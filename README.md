@@ -31,7 +31,7 @@ sources:
 
 ### Windows
 
-Download the latest `Pinball_Asset_Decryptor_Setup_v*.exe` from the
+Download the latest `Pinball_Asset_Decryptor_v*_Windows.exe` from the
 [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases)
 and run it. The installer bundles a Python runtime so nothing else is needed
 to launch the GUI.
@@ -43,7 +43,7 @@ below).
 
 ### macOS
 
-Download the latest `Pinball_Asset_Decryptor_v*.dmg` from the
+Download the latest `Pinball_Asset_Decryptor_v*_macOS.dmg` from the
 [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases),
 open it, and drag the app to `/Applications`.
 
@@ -201,7 +201,7 @@ that manufacturer's `detect()` before persisting.
 ```powershell
 # Requires: Python 3.10+ with tkinter, Inno Setup 6
 installer\build.ps1
-# Output: installer\Output\Pinball_Asset_Decryptor_Setup_v0.1.0.exe
+# Output: installer\Output\Pinball_Asset_Decryptor_v0.1.0_Windows.exe
 ```
 
 ### macOS
@@ -209,7 +209,7 @@ installer\build.ps1
 ```bash
 # Requires: Python 3.10+, brew install create-dmg
 bash installer/build_macos.sh
-# Output: installer/Output/Pinball_Asset_Decryptor_v0.1.0.dmg
+# Output: installer/Output/Pinball_Asset_Decryptor_v0.1.0_macOS.dmg
 ```
 
 CI does both automatically on a `v*` tag push and uploads to a GitHub

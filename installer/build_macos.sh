@@ -62,7 +62,7 @@ codesign --force --deep --sign - "$APP_PATH"
 # --- Package as DMG -----------------------------------------------------
 echo "Creating DMG..."
 mkdir -p "$SCRIPT_DIR/Output"
-DMG_NAME="Pinball_Asset_Decryptor_v${VERSION}.dmg"
+DMG_NAME="Pinball_Asset_Decryptor_v${VERSION}_macOS.dmg"
 DMG_PATH="$SCRIPT_DIR/Output/$DMG_NAME"
 
 if command -v create-dmg &>/dev/null; then

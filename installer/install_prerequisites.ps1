@@ -61,21 +61,22 @@ function Update-SessionPath {
     $env:Path = ($machinePath, $userPath | Where-Object { $_ }) -join ";"
 }
 
-# --- WSL distro list helper ---------------------------------------------
-# Returns the names of every installed WSL distro, normalized.  Handles
-# both UTF-8 (modern wsl.exe with WSL_UTF8=1) and UTF-16LE (older builds
-# that ignore the env var) outputs.  --all includes distros that exist
-# but haven't been initialized (which is exactly the state we hit when
-# Ubuntu is partially installed).
-function Get-WslDistros {
-    try {
-        $raw = (& wsl --list --quiet --all 2>&1 | Out-String)
-    } catch {
-        return @()
+# --- WSL "do we have an apt-based distro?" helper -----------------------
+# Capability-based detection: instead of parsing 'wsl --list' (whose
+# UTF-16LE output is fragile in PowerShell 5.1) and matching a distro
+# name (whose exact spelling varies — Ubuntu, Ubuntu-22.04, Debian...),
+# we directly test the ONE thing every WSL package install needs:
+# the ability to run 'apt-get' as root inside the default distro.
+function Test-WslHasApt {
+    if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
+        return $false
     }
-    # Strip BOM + interior nulls (UTF-16LE bytes after PowerShell decode)
-    $clean = $raw -replace "[`u{FEFF}`0]", ""
-    return @($clean -split "[`r`n]+" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    try {
+        & wsl -u root -- bash -c "command -v apt-get >/dev/null 2>&1" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
 }
 
 function Write-Step($msg)  { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
@@ -292,10 +293,19 @@ if ($hostPlan.Count -gt 0) {
                     if ($LASTEXITCODE -eq 0) { $reFound = $true }
                 } catch {}
 
+                # winget exit codes that mean "package is installed,
+                # nothing more to do":
+                #   0           = success
+                #   -1978335189 = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
+                #                 ("Found existing package; no newer version
+                #                 available" - i.e. already at latest).
+                $wingetSuccess = ($wingetExit -eq 0 -or
+                                  $wingetExit -eq -1978335189)
+
                 if ($reFound) {
                     Write-Installed $p.label
-                } elseif ($wingetExit -eq 0) {
-                    Write-Host ("  Installed, but {0} isn't on PATH yet - open a new terminal to use it." -f $p.command) -ForegroundColor Yellow
+                } elseif ($wingetSuccess) {
+                    Write-Host ("  Installed, but {0} isn't on PATH for THIS shell - open a new terminal to use it." -f $p.command) -ForegroundColor Yellow
                     Write-Installed ("{0} (restart shell to pick up PATH)" -f $p.label)
                 } else {
                     Write-Host ("  winget exited with code {0}." -f $wingetExit) -ForegroundColor Red
@@ -335,41 +345,36 @@ if ($needsWsl) {
         Write-Installed "WSL2 + Ubuntu (reboot required)"
     }
 
-    Write-Step "Checking Ubuntu distribution..."
-    if ($wslAvailable) {
-        $distros = Get-WslDistros
-        if ($distros | Where-Object { $_ -match '^Ubuntu' }) {
-            $ubuntuFound = $true
-            $matchName = ($distros | Where-Object { $_ -match '^Ubuntu' })[0]
-            Write-OK ("Ubuntu (found '{0}')" -f $matchName)
-        }
+    Write-Step "Checking for an apt-based WSL distro..."
+    if ($wslAvailable -and (Test-WslHasApt)) {
+        $ubuntuFound = $true
+        Write-OK "Ubuntu / apt-based distro"
     }
+
     if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
-        # WSL2 is up but no Ubuntu distro yet - install it directly.
+        # No usable distro yet - install Ubuntu directly.
         # --no-launch skips the interactive 'create UNIX user' prompt; we
         # only ever exec via 'wsl -u root' so a default user isn't needed.
+        # We let wsl write its output to the console directly (no capture)
+        # because PowerShell 5.1's pipeline mangles its UTF-16LE output.
         Write-Host "  Installing Ubuntu into WSL (this may take a few minutes)..." -ForegroundColor Cyan
-        $installOut = (& wsl --install -d Ubuntu --no-launch 2>&1 | Out-String) -replace "[`u{FEFF}`0]", ""
+        & wsl --install -d Ubuntu --no-launch
         $installExit = $LASTEXITCODE
-        if ($installOut.Trim()) { $installOut.Trim().Split("`n") | ForEach-Object { Write-Host "    $($_.Trim())" } }
 
-        # ERROR_ALREADY_EXISTS means Ubuntu IS installed but our --list
-        # check missed it (e.g. it's in 'Installing...' state, or the
-        # WSL_UTF8 env var was ignored).  Treat as success and re-list.
-        if ($installExit -eq 0 -or $installOut -match 'ERROR_ALREADY_EXISTS|already exists') {
-            Start-Sleep -Seconds 2
-            $distros = Get-WslDistros
-            if ($distros | Where-Object { $_ -match '^Ubuntu' }) {
-                $ubuntuFound = $true
-                Write-Installed "Ubuntu"
-            } elseif ($installExit -eq 0) {
-                $ubuntuFound = $true  # trust wsl --install's own success signal
-                Write-Installed "Ubuntu (queued)"
-            } else {
-                Write-FAIL ("Ubuntu (already exists but couldn't enumerate; try: wsl --list --verbose)")
-            }
+        # Don't trust the install exit code (ERROR_ALREADY_EXISTS shows
+        # up as a non-zero exit but means "already there, all good").
+        # Re-test the actual capability we need.
+        Start-Sleep -Seconds 2
+        if (Test-WslHasApt) {
+            $ubuntuFound = $true
+            Write-Installed "Ubuntu / apt-based distro"
+        } elseif ($installExit -eq 0) {
+            # Fresh install + first-boot may still be initializing;
+            # trust wsl's success signal.
+            $ubuntuFound = $true
+            Write-Installed "Ubuntu (queued; first boot may still be initializing)"
         } else {
-            Write-FAIL ("Ubuntu (wsl --install exit code {0})" -f $installExit)
+            Write-FAIL ("Ubuntu (wsl --install exit {0}; try: wsl --list --verbose)" -f $installExit)
         }
     } elseif ($needsReboot -and -not $ubuntuFound) {
         Write-SKIP "Ubuntu (will install after WSL2 reboot)"

@@ -9,7 +9,8 @@ need a richer GUI than the shared 4-phase shape provides.
 import os
 import shutil
 
-from ...core.registry import Capabilities, Game, InputSpec, Manufacturer
+from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
+                              Prerequisite)
 from .games import GAME_DB, detect_iso_game
 from .pipeline import StandaloneDecryptPipeline, StandaloneModPipeline
 
@@ -137,6 +138,31 @@ class JJPManufacturer(Manufacturer):
     extract_phases = ("Extract", "Mount", "Decrypt", "Cleanup")
     write_phases = ("Scan", "Extract", "Prepare", "Encrypt", "Convert",
                     "Build ISO", "Cleanup")
+    # JJP runs entirely through the executor (WSL on Windows, Docker on
+    # macOS).  Six WSL-side tools cover the standalone Decrypt + Mod
+    # flows.
+    prerequisites = (
+        Prerequisite(name="partclone", where="wsl",
+                     probe="which partclone.ext4",
+                     reason="ISO partition extraction",
+                     install_hint="apt-get install partclone (in WSL)"),
+        Prerequisite(name="debugfs", where="wsl",
+                     probe="which debugfs",
+                     reason="ext4 filesystem extraction",
+                     install_hint="apt-get install e2fsprogs (in WSL)"),
+        Prerequisite(name="xorriso", where="wsl",
+                     probe="which xorriso",
+                     reason="ISO rebuild for Write pipeline",
+                     install_hint="apt-get install xorriso (in WSL)"),
+        Prerequisite(name="pigz", where="wsl",
+                     probe="which pigz",
+                     reason="Parallel gzip - speeds up large image work",
+                     install_hint="apt-get install pigz (in WSL)"),
+        Prerequisite(name="ffmpeg", where="wsl",
+                     probe="which ffmpeg",
+                     reason="Audio processing for Write pipeline",
+                     install_hint="apt-get install ffmpeg (in WSL)"),
+    )
 
     def detect(self, path):
         if not path.lower().endswith(".iso"):

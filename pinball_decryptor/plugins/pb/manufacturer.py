@@ -1,6 +1,7 @@
 """Pinball Brothers manufacturer plugin."""
 
-from ...core.registry import Capabilities, Game, InputSpec, Manufacturer
+from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
+                              Prerequisite)
 from .formats import detect_game, detect_iso_game, is_iso_file, is_upd_file
 from .games import GAME_DB
 from .pipeline import (ExtractPipeline, IsoExtractPipeline, WritePipeline,
@@ -23,6 +24,14 @@ class PBManufacturer(Manufacturer):
     input_spec = InputSpec(
         label="PB game files",
         extensions=(".upd", ".iso"),
+    )
+    # PB .upd extraction is pure stdlib (gzip+tar).  The optional .iso
+    # path needs WSL + e2fsprogs/debugfs for Alien/Queen Clonezilla.
+    prerequisites = (
+        Prerequisite(name="debugfs", where="wsl",
+                     probe="which debugfs",
+                     reason="Alien/Queen Clonezilla .iso extraction",
+                     install_hint="apt-get install e2fsprogs (in WSL)"),
     )
 
     def detect(self, path):

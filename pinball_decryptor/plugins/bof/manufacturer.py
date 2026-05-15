@@ -6,7 +6,8 @@ into the unified manufacturer contract (4-callback BasePipeline).
 
 import os
 
-from ...core.registry import Capabilities, Game, InputSpec, Manufacturer
+from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
+                              Prerequisite)
 from .executor import create_executor
 from .games import FUN_FILE_TO_GAME, GAME_DB
 from .pipeline import DecryptPipeline, ModifyPipeline, detect_game
@@ -87,6 +88,19 @@ class BOFManufacturer(Manufacturer):
     # silently clamp to 4.
     extract_phases = ("Detect", "Decrypt", "Extract", "Checksums", "Cleanup")
     write_phases = ("Decrypt", "Patch", "Repack", "Encrypt", "Cleanup")
+    # BOF runs gpg + tar via the executor (WSL on Windows, native on
+    # macOS/Linux).  GDRE Tools is optional and the app itself prompts
+    # to install it on first use, so we don't probe for it here.
+    prerequisites = (
+        Prerequisite(name="gpg", where="wsl",
+                     probe="which gpg",
+                     reason=".fun GPG decryption + re-encryption",
+                     install_hint="apt-get install gnupg (in WSL)"),
+        Prerequisite(name="tar", where="wsl",
+                     probe="which tar",
+                     reason="Archive packing/unpacking",
+                     install_hint="apt-get install tar (in WSL)"),
+    )
 
     def detect(self, path):
         key = detect_game(path)

@@ -22,6 +22,41 @@ from .theme import THEMES, detect_system_theme, platform_font
 _SANS_FONT, _MONO_FONT = platform_font()
 
 
+class _Tooltip:
+    """Minimal hover tooltip — used for prereq indicators."""
+
+    def __init__(self, widget, text, theme_fn):
+        self._widget = widget
+        self.text = text
+        self._theme_fn = theme_fn
+        self._tip = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, _event=None):
+        if not self.text:
+            return
+        c = THEMES[self._theme_fn()]
+        x = self._widget.winfo_rootx() + self._widget.winfo_width() // 2
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._tip = tk.Toplevel(self._widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f"+{x}+{y}")
+        self._tip.configure(background=c["tooltip_bg"])
+        tk.Label(
+            self._tip, text=self.text,
+            background=c["tooltip_bg"], foreground=c["tooltip_fg"],
+            relief="solid", borderwidth=1,
+            font=(_SANS_FONT, 9), padx=6, pady=2,
+            wraplength=420, justify=tk.LEFT,
+        ).pack()
+
+    def _hide(self, _event=None):
+        if self._tip:
+            self._tip.destroy()
+            self._tip = None
+
+
 class MainWindow:
     """Single-window Tk GUI; manufacturer-aware via apply_manufacturer()."""
 
@@ -31,6 +66,7 @@ class MainWindow:
                  on_write, on_write_cancel,
                  on_export, on_import,
                  on_apply_delta=None,
+                 on_recheck_prereqs=None, on_install_prereqs=None,
                  on_theme_change=None, initial_theme=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
@@ -40,6 +76,8 @@ class MainWindow:
         self._on_write = on_write
         self._on_write_cancel = on_write_cancel
         self._on_apply_delta = on_apply_delta
+        self._on_recheck_prereqs = on_recheck_prereqs
+        self._on_install_prereqs = on_install_prereqs
         self._on_export = on_export
         self._on_import = on_import
         self._on_theme_change = on_theme_change
@@ -76,6 +114,10 @@ class MainWindow:
         # store that mfr here so a click on the badge can switch to it.
         self._extract_suggested_mfr = None
         self._write_suggested_mfr = None
+
+        # Per-mfr prereq indicators: name -> dict(label, tooltip, prereq).
+        # Rebuilt by reset_prereqs() each time the manufacturer changes.
+        self._prereq_indicators = {}
 
         self._build_ui()
         self._init_phase_steps()
@@ -117,6 +159,25 @@ class MainWindow:
         )
         self._mfr_combo.pack(side=tk.LEFT, padx=(6, 0))
         self._mfr_combo.bind("<<ComboboxSelected>>", self._on_mfr_combo)
+
+        # Per-manufacturer prerequisite indicators.  Hidden until a
+        # manufacturer with declared prereqs is selected.
+        self._prereqs_frame = ttk.LabelFrame(root, text="Prerequisites")
+        self._prereqs_inner = ttk.Frame(self._prereqs_frame)
+        self._prereqs_inner.pack(side=tk.LEFT, fill=tk.X, expand=True,
+                                 padx=4, pady=4)
+        prereq_btns = ttk.Frame(self._prereqs_frame)
+        prereq_btns.pack(side=tk.RIGHT, padx=4, pady=4)
+        ttk.Button(
+            prereq_btns, text="Re-check",
+            command=lambda: (self._on_recheck_prereqs()
+                             if self._on_recheck_prereqs else None)
+        ).pack(side=tk.TOP, fill=tk.X)
+        ttk.Button(
+            prereq_btns, text="Install Missing",
+            command=lambda: (self._on_install_prereqs()
+                             if self._on_install_prereqs else None)
+        ).pack(side=tk.TOP, fill=tk.X, pady=(2, 0))
 
         # Tabs
         self._notebook = ttk.Notebook(root)
@@ -402,6 +463,11 @@ class MainWindow:
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)
 
+        # Per-mfr prereq indicators — start in "checking" state.  The
+        # App's worker thread fills in actual results via
+        # set_prereq_result() shortly after.
+        self.reset_prereqs(mfr.prerequisites)
+
         # Help text + label phrasing
         self._extract_help.configure(text=mfr.extract_input_help())
         primary_ext = (mfr.input_spec.extensions[0]
@@ -586,6 +652,66 @@ class MainWindow:
             self._on_manufacturer_change(suggested)
         var.set(path)
 
+    # ------------------------------------------------------------------
+    # Prerequisite indicators
+    # ------------------------------------------------------------------
+
+    def reset_prereqs(self, prereqs):
+        """Replace the indicator row for the new manufacturer.
+
+        Each prereq starts in "checking" state ([?] name); the App's
+        worker thread fills in real results via :meth:`set_prereq_result`.
+        Hides the section entirely when *prereqs* is empty.
+        """
+        for w in self._prereqs_inner.winfo_children():
+            w.destroy()
+        self._prereq_indicators = {}
+
+        if not prereqs:
+            self._prereqs_frame.pack_forget()
+            return
+
+        self._prereqs_frame.pack(fill=tk.X, padx=10, pady=(6, 0),
+                                 before=self._notebook)
+
+        c = THEMES[self._current_theme]
+        for p in prereqs:
+            lbl = tk.Label(
+                self._prereqs_inner,
+                text=f"[?] {p.name}",
+                font=(_SANS_FONT, 9),
+                background=c["bg"], foreground=c["gray"],
+                padx=4, pady=2,
+            )
+            lbl.pack(side=tk.LEFT, padx=2)
+            tooltip = _Tooltip(
+                lbl,
+                f"{p.name}\n\nChecking...\n\nWhy: {p.reason}",
+                lambda: self._current_theme,
+            )
+            self._prereq_indicators[p.name] = {
+                "label": lbl, "tooltip": tooltip, "prereq": p,
+            }
+
+    def set_prereq_result(self, name, ok, message):
+        """Update one indicator with the probe's result."""
+        entry = self._prereq_indicators.get(name)
+        if not entry:
+            return
+        c = THEMES[self._current_theme]
+        icon = "✓" if ok else "✗"
+        color = c["success"] if ok else c["error"]
+        entry["label"].configure(text=f"[{icon}] {name}", foreground=color)
+        p = entry["prereq"]
+        status = "OK" if ok else "MISSING"
+        tip = (f"{p.name}\n\n"
+               f"Status: {status}\n"
+               f"{message}\n\n"
+               f"Why: {p.reason}")
+        if not ok and p.install_hint:
+            tip += f"\n\nFix: {p.install_hint}"
+        entry["tooltip"].text = tip
+
     def _check_extract_warn(self, *_):
         path = self.extract_output_var.get().strip()
         if path and os.path.isdir(path) and os.listdir(path):
@@ -742,8 +868,26 @@ class MainWindow:
                   foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
         style.configure("TEntry", fieldbackground=c["field_bg"],
                         foreground=c["fg"])
+        # ttk.Combobox with state="readonly" otherwise renders as
+        # disabled (gray-on-dark, illegible).  Force the readonly state
+        # to use our normal field colors.  The dropdown popup is a Tk
+        # Listbox (not ttk), so set it via the option DB.
         style.configure("TCombobox", fieldbackground=c["field_bg"],
-                        foreground=c["fg"])
+                        foreground=c["fg"], background=c["bg"],
+                        arrowcolor=c["fg"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", c["field_bg"]),
+                                   ("disabled", c["field_bg"])],
+                  foreground=[("readonly", c["fg"]),
+                              ("disabled", c["gray"])],
+                  selectbackground=[("readonly", c["select_bg"])],
+                  selectforeground=[("readonly", "#ffffff")],
+                  background=[("readonly", c["bg"])],
+                  arrowcolor=[("readonly", c["fg"])])
+        self.root.option_add("*TCombobox*Listbox.background",      c["field_bg"])
+        self.root.option_add("*TCombobox*Listbox.foreground",      c["fg"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", c["select_bg"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
         style.configure("TNotebook", background=c["bg"], bordercolor=c["border"])
         style.configure("TNotebook.Tab", background=c["button"],
                         foreground=c["fg"], padding=(10, 4))

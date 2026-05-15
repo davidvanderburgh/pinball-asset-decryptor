@@ -10,7 +10,9 @@ from tkinter import filedialog, messagebox
 from . import __version__
 from .core import modpack
 from .core.config import APP_NAME, SETTINGS_FILE
-from .core.messages import (DoneMsg, LinkMsg, LogMsg, PhaseMsg, ProgressMsg)
+from .core.messages import (DoneMsg, LinkMsg, LogMsg, PhaseMsg, PrereqMsg,
+                            ProgressMsg)
+from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import check_for_update
 from .gui.main_window import MainWindow
@@ -43,6 +45,8 @@ class App:
             on_write=self._start_write,
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
+            on_recheck_prereqs=self._recheck_prereqs,
+            on_install_prereqs=self._launch_install_prereqs,
             on_export=self._start_export,
             on_import=self._start_import,
             on_theme_change=self._on_theme_change,
@@ -89,6 +93,13 @@ class App:
                         msg.current, msg.total, msg.desc, mode=self._active_mode)
                 elif isinstance(msg, DoneMsg):
                     self._on_done(msg.success, msg.summary)
+                elif isinstance(msg, PrereqMsg):
+                    # Drop stale results if the user switched mfrs while
+                    # the worker was still running.
+                    if (self._current_mfr is not None and
+                            self._current_mfr.key == msg.mfr_key):
+                        self.window.set_prereq_result(
+                            msg.result.name, msg.result.ok, msg.result.message)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
@@ -101,11 +112,103 @@ class App:
         if self._current_mfr is not None:
             self._save_manufacturer_paths(self._current_mfr.key)
         self._apply_manufacturer(mfr)
+        # Persist immediately so a crash before _on_close doesn't lose
+        # the user's most-recent manufacturer choice.
+        self._save_settings()
 
     def _apply_manufacturer(self, mfr):
         self._current_mfr = mfr
         self._load_manufacturer_paths(mfr.key)
         self.window.apply_manufacturer(mfr)
+        # Kick off the runtime-prereq check on a background thread.  The
+        # GUI is already showing "[?] name" placeholders; results trickle
+        # in via PrereqMsg.
+        self._kick_off_prereq_check(mfr)
+
+    # ------------------------------------------------------------------
+    # Prerequisite checking
+    # ------------------------------------------------------------------
+
+    def _kick_off_prereq_check(self, mfr):
+        """Run every prereq probe in a worker thread; post each result
+        through the queue so the GUI updates incrementally."""
+        if not mfr.prerequisites:
+            return
+        target_key = mfr.key
+
+        def _run():
+            for prereq in mfr.prerequisites:
+                # Bail early if the user switched mfrs mid-check
+                if (self._current_mfr is None or
+                        self._current_mfr.key != target_key):
+                    return
+                try:
+                    result = check_prerequisite(prereq)
+                except Exception as e:  # belt-and-suspenders
+                    from .core.prereqs import PrerequisiteResult
+                    result = PrerequisiteResult(
+                        name=prereq.name, ok=False,
+                        message=f"{type(e).__name__}: {e}",
+                        reason=prereq.reason,
+                        install_hint=prereq.install_hint)
+                self.msg_queue.put(PrereqMsg(target_key, result))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _recheck_prereqs(self):
+        if self._current_mfr is not None:
+            # Reset the indicators back to "[?]" before re-running so
+            # the user sees the check actually happen.
+            self.window.reset_prereqs(self._current_mfr.prerequisites)
+            self._kick_off_prereq_check(self._current_mfr)
+
+    def _launch_install_prereqs(self):
+        """Spawn install_prerequisites.ps1 in an elevated PowerShell."""
+        import sys
+        from tkinter import messagebox
+
+        if sys.platform != "win32":
+            messagebox.showinfo(
+                "Install Prerequisites",
+                "The bundled installer script is Windows-only.\n\n"
+                "On macOS, Spooky/JJP Clonezilla flows use Docker Desktop "
+                "(install from https://www.docker.com/products/docker-desktop/) "
+                "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).\n\n"
+                "On Linux, install partclone, e2fsprogs, xorriso, pigz, gpg, "
+                "ffmpeg, zstd, and python3-zstandard via your package "
+                "manager.")
+            return
+
+        script = self._find_prereqs_script()
+        if not script:
+            messagebox.showerror(
+                "Install Prerequisites",
+                "Could not locate install_prerequisites.ps1.\n\n"
+                "If you're running from source, the script lives at "
+                "installer/install_prerequisites.ps1.")
+            return
+
+        import subprocess
+        # Re-launch PowerShell elevated; the script needs admin for
+        # winget install + wsl --install.
+        subprocess.Popen([
+            "powershell", "-NoProfile", "-Command",
+            f"Start-Process powershell -Verb RunAs -ArgumentList "
+            f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\"'",
+        ])
+
+    @staticmethod
+    def _find_prereqs_script():
+        # core dir = pinball_decryptor/, app installed to {InstallDir}\
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(pkg_dir, "..", "install_prerequisites.ps1"),  # installed
+            os.path.join(pkg_dir, "..", "installer", "install_prerequisites.ps1"),  # source
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return os.path.abspath(c)
+        return None
 
     def _manufacturers_section(self):
         return self._settings.setdefault("manufacturers", {})

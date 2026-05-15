@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 from .config import EXTRACT_PHASES, WRITE_PHASES
+from .prereqs import Prerequisite  # re-exported for plugins
 
 # Plugins are imported in this order at startup.  Order drives the
 # dropdown ordering; auto-detect tries them in this sequence too.
@@ -78,6 +79,12 @@ class Manufacturer(ABC):
     extract_phases: Tuple[str, ...] = tuple(EXTRACT_PHASES)
     write_phases: Tuple[str, ...] = tuple(WRITE_PHASES)
 
+    # Runtime tools this plugin needs.  Probed on a worker thread when
+    # the user picks this manufacturer in the GUI; results render as
+    # `[✓] gpg [✗] partclone` indicators with hover tooltips.  Default
+    # is empty (no prereqs to verify — e.g. PB's stdlib-only flow).
+    prerequisites: Tuple[Prerequisite, ...] = ()
+
     # Optional: GitHub repo override.  When None, the core update checker
     # uses :data:`core.config.GITHUB_REPO`.
     update_repo: Optional[str] = None
@@ -132,7 +139,9 @@ def register_manufacturer(mfr: Manufacturer):
 
 
 def all_manufacturers() -> List[Manufacturer]:
-    return list(_REGISTRY)
+    """Return every registered manufacturer sorted alphabetically by display
+    name (so the GUI dropdown order is stable and easy to scan)."""
+    return sorted(_REGISTRY, key=lambda m: m.display.lower())
 
 
 def get_manufacturer(key: str) -> Optional[Manufacturer]:

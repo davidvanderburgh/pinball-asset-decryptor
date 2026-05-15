@@ -1,6 +1,7 @@
 """Spooky Pinball manufacturer plugin."""
 
-from ...core.registry import Capabilities, Game, InputSpec, Manufacturer
+from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
+                              Prerequisite)
 from .formats import detect_game as _detect_game
 from .games import GAME_DB
 from .pipeline import ExtractPipeline, WritePipeline
@@ -28,6 +29,30 @@ class SpookyManufacturer(Manufacturer):
     # Write     = Detect → Scan → Repack → Done.
     extract_phases = ("Detect", "Decrypt", "Checksums", "Done")
     write_phases = ("Detect", "Scan", "Repack", "Done")
+    # Host-side gpg + ffmpeg are used directly via subprocess; the WSL
+    # tools are only needed for Clonezilla .iso/.zip extraction.
+    prerequisites = (
+        Prerequisite(name="gpg", where="host",
+                     probe="gpg --version",
+                     reason="UM/H78 .pkg decrypt + Beetlejuice signing",
+                     install_hint="winget install --id GnuPG.GnuPG"),
+        Prerequisite(name="ffmpeg", where="host",
+                     probe="ffmpeg -version",
+                     reason="Audio resampling + P3 VID-to-MP4 conversion",
+                     install_hint="winget install --id Gyan.FFmpeg"),
+        Prerequisite(name="partclone", where="wsl",
+                     probe="which partclone.ext4",
+                     reason="Clonezilla restore image extraction",
+                     install_hint="apt-get install partclone (in WSL)"),
+        Prerequisite(name="debugfs", where="wsl",
+                     probe="which debugfs",
+                     reason="ext4 filesystem extraction",
+                     install_hint="apt-get install e2fsprogs (in WSL)"),
+        Prerequisite(name="zstd", where="wsl",
+                     probe="which zstd",
+                     reason="zstd-compressed Clonezilla images (BJ, LT)",
+                     install_hint="apt-get install zstd python3-zstandard (in WSL)"),
+    )
 
     def detect(self, path):
         gf = _detect_game(path)

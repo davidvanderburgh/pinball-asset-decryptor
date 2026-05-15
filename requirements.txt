@@ -1,0 +1,5 @@
+# Pinball Asset Decryptor — Python dependencies
+#
+# The main application uses only the Python standard library.
+# Pillow is only needed to regenerate the app icon from source.
+Pillow>=10.0

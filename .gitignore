@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.idea/
+.vscode/
+build/
+dist/
+*.spec
+
+# Installer build artifacts
+installer/build/
+installer/Output/
+installer/get-pip.py
+installer/python-embed.zip

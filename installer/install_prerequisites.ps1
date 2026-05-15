@@ -10,7 +10,7 @@
     Tool layout:
       - WSL-side  (apt inside Ubuntu): partclone, debugfs, gpg-in-WSL,
         xorriso, pigz, zstd, ffmpeg-in-WSL, etc.
-      - Host-side (winget on Windows): Gpg4win, ffmpeg-on-host
+      - Host-side (winget on Windows): GnuPG (gpg.exe), ffmpeg
         (Spooky uses these directly; BOF and JJP use WSL versions
         through the executor).
 
@@ -86,7 +86,7 @@ $ManufacturerPrereqs = [ordered]@{
             @{ probe="zstd";             pkg="zstd python3-zstandard"; label="zstd + python3-zstandard"; reason="zstd-compressed Clonezilla images (Beetlejuice, Looney Tunes)" }
         )
         HostPackages = @(
-            @{ command="gpg";    winget="GnuPG.Gpg4win"; label="Gpg4win"; manualUrl="https://www.gpg4win.org/download.html"; reason="UM/H78 .pkg decryption + Beetlejuice signing" }
+            @{ command="gpg";    winget="GnuPG.GnuPG";   label="GnuPG (gpg)"; manualUrl="https://gnupg.org/download/"; reason="UM/H78 .pkg decryption + Beetlejuice signing" }
             @{ command="ffmpeg"; winget="Gyan.FFmpeg";   label="ffmpeg";  manualUrl="https://www.gyan.dev/ffmpeg/builds/";    reason="Audio resampling on Write + P3 VID-to-MP4 conversion" }
         )
     }

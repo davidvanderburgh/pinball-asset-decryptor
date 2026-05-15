@@ -90,7 +90,7 @@ those plugins need.
 | Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) |
 |---|---|---|
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
-| Spooky Pinball | Gpg4win, ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
+| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
 | Barrels of Fun | – | gnupg, tar |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard |
 

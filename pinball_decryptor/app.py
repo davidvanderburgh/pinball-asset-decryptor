@@ -131,13 +131,24 @@ class App:
 
     def _kick_off_prereq_check(self, mfr):
         """Run every prereq probe in a worker thread; post each result
-        through the queue so the GUI updates incrementally."""
+        through the queue so the GUI updates incrementally.  Also log
+        a 'checking...' line + a final summary so the empty log pane
+        on app start has SOMETHING useful in it."""
         if not mfr.prerequisites:
+            self.msg_queue.put(LogMsg(
+                f"{mfr.display}: no runtime prerequisites to check.", "info"))
             return
         target_key = mfr.key
+        target_display = mfr.display
+        prereqs = mfr.prerequisites
+
+        self.msg_queue.put(LogMsg(
+            f"Checking {len(prereqs)} prerequisite(s) for "
+            f"{target_display}...", "info"))
 
         def _run():
-            for prereq in mfr.prerequisites:
+            results = []
+            for prereq in prereqs:
                 # Bail early if the user switched mfrs mid-check
                 if (self._current_mfr is None or
                         self._current_mfr.key != target_key):
@@ -151,7 +162,32 @@ class App:
                         message=f"{type(e).__name__}: {e}",
                         reason=prereq.reason,
                         install_hint=prereq.install_hint)
+                results.append(result)
                 self.msg_queue.put(PrereqMsg(target_key, result))
+
+            # Bail if user switched away while we were probing
+            if (self._current_mfr is None or
+                    self._current_mfr.key != target_key):
+                return
+
+            missing = [r for r in results if not r.ok]
+            if not missing:
+                self.msg_queue.put(LogMsg(
+                    f"All prerequisites OK for {target_display}. "
+                    f"Ready to extract / write.", "success"))
+            else:
+                names = ", ".join(r.name for r in missing)
+                self.msg_queue.put(LogMsg(
+                    f"Missing prerequisite(s) for {target_display}: "
+                    f"{names}.", "error"))
+                for r in missing:
+                    detail = (f"  [x] {r.name}: {r.reason}"
+                              + (f" — fix: {r.install_hint}"
+                                 if r.install_hint else ""))
+                    self.msg_queue.put(LogMsg(detail, "error"))
+                self.msg_queue.put(LogMsg(
+                    "Click 'Install Missing' above the tabs to install "
+                    "everything that's missing.", "info"))
 
         threading.Thread(target=_run, daemon=True).start()
 

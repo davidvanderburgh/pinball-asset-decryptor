@@ -208,6 +208,9 @@ if ($hostPlan.Count -gt 0) {
     }
 }
 if ($wslPlan.Count -gt 0) {
+    Write-Host "  WSL framework (required for the WSL packages below):"
+    Write-Host "    - WSL2 + Ubuntu                  for: $($selected -join ', ')" -ForegroundColor Gray
+    Write-Host "        Linux runtime that the WSL-side tools live in" -ForegroundColor DarkGray
     Write-Host "  WSL-side (inside Ubuntu):"
     foreach ($p in $wslPlan) {
         Write-Host ("    - {0,-30} for: {1}" -f $p.label, ($p.for -join ", ")) -ForegroundColor Gray
@@ -299,15 +302,13 @@ if ($needsWsl) {
     } catch {}
 
     if (-not $wslAvailable) {
-        $install = Read-Host "  WSL2 not detected. Install WSL2 + Ubuntu now? (y/n)"
-        if ($install -eq 'y') {
-            Write-Host "  Installing WSL2 with Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
-            wsl --install -d Ubuntu 2>&1 | ForEach-Object { Write-Host "    $_" }
-            $needsReboot = $true
-            Write-Installed "WSL2 + Ubuntu (reboot required)"
-        } else {
-            Write-SKIP "WSL2"
-        }
+        # User already approved the install plan, which listed "WSL2 + Ubuntu"
+        # as required.  Just install it - asking again would be a useless
+        # confirmation that, if declined, leaves nothing to install.
+        Write-Host "  Installing WSL2 + Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
+        wsl --install -d Ubuntu --no-launch
+        $needsReboot = $true
+        Write-Installed "WSL2 + Ubuntu (reboot required)"
     }
 
     Write-Step "Checking Ubuntu distribution..."
@@ -318,13 +319,15 @@ if ($needsWsl) {
         } catch {}
     }
     if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
-        $install = Read-Host "  Install Ubuntu now? (y/n)"
-        if ($install -eq 'y') {
-            wsl --install -d Ubuntu 2>&1 | ForEach-Object { Write-Host "    $_" }
-            if ($LASTEXITCODE -eq 0) { $ubuntuFound = $true; Write-Installed "Ubuntu" }
-            else                     { Write-FAIL "Ubuntu (installation failed)" }
+        # WSL2 is up but no Ubuntu distro yet - install it directly.
+        # --no-launch skips the interactive 'create UNIX user' prompt; we
+        # only ever exec via 'wsl -u root' so a default user isn't needed.
+        Write-Host "  Installing Ubuntu into WSL (this may take a few minutes)..." -ForegroundColor Cyan
+        wsl --install -d Ubuntu --no-launch
+        if ($LASTEXITCODE -eq 0) {
+            $ubuntuFound = $true; Write-Installed "Ubuntu"
         } else {
-            Write-SKIP "Ubuntu"
+            Write-FAIL ("Ubuntu (wsl --install exit code {0})" -f $LASTEXITCODE)
         }
     } elseif ($needsReboot -and -not $ubuntuFound) {
         Write-SKIP "Ubuntu (will install after WSL2 reboot)"

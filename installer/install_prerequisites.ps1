@@ -20,6 +20,15 @@
     Must run as Administrator (WSL install + admin-scope winget).
 #>
 
+# --- Console encoding ----------------------------------------------------
+# winget emits its progress bars as UTF-8 box characters (U+2588, U+2592).
+# PowerShell 5.1 defaults to OEM/Windows-1252 for [Console]::OutputEncoding,
+# which renders those characters as mojibake (the "ΓûêΓûê" garbage).
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+
 # --- Require admin -------------------------------------------------------
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent())
@@ -33,6 +42,17 @@ if (-not $currentPrincipal.IsInRole(
 $ErrorActionPreference = "Continue"
 $needsReboot = $false
 $results = @()
+
+
+# --- Refresh-PATH helper -------------------------------------------------
+# winget edits the persistent Machine/User PATH but the current process
+# keeps its inherited copy.  Without this the post-install probe always
+# fails ("[SKIP] (verify in new shell)") even when the install succeeded.
+function Update-SessionPath {
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath    = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = ($machinePath, $userPath | Where-Object { $_ }) -join ";"
+}
 
 function Write-Step($msg)  { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-OK($n)        { Write-Host "  [OK] $n"        -ForegroundColor Green;  $script:results += [PSCustomObject]@{Name=$n;Status="OK"} }
@@ -224,20 +244,36 @@ if ($hostPlan.Count -gt 0) {
         if (-not $found) {
             if ($wingetAvailable) {
                 Write-Host ("  Installing {0} via winget..." -f $p.label) -ForegroundColor Cyan
-                winget install --id $p.winget --silent --accept-package-agreements --accept-source-agreements 2>&1 |
-                    ForEach-Object { Write-Host "    $_" }
-                # Re-check (winget puts things on PATH but the current shell may not see them
-                # immediately; we attempt the probe and fall back to a manual-install hint)
+                # Don't pipe winget through ForEach-Object - that runs every
+                # line through PowerShell's string layer and corrupts the
+                # encoding of progress bars / status spinners.
+                # --disable-interactivity stops winget drawing the box-char
+                # progress bars at all (which look fine on Win11 Terminal but
+                # render garbled in Win10 conhost).
+                winget install --id $p.winget --silent --disable-interactivity `
+                    --accept-package-agreements --accept-source-agreements
+                $wingetExit = $LASTEXITCODE
+
+                # winget edits PATH in the registry but the running process
+                # has a stale copy.  Reload from Machine + User PATH.
+                Update-SessionPath
+
+                # Re-probe with a fresh PATH lookup
+                $reFound = $false
                 try {
                     & $p.command --version 2>&1 | Out-Null
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Installed $p.label
-                    } else {
-                        Write-Host ("  Installed but not yet on PATH - open a new terminal and re-run this script to verify.") -ForegroundColor Yellow
-                        Write-SKIP ("{0} (installed; verify in new shell)" -f $p.label)
-                    }
-                } catch {
-                    Write-SKIP ("{0} (installed; verify in new shell)" -f $p.label)
+                    if ($LASTEXITCODE -eq 0) { $reFound = $true }
+                } catch {}
+
+                if ($reFound) {
+                    Write-Installed $p.label
+                } elseif ($wingetExit -eq 0) {
+                    Write-Host ("  Installed, but {0} isn't on PATH yet - open a new terminal to use it." -f $p.command) -ForegroundColor Yellow
+                    Write-Installed ("{0} (restart shell to pick up PATH)" -f $p.label)
+                } else {
+                    Write-Host ("  winget exited with code {0}." -f $wingetExit) -ForegroundColor Red
+                    Write-Host ("  Manual install: {0}" -f $p.manualUrl) -ForegroundColor Yellow
+                    Write-FAIL $p.label
                 }
             } else {
                 Write-Host ("  winget not available - install {0} manually from:" -f $p.label) -ForegroundColor Yellow

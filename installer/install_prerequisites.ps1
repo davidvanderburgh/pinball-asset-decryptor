@@ -71,7 +71,7 @@ $ManufacturerPrereqs = [ordered]@{
         )
     }
 
-    "Back of Flipper" = @{
+    "Barrels of Fun" = @{
         Description  = "Labyrinth, Dune, Winchester (.fun files)"
         WslPackages  = @(
             @{ probe="gpg"; pkg="gnupg"; label="gnupg (in WSL)"; reason=".fun GPG decryption / re-encryption" }

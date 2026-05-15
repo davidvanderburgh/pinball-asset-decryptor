@@ -1,7 +1,7 @@
 # Pinball Asset Decryptor
 
 One app to extract, view, and modify game assets from pinball machines made
-by **Pinball Brothers**, **Spooky Pinball**, **Back of Flipper**, and
+by **Pinball Brothers**, **Spooky Pinball**, **Barrels of Fun**, and
 **Jersey Jack Pinball** — 32 games across four manufacturers.
 
 This is a unified replacement for four separate decryptor apps that all shared
@@ -17,7 +17,7 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 |---|---|---|---|
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
-| **Back of Flipper** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack |
+| **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
 
 The full per-game lists with the format-specific quirks live in the plugin
@@ -91,7 +91,7 @@ those plugins need.
 |---|---|---|
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
 | Spooky Pinball | Gpg4win, ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
-| Back of Flipper | – | gnupg, tar |
+| Barrels of Fun | – | gnupg, tar |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard |
 
 Run [installer/install_prerequisites.ps1](installer/install_prerequisites.ps1)
@@ -130,7 +130,7 @@ pinball_decryptor/
 ├── plugins/
 │   ├── pb/                       # Pinball Brothers
 │   ├── spooky/                   # Spooky Pinball (+ private Docker)
-│   ├── bof/                      # Back of Flipper
+│   ├── bof/                      # Barrels of Fun
 │   └── jjp/                      # Jersey Jack Pinball (+ private Docker)
 ├── app.py                        # controller — wires GUI ↔ plugins
 └── icon.{ico,png}

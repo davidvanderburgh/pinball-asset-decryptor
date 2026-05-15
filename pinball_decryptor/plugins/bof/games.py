@@ -1,4 +1,4 @@
-"""Back of Flipper game database + pipeline tunables."""
+"""Barrels of Fun (BOF) game database + pipeline tunables."""
 
 GAME_DB = {
     "labyrinth": {

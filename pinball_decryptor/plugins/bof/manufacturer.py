@@ -1,4 +1,4 @@
-"""Back of Flipper manufacturer plugin.
+"""Barrels of Fun (BOF) manufacturer plugin.
 
 Wraps the existing BOF :class:`DecryptPipeline` / :class:`ModifyPipeline`
 into the unified manufacturer contract (4-callback BasePipeline).
@@ -73,13 +73,13 @@ class _WriteWrapper(ModifyPipeline):
 
 class BOFManufacturer(Manufacturer):
     key = "bof"
-    display = "Back of Flipper"
+    display = "Barrels of Fun"
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=False,
     )
     input_spec = InputSpec(
-        label="Back of Flipper game files",
+        label="Barrels of Fun game files",
         extensions=(".fun",),
     )
     # BOF flows match the upstream DECRYPT_PHASES / MODIFY_PHASES — see
@@ -106,7 +106,7 @@ class BOFManufacturer(Manufacturer):
                              log_cb, phase_cb, progress_cb, done_cb)
 
     def extract_input_help(self):
-        return ("Decrypt a Back of Flipper `.fun` update file (Labyrinth, "
+        return ("Decrypt a Barrels of Fun `.fun` update file (Labyrinth, "
                 "Dune, Winchester). Requires GPG and (optionally) GDRE Tools "
                 "for Godot PCK extraction.")
 

@@ -1,4 +1,4 @@
-"""Back of Flipper plugin entry point."""
+"""Barrels of Fun (BOF) plugin entry point."""
 
 from ...core.registry import register_manufacturer
 from .manufacturer import BOFManufacturer

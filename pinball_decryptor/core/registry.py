@@ -33,7 +33,13 @@ class Game:
     key: str               # "alien", "halloween", ...
     display: str           # "Alien", "Halloween", ...
     manufacturer_key: str  # "pb", "spooky", ...
-    notes: str = ""        # optional UI-visible hint
+    notes: str = ""        # optional UI-visible hint shown in detect badge
+    # Whether decryption/extraction is currently possible at all.
+    # Set False for games whose encryption key isn't known or whose
+    # format isn't (yet) implemented — picker shows them greyed out
+    # with a tooltip explaining the reason.
+    supported: bool = True
+    unsupported_reason: str = ""
 
 
 @dataclass(frozen=True)

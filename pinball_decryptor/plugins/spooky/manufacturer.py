@@ -7,8 +7,22 @@ from .games import GAME_DB
 from .pipeline import ExtractPipeline, WritePipeline
 
 
+# Total Nuclear Annihilation ships .pkg files encrypted with an AES-256
+# key that hasn't been recovered yet.  Every other Spooky title is
+# decryptable in some form (.pkg with a known key, plain tar.gz, or via
+# the Clonezilla restore image route).
+_UNSUPPORTED_REASONS = {
+    "total_nuclear": "AES-256-CBC key unknown - no Clonezilla image available either",
+}
+
 _GAMES = tuple(
-    Game(key=k, display=info["display"], manufacturer_key="spooky")
+    Game(
+        key=k,
+        display=info["display"],
+        manufacturer_key="spooky",
+        supported=(k not in _UNSUPPORTED_REASONS),
+        unsupported_reason=_UNSUPPORTED_REASONS.get(k, ""),
+    )
     for k, info in GAME_DB.items()
 )
 

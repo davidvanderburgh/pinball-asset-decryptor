@@ -21,40 +21,9 @@ from .theme import THEMES, detect_system_theme, platform_font
 
 _SANS_FONT, _MONO_FONT = platform_font()
 
-
-class _Tooltip:
-    """Minimal hover tooltip — used for prereq indicators."""
-
-    def __init__(self, widget, text, theme_fn):
-        self._widget = widget
-        self.text = text
-        self._theme_fn = theme_fn
-        self._tip = None
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
-
-    def _show(self, _event=None):
-        if not self.text:
-            return
-        c = THEMES[self._theme_fn()]
-        x = self._widget.winfo_rootx() + self._widget.winfo_width() // 2
-        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
-        self._tip = tk.Toplevel(self._widget)
-        self._tip.wm_overrideredirect(True)
-        self._tip.wm_geometry(f"+{x}+{y}")
-        self._tip.configure(background=c["tooltip_bg"])
-        tk.Label(
-            self._tip, text=self.text,
-            background=c["tooltip_bg"], foreground=c["tooltip_fg"],
-            relief="solid", borderwidth=1,
-            font=(_SANS_FONT, 9), padx=6, pady=2,
-            wraplength=420, justify=tk.LEFT,
-        ).pack()
-
-    def _hide(self, _event=None):
-        if self._tip:
-            self._tip.destroy()
-            self._tip = None
+# _Tooltip used to live here; moved to gui/widgets.py so picker.py can
+# also use it without importing main_window (circular).
+from .widgets import _Tooltip  # noqa: E402
 
 
 class MainWindow:
@@ -93,7 +62,11 @@ class MainWindow:
         self._log_widgets = {}    # mfr.key -> tk.Text
         self._log_text = None     # alias for the currently-packed widget
 
-        root.geometry("780x820")
+        # Default size picked so the picker fits all 4 current cards
+        # (incl. Spooky's 14-game list) without scrolling on a typical
+        # 1080p display.  minsize stays modest because the scrollable
+        # canvas + log handle smaller windows gracefully.
+        root.geometry("820x940")
         root.minsize(700, 600)
 
         if sys.platform == "win32":
@@ -470,8 +443,12 @@ class MainWindow:
         """Display the manufacturer picker and hide the working view."""
         self._mfr_view.pack_forget()
         self._back_btn.pack_forget()
-        self._title_lbl.configure(text=self._app_title)
-        self._picker_view.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Hide the app-title label entirely — the window title bar
+        # already says "Pinball Asset Decryptor" so showing it again in
+        # the body is just noise.  The picker has its own internal
+        # "Choose a manufacturer" header.
+        self._title_lbl.pack_forget()
+        self._picker_view.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 10))
 
     def show_mfr_view(self):
         """Display the working view for the currently-selected mfr."""
@@ -547,9 +524,9 @@ class MainWindow:
         self.mfr_var.set(mfr.display)
         self._suppress_mfr_event = False
 
-        # Title bar reflects the active manufacturer.
-        self._title_lbl.configure(
-            text=f"{self._app_title}  -  {mfr.display}")
+        # Title bar shows just the mfr name (window title bar already
+        # has the app name).
+        self._title_lbl.configure(text=mfr.display)
 
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)

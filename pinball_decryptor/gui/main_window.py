@@ -67,6 +67,7 @@ class MainWindow:
                  on_export, on_import,
                  on_apply_delta=None,
                  on_recheck_prereqs=None, on_install_prereqs=None,
+                 on_back=None,
                  on_theme_change=None, initial_theme=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
@@ -78,6 +79,7 @@ class MainWindow:
         self._on_apply_delta = on_apply_delta
         self._on_recheck_prereqs = on_recheck_prereqs
         self._on_install_prereqs = on_install_prereqs
+        self._on_back = on_back
         self._on_export = on_export
         self._on_import = on_import
         self._on_theme_change = on_theme_change
@@ -85,6 +87,11 @@ class MainWindow:
 
         self._current_mfr = None
         self._suppress_mfr_event = False
+        # Per-mfr log widgets — created lazily, swapped on mfr select.
+        # Each manufacturer keeps its own scrollback so going Back +
+        # Forward to the same mfr restores their full log history.
+        self._log_widgets = {}    # mfr.key -> tk.Text
+        self._log_text = None     # alias for the currently-packed widget
 
         root.geometry("780x820")
         root.minsize(700, 600)
@@ -138,31 +145,45 @@ class MainWindow:
     def _build_ui(self):
         root = self.root
 
+        # ---- Top bar: Back, title, theme toggle ----------------------
         top = ttk.Frame(root)
         top.pack(fill=tk.X, padx=10, pady=(8, 0))
-        ttk.Label(top, text=self._app_title,
-                  font=(_SANS_FONT, 13, "bold")).pack(side=tk.LEFT)
+        # Back button — hidden until the user has picked a manufacturer.
+        self._back_btn = ttk.Button(
+            top, text="< Back", width=8,
+            command=self._handle_back)
+        # not packed yet — show_mfr_view() does that
+        self._title_lbl = ttk.Label(
+            top, text=self._app_title,
+            font=(_SANS_FONT, 13, "bold"))
+        self._title_lbl.pack(side=tk.LEFT)
         self._theme_btn = ttk.Button(top, text="", width=3,
                                      command=self._toggle_theme)
         self._theme_btn.pack(side=tk.RIGHT)
 
-        # Manufacturer picker row
-        mfr_row = ttk.Frame(root)
-        mfr_row.pack(fill=tk.X, padx=10, pady=(6, 0))
-        ttk.Label(mfr_row, text="Manufacturer:",
-                  font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
-        self.mfr_var = tk.StringVar()
-        self._mfr_combo = ttk.Combobox(
-            mfr_row, textvariable=self.mfr_var,
-            values=[m.display for m in self._manufacturers],
-            state="readonly", width=24,
-        )
-        self._mfr_combo.pack(side=tk.LEFT, padx=(6, 0))
-        self._mfr_combo.bind("<<ComboboxSelected>>", self._on_mfr_combo)
+        # ---- Picker view (the entry screen) --------------------------
+        from .picker import ManufacturerPicker
+        self._picker_view = ManufacturerPicker(
+            root,
+            manufacturers=self._manufacturers,
+            on_select=self._on_picker_select,
+            theme_fn=lambda: self._current_theme)
+        # Packed in show_picker() — leaving the placement for later so
+        # the App can decide the initial view.
 
-        # Per-manufacturer prerequisite indicators.  Hidden until a
-        # manufacturer with declared prereqs is selected.
-        self._prereqs_frame = ttk.LabelFrame(root, text="Prerequisites")
+        # ---- Manufacturer working view (decryption UI) ---------------
+        # Everything below this is parented to _mfr_view so we can hide
+        # the whole thing with one pack_forget() and show the picker
+        # instead.  Created but not packed; show_mfr_view() does that.
+        self._mfr_view = ttk.Frame(root)
+        mv = self._mfr_view
+
+        # mfr_var stays for compatibility (some helpers read it) — but
+        # there's no combobox any more; the title bar shows the choice.
+        self.mfr_var = tk.StringVar()
+
+        # Per-manufacturer prerequisite indicators.
+        self._prereqs_frame = ttk.LabelFrame(mv, text="Prerequisites")
         self._prereqs_inner = ttk.Frame(self._prereqs_frame)
         self._prereqs_inner.pack(side=tk.LEFT, fill=tk.X, expand=True,
                                  padx=4, pady=4)
@@ -180,7 +201,7 @@ class MainWindow:
         ).pack(side=tk.TOP, fill=tk.X, pady=(2, 0))
 
         # Tabs
-        self._notebook = ttk.Notebook(root)
+        self._notebook = ttk.Notebook(mv)
         self._notebook.pack(fill=tk.X, expand=False, padx=10, pady=(8, 0))
 
         self._tab_extract = ttk.Frame(self._notebook)
@@ -196,7 +217,7 @@ class MainWindow:
         self._build_modpack_tab()
 
         # Phase indicators + progress bar
-        status_frame = ttk.Frame(root)
+        status_frame = ttk.Frame(mv)
         status_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
 
         self._extract_phases_frame = ttk.Frame(status_frame)
@@ -218,17 +239,11 @@ class MainWindow:
 
         self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # Log
-        log_frame = ttk.LabelFrame(root, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(6, 8))
-
-        self._log_text = tk.Text(log_frame, wrap=tk.WORD,
-                                 font=(_MONO_FONT, 9),
-                                 state=tk.DISABLED, height=12)
-        log_scroll = ttk.Scrollbar(log_frame, command=self._log_text.yview)
-        self._log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._log_text.pack(fill=tk.BOTH, expand=True)
+        # Log section.  We keep ONE log LabelFrame, but its contents
+        # (the Text widget + its scrollbar) are swapped per-manufacturer
+        # by _swap_log_widget() so each mfr has its own scrollback.
+        self._log_frame = ttk.LabelFrame(mv, text="Log")
+        self._log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(6, 8))
 
     def _build_extract_tab(self):
         f = self._tab_extract
@@ -448,6 +463,78 @@ class MainWindow:
                 fill=tk.X, before=self._progress_bar)
 
     # ------------------------------------------------------------------
+    # View navigation (picker <-> manufacturer working view)
+    # ------------------------------------------------------------------
+
+    def show_picker(self):
+        """Display the manufacturer picker and hide the working view."""
+        self._mfr_view.pack_forget()
+        self._back_btn.pack_forget()
+        self._title_lbl.configure(text=self._app_title)
+        self._picker_view.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    def show_mfr_view(self):
+        """Display the working view for the currently-selected mfr."""
+        self._picker_view.pack_forget()
+        # Pack Back left of the title, then re-pack title so it sits
+        # to the right of the Back button.
+        self._back_btn.pack(side=tk.LEFT, padx=(0, 8))
+        self._title_lbl.pack_forget()
+        self._title_lbl.pack(side=tk.LEFT)
+        self._mfr_view.pack(fill=tk.BOTH, expand=True)
+
+    def set_back_enabled(self, enabled):
+        """Enable / disable the Back button — called by App while a
+        pipeline is running so the user can't navigate away mid-extract."""
+        self._back_btn.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+
+    def _on_picker_select(self, mfr):
+        # Forward to the App; it'll call apply_manufacturer + show_mfr_view.
+        if self._on_manufacturer_change:
+            self._on_manufacturer_change(mfr)
+
+    def _handle_back(self):
+        if self._on_back:
+            self._on_back()
+        else:
+            self.show_picker()
+
+    # ------------------------------------------------------------------
+    # Per-manufacturer log widgets
+    # ------------------------------------------------------------------
+
+    def _swap_log_widget(self, mfr):
+        """Show *mfr*'s log widget; create it on first access."""
+        for w in self._log_frame.winfo_children():
+            w.pack_forget()
+
+        bundle = self._log_widgets.get(mfr.key)
+        if bundle is None:
+            text = tk.Text(self._log_frame, wrap=tk.WORD,
+                           font=(_MONO_FONT, 9), state=tk.DISABLED,
+                           height=12)
+            scroll = ttk.Scrollbar(self._log_frame, command=text.yview)
+            text.configure(yscrollcommand=scroll.set)
+            self._apply_log_theme(text)
+            bundle = {"text": text, "scroll": scroll}
+            self._log_widgets[mfr.key] = bundle
+
+        bundle["scroll"].pack(side=tk.RIGHT, fill=tk.Y)
+        bundle["text"].pack(fill=tk.BOTH, expand=True)
+        self._log_text = bundle["text"]  # alias for append_log/append_log_link
+
+    def _apply_log_theme(self, text_widget):
+        c = THEMES[self._current_theme]
+        text_widget.configure(
+            background=c["field_bg"], foreground=c["fg"],
+            insertbackground=c["fg"], selectbackground=c["select_bg"])
+        text_widget.tag_configure("info", foreground=c["fg"])
+        text_widget.tag_configure("success", foreground=c["success"])
+        text_widget.tag_configure("error", foreground=c["error"])
+        text_widget.tag_configure("ts", foreground=c["timestamp"])
+        text_widget.tag_configure("link", foreground=c["link"])
+
+    # ------------------------------------------------------------------
     # Manufacturer switching
     # ------------------------------------------------------------------
 
@@ -460,13 +547,23 @@ class MainWindow:
         self.mfr_var.set(mfr.display)
         self._suppress_mfr_event = False
 
+        # Title bar reflects the active manufacturer.
+        self._title_lbl.configure(
+            text=f"{self._app_title}  -  {mfr.display}")
+
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)
 
-        # Per-mfr prereq indicators — start in "checking" state.  The
+        # Per-mfr prereq indicators - start in "checking" state.  The
         # App's worker thread fills in actual results via
         # set_prereq_result() shortly after.
         self.reset_prereqs(mfr.prerequisites)
+
+        # Per-mfr log: each mfr keeps its own scrollback across switches.
+        self._swap_log_widget(mfr)
+
+        # Make sure the working view is visible (and the picker isn't).
+        self.show_mfr_view()
 
         # Help text + label phrasing
         self._extract_help.configure(text=mfr.extract_input_help())
@@ -507,16 +604,6 @@ class MainWindow:
                     self._notebook.tab(tab_id, state="normal")
                 else:
                     self._notebook.tab(tab_id, state="hidden")
-                return
-
-    def _on_mfr_combo(self, _event=None):
-        if self._suppress_mfr_event:
-            return
-        display = self.mfr_var.get()
-        for m in self._manufacturers:
-            if m.display == display:
-                if self._on_manufacturer_change:
-                    self._on_manufacturer_change(m)
                 return
 
     # ------------------------------------------------------------------
@@ -740,6 +827,11 @@ class MainWindow:
     # ------------------------------------------------------------------
 
     def append_log(self, text, level="info"):
+        # Calls before any mfr is selected (e.g. update-check on startup
+        # while picker is showing) are buffered against the first mfr's
+        # widget once one is selected.  For now, silently drop them.
+        if self._log_text is None:
+            return
         ts = time.strftime("%H:%M:%S")
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, f"[{ts}] ", "ts")
@@ -748,6 +840,8 @@ class MainWindow:
         self._log_text.see(tk.END)
 
     def append_log_link(self, text, url):
+        if self._log_text is None:
+            return
         ts = time.strftime("%H:%M:%S")
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, f"[{ts}] ", "ts")
@@ -816,6 +910,9 @@ class MainWindow:
             self._extract_cancel_btn.configure(state=tk.NORMAL)
             self._write_btn.configure(state=tk.DISABLED)
             self._write_cancel_btn.configure(state=tk.NORMAL)
+            # Lock the Back button while work is in flight - we don't want
+            # the user navigating away from a running pipeline.
+            self.set_back_enabled(False)
             self._start_time = time.time()
             self._tick_timer()
         else:
@@ -823,6 +920,7 @@ class MainWindow:
             self._extract_cancel_btn.configure(state=tk.DISABLED)
             self._write_btn.configure(state=tk.NORMAL)
             self._write_cancel_btn.configure(state=tk.DISABLED)
+            self.set_back_enabled(True)
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")
             if self._timer_id:
@@ -900,14 +998,14 @@ class MainWindow:
         style.configure("TSeparator", background=c["border"])
 
         self.root.configure(background=c["bg"])
-        self._log_text.configure(
-            background=c["field_bg"], foreground=c["fg"],
-            insertbackground=c["fg"], selectbackground=c["select_bg"])
-        self._log_text.tag_configure("info", foreground=c["fg"])
-        self._log_text.tag_configure("success", foreground=c["success"])
-        self._log_text.tag_configure("error", foreground=c["error"])
-        self._log_text.tag_configure("ts", foreground=c["timestamp"])
-        self._log_text.tag_configure("link", foreground=c["link"])
+        # Re-skin EVERY cached per-mfr log widget — not just the currently-
+        # visible one — so switching mfrs after a theme change still looks
+        # right.
+        for bundle in self._log_widgets.values():
+            self._apply_log_theme(bundle["text"])
+        # Rebuild the picker cards with the new theme colors.
+        if hasattr(self, "_picker_view"):
+            self._picker_view.apply_theme()
 
         if theme == "dark":
             self._theme_btn.configure(text="☀", style="Sun.TButton")

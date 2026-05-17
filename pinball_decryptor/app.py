@@ -47,18 +47,18 @@ class App:
             on_apply_delta=self._start_apply_delta,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
+            on_back=self._on_back_to_picker,
             on_export=self._start_export,
             on_import=self._start_import,
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
         )
 
-        # Restore last-used manufacturer, or default to the first registered.
-        last_key = self._settings.get("last_manufacturer")
-        initial_mfr = get_manufacturer(last_key) if last_key else None
-        if initial_mfr is None:
-            initial_mfr = self._manufacturers[0]
-        self._apply_manufacturer(initial_mfr)
+        # Start at the manufacturer picker.  Even if the user has a
+        # last_manufacturer saved, the explicit pick step makes "which
+        # mfr am I about to work on" unambiguous and prevents the
+        # accidental mid-session mfr switch class of bug.
+        self.window.show_picker()
 
         self._poll_queue()
 
@@ -115,6 +115,17 @@ class App:
         # Persist immediately so a crash before _on_close doesn't lose
         # the user's most-recent manufacturer choice.
         self._save_settings()
+
+    def _on_back_to_picker(self):
+        """User clicked Back -> return to the manufacturer picker."""
+        # Save the current mfr's paths so they're preserved across
+        # picker -> re-enter cycles.  Don't clear _current_mfr; the
+        # picker doesn't know about it and apply_manufacturer() reuses
+        # _current_mfr to detect mfr-changes.
+        if self._current_mfr is not None:
+            self._save_manufacturer_paths(self._current_mfr.key)
+            self._save_settings()
+        self.window.show_picker()
 
     def _apply_manufacturer(self, mfr):
         self._current_mfr = mfr

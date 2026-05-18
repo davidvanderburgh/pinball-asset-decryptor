@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Build AppImage for Pinball Asset Decryptor.
+# Requirements: Python 3.10+ with tkinter, wget (for appimagetool), file.
+# Tested on Ubuntu 22.04 / 24.04.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+VERSION=$(python3 -c "import sys; sys.path.insert(0,'$ROOT_DIR'); from pinball_decryptor import __version__; print(__version__)")
+ARCH="$(uname -m)"
+
+echo "=== Building Pinball Asset Decryptor v${VERSION} for Linux (${ARCH}) ==="
+
+BUILD_DIR="$SCRIPT_DIR/build_linux"
+APPDIR="$BUILD_DIR/AppDir"
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR" "$APPDIR"
+
+# --- PyInstaller build --------------------------------------------------
+echo "Installing build deps..."
+pip3 install --quiet --user pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow
+
+echo "Running PyInstaller..."
+cd "$ROOT_DIR"
+pyinstaller \
+    --name "pinball-decryptor" \
+    --windowed \
+    --paths "$ROOT_DIR" \
+    --add-data "$ROOT_DIR/pinball_decryptor/icon.png:pinball_decryptor" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \
+    --hidden-import "Crypto" \
+    --hidden-import "Crypto.Cipher" \
+    --hidden-import "Crypto.Cipher.AES" \
+    --hidden-import "Crypto.Util.Padding" \
+    --collect-all "UnityPy" \
+    --collect-all "fsb5" \
+    --collect-all "pyogg" \
+    --hidden-import "PIL" \
+    --hidden-import "PIL.Image" \
+    --noconfirm \
+    --clean \
+    --distpath "$BUILD_DIR/dist" \
+    --workpath "$BUILD_DIR/work" \
+    --specpath "$BUILD_DIR" \
+    "$SCRIPT_DIR/pyinstaller_entry.py"
+
+# --- Assemble AppDir ----------------------------------------------------
+# Layout follows the AppImage spec: a top-level AppRun, .desktop, icon,
+# plus the binary under usr/bin/.
+echo "Assembling AppDir..."
+mkdir -p "$APPDIR/usr/bin"
+cp -r "$BUILD_DIR/dist/pinball-decryptor/." "$APPDIR/usr/bin/"
+
+# Top-level icon (required by appimagetool) + standard hicolor location
+mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+cp "$ROOT_DIR/pinball_decryptor/icon.png" "$APPDIR/pinball-decryptor.png"
+cp "$ROOT_DIR/pinball_decryptor/icon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/pinball-decryptor.png"
+
+cat > "$APPDIR/pinball-decryptor.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Pinball Asset Decryptor
+Comment=Extract, view, and modify pinball machine assets
+Exec=pinball-decryptor
+Icon=pinball-decryptor
+Categories=Utility;
+Terminal=false
+EOF
+
+cat > "$APPDIR/AppRun" <<'EOF'
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "${0}")")"
+export PATH="${HERE}/usr/bin:${PATH}"
+exec "${HERE}/usr/bin/pinball-decryptor" "$@"
+EOF
+chmod +x "$APPDIR/AppRun"
+
+# --- Fetch appimagetool if needed --------------------------------------
+APPIMAGETOOL="$BUILD_DIR/appimagetool"
+if [ ! -x "$APPIMAGETOOL" ]; then
+    echo "Fetching appimagetool..."
+    case "$ARCH" in
+        x86_64)  TOOL_ARCH="x86_64" ;;
+        aarch64) TOOL_ARCH="aarch64" ;;
+        *)       echo "Unsupported arch: $ARCH"; exit 1 ;;
+    esac
+    wget -q -O "$APPIMAGETOOL" \
+        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${TOOL_ARCH}.AppImage"
+    chmod +x "$APPIMAGETOOL"
+fi
+
+# --- Package AppImage ---------------------------------------------------
+mkdir -p "$SCRIPT_DIR/Output"
+OUTPUT_NAME="Pinball_Asset_Decryptor_v${VERSION}_Linux_${ARCH}.AppImage"
+OUTPUT_PATH="$SCRIPT_DIR/Output/$OUTPUT_NAME"
+
+# ARCH must be set for appimagetool to pick the runtime; --appimage-extract-and-run
+# avoids needing FUSE on CI runners that don't have it.
+echo "Building AppImage..."
+ARCH="$ARCH" "$APPIMAGETOOL" --appimage-extract-and-run \
+    "$APPDIR" "$OUTPUT_PATH"
+
+echo ""
+echo "=== Build complete ==="
+echo "Output: $OUTPUT_PATH"

@@ -214,16 +214,41 @@ class App:
         import sys
         from tkinter import messagebox
 
-        if sys.platform != "win32":
+        if sys.platform == "darwin":
             messagebox.showinfo(
                 "Install Prerequisites",
-                "The bundled installer script is Windows-only.\n\n"
+                "The auto-installer is Windows/Linux-only.\n\n"
                 "On macOS, Spooky/JJP Clonezilla flows use Docker Desktop "
                 "(install from https://www.docker.com/products/docker-desktop/) "
-                "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).\n\n"
-                "On Linux, install partclone, e2fsprogs, xorriso, pigz, gpg, "
-                "ffmpeg, zstd, and python3-zstandard via your package "
-                "manager.")
+                "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).")
+            return
+
+        if sys.platform.startswith("linux"):
+            script = self._find_prereqs_script_linux()
+            if not script:
+                messagebox.showerror(
+                    "Install Prerequisites",
+                    "Could not locate install_prerequisites_linux.sh.\n\n"
+                    "If you're running from source, the script lives at "
+                    "installer/install_prerequisites_linux.sh.")
+                return
+            # Launch the bash installer in a terminal so the user can
+            # interact with the manufacturer picker and answer the sudo
+            # prompt.  Try a few common terminal emulators.
+            import shutil, subprocess
+            for term, args in (
+                ("x-terminal-emulator", ["-e"]),
+                ("gnome-terminal",       ["--"]),
+                ("konsole",              ["-e"]),
+                ("xterm",                ["-e"]),
+            ):
+                if shutil.which(term):
+                    subprocess.Popen([term, *args, "bash", script])
+                    return
+            messagebox.showinfo(
+                "Install Prerequisites",
+                f"No terminal emulator found.  Run manually:\n\n"
+                f"  bash {script}")
             return
 
         script = self._find_prereqs_script()
@@ -251,6 +276,18 @@ class App:
         candidates = [
             os.path.join(pkg_dir, "..", "install_prerequisites.ps1"),  # installed
             os.path.join(pkg_dir, "..", "installer", "install_prerequisites.ps1"),  # source
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return os.path.abspath(c)
+        return None
+
+    @staticmethod
+    def _find_prereqs_script_linux():
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(pkg_dir, "..", "install_prerequisites_linux.sh"),
+            os.path.join(pkg_dir, "..", "installer", "install_prerequisites_linux.sh"),
         ]
         for c in candidates:
             if os.path.isfile(c):

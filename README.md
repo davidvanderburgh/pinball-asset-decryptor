@@ -50,6 +50,27 @@ open it, and drag the app to `/Applications`.
 For Spooky and JJP Clonezilla extraction you'll also need Docker Desktop
 (the app builds and uses an ephemeral container for partclone / debugfs).
 
+### Linux
+
+Download the latest `Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage`
+from the [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases),
+mark it executable, and run it:
+
+```bash
+chmod +x Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
+./Pinball_Asset_Decryptor_v*_Linux_x86_64.AppImage
+```
+
+After install, run **Install Missing** from the prereqs row (or run
+[installer/install_prerequisites_linux.sh](installer/install_prerequisites_linux.sh)
+directly) — it asks which manufacturers you'll actually use and installs
+only the apt packages those plugins need (see
+[Per-manufacturer prerequisites](#per-manufacturer-prerequisites) below).
+
+The installer expects an apt-based distro (Debian / Ubuntu); on other
+distros, install the equivalent packages manually using the table in that
+section.
+
 ### From source
 
 ```bash
@@ -95,17 +116,26 @@ Different plugins need different runtime tools. The prerequisite installer
 lets you pick which manufacturers you care about and installs only what
 those plugins need.
 
-| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) |
+| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt |
 |---|---|---|
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
 | Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
 | Barrels of Fun | – | gnupg, tar |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard |
 
+On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional
+apt packages alongside the rest — the Linux installer flattens both
+columns into one apt-install set.
+
 Run [installer/install_prerequisites.ps1](installer/install_prerequisites.ps1)
 as Administrator (the Start Menu shortcut does this for you) and pick from
 the manufacturer menu. Re-run any time — anything already installed gets
 skipped.
+
+On Linux, the equivalent script is
+[installer/install_prerequisites_linux.sh](installer/install_prerequisites_linux.sh)
+— same per-manufacturer picker, installs the apt packages directly (no
+WSL layer to set up).
 
 On macOS, Spooky/JJP Clonezilla flows use Docker Desktop instead of WSL
 (the app builds the container automatically the first time it's needed).
@@ -259,8 +289,17 @@ bash installer/build_macos.sh
 # Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_macOS.dmg
 ```
 
-CI does both automatically on a `v*` tag push and uploads to a GitHub
-release. See [.github/workflows/release.yml](.github/workflows/release.yml).
+### Linux
+
+```bash
+# Requires: Python 3.10+ with tkinter, wget (for appimagetool fetch)
+#   apt-get install python3-tk wget
+bash installer/build_linux.sh
+# Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_Linux_x86_64.AppImage
+```
+
+CI does all three automatically on a `v*` tag push and uploads to a
+GitHub release. See [.github/workflows/release.yml](.github/workflows/release.yml).
 
 To cut a release:
 

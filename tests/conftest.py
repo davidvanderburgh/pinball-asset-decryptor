@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 import sys
 
 import pytest
@@ -14,7 +15,32 @@ import pytest
 # CI runners that don't have every host-side tool.
 
 HAS_GPG = shutil.which("gpg") is not None
-HAS_WSL = (sys.platform == "win32") and (shutil.which("wsl") is not None)
+
+
+def _wsl_usable():
+    """True only if WSL can actually execute a command.
+
+    Windows ships `wsl.exe` system-wide as part of the optional WSL
+    feature, so `shutil.which("wsl")` finds it on every Windows host
+    -- even GitHub Actions runners that don't have a distro
+    installed.  We need to verify wsl can actually run something
+    before claiming HAS_WSL.
+    """
+    if sys.platform != "win32":
+        return False
+    if shutil.which("wsl") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["wsl", "-u", "root", "--", "echo", "ok"],
+            capture_output=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+HAS_WSL = _wsl_usable()
 HAS_DOCKER = shutil.which("docker") is not None
 
 

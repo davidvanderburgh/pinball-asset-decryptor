@@ -1,8 +1,8 @@
 # Pinball Asset Decryptor
 
 One app to extract, view, and modify game assets from pinball machines made
-by **Pinball Brothers**, **Spooky Pinball**, **Barrels of Fun**, and
-**Jersey Jack Pinball** — 32 games across four manufacturers.
+by **Barrels of Fun**, **Jersey Jack Pinball**, **Pinball Brothers**, and
+**Spooky Pinball** — 32 games across four manufacturers.
 
 This is a unified replacement for four separate decryptor apps that all shared
 the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
@@ -15,17 +15,17 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
-| **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
-| **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
 | **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
+| **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
+| **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
 
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
-[pb/games.py](pinball_decryptor/plugins/pb/games.py),
-[spooky/games.py](pinball_decryptor/plugins/spooky/games.py),
 [bof/games.py](pinball_decryptor/plugins/bof/games.py),
-[jjp/games.py](pinball_decryptor/plugins/jjp/games.py).
+[jjp/games.py](pinball_decryptor/plugins/jjp/games.py),
+[pb/games.py](pinball_decryptor/plugins/pb/games.py),
+[spooky/games.py](pinball_decryptor/plugins/spooky/games.py).
 
 ## Install
 
@@ -118,10 +118,10 @@ those plugins need.
 
 | Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt |
 |---|---|---|
-| Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
-| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
 | Barrels of Fun | – | gnupg, tar |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard |
+| Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
+| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
 
 On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional
 apt packages alongside the rest — the Linux installer flattens both
@@ -169,10 +169,10 @@ pinball_decryptor/
 ├── gui/
 │   └── main_window.py            # manufacturer-aware window
 ├── plugins/
-│   ├── pb/                       # Pinball Brothers
-│   ├── spooky/                   # Spooky Pinball (+ private Docker)
 │   ├── bof/                      # Barrels of Fun
-│   └── jjp/                      # Jersey Jack Pinball (+ private Docker)
+│   ├── jjp/                      # Jersey Jack Pinball (+ private Docker)
+│   ├── pb/                       # Pinball Brothers
+│   └── spooky/                   # Spooky Pinball (+ private Docker)
 ├── app.py                        # controller — wires GUI ↔ plugins
 └── icon.{ico,png}
 ```
@@ -248,10 +248,10 @@ are shipped or required. Coverage:
 
 | Manufacturer | Tested | How |
 |---|---|---|
-| Pinball Brothers | Extract + Write round-trip, all 4 games | Synthetic `.upd` (gzip+tar) |
-| Spooky Pinball | Extract + Write round-trip for `.ed`, `.scooby`, `.looney`, P3 `.zip`, `.pkg` (RM, AC) | Synthetic format-correct files; AES rounds use the known plugin keys |
 | Barrels of Fun | Extract + Write round-trip, all 3 games | Synthetic `.fun` (gpg-symmetric tar.gz) — *skipped automatically when gpg isn't installed* |
 | Jersey Jack | Detection + write-output-rename wrapper | Full Extract needs WSL + real ISO (gigabytes), not testable in CI |
+| Pinball Brothers | Extract + Write round-trip, all 4 games | Synthetic `.upd` (gzip+tar) |
+| Spooky Pinball | Extract + Write round-trip for `.ed`, `.scooby`, `.looney`, P3 `.zip`, `.pkg` (RM, AC) | Synthetic format-correct files; AES rounds use the known plugin keys |
 
 Plus: per-mfr contract validation (capabilities, prereqs, phase labels,
 game lists), GUI smoke (picker, mfr switch, per-mfr log persistence,

@@ -65,16 +65,24 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
 
 ## Quick start
 
-1. Pick a manufacturer from the dropdown at the top.
-2. **Extract tab** — pick an input file and an output folder; click *Extract*.
-   The output folder gets the decrypted assets plus a `.checksums.md5`
-   baseline used by the Write tab.
-3. Modify any files in the output folder you want to change.
-4. **Write tab** — pick the original file, the (now-modified) assets folder,
-   and an output folder; click *Build update*. You get an installable file
-   that's ready for a USB drive.
-5. **Mod Pack tab** — share just your changed files as a zip, or apply
+1. On launch, the **picker** shows a card per manufacturer with every
+   compatible game listed (greyed + struck-through for ones not
+   currently decryptable — e.g. Spooky's Total Nuclear Annihilation,
+   AES key unknown). Click a card to enter that manufacturer's view.
+2. The **prerequisites** row at the top of the mfr view turns each
+   needed tool green (✓) or red (✗); hover for an install hint.
+3. **Extract tab** — pick an input file and an output folder; click
+   *Extract*. The output folder gets the decrypted assets plus a
+   `.checksums.md5` baseline used by the Write tab.
+4. Modify any files in the output folder you want to change.
+5. **Write tab** — pick the original file, the (now-modified) assets
+   folder, and an output folder; click *Build update*. You get an
+   installable file that's ready for a USB drive.
+6. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder.
+7. **< Back** in the top bar returns to the picker. Each manufacturer
+   keeps its own log scrollback, so coming back to the same one
+   shows your previous activity intact.
 
 If you browse to a file the current manufacturer doesn't recognise but
 *another* manufacturer does, the badge under the input field will say
@@ -108,8 +116,11 @@ The app polls the GitHub releases API on launch and posts an "Update
 available" link in the log pane if a newer release exists. The check is
 non-blocking and silent if you're already on the latest version.
 
-The release tag format is `vMAJOR.MINOR.PATCH` (e.g. `v0.1.0`); see
-[core/updater.py](pinball_decryptor/core/updater.py) for the details.
+The release tag format is `vMAJOR.MINOR.PATCH`; see
+[core/updater.py](pinball_decryptor/core/updater.py) for the
+parser. The current shipped version is whatever
+[`pinball_decryptor/__init__.py`](pinball_decryptor/__init__.py)
+declares — `__version__` is the single source of truth.
 
 ## Architecture
 
@@ -237,7 +248,7 @@ should come with at least a detection test + a contract test in
 ```powershell
 # Requires: Python 3.10+ with tkinter, Inno Setup 6
 installer\build.ps1
-# Output: installer\Output\Pinball_Asset_Decryptor_v0.1.0_Windows.exe
+# Output: installer\Output\Pinball_Asset_Decryptor_vX.Y.Z_Windows.exe
 ```
 
 ### macOS
@@ -245,7 +256,7 @@ installer\build.ps1
 ```bash
 # Requires: Python 3.10+, brew install create-dmg
 bash installer/build_macos.sh
-# Output: installer/Output/Pinball_Asset_Decryptor_v0.1.0_macOS.dmg
+# Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_macOS.dmg
 ```
 
 CI does both automatically on a `v*` tag push and uploads to a GitHub
@@ -255,8 +266,8 @@ To cut a release:
 
 ```bash
 # Bump pinball_decryptor/__init__.py to the new version, then:
-git tag v0.1.0
-git push origin v0.1.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 ## License

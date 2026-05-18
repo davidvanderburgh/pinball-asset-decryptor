@@ -36,29 +36,19 @@ jobs:
           pip install pytest pycryptodome
 
       # gpg is needed for the BOF .fun round-trip + Spooky's GPG-symmetric
-      # flows; install on every OS so those tests run, not skip.
-      - name: Install gpg (Linux)
+      # flows on Linux and macOS, where the app calls a host-side gpg
+      # directly.  Skip the Windows install -- BOF on Windows uses
+      # gpg-inside-WSL through the executor, not host gpg, so a host
+      # gpg install wouldn't reflect real usage AND winget install of
+      # Gpg4win/GnuPG takes 1-2 minutes per run.  The BOF tests skip
+      # cleanly via HAS_GPG on Windows runners.
+      - name: Install gpg + xvfb (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnupg xvfb
 
       - name: Install gpg (macOS)
         if: runner.os == 'macOS'
         run: brew install gnupg
-
-      - name: Install gpg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # GnuPG.GnuPG = standalone gpg CLI (no Kleopatra bundle).
-          # --disable-interactivity stops winget drawing box-char
-          # progress bars that look like mojibake in GH Actions logs.
-          winget install --id GnuPG.GnuPG --silent --disable-interactivity `
-            --accept-package-agreements --accept-source-agreements
-          # winget edits PATH in the registry; refresh for this shell.
-          $machinePath = [System.Environment]::GetEnvironmentVariable("Path","Machine")
-          $userPath    = [System.Environment]::GetEnvironmentVariable("Path","User")
-          $env:Path = "$machinePath;$userPath"
-          echo "PATH=$env:Path" >> $env:GITHUB_ENV
 
       # Tk needs a display on Linux.  xvfb-run wraps the test command
       # with a virtual X server.  Mac + Windows runners can open Tk

@@ -5,8 +5,13 @@ Skips cleanly when gpg isn't installed — relevant for some CI matrix
 entries (Windows runners don't ship gpg by default).
 """
 
+import os
+import subprocess
+import sys
+
 import pytest
 
+from pinball_decryptor.plugins.bof.games import GAME_DB
 from tests import synthetic
 from tests._runner import run_pipeline_sync
 from tests.conftest import HAS_GPG
@@ -32,15 +37,31 @@ def _run_write(mfr, original, assets, output):
     return run_pipeline_sync(p)
 
 
+def _take_ownership(path):
+    """On Linux, BOF's NativeExecutor wraps every command in
+    ``sudo bash -c`` (lifted verbatim from upstream), so the extracted
+    files end up owned by root.  Chown back to the current user so
+    tests can read/modify them — CI runner has passwordless sudo, and
+    a local dev would too if they're set up to run BOF at all."""
+    if sys.platform != "linux":
+        return
+    subprocess.run(
+        ["sudo", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(path)],
+        check=False, capture_output=True)
+
+
 @pytest.mark.requires_gpg
 @pytest.mark.parametrize("game_key", ["labyrinth", "dune", "winchester"])
 def test_bof_extract(manufacturers_by_key, tmp_path, game_key):
     bof = manufacturers_by_key["bof"]
-    fun = synthetic.make_bof_fun(
-        tmp_path / f"{game_key}.fun", game_key=game_key)
+    # BOF detect() matches on exact .fun filename, not game key -
+    # 'lab.fun' for Labyrinth, etc.  Use the canonical name from GAME_DB.
+    fun_name = GAME_DB[game_key]["fun_file"]
+    fun = synthetic.make_bof_fun(tmp_path / fun_name, game_key=game_key)
     out = tmp_path / "out"; out.mkdir()
     r = _run_extract(bof, fun, out)
     assert r.success, f"{game_key} extract failed: {r.summary}\n{r.log_text()}"
+    _take_ownership(out)
     assert (out / "main.x86_64").is_file()
 
 
@@ -48,20 +69,28 @@ def test_bof_extract(manufacturers_by_key, tmp_path, game_key):
 def test_bof_round_trip(manufacturers_by_key, tmp_path):
     """Extract -> modify -> re-encrypt -> re-extract -> verify edit."""
     bof = manufacturers_by_key["bof"]
-    fun_in = synthetic.make_bof_fun(tmp_path / "lab.fun",
-                                     game_key="labyrinth")
+    fun_name = GAME_DB["labyrinth"]["fun_file"]   # lab.fun
+
+    fun_in = synthetic.make_bof_fun(tmp_path / fun_name, game_key="labyrinth")
     extracted = tmp_path / "ex"; extracted.mkdir()
     r1 = _run_extract(bof, fun_in, extracted)
     assert r1.success, r1.summary
+    # Linux: claim ownership back before we try to modify.
+    _take_ownership(extracted)
 
     # Modify the synthesized "binary"
     (extracted / "main.x86_64").write_bytes(b"BOF_ROUND_TRIP_OK")
 
-    fun_out = tmp_path / "lab_out.fun"
+    # Output filename must match BOF's detection pattern (lab.fun for
+    # Labyrinth), so put it in a sibling dir rather than renaming it.
+    out_dir = tmp_path / "out"; out_dir.mkdir()
+    fun_out = out_dir / fun_name
     r2 = _run_write(bof, fun_in, extracted, fun_out)
     assert r2.success, f"BOF write failed: {r2.summary}\n{r2.log_text()}"
+    _take_ownership(out_dir)
 
     re_extracted = tmp_path / "re"; re_extracted.mkdir()
     r3 = _run_extract(bof, fun_out, re_extracted)
     assert r3.success, r3.summary
+    _take_ownership(re_extracted)
     assert (re_extracted / "main.x86_64").read_bytes() == b"BOF_ROUND_TRIP_OK"

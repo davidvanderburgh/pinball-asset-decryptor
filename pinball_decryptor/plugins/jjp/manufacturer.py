@@ -15,10 +15,11 @@ from .games import GAME_DB, detect_iso_game
 from .pipeline import StandaloneDecryptPipeline, StandaloneModPipeline
 
 
-_GAMES = tuple(
-    Game(key=k, display=info["display"], manufacturer_key="jjp")
-    for k, info in GAME_DB.items()
-)
+_GAMES = tuple(sorted(
+    (Game(key=k, display=info["display"], manufacturer_key="jjp")
+     for k, info in GAME_DB.items()),
+    key=lambda g: g.display.lower(),
+))
 
 
 # ---------------------------------------------------------------------------

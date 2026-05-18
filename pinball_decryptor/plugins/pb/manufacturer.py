@@ -8,10 +8,11 @@ from .pipeline import (ExtractPipeline, IsoExtractPipeline, WritePipeline,
                        apply_delta)
 
 
-_GAMES = tuple(
-    Game(key=k, display=info["display"], manufacturer_key="pb")
-    for k, info in GAME_DB.items()
-)
+_GAMES = tuple(sorted(
+    (Game(key=k, display=info["display"], manufacturer_key="pb")
+     for k, info in GAME_DB.items()),
+    key=lambda g: g.display.lower(),
+))
 
 
 class PBManufacturer(Manufacturer):

@@ -13,10 +13,11 @@ from .games import FUN_FILE_TO_GAME, GAME_DB
 from .pipeline import DecryptPipeline, ModifyPipeline, detect_game
 
 
-_GAMES = tuple(
-    Game(key=k, display=info["display"], manufacturer_key="bof")
-    for k, info in GAME_DB.items()
-)
+_GAMES = tuple(sorted(
+    (Game(key=k, display=info["display"], manufacturer_key="bof")
+     for k, info in GAME_DB.items()),
+    key=lambda g: g.display.lower(),
+))
 
 
 class _ExtractWrapper(DecryptPipeline):

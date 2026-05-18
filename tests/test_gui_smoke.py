@@ -25,14 +25,21 @@ def app():
     # _poll_queue / _check_for_update closures don't fire against a
     # freed Tk interpreter (otherwise we get noisy
     # 'invalid command name "...poll_queue"' stderr at test teardown).
-    try:
-        for after_id in a.root.tk.call("after", "info").split():
+    # _poll_queue reschedules itself every 100ms, so a single sweep
+    # can race against the next reschedule -- loop until nothing
+    # pending remains.
+    for _ in range(20):
+        try:
+            pending = a.root.tk.call("after", "info")
+        except Exception:
+            break
+        if not pending:
+            break
+        for after_id in pending.split():
             try:
                 a.root.after_cancel(after_id)
             except Exception:
                 pass
-    except Exception:
-        pass
     a.root.destroy()
 
 

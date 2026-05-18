@@ -15,16 +15,16 @@ _UNSUPPORTED_REASONS = {
     "total_nuclear": "AES-256-CBC key unknown - no Clonezilla image available either",
 }
 
-_GAMES = tuple(
-    Game(
+_GAMES = tuple(sorted(
+    (Game(
         key=k,
         display=info["display"],
         manufacturer_key="spooky",
         supported=(k not in _UNSUPPORTED_REASONS),
         unsupported_reason=_UNSUPPORTED_REASONS.get(k, ""),
-    )
-    for k, info in GAME_DB.items()
-)
+    ) for k, info in GAME_DB.items()),
+    key=lambda g: g.display.lower(),
+))
 
 
 class SpookyManufacturer(Manufacturer):

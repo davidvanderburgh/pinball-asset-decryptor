@@ -222,9 +222,10 @@ class MainWindow:
         f = self._tab_extract
         pad = {"padx": 10, "pady": 4}
 
-        self._extract_help = ttk.Label(
-            f, text="", font=(_SANS_FONT, 9, "italic"))
-        self._extract_help.pack(anchor=tk.W, **pad)
+        # NOTE: a per-mfr description label used to live here, but the
+        # picker page already shows every game the mfr handles, and
+        # the prereqs row above the tabs already lists runtime tools,
+        # so it was redundant + got clipped when the text was long.
 
         row = ttk.Frame(f); row.pack(fill=tk.X, **pad)
         self._extract_input_lbl = ttk.Label(
@@ -542,8 +543,7 @@ class MainWindow:
         # Make sure the working view is visible (and the picker isn't).
         self.show_mfr_view()
 
-        # Help text + label phrasing
-        self._extract_help.configure(text=mfr.extract_input_help())
+        # Per-format label phrasing (e.g. ".upd:" vs "Input:")
         primary_ext = (mfr.input_spec.extensions[0]
                        if mfr.input_spec.extensions else "file")
         self._extract_input_lbl.configure(

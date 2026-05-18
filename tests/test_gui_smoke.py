@@ -27,7 +27,9 @@ def app():
     # 'invalid command name "...poll_queue"' stderr at test teardown).
     # _poll_queue reschedules itself every 100ms, so a single sweep
     # can race against the next reschedule -- loop until nothing
-    # pending remains.
+    # pending remains.  Note: tk.call("after", "info") returns a TUPLE
+    # of strings on most Tk builds (and an empty string on some), so
+    # accept either.
     for _ in range(20):
         try:
             pending = a.root.tk.call("after", "info")
@@ -35,7 +37,11 @@ def app():
             break
         if not pending:
             break
-        for after_id in pending.split():
+        if isinstance(pending, str):
+            ids = pending.split()
+        else:
+            ids = list(pending)
+        for after_id in ids:
             try:
                 a.root.after_cancel(after_id)
             except Exception:

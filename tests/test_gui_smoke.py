@@ -1,0 +1,105 @@
+"""GUI construction smoke tests.
+
+These exercise the picker -> mfr-view navigation flow and per-mfr log
+swapping without actually running pipelines.  Skipped when Tk can't
+open a display (typical for headless Linux CI without xvfb).
+"""
+
+import pytest
+
+from tests.conftest import HAS_DISPLAY
+
+
+pytestmark = pytest.mark.skipif(
+    not HAS_DISPLAY, reason="no Tk display available")
+
+
+@pytest.fixture
+def app():
+    """Build an App() instance + tear it down cleanly per-test."""
+    from pinball_decryptor.app import App
+    a = App()
+    a.root.update()
+    yield a
+    # Cancel every pending after() callback before destroying so the
+    # _poll_queue / _check_for_update closures don't fire against a
+    # freed Tk interpreter (otherwise we get noisy
+    # 'invalid command name "...poll_queue"' stderr at test teardown).
+    try:
+        for after_id in a.root.tk.call("after", "info").split():
+            try:
+                a.root.after_cancel(after_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    a.root.destroy()
+
+
+def test_app_starts_on_picker(app):
+    assert app.window._picker_view.winfo_ismapped()
+    assert not app.window._mfr_view.winfo_ismapped()
+    assert app._current_mfr is None
+
+
+def test_picker_has_all_manufacturer_cards(app):
+    """The picker should have one card per registered manufacturer."""
+    picker = app.window._picker_view
+    assert len(picker._cards) == len(app._manufacturers)
+
+
+def test_mfr_select_switches_to_mfr_view(app, manufacturers_by_key):
+    spooky = manufacturers_by_key["spooky"]
+    app._on_manufacturer_change(spooky)
+    app.root.update(); app.root.update()
+    assert app._current_mfr.key == "spooky"
+    assert app.window._mfr_view.winfo_ismapped()
+    assert not app.window._picker_view.winfo_ismapped()
+
+
+def test_back_returns_to_picker(app, manufacturers_by_key):
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    app._on_back_to_picker()
+    app.root.update()
+    assert app.window._picker_view.winfo_ismapped()
+    assert not app.window._mfr_view.winfo_ismapped()
+
+
+def test_per_mfr_log_persists_across_switches(app, manufacturers_by_key):
+    """Each mfr keeps its own Text widget; logs survive Back + re-pick."""
+    spooky = manufacturers_by_key["spooky"]
+    jjp = manufacturers_by_key["jjp"]
+
+    app._on_manufacturer_change(spooky)
+    app.root.update()
+    app.window.append_log("spooky-test-line", "info")
+
+    app._on_back_to_picker()
+    app._on_manufacturer_change(jjp)
+    app.root.update()
+    app.window.append_log("jjp-test-line", "info")
+
+    # Spooky's log still has its content cached
+    spooky_log = app.window._log_widgets["spooky"]["text"].get("1.0", "end-1c")
+    jjp_log = app.window._log_widgets["jjp"]["text"].get("1.0", "end-1c")
+    assert "spooky-test-line" in spooky_log
+    assert "spooky-test-line" not in jjp_log
+    assert "jjp-test-line" in jjp_log
+    assert "jjp-test-line" not in spooky_log
+
+
+def test_prereq_indicators_render_for_current_mfr(app, manufacturers_by_key):
+    """When a mfr is selected, its prereqs get [?] placeholder labels."""
+    spooky = manufacturers_by_key["spooky"]
+    app._on_manufacturer_change(spooky)
+    app.root.update()
+    # Indicator names should match the manufacturer's declared prereqs
+    expected_names = {p.name for p in spooky.prerequisites}
+    rendered_names = set(app.window._prereq_indicators.keys())
+    assert rendered_names == expected_names
+
+
+def test_manufacturer_picker_alphabetical_order(app):
+    displays = [m.display for m in app._manufacturers]
+    assert displays == sorted(displays, key=str.lower)

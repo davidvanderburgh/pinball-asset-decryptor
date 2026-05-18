@@ -1,0 +1,8 @@
+# Test + development dependencies.  The app itself only needs Pillow
+# (see requirements.txt), but the test suite needs pytest + pycryptodome
+# (for the Spooky AES round-trip fixtures).
+#
+# Install with:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8
+pycryptodome>=3

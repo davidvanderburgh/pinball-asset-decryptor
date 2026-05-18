@@ -1,0 +1,72 @@
+name: Tests
+
+# Runs the test suite on push to main and every pull request.
+# Matrix covers all three supported host OSes; per-platform setup
+# installs whatever extra tooling those tests need (gpg, xvfb).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pycryptodome
+
+      # gpg is needed for the BOF .fun round-trip + Spooky's GPG-symmetric
+      # flows; install on every OS so those tests run, not skip.
+      - name: Install gpg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gnupg xvfb
+
+      - name: Install gpg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gnupg
+
+      - name: Install gpg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # GnuPG.GnuPG = standalone gpg CLI (no Kleopatra bundle).
+          # --disable-interactivity stops winget drawing box-char
+          # progress bars that look like mojibake in GH Actions logs.
+          winget install --id GnuPG.GnuPG --silent --disable-interactivity `
+            --accept-package-agreements --accept-source-agreements
+          # winget edits PATH in the registry; refresh for this shell.
+          $machinePath = [System.Environment]::GetEnvironmentVariable("Path","Machine")
+          $userPath    = [System.Environment]::GetEnvironmentVariable("Path","User")
+          $env:Path = "$machinePath;$userPath"
+          echo "PATH=$env:Path" >> $env:GITHUB_ENV
+
+      # Tk needs a display on Linux.  xvfb-run wraps the test command
+      # with a virtual X server.  Mac + Windows runners can open Tk
+      # directly without setup.
+      - name: Run tests (Linux, under xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest tests -v
+
+      - name: Run tests (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: python -m pytest tests -v

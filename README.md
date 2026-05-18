@@ -194,6 +194,42 @@ that manufacturer's `detect()` before persisting.
 8. Smoke-test: load all plugins, run `detect()` against real sample files,
    instantiate the pipelines.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests
+```
+
+The suite exercises the full Extract → Write round-trip per manufacturer
+against synthetic fixtures generated at test time — no real game files
+are shipped or required. Coverage:
+
+| Manufacturer | Tested | How |
+|---|---|---|
+| Pinball Brothers | Extract + Write round-trip, all 4 games | Synthetic `.upd` (gzip+tar) |
+| Spooky Pinball | Extract + Write round-trip for `.ed`, `.scooby`, `.looney`, P3 `.zip`, `.pkg` (RM, AC) | Synthetic format-correct files; AES rounds use the known plugin keys |
+| Barrels of Fun | Extract + Write round-trip, all 3 games | Synthetic `.fun` (gpg-symmetric tar.gz) — *skipped automatically when gpg isn't installed* |
+| Jersey Jack | Detection + write-output-rename wrapper | Full Extract needs WSL + real ISO (gigabytes), not testable in CI |
+
+Plus: per-mfr contract validation (capabilities, prereqs, phase labels,
+game lists), GUI smoke (picker, mfr switch, per-mfr log persistence,
+Back navigation), and `detect()` against synthetic filenames.
+
+[CI runs this matrix on every push + PR](.github/workflows/test.yml):
+
+| Runner | gpg | Tk display |
+|---|---|---|
+| `ubuntu-latest` | apt | `xvfb-run` wraps pytest |
+| `macos-latest` | brew | native |
+| `windows-latest` | winget (GnuPG.GnuPG) | native |
+
+Tests that need WSL or Docker (full Clonezilla / JJP extraction) are
+marked `@pytest.mark.requires_wsl` / `requires_docker` and skip
+automatically when those aren't available. Adding new manufacturers
+should come with at least a detection test + a contract test in
+[tests/](tests/).
+
 ## Building installers locally
 
 ### Windows

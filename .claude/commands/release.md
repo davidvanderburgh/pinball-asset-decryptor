@@ -41,6 +41,22 @@ so we never again ship a tag where `__version__` lags the tag string
 
    Do NOT bump per-plugin versions (e.g. `plugins/jjp/__init__.py:__version__ = "3.7.0"`) — those are independent and track the upstream tool's version.
 
+5b. **Audit README content** (separate from the version-string scan above).  The README is user-facing documentation — when a release adds a new plugin, pipeline, capability, or changes a workflow, the README description of *what the app does* needs to follow.  This is NOT just find-and-replace.
+
+   Walk through the README and ask, for each section:
+   - **Title / one-liner:** still accurate?  Adding a major manufacturer often means the tagline ("decrypts X, Y, Z files") needs the new format added.
+   - **Supported games / manufacturers:** new plugin since last release?  Add it to the picker / capability matrix.
+   - **Quick Start / Usage:** new GUI surface (e.g. new tabs, new checkboxes, new modes)?  Update the screenshots or step-by-step.
+   - **Prerequisites:** new external dep (libpinmame, ffmpeg, GDRE Tools, etc.)?  Add to the prereq list AND the install instructions.
+   - **Capabilities table:** if there's a table of "what plugin X does," verify capture / write / modpack / etc. flags match the new code.
+   - **Output structure:** new file types in the output dir (e.g. per-scene MP4s)?  Document.
+   - **Troubleshooting / FAQ:** common questions raised in feedback since last release?  Pre-empt them.
+   - **Screenshots:** still match the current GUI?  Stale screenshots are worse than no screenshots.
+
+   Use `git log $(git describe --tags --abbrev=0)..HEAD -- README.md` to see the last time README was touched relative to the release log.  If the README hasn't been updated but the code has changed substantially, that's a signal — propose specific README edits before committing the release.
+
+   When in doubt, ask the user: *"The README hasn't changed since vN.N.N-1 but the code added <feature>; want me to update §X to mention it?"*
+
 6. **Stage + commit.**  Commit message format:
    ```
    vN.N.N - <one-line summary of what this release does>

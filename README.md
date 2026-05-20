@@ -20,7 +20,7 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
-| **Williams** (WPC-era) | 40+ WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | Extract DMD scenes (PNGs), animations (MP4), font strips |
+| **Williams** (WPC-era) | 41 WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | **Static**: DMD scene PNGs, animation MP4s, font strips decoded from the ROM. **Capture**: per-scene gameplay MP4s with synced DCS audio via libpinmame (scripted playthrough drives the ROM through its named cinematics — skill shots, mode starts, multiball, jackpots). |
 
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
@@ -30,7 +30,12 @@ sources:
 [spooky/games.py](pinball_decryptor/plugins/spooky/games.py),
 [williams/games.py](pinball_decryptor/plugins/williams/games.py).
 
-The Williams plugin uses a Python port of
+The Williams plugin has two complementary extract paths, independently
+togglable via checkboxes on the Extract tab:
+
+### Static extract (ROM-decoded assets)
+
+Python port of
 [permartinson/wpcedit.js](https://github.com/permartinson/wpcedit.js)
 (based on Garrett Lee's original 2004 WPC Edit) to walk the WPC ROM's
 font/graphics/animation master tables and decode the 11 compressed-frame
@@ -49,6 +54,26 @@ encodings the game's 6809 code uses at runtime. Output per game:
   motorcycle ride in No Fear, etc.).
 - **`fonts/font_*.png`** — sprite-sheet grids of every DMD glyph
   atlas (full ASCII alphabets in multiple sizes).
+
+### PinMAME runtime capture (composed cinematics + audio)
+
+Drives [libpinmame](https://github.com/vpinball/pinmame) under ctypes,
+auto-credits + presses Start + plays a per-game scripted shot sequence
+so the ROM walks through its named cinematics — skill shots, mode
+starts, multiball, jackpots, end-of-ball bonus, etc.  Emits one MP4 per
+scene named for the moment (e.g. `skill_shot.mp4`,
+`multiball_start.mp4`, `total_annihilation_setup.mp4`) with synced DCS
+audio.
+
+16 popular titles have hand-tuned scripts of 10–21 named moments each:
+AFM, MM, ToM, FT, WW, TZ, AF, STTNG, IJ, JD, NGG, T2, DM, RS, SS,
+Dracula. The remaining 25 games use a smart-generic pattern matcher
+that builds an equivalent playthrough from the per-game PinMAME switch
+profile.
+
+While the capture is running, the GUI shows a live DMD preview pane
+and a labeled switch-matrix grid — click any switch to manually press
+it for diagnostics.
 
 ## Install
 
@@ -139,12 +164,13 @@ Different plugins need different runtime tools. The prerequisite installer
 lets you pick which manufacturers you care about and installs only what
 those plugins need.
 
-| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt |
-|---|---|---|
-| Barrels of Fun | – | gnupg, tar |
-| Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard |
-| Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* |
-| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard |
+| Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt | Other |
+|---|---|---|---|
+| Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** (auto-downloaded by Install Prerequisites from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases)) |
+| Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
+| Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
+| Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
+| Williams (WPC) | ffmpeg | – (no WSL needed) | **libpinmame** (for the optional PinMAME capture path — download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). User-supplied MAME ROM zips; nothing bundled. |
 
 On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional
 apt packages alongside the rest — the Linux installer flattens both
@@ -192,10 +218,11 @@ pinball_decryptor/
 ├── gui/
 │   └── main_window.py            # manufacturer-aware window
 ├── plugins/
-│   ├── bof/                      # Barrels of Fun
+│   ├── bof/                      # Barrels of Fun (gpg + GDRE Tools)
 │   ├── jjp/                      # Jersey Jack Pinball (+ private Docker)
 │   ├── pb/                       # Pinball Brothers
-│   └── spooky/                   # Spooky Pinball (+ private Docker)
+│   ├── spooky/                   # Spooky Pinball (+ private Docker)
+│   └── williams/                 # WPC-era (static ROM scrape + PinMAME capture)
 ├── app.py                        # controller — wires GUI ↔ plugins
 └── icon.{ico,png}
 ```
@@ -275,6 +302,7 @@ are shipped or required. Coverage:
 | Jersey Jack | Detection + write-output-rename wrapper | Full Extract needs WSL + real ISO (gigabytes), not testable in CI |
 | Pinball Brothers | Extract + Write round-trip, all 4 games | Synthetic `.upd` (gzip+tar) |
 | Spooky Pinball | Extract + Write round-trip for `.ed`, `.scooby`, `.looney`, P3 `.zip`, `.pkg` (RM, AC) | Synthetic format-correct files; AES rounds use the known plugin keys |
+| Williams (WPC) | Static extract end-to-end on Fish Tales + Attack From Mars; per-game switch-profile + game-script contract validation across all 41 titles | Synthetic ROM zips with valid WPC font/animation tables; PinMAME capture path needs libpinmame + a real ROM so it's `@pytest.mark.requires_libpinmame` and skipped in CI |
 
 Plus: per-mfr contract validation (capabilities, prereqs, phase labels,
 game lists), GUI smoke (picker, mfr switch, per-mfr log persistence,
@@ -324,13 +352,11 @@ bash installer/build_linux.sh
 CI does all three automatically on a `v*` tag push and uploads to a
 GitHub release. See [.github/workflows/release.yml](.github/workflows/release.yml).
 
-To cut a release:
-
-```bash
-# Bump pinball_decryptor/__init__.py to the new version, then:
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
+To cut a release: use the `/release` slash command in Claude Code
+(`.claude/commands/release.md`), which bumps `__version__`, audits the
+README for content drift, runs the test suite, commits, pushes,
+tags, and publishes the GitHub release in the right order — designed
+to never again ship a tag where `__version__` lags the tag string.
 
 ## License
 

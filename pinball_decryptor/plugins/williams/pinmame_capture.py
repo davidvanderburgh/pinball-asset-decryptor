@@ -609,6 +609,47 @@ class PinmameCapture:
             self._emit_log(
                 f"PinmameSetSwitch({sw_no},{state}) failed: {e}", "warning")
 
+    def _confirm_ball_on_playfield(self, script):
+        """Pulse any defined inlane / sling switch in the per-game
+        switch map immediately after the ball plunges.
+
+        Every WPC ROM uses an inlane/sling hit as the universal
+        "ball is moving on the playfield" signal to engage its ball-
+        tracking state machine.  Without it, opening the shooter
+        lane is interpreted as "ball left the lane" but with no
+        follow-up activity within 2-3s the ball-search routine
+        decides the ball is lost and re-ejects.  Repeatedly.  That
+        was the No Fear symptom: 8x sol#14 + 6x sol#2 firings as
+        the game looped through "eject → plunge → lost → eject".
+
+        We pulse up to 3 distinct inlanes/slings spaced 300ms apart
+        — enough to look like "ball travelled from upper lane down
+        through the slings" without overloading the bounce filter.
+        """
+        raw = script.profile.get("raw", {})
+        candidates = []
+        seen = set()
+        for name, sw in raw.items():
+            sw_n = int(sw)
+            if sw_n in seen:
+                continue
+            nl = name.lower()
+            if "inlane" in nl or "sling" in nl:
+                seen.add(sw_n)
+                candidates.append(sw_n)
+        if not candidates:
+            return
+        # Prefer inlanes (top of the playfield, more natural first
+        # contact) then slings.  Sorting numerically achieves this on
+        # most layouts where inlanes are lower-numbered.
+        candidates.sort()
+        self._emit_log(
+            f"Confirming ball on playfield: pulsing inlane/sling "
+            f"sw#{candidates[:3]}.", "info")
+        for sw in candidates[:3]:
+            self._press_switch(sw, hold_ms=60)
+            time.sleep(0.3)
+
     # AFM (and most WPC) ball-tracking switch conventions, sourced
     # from PinMAME's ``src/wpc/sims/wpc/full/afm.c``:
     #
@@ -853,6 +894,14 @@ class PinmameCapture:
             self._set_switch(script.sw_shooter_lane, 0)
         self._emit_log(
             "Shooter-lane OPEN = ball in active play.", "info")
+        # 7. Immediately confirm the ball arrived on the playfield
+        # by pulsing any defined inlane / sling.  Without this, the
+        # game sees "ball left shooter lane" then nothing for ~3
+        # seconds while subsequent moments fire — well past the
+        # ball-search timeout — so it concludes the ball is lost
+        # and tries to re-eject.  Hits to inlanes/slings are the
+        # universal WPC "ball is moving on the playfield" signal.
+        self._confirm_ball_on_playfield(script)
         time.sleep(0.5)
 
         # 7. Active play: drive the per-game script's ordered

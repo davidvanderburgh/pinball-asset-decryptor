@@ -391,6 +391,12 @@ class PinmameCapture:
         self._rom_name: str = ""
         self._script_clips: list = []
         self._active_script = None  # GameScript instance, set in run()
+        # PINMAME_KEYCODE values currently treated as "pressed" by
+        # the IsKeyPressed callback.  Drives cabinet keys (Start,
+        # Coin) which WPC's SWITCH_UPDATE handler reads from the
+        # keyboard inports each tick — PinmameSetSwitch on those
+        # switches gets overwritten back to 0 within one frame.
+        self._keys_pressed: set = set()
         # Live frame-callback (GUI DMD preview).
         self._frame_cb: Optional[Callable] = None
         self._frame_cb_interval_ms: int = 50
@@ -609,6 +615,30 @@ class PinmameCapture:
             self._emit_log(
                 f"PinmameSetSwitch({sw_no},{state}) failed: {e}", "warning")
 
+    # PINMAME_KEYCODE values for the cabinet keys we need to drive.
+    # See libpinmame.h `enum PinmameKeycode`.
+    _KEY_START_1 = 27   # NUMBER_1 — IPT_START1 default
+    _KEY_COIN_1 = 31    # NUMBER_5 — IPT_COIN1 default
+
+    def _press_key(self, keycode: int, hold_ms: int = 100):
+        """Simulate a keyboard press by toggling the keycode in our
+        ``_keys_pressed`` set.
+
+        PinMAME's WPC ``SWITCH_UPDATE`` handler reads cabinet switch
+        state directly from the keyboard inports every tick (~16ms)
+        and OVERWRITES our PinmameSetSwitch values for sw#13 (start),
+        sw#14 (tilt), sw#21 (slam tilt), sw#22 (coin door), and
+        sw#15ish (shooter).  The only way to hold those switches
+        through PinMAME's polling is to tell it the keyboard key is
+        pressed — which it queries via our ``_cb_is_key_pressed``
+        callback.  Adding the keycode to ``_keys_pressed`` makes the
+        callback return 1 for it; PinMAME then keeps the matrix bit
+        set every tick.
+        """
+        self._keys_pressed.add(keycode)
+        time.sleep(hold_ms / 1000.0)
+        self._keys_pressed.discard(keycode)
+
     def _confirm_ball_on_playfield(self, script):
         """Pulse any defined inlane / sling switch in the per-game
         switch map immediately after the ball plunges.
@@ -782,13 +812,18 @@ class PinmameCapture:
         # subsequent coins+Start then get interpreted as menu
         # navigation rather than game commands.  Skip it.
 
-        # 3. Insert coins.  Default WPC coinage on most games is
-        # 3 coins / credit; 8 covers up to 4:1 pricing safely.
-        self._emit_log("Inserting coins (8x)...", "info")
+        # 3. Insert coins.  Drive via the keyboard's COIN1 key
+        # (PINMAME_KEYCODE_NUMBER_5 = 31, default for IPT_COIN1) so
+        # WPC's SWITCH_UPDATE handler honors the press for its full
+        # hold duration instead of overwriting it back to 0 every
+        # tick.  Default WPC coinage on most games is 3 coins /
+        # credit; 8 covers up to 4:1 pricing safely.
+        self._emit_log(
+            "Inserting coins (8x via keyboard COIN1)...", "info")
         for _ in range(8):
             if stop_event.is_set():
                 return
-            self._press_switch(SW_COIN_LEFT, hold_ms=120)
+            self._press_key(self._KEY_COIN_1, hold_ms=120)
             time.sleep(0.35)
         # Let the credits message finish + chime clear before Start.
         time.sleep(2.0)
@@ -815,7 +850,10 @@ class PinmameCapture:
             if stop_event.is_set():
                 return
             sol_counts_before = dict(self._sol_counts)
-            self._press_switch(SW_START, hold_ms=600)
+            # Drive Start via the keyboard "1" key so WPC's
+            # SWITCH_UPDATE handler honors the held state instead of
+            # immediately overwriting our PinmameSetSwitch.
+            self._press_key(self._KEY_START_1, hold_ms=300)
             # Tight 1.2s post-press window — game-start sol response
             # is sub-second, attract flashers cycle on much longer
             # schedules so they rarely land inside this window.
@@ -973,7 +1011,11 @@ class PinmameCapture:
             pass
 
     def _cb_console_data(self, data, size, userdata): pass
-    def _cb_is_key_pressed(self, keycode, userdata): return 0
+    def _cb_is_key_pressed(self, keycode, userdata):
+        # PinMAME polls this each input cycle for every input bit.
+        # Return 1 for keycodes the sim thread has placed in
+        # ``_keys_pressed``; otherwise 0.
+        return 1 if keycode in self._keys_pressed else 0
 
     def _cb_sound_command(self, board, cmd, userdata):
         """Log sound commands.
@@ -1041,6 +1083,7 @@ class PinmameCapture:
         self._sol_counts = {}
         self._snd_seen = set()
         self._script_done_event.clear()
+        self._keys_pressed = set()
         self._rom_name = config.rom_name
         self._script_clips = []
         self._frame_cb = config.frame_callback

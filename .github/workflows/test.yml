@@ -34,6 +34,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pycryptodome
+          # Pillow is in requirements.txt — Williams' DMD render
+          # path (dmd_render.py, capture_pipeline.py) imports it at
+          # module load, so missing it causes the Williams plugin
+          # to silently fail to load and disappear from the
+          # manufacturer registry.  Installing requirements.txt
+          # picks that up.
+          pip install -r requirements.txt
 
       # gpg is needed for the BOF .fun round-trip + Spooky's GPG-symmetric
       # flows on Linux and macOS, where the app calls a host-side gpg

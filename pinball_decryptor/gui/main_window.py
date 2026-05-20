@@ -940,9 +940,27 @@ class MainWindow:
         self._switch_matrix_buttons = []
 
         raw = script.profile.get("raw", {}) if script else {}
-        # Sort by switch number for a stable layout.
-        entries = sorted(raw.items(), key=lambda kv: int(kv[1]))
-        if not entries:
+        named_by_sw = {int(sw): name for name, sw in raw.items()}
+        # Sort the named entries by switch number for stable layout.
+        named_entries = sorted(raw.items(), key=lambda kv: int(kv[1]))
+        # ALSO surface every standard WPC playfield position (sw#41
+        # through sw#88) that isn't already in the raw map.  Sparse
+        # prelim-sim games (NF, MB, CC, CV, etc.) only declare the
+        # cabinet + trough + a couple of slings — but the real
+        # playfield has ramps + saucers + targets at the conventional
+        # positions.  Adding buttons for those lets the user fire
+        # them manually for diagnostics, even though they're unlabeled.
+        unknown_sws = []
+        for sw_n in range(11, 89):
+            if sw_n in named_by_sw:
+                continue
+            # Skip slot positions outside the conventional matrix
+            # (column 9+, row 0).  WPC matrix is 8 cols × 8 rows so
+            # any sw#NN where N%10 == 0 or N%10 > 8 is invalid.
+            if sw_n % 10 == 0 or sw_n % 10 > 8:
+                continue
+            unknown_sws.append(sw_n)
+        if not named_entries and not unknown_sws:
             self._switch_matrix_frame.configure(
                 text="Switch matrix (no switches defined)")
             self._switch_matrix_frame.pack(
@@ -950,28 +968,59 @@ class MainWindow:
             return
         self._switch_matrix_frame.configure(
             text=f"Switch matrix — {script.title} "
-                 f"({len(entries)} switches, click to press)")
-        # 8 columns of compact buttons fits comfortably in the
-        # default extract-tab width.  Each button is "sw## Name"
-        # truncated to 13 chars total — full switch name in tooltip.
+                 f"({len(named_entries)} named + "
+                 f"{len(unknown_sws)} unlabeled WPC positions, "
+                 "click to press)")
+        # 8 columns of compact buttons.
         cols = 8
-        for i, (name, sw) in enumerate(entries):
+        # Section 1: named switches.
+        idx = 0
+        for name, sw in named_entries:
             sw_n = int(sw)
-            row, col = divmod(i, cols)
+            row, col = divmod(idx, cols)
             short = name.replace("sw", "", 1).strip()
-            # Truncate to keep the grid compact.
-            short_disp = short[:8]
             btn = ttk.Button(
                 self._switch_matrix_inner,
-                text=f"{sw_n:>2} {short_disp}",
+                text=f"{sw_n:>2} {short[:8]}",
                 width=12,
                 command=lambda s=sw_n, n=short:
                     self._on_manual_switch_press(s, n))
             btn.grid(row=row, column=col, padx=1, pady=1, sticky="w")
             self._switch_matrix_buttons.append(btn)
-            # Full name in a tooltip on hover.
             _Tooltip(btn, f"sw#{sw_n} — {short}",
                      lambda: self._current_theme)
+            idx += 1
+
+        # Separator row before the unlabeled positions.
+        if unknown_sws:
+            # Round up to next row boundary.
+            while idx % cols != 0:
+                idx += 1
+            sep = ttk.Label(
+                self._switch_matrix_inner,
+                text="── Standard WPC playfield positions (not declared "
+                     "in this game's sim — try them to see what's wired here)",
+                font=(_SANS_FONT, 9, "italic"))
+            sep.grid(row=idx // cols, column=0,
+                     columnspan=cols, sticky="w",
+                     padx=2, pady=(6, 2))
+            self._switch_matrix_buttons.append(sep)
+            idx = (idx // cols + 1) * cols
+            for sw_n in unknown_sws:
+                row, col = divmod(idx, cols)
+                btn = ttk.Button(
+                    self._switch_matrix_inner,
+                    text=f"{sw_n:>2}  ?",
+                    width=12,
+                    command=lambda s=sw_n:
+                        self._on_manual_switch_press(s, f"sw#{s}"))
+                btn.grid(row=row, column=col, padx=1, pady=1, sticky="w")
+                self._switch_matrix_buttons.append(btn)
+                _Tooltip(btn,
+                         f"sw#{sw_n} (col {sw_n // 10}, row {sw_n % 10}) "
+                         f"— unlabeled standard WPC position",
+                         lambda: self._current_theme)
+                idx += 1
         # Make the matrix visible.
         self._switch_matrix_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
 

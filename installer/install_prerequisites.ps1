@@ -119,10 +119,19 @@ $ManufacturerPrereqs = [ordered]@{
     "Barrels of Fun" = @{
         Description  = "Labyrinth, Dune, Winchester (.fun files)"
         WslPackages  = @(
-            @{ probe="gpg"; pkg="gnupg"; label="gnupg (in WSL)"; reason=".fun GPG decryption / re-encryption" }
-            @{ probe="tar"; pkg="tar";   label="tar (in WSL)";   reason="Archive packing/unpacking" }
+            @{ probe="gpg";      pkg="gnupg"; label="gnupg (in WSL)";    reason=".fun GPG decryption / re-encryption" }
+            @{ probe="tar";      pkg="tar";   label="tar (in WSL)";      reason="Archive packing/unpacking" }
+            @{ probe="curl";     pkg="curl";  label="curl (in WSL)";     reason="Downloads GDRE Tools release zip" }
+            @{ probe="unzip";    pkg="unzip"; label="unzip (in WSL)";    reason="Unpacks GDRE Tools release zip" }
+            @{ probe="xvfb-run"; pkg="xvfb";  label="xvfb (in WSL)";     reason="Headless X server for GDRE Tools on WSL/Linux" }
+            @{ probe="cwebp";    pkg="webp";  label="webp / cwebp (in WSL)"; reason="Texture re-import during Write pipeline" }
         )
         HostPackages = @()
+        # Custom post-install: GDRE Tools doesn't live in apt; we
+        # fetch the latest GitHub release and install it to
+        # /opt/gdre_tools/ with a /usr/local/bin/gdre_tools wrapper.
+        # See InstallGdreTools below.
+        Custom       = @("InstallGdreTools")
     }
 
     "Jersey Jack Pinball" = @{
@@ -416,6 +425,76 @@ if ($wslPlan.Count -gt 0) {
     } else {
         foreach ($p in $wslPlan) {
             Write-SKIP ("{0} (WSL/Ubuntu not available yet)" -f $p.label)
+        }
+    }
+}
+
+# =========================================================================
+# 4. Per-mfr custom post-install steps
+# =========================================================================
+function Install-GdreTools {
+    Write-Step "Installing GDRE Tools (Godot RE Tools) inside WSL..."
+    if (-not ($wslAvailable -and $ubuntuFound)) {
+        Write-SKIP "GDRE Tools (WSL/Ubuntu not available yet)"
+        return
+    }
+    # Check if it's already installed.
+    wsl -u root -- bash -c "test -x /opt/gdre_tools/gdre_tools.x86_64" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "GDRE Tools (already installed at /opt/gdre_tools)"
+        return
+    }
+    # Fetch latest release URL, download, extract to /opt, create wrapper.
+    # Matches upstream bof-decryptor's _install_gdre_tools logic.
+    $script = @'
+set -e
+ASSET_SUFFIX="-linux.zip"
+META=$(curl -sf https://api.github.com/repos/GDRETools/gdsdecomp/releases/latest)
+DL_URL=$(echo "$META" | grep -oE "\"browser_download_url\": \"[^\"]*${ASSET_SUFFIX}\"" | head -1 | cut -d'"' -f4)
+VER=$(echo "$META" | grep -oE "\"tag_name\": \"[^\"]*\"" | head -1 | cut -d'"' -f4)
+if [ -z "$DL_URL" ]; then
+    echo "Could not find ${ASSET_SUFFIX} release asset on GDRETools/gdsdecomp." >&2
+    exit 1
+fi
+echo "Downloading GDRE Tools ${VER}..."
+curl -L --progress-bar "$DL_URL" -o /tmp/gdre_tools.zip
+rm -rf /tmp/gdre_extract
+mkdir -p /tmp/gdre_extract
+unzip -o /tmp/gdre_tools.zip -d /tmp/gdre_extract/
+rm -rf /opt/gdre_tools
+mkdir -p /opt/gdre_tools
+cp -f /tmp/gdre_extract/gdre_tools.x86_64    /opt/gdre_tools/
+cp -f /tmp/gdre_extract/gdre_tools.pck       /opt/gdre_tools/
+cp -f /tmp/gdre_extract/libGodotMonoDecompNativeAOT.so /opt/gdre_tools/ 2>/dev/null || true
+chmod +x /opt/gdre_tools/gdre_tools.x86_64
+# Wrapper on PATH:
+cat > /usr/local/bin/gdre_tools <<EOF
+#!/bin/bash
+export LD_LIBRARY_PATH=/opt/gdre_tools:\$LD_LIBRARY_PATH
+exec "/opt/gdre_tools/gdre_tools.x86_64" "\$@"
+EOF
+chmod +x /usr/local/bin/gdre_tools
+rm -rf /tmp/gdre_tools.zip /tmp/gdre_extract
+echo "GDRE Tools ${VER} installed."
+'@
+    # Pipe the heredoc-style script to bash inside WSL as root.
+    $script | wsl -u root -- bash -s 2>&1 | ForEach-Object { Write-Host "    $_" }
+    wsl -u root -- bash -c "test -x /usr/local/bin/gdre_tools" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Installed "GDRE Tools (wrapper at /usr/local/bin/gdre_tools)"
+    } else {
+        Write-FAIL "GDRE Tools"
+    }
+}
+
+foreach ($mfr in $selected) {
+    $custom = $ManufacturerPrereqs[$mfr].Custom
+    if ($custom) {
+        foreach ($step in $custom) {
+            switch ($step) {
+                "InstallGdreTools" { Install-GdreTools }
+                default            { Write-SKIP "Unknown custom step: $step" }
+            }
         }
     }
 }

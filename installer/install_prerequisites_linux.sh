@@ -22,7 +22,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "For others, install the equivalent of these packages by hand:"
     echo "  PB:     e2fsprogs"
     echo "  Spooky: gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard"
-    echo "  BOF:    gnupg tar"
+    echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard"
     exit 1
 fi
@@ -45,8 +45,15 @@ declare -A MFR_DESCRIPTIONS=(
 declare -A MFR_PACKAGES=(
     [1]="e2fsprogs"
     [2]="gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard"
-    [3]="gnupg tar"
+    [3]="gnupg tar curl unzip xvfb webp"
     [4]="partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard"
+)
+
+# Plugins whose apt packages alone aren't enough — extra
+# download-install-from-github post-step gets dispatched after the
+# apt section.  Currently only BOF needs this (GDRE Tools).
+declare -A MFR_CUSTOM=(
+    [3]="install_gdre_tools"
 )
 
 # --- Picker -------------------------------------------------------------
@@ -113,6 +120,54 @@ $SUDO apt-get update -qq
 
 echo "Installing packages..."
 $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${all_packages[@]}"
+
+# --- Custom post-install steps (downloads that aren't in apt) -----------
+install_gdre_tools() {
+    # GDRE Tools (Godot RE Tools) — required for BOF's PCK repack.
+    # Match upstream bof-decryptor: install binary to /opt/gdre_tools/
+    # and a wrapper at /usr/local/bin/gdre_tools (so it's on PATH).
+    echo ""
+    echo "Installing GDRE Tools (Godot RE Tools)..."
+    if [ -x /opt/gdre_tools/gdre_tools.x86_64 ]; then
+        echo "  Already installed at /opt/gdre_tools — skipping."
+        return 0
+    fi
+    local META DL_URL VER
+    META=$(curl -sf https://api.github.com/repos/GDRETools/gdsdecomp/releases/latest)
+    DL_URL=$(echo "$META" | grep -oE '"browser_download_url": "[^"]*-linux\.zip"' | head -1 | cut -d'"' -f4)
+    VER=$(echo "$META" | grep -oE '"tag_name": "[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ -z "$DL_URL" ]; then
+        echo "  ERROR: could not find -linux.zip release asset on GDRETools/gdsdecomp."
+        return 1
+    fi
+    echo "  Downloading GDRE Tools $VER..."
+    curl -L --progress-bar "$DL_URL" -o /tmp/gdre_tools.zip
+    rm -rf /tmp/gdre_extract
+    mkdir -p /tmp/gdre_extract
+    unzip -o /tmp/gdre_tools.zip -d /tmp/gdre_extract/ >/dev/null
+    $SUDO rm -rf /opt/gdre_tools
+    $SUDO mkdir -p /opt/gdre_tools
+    $SUDO cp -f /tmp/gdre_extract/gdre_tools.x86_64 /opt/gdre_tools/
+    $SUDO cp -f /tmp/gdre_extract/gdre_tools.pck    /opt/gdre_tools/
+    $SUDO cp -f /tmp/gdre_extract/libGodotMonoDecompNativeAOT.so /opt/gdre_tools/ 2>/dev/null || true
+    $SUDO chmod +x /opt/gdre_tools/gdre_tools.x86_64
+    # Wrapper script on PATH
+    $SUDO tee /usr/local/bin/gdre_tools > /dev/null <<'EOF'
+#!/bin/bash
+export LD_LIBRARY_PATH=/opt/gdre_tools:$LD_LIBRARY_PATH
+exec "/opt/gdre_tools/gdre_tools.x86_64" "$@"
+EOF
+    $SUDO chmod +x /usr/local/bin/gdre_tools
+    rm -rf /tmp/gdre_tools.zip /tmp/gdre_extract
+    echo "  GDRE Tools $VER installed (wrapper: /usr/local/bin/gdre_tools)."
+}
+
+for s in "${selected[@]}"; do
+    custom=${MFR_CUSTOM[$s]:-}
+    if [ -n "$custom" ]; then
+        $custom
+    fi
+done
 
 # --- Summary ------------------------------------------------------------
 echo ""

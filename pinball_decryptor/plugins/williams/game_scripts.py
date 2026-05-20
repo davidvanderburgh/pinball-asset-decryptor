@@ -553,36 +553,81 @@ def _generic_moments(s: "GameScript") -> List[GameMoment]:
         ))
 
     # ---- Sparse-data fallback ----
-    # If the profile's switch map didn't yield much (typical of
-    # "prelim" PinMAME sim files which only define trough + start),
-    # fire the *standard WPC playfield switch ranges* to try to
-    # trigger SOMETHING.  PinMAME silently ignores undefined switch
-    # numbers, so this is safe on games whose playfield switches
-    # live at non-standard positions.  On the many WPC titles that
-    # follow the convention, this catches ramps/loops/saucers/etc.
-    # that the prelim source didn't bother to define.
+    # When the per-game PinMAME sim is too thin to yield decent
+    # ramps/loops (typical of "prelim" sims which only define
+    # trough + cabinet + inlanes/outlanes), build two safety-net
+    # moments using whatever IS defined in the raw map:
     #
-    # Standard WPC ranges (where most games' playfield switches live):
-    #   41-48 — standup targets / 5-bank drop members
-    #   51-55 — slingshots + pop bumpers
-    #   56-58 — secondary target bank
-    #   61-67 — ramp entries / exits
-    #   71-78 — loops / saucers / scoops / drop targets
+    #   1. "explore_known_playfield" — fire every defined playfield
+    #      switch in the raw map (inlanes, outlanes, slings, etc.),
+    #      skipping the seed switches we manage explicitly (trough,
+    #      shooter lane, coin door, tilt).  These are real switches
+    #      so the game gets real activity = no ball-search timeout.
+    #
+    #   2. "explore_standard_wpc" — fire the conventional WPC switch
+    #      ranges (41-77) as a wishful-thinking pass.  PinMAME
+    #      ignores undefined numbers so it's a no-op on games where
+    #      the prelim sim didn't declare them, but on games that
+    #      follow the convention this catches ramps + saucers the
+    #      sim source never bothered to define.
     if len(ramps) + len(loops) < 2:
+        # Block the seed switches the run loop manages itself.
+        seed_blocked = set()
+        if s.sw_trough:
+            seed_blocked.update(s.sw_trough)
+        if s.sw_shooter_lane is not None:
+            seed_blocked.add(s.sw_shooter_lane)
+        if s.sw_eject is not None:
+            seed_blocked.add(s.sw_eject)
+        seed_blocked.update({s.sw_coin_door, s.sw_coin_left,
+                              s.sw_launch, s.sw_start, 14, 21})  # tilt, slamtilt
+        # Outlanes drain the ball — skip them so we don't end the
+        # ball before the script finishes.
+        known_playfield = []
+        for name, sw in sorted(raw.items(), key=lambda kv: int(kv[1])):
+            sw_n = int(sw)
+            if sw_n in seed_blocked:
+                continue
+            nl = name.lower()
+            if "outlane" in nl or "trough" in nl or "shooter" in nl:
+                continue
+            if "tilt" in nl or "slam" in nl or "coindoor" in nl:
+                continue
+            known_playfield.append((sw_n, name))
+        if known_playfield:
+            evts = []
+            # Fire each known switch twice so the game sees sustained
+            # activity (one fire might be filtered as bounce).
+            for cycle in range(2):
+                for sw_n, _ in known_playfield:
+                    evts.append(_press(sw_n, hold_ms=60, delay=300))
+            evts.append(_wait(2000))
+            moments.append(GameMoment(
+                name="explore_known_playfield",
+                description=(
+                    f"Fire every defined playfield switch in the "
+                    f"profile ({len(known_playfield)} switches) — "
+                    "keeps the ball-search timer from ending the "
+                    "ball when the sim is too sparse for a rich "
+                    "playthrough."),
+                wait_before_ms=400,
+                events=evts,
+            ))
+        # Best-effort standard-positions pass too.
         evts = []
         for sw in (62, 63, 61, 65, 64,        # ramps
                    71, 72, 73, 74, 75, 76,    # loops + saucers
                    41, 42, 43, 44, 45,        # target bank
                    53, 54, 55,                # jets
                    77):                        # drop target
-            evts.append(_press(sw, hold_ms=60, delay=350))
-        evts.append(_wait(2500))
+            evts.append(_press(sw, hold_ms=60, delay=300))
+        evts.append(_wait(2000))
         moments.append(GameMoment(
-            name="explore_playfield",
+            name="explore_standard_wpc",
             description=(
-                "Fire standard WPC playfield switches — the per-game "
-                "PinMAME sim is too sparse for pattern matching to "
-                "find ramps/loops, so try the conventional positions."),
+                "Fire conventional WPC playfield switch numbers; "
+                "no-op on games where the sim file didn't declare "
+                "them at standard positions."),
             wait_before_ms=400,
             events=evts,
         ))

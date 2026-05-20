@@ -619,6 +619,9 @@ class PinmameCapture:
     # See libpinmame.h `enum PinmameKeycode`.
     _KEY_START_1 = 27   # NUMBER_1 — IPT_START1 default
     _KEY_COIN_1 = 31    # NUMBER_5 — IPT_COIN1 default
+    _KEY_COIN_DOOR = 78 # END     — Coin Door BITTOG default
+    _KEY_TILT = 75      # INSERT  — IPT_TILT default (never pressed)
+    _KEY_SLAM_TILT = 77 # HOME    — Slam Tilt default (never pressed)
 
     def _press_key(self, keycode: int, hold_ms: int = 100):
         """Simulate a keyboard press by toggling the keycode in our
@@ -803,6 +806,19 @@ class PinmameCapture:
         if stop_event.is_set():
             return
 
+        # 1b. Close the coin door.  IPT_COIN_DOOR is a BITTOG (toggle)
+        # input — each KEYCODE_END press flips its state.  Default
+        # MAME state for BITTOG is OFF (= door OPEN); WPC games show
+        # "COIN DOOR OPEN — COILS DISABLED" and refuse to accept
+        # Start when open.  One press toggles to ON (closed).  Our
+        # earlier PinmameSetSwitch(22, 1) was getting overwritten
+        # every tick by SWITCH_UPDATE because the underlying BITTOG
+        # bit stayed OFF.
+        self._emit_log(
+            "Closing coin door (KEYCODE_END toggle)...", "info")
+        self._press_key(self._KEY_COIN_DOOR, hold_ms=100)
+        time.sleep(0.5)
+
         # NB: we used to spam sw#5 (ESCAPE) here to bail out of any
         # operator menu the game might be sitting in.  That was a
         # workaround for an early bug where we'd wiped NVRAM and the
@@ -852,8 +868,9 @@ class PinmameCapture:
             sol_counts_before = dict(self._sol_counts)
             # Drive Start via the keyboard "1" key so WPC's
             # SWITCH_UPDATE handler honors the held state instead of
-            # immediately overwriting our PinmameSetSwitch.
-            self._press_key(self._KEY_START_1, hold_ms=300)
+            # immediately overwriting our PinmameSetSwitch.  800ms
+            # hold = well past any matrix-scan debounce filter.
+            self._press_key(self._KEY_START_1, hold_ms=800)
             # Tight 1.2s post-press window — game-start sol response
             # is sub-second, attract flashers cycle on much longer
             # schedules so they rarely land inside this window.
@@ -1165,7 +1182,12 @@ class PinmameCapture:
         # pixel-by-pixel data and can decide brightness mapping
         # ourselves at render time.
         self._lib.PinmameSetDmdMode(PINMAME_DMD_MODE_RAW)
-        self._lib.PinmameSetHandleKeyboard(0)
+        # Enable PinMAME's keyboard layer so the IsKeyPressed
+        # callback is fully wired into MAME's input port reading
+        # (g_fHandleKeyboard isn't actually checked anywhere in
+        # libpinmame today, but enabling it is the documented
+        # path for callback-driven keyboard).
+        self._lib.PinmameSetHandleKeyboard(1)
         self._lib.PinmameSetHandleMechanics(0)
         self._lib.PinmameSetCheat(0)
 

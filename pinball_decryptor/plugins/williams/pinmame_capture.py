@@ -336,6 +336,12 @@ class CaptureConfig:
     #     fn(data: bytes, width: int, height: int, depth: int) -> None
     frame_callback: Optional[Callable] = None
     frame_callback_min_interval_ms: int = 50
+    # Optional GUI hook: fires once when PinMAME is initialized and
+    # the active script is resolved, with arguments
+    # ``(manual_press_fn, active_script)`` so the GUI can build a
+    # diagnostic switch-matrix widget keyed to that game's switch
+    # map.  Cleared by the capture when it ends.
+    capture_ready_callback: Optional[Callable] = None
 
 
 @dataclass
@@ -622,6 +628,22 @@ class PinmameCapture:
     _KEY_COIN_DOOR = 78 # END     — Coin Door BITTOG default
     _KEY_TILT = 75      # INSERT  — IPT_TILT default (never pressed)
     _KEY_SLAM_TILT = 77 # HOME    — Slam Tilt default (never pressed)
+
+    def manual_press(self, sw_no: int, hold_ms: int = 120):
+        """Public API for GUI-driven manual switch pulses.
+
+        Diagnostic hook — lets the user click a labeled switch in
+        the GUI matrix to fire it directly into PinMAME.  Pulses
+        sw_no high for hold_ms then low.  Safe to call from any
+        thread (PinmameSetSwitch is thread-safe).
+        """
+        try:
+            self._lib.PinmameSetSwitch(sw_no, 1)
+            time.sleep(hold_ms / 1000.0)
+            self._lib.PinmameSetSwitch(sw_no, 0)
+        except Exception as e:
+            self._emit_log(
+                f"manual_press({sw_no}) failed: {e}", "warning")
 
     def _press_key(self, keycode: int, hold_ms: int = 100):
         """Simulate a keyboard press by toggling the keycode in our
@@ -1119,6 +1141,16 @@ class PinmameCapture:
             f"lane=sw#{self._active_script.sw_shooter_lane}, "
             f"launch=sw#{self._active_script.sw_launch})",
             "info")
+        # Hand the GUI a manual-press handle + the active script so
+        # it can build a diagnostic switch-matrix widget.
+        self._capture_ready_cb = config.capture_ready_callback
+        if self._capture_ready_cb is not None:
+            try:
+                self._capture_ready_cb(self.manual_press,
+                                       self._active_script)
+            except Exception as e:
+                self._emit_log(
+                    f"capture_ready_callback failed: {e}", "warning")
 
         # Set up vpmPath/roms/<rom_name>.zip
         vpm_dir = _ensure_vpm_dir(config.rom_zip_path, config.rom_name,

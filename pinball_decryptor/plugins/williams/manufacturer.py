@@ -99,6 +99,7 @@ class WilliamsManufacturer(Manufacturer):
         duration = kwargs.get("duration_seconds", 180.0)
         simulate = kwargs.get("simulate_gameplay", True)
         frame_cb = kwargs.get("frame_cb")
+        capture_ready_cb = kwargs.get("capture_ready_cb")
         if also_static:
             return StaticPlusCapturePipeline(
                 input_path, output_dir,
@@ -106,6 +107,7 @@ class WilliamsManufacturer(Manufacturer):
                 duration_seconds=duration,
                 simulate_gameplay=simulate,
                 frame_cb=frame_cb,
+                capture_ready_cb=capture_ready_cb,
             )
         return CapturePipeline(
             input_path, output_dir,
@@ -113,6 +115,7 @@ class WilliamsManufacturer(Manufacturer):
             duration_seconds=duration,
             simulate_gameplay=simulate,
             frame_cb=frame_cb,
+            capture_ready_cb=capture_ready_cb,
         )
 
     def extract_input_help(self):

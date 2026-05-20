@@ -82,7 +82,8 @@ class CapturePipeline(BasePipeline):
                  log_cb, phase_cb, progress_cb, done_cb,
                  duration_seconds=DEFAULT_DURATION_SECONDS,
                  simulate_gameplay=True,
-                 frame_cb=None):
+                 frame_cb=None,
+                 capture_ready_cb=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.zip_path = zip_path
         self.output_dir = output_dir
@@ -92,6 +93,10 @@ class CapturePipeline(BasePipeline):
         # Signature: fn(data, width, height, depth) called on the
         # libpinmame display thread.
         self.frame_cb = frame_cb
+        # Diagnostic switch-matrix hook — fires once with
+        # ``(manual_press_fn, active_script)`` so the GUI can let
+        # the user click switches by name during the capture.
+        self.capture_ready_cb = capture_ready_cb
 
     # ------------------------------------------------------------------
 
@@ -145,6 +150,7 @@ class CapturePipeline(BasePipeline):
                 log_callback=self._log,
                 progress_callback=_on_progress,
                 frame_callback=self.frame_cb,
+                capture_ready_callback=self.capture_ready_cb,
             ))
         except RuntimeError as e:
             raise PipelineError("Capture", str(e))
@@ -494,13 +500,15 @@ class StaticPlusCapturePipeline(BasePipeline):
                  log_cb, phase_cb, progress_cb, done_cb,
                  duration_seconds=DEFAULT_DURATION_SECONDS,
                  simulate_gameplay=True,
-                 frame_cb=None):
+                 frame_cb=None,
+                 capture_ready_cb=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.zip_path = zip_path
         self.output_dir = output_dir
         self.duration_seconds = duration_seconds
         self.simulate_gameplay = simulate_gameplay
         self.frame_cb = frame_cb
+        self.capture_ready_cb = capture_ready_cb
         self._inner_static = None
         self._inner_capture = None
 
@@ -576,6 +584,7 @@ class StaticPlusCapturePipeline(BasePipeline):
             duration_seconds=self.duration_seconds,
             simulate_gameplay=self.simulate_gameplay,
             frame_cb=self.frame_cb,
+            capture_ready_cb=self.capture_ready_cb,
         )
         self._inner_capture = capture
         # capture.run() calls combined_done at the end (or on error).

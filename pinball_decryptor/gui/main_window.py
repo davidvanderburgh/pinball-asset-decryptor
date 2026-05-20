@@ -388,6 +388,21 @@ class MainWindow:
         self._dmd_preview_visible = False
         self._dmd_preview_pump_id = None
 
+        # ---- Diagnostic switch matrix (Williams capture mode) ----
+        # When PinMAME is running, expose a clickable grid of every
+        # defined switch in the active game.  Lets the user manually
+        # press switches to see how the ROM responds (useful when
+        # the scripted playthrough doesn't trigger expected cinemas).
+        self._switch_matrix_frame = ttk.LabelFrame(
+            f, text="Switch matrix (click to press)")
+        self._switch_matrix_inner = ttk.Frame(self._switch_matrix_frame)
+        self._switch_matrix_inner.pack(fill=tk.BOTH, expand=True,
+                                       padx=4, pady=4)
+        # ``_manual_press_fn`` is set by ``on_capture_ready`` when
+        # PinMAME boots; the matrix grid uses it for each button.
+        self._manual_press_fn = None
+        self._switch_matrix_buttons = []
+
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._extract_btn = ttk.Button(btn_row, text="Extract",
                                        command=self._on_extract)
@@ -692,6 +707,8 @@ class MainWindow:
             # Mount the DMD preview placeholder so it's ready to
             # surface as soon as PinMAME emits the first frame.
             self._dmd_preview_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+            # Switch matrix is mounted on capture_ready (after the
+            # active script is known).
         else:
             self._basic_extract_frame.pack_forget()
             self._capture_frame.pack_forget()
@@ -702,6 +719,8 @@ class MainWindow:
             self.static_extract_var.set(True)
             self._dmd_preview_frame.pack_forget()
             self._stop_dmd_preview_pump()
+            self._switch_matrix_frame.pack_forget()
+            self._manual_press_fn = None
 
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
@@ -859,6 +878,77 @@ class MainWindow:
         # this self-rearm behaviour.
         self._dmd_preview_pump_id = self.root.after(
             33, self._pump_dmd_preview)
+
+    # ------------------------------------------------------------------
+    # Diagnostic switch matrix (Williams capture mode)
+    # ------------------------------------------------------------------
+
+    def on_capture_ready(self, manual_press_fn, active_script):
+        """Called by the capture pipeline once PinMAME is initialized
+        and the active script is known.
+
+        Stashes the manual-press function and builds a labeled grid
+        of clickable switch buttons for the active game.  Called from
+        the capture thread — schedule the actual widget build on the
+        Tk main thread.
+        """
+        self._manual_press_fn = manual_press_fn
+        self.root.after(0, self._build_switch_matrix, active_script)
+
+    def _build_switch_matrix(self, script):
+        """Build the clickable switch-matrix grid from the active
+        game's raw switch map."""
+        # Tear down previous buttons.
+        for w in self._switch_matrix_buttons:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        self._switch_matrix_buttons = []
+
+        raw = script.profile.get("raw", {}) if script else {}
+        # Sort by switch number for a stable layout.
+        entries = sorted(raw.items(), key=lambda kv: int(kv[1]))
+        if not entries:
+            self._switch_matrix_frame.configure(
+                text="Switch matrix (no switches defined)")
+            self._switch_matrix_frame.pack(
+                fill=tk.X, padx=10, pady=(4, 0))
+            return
+        self._switch_matrix_frame.configure(
+            text=f"Switch matrix — {script.title} "
+                 f"({len(entries)} switches, click to press)")
+        cols = 6
+        for i, (name, sw) in enumerate(entries):
+            sw_n = int(sw)
+            row, col = divmod(i, cols)
+            short = name.replace("sw", "", 1).strip()
+            btn = ttk.Button(
+                self._switch_matrix_inner,
+                text=f"sw{sw_n:>3}  {short[:14]}",
+                width=20,
+                command=lambda s=sw_n, n=short:
+                    self._on_manual_switch_press(s, n))
+            btn.grid(row=row, column=col, padx=2, pady=2, sticky="w")
+            self._switch_matrix_buttons.append(btn)
+        # Make the matrix visible.
+        self._switch_matrix_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+
+    def _on_manual_switch_press(self, sw_no: int, label: str):
+        """User clicked a switch button — fire the manual press."""
+        fn = self._manual_press_fn
+        if fn is None:
+            return
+        try:
+            fn(sw_no, 120)
+        except Exception as e:
+            # Don't let a bad press crash the GUI.
+            try:
+                self.append_log(
+                    f"manual press sw#{sw_no} ({label}) failed: {e}",
+                    "warning")
+            except Exception:
+                pass
 
     def _configure_tab(self, label, visible):
         for tab_id in self._notebook.tabs():

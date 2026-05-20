@@ -425,6 +425,8 @@ class App:
             if frame_cb is not None and hasattr(
                     self.window, "reset_dmd_preview"):
                 self.window.reset_dmd_preview()
+            capture_ready_cb = getattr(
+                self.window, "on_capture_ready", None)
             self.pipeline = self._current_mfr.make_capture_pipeline(
                 in_path, output_path,
                 log_cb, phase_cb, progress_cb, done_cb,
@@ -434,6 +436,7 @@ class App:
                     if hasattr(self.window, "capture_gameplay_var")
                     else True),
                 frame_cb=frame_cb,
+                capture_ready_cb=capture_ready_cb,
                 also_run_static=run_static,
             )
         else:

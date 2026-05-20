@@ -732,19 +732,14 @@ class PinmameCapture:
         if stop_event.is_set():
             return
 
-        # 2. ESCAPE the operator menu in case the game is sitting in
-        # one — a fresh-NVRAM AFM can land in "FACTORY DEFAULTS
-        # CONFIRMED" or "AUDITS" mode where Start is ignored.
-        # ESCAPE on WPC is dedicated switch D5 (slot 5).  Spam it a
-        # few times to walk back out of any nested setup menu.
-        self._emit_log("Pressing Escape (sw 5) 4x to exit any menu...",
-                       "info")
-        for _ in range(4):
-            if stop_event.is_set():
-                return
-            self._press_switch(5, hold_ms=200)
-            time.sleep(0.4)
-        time.sleep(1.0)
+        # NB: we used to spam sw#5 (ESCAPE) here to bail out of any
+        # operator menu the game might be sitting in.  That was a
+        # workaround for an early bug where we'd wiped NVRAM and the
+        # ROM landed in "FACTORY RESTORE CONFIRMED" mode.  We no
+        # longer wipe NVRAM, and pressing Escape on a game that's
+        # already in clean attract can ENTER the operator menu —
+        # subsequent coins+Start then get interpreted as menu
+        # navigation rather than game commands.  Skip it.
 
         # 3. Insert coins.  Default WPC coinage on most games is
         # 3 coins / credit; 8 covers up to 4:1 pricing safely.
@@ -812,21 +807,31 @@ class PinmameCapture:
                 "warning")
             return
 
-        # 5. The ROM has fired the trough release solenoid (sBallRel,
-        # typically sol#2).  Simulate the ball's journey from trough
-        # position 0 up the ball channel to the shooter lane.
+        # 5. WPC ROMs spend ~3-5s on the "PLAYER 1 / BALL 1" splash
+        # right after Start is accepted.  If we move switches during
+        # the splash the state machine gets confused (it's still in
+        # "game starting" mode, not "ball tracking" mode).  Wait it
+        # out before touching anything.
+        self._emit_log(
+            "Waiting 3s for the PLAYER 1 / BALL 1 splash to clear...",
+            "info")
+        time.sleep(3.0)
+
+        # 6. ROM fired its trough release; simulate the ball's
+        # journey from trough position 0 up the ball channel to the
+        # shooter lane.
         if script.sw_trough:
             self._set_switch(script.sw_trough[0], 0)
-            time.sleep(0.3)
+            time.sleep(0.5)
         if script.sw_shooter_lane is not None:
             self._set_switch(script.sw_shooter_lane, 1)
         self._emit_log(
             f"Ball traveled: trough[0] (sw#{script.sw_trough[0]}) OPEN, "
             f"shooter-lane (sw#{script.sw_shooter_lane}) CLOSED.",
             "info")
-        # Hold in shooter lane briefly so the skill-shot window can
-        # render.
-        time.sleep(2.0)
+        # Hold in shooter lane long enough for the skill-shot window
+        # + any audio cue to fully play out.
+        time.sleep(3.0)
 
         # 6. Fire the auto-plunger.  Newer games (1995+) have a
         # dedicated Launch button; older WPC games used a manual

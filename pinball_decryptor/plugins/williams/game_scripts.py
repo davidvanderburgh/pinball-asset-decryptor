@@ -552,6 +552,41 @@ def _generic_moments(s: "GameScript") -> List[GameMoment]:
             events=evts,
         ))
 
+    # ---- Sparse-data fallback ----
+    # If the profile's switch map didn't yield much (typical of
+    # "prelim" PinMAME sim files which only define trough + start),
+    # fire the *standard WPC playfield switch ranges* to try to
+    # trigger SOMETHING.  PinMAME silently ignores undefined switch
+    # numbers, so this is safe on games whose playfield switches
+    # live at non-standard positions.  On the many WPC titles that
+    # follow the convention, this catches ramps/loops/saucers/etc.
+    # that the prelim source didn't bother to define.
+    #
+    # Standard WPC ranges (where most games' playfield switches live):
+    #   41-48 — standup targets / 5-bank drop members
+    #   51-55 — slingshots + pop bumpers
+    #   56-58 — secondary target bank
+    #   61-67 — ramp entries / exits
+    #   71-78 — loops / saucers / scoops / drop targets
+    if len(ramps) + len(loops) < 2:
+        evts = []
+        for sw in (62, 63, 61, 65, 64,        # ramps
+                   71, 72, 73, 74, 75, 76,    # loops + saucers
+                   41, 42, 43, 44, 45,        # target bank
+                   53, 54, 55,                # jets
+                   77):                        # drop target
+            evts.append(_press(sw, hold_ms=60, delay=350))
+        evts.append(_wait(2500))
+        moments.append(GameMoment(
+            name="explore_playfield",
+            description=(
+                "Fire standard WPC playfield switches — the per-game "
+                "PinMAME sim is too sparse for pattern matching to "
+                "find ramps/loops, so try the conventional positions."),
+            wait_before_ms=400,
+            events=evts,
+        ))
+
     # ---- Phase D: end-of-ball drain (auto-appended by registry) ----
     moments.append(_end_of_ball_moment(s))
     return moments
@@ -1652,6 +1687,489 @@ def _tz_moments(s: GameScript) -> List[GameMoment]:
     ]
 
 
+def _taf_moments(s: GameScript) -> List[GameMoment]:
+    """Addams Family (PinMAME taf.c) — best-selling pinball ever.
+    Switch map: L ramp 61/66, R ramp 64/65, train 62, chair 43,
+    swamp 45/47/48, graves 41/42, vault 68 (multiball lock),
+    mansion locks U/C/L 71/72/73, BOOK targets 53-56, jets 31-35.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   description="3 made L-ramp shots.",
+                   events=[_press(61, 80, 300), _press(66, 80, 1300),
+                           _press(61, 80, 300), _press(66, 80, 1300),
+                           _press(61, 80, 300), _press(66, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(64, 80, 300), _press(65, 80, 1300),
+                           _press(64, 80, 300), _press(65, 80, 1300),
+                           _press(64, 80, 300), _press(65, 80, 1500)]),
+        GameMoment(name="bookcase_letters", wait_before_ms=400,
+                   description="Spell B-O-O-K on the target bank.",
+                   events=[_press(53, 80, 300), _press(54, 80, 300),
+                           _press(55, 80, 300), _press(56, 80, 3000,
+                           note="BOOKCASE OPEN cinematic")]),
+        GameMoment(name="chair_thing", wait_before_ms=400,
+                   description="Chair target — Thing's hand reaches.",
+                   events=[_press(43, 100, 3500)]),
+        GameMoment(name="swamp_targets", wait_before_ms=400,
+                   events=[_press(45, 80, 400), _press(47, 80, 400),
+                           _press(48, 80, 3000)]),
+        GameMoment(name="train_chase", wait_before_ms=400,
+                   description="Train shot — chase cinematic.",
+                   events=[_press(62, 100, 4500)]),
+        GameMoment(name="graveyard", wait_before_ms=400,
+                   events=[_press(41, 80, 400), _press(42, 80, 2500)]),
+        GameMoment(name="vault_lock_1", wait_before_ms=400,
+                   description="Vault saucer = LOCK 1.",
+                   events=[_press(68, 120, 3500)]),
+        GameMoment(name="vault_multiball", wait_before_ms=400,
+                   description="2 more vaults → THING MULTIBALL.",
+                   events=[_press(68, 120, 3000),
+                           _press(68, 150, 5500,
+                                  note="THING MULTIBALL cinematic")]),
+        GameMoment(name="mansion_locks", wait_before_ms=400,
+                   description="Locks U / C / L (tour the mansion).",
+                   events=[_press(71, 120, 2500), _press(72, 120, 2500),
+                           _press(73, 120, 3000)]),
+        GameMoment(name="jets_mamushka", wait_before_ms=300,
+                   description="Jets — Mamushka dance.",
+                   events=[_press(31, 50, 100), _press(32, 50, 100),
+                           _press(33, 50, 100), _press(34, 50, 100),
+                           _press(35, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(61, 80, 300), _press(66, 80, 5000,
+                           note="L-ramp mode cinematic")]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(64, 80, 300), _press(65, 80, 5000,
+                           note="R-ramp mode cinematic")]),
+    ]
+
+
+def _sttng_moments(s: GameScript) -> List[GameMoment]:
+    """Star Trek: The Next Generation (PinMAME sttng.c).
+    Borg cube lock at 31, upper-left locks 35/41/42/43, outer loops
+    44/58, ramps L 88/83, R 25/87, C ramp exit 23, Borg entry/hole
+    47/48, drop target 57, jets 71-73.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(88, 80, 300), _press(83, 80, 1300),
+                           _press(88, 80, 300), _press(83, 80, 1300),
+                           _press(88, 80, 300), _press(83, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(25, 80, 300), _press(87, 80, 1300),
+                           _press(25, 80, 300), _press(87, 80, 1300),
+                           _press(25, 80, 300), _press(87, 80, 1500)]),
+        GameMoment(name="left_outer_loop", wait_before_ms=400,
+                   events=[_press(44, 70, 1500),
+                           _press(44, 70, 1500),
+                           _press(44, 70, 2000)]),
+        GameMoment(name="right_outer_loop", wait_before_ms=400,
+                   events=[_press(58, 70, 1500),
+                           _press(58, 70, 1500),
+                           _press(58, 70, 2000)]),
+        GameMoment(name="borg_lock_1", wait_before_ms=400,
+                   description="Borg cube lock 1.",
+                   events=[_press(48, 80, 400),
+                           _press(31, 120, 3500,
+                                  note="LOCK 1 splash")]),
+        GameMoment(name="borg_locks_multiball", wait_before_ms=400,
+                   description="2 more Borg locks → BORG MULTIBALL.",
+                   events=[_press(31, 120, 2500),
+                           _press(31, 150, 5500,
+                                  note="BORG MULTIBALL cinematic")]),
+        GameMoment(name="ul_locks", wait_before_ms=400,
+                   description="Upper-left ball locks.",
+                   events=[_press(41, 120, 2500), _press(35, 120, 2500),
+                           _press(42, 120, 2500), _press(43, 120, 3000)]),
+        GameMoment(name="borg_hole", wait_before_ms=400,
+                   description="Upper Borg hole shot.",
+                   events=[_press(47, 100, 4000)]),
+        GameMoment(name="drop_target", wait_before_ms=300,
+                   events=[_press(57, 80, 2500)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(71, 50, 100), _press(72, 50, 100),
+                           _press(73, 50, 100), _press(71, 50, 100),
+                           _press(72, 50, 100), _press(73, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(88, 80, 300), _press(83, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(25, 80, 300), _press(87, 80, 5000)]),
+    ]
+
+
+def _ij_moments(s: GameScript) -> List[GameMoment]:
+    """Indiana Jones (PinMAME ij.c).
+    L ramp 41/118 (sw#118 unusual — extended matrix), R ramp 42/74,
+    idol 43 enter / 32 exit, loops 54/55 (L T/B), 56/57 (R T/B),
+    R popper 44, jets 35/36/37, slings 33/48.  IJ has a tiered
+    upper playfield with the idol and loops.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(41, 80, 300), _press(118, 80, 1300),
+                           _press(41, 80, 300), _press(118, 80, 1300),
+                           _press(41, 80, 300), _press(118, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(42, 80, 300), _press(74, 80, 1300),
+                           _press(42, 80, 300), _press(74, 80, 1300),
+                           _press(42, 80, 300), _press(74, 80, 1500)]),
+        GameMoment(name="left_loop", wait_before_ms=400,
+                   events=[_press(55, 70, 300), _press(54, 70, 1300),
+                           _press(55, 70, 300), _press(54, 70, 1300),
+                           _press(55, 70, 300), _press(54, 70, 1500)]),
+        GameMoment(name="right_loop", wait_before_ms=400,
+                   events=[_press(57, 70, 300), _press(56, 70, 1300),
+                           _press(57, 70, 300), _press(56, 70, 1500)]),
+        GameMoment(name="idol_shot", wait_before_ms=400,
+                   description="Idol shot — chase the idol cinematic.",
+                   events=[_press(43, 80, 400),
+                           _press(32, 80, 4000,
+                                  note="IDOL CHASE cinematic")]),
+        GameMoment(name="r_popper_mb", wait_before_ms=400,
+                   description="Right popper — multiball setup.",
+                   events=[_press(44, 120, 2500),
+                           _press(44, 120, 5000,
+                                  note="multiball splash")]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(35, 50, 100), _press(36, 50, 100),
+                           _press(37, 50, 100), _press(35, 50, 100),
+                           _press(36, 50, 100), _press(37, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(41, 80, 300), _press(118, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(42, 80, 300), _press(74, 80, 5000)]),
+    ]
+
+
+def _jd_moments(s: GameScript) -> List[GameMoment]:
+    """Judge Dredd (PinMAME jd.c).
+    L ramp 67/64 (also 63=LRampToLock for the lock kicker),
+    C ramp exit 66, R ramp 75/76, S loop center 35, L popper 73,
+    R popper 74, target 27, slings 51/52.  JD has the iconic
+    Crimescenes / Pursuit / Manhunt modes.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(67, 80, 300), _press(64, 80, 1300),
+                           _press(67, 80, 300), _press(64, 80, 1300),
+                           _press(67, 80, 300), _press(64, 80, 1500)]),
+        GameMoment(name="center_ramp", wait_before_ms=400,
+                   events=[_press(66, 80, 2000),
+                           _press(66, 80, 2000)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(75, 80, 1300),
+                           _press(76, 80, 1300),
+                           _press(75, 80, 1300),
+                           _press(76, 80, 1500)]),
+        GameMoment(name="s_loop", wait_before_ms=400,
+                   events=[_press(35, 80, 1500), _press(35, 80, 2000)]),
+        GameMoment(name="l_ramp_lock", wait_before_ms=400,
+                   description="L ramp to lock kicker — LOCK 1.",
+                   events=[_press(67, 80, 300),
+                           _press(63, 120, 3500,
+                                  note="LOCK 1 splash")]),
+        GameMoment(name="multiball", wait_before_ms=400,
+                   description="Successive locks → MULTIBALL.",
+                   events=[_press(67, 80, 300), _press(63, 120, 2500),
+                           _press(67, 80, 300),
+                           _press(63, 150, 5500,
+                                  note="MULTIBALL cinematic")]),
+        GameMoment(name="poppers", wait_before_ms=400,
+                   description="L + R poppers (mode targets).",
+                   events=[_press(73, 120, 3000),
+                           _press(74, 120, 3000)]),
+        GameMoment(name="lltarget", wait_before_ms=300,
+                   events=[_press(27, 80, 2500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(67, 80, 300), _press(64, 80, 5000,
+                           note="L-ramp mode cinematic")]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(75, 80, 300), _press(76, 80, 5000)]),
+    ]
+
+
+def _ngg_moments(s: GameScript) -> List[GameMoment]:
+    """No Good Gofers (PinMAME ngg.c).
+    L ramp made 12, C ramp 15, R ramp 73, ramp downs 47/48,
+    L spinner 61, R spinner 62, jets 53/54/55, R popper 46, jet
+    popper 38, golf cart 74, sand trap 78, captive 86.  Iconic:
+    Bud + Buzz gophers popping up out of holes.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(12, 80, 1500), _press(12, 80, 1500),
+                           _press(12, 80, 1500)]),
+        GameMoment(name="center_ramp_light", wait_before_ms=400,
+                   events=[_press(15, 80, 1500), _press(15, 80, 1500),
+                           _press(15, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(73, 80, 1500), _press(73, 80, 1500),
+                           _press(73, 80, 1500)]),
+        GameMoment(name="left_spinner", wait_before_ms=400,
+                   events=[_press(61, 60, 100), _press(61, 60, 100),
+                           _press(61, 60, 100), _press(61, 60, 2000)]),
+        GameMoment(name="right_spinner", wait_before_ms=400,
+                   events=[_press(62, 60, 100), _press(62, 60, 100),
+                           _press(62, 60, 100), _press(62, 60, 2000)]),
+        GameMoment(name="golf_cart", wait_before_ms=400,
+                   description="Golf cart shot — Bud/Buzz cinematic.",
+                   events=[_press(74, 120, 3500)]),
+        GameMoment(name="sand_trap", wait_before_ms=400,
+                   events=[_press(78, 120, 3000)]),
+        GameMoment(name="r_popper_lock", wait_before_ms=400,
+                   description="R popper = lock for multiball.",
+                   events=[_press(46, 120, 2500),
+                           _press(46, 120, 5500,
+                                  note="multiball cinematic")]),
+        GameMoment(name="captive_ball", wait_before_ms=300,
+                   events=[_press(86, 100, 2500)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(53, 50, 100), _press(54, 50, 100),
+                           _press(55, 50, 100), _press(53, 50, 100),
+                           _press(54, 50, 100), _press(55, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(12, 80, 5500)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(73, 80, 5500)]),
+    ]
+
+
+def _t2_moments(s: GameScript) -> List[GameMoment]:
+    """Terminator 2: Judgment Day (PinMAME t2.c).
+    L ramp 61/62, R ramp 63/64, loops L 65, H 66, locks L 51, T 55,
+    ball popper 76, drop target 77, 5-target bank 71-75, jets 41/42/43,
+    slings 44/45.  Iconic: Skull Multiball, Hurry-Up, Video Mode.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(61, 80, 300), _press(62, 80, 1300),
+                           _press(61, 80, 300), _press(62, 80, 1300),
+                           _press(61, 80, 300), _press(62, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(63, 80, 300), _press(64, 80, 1300),
+                           _press(63, 80, 300), _press(64, 80, 1300),
+                           _press(63, 80, 300), _press(64, 80, 1500)]),
+        GameMoment(name="loops", wait_before_ms=400,
+                   events=[_press(65, 70, 1500), _press(66, 70, 1500),
+                           _press(65, 70, 1500), _press(66, 70, 2000)]),
+        GameMoment(name="target_bank", wait_before_ms=400,
+                   description="5-target T-2 letters.",
+                   events=[_press(71, 80, 300), _press(72, 80, 300),
+                           _press(73, 80, 300), _press(74, 80, 300),
+                           _press(75, 80, 3000)]),
+        GameMoment(name="ball_popper", wait_before_ms=400,
+                   events=[_press(76, 120, 2500),
+                           _press(76, 120, 4000,
+                                  note="multiball cinematic")]),
+        GameMoment(name="skull_locks", wait_before_ms=400,
+                   description="Skull-lock left + top.",
+                   events=[_press(51, 120, 2500), _press(55, 120, 3500)]),
+        GameMoment(name="drop_target", wait_before_ms=300,
+                   events=[_press(77, 80, 2500)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(41, 50, 100), _press(42, 50, 100),
+                           _press(43, 50, 100), _press(41, 50, 100),
+                           _press(42, 50, 100), _press(43, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(61, 80, 300), _press(62, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(63, 80, 300), _press(64, 80, 5000)]),
+    ]
+
+
+def _dm_moments(s: GameScript) -> List[GameMoment]:
+    """Demolition Man (PinMAME dm.c).
+    L ramp 51/52, R ramp 46/47, C ramp 53, S(uper) ramp 61/62,
+    loops left 86 / center 55 / right 48, car chase 71/72/87,
+    top popper 73, bottom popper 76, elevator 67/74/75, claw 82,
+    slings 41/42, top sling 44, jets 43/45.  Iconic: Cryoclaw,
+    Car Chase, Demolition Time wizard mode.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(51, 80, 300), _press(52, 80, 1300),
+                           _press(51, 80, 300), _press(52, 80, 1300),
+                           _press(51, 80, 300), _press(52, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(46, 80, 300), _press(47, 80, 1300),
+                           _press(46, 80, 300), _press(47, 80, 1300),
+                           _press(46, 80, 300), _press(47, 80, 1500)]),
+        GameMoment(name="center_ramp", wait_before_ms=400,
+                   events=[_press(53, 80, 1500), _press(53, 80, 2000)]),
+        GameMoment(name="super_ramp", wait_before_ms=400,
+                   description="Super ramp (Demolition Time setup).",
+                   events=[_press(61, 80, 300), _press(62, 80, 2000)]),
+        GameMoment(name="loops", wait_before_ms=400,
+                   events=[_press(86, 70, 1500), _press(55, 70, 1500),
+                           _press(48, 70, 2000)]),
+        GameMoment(name="car_chase", wait_before_ms=400,
+                   description="Car Chase mode (3 switches).",
+                   events=[_press(71, 80, 300), _press(72, 80, 300),
+                           _press(87, 80, 4000,
+                                  note="CAR CHASE cinematic")]),
+        GameMoment(name="elevator", wait_before_ms=400,
+                   description="Elevator hold/ramp/index.",
+                   events=[_press(67, 80, 400), _press(74, 80, 400),
+                           _press(75, 80, 3000)]),
+        GameMoment(name="poppers_multiball", wait_before_ms=400,
+                   events=[_press(73, 120, 2500),
+                           _press(76, 120, 4000,
+                                  note="multiball cinematic")]),
+        GameMoment(name="claw", wait_before_ms=400,
+                   description="Cryoclaw mech.",
+                   events=[_press(82, 120, 4000)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(43, 50, 100), _press(45, 50, 100),
+                           _press(43, 50, 100), _press(45, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(51, 80, 300), _press(52, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(46, 80, 300), _press(47, 80, 5000)]),
+    ]
+
+
+def _rs_moments(s: GameScript) -> List[GameMoment]:
+    """Red & Ted's Road Show (PinMAME rs.c).
+    L ramp 57/56, R ramp 71/55 + 72 (exit C), Rt loop 46/38,
+    spinner 51, lockup 52/53, lock kickout 54, jets 63/64/65,
+    slings 61/62.  Iconic: Drilling cinematics, Red + Ted talking
+    heads, City modes.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(57, 80, 300), _press(56, 80, 1300),
+                           _press(57, 80, 300), _press(56, 80, 1300),
+                           _press(57, 80, 300), _press(56, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(71, 80, 300), _press(55, 80, 1300),
+                           _press(71, 80, 300), _press(55, 80, 1300),
+                           _press(71, 80, 300), _press(55, 80, 1500)]),
+        GameMoment(name="right_loop", wait_before_ms=400,
+                   events=[_press(46, 70, 300), _press(38, 70, 1500),
+                           _press(46, 70, 300), _press(38, 70, 2000)]),
+        GameMoment(name="spinner", wait_before_ms=400,
+                   events=[_press(51, 60, 100), _press(51, 60, 100),
+                           _press(51, 60, 100), _press(51, 60, 2000)]),
+        GameMoment(name="locks_multiball", wait_before_ms=400,
+                   description="Lockups → Drilling multiball.",
+                   events=[_press(52, 120, 2500), _press(53, 120, 2500),
+                           _press(54, 120, 4500,
+                                  note="MULTIBALL cinematic")]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(63, 50, 100), _press(64, 50, 100),
+                           _press(65, 50, 100), _press(63, 50, 100),
+                           _press(64, 50, 100), _press(65, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(57, 80, 300), _press(56, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(71, 80, 300), _press(55, 80, 5000)]),
+    ]
+
+
+def _ss_moments(s: GameScript) -> List[GameMoment]:
+    """Scared Stiff (PinMAME ss.c).
+    L ramp 44/46, R ramp 45/47 + 67 (10pt), coffin 41/42/43/48,
+    crate 38, R popper 36, loops L 58 / R 68, slings 51/52, upper
+    sling 56, jets 53/54/55.  Iconic: Spider Multiball, Crate
+    Multiball, Coffin lock.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(44, 80, 300), _press(46, 80, 1300),
+                           _press(44, 80, 300), _press(46, 80, 1300),
+                           _press(44, 80, 300), _press(46, 80, 1500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(45, 80, 300), _press(47, 80, 1300),
+                           _press(45, 80, 300), _press(47, 80, 1300),
+                           _press(45, 80, 300), _press(47, 80, 1500)]),
+        GameMoment(name="loops", wait_before_ms=400,
+                   events=[_press(58, 70, 1500), _press(68, 70, 1500),
+                           _press(58, 70, 1500), _press(68, 70, 2000)]),
+        GameMoment(name="coffin_letters", wait_before_ms=400,
+                   description="Coffin targets (L/C/R + entrance).",
+                   events=[_press(41, 80, 300), _press(42, 80, 300),
+                           _press(43, 80, 300),
+                           _press(48, 120, 4000,
+                                  note="COFFIN MB / mode cinematic")]),
+        GameMoment(name="crate_lock", wait_before_ms=400,
+                   description="Crate — Spider Multiball lock.",
+                   events=[_press(38, 100, 2500),
+                           _press(38, 120, 5500,
+                                  note="SPIDER MB cinematic")]),
+        GameMoment(name="r_popper", wait_before_ms=400,
+                   events=[_press(36, 120, 3000)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(53, 50, 100), _press(54, 50, 100),
+                           _press(55, 50, 100), _press(53, 50, 100),
+                           _press(54, 50, 100), _press(55, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(44, 80, 300), _press(46, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(45, 80, 300), _press(47, 80, 5000)]),
+    ]
+
+
+def _drac_moments(s: GameScript) -> List[GameMoment]:
+    """Bram Stoker's Dracula (PinMAME drac.c).
+    L ramp 73/84/85, R ramp 28/77, BL popper 55, TL popper 56,
+    mystery 58, coffin pop 72, jets 61/62/63, slings 64/65.
+    Iconic: Mist Multiball (turn into bats), Coffin lock,
+    Holy Water hurry-up.
+    """
+    return [
+        GameMoment(name="skill_shot",
+                   events=[_wait(2500, note="skill shot window")]),
+        GameMoment(name="left_ramp_light", wait_before_ms=400,
+                   events=[_press(73, 80, 300), _press(84, 80, 1300),
+                           _press(73, 80, 300), _press(84, 80, 1300),
+                           _press(73, 80, 300), _press(84, 80, 1500)]),
+        GameMoment(name="left_ramp_div", wait_before_ms=400,
+                   description="L ramp diverter — alternate path.",
+                   events=[_press(73, 80, 300), _press(85, 80, 2500)]),
+        GameMoment(name="right_ramp_light", wait_before_ms=400,
+                   events=[_press(77, 80, 300), _press(28, 80, 1300),
+                           _press(77, 80, 300), _press(28, 80, 1300),
+                           _press(77, 80, 300), _press(28, 80, 1500)]),
+        GameMoment(name="mystery_scoop", wait_before_ms=400,
+                   description="Mystery scoop — random award.",
+                   events=[_press(58, 120, 4000)]),
+        GameMoment(name="coffin_pop", wait_before_ms=400,
+                   description="Coffin pop — Mist Multiball setup.",
+                   events=[_press(72, 120, 2500),
+                           _press(72, 120, 5500,
+                                  note="MIST MULTIBALL cinematic")]),
+        GameMoment(name="poppers", wait_before_ms=400,
+                   events=[_press(55, 120, 2500), _press(56, 120, 3000)]),
+        GameMoment(name="jets", wait_before_ms=300,
+                   events=[_press(61, 50, 100), _press(62, 50, 100),
+                           _press(63, 50, 100), _press(61, 50, 100),
+                           _press(62, 50, 100), _press(63, 50, 1500)]),
+        GameMoment(name="left_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(73, 80, 300), _press(84, 80, 5000)]),
+        GameMoment(name="right_ramp_mode_start", wait_before_ms=400,
+                   events=[_press(77, 80, 300), _press(28, 80, 5000)]),
+    ]
+
+
 # Per-game key -> moments factory.  Games not listed fall through to
 # the profile-driven generic factory.
 _MOMENTS_FACTORIES: Dict[str, Callable[[GameScript], List[GameMoment]]] = {
@@ -1661,6 +2179,16 @@ _MOMENTS_FACTORIES: Dict[str, Callable[[GameScript], List[GameMoment]]] = {
     "fish_tales": _ft_moments,
     "white_water": _ww_moments,
     "twilight_zone": _tz_moments,
+    "addams_family": _taf_moments,
+    "star_trek_tng": _sttng_moments,
+    "indiana_jones": _ij_moments,
+    "judge_dredd": _jd_moments,
+    "no_good_gofers": _ngg_moments,
+    "terminator_2": _t2_moments,
+    "demolition_man": _dm_moments,
+    "roadshow": _rs_moments,
+    "scared_stiff": _ss_moments,
+    "bram_stokers_dracula": _drac_moments,
 }
 
 

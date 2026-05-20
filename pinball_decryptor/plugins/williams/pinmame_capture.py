@@ -757,52 +757,55 @@ class PinmameCapture:
         # Let the credits message finish + chime clear before Start.
         time.sleep(2.0)
 
-        # 4. Press Start.  Detect acceptance by watching for any
-        # new mechanism-range solenoid (sol#1-16) to fire DURING
-        # this specific press window — per-press snapshot of the
-        # seen-set, not first-time-ever.  The trough-release solenoid
-        # number varies per game (sBallRel=2 on AFM, sTrough=14 on
-        # No Fear, etc.) and may have already fired during attract
-        # or coin insertion, so we can't rely on a single sol number
-        # or a global first-time check.
+        # 4. Press Start.  Detect acceptance by watching for ≥ 2
+        # DISTINCT mechanism-range solenoids (sol#1-16) to fire
+        # during this specific press window.  Game-start fires
+        # trough-release THEN autoplunger in sequence (~1s apart);
+        # attract-mode flasher cycles may briefly bump one sol but
+        # rarely two distinct mechanism sols at once.  Requiring two
+        # eliminates false positives where the press happens to
+        # coincide with a single attract sol pulse.
         accepted = False
         self._emit_log(
             f"Pressing Start (sw#{SW_START}) up to 6x...", "info")
         for i in range(6):
             if stop_event.is_set():
                 return
-            # Snapshot solenoid counts immediately before this press.
             sol_counts_before = dict(self._sol_counts)
             self._press_switch(SW_START, hold_ms=800)
-            # Poll up to 1.5s for any mechanism solenoid to fire
-            # more times than it had before the press.  Game-start
-            # bursts include 2-4 mechanism solenoid fires (trough
-            # release, autoplunger, credit chime, etc.) so even one
-            # extra count is a strong positive signal.
-            deadline = time.monotonic() + 1.5
-            new_fires = []
+            # Poll 2s — game-start burst (release + plunger +
+            # optional knocker) typically completes inside 1.5s but
+            # we give a little more room than the press timing alone.
+            deadline = time.monotonic() + 2.0
+            distinct_sols = set()
             while time.monotonic() < deadline:
                 if stop_event.is_set():
                     return
                 for sol, count in self._sol_counts.items():
                     if (sol in self._SOL_MECHANISM_RANGE
                             and count > sol_counts_before.get(sol, 0)):
-                        new_fires.append(sol)
-                if new_fires:
+                        distinct_sols.add(sol)
+                if len(distinct_sols) >= 2:
                     break
                 time.sleep(0.05)
-            if new_fires:
+            if len(distinct_sols) >= 2:
                 self._emit_log(
                     f"Start accepted on press #{i + 1} — "
-                    f"mechanism solenoid(s) {sorted(set(new_fires))} "
-                    "fired in response.", "success")
+                    f"mechanism sols {sorted(distinct_sols)} "
+                    "fired in sequence (game-start burst).",
+                    "success")
                 accepted = True
                 break
+            elif distinct_sols:
+                self._emit_log(
+                    f"Press #{i + 1}: only sol#{sorted(distinct_sols)[0]} "
+                    "fired — likely attract flasher, not Start "
+                    "acceptance.  Retrying.", "info")
         if not accepted:
             self._emit_log(
-                "No mechanism solenoid fired after any Start press "
-                "— game did NOT enter play.  Aborting sim loop.",
-                "warning")
+                "Insufficient mechanism solenoid activity after any "
+                "Start press — game did NOT enter play.  Aborting "
+                "sim loop.", "warning")
             return
 
         # 5. The ROM has fired the trough release solenoid (sBallRel,

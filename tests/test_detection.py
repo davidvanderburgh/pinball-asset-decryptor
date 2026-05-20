@@ -146,3 +146,55 @@ def test_jjp_detect_rejects_non_iso(manufacturers_by_key, tmp_path):
     other = tmp_path / "Wonka.zip"
     other.write_bytes(b"\x00")
     assert jjp.detect(str(other)) is None
+
+
+# ---------------------------------------------------------------------------
+# CGC - detects .img by filename hint, requires a valid MBR signature.
+# ---------------------------------------------------------------------------
+
+def _make_fake_cgc_img(path):
+    """Tiny MBR-signed file -- enough for detect() to accept the
+    .img as plausibly a disk image without us shipping a real one."""
+    blob = bytearray(512)
+    blob[510:512] = b"\x55\xaa"
+    path.write_bytes(bytes(blob))
+
+
+@pytest.mark.parametrize("filename,expected_key", [
+    ("MedievalMadness300Installer.img", "mm_remake"),
+    ("AttackFromMars100Installer.img", "afm_remake"),
+    ("MonsterBash103Installer.img", "mb_remake"),
+    ("PulpFiction102Installer.img", "pulp_fiction"),
+    # Lowercased / spaced variants the hints accept.
+    ("medievalmadness_2.5.img", "mm_remake"),
+    ("AFM_remake_v1.0.0.img", "afm_remake"),
+])
+def test_cgc_detect_filename(manufacturers_by_key, tmp_path,
+                              filename, expected_key):
+    cgc = manufacturers_by_key["cgc"]
+    f = tmp_path / filename
+    _make_fake_cgc_img(f)
+    game = cgc.detect(str(f))
+    assert game is not None and game.key == expected_key
+
+
+def test_cgc_detect_requires_mbr_signature(manufacturers_by_key, tmp_path):
+    cgc = manufacturers_by_key["cgc"]
+    f = tmp_path / "MedievalMadness300Installer.img"
+    # Garbage without the 0x55 0xAA boot signature should not detect.
+    f.write_bytes(b"\x00" * 16)
+    assert cgc.detect(str(f)) is None
+
+
+def test_cgc_detect_rejects_unknown_img(manufacturers_by_key, tmp_path):
+    cgc = manufacturers_by_key["cgc"]
+    f = tmp_path / "SomeRandomGame.img"
+    _make_fake_cgc_img(f)
+    assert cgc.detect(str(f)) is None
+
+
+def test_cgc_detect_rejects_non_img_extension(manufacturers_by_key, tmp_path):
+    cgc = manufacturers_by_key["cgc"]
+    f = tmp_path / "MedievalMadness300Installer.iso"
+    _make_fake_cgc_img(f)
+    assert cgc.detect(str(f)) is None

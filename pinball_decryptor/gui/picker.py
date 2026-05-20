@@ -36,6 +36,9 @@ _MFR_VISUALS = {
     # deep red mirrors that without colliding with JJP's slightly
     # brighter red.
     "williams": {"color": "#a01818", "letter": "W"},
+    # CGC's brand uses a chrome/silver palette; muted blue-grey reads
+    # as "premium remake" and stays distinct from BOF's saturated blue.
+    "cgc":      {"color": "#37474f", "letter": "C"},
 }
 
 

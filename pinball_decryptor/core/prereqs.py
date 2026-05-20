@@ -58,9 +58,21 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
 
     Never raises — any unexpected error is reported as ``ok=False`` with
     the exception text in :attr:`PrerequisiteResult.message`.
+
+    Probe formats:
+        * ``"python:<module>"`` -- import-checks ``<module>`` in the
+          current Python process.  Use this for pip-installed deps
+          (e.g. ``"python:faster_whisper"``).  Works regardless of
+          whether the app runs from source or a PyInstaller bundle --
+          the import always resolves against the running interpreter.
+        * any other string -- shell command; exit-zero means OK.
+          Runs on the host shell when ``where == "host"`` or inside
+          WSL when ``where == "wsl"``.
     """
     try:
-        if prereq.where == "host":
+        if prereq.probe.startswith("python:"):
+            ok, msg = _probe_python_import(prereq.probe.split(":", 1)[1])
+        elif prereq.where == "host":
             ok, msg = _probe_host(prereq.probe)
         elif prereq.where == "wsl":
             ok, msg = _probe_wsl(prereq.probe)
@@ -73,6 +85,21 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
         name=prereq.name, ok=ok, message=msg,
         reason=prereq.reason, install_hint=prereq.install_hint,
     )
+
+
+def _probe_python_import(module_name: str) -> Tuple[bool, str]:
+    """Try to ``import`` *module_name* in the current process.
+
+    No subprocess (and no PATH lookup) -- always uses ``sys.executable``'s
+    site-packages, which is exactly what the app will use at runtime.
+    """
+    import importlib
+    try:
+        mod = importlib.import_module(module_name)
+    except ImportError as e:
+        return False, str(e)
+    version = getattr(mod, "__version__", "available")
+    return True, f"{module_name} {version}"
 
 
 def check_prerequisites(prereqs) -> List[PrerequisiteResult]:

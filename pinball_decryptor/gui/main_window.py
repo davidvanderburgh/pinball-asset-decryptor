@@ -151,6 +151,18 @@ class MainWindow:
         # the final scenes.  Plus ~25s boot/credit/start overhead.
         self.capture_duration_var = tk.StringVar(value="180")
         self.capture_gameplay_var = tk.BooleanVar(value=True)
+        # CGC-only: "Generate callouts.csv after Extract" toggle on the
+        # Extract tab.  When ON, a successful Extract triggers the
+        # transcribe pipeline against the output folder.  Default OFF
+        # because the model download (~75 MB) is opt-in.
+        self.transcribe_var = tk.BooleanVar(value=False)
+        # Companion toggle: when ON (and transcribe is also ON), the
+        # transcribe pipeline renames each speech WAV to
+        # "<original> - <transcript>.wav".  Write picks up the renamed
+        # files via prefix-matching in _diff_assets so the round trip
+        # still works.  Default OFF -- some users want to cross-check
+        # original names against community sample lists.
+        self.transcribe_rename_var = tk.BooleanVar(value=False)
 
         # Cross-manufacturer auto-detect: when the current mfr doesn't
         # recognise a browsed file but exactly one other mfr does, we
@@ -435,6 +447,27 @@ class MainWindow:
         # PinMAME boots; the matrix grid uses it for each button.
         self._manual_press_fn = None
         self._switch_matrix_buttons = []
+
+        # Transcribe checkbox — packed only when the active manufacturer
+        # has capabilities.transcribe (currently just CGC).  When ON,
+        # Extract chains the transcribe pipeline against the output
+        # folder, emitting callouts.csv next to the WAVs.  Mirrors
+        # the capture-mode toggle pattern used by Williams.
+        self._transcribe_frame = ttk.Frame(f)
+        self._transcribe_check = ttk.Checkbutton(
+            self._transcribe_frame,
+            text="Auto-transcribe samples to callouts.csv",
+            variable=self.transcribe_var,
+            command=self._on_transcribe_toggle)
+        self._transcribe_check.pack(side=tk.LEFT, padx=(24, 8))
+        self._transcribe_rename_check = ttk.Checkbutton(
+            self._transcribe_frame,
+            text="...and rename WAVs using transcripts",
+            variable=self.transcribe_rename_var)
+        self._transcribe_rename_check.pack(side=tk.LEFT, padx=(12, 0))
+        # Greyed-out until the first checkbox is on -- rename only
+        # makes sense as a chained step after the CSV exists.
+        self._transcribe_rename_check.state(["disabled"])
 
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._extract_btn = ttk.Button(btn_row, text="Extract",
@@ -755,6 +788,21 @@ class MainWindow:
             self._switch_matrix_frame.pack_forget()
             self._manual_press_fn = None
 
+        # Show/hide the auto-transcribe checkbox (CGC for now).  Lives
+        # above the Extract button so its relationship to Extract is
+        # visually clear -- ticking it makes Extract also produce
+        # callouts.csv once the asset dump finishes.
+        if caps.transcribe:
+            self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+            # Sync the rename checkbox's enabled state to the current
+            # transcribe checkbox value (so swapping manufacturers
+            # doesn't leave it in an inconsistent state).
+            self._on_transcribe_toggle()
+        else:
+            self._transcribe_frame.pack_forget()
+            self.transcribe_var.set(False)
+            self.transcribe_rename_var.set(False)
+
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
             self._delta_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
@@ -803,6 +851,20 @@ class MainWindow:
     # Back-compat shim — older code paths may still reference the
     # original toggle name.
     _on_capture_toggle = _on_extract_mode_toggle
+
+    def _on_transcribe_toggle(self):
+        """Enable / disable the rename checkbox when transcribe flips.
+
+        The rename pass depends on the transcripts produced by the
+        transcribe pass, so it's only meaningful as a child of the
+        first checkbox.  When transcribe is unticked we also clear
+        the rename flag so a re-tick doesn't carry stale state.
+        """
+        if self.transcribe_var.get():
+            self._transcribe_rename_check.state(["!disabled"])
+        else:
+            self._transcribe_rename_check.state(["disabled"])
+            self.transcribe_rename_var.set(False)
 
     def _update_capture_help_text(self):
         basic = self.static_extract_var.get()
@@ -1364,6 +1426,15 @@ class MainWindow:
             # determinate.
             self._progress_bar.configure(mode="indeterminate")
             self._progress_bar.start(12)
+            # Cancel any prior tick chain before starting a new one.
+            # Without this, a stale chain (e.g. from a back-to-back
+            # extract-then-transcribe with two set_running(True) calls)
+            # keeps ticking even after set_running(False) cancels what
+            # _timer_id points to — orphan _tick_timer chains rewrite
+            # the elapsed label indefinitely.
+            if self._timer_id:
+                self.root.after_cancel(self._timer_id)
+                self._timer_id = None
             self._start_time = time.time()
             self._tick_timer()
         else:
@@ -1377,6 +1448,10 @@ class MainWindow:
             if self._timer_id:
                 self.root.after_cancel(self._timer_id)
                 self._timer_id = None
+            # Belt-and-suspenders: clear _start_time so any orphan
+            # tick that slipped past the cancel becomes a no-op for
+            # the elapsed label update.
+            self._start_time = None
             self._elapsed_label.configure(text="")
             # Stop the live DMD-preview after-pump.  The label keeps
             # the last frame on screen as a static snapshot of where
@@ -1384,10 +1459,15 @@ class MainWindow:
             self._stop_dmd_preview_pump()
 
     def _tick_timer(self):
-        if self._start_time is not None:
-            elapsed = int(time.time() - self._start_time)
-            m, s = divmod(elapsed, 60)
-            self._elapsed_label.configure(text=f"{m:02d}:{s:02d}")
+        if self._start_time is None:
+            # Pipeline finished -- don't re-schedule.  Leaving the
+            # chain alive would burn CPU forever and (worse) reach in
+            # to rewrite an elapsed label that we already cleared.
+            self._timer_id = None
+            return
+        elapsed = int(time.time() - self._start_time)
+        m, s = divmod(elapsed, 60)
+        self._elapsed_label.configure(text=f"{m:02d}:{s:02d}")
         self._timer_id = self.root.after(1000, self._tick_timer)
 
     # ------------------------------------------------------------------

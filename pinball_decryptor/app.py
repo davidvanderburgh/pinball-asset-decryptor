@@ -442,11 +442,50 @@ class App:
         else:
             # No capture — pure basic-extract path (the same one all
             # other plugins always use).
+            # If the transcribe checkbox is on (CGC-only currently),
+            # wrap done_cb so a successful Extract chains into the
+            # transcribe pipeline against the just-written output dir.
+            chained_done_cb = self._maybe_wrap_done_for_transcribe(
+                done_cb, output_path)
             self.pipeline = self._current_mfr.make_extract_pipeline(
                 in_path, output_path,
-                log_cb, phase_cb, progress_cb, done_cb,
+                log_cb, phase_cb, progress_cb, chained_done_cb,
             )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    def _maybe_wrap_done_for_transcribe(self, original_done_cb, output_path):
+        """If the user ticked the Auto-transcribe checkbox AND the
+        active mfr supports it, return a wrapped done_cb that kicks
+        off the transcribe pipeline after a successful Extract.
+        Otherwise return the original done_cb unchanged.
+        """
+        if not getattr(
+                self._current_mfr.capabilities, "transcribe", False):
+            return original_done_cb
+        if not getattr(self.window, "transcribe_var", None):
+            return original_done_cb
+        if not self.window.transcribe_var.get():
+            return original_done_cb
+
+        def wrapped(success, summary):
+            if not success:
+                original_done_cb(success, summary)
+                return
+            # Defer the original done_cb until transcribe finishes,
+            # otherwise the GUI's "Extract Complete" modal would steal
+            # focus before transcribe even starts.
+            self.msg_queue.put(LogMsg(
+                "Extract done; chaining auto-transcribe...", "info"))
+            # wrapped() runs on the Extract pipeline's worker thread.
+            # Hop to the main thread before touching any Tk widgets
+            # inside _start_transcribe (set_running, reset_steps, etc.)
+            # -- root.after(0, ...) is the cheapest cross-thread hand-off.
+            self.root.after(0, lambda: self._start_transcribe(
+                assets_dir_override=output_path,
+                outer_done_summary=summary,
+                outer_done_cb=original_done_cb,
+            ))
+        return wrapped
 
     # ------------------------------------------------------------------
     # Write
@@ -509,6 +548,75 @@ class App:
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
         )
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Transcribe (CGC opt-in, faster-whisper)
+    # ------------------------------------------------------------------
+
+    def _start_transcribe(self, assets_dir_override=None,
+                          outer_done_summary=None, outer_done_cb=None):
+        """Run the transcribe pipeline.
+
+        Called from ``_start_extract`` (chained) when the user ticked
+        the auto-transcribe checkbox.  ``assets_dir_override`` is the
+        Extract output dir (passed directly to bypass any race with
+        the Tk var); ``outer_done_summary`` + ``outer_done_cb`` let us
+        defer the Extract's "Complete" modal until transcribe finishes
+        so the user sees one terminal dialog instead of two.
+        """
+        if not self._current_mfr.capabilities.transcribe:
+            return
+        assets_dir = (assets_dir_override
+                      or self.window.extract_output_var.get().strip()
+                      or self.window.write_assets_var.get().strip())
+        if not assets_dir or not os.path.isdir(assets_dir):
+            messagebox.showerror(
+                "Invalid Folder",
+                f"Cannot run transcribe — folder not found:\n{assets_dir}")
+            if outer_done_cb:
+                outer_done_cb(True, outer_done_summary or "")
+            return
+
+        # Stay in extract mode so the status row keeps its labels.
+        self._active_mode = "extract"
+        # Only call set_running(True) when transcribe is the FIRST
+        # action in the chain.  When it's chained after Extract
+        # (outer_done_cb is set), the running state is already on and
+        # calling it again would reset the elapsed timer to zero
+        # mid-pipeline -- the user just saw Extract take 60s and now
+        # the clock would say 00:00 again during transcribe.
+        if outer_done_cb is None:
+            self.window.set_running(True, mode="extract")
+
+        log_cb, _phase_cb, progress_cb, done_cb = self._make_callbacks()
+        # Don't drive the Extract phase indicator -- transcribe phases
+        # don't line up with Extract's "Detect / Outer / Inner /
+        # Checksums" labels; would just be visual noise.
+        phase_cb = lambda _i: None
+
+        # If we're chained, replace the normal done_cb with one that
+        # merges transcribe's summary into the Extract summary and
+        # delegates the final "Complete" modal to outer_done_cb.
+        if outer_done_cb is not None:
+            head = (outer_done_summary or "").rstrip()
+            def merged_done(transcribe_success, transcribe_summary):
+                label = ("Auto-transcribe:" if transcribe_success
+                         else "Auto-transcribe failed:")
+                combined = f"{head}\n\n{label}\n{transcribe_summary}"
+                # Extract already succeeded; surface that as success
+                # even if transcribe failed (the asset folder is still
+                # usable -- the user can re-tick and try again).
+                outer_done_cb(True, combined)
+            done_cb = merged_done
+
+        rename_after = bool(
+            getattr(self.window, "transcribe_rename_var", None)
+            and self.window.transcribe_rename_var.get())
+
+        self.pipeline = self._current_mfr.make_transcribe_pipeline(
+            assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            rename_after=rename_after)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     # ------------------------------------------------------------------
@@ -680,6 +788,16 @@ class App:
 
     def _on_done(self, success, summary):
         is_extract = self._active_mode == "extract"
+        # On success, advance the phase indicator past the last phase
+        # so every step shows green instead of leaving the final
+        # phase stuck on "active" (blue) forever.  set_phase walks
+        # labels and marks any with index < target as green; passing
+        # len(phases) makes the comparison true for every label.
+        if success and self._current_mfr is not None:
+            phases = (self._current_mfr.extract_phases if is_extract
+                      else self._current_mfr.write_phases)
+            if phases:
+                self.window.set_phase(len(phases), mode=self._active_mode)
         self.window.set_running(False, mode=self._active_mode)
         if success:
             self.window.set_status("Complete!")

@@ -134,6 +134,18 @@ $ManufacturerPrereqs = [ordered]@{
         Custom       = @("InstallGdreTools")
     }
 
+    "Chicago Gaming Company" = @{
+        Description  = "Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction (.img installer images)"
+        WslPackages  = @(
+            @{ probe="debugfs"; pkg="e2fsprogs"; label="e2fsprogs/debugfs"; reason="ext4 read/write on installer P3 + emmc.img P2" }
+            @{ probe="xxd";     pkg="xxd";       label="xxd";              reason="Reading the inner emmc.img MBR partition table" }
+        )
+        HostPackages = @()
+        PipPackages  = @(
+            @{ probe="faster_whisper"; pkg="faster-whisper"; label="faster-whisper"; reason="Auto-transcribe samples to callouts.csv (Whisper tiny.en on CPU)" }
+        )
+    }
+
     "Jersey Jack Pinball" = @{
         Description  = "Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc. (.iso disk images)"
         WslPackages  = @(
@@ -204,6 +216,7 @@ Write-Host "Selected: $($selected -join ', ')" -ForegroundColor Green
 
 $wslByProbe  = @{}
 $hostByCmd   = @{}
+$pipByProbe  = @{}
 
 foreach ($mfr in $selected) {
     foreach ($pkg in $ManufacturerPrereqs[$mfr].WslPackages) {
@@ -226,10 +239,25 @@ foreach ($mfr in $selected) {
             $hostByCmd[$key] = $copy
         }
     }
+    # PipPackages is optional on a manufacturer entry; default to empty.
+    $pipEntries = $ManufacturerPrereqs[$mfr].PipPackages
+    if ($pipEntries) {
+        foreach ($pkg in $pipEntries) {
+            $key = $pkg.probe
+            if ($pipByProbe.ContainsKey($key)) {
+                $pipByProbe[$key].for += $mfr
+            } else {
+                $copy = $pkg.Clone()
+                $copy["for"] = @($mfr)
+                $pipByProbe[$key] = $copy
+            }
+        }
+    }
 }
 
 $wslPlan  = @($wslByProbe.Values)
 $hostPlan = @($hostByCmd.Values)
+$pipPlan  = @($pipByProbe.Values)
 
 # Show the install plan
 Write-Host ""
@@ -247,6 +275,13 @@ if ($wslPlan.Count -gt 0) {
     Write-Host "        Linux runtime that the WSL-side tools live in" -ForegroundColor DarkGray
     Write-Host "  WSL-side (inside Ubuntu):"
     foreach ($p in $wslPlan) {
+        Write-Host ("    - {0,-30} for: {1}" -f $p.label, ($p.for -join ", ")) -ForegroundColor Gray
+        Write-Host ("        {0}" -f $p.reason) -ForegroundColor DarkGray
+    }
+}
+if ($pipPlan.Count -gt 0) {
+    Write-Host "  Python packages (pip, installed into the same Python the app uses):"
+    foreach ($p in $pipPlan) {
         Write-Host ("    - {0,-30} for: {1}" -f $p.label, ($p.for -join ", ")) -ForegroundColor Gray
         Write-Host ("        {0}" -f $p.reason) -ForegroundColor DarkGray
     }
@@ -494,6 +529,50 @@ foreach ($mfr in $selected) {
             switch ($step) {
                 "InstallGdreTools" { Install-GdreTools }
                 default            { Write-SKIP "Unknown custom step: $step" }
+            }
+        }
+    }
+}
+
+# =========================================================================
+# Pip packages -- installed into the same Python that runs the app.
+# =========================================================================
+# We use `python -m pip install` rather than calling `pip` directly so
+# the package lands in the right interpreter's site-packages.  When the
+# user runs the app via the PyInstaller bundle (no exposed Python), the
+# bundle's interpreter isn't pip-able and the user is expected to have
+# faster-whisper bundled at build time -- this loop is a no-op in that
+# case because the import probe already returns OK.
+if ($pipPlan.Count -gt 0) {
+    $pythonCmd = $null
+    foreach ($cand in @("python", "python3", "py")) {
+        try {
+            & $cand --version 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { $pythonCmd = $cand; break }
+        } catch {}
+    }
+    if (-not $pythonCmd) {
+        foreach ($p in $pipPlan) {
+            Write-Host ("No `python` on PATH -- skipping pip install of {0}." -f $p.label) -ForegroundColor Yellow
+            Write-SKIP $p.label
+        }
+    } else {
+        foreach ($p in $pipPlan) {
+            Write-Step ("Checking pip package {0} (for: {1})" -f $p.label, ($p.for -join ", "))
+            $importCheck = "import importlib, sys; sys.exit(0 if importlib.util.find_spec('$($p.probe)') else 1)"
+            & $pythonCmd -c $importCheck 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-OK $p.label
+            } else {
+                Write-Host ("  Installing {0} via {1} -m pip install..." -f $p.label, $pythonCmd) -ForegroundColor Cyan
+                & $pythonCmd -m pip install --upgrade $p.pkg
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Installed $p.label
+                } else {
+                    Write-Host ("  pip install failed (exit {0})." -f $LASTEXITCODE) -ForegroundColor Red
+                    Write-Host ("  Manual install: {0} -m pip install {1}" -f $pythonCmd, $p.pkg) -ForegroundColor Yellow
+                    Write-FAIL $p.label
+                }
             }
         }
     }

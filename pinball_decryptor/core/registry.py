@@ -21,6 +21,7 @@ _PLUGIN_MODULES = [
     "pinball_decryptor.plugins.spooky",
     "pinball_decryptor.plugins.bof",
     "pinball_decryptor.plugins.jjp",
+    "pinball_decryptor.plugins.cgc",
     "pinball_decryptor.plugins.williams",
 ]
 
@@ -55,6 +56,11 @@ class Capabilities:
     # libpinmame), capture composed DMD frames + audio while attract
     # mode plays, and emit per-cinematic MP4s.  Used by Williams.
     capture: bool = False
+    # Auto-transcribe path: run faster-whisper across the extracted
+    # audio files and emit a ``callouts.csv`` mapping each WAV to its
+    # spoken text (non-speech samples are skipped via VAD).  Used by
+    # CGC where samples are numbered by index with no embedded names.
+    transcribe: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +103,9 @@ class Manufacturer(ABC):
     # capture toggle is on and capture is additive on top of static.
     # Falls back to capture_phases if a plugin doesn't define both.
     combined_phases: Tuple[str, ...] = ()
+    # Phase labels for the auto-transcribe path (Whisper-based) —
+    # used when ``capabilities.transcribe`` is True.
+    transcribe_phases: Tuple[str, ...] = ()
 
     # Runtime tools this plugin needs.  Probed on a worker thread when
     # the user picks this manufacturer in the GUI; results render as
@@ -150,6 +159,18 @@ class Manufacturer(ABC):
         """
         raise NotImplementedError(
             f"{self.display} does not implement a Capture pipeline.")
+
+    def make_transcribe_pipeline(self, assets_dir,
+                                 log_cb, phase_cb, progress_cb, done_cb):
+        """Build the auto-transcribe pipeline (faster-whisper).
+
+        Only meaningful when ``capabilities.transcribe`` is True.
+        Walks ``assets_dir`` for .wav files, runs Whisper with VAD
+        filtering to skip non-speech, and emits ``callouts.csv`` at
+        the root of the assets dir.
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a Transcribe pipeline.")
 
     # ------------------------------------------------------------------
     # Misc UI hints — override if you want non-default phrasing.

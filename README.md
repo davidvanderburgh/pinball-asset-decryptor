@@ -1,9 +1,9 @@
 # Pinball Asset Decryptor
 
 One app to extract, view, and modify game assets from pinball machines made
-by **Barrels of Fun**, **Jersey Jack Pinball**, **Pinball Brothers**,
-**Spooky Pinball**, and **Williams** (WPC-era) — 70+ games across five
-manufacturers.
+by **Barrels of Fun**, **Chicago Gaming Company**, **Jersey Jack Pinball**,
+**Pinball Brothers**, **Spooky Pinball**, and **Williams** (WPC-era) —
+70+ games across six manufacturers.
 
 This is a unified replacement for separate decryptor apps that all shared
 the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
@@ -12,11 +12,44 @@ and mod-pack workflow. Each manufacturer is a plugin under
 lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 [pinball_decryptor/gui/](pinball_decryptor/gui/).
 
+## Disclaimer
+
+This project is an independent interoperability utility. It is **not
+affiliated with, endorsed by, or sponsored by** Chicago Gaming Company,
+Planetary Pinball Supply, Bally, Williams, Stern Pinball, Jersey Jack
+Pinball, Pinball Brothers, Spooky Pinball, Barrels of Fun, or any other
+pinball manufacturer, publisher, or rights holder. All trademarks and
+game titles referenced are the property of their respective owners and
+are used here in their nominative/descriptive sense only — to identify
+which file formats this tool can read.
+
+The tool ships **no game content** of any kind — no ROMs, no audio
+samples, no graphics, no executables from any pinball machine. It is
+inert until the user supplies their own file that they obtained
+legitimately (typically by purchasing the machine, downloading the
+official update from the manufacturer's support portal, or imaging
+their own physical media).
+
+Intended use is **personal customization of a machine you own** — the
+same kind of fair-use modification covered by Sega v. Accolade (1992)
+for reverse engineering interoperability and by the general right to
+modify property you've legally purchased. Distributing modified game
+assets to others, hosting copyrighted ROMs, or reselling modified
+firmware is not supported by this tool and is **your responsibility to
+avoid** — those activities have separate legal considerations the tool
+does not address.
+
+No warranty. Use entirely at your own risk; flashing a modified `.img`
+to a real pinball machine can render it inoperable until you flash a
+known-good image back. The maintainers accept no liability for damage
+to hardware, voided warranties, or any consequence of using this tool.
+
 ## Supported manufacturers
 
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
 | **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack |
+| **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
@@ -25,6 +58,7 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
 [bof/games.py](pinball_decryptor/plugins/bof/games.py),
+[cgc/games.py](pinball_decryptor/plugins/cgc/games.py),
 [jjp/games.py](pinball_decryptor/plugins/jjp/games.py),
 [pb/games.py](pinball_decryptor/plugins/pb/games.py),
 [spooky/games.py](pinball_decryptor/plugins/spooky/games.py),
@@ -74,6 +108,52 @@ profile.
 While the capture is running, the GUI shows a live DMD preview pane
 and a labeled switch-matrix grid — click any switch to manually press
 it for diagnostics.
+
+## Chicago Gaming Company plugin (v0.5.0)
+
+CGC's installer `.img` files are raw bootable disk images with three
+nested layers — an MBR-partitioned installer rootfs containing an
+`emmc.img` blob that's itself an MBR-partitioned ext4 disk holding the
+actual game. **No encryption** anywhere in the chain; the difficulty
+is purely the nesting. The plugin handles all three layers
+transparently — you give it `.img`, you get back the playable game's
+asset tree.
+
+### Asset shape per game
+
+- **MM / AFM / MB Remakes** (CGC's `emumm` WPC emulator + original
+  Williams ROM): `appdata/samples/vol_25perc/S<NNNN>_C<N>.wav` — a few
+  hundred pre-attenuated `.wav` callouts per game, in standard 16-bit
+  stereo PCM. Plus the original WPC ROM in `rom/` and boot bitmaps.
+- **Pulp Fiction** (CGC original on a BeagleBone Black, audio engine
+  CGC's in-house "JPS" library): 6 `.bnk` sound banks the plugin
+  auto-decodes into ~1,000 individual `.wav` files (music + speech +
+  SFX + diagnostics + beeped-speech) plus a `manifest.json` mapping
+  every event to its underlying buffer. Repacks on Write so audio
+  swaps end up back in the `.img` byte-for-byte verified by software
+  round-trip. The full reverse-engineering journal lives in
+  [docs/CGC_BNK_RE.md](docs/CGC_BNK_RE.md).
+
+### Auto-transcribe samples to `callouts.csv` (opt-in)
+
+CGC's audio filenames are sequential codes (`S0197_C6.wav`) with no
+human-readable names. Tick **Auto-transcribe samples to callouts.csv**
+on the Extract tab to run `faster-whisper` (tiny.en, CPU-int8) across
+every extracted WAV, with silence/non-speech filtered out via the
+built-in Silero VAD. Output is a CSV mapping each WAV's relative path
+to its detected English text, so you can open Excel and search "Joust
+champion!" to find which sample to swap.
+
+Tick the companion **...and rename WAVs using transcripts** checkbox
+to also rename each speech WAV in place — `S0197_C6.wav` becomes
+`S0197_C6 - Get the troops ready.wav` so File Explorer shows the
+content inline. Write is rename-aware: edits to renamed files get
+written back to the original inner-ext4 path the game expects.
+
+The `faster-whisper` pip package is treated as a real prerequisite and
+auto-installed by **Install Prerequisites** (same flow as the WSL
+tools). The model itself (~75 MB) downloads on first transcribe-run
+and is cached in `%USERPROFILE%\.cache\huggingface\`.
 
 ## Install
 
@@ -167,6 +247,7 @@ those plugins need.
 | Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt | Other |
 |---|---|---|---|
 | Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** (auto-downloaded by Install Prerequisites from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases)) |
+| Chicago Gaming Company | – | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model, ~75 MB downloaded on first use, runs entirely on CPU). |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
 | Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
@@ -219,6 +300,7 @@ pinball_decryptor/
 │   └── main_window.py            # manufacturer-aware window
 ├── plugins/
 │   ├── bof/                      # Barrels of Fun (gpg + GDRE Tools)
+│   ├── cgc/                      # Chicago Gaming Company (nested .img -> ext4)
 │   ├── jjp/                      # Jersey Jack Pinball (+ private Docker)
 │   ├── pb/                       # Pinball Brothers
 │   ├── spooky/                   # Spooky Pinball (+ private Docker)
@@ -299,6 +381,7 @@ are shipped or required. Coverage:
 | Manufacturer | Tested | How |
 |---|---|---|
 | Barrels of Fun | Extract + Write round-trip, all 3 games | Synthetic `.fun` (gpg-symmetric tar.gz) — *skipped automatically when gpg isn't installed* |
+| Chicago Gaming Company | Detection (filename + MBR signature) + contract + JPS .bnk extract/repack round-trip on synthetic banks | Full Extract walks 3 nested layers of ext4 disk images and needs WSL + a real installer .img (7-15 GB), not testable in CI; the JPS sound-bank extractor/repacker is unit-tested against synthetic in-memory bnks |
 | Jersey Jack | Detection + write-output-rename wrapper | Full Extract needs WSL + real ISO (gigabytes), not testable in CI |
 | Pinball Brothers | Extract + Write round-trip, all 4 games | Synthetic `.upd` (gzip+tar) |
 | Spooky Pinball | Extract + Write round-trip for `.ed`, `.scooby`, `.looney`, P3 `.zip`, `.pkg` (RM, AC) | Synthetic format-correct files; AES rounds use the known plugin keys |

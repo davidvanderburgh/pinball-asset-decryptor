@@ -391,10 +391,58 @@ class App:
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
 
-        self.pipeline = self._current_mfr.make_extract_pipeline(
-            in_path, output_path,
-            log_cb, phase_cb, progress_cb, done_cb,
-        )
+        # Williams-only branch: two independent toggles drive which
+        # half(s) of the extract run.
+        #   * static_extract_var (default ON):  basic asset extract
+        #   * capture_mode_var   (default OFF): PinMAME runtime capture
+        # Four combinations are valid; "neither" we reject with a
+        # message rather than silently no-op.
+        has_capture_caps = self._current_mfr.capabilities.capture
+        run_static = (
+            not has_capture_caps
+            or getattr(self.window, "static_extract_var", None) is None
+            or self.window.static_extract_var.get())
+        run_capture = (
+            has_capture_caps
+            and getattr(self.window, "capture_mode_var", None) is not None
+            and self.window.capture_mode_var.get())
+        if has_capture_caps and not run_static and not run_capture:
+            messagebox.showwarning(
+                "Nothing to do",
+                "Tick at least one extract option:\n"
+                "  • Basic extract (raw ROM assets), and/or\n"
+                "  • Use PinMAME runtime capture")
+            self._active_mode = None
+            self.window.set_running(False, mode="extract")
+            return
+
+        if run_capture:
+            try:
+                duration = float(self.window.capture_duration_var.get())
+            except (TypeError, ValueError):
+                duration = 180.0
+            frame_cb = getattr(self.window, "on_dmd_frame", None)
+            if frame_cb is not None and hasattr(
+                    self.window, "reset_dmd_preview"):
+                self.window.reset_dmd_preview()
+            self.pipeline = self._current_mfr.make_capture_pipeline(
+                in_path, output_path,
+                log_cb, phase_cb, progress_cb, done_cb,
+                duration_seconds=duration,
+                simulate_gameplay=(
+                    self.window.capture_gameplay_var.get()
+                    if hasattr(self.window, "capture_gameplay_var")
+                    else True),
+                frame_cb=frame_cb,
+                also_run_static=run_static,
+            )
+        else:
+            # No capture — pure basic-extract path (the same one all
+            # other plugins always use).
+            self.pipeline = self._current_mfr.make_extract_pipeline(
+                in_path, output_path,
+                log_cb, phase_cb, progress_cb, done_cb,
+            )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     # ------------------------------------------------------------------

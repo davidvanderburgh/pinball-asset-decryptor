@@ -8,6 +8,7 @@ __pycache__/
 build/
 dist/
 *.spec
+images/
 
 # Installer build artifacts
 installer/build/

@@ -28,10 +28,14 @@ _SANS_FONT, _MONO_FONT = platform_font()
 # typically covers third-party tools like this, but a "not affiliated"
 # README disclaimer is the standard hedge).
 _MFR_VISUALS = {
-    "pb":     {"color": "#d4a017", "letter": "P"},
-    "spooky": {"color": "#e64a19", "letter": "S"},
-    "bof":    {"color": "#1565c0", "letter": "B"},
-    "jjp":    {"color": "#c62828", "letter": "J"},
+    "pb":       {"color": "#d4a017", "letter": "P"},
+    "spooky":   {"color": "#e64a19", "letter": "S"},
+    "bof":      {"color": "#1565c0", "letter": "B"},
+    "jjp":      {"color": "#c62828", "letter": "J"},
+    # Williams classic logo is the cursive red "Williams" script; a
+    # deep red mirrors that without colliding with JJP's slightly
+    # brighter red.
+    "williams": {"color": "#a01818", "letter": "W"},
 }
 
 
@@ -161,11 +165,26 @@ class ManufacturerPicker(ttk.Frame):
         title_block = tk.Frame(header, background=c["button"])
         title_block.pack(side=tk.LEFT, padx=(10, 0), anchor="n")
 
+        name_row = tk.Frame(title_block, background=c["button"])
+        name_row.pack(anchor="w")
+
         name = tk.Label(
-            title_block, text=mfr.display,
+            name_row, text=mfr.display,
             font=(_SANS_FONT, 13, "bold"),
             background=c["button"], foreground=c["fg"])
-        name.pack(anchor="w")
+        name.pack(side=tk.LEFT)
+
+        # Beta badge — small inline pill for plugins with the
+        # ``beta = True`` flag.  Helps set expectations that the
+        # pipeline is actively being tuned and rough edges are
+        # expected.
+        if getattr(mfr, "beta", False):
+            beta_badge = tk.Label(
+                name_row, text="BETA",
+                font=(_SANS_FONT, 8, "bold"),
+                foreground="#ffffff", background="#e6a700",
+                padx=5, pady=0)
+            beta_badge.pack(side=tk.LEFT, padx=(8, 0))
 
         n_games = len(mfr.games)
         n_unsup = sum(1 for g in mfr.games if not g.supported)
@@ -192,8 +211,10 @@ class ManufacturerPicker(ttk.Frame):
         # Track every widget on the card so the click + hover bindings
         # can be applied to all of them (the whole card surface is the
         # hot zone).
-        all_widgets = [card, header, logo, title_block, name, subtitle,
-                       games_box]
+        all_widgets = [card, header, logo, title_block, name_row, name,
+                       subtitle, games_box]
+        if getattr(mfr, "beta", False):
+            all_widgets.append(beta_badge)
         game_labels = []
 
         # 3-column layout — wide enough to fit most game names while

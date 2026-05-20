@@ -90,8 +90,10 @@ class BOFManufacturer(Manufacturer):
     extract_phases = ("Detect", "Decrypt", "Extract", "Checksums", "Cleanup")
     write_phases = ("Decrypt", "Patch", "Repack", "Encrypt", "Cleanup")
     # BOF runs gpg + tar via the executor (WSL on Windows, native on
-    # macOS/Linux).  GDRE Tools is optional and the app itself prompts
-    # to install it on first use, so we don't probe for it here.
+    # macOS/Linux), plus GDRE Tools (headless Godot RE) under xvfb to
+    # repack the embedded PCK on Write.  All four show up in the
+    # prereq panel so the user can see missing pieces at a glance
+    # before kicking off a flow that's going to fail mid-pipeline.
     prerequisites = (
         Prerequisite(name="gpg", where="wsl",
                      probe="which gpg",
@@ -101,6 +103,21 @@ class BOFManufacturer(Manufacturer):
                      probe="which tar",
                      reason="Archive packing/unpacking",
                      install_hint="apt-get install tar (in WSL)"),
+        Prerequisite(
+            name="gdre_tools", where="wsl",
+            # Either on PATH or installed to ~/.local/bin/gdre_tools.
+            probe=("which gdre_tools 2>/dev/null || "
+                   "test -x ~/.local/bin/gdre_tools && "
+                   "echo ~/.local/bin/gdre_tools"),
+            reason="Godot RE Tools — required to repack the PCK on Write.",
+            install_hint=(
+                "Click \"Install Prerequisites\" — auto-downloads "
+                "the GDRE Tools release into ~/.local/share/gdre_tools.")),
+        Prerequisite(
+            name="xvfb-run", where="wsl",
+            probe="which xvfb-run",
+            reason="Headless X server — GDRE Tools needs it on Linux/WSL.",
+            install_hint="apt-get install xvfb (in WSL)"),
     )
 
     def detect(self, path):

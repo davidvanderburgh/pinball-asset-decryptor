@@ -188,3 +188,66 @@ def make_bof_fun(out_path, game_key="labyrinth", files=None):
         if os.path.exists(tmp_tar):
             os.remove(tmp_tar)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Williams MAME ROM zip — synthetic ROM bytes embedding a few DMD frames
+# ---------------------------------------------------------------------------
+
+def make_williams_rom_zip(out_path, game_key="fish_tales"):
+    """Generate a minimal Williams MAME ROM .zip.
+
+    The zip carries the canonical game-ROM + sound-ROM filenames the
+    plugin expects, with mostly-zero payloads padded out to the real
+    file sizes (so size-based heuristics don't choke).  We embed a few
+    synthetic 1024-byte 4-shade DMD frame chunks inside the game ROM
+    so the scan pipeline has something plausible to find — useful for
+    a tiny end-to-end test without shipping real ROM data.
+    """
+    from pinball_decryptor.plugins.williams.games import GAME_DB
+    info = GAME_DB[game_key]
+
+    def synth_dmd_frame():
+        # Three horizontal "lit" stripes at varied densities + blank
+        # rows in between.  Each lit row has holes so the solid-band
+        # filter doesn't fire, and the bands give the band-spread
+        # heuristic something to chew on.
+        lit_row = (b"\x00\x00\xff\xff\xff\xff\xff\xff"
+                   b"\xff\xff\xff\xff\x00\x00\x00\x00")
+        dim_row = (b"\x00\x00\x0f\x0f\x0f\x0f\x0f\x0f"
+                   b"\x0f\x0f\x0f\x0f\x00\x00\x00\x00")
+        plane = bytearray()
+        for r in range(32):
+            if 4 <= r < 8:
+                plane.extend(lit_row)
+            elif 12 <= r < 16:
+                plane.extend(dim_row)
+            elif 20 <= r < 24:
+                plane.extend(lit_row)
+            else:
+                plane.extend(b"\x00" * 16)
+        return bytes(plane) + bytes(plane)  # low + high planes
+
+    # First game-ROM file gets the embedded frames; the rest are filler.
+    rom_size = 524288  # 512 KB matches real WPC game ROM
+    sound_size = 524288
+
+    primary = bytearray(b"\x00" * rom_size)
+    # Place 8 contiguous frames inside the primary ROM at offset 0x4000.
+    frame = synth_dmd_frame()
+    base = 0x4000
+    for i in range(8):
+        start = base + i * 1024
+        primary[start:start + 1024] = frame
+    primary_bytes = bytes(primary)
+
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # game ROM(s) — first one is the populated one
+        game_roms = info["game_roms"]
+        zf.writestr(game_roms[0], primary_bytes)
+        for n in game_roms[1:]:
+            zf.writestr(n, b"\x00" * 256)  # placeholder; not parsed
+        # sound ROM(s) — passthrough copies, no DMD data
+        for n in info["sound_roms"]:
+            zf.writestr(n, b"\x00" * sound_size)
+    return out_path

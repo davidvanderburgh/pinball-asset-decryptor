@@ -19,11 +19,60 @@ import webbrowser
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from .theme import THEMES, detect_system_theme, platform_font
 
+# PIL lazy-imported on demand for the live DMD preview — keeping the
+# import here so a missing Pillow doesn't break the rest of the GUI.
+try:
+    from PIL import Image, ImageTk
+    _HAVE_PIL = True
+except ImportError:
+    _HAVE_PIL = False
+
 _SANS_FONT, _MONO_FONT = platform_font()
 
 # _Tooltip used to live here; moved to gui/widgets.py so picker.py can
 # also use it without importing main_window (circular).
 from .widgets import _Tooltip  # noqa: E402
+
+
+def _render_pinmame_frame(data, w, h, depth, scale, color):
+    """Render a libpinmame RAW DMD frame to an amber-tinted PIL image.
+
+    PinMAME RAW mode hands one byte per pixel where each byte holds a
+    brightness value in 0..(2**depth - 1).  We:
+
+      1. Build a per-level RGB LUT (so we don't pay the multiply per
+         pixel — there are only ``levels`` distinct shades).
+      2. Map the raw bytes through the LUT in one pass into an RGB
+         buffer.
+      3. ``Image.frombytes`` + ``resize(NEAREST)`` to scale up.
+    """
+    if not _HAVE_PIL:
+        return None
+    levels = max(1, (1 << depth) - 1)
+    r, g, b = color
+    # 256-entry LUT — covers any byte value we might see, clamped to
+    # the depth's brightness range.
+    lut = bytearray(256 * 3)
+    for i in range(256):
+        lv = min(i, levels)
+        ratio = lv / levels
+        lut[3 * i + 0] = int(r * ratio)
+        lut[3 * i + 1] = int(g * ratio)
+        lut[3 * i + 2] = int(b * ratio)
+    n = w * h
+    src = data[:n]
+    rgb = bytearray(n * 3)
+    j = 0
+    for px in src:
+        k = 3 * px
+        rgb[j] = lut[k]
+        rgb[j + 1] = lut[k + 1]
+        rgb[j + 2] = lut[k + 2]
+        j += 3
+    img = Image.frombytes("RGB", (w, h), bytes(rgb))
+    if scale > 1:
+        img = img.resize((w * scale, h * scale), Image.NEAREST)
+    return img
 
 
 class MainWindow:
@@ -88,6 +137,20 @@ class MainWindow:
         self.write_upd_var = tk.StringVar()
         self.write_assets_var = tk.StringVar()
         self.write_output_var = tk.StringVar()
+        # Williams-only: "Use PinMAME runtime capture" toggle on the
+        # Extract tab.  When ON, the Extract button kicks off the
+        # libpinmame-driven capture pipeline (composed cinematics +
+        # audio) instead of the static asset extractor.
+        # "Basic extract" — the static ROM asset bitmap scanner.  On
+        # by default.  Users with limited disk who only want the
+        # PinMAME capture cinematics can untick this.
+        self.static_extract_var = tk.BooleanVar(value=True)
+        self.capture_mode_var = tk.BooleanVar(value=False)
+        # 180s gives the scripted gameplay tour (18-21 moments per
+        # rich game) enough time to play through without truncating
+        # the final scenes.  Plus ~25s boot/credit/start overhead.
+        self.capture_duration_var = tk.StringVar(value="180")
+        self.capture_gameplay_var = tk.BooleanVar(value=True)
 
         # Cross-manufacturer auto-detect: when the current mfr doesn't
         # recognise a browsed file but exactly one other mfr does, we
@@ -259,6 +322,71 @@ class MainWindow:
         self._extract_warn = ttk.Label(f, text="", foreground="#f44747",
                                        font=(_SANS_FONT, 9))
         self._extract_warn.pack(anchor=tk.W, padx=24)
+
+        # Williams-only: extract-mode checkboxes.  Both hidden in
+        # apply_manufacturer() for manufacturers without
+        # capabilities.capture (other plugins always run their
+        # default extract).
+        self._basic_extract_frame = ttk.Frame(f)
+        self._basic_extract_check = ttk.Checkbutton(
+            self._basic_extract_frame,
+            text="Basic extract (raw ROM asset bitmaps + animation MP4s)",
+            variable=self.static_extract_var,
+            command=self._on_extract_mode_toggle)
+        self._basic_extract_check.pack(side=tk.LEFT, padx=(24, 8))
+
+        self._capture_frame = ttk.Frame(f)
+        self._capture_check = ttk.Checkbutton(
+            self._capture_frame,
+            text="Use PinMAME runtime capture (composed cinematics + audio)",
+            variable=self.capture_mode_var,
+            command=self._on_extract_mode_toggle)
+        self._capture_check.pack(side=tk.LEFT, padx=(24, 8))
+        ttk.Label(
+            self._capture_frame, text="Duration (s):",
+            font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
+        self._capture_dur_entry = ttk.Entry(
+            self._capture_frame, textvariable=self.capture_duration_var,
+            width=6)
+        self._capture_dur_entry.pack(side=tk.LEFT, padx=(4, 0))
+        self._capture_gameplay_check = ttk.Checkbutton(
+            self._capture_frame,
+            text="Simulate gameplay",
+            variable=self.capture_gameplay_var)
+        self._capture_gameplay_check.pack(side=tk.LEFT, padx=(12, 0))
+        self._capture_help = ttk.Label(
+            f, text="",
+            font=(_SANS_FONT, 9, "italic"),
+            foreground="#888888",
+            wraplength=620, justify=tk.LEFT)
+        self._capture_help.pack(anchor=tk.W, padx=24, pady=(2, 0))
+
+        # ---- Live DMD preview ------------------------------------
+        # While the capture pipeline runs, we show the actual DMD
+        # frames PinMAME is rendering — invaluable for "is the game
+        # in attract, stuck on ball-search, or actually playing?"
+        # diagnostics.  The image label is created here but kept
+        # hidden until ``on_dmd_frame`` receives the first frame.
+        self._dmd_preview_frame = ttk.Frame(f)
+        self._dmd_preview_label = tk.Label(
+            self._dmd_preview_frame,
+            background="#000000",
+            borderwidth=1, relief="solid")
+        self._dmd_preview_label.pack(side=tk.LEFT, padx=(24, 8))
+        self._dmd_preview_caption = ttk.Label(
+            self._dmd_preview_frame,
+            text="Live DMD (PinMAME)",
+            font=(_SANS_FONT, 9, "italic"),
+            foreground="#888888")
+        self._dmd_preview_caption.pack(side=tk.LEFT, padx=(0, 0),
+                                       anchor="s", pady=(0, 4))
+        # Latest frame slot — written from the libpinmame display
+        # thread (no GIL contention concerns since dict/tuple writes
+        # are atomic in CPython).  The Tk after()-pump reads it.
+        self._dmd_latest = None      # (data, w, h, depth) or None
+        self._dmd_preview_tkimage = None  # PhotoImage retained as ref
+        self._dmd_preview_visible = False
+        self._dmd_preview_pump_id = None
 
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._extract_btn = ttk.Button(btn_row, text="Extract",
@@ -556,6 +684,25 @@ class MainWindow:
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
 
+        # Show/hide the Williams capture toggles on the Extract tab.
+        if caps.capture:
+            self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
+            self._capture_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+            self._update_capture_help_text()
+            # Mount the DMD preview placeholder so it's ready to
+            # surface as soon as PinMAME emits the first frame.
+            self._dmd_preview_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+        else:
+            self._basic_extract_frame.pack_forget()
+            self._capture_frame.pack_forget()
+            self._capture_help.configure(text="")
+            self.capture_mode_var.set(False)
+            # Restore basic-extract default for non-Williams plugins
+            # (they always run their normal extract).
+            self.static_extract_var.set(True)
+            self._dmd_preview_frame.pack_forget()
+            self._stop_dmd_preview_pump()
+
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
             self._delta_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
@@ -573,6 +720,145 @@ class MainWindow:
         # the previous manufacturer's settings — unusual but possible).
         self._update_extract_badge()
         self._update_write_badge()
+
+    def _on_extract_mode_toggle(self):
+        """Either Basic-extract or Capture checkbox toggled.
+
+        The two checkboxes are independent — four states matter:
+
+          * basic ON,  capture ON  → combined phases (static + capture)
+          * basic ON,  capture OFF → static-only (default)
+          * basic OFF, capture ON  → capture-only (no static)
+          * basic OFF, capture OFF → nothing to do; warn but allow
+                                     the toggle so the user can fix it
+        """
+        self._update_capture_help_text()
+        if self._current_mfr is None:
+            return
+        basic = self.static_extract_var.get()
+        capture = (self.capture_mode_var.get()
+                   and self._current_mfr.capabilities.capture)
+        if basic and capture:
+            phases = (self._current_mfr.combined_phases
+                      or self._current_mfr.extract_phases)
+        elif capture and not basic:
+            phases = (self._current_mfr.capture_phases
+                      or self._current_mfr.extract_phases)
+        else:  # basic only, or neither (treated as basic for display)
+            phases = self._current_mfr.extract_phases
+        self._rebuild_phase_steps(phases, self._current_mfr.write_phases)
+
+    # Back-compat shim — older code paths may still reference the
+    # original toggle name.
+    _on_capture_toggle = _on_extract_mode_toggle
+
+    def _update_capture_help_text(self):
+        basic = self.static_extract_var.get()
+        capture = self.capture_mode_var.get()
+        if basic and capture:
+            self._capture_help.configure(text=(
+                "Combined: runs the basic ROM asset extract (sprites, "
+                "fonts, splash bitmaps, animation MP4s) AND the "
+                "PinMAME runtime capture (per-scene cinematics with "
+                "synced DCS audio) into the same output folder.  "
+                "Capture requires libpinmame.dll installed.\n\n"
+                "\"Simulate gameplay\" (recommended ON): drives "
+                "coin + Start + Launch + the per-game scripted shot "
+                "sequences (Big-O-Beam, Stroke of Luck, multiball, "
+                "etc.) so the game actually enters play.  OFF = "
+                "attract-mode only — leaves PinMAME idle, capturing "
+                "just the attract reel."))
+        elif capture and not basic:
+            self._capture_help.configure(text=(
+                "Capture only: PinMAME runtime capture without the "
+                "static ROM asset extract.  Output is just the "
+                "per-scene cinematics + DCS audio.  Faster + uses "
+                "less disk than the combined run, useful when you "
+                "already have the static assets or only want the "
+                "live cinematics."))
+        elif basic and not capture:
+            self._capture_help.configure(text=(
+                "Basic only: scans the ROM for raw asset bitmaps "
+                "(sprites, font glyphs, splash screens, paired "
+                "4-shade composites).  Tick \"Use PinMAME\" too to "
+                "ALSO record live gameplay cinematics."))
+        else:
+            self._capture_help.configure(
+                text="Tick at least one box above to run an extract.",
+                foreground="#f44747")
+            return
+        # Restore normal help color (the "neither" branch sets red).
+        self._capture_help.configure(foreground="#888888")
+
+    # ------------------------------------------------------------------
+    # Live DMD preview (Williams capture mode)
+    # ------------------------------------------------------------------
+
+    # WPC DMDs are 128x32 — too tiny to read on a modern display.  This
+    # is the per-dot scale we render at.  4 = ~512x128 image, big
+    # enough to read 5-pixel-tall font glyphs.
+    _DMD_PREVIEW_SCALE = 4
+    _DMD_AMBER = (255, 130, 0)   # match the orange we use elsewhere
+
+    def on_dmd_frame(self, data, width, height, depth):
+        """Receive a live DMD frame from the capture thread.
+
+        Called from libpinmame's display callback on the C side's
+        thread — MUST be quick and MUST NOT touch Tk widgets here.
+        We just stash the latest frame; the Tk-after pump renders it.
+        """
+        # Tuple assignment is atomic in CPython, so concurrent reader
+        # always sees a coherent slot.
+        self._dmd_latest = (data, width, height, depth)
+
+    def reset_dmd_preview(self):
+        """Forget the previous capture's last frame + start the pump.
+
+        Called by app.py right before a new capture run.
+        """
+        self._dmd_latest = None
+        if _HAVE_PIL:
+            self._start_dmd_preview_pump()
+
+    def _start_dmd_preview_pump(self):
+        if self._dmd_preview_pump_id is not None:
+            return
+        # 33ms ≈ 30 fps redraw — generous; the underlying capture
+        # callback is already throttled to ~20 fps so we'll mostly
+        # be repainting the same image.
+        self._dmd_preview_pump_id = self.root.after(
+            33, self._pump_dmd_preview)
+
+    def _stop_dmd_preview_pump(self):
+        if self._dmd_preview_pump_id is not None:
+            try:
+                self.root.after_cancel(self._dmd_preview_pump_id)
+            except Exception:
+                pass
+            self._dmd_preview_pump_id = None
+
+    def _pump_dmd_preview(self):
+        """Tk-after redraw loop: pulls the latest frame slot, renders,
+        updates the preview label."""
+        try:
+            latest = self._dmd_latest
+            if latest is not None and _HAVE_PIL:
+                data, w, h, depth = latest
+                img = _render_pinmame_frame(
+                    data, w, h, depth,
+                    self._DMD_PREVIEW_SCALE, self._DMD_AMBER)
+                tkimg = ImageTk.PhotoImage(img)
+                self._dmd_preview_tkimage = tkimg  # keep reference!
+                self._dmd_preview_label.configure(image=tkimg)
+                if not self._dmd_preview_visible:
+                    self._dmd_preview_visible = True
+        except Exception:
+            # GUI must not crash on a malformed frame.
+            pass
+        # Re-arm — capture-cancel + new-capture loop both rely on
+        # this self-rearm behaviour.
+        self._dmd_preview_pump_id = self.root.after(
+            33, self._pump_dmd_preview)
 
     def _configure_tab(self, label, visible):
         for tab_id in self._notebook.tabs():
@@ -890,6 +1176,14 @@ class MainWindow:
             # Lock the Back button while work is in flight - we don't want
             # the user navigating away from a running pipeline.
             self.set_back_enabled(False)
+            # Start the progress bar marching immediately so the user
+            # gets visual feedback before the first progress callback
+            # arrives — some plugins (Williams DMD scan) take a few
+            # seconds of CPU spin-up before they emit any progress.
+            # The first set_progress() with total>0 switches it to
+            # determinate.
+            self._progress_bar.configure(mode="indeterminate")
+            self._progress_bar.start(12)
             self._start_time = time.time()
             self._tick_timer()
         else:
@@ -904,6 +1198,10 @@ class MainWindow:
                 self.root.after_cancel(self._timer_id)
                 self._timer_id = None
             self._elapsed_label.configure(text="")
+            # Stop the live DMD-preview after-pump.  The label keeps
+            # the last frame on screen as a static snapshot of where
+            # capture ended (useful when reviewing what went wrong).
+            self._stop_dmd_preview_pump()
 
     def _tick_timer(self):
         if self._start_time is not None:
@@ -941,6 +1239,35 @@ class MainWindow:
         style.map("TButton",
                   background=[("active", c["accent"]), ("pressed", c["accent"])],
                   foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+        # ttk.Checkbutton — clam's default flips the background to
+        # white on hover/active, which makes our light-grey text
+        # invisible in dark mode.  Pin the background to our panel
+        # color in every state; convey hover via the indicator
+        # accent colour instead.
+        style.configure("TCheckbutton",
+                        background=c["bg"], foreground=c["fg"],
+                        focuscolor=c["bg"])
+        style.map("TCheckbutton",
+                  background=[("active", c["bg"]),
+                              ("selected", c["bg"]),
+                              ("pressed", c["bg"])],
+                  foreground=[("active", c["accent"]),
+                              ("disabled", c["gray"])],
+                  indicatorcolor=[("selected", c["accent"]),
+                                  ("!selected", c["field_bg"])],
+                  indicatorbackground=[("active", c["field_bg"])])
+        # ttk.Radiobutton has the same clam-default hover bug.
+        style.configure("TRadiobutton",
+                        background=c["bg"], foreground=c["fg"],
+                        focuscolor=c["bg"])
+        style.map("TRadiobutton",
+                  background=[("active", c["bg"]),
+                              ("selected", c["bg"]),
+                              ("pressed", c["bg"])],
+                  foreground=[("active", c["accent"]),
+                              ("disabled", c["gray"])],
+                  indicatorcolor=[("selected", c["accent"]),
+                                  ("!selected", c["field_bg"])])
         style.configure("TEntry", fieldbackground=c["field_bg"],
                         foreground=c["fg"])
         # ttk.Combobox with state="readonly" otherwise renders as

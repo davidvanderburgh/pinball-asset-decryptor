@@ -1,10 +1,11 @@
 # Pinball Asset Decryptor
 
 One app to extract, view, and modify game assets from pinball machines made
-by **Barrels of Fun**, **Jersey Jack Pinball**, **Pinball Brothers**, and
-**Spooky Pinball** — 32 games across four manufacturers.
+by **Barrels of Fun**, **Jersey Jack Pinball**, **Pinball Brothers**,
+**Spooky Pinball**, and **Williams** (WPC-era) — 70+ games across five
+manufacturers.
 
-This is a unified replacement for four separate decryptor apps that all shared
+This is a unified replacement for separate decryptor apps that all shared
 the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
 and mod-pack workflow. Each manufacturer is a plugin under
 [pinball_decryptor/plugins/](pinball_decryptor/plugins/); the shared shell
@@ -19,13 +20,35 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
+| **Williams** (WPC-era) | 40+ WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | Extract DMD scenes (PNGs), animations (MP4), font strips |
 
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
 [bof/games.py](pinball_decryptor/plugins/bof/games.py),
 [jjp/games.py](pinball_decryptor/plugins/jjp/games.py),
 [pb/games.py](pinball_decryptor/plugins/pb/games.py),
-[spooky/games.py](pinball_decryptor/plugins/spooky/games.py).
+[spooky/games.py](pinball_decryptor/plugins/spooky/games.py),
+[williams/games.py](pinball_decryptor/plugins/williams/games.py).
+
+The Williams plugin uses a Python port of
+[permartinson/wpcedit.js](https://github.com/permartinson/wpcedit.js)
+(based on Garrett Lee's original 2004 WPC Edit) to walk the WPC ROM's
+font/graphics/animation master tables and decode the 11 compressed-frame
+encodings the game's 6809 code uses at runtime. Output per game:
+
+- **`dmd_scenes/scene_*.png`** — one PNG per full-frame DMD bitmap
+  (jackpot splashes, mode-start announcements, title cards). Order
+  of magnitude: ~800–1400 scenes per game ROM.
+- **`dmd_scenes/pairs/pair_*.png`** — 4-shade composites that pair
+  consecutive low+high planes.
+- **`dmd_scenes/browse.mp4`** — every scene back-to-back at 2 fps so
+  you can skim hundreds in a minute.
+- **`animations/anim_*.mp4`** — true game animations decoded from
+  the WPC animation table (one MP4 per cinematic sequence — the
+  "fish growing toward you" attract animation in Fish Tales, the
+  motorcycle ride in No Fear, etc.).
+- **`fonts/font_*.png`** — sprite-sheet grids of every DMD glyph
+  atlas (full ASCII alphabets in multiple sizes).
 
 ## Install
 

@@ -21,6 +21,7 @@ _PLUGIN_MODULES = [
     "pinball_decryptor.plugins.spooky",
     "pinball_decryptor.plugins.bof",
     "pinball_decryptor.plugins.jjp",
+    "pinball_decryptor.plugins.williams",
 ]
 
 
@@ -50,6 +51,10 @@ class Capabilities:
     modpack: bool = False
     apply_delta: bool = False
     iso: bool = False
+    # Runtime-capture path: spawn an emulator (e.g. PinMAME via
+    # libpinmame), capture composed DMD frames + audio while attract
+    # mode plays, and emit per-cinematic MP4s.  Used by Williams.
+    capture: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,14 @@ class Manufacturer(ABC):
     # phases (Detect/Decrypt/Extract/Checksums/Cleanup).
     extract_phases: Tuple[str, ...] = tuple(EXTRACT_PHASES)
     write_phases: Tuple[str, ...] = tuple(WRITE_PHASES)
+    # Phase labels for the runtime-capture path (only meaningful
+    # when ``capabilities.capture`` is True).
+    capture_phases: Tuple[str, ...] = ()
+    # Phase labels for the COMBINED extract + capture path (static
+    # asset extract followed by runtime capture).  Used when the
+    # capture toggle is on and capture is additive on top of static.
+    # Falls back to capture_phases if a plugin doesn't define both.
+    combined_phases: Tuple[str, ...] = ()
 
     # Runtime tools this plugin needs.  Probed on a worker thread when
     # the user picks this manufacturer in the GUI; results render as
@@ -94,6 +107,12 @@ class Manufacturer(ABC):
     # Optional: GitHub repo override.  When None, the core update checker
     # uses :data:`core.config.GITHUB_REPO`.
     update_repo: Optional[str] = None
+
+    # Whether this plugin should be flagged as "Beta" in the UI.  Set
+    # True on plugins where major features are still in active
+    # development (e.g. capture pipeline emerging from initial
+    # bring-up) so users know to expect rough edges.
+    beta: bool = False
 
     @abstractmethod
     def detect(self, path):
@@ -118,6 +137,19 @@ class Manufacturer(ABC):
         """Returns ``(overwritten, added, total)``."""
         raise NotImplementedError(
             f"{self.display} does not implement apply-delta.")
+
+    def make_capture_pipeline(self, input_path, output_dir,
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              **kwargs):
+        """Build the runtime-capture pipeline (emulator-driven).
+
+        Only meaningful when ``capabilities.capture`` is True.
+        ``kwargs`` carries pipeline-specific knobs (e.g.
+        ``duration_seconds``); each plugin decides which it
+        understands.
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a Capture pipeline.")
 
     # ------------------------------------------------------------------
     # Misc UI hints — override if you want non-default phrasing.

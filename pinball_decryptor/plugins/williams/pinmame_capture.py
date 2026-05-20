@@ -383,9 +383,6 @@ class PinmameCapture:
         self._log: list = []
         self._log_cb: Optional[Callable[[str, str], None]] = None
         self._state: int = 0
-        # Reactive trough-VUK tracking (see _gameplay_simulation_loop).
-        self._trough_kick_event = threading.Event()
-        self._watching_trough_kick = False
         # Fires when the per-game script finishes its last moment;
         # the main capture loop uses this to end the recording early
         # instead of padding with idle ball-search frames.
@@ -760,34 +757,52 @@ class PinmameCapture:
         # Let the credits message finish + chime clear before Start.
         time.sleep(2.0)
 
-        # 4. Press Start.  We arm the trough-kick watcher BEFORE
-        # the first press so even an instant-accept press is caught.
-        # As soon as the ROM fires the trough VUK we stop pressing —
-        # extra presses while a game is starting can add players we
-        # don't want (Start during attract = add player on a started
-        # game).
-        self._trough_kick_event.clear()
-        self._watching_trough_kick = True
+        # 4. Press Start.  Detect acceptance by watching for any
+        # new mechanism-range solenoid (sol#1-16) to fire DURING
+        # this specific press window — per-press snapshot of the
+        # seen-set, not first-time-ever.  The trough-release solenoid
+        # number varies per game (sBallRel=2 on AFM, sTrough=14 on
+        # No Fear, etc.) and may have already fired during attract
+        # or coin insertion, so we can't rely on a single sol number
+        # or a global first-time check.
+        accepted = False
         self._emit_log(
             f"Pressing Start (sw#{SW_START}) up to 6x...", "info")
-        accepted = False
         for i in range(6):
             if stop_event.is_set():
                 return
+            # Snapshot solenoid counts immediately before this press.
+            sol_counts_before = dict(self._sol_counts)
             self._press_switch(SW_START, hold_ms=800)
-            # Short wait to see if THIS press triggered trough kick.
-            if self._trough_kick_event.wait(timeout=1.5):
+            # Poll up to 1.5s for any mechanism solenoid to fire
+            # more times than it had before the press.  Game-start
+            # bursts include 2-4 mechanism solenoid fires (trough
+            # release, autoplunger, credit chime, etc.) so even one
+            # extra count is a strong positive signal.
+            deadline = time.monotonic() + 1.5
+            new_fires = []
+            while time.monotonic() < deadline:
+                if stop_event.is_set():
+                    return
+                for sol, count in self._sol_counts.items():
+                    if (sol in self._SOL_MECHANISM_RANGE
+                            and count > sol_counts_before.get(sol, 0)):
+                        new_fires.append(sol)
+                if new_fires:
+                    break
+                time.sleep(0.05)
+            if new_fires:
                 self._emit_log(
                     f"Start accepted on press #{i + 1} — "
-                    "trough kicker fired.", "success")
+                    f"mechanism solenoid(s) {sorted(set(new_fires))} "
+                    "fired in response.", "success")
                 accepted = True
                 break
         if not accepted:
             self._emit_log(
-                "Trough kicker never fired after Start presses — "
-                "game did NOT enter play.  Aborting sim loop.",
+                "No mechanism solenoid fired after any Start press "
+                "— game did NOT enter play.  Aborting sim loop.",
                 "warning")
-            self._watching_trough_kick = False
             return
 
         # 5. The ROM has fired the trough release solenoid (sBallRel,
@@ -826,8 +841,6 @@ class PinmameCapture:
             self._set_switch(script.sw_shooter_lane, 0)
         self._emit_log(
             "Shooter-lane OPEN = ball in active play.", "info")
-        # Disarm the watcher — we'll re-arm it if we restart the game.
-        self._watching_trough_kick = False
         time.sleep(0.5)
 
         # 7. Active play: drive the per-game script's ordered
@@ -860,37 +873,41 @@ class PinmameCapture:
     def _cb_mech_available(self, mech, info_ptr, userdata): pass
     def _cb_mech_updated(self, mech, info_ptr, userdata): pass
 
-    # Solenoid number for the trough ball-release.  On AFM this is
-    # sBallRel = 2 (from PinMAME afm.c).  sAutoFire (sol#1) is the
-    # AUTO-PLUNGER which fires AFTER the ball is in the shooter lane
-    # — listening to that solenoid for "Start accepted" was a
-    # diagnostic mistake.
-    _SOL_TROUGH_KICKER = 2
-    _SOL_AUTOPLUNGER = 1
+    # WPC games consistently assign sol#1-16 to game-mechanism
+    # solenoids (trough release, autoplunger, knocker, slings, pop
+    # bumpers, jets, saucer kickers, drop reset).  Higher numbers
+    # (17+) are flashers — attract mode pulses them constantly, so
+    # they're useless as a "Start accepted" signal.  We watch for
+    # any NEW sol in the mechanism range to fire after we press
+    # Start; that's reliable across every WPC game regardless of
+    # the specific trough-release solenoid number (sBallRel=2 on
+    # AFM, but other games shuffle the assignments).
+    _SOL_MECHANISM_RANGE = range(1, 17)
 
     def _cb_solenoid_updated(self, state_ptr, userdata):
-        """Tally solenoid energizations + react to trough kicker.
+        """Tally solenoid energizations + react to game-start signals.
 
         First-time-seen events log to the live console; total counts
-        feed the end-of-capture activity summary.  Additionally, if
-        we're currently waiting for the ROM to release a ball after
-        Start, we watch for the trough-VUK solenoid and signal the
-        simulation thread the moment it fires.
+        feed the end-of-capture activity summary.  When we're
+        watching for the ROM to accept Start, any *new* low-numbered
+        solenoid firing signals acceptance.
         """
         try:
             st = state_ptr.contents
             sol = st.solNo
             if st.state:
                 self._sol_counts[sol] = self._sol_counts.get(sol, 0) + 1
-                if (self._watching_trough_kick
-                        and sol == self._SOL_TROUGH_KICKER):
-                    self._trough_kick_event.set()
-                if sol not in self._sol_seen:
+                is_first_time = sol not in self._sol_seen
+                if is_first_time:
                     self._sol_seen.add(sol)
                     elapsed = time.monotonic() - self._start_monotonic
                     self._emit_log(
                         f"[sol] sol#{sol} energized first time "
                         f"@ t={elapsed:.1f}s", "info")
+                # Game-start detection now happens in the sim thread
+                # via per-press snapshots of _sol_counts (see
+                # _gameplay_simulation_loop).  This callback just
+                # maintains _sol_counts; the watcher is gone.
         except Exception:
             pass
 
@@ -962,8 +979,6 @@ class PinmameCapture:
         self._sol_seen = set()
         self._sol_counts = {}
         self._snd_seen = set()
-        self._watching_trough_kick = False
-        self._trough_kick_event.clear()
         self._script_done_event.clear()
         self._rom_name = config.rom_name
         self._script_clips = []

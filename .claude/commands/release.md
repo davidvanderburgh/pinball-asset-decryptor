@@ -21,11 +21,13 @@ so we never again ship a tag where `__version__` lags the tag string
    - Latest tag from `git tag --sort=-v:refname | head -1`.
    - The two SHOULD match the same `vX.Y.Z`.  If they don't, surface the mismatch.
 
-3. **Run the test suite** before anything else gets touched:
+3. **Run the test suite locally** before anything else gets touched:
    ```
    python -m pytest tests/ --ignore=tests/test_gui_smoke.py
    ```
    Abort the release if anything fails.  The `test_gui_smoke.py` Tcl error is pre-existing infrastructure noise — ignore it via the `--ignore` flag, NOT by skipping the whole run.
+
+   **Local green is necessary but NOT sufficient.**  Local envs tend to have more installed than CI runners (e.g. Pillow lives in my dev env but wasn't in the CI workflow's pip-install step, which silently broke Williams plugin discovery for the entire v0.4.0 release).  See step 7b below — we don't tag until CI is green on the just-pushed commit.
 
 4. **Decide the bump.**
    - Default to **patch** for bugfixes / small tweaks.
@@ -74,6 +76,30 @@ so we never again ship a tag where `__version__` lags the tag string
    git push origin main
    ```
    No PR — user pushes directly to main always.  (Memory: `feedback_no_prs.md`.)
+
+7b. **Wait for CI to pass on the just-pushed commit before tagging.**
+
+    Local green isn't enough — CI runners often have fewer packages installed than the dev env.  v0.4.0 shipped with a broken Williams plugin because Pillow lived in my local Python but wasn't in the CI workflow's pip-install step; `load_plugins()` swallowed the ImportError and Williams silently disappeared from the registry across all three runner OSes.  Catch this BEFORE the tag goes out.
+
+    ```bash
+    HEAD_SHA=$(git rev-parse HEAD)
+    sleep 5  # let GitHub register the workflow trigger
+    RUN_ID=$(gh run list --workflow=test.yml --commit "$HEAD_SHA" \
+                       --json databaseId --jq '.[0].databaseId')
+    if [ -z "$RUN_ID" ]; then
+        echo "No CI run found for $HEAD_SHA — workflow may not have triggered."
+        # Either the workflow doesn't run on this branch, or GitHub's
+        # still processing the push.  Ask the user whether to proceed
+        # without the gate.
+    else
+        gh run watch "$RUN_ID" --exit-status
+    fi
+    ```
+
+    If CI fails:
+    - **Do NOT tag.**  The push is on main and stays there — fix forward.
+    - Read the failure (`gh run view $RUN_ID --log-failed`), make the fix, commit + push again, and re-poll CI.
+    - When CI is finally green on a commit, that's the commit you tag.
 
 8. **Tag annotated.**  Tag body = a short release-note summary (different from the commit body — these end up as the GitHub release description).
    ```

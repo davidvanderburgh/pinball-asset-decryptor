@@ -395,9 +395,42 @@ class MainWindow:
         # the scripted playthrough doesn't trigger expected cinemas).
         self._switch_matrix_frame = ttk.LabelFrame(
             f, text="Switch matrix (click to press)")
-        self._switch_matrix_inner = ttk.Frame(self._switch_matrix_frame)
-        self._switch_matrix_inner.pack(fill=tk.BOTH, expand=True,
-                                       padx=4, pady=4)
+        # Wrap the grid in a scrollable Canvas so games with 60+
+        # switches (ToM, STTNG, etc.) work without forcing a wide
+        # window.  Vertical scrollbar appears on demand.
+        self._switch_matrix_canvas = tk.Canvas(
+            self._switch_matrix_frame,
+            height=140, highlightthickness=0, borderwidth=0)
+        self._switch_matrix_scroll = ttk.Scrollbar(
+            self._switch_matrix_frame, orient="vertical",
+            command=self._switch_matrix_canvas.yview)
+        self._switch_matrix_canvas.configure(
+            yscrollcommand=self._switch_matrix_scroll.set)
+        self._switch_matrix_canvas.pack(
+            side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._switch_matrix_inner = tk.Frame(self._switch_matrix_canvas)
+        self._switch_matrix_inner_id = (
+            self._switch_matrix_canvas.create_window(
+                (0, 0), window=self._switch_matrix_inner, anchor="nw"))
+
+        def _update_matrix_scroll(_e=None):
+            bbox = self._switch_matrix_canvas.bbox("all")
+            if bbox is None:
+                return
+            self._switch_matrix_canvas.configure(scrollregion=bbox)
+            visible = self._switch_matrix_canvas.winfo_height()
+            content_h = bbox[3] - bbox[1]
+            if content_h > visible + 2:
+                self._switch_matrix_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            else:
+                self._switch_matrix_scroll.pack_forget()
+
+        self._switch_matrix_inner.bind(
+            "<Configure>", _update_matrix_scroll)
+        self._switch_matrix_canvas.bind(
+            "<Configure>",
+            lambda e: self._switch_matrix_canvas.itemconfig(
+                self._switch_matrix_inner_id, width=e.width))
         # ``_manual_press_fn`` is set by ``on_capture_ready`` when
         # PinMAME boots; the matrix grid uses it for each button.
         self._manual_press_fn = None
@@ -918,19 +951,27 @@ class MainWindow:
         self._switch_matrix_frame.configure(
             text=f"Switch matrix — {script.title} "
                  f"({len(entries)} switches, click to press)")
-        cols = 6
+        # 8 columns of compact buttons fits comfortably in the
+        # default extract-tab width.  Each button is "sw## Name"
+        # truncated to 13 chars total — full switch name in tooltip.
+        cols = 8
         for i, (name, sw) in enumerate(entries):
             sw_n = int(sw)
             row, col = divmod(i, cols)
             short = name.replace("sw", "", 1).strip()
+            # Truncate to keep the grid compact.
+            short_disp = short[:8]
             btn = ttk.Button(
                 self._switch_matrix_inner,
-                text=f"sw{sw_n:>3}  {short[:14]}",
-                width=20,
+                text=f"{sw_n:>2} {short_disp}",
+                width=12,
                 command=lambda s=sw_n, n=short:
                     self._on_manual_switch_press(s, n))
-            btn.grid(row=row, column=col, padx=2, pady=2, sticky="w")
+            btn.grid(row=row, column=col, padx=1, pady=1, sticky="w")
             self._switch_matrix_buttons.append(btn)
+            # Full name in a tooltip on hover.
+            _Tooltip(btn, f"sw#{sw_n} — {short}",
+                     lambda: self._current_theme)
         # Make the matrix visible.
         self._switch_matrix_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
 

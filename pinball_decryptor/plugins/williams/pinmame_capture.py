@@ -584,15 +584,43 @@ class PinmameCapture:
             self._lib.PinmameSetSwitch(script.sw_coin_door, 1)
             for sw in script.sw_trough:
                 self._lib.PinmameSetSwitch(sw, 1)
+            # The sw#31-ish "eject" position has two distinct meanings
+            # across WPC games:
+            #
+            #   * "swTroughJam" / "TroughJAM" (NF, MM, ToM, MB, etc.)
+            #     — a VUK *staging* position where one ball pre-loads
+            #     outside the main trough.  Default initial state on
+            #     a real machine is CLOSED (ball staged), and the
+            #     ROM's pre-launch "INITIALIZING PLEASE WAIT" check
+            #     loops forever if it isn't.
+            #
+            #   * "swTEject" (AFM and a few others) — an empty
+            #     intermediate eject position between trough and
+            #     shooter lane.  Default is OPEN (no ball there
+            #     until the trough kicker fires).
+            #
+            # We disambiguate by switch name in the raw map.
+            eject_state = "EMPTY"
             if script.sw_eject is not None:
-                self._lib.PinmameSetSwitch(script.sw_eject, 0)
+                eject_name = ""
+                raw = script.profile.get("raw", {})
+                for n, sw in raw.items():
+                    if int(sw) == script.sw_eject:
+                        eject_name = n
+                        break
+                if "jam" in eject_name.lower():
+                    self._lib.PinmameSetSwitch(script.sw_eject, 1)
+                    eject_state = f"LOADED ({eject_name})"
+                else:
+                    self._lib.PinmameSetSwitch(script.sw_eject, 0)
+                    eject_state = f"EMPTY ({eject_name or 'sw#%d' % script.sw_eject})"
             if script.sw_shooter_lane is not None:
                 self._lib.PinmameSetSwitch(script.sw_shooter_lane, 0)
             self._emit_log(
                 f"Seeded boot switches ({script.title}): coin door "
                 f"sw#{script.sw_coin_door} CLOSED, "
                 f"trough {script.sw_trough} FULL, "
-                f"eject sw#{script.sw_eject} EMPTY, "
+                f"eject sw#{script.sw_eject} {eject_state}, "
                 f"shooter-lane sw#{script.sw_shooter_lane} EMPTY.",
                 "info")
         except Exception as e:

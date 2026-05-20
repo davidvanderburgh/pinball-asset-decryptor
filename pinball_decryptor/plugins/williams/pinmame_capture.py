@@ -757,55 +757,59 @@ class PinmameCapture:
         # Let the credits message finish + chime clear before Start.
         time.sleep(2.0)
 
-        # 4. Press Start.  Detect acceptance by watching for ≥ 2
-        # DISTINCT mechanism-range solenoids (sol#1-16) to fire
-        # during this specific press window.  Game-start fires
-        # trough-release THEN autoplunger in sequence (~1s apart);
-        # attract-mode flasher cycles may briefly bump one sol but
-        # rarely two distinct mechanism sols at once.  Requiring two
-        # eliminates false positives where the press happens to
-        # coincide with a single attract sol pulse.
+        # 4. Press Start.  Detect acceptance by watching for any
+        # mechanism-range solenoid (sol#1-16) to fire WITHIN 1.2s of
+        # the press release.  Game-start triggers a sol response
+        # nearly instantly (typically 200-500ms after press), while
+        # attract-mode flasher cycles fire on their own slow schedule
+        # (~5-15s between cycles) — so a tight post-press window is
+        # what distinguishes "the ROM responded to my input" from
+        # "this would have happened anyway".
+        #
+        # We DON'T retry beyond a couple of presses: multi-pressing
+        # Start adds players to a started game (Start during attract
+        # = add credit/player), so over-pressing actively breaks
+        # what we just succeeded at.
         accepted = False
+        max_presses = 3
         self._emit_log(
-            f"Pressing Start (sw#{SW_START}) up to 6x...", "info")
-        for i in range(6):
+            f"Pressing Start (sw#{SW_START}) up to {max_presses}x...",
+            "info")
+        for i in range(max_presses):
             if stop_event.is_set():
                 return
             sol_counts_before = dict(self._sol_counts)
-            self._press_switch(SW_START, hold_ms=800)
-            # Poll 2s — game-start burst (release + plunger +
-            # optional knocker) typically completes inside 1.5s but
-            # we give a little more room than the press timing alone.
-            deadline = time.monotonic() + 2.0
-            distinct_sols = set()
+            self._press_switch(SW_START, hold_ms=600)
+            # Tight 1.2s post-press window — game-start sol response
+            # is sub-second, attract flashers cycle on much longer
+            # schedules so they rarely land inside this window.
+            deadline = time.monotonic() + 1.2
+            new_sols = set()
             while time.monotonic() < deadline:
                 if stop_event.is_set():
                     return
                 for sol, count in self._sol_counts.items():
                     if (sol in self._SOL_MECHANISM_RANGE
                             and count > sol_counts_before.get(sol, 0)):
-                        distinct_sols.add(sol)
-                if len(distinct_sols) >= 2:
+                        new_sols.add(sol)
+                if new_sols:
                     break
                 time.sleep(0.05)
-            if len(distinct_sols) >= 2:
+            if new_sols:
                 self._emit_log(
                     f"Start accepted on press #{i + 1} — "
-                    f"mechanism sols {sorted(distinct_sols)} "
-                    "fired in sequence (game-start burst).",
-                    "success")
+                    f"mechanism sol(s) {sorted(new_sols)} fired "
+                    "within the post-press window.", "success")
                 accepted = True
                 break
-            elif distinct_sols:
-                self._emit_log(
-                    f"Press #{i + 1}: only sol#{sorted(distinct_sols)[0]} "
-                    "fired — likely attract flasher, not Start "
-                    "acceptance.  Retrying.", "info")
+            self._emit_log(
+                f"Press #{i + 1}: no mech sol fired within 1.2s. "
+                "Retrying.", "info")
         if not accepted:
             self._emit_log(
-                "Insufficient mechanism solenoid activity after any "
-                "Start press — game did NOT enter play.  Aborting "
-                "sim loop.", "warning")
+                "No mechanism solenoid fired after any Start press "
+                "— game did NOT enter play.  Aborting sim loop.",
+                "warning")
             return
 
         # 5. The ROM has fired the trough release solenoid (sBallRel,

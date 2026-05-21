@@ -4,8 +4,8 @@ from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from .formats import detect_game
 from .games import GAME_DB
+from ...core.transcribe import TranscribePipeline
 from .pipeline import ExtractPipeline, WritePipeline
-from .transcribe import TranscribePipeline
 
 
 _GAMES = tuple(sorted(

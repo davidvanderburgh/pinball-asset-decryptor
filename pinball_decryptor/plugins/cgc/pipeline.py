@@ -28,10 +28,10 @@ from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
                                md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
+from ...core.transcribe import CALLOUTS_CSV
 from .formats import (detect_game, find_data_partition, find_game_partition,
                       is_img_file, read_mbr_partitions)
 from .games import GAME_DB
-from .transcribe import CALLOUTS_CSV
 
 
 # Path of emmc.img inside the installer's P3 ext4 partition.  Same for

@@ -2,6 +2,7 @@
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
+from ...core.transcribe import TranscribePipeline
 from .capture_pipeline import (
     COMBINED_PHASES, CapturePipeline, StaticPlusCapturePipeline)
 from .capture_pipeline import PHASES as CAPTURE_PHASES
@@ -34,6 +35,9 @@ class WilliamsManufacturer(Manufacturer):
         # zip + output folder feed into a libpinmame-driven session
         # that emits per-cinematic MP4s with synced audio.
         capture=True,
+        # Auto-transcribe: faster-whisper over the extracted WAVs
+        # (DCS sound tracks + capture audio slices) -> callouts.csv.
+        transcribe=True,
     )
     input_spec = InputSpec(
         label="Williams MAME ROM zips",
@@ -46,6 +50,7 @@ class WilliamsManufacturer(Manufacturer):
     # runs on top).  GUI phase indicator switches to this set when
     # the user ticks "Use PinMAME runtime capture".
     combined_phases = COMBINED_PHASES
+    transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     prerequisites = (
         Prerequisite(
             name="ffmpeg", where="host",
@@ -55,6 +60,15 @@ class WilliamsManufacturer(Manufacturer):
                 "winget install Gyan.FFmpeg  (Windows)\n"
                 "brew install ffmpeg          (macOS)\n"
                 "apt-get install ffmpeg       (Linux)")),
+        # faster-whisper drives the Auto-transcribe checkbox.  Probed
+        # via an in-process import so the check reflects the Python
+        # the app actually runs on.  ~75 MB tiny.en model downloads
+        # on first transcribe-run and is cached in the user's HF cache.
+        Prerequisite(
+            name="faster-whisper", where="host",
+            probe="python:faster_whisper",
+            reason="Auto-transcribe extracted audio to callouts.csv.",
+            install_hint="pip install faster-whisper"),
         # libpinmame is optional — only needed for the runtime-
         # capture path.  We don't list it as a prereq because the
         # GUI shows missing prereqs in red; libpinmame missing should
@@ -118,11 +132,21 @@ class WilliamsManufacturer(Manufacturer):
             capture_ready_cb=capture_ready_cb,
         )
 
+    def make_transcribe_pipeline(self, assets_dir,
+                                 log_cb, phase_cb, progress_cb, done_cb,
+                                 rename_after=False):
+        return TranscribePipeline(
+            assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            rename_after=rename_after)
+
     def extract_input_help(self):
         return ("Pick a MAME-format ROM zip — e.g. `ft_l5.zip` "
                 "(Fish Tales), `afm_113b.zip` (Attack From Mars).  "
                 "Static mode extracts raw asset bitmaps from the ROM "
-                "(sprites, font glyphs, splash screens).  Capture "
-                "mode (checkbox below) spawns PinMAME, records "
-                "composed cinematics + DCS audio during attract "
-                "mode, and emits per-cinematic MP4s.")
+                "(sprites, font glyphs, splash screens), and for "
+                "DCS-era games (1993+) decodes every sound track to "
+                "sounds/.  Capture mode (checkbox below) spawns "
+                "PinMAME, records composed cinematics + DCS audio "
+                "during attract mode, and emits per-cinematic MP4s.  "
+                "Tick Auto-transcribe to also emit a callouts.csv "
+                "naming each extracted WAV by its spoken text.")

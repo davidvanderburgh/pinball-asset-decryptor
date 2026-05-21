@@ -788,20 +788,11 @@ class MainWindow:
             self._switch_matrix_frame.pack_forget()
             self._manual_press_fn = None
 
-        # Show/hide the auto-transcribe checkbox (CGC for now).  Lives
-        # above the Extract button so its relationship to Extract is
-        # visually clear -- ticking it makes Extract also produce
-        # callouts.csv once the asset dump finishes.
-        if caps.transcribe:
-            self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
-            # Sync the rename checkbox's enabled state to the current
-            # transcribe checkbox value (so swapping manufacturers
-            # doesn't leave it in an inconsistent state).
-            self._on_transcribe_toggle()
-        else:
-            self._transcribe_frame.pack_forget()
-            self.transcribe_var.set(False)
-            self.transcribe_rename_var.set(False)
+        # Show/hide the auto-transcribe checkboxes.  They build a
+        # callouts.csv from the extracted WAVs — and only the basic/
+        # static extract emits standalone WAVs, so for capture-capable
+        # plugins they sit under "Basic extract" and track it.
+        self._update_transcribe_visibility()
 
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
@@ -847,6 +838,8 @@ class MainWindow:
         else:  # basic only, or neither (treated as basic for display)
             phases = self._current_mfr.extract_phases
         self._rebuild_phase_steps(phases, self._current_mfr.write_phases)
+        # Transcribe is only meaningful when the basic extract runs.
+        self._update_transcribe_visibility()
 
     # Back-compat shim — older code paths may still reference the
     # original toggle name.
@@ -865,6 +858,39 @@ class MainWindow:
         else:
             self._transcribe_rename_check.state(["disabled"])
             self.transcribe_rename_var.set(False)
+
+    def _update_transcribe_visibility(self):
+        """Show the auto-transcribe checkboxes only when a transcribable
+        extract will actually run.
+
+        Transcribe builds callouts.csv from standalone .wav files, and
+        only the basic/static extract emits those — a capture-only run
+        muxes its audio straight into the per-clip MP4s.  So for
+        capture-capable plugins (Williams) the checkboxes sit directly
+        under "Basic extract" and appear only while it is ticked;
+        plugins without that toggle (CGC) always show them.
+        """
+        if self._current_mfr is None:
+            return
+        caps = self._current_mfr.capabilities
+        show = caps.transcribe and (
+            not caps.capture or self.static_extract_var.get())
+        if not show:
+            self._transcribe_frame.pack_forget()
+            # Hidden means it won't run — don't let a stale tick chain
+            # transcribe onto an output that has no WAVs.
+            self.transcribe_var.set(False)
+            self.transcribe_rename_var.set(False)
+            return
+        if caps.capture:
+            # Sit directly below the "Basic extract" checkbox.
+            self._transcribe_frame.pack(
+                fill=tk.X, padx=10, pady=(2, 0),
+                after=self._basic_extract_frame)
+        else:
+            self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+        # Keep the rename checkbox's enabled state in sync.
+        self._on_transcribe_toggle()
 
     def _update_capture_help_text(self):
         basic = self.static_extract_var.get()

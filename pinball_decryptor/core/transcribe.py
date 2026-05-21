@@ -1,22 +1,22 @@
-"""Auto-transcribe extracted CGC audio samples to a callouts.csv.
+"""Auto-transcribe extracted audio samples to a callouts.csv.
 
-CGC's WPC remakes (MM, AFM, MB) ship per-game audio as several hundred
-WAVs named purely by sample index (``MM_40DEB2.wav``, ``S0007-LP.wav``,
-...).  When you want to mod "the callout where the witch laughs" you
-have to open WAVs blind because nothing in the .img maps index ->
-spoken text.
+Asset extraction yields audio as many WAVs named only by index — when
+you want to mod "the callout where the witch laughs" you'd otherwise
+have to open WAVs blind because nothing maps index -> spoken text.
 
-This module runs `faster-whisper`_ (tiny.en, int8 CPU) across the
-extracted samples, with the built-in Silero VAD filter enabled so
-non-speech samples (sound effects, music beds, crowd ambience) skip
-Whisper entirely and just get logged as ``[no speech]`` in the CSV.
+This module runs `faster-whisper`_ (tiny.en, int8 CPU) across every
+WAV under an assets directory, with the built-in Silero VAD filter
+enabled so non-speech samples (sound effects, music beds, crowd
+ambience) skip Whisper entirely and just get logged as ``[no speech]``.
 
 Output: ``callouts.csv`` at the root of the assets dir, with columns:
 
     relative_path, classification, text
 
 where ``classification`` is ``speech`` for transcribed WAVs and
-``non-speech`` for VAD-skipped ones.
+``non-speech`` for VAD-skipped ones.  Shared infrastructure — any
+manufacturer plugin whose ``Capabilities.transcribe`` is True wires
+this in via ``make_transcribe_pipeline``.
 
 .. _faster-whisper: https://github.com/SYSTRAN/faster-whisper
 """
@@ -24,7 +24,7 @@ where ``classification`` is ``speech`` for transcribed WAVs and
 import csv
 import os
 
-from ...core.pipeline_base import BasePipeline, PipelineError
+from .pipeline_base import BasePipeline, PipelineError
 
 
 WHISPER_IMPORT_HINT = (
@@ -40,7 +40,7 @@ CALLOUTS_CSV = "callouts.csv"
 
 
 class TranscribePipeline(BasePipeline):
-    """Walk an extracted CGC assets dir, transcribe speech-bearing WAVs.
+    """Walk an extracted assets dir, transcribe speech-bearing WAVs.
 
     Phase 0: Locate WAVs + load model.
     Phase 1: Run Whisper+VAD on each WAV.

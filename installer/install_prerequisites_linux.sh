@@ -17,6 +17,8 @@ else
     SUDO=""
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This installer expects an apt-based distro (Debian / Ubuntu)."
     echo "For others, install the equivalent of these packages by hand:"
@@ -147,42 +149,10 @@ $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${all_packages[@]}"
 # --- Custom post-install steps (downloads that aren't in apt) -----------
 install_gdre_tools() {
     # GDRE Tools (Godot RE Tools) — required for BOF's PCK repack.
-    # Match upstream bof-decryptor: install binary to /opt/gdre_tools/
-    # and a wrapper at /usr/local/bin/gdre_tools (so it's on PATH).
+    # The install logic is the shared install_gdre.sh, run verbatim by
+    # the Windows (WSL) installer too — one source of truth.
     echo ""
-    echo "Installing GDRE Tools (Godot RE Tools)..."
-    if [ -x /opt/gdre_tools/gdre_tools.x86_64 ]; then
-        echo "  Already installed at /opt/gdre_tools — skipping."
-        return 0
-    fi
-    local META DL_URL VER
-    META=$(curl -sf https://api.github.com/repos/GDRETools/gdsdecomp/releases/latest)
-    DL_URL=$(echo "$META" | grep -oE '"browser_download_url": "[^"]*-linux\.zip"' | head -1 | cut -d'"' -f4)
-    VER=$(echo "$META" | grep -oE '"tag_name": "[^"]*"' | head -1 | cut -d'"' -f4)
-    if [ -z "$DL_URL" ]; then
-        echo "  ERROR: could not find -linux.zip release asset on GDRETools/gdsdecomp."
-        return 1
-    fi
-    echo "  Downloading GDRE Tools $VER..."
-    curl -L --progress-bar "$DL_URL" -o /tmp/gdre_tools.zip
-    rm -rf /tmp/gdre_extract
-    mkdir -p /tmp/gdre_extract
-    unzip -o /tmp/gdre_tools.zip -d /tmp/gdre_extract/ >/dev/null
-    $SUDO rm -rf /opt/gdre_tools
-    $SUDO mkdir -p /opt/gdre_tools
-    $SUDO cp -f /tmp/gdre_extract/gdre_tools.x86_64 /opt/gdre_tools/
-    $SUDO cp -f /tmp/gdre_extract/gdre_tools.pck    /opt/gdre_tools/
-    $SUDO cp -f /tmp/gdre_extract/libGodotMonoDecompNativeAOT.so /opt/gdre_tools/ 2>/dev/null || true
-    $SUDO chmod +x /opt/gdre_tools/gdre_tools.x86_64
-    # Wrapper script on PATH
-    $SUDO tee /usr/local/bin/gdre_tools > /dev/null <<'EOF'
-#!/bin/bash
-export LD_LIBRARY_PATH=/opt/gdre_tools:$LD_LIBRARY_PATH
-exec "/opt/gdre_tools/gdre_tools.x86_64" "$@"
-EOF
-    $SUDO chmod +x /usr/local/bin/gdre_tools
-    rm -rf /tmp/gdre_tools.zip /tmp/gdre_extract
-    echo "  GDRE Tools $VER installed (wrapper: /usr/local/bin/gdre_tools)."
+    bash "$SCRIPT_DIR/install_gdre.sh"
 }
 
 for s in "${selected[@]}"; do

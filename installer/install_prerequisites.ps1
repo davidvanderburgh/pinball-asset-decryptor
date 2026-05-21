@@ -479,41 +479,18 @@ function Install-GdreTools {
         Write-OK "GDRE Tools (already installed at /opt/gdre_tools)"
         return
     }
-    # Fetch latest release URL, download, extract to /opt, create wrapper.
-    # Matches upstream bof-decryptor's _install_gdre_tools logic.
-    $script = @'
-set -e
-ASSET_SUFFIX="-linux.zip"
-META=$(curl -sf https://api.github.com/repos/GDRETools/gdsdecomp/releases/latest)
-DL_URL=$(echo "$META" | grep -oE "\"browser_download_url\": \"[^\"]*${ASSET_SUFFIX}\"" | head -1 | cut -d'"' -f4)
-VER=$(echo "$META" | grep -oE "\"tag_name\": \"[^\"]*\"" | head -1 | cut -d'"' -f4)
-if [ -z "$DL_URL" ]; then
-    echo "Could not find ${ASSET_SUFFIX} release asset on GDRETools/gdsdecomp." >&2
-    exit 1
-fi
-echo "Downloading GDRE Tools ${VER}..."
-curl -L --progress-bar "$DL_URL" -o /tmp/gdre_tools.zip
-rm -rf /tmp/gdre_extract
-mkdir -p /tmp/gdre_extract
-unzip -o /tmp/gdre_tools.zip -d /tmp/gdre_extract/
-rm -rf /opt/gdre_tools
-mkdir -p /opt/gdre_tools
-cp -f /tmp/gdre_extract/gdre_tools.x86_64    /opt/gdre_tools/
-cp -f /tmp/gdre_extract/gdre_tools.pck       /opt/gdre_tools/
-cp -f /tmp/gdre_extract/libGodotMonoDecompNativeAOT.so /opt/gdre_tools/ 2>/dev/null || true
-chmod +x /opt/gdre_tools/gdre_tools.x86_64
-# Wrapper on PATH:
-cat > /usr/local/bin/gdre_tools <<EOF
-#!/bin/bash
-export LD_LIBRARY_PATH=/opt/gdre_tools:\$LD_LIBRARY_PATH
-exec "/opt/gdre_tools/gdre_tools.x86_64" "\$@"
-EOF
-chmod +x /usr/local/bin/gdre_tools
-rm -rf /tmp/gdre_tools.zip /tmp/gdre_extract
-echo "GDRE Tools ${VER} installed."
-'@
-    # Pipe the heredoc-style script to bash inside WSL as root.
-    $script | wsl -u root -- bash -s 2>&1 | ForEach-Object { Write-Host "    $_" }
+    # The install logic lives in install_gdre.sh — a real shell script
+    # (pinned to LF via .gitattributes) shared verbatim with the Linux
+    # installer.  We hand WSL the file directly instead of piping an
+    # embedded here-string: the old here-string approach glued a UTF-8
+    # BOM onto line 1 and left CRLFs that broke the script's heredoc.
+    $gdreSh = Join-Path $PSScriptRoot "install_gdre.sh"
+    if (-not (Test-Path -LiteralPath $gdreSh)) {
+        Write-FAIL "GDRE Tools (install_gdre.sh missing beside the installer)"
+        return
+    }
+    $wslSh = (wsl -u root -- wslpath -a "$gdreSh").Trim()
+    wsl -u root -- bash $wslSh 2>&1 | ForEach-Object { Write-Host "    $_" }
     wsl -u root -- bash -c "test -x /usr/local/bin/gdre_tools" *> $null
     if ($LASTEXITCODE -eq 0) {
         Write-Installed "GDRE Tools (wrapper at /usr/local/bin/gdre_tools)"

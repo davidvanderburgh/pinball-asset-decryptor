@@ -1,0 +1,6 @@
+# Shell scripts must always check out with LF line endings — they run
+# under bash (WSL / Linux), where stray CR bytes break heredoc
+# terminators and `#!` shebang lines.  Without this, core.autocrlf on a
+# Windows checkout would rewrite them to CRLF and corrupt them (this is
+# exactly what broke the GDRE Tools installer — see installer/install_gdre.sh).
+*.sh text eol=lf

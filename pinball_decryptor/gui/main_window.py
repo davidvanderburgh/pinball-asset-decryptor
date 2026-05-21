@@ -163,6 +163,11 @@ class MainWindow:
         # still works.  Default OFF -- some users want to cross-check
         # original names against community sample lists.
         self.transcribe_rename_var = tk.BooleanVar(value=False)
+        # Whether the currently-selected extract input is a game whose
+        # audio we can export (drives the Auto-transcribe controls +
+        # the "Extract audio" phase).  Re-probed on every input change;
+        # True when no file is selected yet so the UI isn't pre-hidden.
+        self._extract_audio_supported = True
 
         # Cross-manufacturer auto-detect: when the current mfr doesn't
         # recognise a browsed file but exactly one other mfr does, we
@@ -729,6 +734,10 @@ class MainWindow:
         """Reconfigure the UI for *mfr*.  Called on initial load + on switch."""
         self._current_mfr = mfr
         caps = mfr.capabilities
+        # Reset audio-export support to the optimistic default; the
+        # extract-badge refresh later in this method re-probes it for
+        # the actual selected file.
+        self._extract_audio_supported = True
 
         self._suppress_mfr_event = True
         self.mfr_var.set(mfr.display)
@@ -813,33 +822,42 @@ class MainWindow:
         self._update_write_badge()
 
     def _on_extract_mode_toggle(self):
-        """Either Basic-extract or Capture checkbox toggled.
+        """Either Basic-extract or Capture checkbox toggled."""
+        self._update_capture_help_text()
+        self._refresh_extract_phases()
+        # Transcribe is only meaningful when the basic extract runs.
+        self._update_transcribe_visibility()
 
-        The two checkboxes are independent — four states matter:
+    def _refresh_extract_phases(self):
+        """Rebuild the extract phase indicator for the current extract
+        mode and the detected game's audio-export support.
+
+        The Basic-extract and Capture checkboxes are independent —
+        four states matter:
 
           * basic ON,  capture ON  → combined phases (static + capture)
           * basic ON,  capture OFF → static-only (default)
           * basic OFF, capture ON  → capture-only (no static)
           * basic OFF, capture OFF → nothing to do; warn but allow
                                      the toggle so the user can fix it
+
+        On top of that, the dedicated DCS "Extract audio" phase is
+        dropped for games whose audio we can't export (pre-DCS).
         """
-        self._update_capture_help_text()
         if self._current_mfr is None:
             return
+        mfr = self._current_mfr
         basic = self.static_extract_var.get()
-        capture = (self.capture_mode_var.get()
-                   and self._current_mfr.capabilities.capture)
+        capture = self.capture_mode_var.get() and mfr.capabilities.capture
         if basic and capture:
-            phases = (self._current_mfr.combined_phases
-                      or self._current_mfr.extract_phases)
+            phases = mfr.combined_phases or mfr.extract_phases
         elif capture and not basic:
-            phases = (self._current_mfr.capture_phases
-                      or self._current_mfr.extract_phases)
+            phases = mfr.capture_phases or mfr.extract_phases
         else:  # basic only, or neither (treated as basic for display)
-            phases = self._current_mfr.extract_phases
-        self._rebuild_phase_steps(phases, self._current_mfr.write_phases)
-        # Transcribe is only meaningful when the basic extract runs.
-        self._update_transcribe_visibility()
+            phases = mfr.extract_phases
+        if not self._extract_audio_supported:
+            phases = tuple(p for p in phases if p != "Extract audio")
+        self._rebuild_phase_steps(phases, mfr.write_phases)
 
     # Back-compat shim — older code paths may still reference the
     # original toggle name.
@@ -863,18 +881,22 @@ class MainWindow:
         """Show the auto-transcribe checkboxes only when a transcribable
         extract will actually run.
 
-        Transcribe builds callouts.csv from standalone .wav files, and
-        only the basic/static extract emits those — a capture-only run
-        muxes its audio straight into the per-clip MP4s.  So for
-        capture-capable plugins (Williams) the checkboxes sit directly
-        under "Basic extract" and appear only while it is ticked;
-        plugins without that toggle (CGC) always show them.
+        Three conditions must all hold:
+          * the manufacturer supports transcribe at all;
+          * the selected game's audio is exportable (pre-DCS Williams
+            titles have none — see _refresh_extract_audio_support);
+          * standalone WAVs will be produced — only the basic/static
+            extract emits those, so for capture-capable plugins the
+            checkboxes sit under "Basic extract" and track it.
+
+        Plugins without a Basic-extract toggle (CGC) always pass the
+        third condition.
         """
         if self._current_mfr is None:
             return
         caps = self._current_mfr.capabilities
-        show = caps.transcribe and (
-            not caps.capture or self.static_extract_var.get())
+        show = (caps.transcribe and self._extract_audio_supported
+                and (not caps.capture or self.static_extract_var.get()))
         if not show:
             self._transcribe_frame.pack_forget()
             # Hidden means it won't run — don't let a stale tick chain
@@ -1185,6 +1207,31 @@ class MainWindow:
     def _update_extract_badge(self, *_):
         self._set_badge(self._extract_badge, self.extract_input_var.get(),
                         mode="extract")
+        self._refresh_extract_audio_support()
+
+    def _refresh_extract_audio_support(self):
+        """Re-probe whether the selected extract input is a game whose
+        audio we can export, then refresh the audio-dependent UI (the
+        Auto-transcribe checkboxes and the "Extract audio" phase) when
+        that answer changes."""
+        path = (self.extract_input_var.get() or "").strip()
+        if self._current_mfr is None:
+            supported = False
+        elif path and os.path.isfile(path):
+            try:
+                supported = bool(
+                    self._current_mfr.audio_export_supported(path))
+            except Exception:
+                supported = False
+        else:
+            # No file picked yet — don't pre-hide the audio UI; it
+            # only hides once an unsupported game is actually chosen.
+            supported = True
+        if supported == self._extract_audio_supported:
+            return
+        self._extract_audio_supported = supported
+        self._refresh_extract_phases()
+        self._update_transcribe_visibility()
 
     def _update_write_badge(self, *_):
         self._set_badge(self._write_badge, self.write_upd_var.get(),

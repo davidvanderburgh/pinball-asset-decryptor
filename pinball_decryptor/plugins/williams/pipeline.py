@@ -42,6 +42,7 @@ import zipfile
 
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
+from . import dcs_decode
 from . import dmd_render
 from . import wpc_decode
 from .formats import detect_game, list_game_roms
@@ -390,12 +391,19 @@ class ExtractPipeline(BasePipeline):
             self._log(f"  animations: {anim_count}  fonts: {font_count}",
                       "success")
 
-        # ---- Extract audio (DCS sound ROMs) ----
-        self._set_phase(5)
-        dcs_track_count = self._extract_dcs_audio(game_dir)
+        # ---- Extract audio (DCS sound ROMs) — DCS games only ----
+        # Pre-DCS games (YM2151 sound board) have no statically
+        # decodable audio; they skip this phase and the GUI omits it
+        # from the indicator, so the remaining phases renumber.
+        dcs_track_count = 0
+        cleanup_phase = 5
+        if dcs_decode.is_dcs_rom(self.zip_path):
+            self._set_phase(5)
+            dcs_track_count = self._extract_dcs_audio(game_dir)
+            cleanup_phase = 6
 
         # ---- Cleanup / checksums ----
-        self._set_phase(6)
+        self._set_phase(cleanup_phase)
         self._log("Generating baseline checksums...", "info")
         n = generate_checksums(
             game_dir, log_cb=self._log, progress_cb=self._progress)
@@ -444,7 +452,6 @@ class ExtractPipeline(BasePipeline):
         Returns the number of tracks extracted (0 when not a DCS game
         or the decoder is unavailable).
         """
-        from . import dcs_decode
         self._log("Decoding DCS sound ROMs...", "info")
         sounds_dir = os.path.join(game_dir, "sounds")
         try:

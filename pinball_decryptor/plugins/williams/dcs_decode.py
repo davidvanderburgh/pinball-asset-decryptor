@@ -106,6 +106,45 @@ def find_dcs_explorer() -> Optional[str]:
     return None
 
 
+_is_dcs_cache: dict = {}
+
+
+def is_dcs_rom(zip_path: str) -> bool:
+    """Return True if *zip_path* is a DCS-audio ROM set DCSExplorer
+    can decode — i.e. audio export is supported for this game.
+
+    Runs DCSExplorer's fast ``--info`` mode; the result is cached per
+    path for the life of the process.  Pre-DCS games (the YM2151
+    sound board — Fish Tales, White Water, ...) and anything
+    DCSExplorer can't identify return False.
+    """
+    key = os.path.abspath(zip_path)
+    cached = _is_dcs_cache.get(key)
+    if cached is not None:
+        return cached
+    result = _probe_is_dcs(zip_path)
+    _is_dcs_cache[key] = result
+    return result
+
+
+def _probe_is_dcs(zip_path: str) -> bool:
+    exe = find_dcs_explorer()
+    if exe is None or not os.path.isfile(zip_path):
+        return False
+    try:
+        proc = subprocess.run(
+            [exe, "--info", zip_path],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            timeout=60, creationflags=_CREATE_FLAGS)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    if "could be identified as ROM U2" in out:
+        return False
+    # DCSExplorer prints the U2 ROM signature for a recognised DCS set.
+    return "U2 Signature:" in out
+
+
 def _scan_line(text: str, label: str) -> Optional[str]:
     """Return the text after *label* on the first line that has it."""
     for line in text.splitlines():

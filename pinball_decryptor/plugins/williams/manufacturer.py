@@ -139,6 +139,14 @@ class WilliamsManufacturer(Manufacturer):
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             rename_after=rename_after)
 
+    def audio_export_supported(self, path):
+        """Only DCS-era games have statically decodable audio; pre-DCS
+        YM2151 titles (Fish Tales, White Water, ...) do not, so the
+        Auto-transcribe controls and the "Extract audio" phase are
+        hidden for them."""
+        from . import dcs_decode
+        return is_williams_zip(path) and dcs_decode.is_dcs_rom(path)
+
     def extract_input_help(self):
         return ("Pick a MAME-format ROM zip — e.g. `ft_l5.zip` "
                 "(Fish Tales), `afm_113b.zip` (Attack From Mars).  "

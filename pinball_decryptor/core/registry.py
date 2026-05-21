@@ -172,6 +172,17 @@ class Manufacturer(ABC):
         raise NotImplementedError(
             f"{self.display} does not implement a Transcribe pipeline.")
 
+    def audio_export_supported(self, path) -> bool:
+        """Whether extracting *path* yields audio assets the
+        transcribe pipeline can act on.
+
+        Drives the per-game visibility of the Auto-transcribe controls
+        and the "Extract audio" phase.  Default: tied to the static
+        ``transcribe`` capability (path-independent).  Williams
+        overrides this — only DCS-era ROMs have decodable audio.
+        """
+        return self.capabilities.transcribe
+
     # ------------------------------------------------------------------
     # Misc UI hints — override if you want non-default phrasing.
     # ------------------------------------------------------------------

@@ -515,22 +515,33 @@ foreach ($mfr in $selected) {
 # Pip packages -- installed into the same Python that runs the app.
 # =========================================================================
 # We use `python -m pip install` rather than calling `pip` directly so
-# the package lands in the right interpreter's site-packages.  When the
-# user runs the app via the PyInstaller bundle (no exposed Python), the
-# bundle's interpreter isn't pip-able and the user is expected to have
-# faster-whisper bundled at build time -- this loop is a no-op in that
-# case because the import probe already returns OK.
+# the package lands in the right interpreter's site-packages.  The
+# Windows app bundles an embeddable Python (with pip) at {app}\python\;
+# we install into that one so the app's `python:` prereq probe — which
+# checks the interpreter the app actually runs on — finds the package.
 if ($pipPlan.Count -gt 0) {
+    # Prefer the bundled interpreter beside this installer.  A packaged
+    # install has no `python` on PATH at all (that is what silently
+    # skipped faster-whisper), and a system `python`, if present, is
+    # the wrong interpreter.  PATH is only a fallback for running from
+    # source, where there is no bundled Python.
     $pythonCmd = $null
-    foreach ($cand in @("python", "python3", "py")) {
-        try {
-            & $cand --version 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { $pythonCmd = $cand; break }
-        } catch {}
+    $pipTarget = $null
+    $bundledPython = Join-Path $PSScriptRoot "python\python.exe"
+    if (Test-Path -LiteralPath $bundledPython) {
+        $pythonCmd = $bundledPython
+        $pipTarget = Join-Path $PSScriptRoot "python\Lib\site-packages"
+    } else {
+        foreach ($cand in @("python", "python3", "py")) {
+            try {
+                & $cand --version 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { $pythonCmd = $cand; break }
+            } catch {}
+        }
     }
     if (-not $pythonCmd) {
         foreach ($p in $pipPlan) {
-            Write-Host ("No `python` on PATH -- skipping pip install of {0}." -f $p.label) -ForegroundColor Yellow
+            Write-Host ("No Python found -- skipping pip install of {0}." -f $p.label) -ForegroundColor Yellow
             Write-SKIP $p.label
         }
     } else {
@@ -542,7 +553,13 @@ if ($pipPlan.Count -gt 0) {
                 Write-OK $p.label
             } else {
                 Write-Host ("  Installing {0} via {1} -m pip install..." -f $p.label, $pythonCmd) -ForegroundColor Cyan
-                & $pythonCmd -m pip install --upgrade $p.pkg
+                if ($pipTarget) {
+                    # Bundled Python: install into its site-packages
+                    # explicitly, the same way build.ps1 seeds the bundle.
+                    & $pythonCmd -m pip install --no-warn-script-location --target $pipTarget $p.pkg
+                } else {
+                    & $pythonCmd -m pip install --upgrade $p.pkg
+                }
                 if ($LASTEXITCODE -eq 0) {
                     Write-Installed $p.label
                 } else {

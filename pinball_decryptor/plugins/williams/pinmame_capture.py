@@ -869,14 +869,11 @@ class PinmameCapture:
         self._press_key(self._KEY_COIN_DOOR, hold_ms=100)
         time.sleep(0.5)
 
-        # NB: we used to spam sw#5 (ESCAPE) here to bail out of any
-        # operator menu the game might be sitting in.  That was a
-        # workaround for an early bug where we'd wiped NVRAM and the
-        # ROM landed in "FACTORY RESTORE CONFIRMED" mode.  We no
-        # longer wipe NVRAM, and pressing Escape on a game that's
-        # already in clean attract can ENTER the operator menu —
-        # subsequent coins+Start then get interpreted as menu
-        # navigation rather than game commands.  Skip it.
+        # NB: don't press the service-Escape button here.  A first-
+        # run factory-restore lock screen is avoided up-front by the
+        # NVRAM priming boot in run(); pressing Escape on a normal
+        # warm boot's attract mode would open the operator menu and
+        # subsequent coins+Start would be read as menu navigation.
 
         # 3. Insert coins.  Drive via the keyboard's COIN1 key
         # (PINMAME_KEYCODE_NUMBER_5 = 31, default for IPT_COIN1) so
@@ -1126,6 +1123,103 @@ class PinmameCapture:
     # Run a capture session
     # ------------------------------------------------------------------
 
+    def _apply_config(self, cfg):
+        """Push the PinMAME config + display/input/cheat modes.
+
+        Re-applied before each PinmameRun — a priming boot followed by
+        the real capture run does two PinmameRun/PinmameStop cycles.
+        """
+        self._lib.PinmameSetConfig(ctypes.byref(cfg))
+        # RAW mode hands us the underlying packed-bitplane bytes the
+        # WPC ASIC wrote to VRAM (one byte per pixel where each byte
+        # holds an N-bit brightness value).  BRIGHTNESS mode pre-mixes
+        # the planes to 0..255 luminance.  We use RAW — same as
+        # libpinmame's own test.cpp — so we get the canonical
+        # pixel-by-pixel data and can decide brightness mapping
+        # ourselves at render time.
+        self._lib.PinmameSetDmdMode(PINMAME_DMD_MODE_RAW)
+        # Enable PinMAME's keyboard layer so the IsKeyPressed
+        # callback is fully wired into MAME's input port reading
+        # (g_fHandleKeyboard isn't actually checked anywhere in
+        # libpinmame today, but enabling it is the documented
+        # path for callback-driven keyboard).
+        self._lib.PinmameSetHandleKeyboard(1)
+        self._lib.PinmameSetHandleMechanics(0)
+        self._lib.PinmameSetCheat(0)
+
+    def _prime_nvram_first_run(self, config: CaptureConfig) -> None:
+        """Boot the ROM once, discard the output, and stop — purely so
+        PinMAME flushes a valid ``<rom>.nv`` on shutdown.
+
+        On a ROM's first ever run there is no NVRAM file.  WPC ROMs
+        read a blank NVRAM as a battery-failure event, restore factory
+        defaults, and park on a stuck multi-screen "FACTORY SETTINGS
+        RESTORED" report that blocks all play.  The factory-restore
+        commits valid defaults (and the NVRAM validity signature) into
+        the battery-RAM image early in boot; PinmameStop then writes
+        that image to ``<rom>.nv``.  The subsequent real capture boots
+        warm and goes straight to attract.
+
+        Config + callbacks must already be applied.
+        """
+        PRIME_BOOT_SECONDS = 20.0
+        self._emit_log(
+            "First run of this ROM — priming NVRAM with a throwaway "
+            "boot so the real capture skips the factory-restore lock "
+            "screen...", "info")
+        self._running_event.clear()
+        self._stopped_event.clear()
+        status = self._lib.PinmameRun(config.rom_name.encode("utf-8"))
+        if status != PINMAME_STATUS_OK:
+            self._emit_log(
+                f"Priming boot: PinmameRun failed (status={status}) — "
+                "skipping prime; the real run will surface the error.",
+                "warning")
+        else:
+            deadline = time.monotonic() + 15.0
+            while not self._running_event.is_set():
+                if self._stopped_event.is_set():
+                    break
+                if time.monotonic() > deadline:
+                    self._emit_log(
+                        "Priming boot never reached running state — "
+                        "stopping and continuing anyway.", "warning")
+                    break
+                time.sleep(0.05)
+            # Let the ROM finish its factory-restore and commit the
+            # NVRAM signature before we stop.
+            for _ in range(int(PRIME_BOOT_SECONDS * 20)):
+                if self._stopped_event.is_set():
+                    break
+                time.sleep(0.05)
+            try:
+                self._lib.PinmameStop()
+            except Exception as e:
+                self._emit_log(
+                    f"Priming boot: PinmameStop error: {e}", "warning")
+            for _ in range(60):
+                if self._stopped_event.is_set():
+                    break
+                time.sleep(0.05)
+            self._emit_log(
+                "NVRAM primed — restarting for the real capture "
+                "(warm boot).", "success")
+            time.sleep(1.0)
+        # Discard everything the priming boot's callbacks collected so
+        # the real capture starts from a clean slate.
+        self._frames = []
+        self._audio_buffer = bytearray()
+        self._sol_seen = set()
+        self._sol_counts = {}
+        self._snd_seen = set()
+        self._last_frame_data = None
+        self._last_frame_cb_ms = 0
+        self._display_invocations = 0
+        self._display_null_count = 0
+        self._display_nonnull_count = 0
+        self._running_event.clear()
+        self._stopped_event.clear()
+
     def run(self, config: CaptureConfig) -> CaptureResult:
         """Set up PinMAME for *config.rom_name* and capture for *duration_seconds*.
 
@@ -1185,6 +1279,21 @@ class PinmameCapture:
                                   log=self._emit_log)
         self._emit_log(f"vpmPath = {vpm_dir}", "info")
 
+        # Detect a first-ever run of this ROM.  With no NVRAM file yet
+        # a WPC ROM reads the blank NVRAM as a battery-failure event
+        # and parks on a stuck multi-screen "FACTORY SETTINGS
+        # RESTORED" report that blocks all play.  When fresh, we do a
+        # throwaway priming boot first (see _prime_nvram_first_run)
+        # so the real capture boots warm.
+        nvram_existing = _glob.glob(
+            os.path.join(vpm_dir, "nvram", config.rom_name + "*"))
+        nvram_fresh = not nvram_existing
+        self._emit_log(
+            f"NVRAM for {config.rom_name!r}: "
+            + ("none yet — first run, will prime NVRAM before capture"
+               if nvram_fresh else "present — warm boot"),
+            "info")
+
         # Build callback objects.  CRITICAL: store on self so they stay
         # alive for the duration of the C library's reference.
         self._callbacks = {
@@ -1233,23 +1342,16 @@ class PinmameCapture:
         cfg.cb_OnLogMessage = self._callbacks["log"]
         cfg.cb_OnSoundCommand = self._callbacks["sound"]
 
-        self._lib.PinmameSetConfig(ctypes.byref(cfg))
-        # RAW mode hands us the underlying packed-bitplane bytes the
-        # WPC ASIC wrote to VRAM (one byte per pixel where each byte
-        # holds an N-bit brightness value).  BRIGHTNESS mode pre-mixes
-        # the planes to 0..255 luminance.  We use RAW — same as
-        # libpinmame's own test.cpp — so we get the canonical
-        # pixel-by-pixel data and can decide brightness mapping
-        # ourselves at render time.
-        self._lib.PinmameSetDmdMode(PINMAME_DMD_MODE_RAW)
-        # Enable PinMAME's keyboard layer so the IsKeyPressed
-        # callback is fully wired into MAME's input port reading
-        # (g_fHandleKeyboard isn't actually checked anywhere in
-        # libpinmame today, but enabling it is the documented
-        # path for callback-driven keyboard).
-        self._lib.PinmameSetHandleKeyboard(1)
-        self._lib.PinmameSetHandleMechanics(0)
-        self._lib.PinmameSetCheat(0)
+        self._apply_config(cfg)
+
+        # First-run NVRAM priming: boot the ROM once and stop, purely
+        # so PinMAME flushes a valid <rom>.nv on shutdown.  The real
+        # capture below then boots warm and skips the factory-restore
+        # lock screen.  PinmameStop tears down emulator state, so the
+        # config is re-applied before the real run.
+        if nvram_fresh:
+            self._prime_nvram_first_run(config)
+            self._apply_config(cfg)
 
         # Start the game.  PinmameRun is *synchronous* up through the
         # state→running callback (the emulator finishes loading ROMs

@@ -51,8 +51,25 @@ def test_shell_script_is_lf_only(sh):
         f"(see .gitattributes: '*.sh text eol=lf')")
 
 
-@pytest.mark.skipif(shutil.which("bash") is None,
-                    reason="bash not available")
+def _bash_works():
+    """True only if `bash` is present AND functional.
+
+    On Windows the `bash` on PATH is often the WSL launcher
+    (C:\\Windows\\System32\\bash.exe); with no WSL distro installed it
+    exists but fails every command — so a plain which('bash') isn't
+    enough (this is what broke the v0.6.1 CI on the Windows runner)."""
+    if shutil.which("bash") is None:
+        return False
+    try:
+        return subprocess.run(
+            ["bash", "-c", "exit 0"],
+            capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.mark.skipif(not _bash_works(),
+                    reason="no working bash (WSL launcher without a distro?)")
 @pytest.mark.parametrize("sh", SH_SCRIPTS, ids=lambda p: p.name)
 def test_shell_script_parses(sh):
     """`bash -n` — syntax-check each installer shell script.

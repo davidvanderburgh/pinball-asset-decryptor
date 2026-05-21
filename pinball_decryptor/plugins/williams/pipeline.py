@@ -49,7 +49,7 @@ from .games import GAME_DB
 
 
 PHASES = ("Detect", "Unzip", "Find tables", "Decode scenes",
-          "Render animations", "Cleanup")
+          "Render animations", "Extract audio", "Cleanup")
 
 # How many image indices to try beyond the last known valid one
 # before we conclude we've walked past the end of the table.
@@ -390,11 +390,21 @@ class ExtractPipeline(BasePipeline):
             self._log(f"  animations: {anim_count}  fonts: {font_count}",
                       "success")
 
-        # ---- Cleanup / checksums ----
+        # ---- Extract audio (DCS sound ROMs) ----
         self._set_phase(5)
+        dcs_track_count = self._extract_dcs_audio(game_dir)
+
+        # ---- Cleanup / checksums ----
+        self._set_phase(6)
         self._log("Generating baseline checksums...", "info")
         n = generate_checksums(
             game_dir, log_cb=self._log, progress_cb=self._progress)
+
+        dcs_help = ""
+        if dcs_track_count:
+            dcs_help = ("\n  sounds/track_*.wav — every DCS music cue, "
+                        "voice line, and sound effect, one WAV per "
+                        "track (indexed in sounds/manifest.json).")
 
         self._log("Done.", "success")
         self._done(
@@ -405,6 +415,7 @@ class ExtractPipeline(BasePipeline):
             f"4-shade pairs: {len(rendered_pairs)}\n"
             f"Animations:    {anim_count}\n"
             f"Fonts:         {font_count}\n"
+            f"DCS tracks:    {dcs_track_count}\n"
             f"Files checksummed: {n}\n\n"
             f"What you get:\n"
             f"  dmd_scenes/scene_*.png — every still bitmap in the "
@@ -414,7 +425,39 @@ class ExtractPipeline(BasePipeline):
             f"  animations/anim_*.mp4 — true game animations from "
             f"the WPC animation table, one MP4 per sequence.\n"
             f"  fonts/font_*.png — sprite-sheet strips of the DMD "
-            f"glyph atlases (alphabet, numerals, punctuation).")
+            f"glyph atlases (alphabet, numerals, punctuation)."
+            + dcs_help)
+
+    # ------------------------------------------------------------------
+    # DCS audio extraction
+    # ------------------------------------------------------------------
+
+    def _extract_dcs_audio(self, game_dir):
+        """Decode the game's DCS sound ROMs into per-track WAVs.
+
+        DCS games (1993-1998) store music, speech, and SFX as
+        compressed digital audio; :mod:`.dcs_decode` extracts every
+        track via the bundled DCSExplorer decoder.  Pre-DCS games use
+        the older YM2151 sound board, which can't be decoded
+        statically — those are reported and skipped, no error.
+
+        Returns the number of tracks extracted (0 when not a DCS game
+        or the decoder is unavailable).
+        """
+        from . import dcs_decode
+        self._log("Decoding DCS sound ROMs...", "info")
+        sounds_dir = os.path.join(game_dir, "sounds")
+        try:
+            result = dcs_decode.extract_dcs(
+                self.zip_path, sounds_dir, log_cb=self._log)
+        except Exception as e:
+            self._log(f"  DCS audio extraction error: {e}", "warning")
+            return 0
+        if not result.is_dcs:
+            self._log(f"  {result.message}", "info")
+            return 0
+        self._log(f"  {result.message} -> sounds/", "success")
+        return len(result.tracks)
 
     # ------------------------------------------------------------------
     # Animation + font sub-table renderers

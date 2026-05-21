@@ -1,7 +1,7 @@
 """Static + structural checks for the prerequisite installers.
 
-Two installer bugs reached users because the installer scripts had no
-test coverage:
+Several installer bugs reached users because the installer scripts
+had no test coverage:
 
   * GDRE Tools install — a bash script embedded in a PowerShell
     here-string picked up a UTF-8 BOM and CRLF line endings, which
@@ -10,10 +10,13 @@ test coverage:
   * faster-whisper — the pip step searched only PATH for a Python, so
     on a packaged install (which ships its own Python and puts nothing
     on PATH) it silently skipped the install.
+  * GDRE prereq check — the BOF gdre_tools probe used `which`, a PATH
+    lookup that traverses WSL's appended Windows PATH and failed
+    intermittently, reporting GDRE missing when it was installed.
 
-These tests guard both classes: installer shell scripts must stay
+These tests guard those classes: installer shell scripts must stay
 LF-only and parse clean, the PowerShell installer must stay
-syntactically valid, and the two specific fixes must not regress.
+syntactically valid, and the specific fixes must not regress.
 
 A true end-to-end run of the installer (WSL provisioning, apt, etc.)
 isn't feasible in CI — `wsl --install` needs a reboot and nested
@@ -134,3 +137,31 @@ def test_pip_step_uses_bundled_python():
         "install_prerequisites.ps1's pip step must discover the bundled "
         "interpreter ({app}\\python\\python.exe) — without it, packaged "
         "installs silently skip pip packages like faster-whisper.")
+
+
+def test_gdre_prereq_probe_matches_install_location():
+    """Regression guard — GDRE prereq false-negative (Joe_Blasi report).
+
+    The BOF gdre_tools prerequisite probe must check the canonical path
+    install_gdre.sh writes to (/opt/gdre_tools), NOT `which gdre_tools`
+    — a PATH lookup that traverses WSL's appended Windows PATH and
+    failed intermittently even with GDRE correctly installed.
+    """
+    gdre_sh = (INSTALLER / "install_gdre.sh").read_text(
+        encoding="utf-8", errors="replace")
+    assert "/opt/gdre_tools" in gdre_sh, (
+        "install_gdre.sh no longer installs to /opt/gdre_tools — the "
+        "BOF gdre_tools probe must be updated to match.")
+
+    from pinball_decryptor.core.registry import (load_plugins,
+                                                 get_manufacturer)
+    load_plugins()
+    bof = get_manufacturer("bof")
+    probe = next(p.probe for p in bof.prerequisites
+                 if p.name == "gdre_tools")
+    assert "/opt/gdre_tools" in probe, (
+        "BOF gdre_tools probe must check /opt/gdre_tools — the path "
+        "install_gdre.sh installs to.")
+    assert "which " not in probe, (
+        "BOF gdre_tools probe uses `which` again — a PATH lookup inside "
+        "WSL is slow/flaky; test the install path directly.")

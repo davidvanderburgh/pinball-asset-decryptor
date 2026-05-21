@@ -105,14 +105,17 @@ class BOFManufacturer(Manufacturer):
                      install_hint="apt-get install tar (in WSL)"),
         Prerequisite(
             name="gdre_tools", where="wsl",
-            # Either on PATH or installed to ~/.local/bin/gdre_tools.
-            probe=("which gdre_tools 2>/dev/null || "
-                   "test -x ~/.local/bin/gdre_tools && "
-                   "echo ~/.local/bin/gdre_tools"),
+            # Check the canonical install path directly — the exact
+            # binary the installer writes (install_gdre.sh) and the
+            # Write pipeline runs (see pipeline._gdre_prefix).  The old
+            # probe used `which`, whose PATH lookup inside the WSL
+            # invocation traverses the slow appended Windows PATH and
+            # failed intermittently even with GDRE correctly installed.
+            probe="test -x /opt/gdre_tools/gdre_tools.x86_64",
             reason="Godot RE Tools — required to repack the PCK on Write.",
             install_hint=(
                 "Click \"Install Prerequisites\" — auto-downloads "
-                "the GDRE Tools release into ~/.local/share/gdre_tools.")),
+                "GDRE Tools to /opt/gdre_tools.")),
         Prerequisite(
             name="xvfb-run", where="wsl",
             probe="which xvfb-run",

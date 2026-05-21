@@ -53,7 +53,7 @@ to hardware, voided warranties, or any consequence of using this tool.
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` | Extract, Write, Mod Pack |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
-| **Williams** (WPC-era) | 41 WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | **Static**: DMD scene PNGs, animation MP4s, font strips decoded from the ROM. **Capture**: per-scene gameplay MP4s with synced DCS audio via libpinmame (scripted playthrough drives the ROM through its named cinematics — skill shots, mode starts, multiball, jackpots). |
+| **Williams** (WPC-era) | 41 WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | **Static**: DMD scene PNGs, animation MP4s, font strips, and per-track DCS sound-ROM audio decoded from the ROM. **Capture**: per-scene gameplay MP4s with synced DCS audio via libpinmame (scripted playthrough — skill shots, mode starts, multiball, jackpots). Optional **Auto-transcribe** names the extracted audio by its spoken call-outs. |
 
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
@@ -88,6 +88,17 @@ encodings the game's 6809 code uses at runtime. Output per game:
   motorcycle ride in No Fear, etc.).
 - **`fonts/font_*.png`** — sprite-sheet grids of every DMD glyph
   atlas (full ASCII alphabets in multiple sizes).
+- **`sounds/track_*.wav`** — every music cue, voice line, and sound
+  effect from the game's DCS sound ROMs, one WAV per track, plus a
+  `manifest.json`. DCS-era games (1993+) only — pre-DCS titles like
+  Fish Tales use the older YM2151 sound board and have no statically
+  decodable audio. Decoded with a bundled
+  [DCSExplorer](https://github.com/mjrgh/DCSExplorer) build (BSD-3).
+
+Tick **Auto-transcribe samples to callouts.csv** on the Extract tab
+(shown only for DCS-era games) to run `faster-whisper` over the
+extracted tracks and emit a CSV — or renamed WAVs — mapping each
+sound to its spoken call-out, the same mechanism the CGC plugin uses.
 
 ### PinMAME runtime capture (composed cinematics + audio)
 
@@ -251,7 +262,7 @@ those plugins need.
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
 | Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
-| Williams (WPC) | ffmpeg | – (no WSL needed) | **libpinmame** (for the optional PinMAME capture path — download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). User-supplied MAME ROM zips; nothing bundled. |
+| Williams (WPC) | ffmpeg; `faster-whisper` *(optional — Auto-transcribe)* | – (no WSL needed) | **libpinmame** (for the optional PinMAME capture path — download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). DCS audio decoding uses a bundled DCSExplorer build (BSD-3). User-supplied MAME ROM zips — no ROMs bundled. |
 
 On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional
 apt packages alongside the rest — the Linux installer flattens both

@@ -80,6 +80,25 @@ Name: "{autodesktop}\Pinball Asset Decryptor"; Filename: "wscript.exe"; Paramete
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install_prerequisites.ps1"""; WorkingDir: "{app}"; StatusMsg: "Installing prerequisites..."; Flags: runascurrentuser shellexec waituntilterminated; Tasks: runprereqs
 
+; --- Repair bundled-Python file permissions ------------------------------
+; install_prerequisites.ps1 pip-installs faster-whisper (and its
+; dependencies) into {app}\python\Lib\site-packages while running
+; elevated.  Files written by an elevated process can carry ACLs the
+; normal-user app process cannot read, so "import faster_whisper" — or a
+; dependency such as typing_extensions — fails at runtime with
+; "[Errno 13] Permission denied".
+;
+; Repair the whole bundled-Python tree here, on EVERY (re)install, so a
+; plain install-over-the-top fixes an already-broken machine without the
+; user having to re-run the prerequisites installer.  /reset strips
+; broken or explicit ACEs so each file re-inherits Program Files' default
+; Users read+execute; the explicit /grant of the Users group (well-known
+; SID S-1-5-32-545) is a belt-and-suspenders guard — an explicit allow
+; ACE also out-ranks any inherited deny on a hardened machine.  Not gated
+; behind the runprereqs Task: it must run unconditionally.
+Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /reset /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
+Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545:(OI)(CI)RX /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
+
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]

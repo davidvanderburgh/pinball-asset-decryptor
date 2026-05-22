@@ -15,7 +15,12 @@ had no test coverage:
     intermittently, reporting GDRE missing when it was installed.
   * faster-whisper perms — the elevated installer pip-installed it
     under Program Files with permissions the normal-user app process
-    could not read ([Errno 13] Permission denied on import).
+    could not read ([Errno 13] Permission denied on import). A plain
+    `icacls /grant` didn't fully fix it; the install step must
+    `icacls /reset` the bundled-Python tree so it re-inherits the
+    parent ACL. The Inno installer repeats the repair on every
+    install, so an install-over-the-top fixes an already-broken
+    machine without re-running the prerequisites installer.
 
 These tests guard those classes: installer shell scripts must stay
 LF-only and parse clean, the PowerShell installer must stay
@@ -37,11 +42,13 @@ REPO = Path(__file__).resolve().parent.parent
 INSTALLER = REPO / "installer"
 SH_SCRIPTS = sorted(INSTALLER.glob("*.sh"))
 PS1 = INSTALLER / "install_prerequisites.ps1"
+ISS = INSTALLER / "pinball_decryptor.iss"
 
 
 def test_installer_layout():
     """The shared GDRE script and the PowerShell installer must exist."""
     assert PS1.is_file(), "install_prerequisites.ps1 missing"
+    assert ISS.is_file(), "pinball_decryptor.iss missing"
     assert (INSTALLER / "install_gdre.sh").is_file(), (
         "install_gdre.sh missing — both installers depend on it")
     assert SH_SCRIPTS, "no installer shell scripts found"
@@ -142,21 +149,73 @@ def test_pip_step_uses_bundled_python():
         "installs silently skip pip packages like faster-whisper.")
 
 
-def test_pip_step_grants_read_access():
+def test_pip_step_fixes_read_permissions():
     """Regression guard — faster-whisper [Errno 13] (RTS feedback).
 
     The installer runs elevated; packages it pip-installs under Program
     Files can land unreadable to the normal-user app process. The pip
-    step must grant the Users group (SID S-1-5-32-545) read access to
-    the bundled site-packages so `import faster_whisper` doesn't fail
-    with Permission denied.
+    step must repair this so `import faster_whisper` (and its deps, e.g.
+    typing_extensions) don't fail with Permission denied.
+
+    It must use `icacls /reset` — a plain `/grant` only adds an allow
+    ACE and cannot override a stray DENY or broken ACL inheritance
+    (this is why the v0.6.3 `/grant`-only fix still left
+    typing_extensions.py unreadable). The explicit Users-group
+    (SID S-1-5-32-545) grant stays as a belt-and-suspenders guard.
     """
     ps1 = PS1.read_text(encoding="utf-8", errors="replace")
-    assert "icacls" in ps1 and "S-1-5-32-545" in ps1, (
-        "install_prerequisites.ps1's pip step must grant the Users "
-        "group read access (icacls /grant *S-1-5-32-545) to the "
-        "bundled site-packages — without it, elevated-installed pip "
+    assert "icacls" in ps1, (
+        "install_prerequisites.ps1's pip step must fix file perms on "
+        "the bundled Python — without it, elevated-installed pip "
         "packages are unreadable to the app (Errno 13 on import).")
+    assert "/reset" in ps1, (
+        "install_prerequisites.ps1 must use `icacls /reset` to repair "
+        "perms — a plain `/grant` cannot override a DENY ACE or broken "
+        "inheritance (v0.6.3's /grant-only fix regressed on this).")
+    assert "S-1-5-32-545" in ps1, (
+        "install_prerequisites.ps1 should also keep the explicit Users "
+        "group (SID S-1-5-32-545) read grant as a belt-and-suspenders "
+        "guard for hardened systems with a non-standard Program Files "
+        "ACL.")
+
+
+def test_iss_repairs_python_permissions():
+    """Regression guard — faster-whisper [Errno 13], install-over fix.
+
+    install_prerequisites.ps1 repairs the perms of the packages it
+    pip-installs — but that script only runs when the user explicitly
+    launches it. A user who simply installs a newer version over a
+    broken one would never trigger it. So the Inno installer itself —
+    which runs elevated on every (re)install — must repair the
+    bundled-Python tree, making a plain install-over-the-top enough to
+    fix an already-broken machine.
+
+    The repair must use `icacls /reset` (not just /grant — see
+    test_pip_step_fixes_read_permissions), target {app}\\python, and
+    NOT be gated behind the optional `runprereqs` Task.
+    """
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    icacls_lines = [ln for ln in iss.splitlines()
+                    if "icacls" in ln.lower()
+                    and not ln.lstrip().startswith(";")]
+    assert icacls_lines, (
+        "pinball_decryptor.iss must run icacls on {app}\\python in [Run] "
+        "so a plain install-over repairs an already-broken machine "
+        "without the user re-running the prerequisites installer.")
+    joined = "\n".join(icacls_lines)
+    assert "/reset" in joined, (
+        "the .iss icacls repair must use /reset — a plain /grant cannot "
+        "override a DENY ACE or broken inheritance.")
+    assert "{app}\\python" in joined, (
+        "the .iss icacls repair must target {app}\\python (the bundled "
+        "interpreter + the pip-installed packages under it).")
+    assert "S-1-5-32-545" in joined, (
+        "the .iss icacls repair must also grant the Users group "
+        "(SID S-1-5-32-545) read access.")
+    assert not any("Tasks:" in ln for ln in icacls_lines), (
+        "the .iss icacls repair must NOT be gated behind an optional "
+        "Task — it has to run on every install, including install-over, "
+        "which is the whole point of moving the fix into the installer.")
 
 
 def test_gdre_prereq_probe_matches_install_location():

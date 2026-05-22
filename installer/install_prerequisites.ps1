@@ -570,16 +570,40 @@ if ($pipPlan.Count -gt 0) {
             }
         }
         if ($pipTarget) {
-            # The installer runs elevated, so packages pip writes under
-            # Program Files can land unreadable to the normal-user app
-            # process ([Errno 13] Permission denied on import).  Grant
-            # the Users group (SID S-1-5-32-545) read+execute on the
-            # bundled site-packages so the app can load them.  Run
-            # unconditionally — it also repairs an already-installed
-            # package whose perms are wrong, which the find_spec check
-            # above cannot detect.
-            icacls $pipTarget /grant '*S-1-5-32-545:(OI)(CI)RX' /T /C /Q |
-                Out-Null
+            # The installer runs elevated.  Packages pip writes under
+            # Program Files — and sometimes the bundled Python tree
+            # itself — can carry ACLs the normal-user app process cannot
+            # read, so importing faster_whisper *or one of its deps*
+            # (e.g. typing_extensions) fails at runtime with
+            # [Errno 13] Permission denied.
+            #
+            # A plain `/grant Users:RX` (the v0.6.3 attempt) only ADDS an
+            # allow ACE; it cannot override a stray DENY ACE or repair
+            # broken ACL inheritance.  `/reset` is decisive: it strips
+            # every explicit ACE from each file so the whole tree
+            # re-inherits the parent ACL — Program Files grants the Users
+            # group read+execute by default.  We then add an explicit
+            # Users (SID S-1-5-32-545) read+execute grant as a
+            # belt-and-suspenders guard for hardened systems whose
+            # Program Files ACL is non-standard.  Run unconditionally —
+            # this also repairs an install whose perms are already wrong,
+            # which the find_spec check above cannot detect.
+            $pythonDir = Split-Path -Parent $bundledPython
+            Write-Step "Fixing bundled-Python file permissions..."
+            $aclOut = @()
+            $aclOut += & icacls $pythonDir /reset /T /C /Q 2>&1
+            $aclOut += & icacls $pythonDir /grant '*S-1-5-32-545:(OI)(CI)RX' `
+                /T /C /Q 2>&1
+            $aclFail = $aclOut | Where-Object {
+                $_ -match 'Failed processing' -and
+                $_ -notmatch 'Failed processing 0 ' }
+            if ($aclFail) {
+                Write-Host ("  icacls reported errors: {0}" -f `
+                    ($aclFail -join '; ')) -ForegroundColor Yellow
+            } else {
+                Write-Host ("  [OK] Users group can now read the bundled " +
+                    "Python packages.") -ForegroundColor Green
+            }
         }
     }
 }

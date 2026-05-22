@@ -569,6 +569,18 @@ if ($pipPlan.Count -gt 0) {
                 }
             }
         }
+        if ($pipTarget) {
+            # The installer runs elevated, so packages pip writes under
+            # Program Files can land unreadable to the normal-user app
+            # process ([Errno 13] Permission denied on import).  Grant
+            # the Users group (SID S-1-5-32-545) read+execute on the
+            # bundled site-packages so the app can load them.  Run
+            # unconditionally — it also repairs an already-installed
+            # package whose perms are wrong, which the find_spec check
+            # above cannot detect.
+            icacls $pipTarget /grant '*S-1-5-32-545:(OI)(CI)RX' /T /C /Q |
+                Out-Null
+        }
     }
 }
 

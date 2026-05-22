@@ -13,6 +13,9 @@ had no test coverage:
   * GDRE prereq check — the BOF gdre_tools probe used `which`, a PATH
     lookup that traverses WSL's appended Windows PATH and failed
     intermittently, reporting GDRE missing when it was installed.
+  * faster-whisper perms — the elevated installer pip-installed it
+    under Program Files with permissions the normal-user app process
+    could not read ([Errno 13] Permission denied on import).
 
 These tests guard those classes: installer shell scripts must stay
 LF-only and parse clean, the PowerShell installer must stay
@@ -137,6 +140,23 @@ def test_pip_step_uses_bundled_python():
         "install_prerequisites.ps1's pip step must discover the bundled "
         "interpreter ({app}\\python\\python.exe) — without it, packaged "
         "installs silently skip pip packages like faster-whisper.")
+
+
+def test_pip_step_grants_read_access():
+    """Regression guard — faster-whisper [Errno 13] (RTS feedback).
+
+    The installer runs elevated; packages it pip-installs under Program
+    Files can land unreadable to the normal-user app process. The pip
+    step must grant the Users group (SID S-1-5-32-545) read access to
+    the bundled site-packages so `import faster_whisper` doesn't fail
+    with Permission denied.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "icacls" in ps1 and "S-1-5-32-545" in ps1, (
+        "install_prerequisites.ps1's pip step must grant the Users "
+        "group read access (icacls /grant *S-1-5-32-545) to the "
+        "bundled site-packages — without it, elevated-installed pip "
+        "packages are unreadable to the app (Errno 13 on import).")
 
 
 def test_gdre_prereq_probe_matches_install_location():

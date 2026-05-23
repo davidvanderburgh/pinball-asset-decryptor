@@ -1,9 +1,18 @@
 """Jersey Jack Pinball manufacturer plugin.
 
-Wraps the upstream JJP standalone (dongle-free) pipelines into the unified
-manufacturer contract.  The Direct-SSD and dongle-bearing pipelines are
-intentionally not exposed here — they require physical hardware and would
-need a richer GUI than the shared 4-phase shape provides.
+Wraps the upstream JJP standalone (dongle-free) pipelines into the
+unified manufacturer contract.  Two flows are exposed:
+
+  * ISO-based — Extract / Write / Mod Pack on a Clonezilla ``.iso``.
+    Uses the StandaloneDecryptPipeline / StandaloneModPipeline.
+
+  * Direct-SSD — Extract / Write directly against a physically
+    connected game SSD.  Uses DirectSSDDecryptPipeline /
+    DirectSSDModPipeline.  The GUI toggles between the two via a
+    radio button group on the Extract and Write tabs.
+
+The dongle-bearing pipelines are still not exposed — they require
+physical HASP hardware that's a thin layer of users.
 """
 
 import os
@@ -11,8 +20,10 @@ import shutil
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
+from . import config
 from .games import GAME_DB, detect_iso_game
-from .pipeline import StandaloneDecryptPipeline, StandaloneModPipeline
+from .pipeline import (DirectSSDDecryptPipeline, DirectSSDModPipeline,
+                       StandaloneDecryptPipeline, StandaloneModPipeline)
 
 
 _GAMES = tuple(sorted(
@@ -20,6 +31,27 @@ _GAMES = tuple(sorted(
      for k, info in GAME_DB.items()),
     key=lambda g: g.display.lower(),
 ))
+
+
+def _find_fl_dat(candidate_dirs):
+    """Locate ``fl_decrypted.dat`` in any of the given folders.
+
+    The JJP Decrypt phase writes ``fl_decrypted.dat`` (the
+    file-list metadata — filler sizes + CRC32 per file) into its
+    output folder; the Write phase needs that metadata to forge
+    checksums that pass the game's integrity check.  The standalone
+    decryptor searched several folders (output, modify_input,
+    write_input); for the unified app we look in whatever folder
+    the GUI hands us (the assets folder for Write, the output folder
+    for Extract).  Returns the first match or None.
+    """
+    for d in candidate_dirs:
+        if not d:
+            continue
+        candidate = os.path.join(d, "fl_decrypted.dat")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +160,10 @@ class JJPManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=True,
+        # Direct-SSD: read/write against the game SSD directly (no
+        # ISO intermediate).  Surfaces the "From ISO / From SSD"
+        # radio on the Extract + Write tabs.
+        direct_ssd=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",
@@ -139,6 +175,11 @@ class JJPManufacturer(Manufacturer):
     extract_phases = ("Extract", "Mount", "Decrypt", "Cleanup")
     write_phases = ("Scan", "Extract", "Prepare", "Encrypt", "Convert",
                     "Build ISO", "Cleanup")
+    # Direct-SSD flows — see jjp/config.py DIRECT_SSD_PHASES /
+    # DIRECT_SSD_MOD_PHASES.  The ISO extract + build phases are
+    # gone since we're reading/writing the SSD directly.
+    direct_ssd_extract_phases = tuple(config.DIRECT_SSD_PHASES)
+    direct_ssd_write_phases = tuple(config.DIRECT_SSD_MOD_PHASES)
     # JJP runs entirely through the executor (WSL on Windows, Docker on
     # macOS).  Six WSL-side tools cover the standalone Decrypt + Mod
     # flows.
@@ -182,6 +223,39 @@ class JJPManufacturer(Manufacturer):
                             log_cb, phase_cb, progress_cb, done_cb):
         return _WriteWrapper(original_path, assets_dir, output_path,
                              log_cb, phase_cb, progress_cb, done_cb)
+
+    def make_direct_ssd_extract_pipeline(
+            self, device_path, output_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        # If a prior Decrypt put fl_decrypted.dat in the output
+        # folder, reuse it — the upstream scan-for-filler-sizes pass
+        # is slow on first run and skippable when we already have
+        # the file list.  None falls back to auto-scan.
+        return DirectSSDDecryptPipeline(
+            device_path=device_path, output_path=output_dir,
+            fl_dat_path=_find_fl_dat([output_dir]),
+            log_cb=log_cb, phase_cb=phase_cb,
+            progress_cb=progress_cb, done_cb=done_cb,
+            partition_override=partition_override)
+
+    def make_direct_ssd_write_pipeline(
+            self, device_path, assets_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        # The Direct-SSD encrypt pass NEEDS fl_decrypted.dat — without
+        # the file-list metadata (filler sizes + CRC32) it can't
+        # forge checksums that pass the game's integrity check, so
+        # it bails with "no fl_decrypted.dat is available" rather
+        # than producing a broken SSD.  Look for it in the user's
+        # assets folder; the standalone Decrypt always writes one
+        # there.
+        return DirectSSDModPipeline(
+            device_path=device_path, assets_folder=assets_dir,
+            fl_dat_path=_find_fl_dat([assets_dir]),
+            log_cb=log_cb, phase_cb=phase_cb,
+            progress_cb=progress_cb, done_cb=done_cb,
+            partition_override=partition_override)
 
     def extract_input_help(self):
         return ("Decrypt a Jersey Jack Pinball game ISO (Wonka, Guns N' "

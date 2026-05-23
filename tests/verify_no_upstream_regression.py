@@ -149,10 +149,24 @@ PLAN = {
         ("jjp/jjp_decryptor/filelist.py", "identical"),
     "pinball_decryptor/plugins/jjp/resources.py":
         ("jjp/jjp_decryptor/resources.py", "identical"),
+    # pipeline.py has DIVERGED from upstream as of v0.6.5: the
+    # Direct-SSD path now enumerates partitions, content-verifies
+    # each candidate (Habo report), and mirrors writes across A/B
+    # slots on Windows.  The standalone jjp-decryptor repo is being
+    # deprecated in favour of this unified app, so we no longer
+    # track its pipeline.py byte-for-byte.  Behaviour-equivalence on
+    # the ISO-based flows is covered by tests/test_jjp_contract.py
+    # and the Extract → Write → Re-extract round-trip in the unified
+    # plugins.
     "pinball_decryptor/plugins/jjp/pipeline.py":
-        ("jjp/jjp_decryptor/pipeline.py", "identical"),
+        ("jjp/jjp_decryptor/pipeline.py", "ported"),
+    # updater.py in the standalone jjp-decryptor was rewired to be a
+    # deprecation-redirector (points at this unified app's release
+    # feed).  Our plugin's updater.py is vestigial — the unified app
+    # uses core/updater.py against the unified release feed — so byte
+    # equivalence no longer holds and isn't meaningful here either.
     "pinball_decryptor/plugins/jjp/updater.py":
-        ("jjp/jjp_decryptor/updater.py", "identical"),
+        ("jjp/jjp_decryptor/updater.py", "ported"),
     "pinball_decryptor/plugins/jjp/Dockerfile":
         ("jjp/Dockerfile", "identical"),
     "pinball_decryptor/plugins/jjp/partclone_to_raw.py":

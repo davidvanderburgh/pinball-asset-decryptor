@@ -13,7 +13,7 @@ import os
 import sys
 import time
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
@@ -169,6 +169,27 @@ class MainWindow:
         # True when no file is selected yet so the UI isn't pre-hidden.
         self._extract_audio_supported = True
 
+        # JJP-only (capabilities.direct_ssd): "From ISO / From SSD"
+        # radio toggles between the file picker and the physical-drive
+        # picker.  Default "iso" so plugins without direct_ssd see no
+        # change.  Drive var holds the selected drive's device_path
+        # (the value the pipeline accepts); drive_display_var is the
+        # combobox's selected label.  Partition override is the
+        # optional escape hatch — leave blank to auto-discover.
+        self.extract_input_source_var = tk.StringVar(value="iso")
+        self.extract_drive_var = tk.StringVar()
+        self.extract_drive_display_var = tk.StringVar()
+        self.extract_partition_override_var = tk.StringVar()
+        self.write_input_source_var = tk.StringVar(value="iso")
+        self.write_drive_var = tk.StringVar()
+        self.write_drive_display_var = tk.StringVar()
+        self.write_partition_override_var = tk.StringVar()
+        # Caches of PhysicalDrive — kept in step with the combobox so
+        # selecting a label can look up its device_path without
+        # re-enumerating.  Refilled by _refresh_drives.
+        self._extract_drives_cache = []
+        self._write_drives_cache = []
+
         # Cross-manufacturer auto-detect: when the current mfr doesn't
         # recognise a browsed file but exactly one other mfr does, we
         # store that mfr here so a click on the badge can switch to it.
@@ -190,6 +211,12 @@ class MainWindow:
             "write", lambda *_: self._update_write_filename())
         self.write_output_var.trace_add(
             "write", lambda *_: self._update_write_filename())
+        # Re-scan the Modified Files Preview whenever the assets
+        # folder changes, but only if the user is actually looking at
+        # the SSD-mode Write tab — otherwise we'd be churning hashing
+        # work on every keystroke into the Browse field.
+        self.write_assets_var.trace_add(
+            "write", lambda *_: self._maybe_rescan_write_preview())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -307,15 +334,85 @@ class MainWindow:
         # the prereqs row above the tabs already lists runtime tools,
         # so it was redundant + got clipped when the text was long.
 
-        row = ttk.Frame(f); row.pack(fill=tk.X, **pad)
+        # JJP-only (capabilities.direct_ssd): "From ISO" / "From SSD"
+        # radio toggles between the file picker below and the
+        # physical-drive picker frame.  Hidden in apply_manufacturer
+        # for plugins without direct_ssd.  Layout mirrors the
+        # standalone JJP decryptor so users moving over see the same
+        # shape.
+        self._extract_source_frame = ttk.Frame(f)
+        ttk.Radiobutton(
+            self._extract_source_frame, text="From ISO",
+            value="iso",
+            variable=self.extract_input_source_var,
+            command=lambda: self._on_input_source_change("extract"),
+        ).pack(side=tk.LEFT, padx=(10, 12))
+        ttk.Radiobutton(
+            self._extract_source_frame, text="From SSD",
+            value="ssd",
+            variable=self.extract_input_source_var,
+            command=lambda: self._on_input_source_change("extract"),
+        ).pack(side=tk.LEFT)
+
+        # ISO file-picker row — shown when source == "iso".
+        self._extract_input_row = ttk.Frame(f)
         self._extract_input_lbl = ttk.Label(
-            row, text="Input:", width=14, anchor=tk.W)
+            self._extract_input_row, text="Input:", width=14, anchor=tk.W)
         self._extract_input_lbl.pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.extract_input_var).pack(
+        ttk.Entry(self._extract_input_row,
+                  textvariable=self.extract_input_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
+        ttk.Button(self._extract_input_row, text="Browse...",
                    command=self._browse_extract_input).pack(
             side=tk.LEFT, padx=(4, 0))
+        self._extract_input_row.pack(fill=tk.X, **pad)
+
+        # SSD drive-picker row — shown when source == "ssd".  Created
+        # but not packed; _on_input_source_change toggles it in.
+        self._extract_drive_row = ttk.Frame(f)
+        ttk.Label(self._extract_drive_row,
+                  text="Game SSD:", width=14, anchor=tk.W).pack(side=tk.LEFT)
+        self._extract_drive_combo = ttk.Combobox(
+            self._extract_drive_row,
+            textvariable=self.extract_drive_display_var,
+            state="readonly")
+        self._extract_drive_combo.pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        self._extract_drive_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._on_drive_selected("extract"))
+        ttk.Button(self._extract_drive_row, text="Refresh",
+                   command=lambda: self._refresh_drives("extract")).pack(
+            side=tk.LEFT, padx=(4, 0))
+
+        # We previously surfaced a "Force partition #" entry here, but
+        # it spooked users — a numeric override field next to a
+        # red-warning panel makes the SSD flow feel risky.  The
+        # content-verify loop in DirectSSDDecryptPipeline.\
+        # _mount_ssd_windows now tries every Linux candidate in size
+        # order, so the auto-pick handles every drive layout we've
+        # seen.  If something exotic comes up we can re-expose the
+        # override later.
+
+        # Red warning shown only in SSD mode — mirrors the standalone
+        # JJP decryptor's prompt.  Pulling an SSD that's still bolted
+        # into a powered-on machine risks the host filesystem and the
+        # SSD; remind users every time.
+        self._extract_ssd_warn = ttk.Label(
+            f,
+            text="⚠ Remove the SSD from the pinball machine before "
+                 "connecting. Always keep the original ISO as a backup.",
+            foreground="#f44747",
+            font=(_SANS_FONT, 9))
+
+        # Elevation warning — Direct-SSD on Windows needs admin (both
+        # Set-Disk and wsl --mount are gated by Windows itself).
+        # Designed to be impossible to miss: bold heading, multi-line
+        # how-to-fix, contrasting red background.  Shown only when
+        # SSD mode is selected AND the app isn't running as admin;
+        # the Extract button is *disabled* in that state so users
+        # can't kick off a doomed run.
+        self._extract_admin_frame = self._build_admin_warning_frame(f)
 
         self._extract_badge = ttk.Label(f, text="",
                                         font=(_SANS_FONT, 9, "italic"))
@@ -327,12 +424,15 @@ class MainWindow:
         self._extract_badge.bind(
             "<Leave>", lambda _e: self._update_badge_cursor("extract", False))
 
-        row2 = ttk.Frame(f); row2.pack(fill=tk.X, **pad)
-        ttk.Label(row2, text="Output Folder:", width=14, anchor=tk.W).pack(
+        self._extract_output_row_ref = ttk.Frame(f)
+        self._extract_output_row_ref.pack(fill=tk.X, **pad)
+        ttk.Label(self._extract_output_row_ref,
+                  text="Output Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row2, textvariable=self.extract_output_var).pack(
+        ttk.Entry(self._extract_output_row_ref,
+                  textvariable=self.extract_output_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row2, text="Browse...",
+        ttk.Button(self._extract_output_row_ref, text="Browse...",
                    command=self._browse_extract_output).pack(
             side=tk.LEFT, padx=(4, 0))
 
@@ -492,15 +592,80 @@ class MainWindow:
             text="Re-pack modified assets into an installable update file.",
             font=(_SANS_FONT, 9, "italic")).pack(anchor=tk.W, **pad)
 
-        row_upd = ttk.Frame(f); row_upd.pack(fill=tk.X, **pad)
+        # Write-destination toggle (hidden for plugins without
+        # direct_ssd).  Action-oriented language here — writes have
+        # a destination, not a source, so "Build USB ISO" /
+        # "Write to SSD" reads more naturally than "From ISO" /
+        # "From SSD".  Mirrors the standalone JJP decryptor.
+        self._write_source_frame = ttk.Frame(f)
+        ttk.Radiobutton(
+            self._write_source_frame, text="Build USB ISO",
+            value="iso",
+            variable=self.write_input_source_var,
+            command=lambda: self._on_input_source_change("write"),
+        ).pack(side=tk.LEFT, padx=(10, 12))
+        ttk.Radiobutton(
+            self._write_source_frame, text="Write to SSD",
+            value="ssd",
+            variable=self.write_input_source_var,
+            command=lambda: self._on_input_source_change("write"),
+        ).pack(side=tk.LEFT)
+
+        # ISO original file row.
+        self._write_upd_row = ttk.Frame(f)
         self._write_original_lbl = ttk.Label(
-            row_upd, text="Original:", width=16, anchor=tk.W)
+            self._write_upd_row, text="Original:", width=16, anchor=tk.W)
         self._write_original_lbl.pack(side=tk.LEFT)
-        ttk.Entry(row_upd, textvariable=self.write_upd_var).pack(
+        ttk.Entry(self._write_upd_row, textvariable=self.write_upd_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row_upd, text="Browse...",
+        ttk.Button(self._write_upd_row, text="Browse...",
                    command=self._browse_write_upd).pack(
             side=tk.LEFT, padx=(4, 0))
+        self._write_upd_row.pack(fill=tk.X, **pad)
+
+        # SSD drive picker.
+        self._write_drive_row = ttk.Frame(f)
+        ttk.Label(self._write_drive_row,
+                  text="Game SSD:", width=16, anchor=tk.W).pack(side=tk.LEFT)
+        self._write_drive_combo = ttk.Combobox(
+            self._write_drive_row,
+            textvariable=self.write_drive_display_var,
+            state="readonly")
+        self._write_drive_combo.pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        self._write_drive_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._on_drive_selected("write"))
+        ttk.Button(self._write_drive_row, text="Refresh",
+                   command=lambda: self._refresh_drives("write")).pack(
+            side=tk.LEFT, padx=(4, 0))
+
+        # See the extract tab for why the "Force partition #" field
+        # is intentionally absent.  Same content-verify auto-pick.
+
+        # Red SSD-mode warning (write is even more dangerous than
+        # read since changes go straight to the SSD).
+        self._write_ssd_warn = ttk.Label(
+            f,
+            text="⚠ Remove the SSD from the pinball machine before "
+                 "connecting. Always keep the original ISO as a backup.",
+            foreground="#f44747",
+            font=(_SANS_FONT, 9))
+
+        # Same elevation warning as Extract — see comments there.
+        self._write_admin_frame = self._build_admin_warning_frame(f)
+
+        # Per-mode description that swaps text when the radio flips.
+        # In ISO mode it explains the USB-install flow; in SSD mode
+        # it spells out the in-place encrypt + audio trim/pad
+        # behaviour the JJP standalone called out specifically.  This
+        # is the kind of cue users read before clicking the button.
+        self._write_desc = ttk.Label(
+            f,
+            text="Re-pack modified assets into an installable update file.",
+            foreground="#888888",
+            font=(_SANS_FONT, 9),
+            wraplength=720, justify=tk.LEFT)
 
         self._write_badge = ttk.Label(f, text="",
                                       font=(_SANS_FONT, 9, "italic"))
@@ -512,27 +677,86 @@ class MainWindow:
         self._write_badge.bind(
             "<Leave>", lambda _e: self._update_badge_cursor("write", False))
 
-        row = ttk.Frame(f); row.pack(fill=tk.X, **pad)
-        ttk.Label(row, text="Modified Assets:", width=16, anchor=tk.W).pack(
+        self._write_assets_row_ref = ttk.Frame(f)
+        self._write_assets_row_ref.pack(fill=tk.X, **pad)
+        ttk.Label(self._write_assets_row_ref,
+                  text="Modified Assets:", width=16, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        ttk.Entry(self._write_assets_row_ref,
+                  textvariable=self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
+        ttk.Button(self._write_assets_row_ref, text="Browse...",
                    command=self._browse_write_assets).pack(
             side=tk.LEFT, padx=(4, 0))
 
-        row2 = ttk.Frame(f); row2.pack(fill=tk.X, **pad)
-        ttk.Label(row2, text="Output Folder:", width=16, anchor=tk.W).pack(
+        self._write_output_row_ref = ttk.Frame(f)
+        self._write_output_row_ref.pack(fill=tk.X, **pad)
+        ttk.Label(self._write_output_row_ref,
+                  text="Output Folder:", width=16, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row2, textvariable=self.write_output_var).pack(
+        ttk.Entry(self._write_output_row_ref,
+                  textvariable=self.write_output_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row2, text="Browse...",
+        ttk.Button(self._write_output_row_ref, text="Browse...",
                    command=self._browse_write_output).pack(
             side=tk.LEFT, padx=(4, 0))
 
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
         self._write_filename_lbl.pack(anchor=tk.W, padx=26)
+
+        # JJP Direct-SSD-only: "Modified Files Preview" — same shape
+        # as the standalone JJP decryptor.  Walks the assets folder
+        # comparing each file's MD5 against the .checksums.md5 the
+        # Extract phase emitted; anything that doesn't match shows up
+        # as "Modified".  Gives users a sanity check before they
+        # click Apply Modifications and commit changes to a real SSD.
+        # Hidden by apply_manufacturer() for plugins without
+        # direct_ssd; populated by _scan_write_preview() on tab show.
+        self._write_preview_frame = ttk.LabelFrame(
+            f, text=" Modified Files Preview ", padding=4)
+        # Pack-managed by apply_manufacturer + _on_input_source_change.
+
+        preview_inner = ttk.Frame(self._write_preview_frame)
+        preview_inner.pack(fill=tk.BOTH, expand=True)
+
+        self._write_preview_tree = ttk.Treeview(
+            preview_inner, columns=("type", "status"),
+            height=6, selectmode="browse")
+        self._write_preview_tree.heading("#0", text="File", anchor=tk.W)
+        self._write_preview_tree.heading(
+            "type", text="Type", anchor=tk.W)
+        self._write_preview_tree.heading(
+            "status", text="Status", anchor=tk.W)
+        self._write_preview_tree.column(
+            "#0", width=400, minwidth=200)
+        self._write_preview_tree.column(
+            "type", width=60, minwidth=40)
+        self._write_preview_tree.column(
+            "status", width=200, minwidth=100)
+        preview_scroll = ttk.Scrollbar(
+            preview_inner, orient=tk.VERTICAL,
+            command=self._write_preview_tree.yview)
+        self._write_preview_tree.configure(
+            yscrollcommand=preview_scroll.set)
+        preview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._write_preview_tree.pack(
+            side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Placeholder shown when the tree is empty (no scan yet, or
+        # scan returned no changes).  Floats centred on top of the
+        # tree via .place; the scan code shows/hides it.
+        self._write_preview_empty = ttk.Label(
+            preview_inner,
+            text="Switch to this tab to scan for modified files",
+            foreground="#888888",
+            anchor=tk.CENTER, justify=tk.CENTER)
+        self._write_preview_empty.place(
+            relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # Bump-counter to invalidate in-flight scans when the user
+        # changes the assets folder before a previous scan finishes.
+        self._write_preview_scan_id = 0
 
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._write_btn = ttk.Button(btn_row, text="Build update",
@@ -645,6 +869,16 @@ class MainWindow:
         if text == "Write":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack(fill=tk.X, before=self._progress_bar)
+            # When the Write tab is selected on a Direct-SSD plugin in
+            # SSD mode, auto-scan the assets folder so the preview is
+            # populated by the time the user looks at it.  The scan
+            # itself is no-op when the folder isn't set yet, so this
+            # is safe even pre-Decrypt.
+            mfr = self._current_mfr
+            if (mfr is not None
+                    and mfr.capabilities.direct_ssd
+                    and self.write_input_source_var.get() == "ssd"):
+                self._scan_write_preview()
         else:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
@@ -774,6 +1008,59 @@ class MainWindow:
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
 
+        # JJP (or any future plugin with caps.direct_ssd) gets an extra
+        # "From ISO / From SSD" radio row above the input rows on both
+        # the Extract and Write tabs.  Everyone else: reset the source
+        # to "iso" and hide the radio + the SSD-only frames.
+        if caps.direct_ssd:
+            self._extract_source_frame.pack(
+                fill=tk.X, padx=10, pady=(6, 0),
+                before=self._extract_input_row)
+            self._write_source_frame.pack(
+                fill=tk.X, padx=10, pady=(6, 0),
+                before=self._write_upd_row)
+            # Re-apply whichever source the user last had selected so
+            # the right rows are visible.
+            self._on_input_source_change("extract")
+            self._on_input_source_change("write")
+        else:
+            self._extract_source_frame.pack_forget()
+            self._write_source_frame.pack_forget()
+            self.extract_input_source_var.set("iso")
+            self.write_input_source_var.set("iso")
+            # Force the ISO layout in case we're switching FROM a
+            # direct_ssd plugin TO one without it.
+            self._extract_drive_row.pack_forget()
+            self._extract_ssd_warn.pack_forget()
+            self._write_drive_row.pack_forget()
+            self._write_ssd_warn.pack_forget()
+            # The per-mode description + the Modified Files Preview
+            # are JJP/direct_ssd-specific; hide them for plugins
+            # whose Write tab is just the ISO-build flow.
+            self._write_desc.pack_forget()
+            self._write_preview_frame.pack_forget()
+            # Restore the default "Build update" button label too.
+            self._write_btn.configure(text="Build update")
+            # Make sure the ISO rows are visible — _on_input_source_change
+            # would unpack/repack them, but a non-direct_ssd plugin may
+            # have inherited an unpacked state from a prior switch.
+            try:
+                self._extract_input_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._extract_output_row())
+            except tk.TclError:
+                pass
+            try:
+                self._write_upd_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._write_assets_row())
+            except tk.TclError:
+                pass
+            if self._write_output_row_ref:
+                self._write_output_row_ref.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._write_filename_lbl)
+
         # Show/hide the Williams capture toggles on the Extract tab.
         if caps.capture:
             self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
@@ -821,6 +1108,10 @@ class MainWindow:
         self._update_extract_badge()
         self._update_write_badge()
 
+        # If we're entering a direct_ssd plugin in SSD mode without
+        # admin, make sure the Extract / Apply buttons are disabled.
+        self._refresh_ssd_run_buttons()
+
     def _on_extract_mode_toggle(self):
         """Either Basic-extract or Capture checkbox toggled."""
         self._update_capture_help_text()
@@ -847,17 +1138,34 @@ class MainWindow:
         if self._current_mfr is None:
             return
         mfr = self._current_mfr
-        basic = self.static_extract_var.get()
-        capture = self.capture_mode_var.get() and mfr.capabilities.capture
-        if basic and capture:
-            phases = mfr.combined_phases or mfr.extract_phases
-        elif capture and not basic:
-            phases = mfr.capture_phases or mfr.extract_phases
-        else:  # basic only, or neither (treated as basic for display)
-            phases = mfr.extract_phases
-        if not self._extract_audio_supported:
-            phases = tuple(p for p in phases if p != "Extract audio")
-        self._rebuild_phase_steps(phases, mfr.write_phases)
+        # SSD-mode swap: when the source radio is on "ssd", the
+        # Direct-SSD pipeline skips the ISO extract/build phases.
+        # Same logic for write below.
+        extract_ssd = (mfr.capabilities.direct_ssd
+                       and self.extract_input_source_var.get() == "ssd")
+        write_ssd = (mfr.capabilities.direct_ssd
+                     and self.write_input_source_var.get() == "ssd")
+
+        if extract_ssd and mfr.direct_ssd_extract_phases:
+            phases = mfr.direct_ssd_extract_phases
+        else:
+            basic = self.static_extract_var.get()
+            capture = (self.capture_mode_var.get()
+                       and mfr.capabilities.capture)
+            if basic and capture:
+                phases = mfr.combined_phases or mfr.extract_phases
+            elif capture and not basic:
+                phases = mfr.capture_phases or mfr.extract_phases
+            else:  # basic only, or neither (treated as basic for display)
+                phases = mfr.extract_phases
+            if not self._extract_audio_supported:
+                phases = tuple(p for p in phases if p != "Extract audio")
+
+        if write_ssd and mfr.direct_ssd_write_phases:
+            wphases = mfr.direct_ssd_write_phases
+        else:
+            wphases = mfr.write_phases
+        self._rebuild_phase_steps(phases, wphases)
 
     # Back-compat shim — older code paths may still reference the
     # original toggle name.
@@ -1177,6 +1485,524 @@ class MainWindow:
             title="Select input file", filetypes=self._input_filetypes())
         if path:
             self.extract_input_var.set(path)
+
+    # ------------------------------------------------------------------
+    # Direct-SSD source toggle + drive picker (caps.direct_ssd plugins)
+    # ------------------------------------------------------------------
+
+    def _on_input_source_change(self, mode):
+        """Swap between the ISO file picker and the SSD drive picker.
+
+        ``mode`` is "extract" or "write".  Called by the radio
+        buttons.  Re-packs the visible row in the right order so the
+        layout reads top-to-bottom even after multiple toggles.
+        """
+        if mode == "extract":
+            source = self.extract_input_source_var.get()
+            self._extract_input_row.pack_forget()
+            self._extract_drive_row.pack_forget()
+            self._extract_ssd_warn.pack_forget()
+            self._extract_admin_frame.pack_forget()
+            self._extract_badge.pack_forget()
+            if source == "ssd":
+                self._extract_drive_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._extract_output_row())
+                self._extract_ssd_warn.pack(
+                    anchor=tk.W, padx=10, pady=(4, 2),
+                    before=self._extract_output_row())
+                # Elevation banner — only shown when we're NOT admin.
+                # The standalone JJP decryptor learned the hard way
+                # that wsl --mount returns a cryptic
+                # WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK without
+                # elevation; a banner here heads that off.  Fills
+                # the panel width so the warning is unmissable.
+                from ..core.admin import is_admin
+                if not is_admin():
+                    self._extract_admin_frame.pack(
+                        fill=tk.X, padx=10, pady=(4, 8),
+                        before=self._extract_output_row())
+                # Kick off enumeration on a worker thread so the UI
+                # never blocks on PowerShell/diskutil startup.  First
+                # toggle of the radio always re-enumerates so a
+                # freshly-plugged SSD shows up without a Refresh click.
+                self._refresh_drives_async("extract")
+            else:
+                self._extract_input_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._extract_output_row())
+                self._extract_badge.pack(
+                    anchor=tk.W, padx=24, pady=(0, 2),
+                    before=self._extract_output_row())
+            self._refresh_extract_phases()
+            # Re-evaluate the Extract button gate after a source flip.
+            self._refresh_ssd_run_buttons()
+        else:  # write
+            source = self.write_input_source_var.get()
+            self._write_upd_row.pack_forget()
+            self._write_drive_row.pack_forget()
+            self._write_ssd_warn.pack_forget()
+            self._write_admin_frame.pack_forget()
+            self._write_badge.pack_forget()
+            self._write_desc.pack_forget()
+            self._write_preview_frame.pack_forget()
+            if source == "ssd":
+                # SSD layout matches the standalone JJP decryptor:
+                # Assets → Game SSD → Warning → Description →
+                # Modified Files Preview.  Everything dynamic packs
+                # `before=filename_lbl` so the order is:
+                # [build-time assets row] [dynamic rows] [filename
+                # lbl] [btn row].
+                self._write_drive_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._write_filename_lbl)
+                self._write_ssd_warn.pack(
+                    anchor=tk.W, padx=10, pady=(4, 2),
+                    before=self._write_filename_lbl)
+                # Elevation warning (write side).  Same as extract —
+                # see _build_extract_tab for the explanation.
+                from ..core.admin import is_admin
+                if not is_admin():
+                    self._write_admin_frame.pack(
+                        fill=tk.X, padx=10, pady=(4, 8),
+                        before=self._write_filename_lbl)
+                # SSD mode: explain in-place encrypt + audio
+                # trim/pad behaviour so users know what to expect
+                # before they click Apply Modifications.
+                self._write_desc.configure(
+                    text="Re-encrypt changed files and write them "
+                         "directly to the game SSD. Audio files are "
+                         "automatically trimmed or padded to match "
+                         "the original duration.")
+                self._write_desc.pack(
+                    anchor=tk.W, padx=10, pady=(2, 6),
+                    before=self._write_filename_lbl)
+                # Modified Files Preview only makes sense for SSD
+                # mode — the ISO-build flow has its own scan +
+                # convert phases the user watches via the phase
+                # indicator.
+                self._write_preview_frame.pack(
+                    fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
+                    before=self._write_filename_lbl)
+                self._write_btn.configure(text="Apply Modifications")
+                self._refresh_drives_async("write")
+                # SSD-write doesn't produce an output file — the SSD
+                # IS the output.  Hide the Output Folder row.
+                if hasattr(self, "_write_output_row_ref"):
+                    self._write_output_row_ref.pack_forget()
+                # Kick a preview scan in the background so the user
+                # sees the modified files without a separate click.
+                self._scan_write_preview()
+            else:
+                # ISO layout: source → original ISO → badge → assets
+                # → output folder.  Dynamic rows go BEFORE the
+                # assets row (because the original ISO sits above
+                # the modified-assets folder in this flow).
+                self._write_upd_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._write_assets_row())
+                self._write_badge.pack(
+                    anchor=tk.W, padx=26, pady=(0, 2),
+                    before=self._write_assets_row())
+                self._write_desc.configure(
+                    text="Re-pack modified assets into an "
+                         "installable update file.")
+                self._write_desc.pack(
+                    anchor=tk.W, padx=10, pady=(2, 6),
+                    before=self._write_assets_row())
+                self._write_btn.configure(text="Build update")
+                if hasattr(self, "_write_output_row_ref"):
+                    self._write_output_row_ref.pack(
+                        fill=tk.X, padx=10, pady=4,
+                        before=self._write_filename_lbl)
+            # Either branch may have changed the phase indicator
+            # shape — refresh both extract and write phases.
+            self._refresh_extract_phases()
+            # Also re-evaluate the Extract/Apply Modifications
+            # button gates: SSD + non-admin disables them so the
+            # user can't kick off a doomed run.
+            self._refresh_ssd_run_buttons()
+
+    def _extract_output_row(self):
+        """Output Folder row — anchor for ``before=`` repacks."""
+        return getattr(self, "_extract_output_row_ref", None)
+
+    def _write_assets_row(self):
+        """Modified Assets row — anchor for write-tab SSD repacks."""
+        return getattr(self, "_write_assets_row_ref", None)
+
+    def _refresh_drives(self, mode):
+        """Public Refresh-button handler — kicks off async enumeration."""
+        self._refresh_drives_async(mode)
+
+    def _refresh_drives_async(self, mode):
+        """Enumerate physical drives on a worker thread.
+
+        PowerShell's first-launch cost (~1-2s) blocks the Tk event
+        loop if we run it inline — which is what made the "From SSD"
+        radio feel like the app had hung.  We park the subprocess
+        call on a daemon thread and hand the result back via
+        ``root.after`` so all widget updates happen on the main
+        thread.
+
+        While the enumeration runs, the combobox shows a placeholder
+        so the user has visual feedback that something is happening.
+        """
+        combo = (self._extract_drive_combo if mode == "extract"
+                 else self._write_drive_combo)
+        display_var = (self.extract_drive_display_var
+                       if mode == "extract"
+                       else self.write_drive_display_var)
+        combo["values"] = ["Detecting drives…"]
+        display_var.set("Detecting drives…")
+
+        def _worker():
+            try:
+                from ..core.drives import (list_physical_drives,
+                                           pick_best_game_ssd)
+                drives = list_physical_drives()
+                pick = pick_best_game_ssd(drives)
+            except Exception:
+                drives, pick = [], (None, None, None)
+            # Hop back to the main thread before touching Tk widgets.
+            self._tk_root().after(
+                0, self._apply_drives, mode, drives, pick)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _tk_root(self):
+        """Return the Tk root — used by worker-thread .after() calls.
+
+        ttk.Frame doesn't expose .after directly on this class, but
+        any widget can call .after on its toplevel.
+        """
+        # ``self.master`` or the title label both work; pick a known-
+        # existing widget that's created before any threaded work.
+        return self._title_lbl.winfo_toplevel()
+
+    def _apply_drives(self, mode, drives, pick):
+        """Main-thread continuation of _refresh_drives_async.
+
+        Populates the combobox, auto-selects the best-match drive,
+        logs the discovery so the user can see exactly what was
+        picked and why.  ``pick`` is the
+        ``(drive, confidence, reason)`` triple from
+        ``pick_best_game_ssd``.
+        """
+        combo = (self._extract_drive_combo if mode == "extract"
+                 else self._write_drive_combo)
+        display_var = (self.extract_drive_display_var
+                       if mode == "extract"
+                       else self.write_drive_display_var)
+        if mode == "extract":
+            self._extract_drives_cache = drives
+        else:
+            self._write_drives_cache = drives
+
+        if not drives:
+            combo["values"] = ["(no drives found — click Refresh)"]
+            display_var.set(combo["values"][0])
+            self._log_ssd_pick(
+                "No physical drives detected.  Check that the SSD "
+                "is connected and click Refresh.", level="error")
+            return
+
+        combo["values"] = [d.display for d in drives]
+        best, confidence, reason = pick
+        if best is not None:
+            display_var.set(best.display)
+            self._on_drive_selected(mode)
+            tag = "success" if confidence == "high" else "info"
+            self._log_ssd_pick(
+                f"Selected SSD: {best.display}", level=tag)
+            if reason:
+                self._log_ssd_pick(f"  ({reason})", level="info")
+            if confidence != "high":
+                self._log_ssd_pick(
+                    "  If this isn't the JJP SSD, pick it manually "
+                    "from the dropdown.", level="info")
+        else:
+            # pick_best_game_ssd returned (None, None, None) — should
+            # only happen on an empty list which we handled above.
+            display_var.set(drives[0].display)
+            self._on_drive_selected(mode)
+
+    def _build_admin_warning_frame(self, parent):
+        """Build the prominent "Administrator required" warning panel.
+
+        Uses raw ``tk.Frame`` / ``tk.Label`` (not ttk) so we can set
+        the background colour directly — ttk styling per-widget is
+        themable but harder to override locally, and the goal here
+        is the opposite of "blend in".  Returns the unpacked frame;
+        ``_on_input_source_change`` decides when to pack it.
+        """
+        frame = tk.Frame(
+            parent, bg="#5a1a1a", padx=12, pady=10,
+            highlightbackground="#f44747", highlightthickness=2)
+        tk.Label(
+            frame,
+            text="⚠  ADMINISTRATOR PRIVILEGES REQUIRED",
+            bg="#5a1a1a", fg="#ffd1d1",
+            font=(_SANS_FONT, 11, "bold"),
+            anchor=tk.W).pack(fill=tk.X, anchor=tk.W)
+        tk.Label(
+            frame,
+            text=(
+                "Direct-SSD mode needs Windows Administrator "
+                "privileges.  Both wsl --mount and Set-Disk "
+                "-IsOffline are gated by Windows itself behind "
+                "elevation — there is no workaround at the app "
+                "level.\n\n"
+                "To enable Direct-SSD:\n"
+                "   1.   Close this app.\n"
+                "   2.   Right-click the \"Pinball Asset Decryptor\" "
+                "shortcut (Start menu or desktop).\n"
+                "   3.   Choose \"Run as administrator\".\n"
+                "   4.   Re-select \"From SSD\" — your drive and "
+                "output folder will be remembered."),
+            bg="#5a1a1a", fg="#ffffff",
+            font=(_SANS_FONT, 9),
+            justify=tk.LEFT, anchor=tk.W,
+            wraplength=720).pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+        return frame
+
+    def _refresh_ssd_run_buttons(self):
+        """Disable Extract / Apply Modifications when SSD + not admin.
+
+        Re-enabled the moment the user switches the radio back to ISO
+        mode, or when ``is_admin()`` flips True (which only happens
+        on a re-launched elevated process — same process can't gain
+        admin mid-life).
+        """
+        from ..core.admin import is_admin
+        admin = is_admin()
+        mfr = self._current_mfr
+        needs_admin = (
+            mfr is not None
+            and mfr.capabilities.direct_ssd
+            and not admin)
+        block_extract = (
+            needs_admin
+            and self.extract_input_source_var.get() == "ssd")
+        block_write = (
+            needs_admin
+            and self.write_input_source_var.get() == "ssd")
+        # Don't fight whatever set_running() may have set — only
+        # touch state if we're not in the middle of a run.
+        if not self._is_running():
+            self._extract_btn.configure(
+                state=(tk.DISABLED if block_extract else tk.NORMAL))
+            self._write_btn.configure(
+                state=(tk.DISABLED if block_write else tk.NORMAL))
+
+    def _is_running(self):
+        """True when a pipeline is mid-flight (either tab)."""
+        # Cancel button is enabled during runs; cheaper than tracking
+        # a separate flag and keeps the two state machines in sync.
+        try:
+            return (str(self._extract_cancel_btn.cget("state"))
+                    == tk.NORMAL)
+        except (AttributeError, tk.TclError):
+            return False
+
+    def _log_ssd_pick(self, text, level="info"):
+        """Write a Direct-SSD discovery line to the current mfr's log.
+
+        Routes through the same append_log path the pipelines use, so
+        the user sees the SSD-pick reasoning in the same console
+        they'll watch for the actual decrypt/encrypt run.
+        """
+        try:
+            self.append_log(text, level=level)
+        except Exception:
+            # Pre-mfr-selected start-up state — the log widget may not
+            # be active yet.  Best-effort; the same info will appear
+            # when the pipeline runs anyway (the pipeline logs the
+            # device + partition picks too).
+            pass
+
+    def _on_drive_selected(self, mode):
+        """Map the selected combobox label back to its device_path.
+
+        The combobox stores the *display* string (model + size + path);
+        the pipeline needs the bare device_path.  We look it up from
+        the cached PhysicalDrive list — keying on display is fine
+        because the display includes the device_path verbatim, so
+        duplicates are impossible.
+        """
+        display_var = (self.extract_drive_display_var
+                       if mode == "extract"
+                       else self.write_drive_display_var)
+        device_var = (self.extract_drive_var if mode == "extract"
+                      else self.write_drive_var)
+        cache = (self._extract_drives_cache if mode == "extract"
+                 else self._write_drives_cache)
+        label = display_var.get()
+        match = next((d for d in cache if d.display == label), None)
+        device_var.set(match.device_path if match else "")
+
+    # ------------------------------------------------------------------
+    # Direct-SSD Modified Files Preview (JJP-only)
+    # ------------------------------------------------------------------
+
+    def _scan_write_preview(self):
+        """Populate the Modified Files Preview tree on a worker thread.
+
+        Walks the user's assets folder and MD5-compares each file
+        against the baseline ``.checksums.md5`` the Extract phase
+        emitted; anything that doesn't match shows up as "Modified"
+        in the tree.  Ported almost verbatim from the standalone
+        JJP decryptor (which is where users with the file already
+        know the format from).
+
+        Silently no-ops when:
+          * the assets folder isn't set or doesn't exist (nothing to
+            scan yet);
+          * no .checksums.md5 is present (user pointed at a folder
+            that didn't come from this app's Decrypt phase).
+
+        Cancellable via ``_write_preview_scan_id`` — a re-scan
+        invalidates any in-flight work so two scans don't race to
+        populate the tree.
+        """
+        import hashlib
+        import os
+        import re as _re
+        import threading
+
+        assets_path = (self.write_assets_var.get() or "").strip()
+        # Clear whatever's there from a prior scan.
+        self._write_preview_tree.delete(
+            *self._write_preview_tree.get_children())
+        if not assets_path or not os.path.isdir(assets_path):
+            self._write_preview_empty.configure(
+                text="Switch to this tab to scan for modified files")
+            self._write_preview_empty.place(
+                relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+        checksums_file = os.path.join(assets_path, ".checksums.md5")
+        if not os.path.isfile(checksums_file):
+            self._write_preview_empty.configure(
+                text=("Pick a folder produced by Extract first "
+                      "(no .checksums.md5 found)."))
+            self._write_preview_empty.place(
+                relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+
+        # Bump the scan-id so any older in-flight scan stops
+        # posting results.
+        self._write_preview_scan_id += 1
+        scan_id = self._write_preview_scan_id
+        self._write_preview_empty.configure(
+            text="Scanning for modified files…")
+        self._write_preview_empty.place(
+            relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        def _scan():
+            saved = {}
+            try:
+                with open(checksums_file, "r", encoding="utf-8",
+                          errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        m = _re.match(
+                            r'^([a-f0-9]{32})\s+\*?(.+)$', line)
+                        if m:
+                            fp = m.group(2)
+                            if fp.startswith("./"):
+                                fp = fp[2:]
+                            saved[fp] = m.group(1)
+            except OSError:
+                return
+
+            changed = []
+            for root_dir, _dirs, files in os.walk(assets_path):
+                for name in files:
+                    if (name.startswith(".")
+                            or name == "fl_decrypted.dat"
+                            or name.endswith(".img")):
+                        continue
+                    full = os.path.join(root_dir, name)
+                    rel = os.path.relpath(
+                        full, assets_path).replace("\\", "/")
+                    if rel not in saved:
+                        continue
+                    h = hashlib.md5()
+                    try:
+                        with open(full, "rb") as fh:
+                            for chunk in iter(
+                                    lambda: fh.read(65536), b""):
+                                h.update(chunk)
+                    except OSError:
+                        continue
+                    if h.hexdigest() == saved[rel]:
+                        continue
+                    if self._write_preview_scan_id != scan_id:
+                        return  # superseded — drop this scan
+                    changed.append(rel)
+                    ext = os.path.splitext(name)[1].lstrip(".") or "?"
+                    self._tk_root().after(
+                        0, self._add_write_preview_row,
+                        rel, ext, "Modified", scan_id)
+
+            if self._write_preview_scan_id == scan_id:
+                self._tk_root().after(
+                    0, self._finish_write_preview_scan,
+                    len(changed), scan_id)
+
+        threading.Thread(target=_scan, daemon=True).start()
+
+    def _add_write_preview_row(self, rel, ext, status, scan_id):
+        """Insert one row into the preview tree (main-thread only)."""
+        if self._write_preview_scan_id != scan_id:
+            return
+        # Once we've added a real row, hide the placeholder.
+        try:
+            self._write_preview_empty.place_forget()
+        except tk.TclError:
+            pass
+        self._write_preview_tree.insert(
+            "", tk.END, text=rel, values=(ext, status),
+            tags=("modified",))
+        # Tag colour is set in _apply_theme so it tracks dark/light
+        # mode; nothing per-row here.
+
+    def _finish_write_preview_scan(self, n_changed, scan_id):
+        """End-of-scan housekeeping (main-thread only)."""
+        if self._write_preview_scan_id != scan_id:
+            return
+        if n_changed == 0:
+            self._write_preview_empty.configure(
+                text="No modified files detected.")
+            self._write_preview_empty.place(
+                relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+    def _maybe_rescan_write_preview(self):
+        """Re-scan only when the SSD-mode Write tab is the active view.
+
+        The ``write_assets_var`` trace fires on every keystroke, on
+        every settings-restore, and on programmatic ``set()``; we
+        don't want to spin up a hashing thread for any of those when
+        the user isn't even looking at the preview.
+        """
+        mfr = self._current_mfr
+        if mfr is None or not mfr.capabilities.direct_ssd:
+            return
+        if self.write_input_source_var.get() != "ssd":
+            return
+        # Only scan if the Write tab is the currently-selected tab —
+        # otherwise the user can't see the preview anyway.
+        try:
+            idx = self._notebook.index(self._notebook.select())
+            tab_id = self._notebook.tabs()[idx]
+            if self._notebook.tab(tab_id, "text").strip() != "Write":
+                return
+        except (tk.TclError, IndexError):
+            return
+        self._scan_write_preview()
 
     def _browse_extract_output(self):
         path = filedialog.askdirectory(title="Select output folder")
@@ -1633,6 +2459,37 @@ class MainWindow:
         style.configure("Horizontal.TProgressbar",
                         troughcolor=c["trough"], background=c["accent"])
         style.configure("TSeparator", background=c["border"])
+        # ttk.Treeview — default clam theme leaves rows white-on-black
+        # text even when everything else around it is dark; the
+        # Modified Files Preview tree on the Write tab needs explicit
+        # styling.  Three style names matter: the body, the column
+        # headers, and the selected-row state.
+        style.configure(
+            "Treeview",
+            background=c["field_bg"],
+            foreground=c["fg"],
+            fieldbackground=c["field_bg"],
+            bordercolor=c["border"],
+            lightcolor=c["field_bg"],
+            darkcolor=c["field_bg"])
+        style.configure(
+            "Treeview.Heading",
+            background=c["button"],
+            foreground=c["fg"],
+            relief="flat")
+        style.map(
+            "Treeview.Heading",
+            background=[("active", c["accent"])],
+            foreground=[("active", "#ffffff")])
+        style.map(
+            "Treeview",
+            background=[("selected", c["select_bg"])],
+            foreground=[("selected", "#ffffff")])
+        # Re-bind the row tag colors to the new theme so the tree
+        # rows recolor when the user toggles dark/light mid-session.
+        if hasattr(self, "_write_preview_tree"):
+            self._write_preview_tree.tag_configure(
+                "modified", foreground=c["link"])
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

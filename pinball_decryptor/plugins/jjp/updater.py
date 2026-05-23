@@ -1,15 +1,25 @@
-"""Auto-update checker for JJP Asset Decryptor.
+"""Vestigial update-checker stub for the JJP plugin.
 
-Checks the GitHub releases API for newer versions on startup.
-Uses only the standard library (urllib, json). All errors are
-silently swallowed — update checks must never interfere with
-normal operation.
+The unified app polls its own release feed via
+:mod:`pinball_decryptor.core.updater` against
+``davidvanderburgh/pinball-asset-decryptor``.  This file remains
+because it was lifted verbatim from the upstream standalone
+``jjp-decryptor`` and a few historical imports still reference it;
+it is no longer the active updater.
+
+If you find yourself reaching for this module to add an update
+prompt, prefer the core updater — pointing at the deprecated
+``jjp-decryptor`` GitHub repo would now show users a release older
+than the unified app they're already running.
 """
 
 import json
 import urllib.request
 
-GITHUB_REPO = "davidvanderburgh/jjp-decryptor"
+# Point at the unified app's release feed so any code that does
+# still call this gets sensible results instead of stale data from
+# the deprecated standalone repo.
+GITHUB_REPO = "davidvanderburgh/pinball-asset-decryptor"
 RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 REQUEST_TIMEOUT = 5  # seconds
 
@@ -30,7 +40,7 @@ def check_for_update(current_version):
         req = urllib.request.Request(
             RELEASES_URL,
             headers={"Accept": "application/vnd.github.v3+json",
-                     "User-Agent": "JJP-Asset-Decryptor-UpdateCheck"},
+                     "User-Agent": "Pinball-Asset-Decryptor-UpdateCheck"},
         )
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())

@@ -61,6 +61,11 @@ class Capabilities:
     # spoken text (non-speech samples are skipped via VAD).  Used by
     # CGC where samples are numbered by index with no embedded names.
     transcribe: bool = False
+    # Direct-SSD path: read from / write to a physically-connected
+    # game SSD instead of an ISO/file.  Surfaces a radio toggle on
+    # the Extract / Write tabs swapping the file picker for a drive
+    # picker + manual partition override.  Used by JJP.
+    direct_ssd: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,12 @@ class Manufacturer(ABC):
     # Phase labels for the auto-transcribe path (Whisper-based) —
     # used when ``capabilities.transcribe`` is True.
     transcribe_phases: Tuple[str, ...] = ()
+    # Phase labels for the Direct-SSD paths (only meaningful when
+    # ``capabilities.direct_ssd`` is True).  Mount/Decrypt/Cleanup
+    # for extract; Scan/Mount/Encrypt/Cleanup for write — same shape
+    # the standalone jjp-decryptor used.
+    direct_ssd_extract_phases: Tuple[str, ...] = ()
+    direct_ssd_write_phases: Tuple[str, ...] = ()
 
     # Runtime tools this plugin needs.  Probed on a worker thread when
     # the user picks this manufacturer in the GUI; results render as
@@ -171,6 +182,38 @@ class Manufacturer(ABC):
         """
         raise NotImplementedError(
             f"{self.display} does not implement a Transcribe pipeline.")
+
+    def make_direct_ssd_extract_pipeline(
+            self, device_path, output_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        """Build the Direct-SSD extract pipeline.
+
+        Only meaningful when ``capabilities.direct_ssd`` is True.
+        ``device_path`` is an OS-native physical-disk path
+        (``\\\\.\\PHYSICALDRIVEn`` on Windows, ``/dev/diskN`` on
+        macOS, ``/dev/sdX`` on Linux).  ``partition_override`` is the
+        optional escape hatch from the "Force partition #" field —
+        ``None`` means let the pipeline auto-discover.
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a Direct-SSD "
+            f"extract pipeline.")
+
+    def make_direct_ssd_write_pipeline(
+            self, device_path, assets_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        """Build the Direct-SSD write/modify pipeline.
+
+        Only meaningful when ``capabilities.direct_ssd`` is True.
+        See :meth:`make_direct_ssd_extract_pipeline` for parameter
+        semantics; this one takes an assets folder of modified
+        files instead of an output folder.
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a Direct-SSD "
+            f"write pipeline.")
 
     def audio_export_supported(self, path) -> bool:
         """Whether extracting *path* yields audio assets the

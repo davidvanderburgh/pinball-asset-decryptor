@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 
 from . import config
 from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
@@ -300,13 +301,13 @@ class DecryptionPipeline:
 
     def _log_system_diagnostics(self):
         """Log system/environment info for remote diagnostics."""
-        from . import __version__
+        from pinball_decryptor import __version__ as _app_version
 
         def _clean_utf16(text):
             """Strip UTF-16 null bytes that WSL commands sometimes produce."""
             return text.replace("\x00", "")
 
-        lines = [f"jjp-decryptor v{__version__}"]
+        lines = [f"Pinball Asset Decryptor v{_app_version}"]
 
         # Python version
         lines.append(f"Python {sys.version.split()[0]}")
@@ -4645,6 +4646,175 @@ class StandaloneModPipeline(ModPipeline):
 # Direct SSD pipelines — modify files on a physically-connected SSD
 # ==================================================================
 
+# Normalise per-OS partition-type labels into a small, finite set so the
+# pick-the-game-partition code doesn't have to care which platform it's
+# running on.  Anything we don't recognise is "unknown" (still a valid
+# candidate — Windows reports ext4 as "Unknown" since it has no driver,
+# which is the whole reason we can't just trust the type label).
+_WIN_TYPE_TO_FS_KIND = {
+    "ifs":           "ntfs",     # Windows NTFS / installable FS marker
+    "basic":         "unknown",  # generic data — could be anything
+    "system":        "efi",      # EFI System Partition
+    "reserved":      "msr",      # MS Reserved
+    "recovery":      "recovery",
+    "unknown":       "linux",    # no Windows driver → most often ext4
+}
+
+_MAC_TYPE_TO_FS_KIND = {
+    "linux filesystem":     "linux",
+    "linux swap":           "swap",
+    "efi":                  "efi",
+    "microsoft basic data": "unknown",
+    "ms reserved":          "msr",
+    "apple_hfs":            "hfs",
+    "apple_apfs":           "apfs",
+}
+
+
+@dataclass
+class _PartitionInfo:
+    """One entry in the partition map for a JJP SSD.
+
+    Built by ``_discover_partitions`` on every Direct-SSD run so the
+    full layout is always in the log file regardless of whether the
+    auto-pick succeeds.  ``raw_type`` keeps the OS-native label
+    verbatim — diagnostics — while ``fs_kind`` is the normalised
+    category the pick logic actually reads.
+
+    Mount-probe fields (``has_jjpe_gen1``, ``jjpe_mtime``,
+    ``boot_listing``) are filled in by the content-verify loop in
+    ``_mount_ssd``; they stay at their defaults if that partition
+    was never mounted.
+    """
+    number: int                    # 1-indexed partition number
+    raw_type: str                  # OS-native type string, for the log
+    size_bytes: int                # 0 if unknown
+    fs_kind: str = "unknown"       # linux | efi | fat | ntfs | swap | …
+    has_jjpe_gen1: bool = False    # set True once content-verify finds it
+    jjpe_mtime: int = 0            # epoch seconds — newer = more recent activity
+    boot_listing: list = field(default_factory=list)  # top-level names on small FAT/EFI
+
+
+# ----------------------------------------------------------------------
+# Per-OS partition-table parsers — module-level so they can be unit
+# tested directly against canned PowerShell / diskutil / lsblk output
+# without spinning up a real executor.
+# ----------------------------------------------------------------------
+
+def _parse_windows_partitions(raw_output):
+    """Parse ``num|type|size`` lines from Get-Partition into _PartitionInfo.
+
+    Empty input or junk lines just yield an empty list — the caller
+    treats a missing partition map as "fall back to default".
+    """
+    out_parts = []
+    if not raw_output:
+        return out_parts
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        fields = line.split("|", 2)
+        if len(fields) < 3:
+            continue
+        try:
+            num = int(fields[0].strip())
+            size = int(fields[2].strip())
+        except ValueError:
+            continue
+        raw_type = fields[1].strip()
+        fs_kind = _WIN_TYPE_TO_FS_KIND.get(raw_type.lower(), "unknown")
+        out_parts.append(_PartitionInfo(
+            number=num, raw_type=raw_type,
+            size_bytes=size, fs_kind=fs_kind))
+    return out_parts
+
+
+def _parse_macos_partitions(raw_output):
+    """Parse ``diskutil list <device>`` output into _PartitionInfo.
+
+    Each partition row looks like ``   2:  Linux Filesystem
+    12.0 GB   disk2s2``.  We anchor on the trailing ``diskNsM``
+    instead of the leading index column because diskutil reflows
+    label widths between versions.
+    """
+    out_parts = []
+    if not raw_output:
+        return out_parts
+    for line in raw_output.splitlines():
+        m = re.match(
+            r'\s*\d+:\s+(.+?)\s+([\d.]+)\s+(TB|GB|MB|KB|B)\s+'
+            r'disk\d+s(\d+)',
+            line)
+        if not m:
+            continue
+        raw_type = m.group(1).strip()
+        val = float(m.group(2))
+        unit = m.group(3)
+        size = int(val * {
+            'TB': 1e12, 'GB': 1e9, 'MB': 1e6, 'KB': 1e3, 'B': 1,
+        }.get(unit, 1))
+        num = int(m.group(4))
+        fs_kind = _MAC_TYPE_TO_FS_KIND.get(
+            raw_type.lower(), "unknown")
+        # Fuzzy fallbacks — diskutil's TYPE column often runs the
+        # type label and the volume name together (e.g. "EFI EFI",
+        # "Linux Filesystem MYDRIVE") which the strict dict misses.
+        if fs_kind == "unknown":
+            label = raw_type.lower()
+            if "linux" in label:
+                fs_kind = "linux"
+            elif "efi" in label:
+                fs_kind = "efi"
+            elif "swap" in label:
+                fs_kind = "swap"
+        out_parts.append(_PartitionInfo(
+            number=num, raw_type=raw_type,
+            size_bytes=size, fs_kind=fs_kind))
+    return out_parts
+
+
+def _parse_linux_partitions(raw_output):
+    """Parse ``lsblk -brno NAME,FSTYPE,SIZE`` output into _PartitionInfo.
+
+    ``-b`` makes the size column an int (bytes) — without it lsblk
+    returns "12G" / "500M" and we'd have to undo a localised
+    rounding.
+    """
+    out_parts = []
+    if not raw_output:
+        return out_parts
+    for line in raw_output.strip().splitlines():
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        name = fields[0]
+        fstype = fields[1] if len(fields) >= 3 else ""
+        try:
+            size = int(fields[-1])
+        except ValueError:
+            continue
+        m = re.search(r'(\d+)$', name)
+        if not m:
+            continue
+        num = int(m.group(1))
+        fs_lower = fstype.lower() if fstype else ""
+        if fs_lower in ("ext4", "ext3", "ext2"):
+            fs_kind = "linux"
+        elif fs_lower in ("vfat", "fat32", "fat16", "msdos"):
+            fs_kind = "fat"
+        elif fs_lower == "ntfs":
+            fs_kind = "ntfs"
+        elif fs_lower == "swap":
+            fs_kind = "swap"
+        else:
+            fs_kind = fs_lower or "unknown"
+        out_parts.append(_PartitionInfo(
+            number=num, raw_type=fstype or "(no fstype)",
+            size_bytes=size, fs_kind=fs_kind))
+    return out_parts
+
+
 class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
     """Decrypt files directly from a physically-connected JJP game SSD.
 
@@ -4657,7 +4827,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
     def __init__(self, device_path, output_path, fl_dat_path,
                  log_cb, phase_cb, progress_cb, done_cb,
                  full_dump=False, extract_graphics=True,
-                 extract_sounds=True):
+                 extract_sounds=True, partition_override=None):
         # Pass device_path as image_path (we override mount logic)
         super().__init__(device_path, output_path, fl_dat_path,
                          log_cb, phase_cb, progress_cb, done_cb,
@@ -4665,11 +4835,17 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                          extract_graphics=extract_graphics,
                          extract_sounds=extract_sounds)
         self.device_path = device_path  # e.g. \\.\PHYSICALDRIVE2 or /dev/sdb
+        # User-supplied partition number that overrides auto-discovery.
+        # The escape hatch for drives whose layout the enumerator misses;
+        # set via the GUI's "Force partition #" field.
+        self.partition_override = partition_override
         self._ssd_mounted = False
         self._wsl_mount_device = None  # for Windows wsl --unmount
         self._disk_was_offlined = False
         self._ssd_image_path = None    # raw image of SSD partition (macOS)
         self._needs_writeback = False   # write image back to SSD on success
+        self._partition_map = []        # filled by _discover_partitions for diagnostics
+        self._ab_partitions = None      # filled when an A/B layout is detected
 
     def run(self):
         """Execute the direct SSD decrypt pipeline."""
@@ -5126,247 +5302,568 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                                      f"{i + 1}/{total} files")
         self.log(f"Checksums generated for {total} files.", "success")
 
-    def _detect_partition(self, device):
-        """Auto-detect the Linux/ext4 game partition number on the SSD.
+    def _discover_partitions(self, device):
+        """Enumerate every partition on the device with metadata.
 
-        Tries platform-specific methods, falls back to config default.
-        Returns the 1-indexed partition number.
+        Logs the full partition map so we always have the layout in
+        the log file regardless of whether the auto-pick succeeds —
+        Habo's bug report only ever surfaced partition 2 because the
+        old picker returned the first match and bailed.  Now we log
+        all of them.
+
+        Returns a list of ``_PartitionInfo`` (one per partition) and
+        also stashes it on ``self._partition_map`` for downstream
+        consumers (error paths, A/B detection, the mount-retry loop).
         """
-        from .executor import WslExecutor, DockerExecutor, NativeExecutor
+        from .executor import (WslExecutor, DockerExecutor,
+                               NativeExecutor)
 
-        if isinstance(self.executor, DockerExecutor):
-            # macOS: use diskutil list to find Linux partition
+        if isinstance(self.executor, WslExecutor):
+            parts = self._discover_partitions_windows(device)
+        elif isinstance(self.executor, DockerExecutor):
+            parts = self._discover_partitions_macos(device)
+        elif isinstance(self.executor, NativeExecutor):
+            parts = self._discover_partitions_linux(device)
+        else:
+            parts = []
+
+        self._partition_map = parts
+        if parts:
+            self.log("Partition map:", "info")
+            for p in parts:
+                sz = (f"{p.size_bytes / 1e9:.2f} GB"
+                      if p.size_bytes else "size ?")
+                self.log(
+                    f"  partition {p.number}: {p.raw_type} "
+                    f"[{p.fs_kind}] {sz}",
+                    "info")
+        else:
+            self.log(
+                f"Could not enumerate partitions on {device} — "
+                f"falling back to default "
+                f"(partition {config.GAME_PARTITION_NUMBER}).",
+                "info")
+        return parts
+
+    def _discover_partitions_windows(self, device):
+        """Windows helper for _discover_partitions.
+
+        Pipes Get-Partition through ForEach-Object to emit one
+        ``num|type|size`` line per partition (avoiding Format-Table's
+        column truncation), then hands the raw text to
+        :func:`_parse_windows_partitions`.
+        """
+        disk_num = device.rstrip().replace("\\\\", "\\").split(
+            "PHYSICALDRIVE")[-1]
+        if not disk_num.isdigit():
+            return []
+        try:
+            rc, out, _ = self.executor.run_host(
+                f'powershell -NoProfile -Command "'
+                f"Get-Partition -DiskNumber {disk_num} | "
+                f"ForEach-Object {{ "
+                f"'{{0}}|{{1}}|{{2}}' -f "
+                f"$_.PartitionNumber, $_.Type, $_.Size }}"
+                f'"',
+                timeout=15)
+        except Exception:
+            return []
+        if rc != 0:
+            return []
+        return _parse_windows_partitions(out)
+
+    def _discover_partitions_macos(self, device):
+        """macOS helper for _discover_partitions.
+
+        Runs ``diskutil list <device>`` and hands the output to
+        :func:`_parse_macos_partitions`.
+        """
+        try:
+            rc, out, _ = self.executor.run_host(
+                f"diskutil list {device}", timeout=10)
+        except Exception:
+            return []
+        if rc != 0:
+            return []
+        return _parse_macos_partitions(out)
+
+    def _discover_partitions_linux(self, device):
+        """Linux helper for _discover_partitions.
+
+        Runs ``lsblk -brno NAME,FSTYPE,SIZE`` (bytes, raw, no header)
+        and hands the output to :func:`_parse_linux_partitions`.
+        """
+        try:
+            result = self.executor.run(
+                f"lsblk -brno NAME,FSTYPE,SIZE {device}", timeout=10)
+        except Exception:
+            return []
+        return _parse_linux_partitions(result)
+
+    def _detect_partition(self, device):
+        """Pick a partition number to mount — backward-compat shim.
+
+        Honors ``self.partition_override`` first (the manual escape
+        hatch).  Otherwise calls ``_discover_partitions``, picks the
+        largest ``fs_kind == "linux"`` candidate (game data dwarfs
+        OS/boot partitions on every JJP SSD layout we have data for),
+        and populates ``self._ab_partitions`` with same-sized peers.
+
+        Returns a single int so existing callers (the macOS Docker
+        path, ``RestoreToSSDPipeline``) don't have to change.  The
+        Windows ``_mount_ssd`` path now does content-verification on
+        top of this and can override the pick if ``/jjpe/gen1`` is
+        missing on the chosen partition.
+        """
+        if self.partition_override is not None:
+            self.log(
+                f"Manual partition override: using partition "
+                f"{self.partition_override} "
+                f"(skipping auto-discovery)",
+                "info")
+            # Still enumerate so the partition map is in the log.
+            self._discover_partitions(device)
+            return int(self.partition_override)
+
+        parts = self._discover_partitions(device)
+        linux_parts = [p for p in parts if p.fs_kind == "linux"]
+        if linux_parts:
+            best = max(linux_parts, key=lambda p: p.size_bytes)
+            self.log(
+                f"Auto-detected largest Linux partition: partition "
+                f"{best.number} ({best.size_bytes / 1e9:.2f} GB)",
+                "info")
+            self._ab_partitions = None
+            if best.size_bytes > 1e9:  # >1 GB — sanity guard
+                peers = [
+                    p.number for p in linux_parts
+                    if p.number != best.number
+                    and p.size_bytes > 0
+                    and abs(p.size_bytes - best.size_bytes)
+                        / best.size_bytes < 0.05
+                ]
+                if peers:
+                    self._ab_partitions = [best.number] + peers
+                    self.log(
+                        f"Detected A/B partition layout: "
+                        f"partitions {self._ab_partitions}",
+                        "info")
+            return best.number
+
+        self.log(
+            f"No Linux partition identified — falling back to "
+            f"default (partition {config.GAME_PARTITION_NUMBER}).",
+            "info")
+        return config.GAME_PARTITION_NUMBER
+
+    # ------------------------------------------------------------------
+    # Windows mount path: enumerate → content-verify → retry
+    # ------------------------------------------------------------------
+
+    def _build_partition_candidates(self, device):
+        """Build the ordered list of partition numbers to try on Windows.
+
+        Manual override → just that one partition.  Otherwise: every
+        Linux-fs candidate sorted largest-first (game data dwarfs
+        OS/boot on every JJP layout we've seen, and same-sized peers
+        auto-fall through as A/B fallbacks).  Anything Windows
+        flagged as a non-Linux unknown type comes after as a last
+        resort — gives us a fighting chance if our type-mapping
+        table misses an edge case.
+        """
+        if self.partition_override is not None:
+            self.log(
+                f"Manual partition override: trying only partition "
+                f"{self.partition_override}",
+                "info")
+            # Still enumerate so the partition map is in the log.
+            self._discover_partitions(device)
+            return [int(self.partition_override)]
+
+        parts = self._discover_partitions(device)
+        linux = sorted(
+            (p for p in parts if p.fs_kind == "linux"),
+            key=lambda p: p.size_bytes, reverse=True)
+        seen = {p.number for p in linux}
+        # Pure safety net — anything mysterious that isn't obviously
+        # not-Linux (EFI, swap, MSR).  In practice empty on Windows.
+        other = sorted(
+            (p for p in parts
+             if p.number not in seen
+             and p.fs_kind not in ("efi", "swap", "msr", "ntfs")),
+            key=lambda p: p.size_bytes, reverse=True)
+        candidates = [p.number for p in linux] + [p.number for p in other]
+        if not candidates:
+            # Totally mysterious drive — fall back to default so
+            # behaviour matches pre-refactor and gives the user a
+            # clear error if it's wrong.
+            candidates = [config.GAME_PARTITION_NUMBER]
+        return candidates
+
+    def _update_ab_partitions_for(self, winning_part_num):
+        """Recompute ``_ab_partitions`` around the partition that won.
+
+        Called after content-verify so the A/B partner list reflects
+        whichever slot we ended up using, not whichever the
+        largest-wins heuristic guessed first.
+        """
+        parts = self._partition_map or []
+        win = next(
+            (p for p in parts if p.number == winning_part_num), None)
+        if not win or win.size_bytes <= 1e9:
+            self._ab_partitions = None
+            return
+        peers = [
+            p.number for p in parts
+            if p.number != winning_part_num
+            and p.fs_kind == "linux"
+            and p.size_bytes > 0
+            and abs(p.size_bytes - win.size_bytes)
+                / win.size_bytes < 0.05
+        ]
+        if peers:
+            self._ab_partitions = [winning_part_num] + peers
+            self.log(
+                f"A/B partition layout: partitions "
+                f"{self._ab_partitions} (primary = {winning_part_num})",
+                "info")
+        else:
+            self._ab_partitions = None
+
+    def _format_partition_map_for_error(self):
+        """One-line-per-partition summary suitable for an error body."""
+        parts = self._partition_map or []
+        if not parts:
+            return "(no partition map captured)"
+        lines = ["Partition map:"]
+        for p in parts:
+            sz = (f"{p.size_bytes / 1e9:.2f} GB"
+                  if p.size_bytes else "size ?")
+            lines.append(
+                f"  partition {p.number}: {p.raw_type} "
+                f"[{p.fs_kind}] {sz}")
+        return "\n".join(lines)
+
+    def _wsl_bring_disk_online(self, disk_num):
+        """Bring the SSD back online (cleanup path).
+
+        Idempotent — safe to call even if we never offlined it.
+        """
+        if (getattr(self, '_disk_was_offlined', False)
+                and disk_num.isdigit()):
+            self.executor.run_host(
+                f'powershell -NoProfile -Command '
+                f'"Set-Disk -Number {disk_num} -IsOffline $false"',
+                timeout=15)
+            self._disk_was_offlined = False
+
+    def _diagnostic_dump_boot_partitions_windows(self):
+        """Peek inside small FAT/EFI partitions on the SSD.
+
+        JJP machines that A/B-swap update slots almost certainly
+        track the active slot somewhere — a ``current_slot.txt`` on
+        the EFI System Partition, a GRUB env, a U-Boot env block,
+        etc.  We don't know which yet because the existing pipeline
+        never looked.  This method dumps the top two levels of every
+        small (< 200 MB) FAT or EFI partition into the log so we can
+        spot the pattern from real-world drives and light up actual
+        active-slot detection in a follow-up release.
+
+        Best-effort: any failure here is silently skipped (logged but
+        not raised) — diagnostics aren't worth aborting the main
+        flow.  Runs while the disk is already offline (after the
+        one-time setup in ``_mount_ssd_windows``) but BEFORE the
+        candidate mount loop, so we don't have to juggle which
+        partitions are currently attached to WSL.
+        """
+        device = self.device_path
+        parts = self._partition_map or []
+        candidates = [p for p in parts
+                      if p.fs_kind in ("fat", "efi")
+                      and 0 < p.size_bytes < 200 * 1024 * 1024]
+        if not candidates:
+            return
+        self.log("Boot-partition diagnostic dump (FAT/EFI):", "info")
+        for p in candidates:
             try:
-                rc, out, _ = self.executor.run_host(
-                    f"diskutil list {device}", timeout=10)
-                if rc == 0 and out:
-                    self.log(f"diskutil list {device}:\n{out.strip()}", "info")
-                    # Collect all Linux partitions with their sizes
-                    linux_parts = []
-                    for line in out.splitlines():
-                        if 'Linux' not in line:
-                            continue
-                        m = re.search(r'disk\d+s(\d+)', line)
-                        if not m:
-                            continue
-                        p = int(m.group(1))
-                        sz = re.search(
-                            r'(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB)', line)
-                        bytes_val = 0
-                        if sz:
-                            val = float(sz.group(1))
-                            unit = sz.group(2)
-                            bytes_val = val * {
-                                'TB': 1e12, 'GB': 1e9,
-                                'MB': 1e6, 'KB': 1e3,
-                            }.get(unit, 1)
-                        linux_parts.append((p, bytes_val))
-
-                    if len(linux_parts) == 1:
-                        part = linux_parts[0][0]
-                        self.log(f"Auto-detected Linux partition: "
-                                 f"{device}s{part}", "info")
-                        return part
-                    elif len(linux_parts) > 1:
-                        # Multiple Linux partitions — pick the largest
-                        best_part, best_size = max(
-                            linux_parts, key=lambda x: x[1])
-                        self.log(f"Auto-detected largest Linux partition: "
-                                 f"{device}s{best_part} "
-                                 f"({best_size / 1e9:.1f} GB)", "info")
-                        # Detect A/B layout: two partitions within 5%
-                        # of each other's size (both large)
-                        self._ab_partitions = None
-                        if best_size > 1e9:  # >1 GB
-                            peers = [
-                                p for p, sz in linux_parts
-                                if p != best_part
-                                and sz > 0
-                                and abs(sz - best_size) / best_size < 0.05
-                            ]
-                            if peers:
-                                self._ab_partitions = [best_part] + peers
-                                self.log(
-                                    f"Detected A/B partition layout: "
-                                    f"{', '.join(f'{device}s{p}' for p in self._ab_partitions)}",
-                                    "info")
-                        return best_part
-
-                    # Fallback: find the largest non-EFI/non-boot partition
-                    best_part = None
-                    best_size = 0
-                    for line in out.splitlines():
-                        m = re.search(r'disk\d+s(\d+)', line)
-                        if not m:
-                            continue
-                        p = int(m.group(1))
-                        if 'EFI' in line or 'Apple' in line:
-                            continue
-                        sz = re.search(
-                            r'(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB)', line)
-                        if sz:
-                            val = float(sz.group(1))
-                            unit = sz.group(2)
-                            bytes_val = val * {
-                                'TB': 1e12, 'GB': 1e9,
-                                'MB': 1e6, 'KB': 1e3,
-                            }.get(unit, 1)
-                            if bytes_val > best_size:
-                                best_size = bytes_val
-                                best_part = p
-                    if best_part is not None:
-                        self.log(f"Auto-detected largest partition: "
-                                 f"{device}s{best_part} "
-                                 f"({best_size / 1e9:.1f} GB)", "info")
-                        return best_part
-            except Exception:
-                pass
-
-        elif isinstance(self.executor, WslExecutor):
-            # Windows: use PowerShell Get-Partition to find Linux partition
-            disk_num = device.rstrip().replace("\\\\", "\\").split(
-                "PHYSICALDRIVE")[-1]
-            if disk_num.isdigit():
+                rc, stdout, stderr = self.executor.run_host(
+                    f'wsl --mount "{device}" --partition {p.number} '
+                    f'--type vfat --options "ro"',
+                    timeout=30)
+                if rc != 0:
+                    self.log(
+                        f"  partition {p.number} ({p.raw_type}): "
+                        f"could not mount as vfat — skipping "
+                        f"({(stderr or stdout or '').strip()[:120]})",
+                        "info")
+                    continue
                 try:
-                    rc, out, _ = self.executor.run_host(
-                        f'powershell -NoProfile -Command "'
-                        f"Get-Partition -DiskNumber {disk_num} | "
-                        f"Select-Object PartitionNumber, Type, Size | "
-                        f'Format-Table -AutoSize"',
-                        timeout=15)
-                    if rc == 0 and out:
-                        # Look for partitions with Unknown type (Linux/ext4)
-                        # or the largest partition (game data is typically
-                        # the biggest)
-                        for line in out.splitlines():
-                            m = re.match(r'\s*(\d+)\s+Unknown\s', line)
-                            if m:
-                                part = int(m.group(1))
-                                self.log(f"Auto-detected Linux partition: "
-                                         f"partition {part}", "info")
-                                return part
+                    result = self.executor.run(
+                        "findmnt -rn -o TARGET -t vfat | "
+                        "grep -v '/mnt/c'",
+                        timeout=10)
+                    mounts = [m.strip() for m in
+                              result.strip().split("\n") if m.strip()]
+                except CommandError:
+                    mounts = []
+                if mounts:
+                    mp = mounts[-1]
+                    try:
+                        # Top 2 levels.  -maxdepth 2 picks up
+                        # grub/grub.cfg, EFI/<vendor>/*.efi, etc.
+                        # Cap at 50 entries so an unexpectedly busy
+                        # boot partition doesn't bloat the log.
+                        out = self.executor.run(
+                            f"find '{mp}' -maxdepth 2 -mindepth 1 "
+                            f"-printf '%P\\n' 2>/dev/null | "
+                            f"sort | head -50",
+                            timeout=10)
+                        listing = [ln for ln in
+                                   out.strip().splitlines()
+                                   if ln.strip()]
+                        p.boot_listing = listing
+                        self.log(
+                            f"  partition {p.number} ({p.raw_type}) "
+                            f"at {mp}:",
+                            "info")
+                        if listing:
+                            for entry in listing:
+                                self.log(f"    {entry}", "info")
+                        else:
+                            self.log("    (empty)", "info")
+                    except CommandError as e:
+                        self.log(
+                            f"  partition {p.number}: ls failed — "
+                            f"{(e.output or '')[:120]}",
+                            "info")
+                self.executor.run_host(
+                    f'wsl --unmount "{device}"', timeout=15)
+            except Exception as e:
+                self.log(
+                    f"  partition {p.number}: diagnostic dump "
+                    f"failed — {e}",
+                    "info")
+                # Best-effort cleanup so the main mount can proceed.
+                try:
+                    self.executor.run_host(
+                        f'wsl --unmount "{device}"', timeout=15)
                 except Exception:
                     pass
 
-        elif isinstance(self.executor, NativeExecutor):
-            # Linux: use lsblk to find ext4 partition
-            base = os.path.basename(device)  # e.g. sdb
+    def _mount_ssd_windows(self, read_only):
+        """Windows: enumerate → content-verify each candidate → win.
+
+        The flow:
+          1. One-time setup — clean stale WSL mounts, take the disk
+             offline so Windows releases any drive-letter hold.
+          2. Build the candidate list (manual override > largest
+             Linux > same-sized A/B peers > non-Linux fallbacks).
+          3. ``wsl --mount`` each candidate; if it has /jjpe/gen1,
+             we keep it mounted and return.  If not, ``wsl --unmount``
+             and try the next.
+          4. If every candidate misses, bring the disk back online
+             and raise with the partition map in the error so the
+             user can use the manual override.
+
+        Why the loop instead of a single pick: Habo's drive had
+        partition 2 enumerate as Linux but partition 3 was the
+        actual game data.  The old code's first-Unknown-wins pick
+        landed on 2, mounted it fine, and *then* failed validation.
+        Trying each candidate in turn solves that without needing
+        to know JJP's specific partition layout.
+        """
+        device = self.device_path  # e.g. \\.\PHYSICALDRIVE2
+        self._wsl_mount_device = device
+        disk_num = device.rstrip().replace(
+            "\\\\", "\\").split("PHYSICALDRIVE")[-1]
+
+        # --- One-time setup ------------------------------------------
+        # Clean up stale WSL mounts and Windows drive locks before
+        # attempting wsl --mount.  Order matters:
+        #   1. Try wsl --unmount (specific device) while disk is online
+        #   2. Fallback: wsl --unmount (ALL disks) if specific failed
+        #   3. Take disk offline to release Windows drive letters
+        rc_u, _, _ = self.executor.run_host(
+            f'wsl --unmount "{device}"', timeout=15)
+        if rc_u != 0:
+            self.executor.run_host('wsl --unmount', timeout=15)
+
+        if disk_num.isdigit():
+            self.log("Taking disk offline for WSL access...", "info")
+            rc_off, _, err_off = self.executor.run_host(
+                f'powershell -NoProfile -Command '
+                f'"Set-Disk -Number {disk_num} -IsOffline $true"',
+                timeout=15)
+            if rc_off != 0:
+                self.log(
+                    f"Warning: could not take disk offline: {err_off}",
+                    "info")
+            self._disk_was_offlined = True
+        else:
+            self._disk_was_offlined = False
+
+        # --- Build the candidate list --------------------------------
+        candidates = self._build_partition_candidates(device)
+
+        # --- Boot-partition diagnostic (data collection) -------------
+        # Runs BEFORE the candidate loop so the FAT/EFI mount/unmount
+        # cycles don't fight with the game-data slot we're about to
+        # attach — `wsl --unmount <device>` unmounts all partitions
+        # on the disk, so we can't safely peek at the EFI while a
+        # game partition is mounted.
+        try:
+            self._diagnostic_dump_boot_partitions_windows()
+        except Exception as e:
+            # Diagnostic — never fatal.
+            self.log(
+                f"Boot-partition diagnostic skipped ({e}).", "info")
+
+        # --- Try each candidate --------------------------------------
+        attempted = []
+        for part_num in candidates:
+            attempted.append(part_num)
+            self.log(
+                f"Attaching {device} partition {part_num} to WSL...",
+                "info")
+
+            mount_cmd = (
+                f'wsl --mount "{device}" --partition {part_num} '
+                f'--type ext4')
+            if read_only:
+                mount_cmd += ' --options "ro"'
+            rc, stdout, stderr = self.executor.run_host(
+                mount_cmd, timeout=30)
+
+            # Stale-mount recovery (preserved from the pre-refactor
+            # code): wsl --shutdown clears stuck mounts in the WSL VM.
+            if rc != 0 and "ALREADY_MOUNTED" in (
+                    stderr or stdout or "").upper():
+                self.log(
+                    "Stale WSL mount detected — restarting WSL...",
+                    "info")
+                self.executor.run_host('wsl --shutdown', timeout=30)
+                if disk_num.isdigit():
+                    self.executor.run_host(
+                        f'powershell -NoProfile -Command '
+                        f'"Set-Disk -Number {disk_num} -IsOffline $true"',
+                        timeout=15)
+                rc, stdout, stderr = self.executor.run_host(
+                    mount_cmd, timeout=30)
+
+            if rc != 0:
+                # Mount itself failed — log and try next candidate.
+                # Common causes: partition isn't actually ext4
+                # (Windows reported "Unknown" but it's, say, swap), or
+                # USB drives on some systems.
+                self.log(
+                    f"  partition {part_num}: wsl --mount failed "
+                    f"({(stderr or stdout or '').strip()[:200]})",
+                    "info")
+                continue
+
+            # Find the mount point — wsl --mount puts it at
+            # /mnt/wsl/<diskname>.  The most-recently-added ext4
+            # mount on the WSL side is ours.
             try:
                 result = self.executor.run(
-                    f"lsblk -rno NAME,FSTYPE {device}", timeout=10)
-                for line in result.strip().splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[1] == 'ext4':
-                        name = parts[0]  # e.g. sdb3
-                        m = re.search(r'(\d+)$', name)
-                        if m:
-                            part = int(m.group(1))
-                            self.log(f"Auto-detected ext4 partition: "
-                                     f"{device}{part}", "info")
-                            return part
-            except Exception:
+                    "findmnt -rn -o TARGET -t ext4 | grep -v '/mnt/c'",
+                    timeout=10)
+                mounts = [m.strip() for m in result.strip().split("\n")
+                          if m.strip()]
+            except CommandError:
+                mounts = []
+            if not mounts:
+                self.log(
+                    f"  partition {part_num}: attached but mount "
+                    f"point not visible in WSL",
+                    "info")
+                self.executor.run_host(
+                    f'wsl --unmount "{device}"', timeout=15)
+                continue
+            mp = mounts[-1]
+
+            # Content-verify: does this partition contain a JJP game?
+            try:
+                self.executor.run(
+                    f"test -d '{mp}{config.GAME_BASE_PATH}'",
+                    timeout=10)
+            except CommandError:
+                self.log(
+                    f"  partition {part_num}: mounted at {mp} but "
+                    f"{config.GAME_BASE_PATH} not present — trying "
+                    f"next",
+                    "info")
+                self.executor.run_host(
+                    f'wsl --unmount "{device}"', timeout=15)
+                continue
+
+            # Capture mtime as a freshness signal.  Today it's only
+            # logged; once A/B-mirror writes are wired up on Windows,
+            # newer-mtime breaks the tie when both slots are present.
+            mtime = 0
+            try:
+                mtime_out = self.executor.run(
+                    f"stat -c %Y '{mp}{config.GAME_BASE_PATH}' "
+                    "2>/dev/null", timeout=5).strip()
+                if mtime_out:
+                    mtime = int(mtime_out)
+            except (CommandError, ValueError):
                 pass
 
-        self.log(f"Could not auto-detect partition, using default "
-                 f"(partition {config.GAME_PARTITION_NUMBER})", "info")
-        return config.GAME_PARTITION_NUMBER
+            # Success — keep this one mounted.
+            self._part_num = part_num
+            self.mount_point = mp
+            self._ssd_mounted = True
+            self._update_ab_partitions_for(part_num)
+            mtime_str = f", mtime {mtime}" if mtime else ""
+            self.log(
+                f"SSD mounted at {mp} (partition {part_num} — "
+                f"contains {config.GAME_BASE_PATH}{mtime_str})",
+                "success")
+            return
+
+        # --- Exhausted every candidate -------------------------------
+        self._wsl_bring_disk_online(disk_num)
+        map_str = self._format_partition_map_for_error()
+        raise PipelineError(
+            "Mount",
+            f"This doesn't look like a JJP game drive.\n"
+            f"Tried partition(s): {attempted}.\n"
+            f"{config.GAME_BASE_PATH} not found on any of them.\n\n"
+            f"{map_str}\n\n"
+            f"If you know the right partition number, set it in the "
+            f'"Force partition #" field on the Direct-SSD panel '
+            f"and re-run.\nOtherwise, make sure you selected the "
+            f"correct drive.")
 
     def _mount_ssd(self, read_only=True):
-        """Mount the SSD's game partition via platform-specific method."""
+        """Mount the SSD's game partition via platform-specific method.
+
+        Windows takes a separate code path: ``_mount_ssd_windows``
+        runs a content-verify retry loop because Habo's report showed
+        that picking one partition by heuristic isn't enough — we
+        have to look at what's actually on each candidate.  macOS and
+        Linux keep the simpler single-pick-then-validate flow they've
+        always had (their auto-pick has held up so far; if/when it
+        misses we'll port the retry loop there too).
+        """
         from .executor import WslExecutor, DockerExecutor, NativeExecutor
+
+        if isinstance(self.executor, WslExecutor):
+            # Handles its own partition pick, mount, content-verify,
+            # error reporting, and disk-online cleanup.
+            self._mount_ssd_windows(read_only)
+            return
+
+        # Non-Windows: pick one partition and try it.  The trailing
+        # /jjpe/gen1 check at the bottom catches a wrong pick.
         part_num = self._detect_partition(self.device_path)
         self._part_num = part_num  # save for cleanup writeback
 
         tag = uuid.uuid4().hex[:8]
         self.mount_point = f"{config.MOUNT_PREFIX}ssd_{tag}"
 
-        if isinstance(self.executor, WslExecutor):
-            # Windows: use wsl --mount from the host side
-            device = self.device_path  # e.g. \\.\PHYSICALDRIVE2
-            self._wsl_mount_device = device
-            self.log(f"Attaching {device} partition {part_num} to WSL...", "info")
-
-            # Clean up stale WSL mounts and Windows drive locks before
-            # attempting wsl --mount.  Order matters:
-            #   1. Try wsl --unmount (specific device) while disk is online
-            #   2. Fallback: wsl --unmount (ALL disks) if specific failed
-            #   3. Take disk offline to release Windows drive letters
-            #   4. wsl --mount
-            disk_num = device.rstrip().replace("\\\\", "\\").split("PHYSICALDRIVE")[-1]
-
-            # Step 1: try to detach specific device from WSL
-            rc_u, _, _ = self.executor.run_host(
-                f'wsl --unmount "{device}"', timeout=15)
-            if rc_u != 0:
-                # Step 2: fallback — unmount ALL WSL-attached disks
-                self.executor.run_host('wsl --unmount', timeout=15)
-
-            # Step 3: take disk offline so Windows releases drive letters
-            if disk_num.isdigit():
-                self.log("Taking disk offline for WSL access...", "info")
-                offline_cmd = (
-                    f'powershell -NoProfile -Command '
-                    f'"Set-Disk -Number {disk_num} -IsOffline $true"'
-                )
-                rc_off, _, err_off = self.executor.run_host(offline_cmd, timeout=15)
-                if rc_off != 0:
-                    self.log(f"Warning: could not take disk offline: {err_off}",
-                             "info")
-                self._disk_was_offlined = True
-            else:
-                self._disk_was_offlined = False
-
-            mount_cmd = f'wsl --mount "{device}" --partition {part_num} --type ext4'
-            if read_only:
-                mount_cmd += ' --options "ro"'
-            rc, stdout, stderr = self.executor.run_host(mount_cmd, timeout=30)
-
-            # If mount failed with "already mounted", try nuclear option:
-            # wsl --shutdown kills the entire WSL VM, clearing all stale mounts
-            if rc != 0 and "ALREADY_MOUNTED" in (stderr or stdout or "").upper():
-                self.log("Stale WSL mount detected — restarting WSL...", "info")
-                self.executor.run_host('wsl --shutdown', timeout=30)
-                # Disk may have come back online after WSL shutdown
-                if disk_num.isdigit():
-                    self.executor.run_host(
-                        f'powershell -NoProfile -Command '
-                        f'"Set-Disk -Number {disk_num} -IsOffline $true"',
-                        timeout=15)
-                rc, stdout, stderr = self.executor.run_host(mount_cmd, timeout=30)
-
-            if rc != 0:
-                # Bring disk back online before raising
-                if getattr(self, '_disk_was_offlined', False) and disk_num.isdigit():
-                    self.executor.run_host(
-                        f'powershell -NoProfile -Command '
-                        f'"Set-Disk -Number {disk_num} -IsOffline $false"',
-                        timeout=15)
-                raise PipelineError("Mount",
-                    f"Failed to attach SSD to WSL:\n{stderr or stdout}\n\n"
-                    "Ensure you are running as Administrator.\n"
-                    "Note: wsl --mount may not support USB-connected drives "
-                    "on some systems. Try a direct SATA connection.")
-
-            # Find the mount point — wsl --mount puts it at /mnt/wsl/<diskname>
-            # The exact path depends on the device name
-            try:
-                result = self.executor.run(
-                    "findmnt -rn -o TARGET -t ext4 | grep -v '/mnt/c'",
-                    timeout=10)
-                # Find the most recently added mount
-                mounts = [m.strip() for m in result.strip().split("\n") if m.strip()]
-                if mounts:
-                    self.mount_point = mounts[-1]
-                    self._ssd_mounted = True
-                    self.log(f"SSD mounted at {self.mount_point}", "success")
-                else:
-                    raise PipelineError("Mount",
-                        "SSD was attached but mount point not found in WSL.")
-            except CommandError as e:
-                raise PipelineError("Mount",
-                    f"Could not find SSD mount point: {e.output}") from e
-
-        elif isinstance(self.executor, DockerExecutor):
+        if isinstance(self.executor, DockerExecutor):
             # macOS: check for native debugfs (Homebrew e2fsprogs) to
             # access the SSD directly without copying the partition.
             device = self.device_path  # e.g. /dev/disk2
@@ -5508,8 +6005,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                         raise PipelineError("Mount",
                             f"Failed to read SSD partition via dd:\n"
                             f"{err_text}\n\n"
-                            f"If permission denied, try: "
-                            f"sudo python -m jjp_decryptor")
+                            f"Raw block-device access needs elevation "
+                            f"— relaunch Pinball Asset Decryptor with "
+                            f"sudo (macOS/Linux) or right-click → "
+                            f"Run as administrator (Windows).")
                     raise PipelineError("Mount",
                         f"Failed to read SSD partition via dd:\n{err_text}")
                 if docker_proc.returncode != 0:
@@ -5640,8 +6139,14 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 rc, stdout, stderr = self.executor.run_host(
                     f'wsl --unmount "{dev}"', timeout=30)
                 if rc != 0:
-                    # Fallback: unmount ALL WSL-attached disks
-                    self.log("Specific unmount failed, unmounting all WSL disks...",
+                    # Targeted unmount may report failure if the A/B
+                    # mirror swap left WSL tracking a different
+                    # device handle, or if nothing's attached anymore
+                    # — fall through to a global wsl --unmount to
+                    # cover both cases.  Phrased as informational so
+                    # users don't think anything went wrong on a
+                    # successful run.
+                    self.log("Releasing remaining WSL-attached disks...",
                              "info")
                     rc2, _, stderr2 = self.executor.run_host(
                         'wsl --unmount', timeout=30)
@@ -5912,16 +6417,20 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
     def __init__(self, device_path, assets_folder, fl_dat_path,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 skip_duration_match=False):
+                 skip_duration_match=False, partition_override=None):
         super().__init__(device_path, assets_folder, fl_dat_path,
                          log_cb, phase_cb, progress_cb, done_cb,
                          skip_duration_match=skip_duration_match)
         self.device_path = device_path
+        # See DirectSSDDecryptPipeline.partition_override.
+        self.partition_override = partition_override
         self._ssd_mounted = False
         self._wsl_mount_device = None
         self._ssd_image_path = None
         self._needs_writeback = False
         self._disk_was_offlined = False
+        self._partition_map = []
+        self._ab_partitions = None
 
     def run(self):
         """Execute the direct SSD mod pipeline."""
@@ -5990,6 +6499,22 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                             self._wsl_img = primary_dev
             else:
                 self._phase_encrypt_ssd()
+                # Windows A/B mirror: when the drive has an A/B
+                # partition layout, the firmware can boot from either
+                # slot — writing to only one risks losing the change
+                # on the next boot.  After the primary slot is
+                # updated, re-mount each partner and replay the
+                # encrypt phase against it so both slots match.  This
+                # sidesteps the "which is active" question entirely —
+                # whichever slot the firmware picks, our changes are
+                # there.  (macOS already does this via debugfs on the
+                # raw partner device just above; this is the Windows
+                # equivalent, swapping wsl --mount instead.)
+                from .executor import WslExecutor
+                if (isinstance(self.executor, WslExecutor)
+                        and getattr(self, '_ab_partitions', None)
+                        and len(self._ab_partitions) > 1):
+                    self._mirror_writes_to_partner_slots_windows()
             self._check_cancel()
 
             self._succeeded = True
@@ -6244,6 +6769,121 @@ class DirectSSDModPipeline(StandaloneModPipeline):
             self.log("CRC32 forgery: encrypted files match original fl.dat checksums.",
                      "success")
 
+    def _mirror_writes_to_partner_slots_windows(self):
+        """Re-run the encrypt phase on each A/B partner slot on Windows.
+
+        Called from ``run()`` after the primary slot's encrypt phase
+        succeeds.  For every partner partition in ``_ab_partitions``
+        (less the one already written), we ``wsl --unmount`` the
+        primary, ``wsl --mount`` the partner, content-verify it has
+        ``/jjpe/gen1``, then re-run ``_phase_encrypt_ssd`` against
+        its mount point.  Same code, different mount underneath.
+
+        Best-effort: a failure on any partner is logged and skipped
+        without aborting — the primary slot is already correct, so
+        the user gets *at least* a working machine.  The active-slot
+        question is sidestepped entirely; whichever slot the
+        firmware boots, our changes are there.
+        """
+        device = self.device_path
+        primary_part = self._part_num
+        partners = [p for p in (self._ab_partitions or [])
+                    if p != primary_part]
+        if not partners:
+            return
+
+        self.log(
+            f"A/B layout detected — replaying writes on partner "
+            f"partition(s): {partners}",
+            "info")
+        for partner_part in partners:
+            try:
+                self.log(
+                    f"Unmounting slot {self._part_num} to swap to "
+                    f"partner slot {partner_part}...",
+                    "info")
+                self.executor.run_host(
+                    f'wsl --unmount "{device}"', timeout=15)
+                self._ssd_mounted = False
+                self.mount_point = None
+
+                mount_cmd = (
+                    f'wsl --mount "{device}" '
+                    f'--partition {partner_part} --type ext4')
+                rc, stdout, stderr = self.executor.run_host(
+                    mount_cmd, timeout=30)
+                if rc != 0:
+                    self.log(
+                        f"Could not mount partner slot "
+                        f"{partner_part}: "
+                        f"{(stderr or stdout or '').strip()[:200]} "
+                        f"— skipping",
+                        "info")
+                    continue
+
+                try:
+                    result = self.executor.run(
+                        "findmnt -rn -o TARGET -t ext4 | "
+                        "grep -v '/mnt/c'",
+                        timeout=10)
+                    mounts = [m.strip() for m in
+                              result.strip().split("\n") if m.strip()]
+                except CommandError:
+                    mounts = []
+                if not mounts:
+                    self.log(
+                        f"Partner slot {partner_part} attached but "
+                        f"no WSL mount point appeared — skipping",
+                        "info")
+                    self.executor.run_host(
+                        f'wsl --unmount "{device}"', timeout=15)
+                    continue
+                partner_mp = mounts[-1]
+
+                # Validate the partner is also a JJP game slot — if
+                # it isn't, this isn't really an A/B partner and
+                # we'd just corrupt unrelated data.
+                try:
+                    self.executor.run(
+                        f"test -d '{partner_mp}{config.GAME_BASE_PATH}'",
+                        timeout=10)
+                except CommandError:
+                    self.log(
+                        f"Partner slot {partner_part} mounted at "
+                        f"{partner_mp} but {config.GAME_BASE_PATH} "
+                        f"absent — not a valid A/B partner, "
+                        f"skipping",
+                        "info")
+                    self.executor.run_host(
+                        f'wsl --unmount "{device}"', timeout=15)
+                    continue
+
+                # Replay encrypt on this slot.
+                self.mount_point = partner_mp
+                self._part_num = partner_part
+                self._ssd_mounted = True
+                self.log(
+                    f"Replaying writes on partner slot "
+                    f"{partner_part} ({partner_mp})...",
+                    "info")
+                self._phase_encrypt_ssd()
+                self.log(
+                    f"A/B partner slot {partner_part} updated.",
+                    "success")
+            except (CommandError, PipelineError) as e:
+                self.log(
+                    f"Warning: A/B mirror to partner slot "
+                    f"{partner_part} failed: {e}.  The primary slot "
+                    f"is still updated.",
+                    "info")
+                # Best-effort: try to unmount whatever's currently
+                # attached so cleanup can proceed cleanly.
+                try:
+                    self.executor.run_host(
+                        f'wsl --unmount "{device}"', timeout=15)
+                except Exception:
+                    pass
+
     def _write_system_files_ssd(self, system_files, mp):
         """Write modified system files directly to the mounted SSD.
 
@@ -6338,6 +6978,24 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
     # Reuse mount/unmount from DirectSSDDecryptPipeline
     _detect_partition = DirectSSDDecryptPipeline._detect_partition
+    _discover_partitions = DirectSSDDecryptPipeline._discover_partitions
+    _discover_partitions_windows = (
+        DirectSSDDecryptPipeline._discover_partitions_windows)
+    _discover_partitions_macos = (
+        DirectSSDDecryptPipeline._discover_partitions_macos)
+    _discover_partitions_linux = (
+        DirectSSDDecryptPipeline._discover_partitions_linux)
+    _build_partition_candidates = (
+        DirectSSDDecryptPipeline._build_partition_candidates)
+    _update_ab_partitions_for = (
+        DirectSSDDecryptPipeline._update_ab_partitions_for)
+    _format_partition_map_for_error = (
+        DirectSSDDecryptPipeline._format_partition_map_for_error)
+    _wsl_bring_disk_online = (
+        DirectSSDDecryptPipeline._wsl_bring_disk_online)
+    _diagnostic_dump_boot_partitions_windows = (
+        DirectSSDDecryptPipeline._diagnostic_dump_boot_partitions_windows)
+    _mount_ssd_windows = DirectSSDDecryptPipeline._mount_ssd_windows
     _mount_ssd = DirectSSDDecryptPipeline._mount_ssd
     _cleanup_ssd = DirectSSDDecryptPipeline._cleanup_ssd
     _debugfs_run = DirectSSDDecryptPipeline._debugfs_run

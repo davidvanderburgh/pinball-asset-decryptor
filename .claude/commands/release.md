@@ -41,7 +41,7 @@ so we never again ship a tag where `__version__` lags the tag string
    - `pyproject.toml` if present (it isn't currently, but check anyway).
    - Any `setup.py` / `setup.cfg` (none currently, but check).
 
-   Do NOT bump per-plugin versions (e.g. `plugins/jjp/__init__.py:__version__ = "3.7.0"`) — those are independent and track the upstream tool's version.
+   Per-plugin versions are gone as of v0.6.5 — the plugin code is no longer tracked separately from the unified app, so the only `__version__` that matters is the one at the top of `pinball_decryptor/__init__.py`.  If you spot a `__version__` constant in a `plugins/<name>/__init__.py`, that's almost certainly a regression from a fresh upstream lift and should be deleted (or, if it must stay for compatibility, NOT bumped — it represents the original lifted-from version for provenance only and is never shown to users).
 
 5b. **Audit README content** (separate from the version-string scan above).  The README is user-facing documentation — when a release adds a new plugin, pipeline, capability, or changes a workflow, the README description of *what the app does* needs to follow.  This is NOT just find-and-replace.
 

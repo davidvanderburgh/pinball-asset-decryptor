@@ -354,6 +354,20 @@ class App:
     # ------------------------------------------------------------------
 
     def _start_extract(self):
+        # Direct-SSD branch: when the source radio is on "ssd",
+        # ``in_path`` is a physical-device path (e.g.
+        # ``\\.\PHYSICALDRIVE3``), not a file.  Dispatch to the
+        # manufacturer's Direct-SSD factory instead.  Plugins
+        # without ``capabilities.direct_ssd`` never see this path
+        # (the radio frame is hidden for them).
+        if (self._current_mfr is not None
+                and self._current_mfr.capabilities.direct_ssd
+                and getattr(self.window, "extract_input_source_var", None)
+                is not None
+                and self.window.extract_input_source_var.get() == "ssd"):
+            self._start_direct_ssd_extract()
+            return
+
         in_path = self.window.extract_input_var.get().strip()
         output_path = self.window.extract_output_var.get().strip()
 
@@ -488,11 +502,124 @@ class App:
         return wrapped
 
     # ------------------------------------------------------------------
+    # Direct-SSD pre-flight (elevation gate)
+    # ------------------------------------------------------------------
+
+    def _confirm_admin_for_ssd(self):
+        """Defence-in-depth elevation check before a Direct-SSD run.
+
+        The GUI already disables the Extract / Apply Modifications
+        buttons when SSD mode is on without admin — so this normally
+        won't fire.  It exists as a last-line guard for any code
+        path that bypasses the GUI gate (settings restored mid-run,
+        keyboard shortcut, future entry points).
+
+        Returns True if the caller may proceed; False if they must
+        abort.  No auto-elevation — re-launching with UAC has
+        cross-environment failure modes (packaged vs source, venv vs
+        embeddable Python, frozen .exe vs .pyw) and a half-working
+        button is worse than a clear "restart manually" message.
+        """
+        from .core.admin import is_admin
+        if is_admin():
+            return True
+        messagebox.showerror(
+            "Administrator Required",
+            "Direct-SSD mode needs Windows Administrator "
+            "privileges.\n\n"
+            "wsl --mount and Set-Disk -IsOffline are both gated by "
+            "Windows itself behind elevation — there is no "
+            "workaround at the app level.\n\n"
+            "To proceed:\n"
+            "  1.  Close this app.\n"
+            "  2.  Right-click the \"Pinball Asset Decryptor\" "
+            "shortcut.\n"
+            "  3.  Choose \"Run as administrator\".")
+        return False
+
+    # ------------------------------------------------------------------
+    # Direct-SSD extract (JJP-only as of v0.6.5)
+    # ------------------------------------------------------------------
+
+    def _start_direct_ssd_extract(self):
+        """Dispatch the Direct-SSD extract pipeline from the GUI."""
+        # Pre-flight: Direct-SSD on Windows needs Administrator.  Both
+        # Set-Disk -IsOffline and wsl --mount <physical drive> are
+        # gated by Windows itself; running without elevation fails
+        # with a cryptic WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK halfway
+        # through the run.  Catch it BEFORE we start so the user
+        # gets a clear modal + one-click UAC restart.
+        if not self._confirm_admin_for_ssd():
+            return
+
+        device_path = self.window.extract_drive_var.get().strip()
+        output_path = self.window.extract_output_var.get().strip()
+        override_raw = (self.window
+                        .extract_partition_override_var.get().strip())
+
+        if not device_path:
+            messagebox.showwarning(
+                "No SSD selected",
+                "Pick a drive from the Game SSD dropdown.\n\n"
+                "If the dropdown is empty, click Refresh — and make "
+                "sure the SSD is connected.")
+            return
+        if not output_path:
+            messagebox.showwarning(
+                "Missing Output",
+                "Please select an output folder.")
+            return
+        if os.path.isdir(output_path) and os.listdir(output_path):
+            if not messagebox.askyesno(
+                "Output Folder Not Empty",
+                "The output folder already contains files.\n\n"
+                "Extracting will overwrite existing files.\n\nContinue?",
+            ):
+                return
+
+        partition_override = None
+        if override_raw:
+            try:
+                partition_override = int(override_raw)
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid partition number",
+                    f"\"Force partition #\" must be a whole number "
+                    f"(got: {override_raw!r}).\n\n"
+                    f"Leave blank to auto-discover.")
+                return
+
+        self._save_settings()
+
+        self._active_mode = "extract"
+        self.window.set_running(True, mode="extract")
+        self.window.reset_steps(mode="extract")
+
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = self._current_mfr.make_direct_ssd_extract_pipeline(
+            device_path, output_path,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=partition_override,
+        )
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
 
     def _start_write(self):
         if not self._current_mfr.capabilities.write:
+            return
+
+        # Direct-SSD write branch (see _start_extract for the
+        # symmetric extract version).  In SSD mode there is no
+        # original ISO and no output folder — the SSD itself is the
+        # destination.
+        if (self._current_mfr.capabilities.direct_ssd
+                and getattr(self.window, "write_input_source_var", None)
+                is not None
+                and self.window.write_input_source_var.get() == "ssd"):
+            self._start_direct_ssd_write()
             return
 
         original = self.window.write_upd_var.get().strip()
@@ -547,6 +674,78 @@ class App:
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
+        )
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Direct-SSD write (JJP-only as of v0.6.5)
+    # ------------------------------------------------------------------
+
+    def _start_direct_ssd_write(self):
+        """Dispatch the Direct-SSD write pipeline from the GUI."""
+        if not self._confirm_admin_for_ssd():
+            return
+
+        device_path = self.window.write_drive_var.get().strip()
+        assets_dir = self.window.write_assets_var.get().strip()
+        override_raw = (self.window
+                        .write_partition_override_var.get().strip())
+
+        if not device_path:
+            messagebox.showwarning(
+                "No SSD selected",
+                "Pick a drive from the Game SSD dropdown.\n\n"
+                "If the dropdown is empty, click Refresh — and make "
+                "sure the SSD is connected.")
+            return
+        if not assets_dir:
+            messagebox.showwarning(
+                "Missing Input",
+                "Please select the modified assets folder.")
+            return
+        if not os.path.isdir(assets_dir):
+            messagebox.showerror(
+                "Invalid Folder",
+                f"Folder not found:\n{assets_dir}")
+            return
+
+        partition_override = None
+        if override_raw:
+            try:
+                partition_override = int(override_raw)
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid partition number",
+                    f"\"Force partition #\" must be a whole number "
+                    f"(got: {override_raw!r}).\n\n"
+                    f"Leave blank to auto-discover.")
+                return
+
+        # Last-chance confirmation — Direct-SSD writes go straight to
+        # the connected drive with no undo.  The red warning above
+        # the panel says this too; one more nag here costs the user
+        # nothing and prevents a misclick on the wrong drive.
+        if not messagebox.askyesno(
+            "Write directly to SSD?",
+            f"This will write modified files DIRECTLY to the "
+            f"selected SSD:\n\n  {device_path}\n\n"
+            f"There is no separate output file — changes apply to "
+            f"the drive itself.\n\n"
+            f"Proceed?",
+        ):
+            return
+
+        self._save_settings()
+
+        self._active_mode = "write"
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = self._current_mfr.make_direct_ssd_write_pipeline(
+            device_path, assets_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=partition_override,
         )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 

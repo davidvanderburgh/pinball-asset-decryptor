@@ -1626,35 +1626,156 @@ class DecryptionPipeline:
         )
 
     def _debugfs_run_elevated(self, command, writable=False, timeout=120):
-        """Run a debugfs command with macOS admin privileges via osascript.
+        """Run debugfs as root with a CACHED admin password.
 
-        Uses ``do shell script ... with administrator privileges`` which
-        invokes macOS Authorization Services.  The OS caches the grant
-        for ~5 minutes, so only the first call triggers a password dialog.
+        macOS's ``with administrator privileges`` clause re-prompts on
+        every separate osascript invocation, because the OS authorization
+        cache is keyed by the calling process and ``subprocess.run`` makes
+        a fresh ``osascript`` process per call.  Result on a Direct-SSD
+        extract: a password dialog *per debugfs command* — dozens of
+        them across a single run.  The docstring of the prior version
+        claimed "5-minute OS cache, only first call prompts" but
+        empirically that's only true if osascript is the long-running
+        parent, which it isn't here.
+
+        Fix: prompt the user ONCE via :meth:`_prompt_for_admin_password`,
+        cache the answer on ``self._cached_admin_password``, and pass it
+        explicitly to every subsequent osascript call via
+        ``user name … password …`` — that clause bypasses the system
+        prompt entirely because we've already supplied the credential.
+        On rejection (AppleScript error -60007) we clear the cache and
+        re-prompt once, so a fat-fingered first attempt doesn't abort
+        the whole run.
         """
+        import getpass
         native = self._native_debugfs_path
         w = "-w " if writable else ""
+        user = getpass.getuser()
         escaped_cmd = command.replace("'", "'\\''")
         shell_cmd = (
             f"'{native}' {w}-R '{escaped_cmd}' '{self._wsl_img}' 2>&1"
         )
-        as_cmd = shell_cmd.replace('\\', '\\\\').replace('"', '\\"')
+        # AppleScript string-literal escaping: backslash and double
+        # quote.  Same rule applies to the username and password
+        # interpolations below.
+        as_shell = shell_cmd.replace('\\', '\\\\').replace('"', '\\"')
+        user_escaped = user.replace('\\', '\\\\').replace('"', '\\"')
+
+        for attempt in (0, 1):
+            if not getattr(self, '_cached_admin_password', None):
+                self._cached_admin_password = (
+                    self._prompt_for_admin_password())
+            pw_escaped = (self._cached_admin_password
+                          .replace('\\', '\\\\').replace('"', '\\"'))
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e",
+                     f'do shell script "{as_shell}" '
+                     f'user name "{user_escaped}" '
+                     f'password "{pw_escaped}" '
+                     f'with administrator privileges'],
+                    capture_output=True, text=True,
+                    encoding='utf-8', errors='replace', timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                raise CommandError(
+                    f"debugfs -R '{command}'", -1,
+                    f"Timed out after {timeout}s") from e
+            output = (result.stdout or "") + (result.stderr or "")
+            # AppleScript error -60007 = bad password.  Clear cache,
+            # loop one more time to re-prompt.
+            if result.returncode != 0 and "-60007" in output:
+                self._cached_admin_password = None
+                if attempt == 0:
+                    self.log(
+                        "Admin password rejected — try again.",
+                        "info")
+                    continue
+                raise PipelineError(
+                    "Mount",
+                    "Admin password failed twice. Cancelling. "
+                    "Re-run Extract / Apply to try again.")
+            if result.returncode != 0:
+                raise CommandError(
+                    f"debugfs -R '{command}'", result.returncode, output)
+            return output
+        # Unreachable — loop always either returns or raises.
+        return ""
+
+    def _edata_is_populated(self, edata_dir):
+        """Quick "is the edata dir non-empty?" check via debugfs.
+
+        JJP A/B firmware slots sometimes have ``/jjpe/gen1/<game>/
+        edata`` present as an empty directory on the inactive slot.
+        The macOS native-debugfs mount path uses this to decide
+        whether to swap to the A/B partner before kicking off the
+        decrypt scan, avoiding the "Found 0 files" dead-end the
+        first GnR macOS run hit on partition 3 (empty) when the
+        live data was on partition 5.
+
+        Returns True iff the directory has at least one entry that
+        isn't ``.`` or ``..``.  Returns False on any debugfs error
+        — better to swap and try the partner than block on a
+        transient failure.
+        """
         try:
-            result = subprocess.run(
-                ["osascript", "-e",
-                 f'do shell script "{as_cmd}" '
-                 f'with administrator privileges'],
-                capture_output=True, text=True,
-                encoding='utf-8', errors='replace', timeout=timeout)
-        except subprocess.TimeoutExpired as e:
-            raise CommandError(
-                f"debugfs -R '{command}'", -1,
-                f"Timed out after {timeout}s") from e
-        output = (result.stdout or "") + (result.stderr or "")
+            ls_out = self._debugfs_run(
+                f"ls -p {edata_dir}", timeout=10)
+        except CommandError:
+            return False
+        for line in ls_out.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("/"):
+                continue
+            # debugfs ls -p: /inode/mode/rec_len/name_len/name/
+            parts = line.split("/")
+            if len(parts) < 4:
+                continue
+            name = parts[-2] if parts[-1] == "" else parts[-1]
+            if name in (".", ".."):
+                continue
+            return True
+        return False
+
+    def _prompt_for_admin_password(self):
+        """One-shot macOS admin password prompt via osascript dialog.
+
+        Used once at the start of an elevated-mode Direct-SSD session;
+        the result is cached on ``self._cached_admin_password`` and
+        reused for every subsequent ``_debugfs_run_elevated`` call.
+
+        Returns the password as a string.  Raises :class:`PipelineError`
+        if the user cancels the dialog (so the calling pipeline aborts
+        cleanly with an actionable message).
+        """
+        self.log(
+            "Prompting for admin password (one-time, used only for "
+            "this run — not stored)…",
+            "info")
+        result = subprocess.run(
+            ["osascript", "-e",
+             'display dialog '
+             '"Pinball Asset Decryptor needs your macOS admin '
+             'password to read the SSD. It is used only for this '
+             'run and is not stored anywhere." '
+             'default answer "" with hidden answer '
+             'with title "Admin Password Required" '
+             'buttons {"Cancel", "OK"} default button "OK"'],
+            capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            raise CommandError(
-                f"debugfs -R '{command}'", result.returncode, output)
-        return output
+            raise PipelineError(
+                "Mount",
+                "Admin password is required to read the SSD. "
+                "Cancelled.")
+        # osascript prints: button returned:OK, text returned:<pw>
+        # (with possible trailing fields).  We pull just the
+        # text-returned value.
+        m = re.search(r'text returned:(.*?)(?:, gave up:|$)',
+                      result.stdout.strip())
+        if not m:
+            raise PipelineError(
+                "Mount",
+                "Could not parse password response from osascript.")
+        return m.group(1)
 
 
 class ModPipeline(DecryptionPipeline):
@@ -5932,8 +6053,68 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                         f"{stats_out[:300]}")
                 self.log("ext4 filesystem validated.", "success")
 
-                # Detect game name via debugfs
+                # Detect game name via debugfs on this slot.
                 self.game_name = self._detect_game_via_debugfs()
+
+                # A/B content-verify: JJP firmware uses asymmetric
+                # A/B slots — one slot is active with a populated
+                # /jjpe/gen1/<game>/edata, the other is prepared as
+                # a directory tree but never written to.  The
+                # largest-Linux picker can land on either one
+                # (max() of equal-sized partitions returns the first
+                # in iteration order).  If the edata on the picked
+                # slot is empty, swap to the A/B partner.  Empirical
+                # data from a GnR drive: partition 3 had the
+                # directory but Size: 40 (empty); partition 5 was
+                # the populated one with mtime Jul 2025.
+                if (self.game_name
+                        and getattr(self, '_ab_partitions', None)):
+                    edata_dir = (
+                        f"{config.GAME_BASE_PATH}/"
+                        f"{self.game_name}/edata")
+                    if not self._edata_is_populated(edata_dir):
+                        partners = [
+                            p for p in self._ab_partitions
+                            if p != self._part_num]
+                        for partner in partners:
+                            partner_dev = device.replace(
+                                "/dev/disk", "/dev/rdisk"
+                            ) + f"s{partner}"
+                            self.log(
+                                f"Partition {self._part_num}: "
+                                f"{self.game_name}/edata is empty "
+                                f"— trying A/B partner partition "
+                                f"{partner} ({partner_dev})…",
+                                "info")
+                            self._wsl_img = partner_dev
+                            self._part_num = partner
+                            try:
+                                stats_out = self._debugfs_run(
+                                    "stats", timeout=30)
+                            except CommandError:
+                                continue
+                            if 'Filesystem features' not in stats_out:
+                                continue
+                            game = self._detect_game_via_debugfs()
+                            if not game:
+                                continue
+                            self.game_name = game
+                            new_edata = (
+                                f"{config.GAME_BASE_PATH}/"
+                                f"{game}/edata")
+                            if self._edata_is_populated(new_edata):
+                                self.log(
+                                    f"Partner partition {partner} "
+                                    f"has populated {game}/edata — "
+                                    f"using it.",
+                                    "success")
+                                break
+                            else:
+                                self.log(
+                                    f"Partner partition {partner} "
+                                    f"also has empty edata — "
+                                    f"trying next.",
+                                    "info")
 
                 if not read_only:
                     # Mod mode: set up local temp dir for staging

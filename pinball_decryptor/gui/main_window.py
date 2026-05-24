@@ -435,6 +435,11 @@ class MainWindow:
         # the Extract button is *disabled* in that state so users
         # can't kick off a doomed run.
         self._extract_admin_frame = self._build_admin_warning_frame(f)
+        # macOS Full Disk Access guidance — analogous warning for the
+        # other Direct-SSD-blocking platform constraint.  See the
+        # helper for the full explanation.
+        self._extract_macos_fda_frame = (
+            self._build_macos_fda_warning_frame(f))
 
         self._extract_badge = ttk.Label(f, text="",
                                         font=(_SANS_FONT, 9, "italic"))
@@ -676,6 +681,9 @@ class MainWindow:
 
         # Same elevation warning as Extract — see comments there.
         self._write_admin_frame = self._build_admin_warning_frame(f)
+        # Same macOS FDA warning as Extract.
+        self._write_macos_fda_frame = (
+            self._build_macos_fda_warning_frame(f))
 
         # Per-mode description that swaps text when the radio flips.
         # In ISO mode it explains the USB-install flow; in SSD mode
@@ -1054,8 +1062,12 @@ class MainWindow:
             # direct_ssd plugin TO one without it.
             self._extract_drive_row.pack_forget()
             self._extract_ssd_warn.pack_forget()
+            self._extract_admin_frame.pack_forget()
+            self._extract_macos_fda_frame.pack_forget()
             self._write_drive_row.pack_forget()
             self._write_ssd_warn.pack_forget()
+            self._write_admin_frame.pack_forget()
+            self._write_macos_fda_frame.pack_forget()
             # The per-mode description + the Modified Files Preview
             # are JJP/direct_ssd-specific; hide them for plugins
             # whose Write tab is just the ISO-build flow.
@@ -1525,6 +1537,7 @@ class MainWindow:
             self._extract_drive_row.pack_forget()
             self._extract_ssd_warn.pack_forget()
             self._extract_admin_frame.pack_forget()
+            self._extract_macos_fda_frame.pack_forget()
             self._extract_badge.pack_forget()
             if source == "ssd":
                 self._extract_drive_row.pack(
@@ -1533,19 +1546,21 @@ class MainWindow:
                 self._extract_ssd_warn.pack(
                     anchor=tk.W, padx=10, pady=(4, 2),
                     before=self._extract_output_row())
-                # Elevation banner — only shown on Windows AND only
-                # when we're NOT admin.  The Windows gate (wsl --mount
-                # + Set-Disk -IsOffline both demanding elevation)
-                # doesn't exist on macOS / Linux: those use osascript
-                # / sudo prompts mid-run via the pipeline's own
-                # _debugfs_run_elevated path, so the user runs the
-                # app normally and confirms a password dialog when
-                # it pops.  Disabling the Extract button on macOS
-                # would just lock them out for no reason.
+                # Platform-specific Direct-SSD preconditions:
+                #   * Windows: app must run as Administrator
+                #     (wsl --mount + Set-Disk -IsOffline both gated).
+                #   * macOS:   Full Disk Access on the app + debugfs
+                #     + e2fsck (TCC blocks raw-disk reads otherwise).
+                # Linux just uses sudo prompts mid-run, no preflight
+                # banner required.
                 import sys
                 from ..core.admin import is_admin
                 if sys.platform == "win32" and not is_admin():
                     self._extract_admin_frame.pack(
+                        fill=tk.X, padx=10, pady=(4, 8),
+                        before=self._extract_output_row())
+                elif sys.platform == "darwin":
+                    self._extract_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._extract_output_row())
                 # Kick off enumeration on a worker thread so the UI
@@ -1569,6 +1584,7 @@ class MainWindow:
             self._write_drive_row.pack_forget()
             self._write_ssd_warn.pack_forget()
             self._write_admin_frame.pack_forget()
+            self._write_macos_fda_frame.pack_forget()
             self._write_badge.pack_forget()
             self._write_desc.pack_forget()
             self._write_preview_frame.pack_forget()
@@ -1585,12 +1601,16 @@ class MainWindow:
                 self._write_ssd_warn.pack(
                     anchor=tk.W, padx=10, pady=(4, 2),
                     before=self._write_filename_lbl)
-                # Elevation warning (write side).  Same Windows-only
-                # gate as Extract — see _build_extract_tab for why.
+                # Platform preconditions — see Extract branch for
+                # the rationale.  Windows admin / macOS FDA.
                 import sys
                 from ..core.admin import is_admin
                 if sys.platform == "win32" and not is_admin():
                     self._write_admin_frame.pack(
+                        fill=tk.X, padx=10, pady=(4, 8),
+                        before=self._write_filename_lbl)
+                elif sys.platform == "darwin":
+                    self._write_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
                 # SSD mode: explain in-place encrypt + audio
@@ -1754,6 +1774,61 @@ class MainWindow:
             # only happen on an empty list which we handled above.
             display_var.set(drives[0].display)
             self._on_drive_selected(mode)
+
+    def _build_macos_fda_warning_frame(self, parent):
+        """macOS Full Disk Access guidance banner for Direct-SSD mode.
+
+        macOS Sonoma+ blocks raw block-device reads at the TCC layer
+        — even from root subprocesses — unless every binary that
+        touches ``/dev/rdiskN`` is on the Full Disk Access list.  Our
+        Direct-SSD pipeline shells out to ``debugfs`` and ``e2fsck``
+        from ``e2fsprogs``, so users need to grant access to BOTH
+        helpers plus the app itself.  This banner spells out the
+        exact steps so users don't have to learn TCC the hard way
+        (operation-not-permitted, password-loop, etc.).
+
+        Always shown when SSD mode is on and we're on macOS.  The
+        app can't reliably detect whether FDA has actually been
+        granted (TCC.db is SIP-protected), so we just keep the
+        instructions visible as a reference card.
+        """
+        frame = tk.Frame(
+            parent, bg="#5a1a1a", padx=12, pady=10,
+            highlightbackground="#f44747", highlightthickness=2)
+        tk.Label(
+            frame,
+            text="⚠  macOS FULL DISK ACCESS REQUIRED",
+            bg="#5a1a1a", fg="#ffd1d1",
+            font=(_SANS_FONT, 11, "bold"),
+            anchor=tk.W).pack(fill=tk.X, anchor=tk.W)
+        tk.Label(
+            frame,
+            text=(
+                "Direct-SSD on macOS reads raw disk blocks via "
+                "Homebrew's e2fsprogs.  macOS Sonoma+ blocks this "
+                "at the TCC layer until every binary involved is on "
+                "the Full Disk Access list — even with admin "
+                "password.\n\n"
+                "To grant (one-time setup):\n"
+                "   1.   System Settings → Privacy & Security → "
+                "Full Disk Access.\n"
+                "   2.   Click + and add each of these:\n"
+                "          •   Pinball Asset Decryptor.app\n"
+                "          •   debugfs  (usually "
+                "/opt/homebrew/opt/e2fsprogs/sbin/debugfs on Apple "
+                "Silicon, /usr/local/opt/e2fsprogs/sbin/debugfs on "
+                "Intel)\n"
+                "          •   e2fsck   (same folder as debugfs)\n"
+                "   3.   Toggle each one ON.\n"
+                "   4.   Fully quit this app (⌘Q) and reopen.\n\n"
+                "Tip:  the binaries are in hidden folders.  In the "
+                "Full Disk Access file picker, press ⌘⇧G and paste "
+                "the full path."),
+            bg="#5a1a1a", fg="#ffffff",
+            font=(_SANS_FONT, 9),
+            justify=tk.LEFT, anchor=tk.W,
+            wraplength=720).pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+        return frame
 
     def _build_admin_warning_frame(self, parent):
         """Build the prominent "Administrator required" warning panel.

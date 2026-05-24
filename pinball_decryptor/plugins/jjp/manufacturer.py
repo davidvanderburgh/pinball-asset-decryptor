@@ -63,13 +63,18 @@ def _find_fl_dat(candidate_dirs):
 
 class _ExtractWrapper(StandaloneDecryptPipeline):
     def __init__(self, image_path, output_dir,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 extract_graphics=True, extract_sounds=True,
+                 full_dump=False):
         super().__init__(
             image_path=image_path,
             output_path=output_dir,
             fl_dat_path=None,
             log_cb=log_cb, phase_cb=phase_cb,
             progress_cb=progress_cb, done_cb=done_cb,
+            extract_graphics=extract_graphics,
+            extract_sounds=extract_sounds,
+            full_dump=full_dump,
         )
 
 
@@ -164,6 +169,11 @@ class JJPManufacturer(Manufacturer):
         # ISO intermediate).  Surfaces the "From ISO / From SSD"
         # radio on the Extract + Write tabs.
         direct_ssd=True,
+        # Per-category Extract filters: surfaces Graphics / Sounds /
+        # File System checkboxes on the Extract tab.  Maps to the
+        # standalone pipeline's extract_graphics / extract_sounds /
+        # full_dump knobs.
+        asset_filters=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",
@@ -215,9 +225,14 @@ class JJPManufacturer(Manufacturer):
         return Game(key=key, display=display, manufacturer_key="jjp")
 
     def make_extract_pipeline(self, input_path, output_dir,
-                              log_cb, phase_cb, progress_cb, done_cb):
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              extract_graphics=True, extract_sounds=True,
+                              full_dump=False):
         return _ExtractWrapper(input_path, output_dir,
-                               log_cb, phase_cb, progress_cb, done_cb)
+                               log_cb, phase_cb, progress_cb, done_cb,
+                               extract_graphics=extract_graphics,
+                               extract_sounds=extract_sounds,
+                               full_dump=full_dump)
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb):
@@ -227,7 +242,9 @@ class JJPManufacturer(Manufacturer):
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
-            partition_override=None):
+            partition_override=None,
+            extract_graphics=True, extract_sounds=True,
+            full_dump=False):
         # If a prior Decrypt put fl_decrypted.dat in the output
         # folder, reuse it — the upstream scan-for-filler-sizes pass
         # is slow on first run and skippable when we already have
@@ -237,7 +254,10 @@ class JJPManufacturer(Manufacturer):
             fl_dat_path=_find_fl_dat([output_dir]),
             log_cb=log_cb, phase_cb=phase_cb,
             progress_cb=progress_cb, done_cb=done_cb,
-            partition_override=partition_override)
+            partition_override=partition_override,
+            extract_graphics=extract_graphics,
+            extract_sounds=extract_sounds,
+            full_dump=full_dump)
 
     def make_direct_ssd_write_pipeline(
             self, device_path, assets_dir,

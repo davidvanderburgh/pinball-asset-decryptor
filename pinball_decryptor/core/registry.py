@@ -66,6 +66,13 @@ class Capabilities:
     # the Extract / Write tabs swapping the file picker for a drive
     # picker + manual partition override.  Used by JJP.
     direct_ssd: bool = False
+    # Per-category Extract filters: surfaces "Graphics" / "Sounds" /
+    # "File System" checkboxes on the Extract tab.  Used by JJP where
+    # the encrypted edata tree has two distinct asset categories and
+    # a separately-toggled full filesystem dump.  When True, app.py
+    # passes ``extract_graphics`` / ``extract_sounds`` / ``full_dump``
+    # kwargs to the manufacturer's extract factories.
+    asset_filters: bool = False
 
 
 @dataclass(frozen=True)

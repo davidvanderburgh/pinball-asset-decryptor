@@ -462,9 +462,11 @@ class App:
             # transcribe pipeline against the just-written output dir.
             chained_done_cb = self._maybe_wrap_done_for_transcribe(
                 done_cb, output_path)
+            extra_kwargs = self._collect_asset_filter_kwargs()
             self.pipeline = self._current_mfr.make_extract_pipeline(
                 in_path, output_path,
                 log_cb, phase_cb, progress_cb, chained_done_cb,
+                **extra_kwargs,
             )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
@@ -610,8 +612,34 @@ class App:
             device_path, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override,
+            **self._collect_asset_filter_kwargs(),
         )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    def _collect_asset_filter_kwargs(self):
+        """Build the per-category extract-filter kwargs for the
+        manufacturer's pipeline factory.
+
+        Only the plugins that advertise ``capabilities.asset_filters``
+        get these kwargs (returning an empty dict otherwise keeps
+        every other plugin's factory signature unchanged).  JJP maps
+        them directly onto the upstream pipeline's
+        ``extract_graphics`` / ``extract_sounds`` / ``full_dump``
+        constructor params.
+        """
+        if (self._current_mfr is None
+                or not getattr(
+                    self._current_mfr.capabilities, "asset_filters",
+                    False)):
+            return {}
+        return {
+            "extract_graphics": bool(
+                self.window.extract_graphics_var.get()),
+            "extract_sounds": bool(
+                self.window.extract_sounds_var.get()),
+            "full_dump": bool(
+                self.window.extract_filesystem_var.get()),
+        }
 
     # ------------------------------------------------------------------
     # Write

@@ -171,6 +171,16 @@ class MainWindow:
         # True when no file is selected yet so the UI isn't pre-hidden.
         self._extract_audio_supported = True
 
+        # JJP-only (capabilities.asset_filters): per-category Extract
+        # checkboxes — Graphics / Sounds / File System.  Match the
+        # standalone JJP decryptor's defaults: assets on, full
+        # filesystem dump off (it's the slow path).  Plumbed into the
+        # JJP pipeline as ``extract_graphics`` / ``extract_sounds`` /
+        # ``full_dump``.  Hidden for plugins without the capability.
+        self.extract_graphics_var = tk.BooleanVar(value=True)
+        self.extract_sounds_var = tk.BooleanVar(value=True)
+        self.extract_filesystem_var = tk.BooleanVar(value=False)
+
         # JJP-only (capabilities.direct_ssd): "From ISO / From SSD"
         # radio toggles between the file picker and the physical-drive
         # picker.  Default "iso" so plugins without direct_ssd see no
@@ -466,6 +476,28 @@ class MainWindow:
         self._extract_warn = ttk.Label(f, text="", foreground="#f44747",
                                        font=(_SANS_FONT, 9))
         self._extract_warn.pack(anchor=tk.W, padx=24)
+
+        # JJP-only (capabilities.asset_filters): per-category Extract
+        # filters.  Mirrors the standalone JJP decryptor: an "Extract:"
+        # label followed by Graphics / Sounds / File System
+        # checkboxes inline.  Hidden in apply_manufacturer() for
+        # plugins without the capability.  Built but not packed.
+        self._asset_filters_frame = ttk.Frame(f)
+        ttk.Label(
+            self._asset_filters_frame, text="Extract:",
+            font=(_SANS_FONT, 9)).pack(side=tk.LEFT, padx=(10, 8))
+        ttk.Checkbutton(
+            self._asset_filters_frame, text="Graphics",
+            variable=self.extract_graphics_var,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(
+            self._asset_filters_frame, text="Sounds",
+            variable=self.extract_sounds_var,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(
+            self._asset_filters_frame, text="File System",
+            variable=self.extract_filesystem_var,
+        ).pack(side=tk.LEFT, padx=(0, 12))
 
         # Williams-only: extract-mode checkboxes.  Both hidden in
         # apply_manufacturer() for manufacturers without
@@ -1094,6 +1126,16 @@ class MainWindow:
                 self._write_output_row_ref.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._write_filename_lbl)
+
+        # Show/hide the per-category Extract filters (JJP).  Packed
+        # just below the output-folder warning so it sits above the
+        # phase indicator — same shape as the standalone JJP
+        # decryptor.  Plugins without the capability never see it.
+        if caps.asset_filters:
+            self._asset_filters_frame.pack(
+                fill=tk.X, padx=10, pady=(4, 0))
+        else:
+            self._asset_filters_frame.pack_forget()
 
         # Show/hide the Williams capture toggles on the Extract tab.
         if caps.capture:

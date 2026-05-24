@@ -1588,17 +1588,28 @@ class DecryptionPipeline:
     def _parse_debugfs_ls_line(line):
         """Parse one ``debugfs ls -p`` line into ``(inode, mode, name)``.
 
-        debugfs's ``ls -p`` format is
-        ``/<inode>/<mode>/<uid>/<gid>/<name>/`` — but for
-        **directories** the name itself ends with ``/`` (debugfs's
-        dir-marker), so the line ends in a double slash ``//``.
-        ``str.split('/')`` then yields two trailing empties for dirs
-        and one for files, which broke the original
-        ``name = parts[-2] if parts[-1]=='' else parts[-1]`` parse
-        on the homebrew ``debugfs 1.47.4`` shipped on macOS — every
-        directory entry came out with ``name=''`` and got silently
-        skipped, so an SSD scan reported ``0 files, 0 subdirs``
-        even though ``graphics/`` and ``sound/`` were right there.
+        ``debugfs 1.47.4`` (homebrew e2fsprogs on macOS) emits TWO
+        different line shapes depending on the entry type:
+
+        * **Directory**: ``/<inode>/<mode>/<uid>/<gid>/<name>//``
+          — name carries debugfs's own trailing-slash dir marker,
+          and the format string adds its terminator, so dir lines
+          end in a double slash.  5 non-empty fields after split.
+        * **File**: ``/<inode>/<mode>/<uid>/<gid>/<name>/<size>/``
+          — a size column (in bytes) follows the name and there is
+          no dir-marker, so file lines have **6** non-empty fields.
+
+        The v0.7.9 fix correctly handled the dir double-slash case
+        but assumed the *last* non-empty field was always the name.
+        For files that picked the size (e.g. ``5462744``) instead
+        of ``Mystery.webm``, so the scan added 4168 paths shaped
+        like ``.../Mystery/5462744`` — none of which existed when
+        the dump phase tried to read them, leaving the user staring
+        at a stuck progress bar during filler-size detection.
+
+        Name is always at fixed position **fields[4]** (the 5th
+        non-empty field, immediately after inode/mode/uid/gid),
+        regardless of whether a size column follows.
 
         Returns ``None`` for:
           * blank / non-``/``-leading lines (banners, prompts)
@@ -1621,9 +1632,10 @@ class DecryptionPipeline:
             # Error line ("...: File not found by ext2_lookup") or
             # any non-listing output we should not classify.
             return None
-        # Name is the last non-empty field; the trailing dir-marker
-        # ``/`` was already eaten by the empty-filter above.
-        name = fields[-1]
+        # Name is at fixed position [4] (after inode/mode/uid/gid).
+        # NOT fields[-1] — for file lines a size column follows the
+        # name and would otherwise be returned as the filename.
+        name = fields[4]
         if name in (".", ".."):
             return None
         return inode, mode, name
@@ -1790,8 +1802,12 @@ class DecryptionPipeline:
             f"(depth {_depth}/{max_depth + _depth})",
             "info")
         try:
+            # Quote the path — JJP asset trees have directory
+            # names with spaces (e.g. "Pyro Action Button") that
+            # otherwise tokenize and make debugfs print its
+            # ``Usage: ls ...`` banner and return EMPTY.
             ls_out = self._debugfs_run(
-                f"ls -p {edata_dir}", timeout=10)
+                f'ls -p "{edata_dir}"', timeout=10)
         except CommandError as e:
             self.log(
                 f"{indent}[edata-probe] debugfs ls failed: "
@@ -5384,7 +5400,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         # Fallback: list directory entries for unknown games
         try:
             output = self._debugfs_run(
-                f"ls -p {config.GAME_BASE_PATH}", timeout=15)
+                f'ls -p "{config.GAME_BASE_PATH}"', timeout=15)
             self.log(f"debugfs ls -p output: {output[:500]}", "info")
         except CommandError:
             return None
@@ -5424,7 +5440,9 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         get printed.
         """
         try:
-            output = self._debugfs_run(f'ls -p {path}', timeout=15)
+            # Quote — JJP trees contain dirs like "Pyro Action Button".
+            output = self._debugfs_run(
+                f'ls -p "{path}"', timeout=15)
         except CommandError as e:
             self.log(
                 f"[scan] debugfs ls failed for {path}: "
@@ -5522,7 +5540,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                                        exclude_dirs, prefix=""):
         """Recursively list files, skipping excluded directories."""
         try:
-            output = self._debugfs_run(f'ls -p {path}', timeout=15)
+            # Quote — paths may contain spaces; unquoted ls -p
+            # tokenizes and debugfs returns its usage banner.
+            output = self._debugfs_run(
+                f'ls -p "{path}"', timeout=15)
         except CommandError:
             return
         for line in output.splitlines():

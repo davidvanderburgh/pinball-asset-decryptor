@@ -363,9 +363,14 @@ class _EdataPopulatedStub:
         self._listings = listings
 
     def _debugfs_run(self, command, timeout=10):
-        # The real call shape is `ls -p <path>` — pull <path> back out.
+        # The real call shape is `ls -p "<path>"` — path quoted in
+        # v0.7.10+ so JJP dirs with spaces don't tokenize into
+        # debugfs's usage banner.  Strip both prefix and the
+        # surrounding double-quotes to recover the listing key.
         assert command.startswith("ls -p ")
         path = command[len("ls -p "):]
+        if path.startswith('"') and path.endswith('"'):
+            path = path[1:-1]
         if path not in self._listings:
             raise AssertionError(
                 f"unexpected debugfs ls path: {path}")
@@ -391,12 +396,17 @@ def _dir_entry(inode, name):
     return f"/{inode}/040755/0/0/{name}//"
 
 
-def _file_entry(inode, name):
+def _file_entry(inode, name, size=1234):
     """Render one debugfs `ls -p` line for a regular-file entry.
 
-    Files have a single trailing slash (no dir marker on the name).
+    macOS ``debugfs 1.47.4`` includes a size column on file lines
+    (``/<inode>/<mode>/<uid>/<gid>/<name>/<size>/``) — pre-v0.7.10
+    the helper omitted it and the parser regression that took the
+    size as the filename slipped through coverage.  Size defaults
+    to a sentinel so test authors don't have to think about it
+    unless the specific value matters.
     """
-    return f"/{inode}/100644/0/0/{name}/"
+    return f"/{inode}/100644/0/0/{name}/{size}/"
 
 
 def _dot_lines():
@@ -501,6 +511,31 @@ class TestEdataIsPopulated:
         assert stub._edata_is_populated(
             "/jjpe/gen1/X/edata", max_depth=0) is False
 
+    def test_directory_name_with_spaces_recurses_correctly(self):
+        # JJP asset trees contain directories with spaces
+        # ("Pyro Action Button", "Slash Solo", etc.).  In v0.7.9
+        # the path argument to ``debugfs ls -p`` was unquoted, so
+        # the space tokenized and debugfs returned its usage
+        # banner ("Usage: ls [-c]..."), which the probe
+        # misclassified as EMPTY — meaning even a populated
+        # subtree under a space-named dir was missed.  Drive the
+        # real method through a stub keyed on the quoted-stripped
+        # path and assert it finds the inner file.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/G/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _dir_entry(1, "Pyro Action Button"),
+            ]),
+            "/jjpe/gen1/G/edata/Pyro Action Button": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _file_entry(2, "anim.webm", size=12345),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/G/edata") is True
+
 
 class TestParseDebugfsLsLine:
     """Regression coverage for the v0.7.9 parser fix.
@@ -535,6 +570,30 @@ class TestParseDebugfsLsLine:
         # File lines have one trailing slash (no dir marker on name).
         assert self.parse("/123/100644/0/0/manifest/") == (
             "123", "100644", "manifest")
+
+    def test_file_line_with_size_column_from_field_log(self):
+        # macOS debugfs 1.47.4 adds a size column on file lines.
+        # The exact captured line from the v0.7.9 field log — the
+        # v0.7.9 parser returned ('262585', '100644', '5462744'),
+        # so the scan added paths like .../Mystery/5462744 that no
+        # debugfs dump could read.  v0.7.10 must return the real
+        # filename instead.
+        assert self.parse(
+            "/262585/100644/0/0/Mystery.webm/5462744/") == (
+            "262585", "100644", "Mystery.webm")
+        assert self.parse(
+            "/262586/100644/0/0/Mystery_skip.webm/927760/") == (
+            "262586", "100644", "Mystery_skip.webm")
+
+    def test_filename_with_spaces_and_dashes(self):
+        # JJP asset trees have lots of human-readable directory
+        # names with spaces ("Pyro Action Button", "Slash Solo")
+        # and embedded dashes ("- Coordinates").  Spaces don't
+        # tokenize through debugfs's slash-delimited format, but
+        # we still want to assert the parser preserves them.
+        assert self.parse(
+            "/262435/040755/0/0/Pyro Action Button//") == (
+            "262435", "040755", "Pyro Action Button")
 
     def test_debugfs_error_line_is_not_a_file_entry(self):
         # The probe's recursion bug with empty-name path joining

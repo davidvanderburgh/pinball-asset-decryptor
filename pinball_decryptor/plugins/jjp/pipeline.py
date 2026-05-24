@@ -1712,7 +1712,7 @@ class DecryptionPipeline:
             shell_cmd, timeout=timeout,
             label=f"debugfs -R '{command}'")
 
-    def _edata_is_populated(self, edata_dir, max_depth=3):
+    def _edata_is_populated(self, edata_dir, max_depth=3, _depth=0):
         """Quick "is the edata dir non-empty?" check via debugfs.
 
         JJP A/B firmware slots sometimes have ``/jjpe/gen1/<game>/
@@ -1731,38 +1731,91 @@ class DecryptionPipeline:
         *file* entry, not just a directory entry.  Returns False on
         any debugfs error — better to swap and try the partner than
         block on a transient failure.
+
+        Verbose by design: every call logs the raw debugfs output
+        and the per-entry classification.  When something off-spec
+        (a debugfs version with a different ``ls -p`` format, an
+        edge-case ext4 layout, a permission-denied that returns
+        zero bytes instead of an error) makes this misclassify, the
+        log shows exactly which line broke.  ``_depth`` is for
+        readable indentation in the log only.
         """
+        indent = "    " * _depth
+        self.log(
+            f"{indent}[edata-probe] listing {edata_dir} "
+            f"(depth {_depth}/{max_depth + _depth})",
+            "info")
         try:
             ls_out = self._debugfs_run(
                 f"ls -p {edata_dir}", timeout=10)
-        except CommandError:
+        except CommandError as e:
+            self.log(
+                f"{indent}[edata-probe] debugfs ls failed: "
+                f"{getattr(e, 'output', e) or e}",
+                "info")
             return False
+        # Show the raw output so we can see exactly what debugfs
+        # returned — including the banner line and any non-/-leading
+        # lines we skip.  Trim aggressively so a 100k-entry dir
+        # listing on a populated slot doesn't flood the log.
+        preview = ls_out if len(ls_out) <= 800 else ls_out[:800] + "…"
+        self.log(
+            f"{indent}[edata-probe] raw ls -p output "
+            f"({len(ls_out)} chars):\n{preview}",
+            "info")
+        found_files = 0
+        found_subdirs = 0
         for line in ls_out.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("/"):
+            stripped = line.strip()
+            if not stripped or not stripped.startswith("/"):
                 continue
             # debugfs ls -p: /inode/mode/rec_len/name_len/name/
             # trailing "/" present only for directories.
-            parts = line.split("/")
+            parts = stripped.split("/")
             if len(parts) < 4:
+                self.log(
+                    f"{indent}[edata-probe]   SKIP (<4 parts): "
+                    f"{stripped!r}",
+                    "info")
                 continue
             name = parts[-2] if parts[-1] == "" else parts[-1]
             if name in (".", ".."):
                 continue
             mode = parts[2] if len(parts) > 2 else ""
             if mode.startswith("04"):
-                # Directory — recurse if we have depth budget left.
-                # On the active slot this returns True the moment we
-                # find the first file (cheap); on the inactive slot
-                # we exhaust the budget and fall through to False.
+                found_subdirs += 1
                 if max_depth <= 0:
+                    self.log(
+                        f"{indent}[edata-probe]   DIR {name} "
+                        f"(mode {mode}) — depth budget exhausted, "
+                        f"not recursing",
+                        "info")
                     continue
+                self.log(
+                    f"{indent}[edata-probe]   DIR {name} "
+                    f"(mode {mode}) — recursing",
+                    "info")
                 if self._edata_is_populated(
-                        f"{edata_dir}/{name}", max_depth - 1):
+                        f"{edata_dir}/{name}",
+                        max_depth - 1, _depth=_depth + 1):
+                    self.log(
+                        f"{indent}[edata-probe] → POPULATED "
+                        f"(found file inside {name})",
+                        "info")
                     return True
                 continue
             # Anything non-directory counts as a populated entry.
+            found_files += 1
+            self.log(
+                f"{indent}[edata-probe]   FILE {name} "
+                f"(mode {mode}) → POPULATED",
+                "info")
             return True
+        self.log(
+            f"{indent}[edata-probe] {edata_dir}: "
+            f"{found_subdirs} subdir(s), {found_files} file(s) "
+            f"directly — returning EMPTY",
+            "info")
         return False
 
     def _prompt_for_admin_password(self):
@@ -4133,6 +4186,11 @@ class StandaloneModPipeline(ModPipeline):
         from .crypto import encrypt_file
         from .filelist import parse_fl_dat, detect_edata_prefix
 
+        # Signal to cleanup that the SSD was touched and the post-run
+        # e2fsck pass is needed (journal replay).  Read-only Extract
+        # runs never reach this phase and so leave the flag False.
+        self._wrote_to_ssd = True
+
         # Separate system files from edata files
         system_files = [(r, p) for r, p in self.changed_files
                         if r.startswith("system/")]
@@ -4996,6 +5054,12 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         self._needs_writeback = False   # write image back to SSD on success
         self._partition_map = []        # filled by _discover_partitions for diagnostics
         self._ab_partitions = None      # filled when an A/B layout is detected
+        # Set True the moment a writable debugfs call lands against the
+        # SSD.  Gates the cleanup-time e2fsck pass — read-only Extract
+        # runs don't need (and on macOS often can't successfully run)
+        # the post-mount fsck, and a failure there should not surface
+        # as a scary error when the SSD wasn't touched.
+        self._wrote_to_ssd = False
 
     def run(self):
         """Execute the direct SSD decrypt pipeline."""
@@ -5314,12 +5378,37 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 pass
         return None
 
-    def _debugfs_ls_recursive(self, path, result_list):
-        """Recursively list files under a directory via debugfs."""
+    def _debugfs_ls_recursive(self, path, result_list, _depth=0):
+        """Recursively list files under a directory via debugfs.
+
+        Logs the raw ``ls -p`` output for the top-level call and any
+        empty subtree it descends into — the "Found 0 files" mac
+        regression couldn't be diagnosed from the user log because
+        we never captured what debugfs was actually returning.
+        Bounded so a populated 10k-file tree doesn't flood the log:
+        only the top-level dir AND any subtree that ends up empty
+        get printed.
+        """
         try:
             output = self._debugfs_run(f'ls -p {path}', timeout=15)
-        except CommandError:
+        except CommandError as e:
+            self.log(
+                f"[scan] debugfs ls failed for {path}: "
+                f"{getattr(e, 'output', e) or e}", "info")
             return
+        # Always log the top-level scan output verbatim so the
+        # actual debugfs output format we're parsing is visible
+        # in field logs.
+        if _depth == 0:
+            preview = (output if len(output) <= 800
+                       else output[:800] + "…")
+            self.log(
+                f"[scan] raw ls -p {path} "
+                f"({len(output)} chars):\n{preview}", "info")
+        before_count = len(result_list)
+        skipped_short_lines = 0
+        subdir_count = 0
+        file_count = 0
         for line in output.splitlines():
             # debugfs ls -p format: /inode/mode/rec_len/name_len/name/
             # e.g. /12345/040755/20/6/Avatar/
@@ -5330,6 +5419,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             parts = line.split('/')
             # parts[-1] is '' (trailing /), parts[-2] is name
             if len(parts) < 4:
+                skipped_short_lines += 1
                 continue
             name = parts[-2] if parts[-1] == '' else parts[-1]
             if not name or name in ('.', '..'):
@@ -5339,10 +5429,20 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             full_path = f"{path}/{name}"
             if mode.startswith('04'):
                 # Directory — recurse
-                self._debugfs_ls_recursive(full_path, result_list)
+                subdir_count += 1
+                self._debugfs_ls_recursive(
+                    full_path, result_list, _depth=_depth + 1)
             else:
                 # File
+                file_count += 1
                 result_list.append(full_path)
+        if _depth == 0 or (len(result_list) - before_count) == 0:
+            self.log(
+                f"[scan] {path}: {file_count} files here, "
+                f"{subdir_count} subdirs, "
+                f"{skipped_short_lines} short-line skips, "
+                f"{len(result_list) - before_count} added recursively",
+                "info")
 
     def _phase_copy_full_filesystem_native(self):
         """Copy non-edata system files via native debugfs dump."""
@@ -6096,12 +6196,23 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 # data from a GnR drive: partition 3 had the
                 # directory but Size: 40 (empty); partition 5 was
                 # the populated one with mtime Jul 2025.
+                self.log(
+                    f"A/B content-verify: game={self.game_name!r}, "
+                    f"_ab_partitions={getattr(self, '_ab_partitions', None)}, "
+                    f"current part={self._part_num}",
+                    "info")
                 if (self.game_name
                         and getattr(self, '_ab_partitions', None)):
                     edata_dir = (
                         f"{config.GAME_BASE_PATH}/"
                         f"{self.game_name}/edata")
-                    if not self._edata_is_populated(edata_dir):
+                    is_pop = self._edata_is_populated(edata_dir)
+                    self.log(
+                        f"A/B content-verify verdict for "
+                        f"partition {self._part_num}: "
+                        f"populated={is_pop}",
+                        "info")
+                    if not is_pop:
                         partners = [
                             p for p in self._ab_partitions
                             if p != self._part_num]
@@ -6381,8 +6492,16 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                     # Run e2fsck on every partition we wrote to.
                     # debugfs -w bypasses the ext4 journal; without
                     # e2fsck the journal replay on next mount can
-                    # revert our changes.
-                    if device and getattr(self, '_succeeded', False):
+                    # revert our changes.  Skip entirely when this
+                    # run never wrote to the SSD (read-only Extract):
+                    # macOS raw-disk e2fsck often fails on the final
+                    # superblock writeback with "Error writing file
+                    # system info: Invalid argument" (rc=9), which
+                    # was surfacing as a scary error on perfectly
+                    # successful Extract runs.
+                    wrote = getattr(self, '_wrote_to_ssd', False)
+                    if device and getattr(self, '_succeeded', False) \
+                            and wrote:
                         e2fsck = self._native_debugfs_path.replace(
                             'debugfs', 'e2fsck')
                         ab = getattr(self, '_ab_partitions', None)

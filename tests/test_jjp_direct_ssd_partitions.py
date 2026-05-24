@@ -366,6 +366,11 @@ class _EdataPopulatedStub:
                 f"unexpected debugfs ls path: {path}")
         return self._listings[path]
 
+    def log(self, *args, **kwargs):
+        # _edata_is_populated logs at every step; tests don't care
+        # about the messages, just the return value.
+        pass
+
 
 def _dir_entry(inode, name):
     """Render one debugfs `ls -p` line for a subdirectory entry."""

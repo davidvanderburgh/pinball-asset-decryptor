@@ -352,6 +352,11 @@ class _EdataPopulatedStub:
     shows up in the test results without re-implementation.
     """
     _edata_is_populated = DirectSSDDecryptPipeline._edata_is_populated
+    # The parser is a @staticmethod the real method calls via
+    # ``self._parse_debugfs_ls_line(...)``; bind it on the stub
+    # too so the real recursion can resolve it the same way.
+    _parse_debugfs_ls_line = staticmethod(
+        DirectSSDDecryptPipeline._parse_debugfs_ls_line)
 
     def __init__(self, listings):
         # listings: dict path -> debugfs ls -p output string
@@ -373,20 +378,35 @@ class _EdataPopulatedStub:
 
 
 def _dir_entry(inode, name):
-    """Render one debugfs `ls -p` line for a subdirectory entry."""
-    return f" /{inode}/040755/16/{len(name)}/{name}/"
+    """Render one debugfs `ls -p` line for a subdirectory entry.
+
+    Matches what ``debugfs 1.47.4`` (homebrew e2fsprogs on macOS)
+    actually emits: ``/<inode>/<mode>/<uid>/<gid>/<name>//`` — the
+    name carries debugfs's own trailing-slash dir marker AND the
+    format string adds its terminating slash, so dir lines end in
+    a double slash.  Pre-v0.7.9 the helper omitted the second
+    slash and accidentally hid the parser bug that broke real
+    macOS extractions.
+    """
+    return f"/{inode}/040755/0/0/{name}//"
 
 
 def _file_entry(inode, name):
-    """Render one debugfs `ls -p` line for a regular-file entry."""
-    return f" /{inode}/100644/16/{len(name)}/{name}"
+    """Render one debugfs `ls -p` line for a regular-file entry.
+
+    Files have a single trailing slash (no dir marker on the name).
+    """
+    return f"/{inode}/100644/0/0/{name}/"
 
 
 def _dot_lines():
-    """The `.` and `..` entries debugfs `ls -p` always emits first."""
+    """The `.` and `..` entries debugfs `ls -p` always emits first.
+
+    They're directories, so they get the double-slash treatment too.
+    """
     return [
-        " /2/040755/12/1/./",
-        " /2/040755/4076/2/../",
+        "/2/040755/0/0/.//",
+        "/2/040755/0/0/..//",
     ]
 
 
@@ -480,3 +500,57 @@ class TestEdataIsPopulated:
         })
         assert stub._edata_is_populated(
             "/jjpe/gen1/X/edata", max_depth=0) is False
+
+
+class TestParseDebugfsLsLine:
+    """Regression coverage for the v0.7.9 parser fix.
+
+    A user reported a macOS Direct-SSD run that found zero files even
+    though ``debugfs ls -p`` clearly returned ``graphics//`` and
+    ``sound//`` subdir entries — and the A/B probe flipped to
+    POPULATED on the wrong slot because debugfs's
+    ``...: File not found by ext2_lookup`` error line was being
+    classified as a file.  Both behaviours trace back to the
+    line-format assumptions, so we pin the parser against the
+    literal output we captured in the field.
+    """
+
+    parse = staticmethod(
+        DirectSSDDecryptPipeline._parse_debugfs_ls_line)
+
+    def test_real_macos_directory_lines_from_field_log(self):
+        # Exact bytes from the user's v0.7.8 log — these are the
+        # entries the old parser silently dropped, causing the
+        # "0 files, 0 subdirs" report on a clearly-populated tree.
+        assert self.parse("/262434/040755/0/0/graphics//") == (
+            "262434", "040755", "graphics")
+        assert self.parse("/395273/040755/0/0/sound//") == (
+            "395273", "040755", "sound")
+
+    def test_dot_entries_filtered(self):
+        assert self.parse("/262433/040755/0/0/.//") is None
+        assert self.parse("/262432/040755/0/0/..//") is None
+
+    def test_file_line_single_trailing_slash(self):
+        # File lines have one trailing slash (no dir marker on name).
+        assert self.parse("/123/100644/0/0/manifest/") == (
+            "123", "100644", "manifest")
+
+    def test_debugfs_error_line_is_not_a_file_entry(self):
+        # The probe's recursion bug with empty-name path joining
+        # produced error lines like this, which the old parser
+        # happily treated as files → false POPULATED verdict on
+        # the empty A/B slot.
+        assert self.parse(
+            "/jjpe/gen1/GunsNRoses/edata//: "
+            "File not found by ext2_lookup") is None
+
+    def test_banner_and_blank_lines_ignored(self):
+        assert self.parse("") is None
+        assert self.parse("debugfs 1.47.4 (6-Mar-2025)") is None
+
+    def test_old_format_still_parses(self):
+        # Older debugfs versions may emit a single trailing slash
+        # for directories too; the parser tolerates both.
+        assert self.parse("/12345/040755/20/6/Avatar/") == (
+            "12345", "040755", "Avatar")

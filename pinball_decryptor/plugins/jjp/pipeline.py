@@ -1584,6 +1584,50 @@ class DecryptionPipeline:
 
     # ---- debugfs helpers (shared by all pipelines) ----
 
+    @staticmethod
+    def _parse_debugfs_ls_line(line):
+        """Parse one ``debugfs ls -p`` line into ``(inode, mode, name)``.
+
+        debugfs's ``ls -p`` format is
+        ``/<inode>/<mode>/<uid>/<gid>/<name>/`` — but for
+        **directories** the name itself ends with ``/`` (debugfs's
+        dir-marker), so the line ends in a double slash ``//``.
+        ``str.split('/')`` then yields two trailing empties for dirs
+        and one for files, which broke the original
+        ``name = parts[-2] if parts[-1]=='' else parts[-1]`` parse
+        on the homebrew ``debugfs 1.47.4`` shipped on macOS — every
+        directory entry came out with ``name=''`` and got silently
+        skipped, so an SSD scan reported ``0 files, 0 subdirs``
+        even though ``graphics/`` and ``sound/`` were right there.
+
+        Returns ``None`` for:
+          * blank / non-``/``-leading lines (banners, prompts)
+          * debugfs error lines like
+            ``/some/path//: File not found by ext2_lookup`` —
+            these start with ``/`` but the inode field is not
+            numeric, which is how we discriminate
+          * ``.`` and ``..`` entries (callers never want them)
+        """
+        if not line or not line.startswith("/"):
+            return None
+        parts = line.split("/")
+        # Drop empty leading slot (always '') and any trailing empty
+        # slots ('' for file lines, '', '' for dir lines).
+        fields = [p for p in parts if p != ""]
+        if len(fields) < 5:
+            return None
+        inode, mode = fields[0], fields[1]
+        if not inode.isdigit() or not mode.isdigit():
+            # Error line ("...: File not found by ext2_lookup") or
+            # any non-listing output we should not classify.
+            return None
+        # Name is the last non-empty field; the trailing dir-marker
+        # ``/`` was already eaten by the empty-filter above.
+        name = fields[-1]
+        if name in (".", ".."):
+            return None
+        return inode, mode, name
+
     def _debugfs_run(self, command, writable=False, timeout=120):
         """Run a single debugfs command against the raw ext4 image.
 
@@ -1767,21 +1811,15 @@ class DecryptionPipeline:
         found_subdirs = 0
         for line in ls_out.splitlines():
             stripped = line.strip()
-            if not stripped or not stripped.startswith("/"):
+            parsed = self._parse_debugfs_ls_line(stripped)
+            if parsed is None:
+                if stripped.startswith("/"):
+                    self.log(
+                        f"{indent}[edata-probe]   SKIP (unparsed): "
+                        f"{stripped!r}",
+                        "info")
                 continue
-            # debugfs ls -p: /inode/mode/rec_len/name_len/name/
-            # trailing "/" present only for directories.
-            parts = stripped.split("/")
-            if len(parts) < 4:
-                self.log(
-                    f"{indent}[edata-probe]   SKIP (<4 parts): "
-                    f"{stripped!r}",
-                    "info")
-                continue
-            name = parts[-2] if parts[-1] == "" else parts[-1]
-            if name in (".", ".."):
-                continue
-            mode = parts[2] if len(parts) > 2 else ""
+            _inode, mode, name = parsed
             if mode.startswith("04"):
                 found_subdirs += 1
                 if max_depth <= 0:
@@ -5351,16 +5389,12 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         except CommandError:
             return None
 
-        # debugfs ls -p fields: /inode/mode/rec_len/name_len/name/
         for line in output.splitlines():
-            line = line.strip()
-            if not line or not line.startswith('/'):
+            parsed = self._parse_debugfs_ls_line(line.strip())
+            if parsed is None:
                 continue
-            parts = line.split('/')
-            # Name is second-to-last field (before trailing /)
-            name = parts[-2] if len(parts) >= 3 and parts[-1] == '' \
-                else parts[-1]
-            if not name or name in ('.', '..') or name.isdigit():
+            _inode, _mode, name = parsed
+            if name.isdigit():
                 continue
             try:
                 stat_out = self._debugfs_run(
@@ -5410,22 +5444,14 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         subdir_count = 0
         file_count = 0
         for line in output.splitlines():
-            # debugfs ls -p format: /inode/mode/rec_len/name_len/name/
-            # e.g. /12345/040755/20/6/Avatar/
-            # Name is the second-to-last field (before trailing /)
-            line = line.strip()
-            if not line or not line.startswith('/'):
+            parsed = self._parse_debugfs_ls_line(line.strip())
+            if parsed is None:
+                if line.strip() and not line.strip().startswith(
+                        "debugfs"):
+                    skipped_short_lines += 1
                 continue
-            parts = line.split('/')
-            # parts[-1] is '' (trailing /), parts[-2] is name
-            if len(parts) < 4:
-                skipped_short_lines += 1
-                continue
-            name = parts[-2] if parts[-1] == '' else parts[-1]
-            if not name or name in ('.', '..'):
-                continue
-            # Mode field is parts[2]; directory = 04xxxx, file = 10xxxx
-            mode = parts[2] if len(parts) > 2 else ""
+            _inode, mode, name = parsed
+            # Mode field: directory = 04xxxx, file = 10xxxx
             full_path = f"{path}/{name}"
             if mode.startswith('04'):
                 # Directory — recurse
@@ -5500,16 +5526,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         except CommandError:
             return
         for line in output.splitlines():
-            line = line.strip()
-            if not line or not line.startswith('/'):
+            parsed = self._parse_debugfs_ls_line(line.strip())
+            if parsed is None:
                 continue
-            parts = line.split('/')
-            if len(parts) < 4:
-                continue
-            name = parts[-2] if parts[-1] == '' else parts[-1]
-            if not name or name in ('.', '..'):
-                continue
-            mode = parts[2] if len(parts) > 2 else ""
+            _inode, mode, name = parsed
             full_path = f"{path}/{name}" if path != "/" else f"/{name}"
             rel = full_path.lstrip("/")
             if mode.startswith('04'):

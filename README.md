@@ -182,12 +182,41 @@ below).
 
 ### macOS
 
-Download the latest `Pinball_Asset_Decryptor_v*_macOS.dmg` from the
-[Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases),
-open it, and drag the app to `/Applications`.
+1. Download the latest `Pinball_Asset_Decryptor_v*_macOS.dmg` from the
+   [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases).
+2. Open the DMG and drag **Pinball Asset Decryptor** to your
+   `/Applications` folder.
+3. **First-launch security override** — required because the app is
+   ad-hoc signed (no Apple Developer ID).  Try to open the app once;
+   macOS will refuse with *"Apple could not verify Pinball Asset
+   Decryptor is free of malware…"*.  Then:
+   - Open **System Settings → Privacy & Security**.
+   - Scroll down to the **Security** section.  You'll see a line that
+     says *"Pinball Asset Decryptor was blocked to protect your Mac."*
+   - Click **Open Anyway** next to it.  Confirm with your password /
+     Touch ID.
+   - macOS will pop one more dialog asking if you're sure — click
+     **Open**.
+4. The app now launches and remembers the override; subsequent launches
+   open without prompting.
 
-For Spooky and JJP Clonezilla extraction you'll also need Docker Desktop
-(the app builds and uses an ephemeral container for partclone / debugfs).
+**If the app still bounces in the Dock and never appears** after the
+override, the quarantine attribute didn't get cleared — strip it
+manually in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Pinball Asset Decryptor.app"
+```
+
+Then double-click the app again.  (This is rare but happens on some
+Sonoma / Sequoia setups where Gatekeeper's "Allow Anyway" click doesn't
+fully drop the extended attribute.)
+
+For **Spooky** and **JJP** Clonezilla extraction you'll also need
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) —
+the app builds and uses an ephemeral container for partclone / debugfs
+on those flows.  The other manufacturers (PB, BOF, CGC, Williams) run
+without Docker.
 
 ### Linux
 

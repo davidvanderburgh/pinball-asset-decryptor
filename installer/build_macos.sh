@@ -29,15 +29,19 @@ pip3 install --quiet pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow 2>/dev/n
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.
 #
-# --collect-submodules on `pinball_decryptor.plugins` is REQUIRED:
-# core/registry.py loads plugins via importlib.import_module(<string>),
-# which PyInstaller's static analyser cannot trace.  Without this
-# flag the bundle ships an empty plugins/ directory and every plugin
-# fails with "No module named 'pinball_decryptor.plugins.<name>'"
-# at startup — the picker then shows "no manufacturer plugins
-# registered" and the app is unusable.  v0.7.1 shipped without it.
-# Also collect core/ so any future dynamic imports there don't
-# regress the same way.
+# Plugins are loaded dynamically at startup via
+# ``importlib.import_module(<string>)`` in core/registry.py —
+# PyInstaller's static analyser cannot trace string-based imports
+# so we MUST list each plugin package explicitly with --hidden-
+# import.  Without that the bundle ships with an EMPTY plugins/
+# tree (only the --add-data Dockerfiles) and every plugin fails
+# with "No module named 'pinball_decryptor.plugins.<name>'" at
+# startup — picker shows "no manufacturer plugins registered" and
+# the app is unusable.  v0.7.1 and v0.7.2 both shipped that way.
+# (--collect-submodules silently no-ops here, hence the explicit
+# per-plugin list — PyInstaller's tracer DOES follow each
+# __init__.py → manufacturer.py → pipeline.py chain once we tell
+# it to start from the package root.)
 pyinstaller \
     --name "Pinball Asset Decryptor" \
     --windowed \
@@ -56,6 +60,12 @@ pyinstaller \
     --collect-all "pyogg" \
     --hidden-import "PIL" \
     --hidden-import "PIL.Image" \
+    --hidden-import "pinball_decryptor.plugins.pb" \
+    --hidden-import "pinball_decryptor.plugins.spooky" \
+    --hidden-import "pinball_decryptor.plugins.bof" \
+    --hidden-import "pinball_decryptor.plugins.jjp" \
+    --hidden-import "pinball_decryptor.plugins.cgc" \
+    --hidden-import "pinball_decryptor.plugins.williams" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

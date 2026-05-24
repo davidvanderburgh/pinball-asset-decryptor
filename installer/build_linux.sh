@@ -22,13 +22,12 @@ pip3 install --quiet --user pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow
 
 echo "Running PyInstaller..."
 cd "$ROOT_DIR"
-# See installer/build_macos.sh for the rationale behind
-# --collect-submodules — plugins are loaded via
-# importlib.import_module(<string>) in core/registry.py, which
-# PyInstaller's static analyser cannot trace.  Without the flag the
-# bundle ships an empty plugins/ directory and every plugin fails
-# with "No module named 'pinball_decryptor.plugins.<name>'" at
-# startup.
+# See installer/build_macos.sh for the rationale.  The plugins are
+# loaded dynamically via importlib.import_module(<string>) in
+# core/registry.py, so each one needs an explicit --hidden-import.
+# --collect-submodules silently no-ops in PyInstaller 6.x for
+# packages added via --paths; the explicit per-plugin list is the
+# bulletproof mechanism.
 pyinstaller \
     --name "pinball-decryptor" \
     --windowed \
@@ -46,6 +45,12 @@ pyinstaller \
     --collect-all "pyogg" \
     --hidden-import "PIL" \
     --hidden-import "PIL.Image" \
+    --hidden-import "pinball_decryptor.plugins.pb" \
+    --hidden-import "pinball_decryptor.plugins.spooky" \
+    --hidden-import "pinball_decryptor.plugins.bof" \
+    --hidden-import "pinball_decryptor.plugins.jjp" \
+    --hidden-import "pinball_decryptor.plugins.cgc" \
+    --hidden-import "pinball_decryptor.plugins.williams" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

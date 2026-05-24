@@ -190,24 +190,38 @@ def test_pip_step_fixes_read_permissions():
         "ACL.")
 
 
+_PLUGIN_PACKAGES = (
+    "pinball_decryptor.plugins.pb",
+    "pinball_decryptor.plugins.spooky",
+    "pinball_decryptor.plugins.bof",
+    "pinball_decryptor.plugins.jjp",
+    "pinball_decryptor.plugins.cgc",
+    "pinball_decryptor.plugins.williams",
+)
+
+
 @pytest.mark.parametrize(
     "script", PYINSTALLER_BUILD_SCRIPTS,
     ids=lambda p: p.name)
-def test_pyinstaller_collects_plugin_submodules(script):
-    """Regression guard — v0.7.1 macOS dead-on-arrival bug.
+def test_pyinstaller_explicit_plugin_hidden_imports(script):
+    """Regression guard — v0.7.1/v0.7.2/v0.7.3 macOS dead-on-arrival.
 
-    PyInstaller's static-import analyser cannot trace
-    ``importlib.import_module(<string>)`` in core/registry.py — so
-    without explicit ``--collect-submodules
-    pinball_decryptor.plugins``, the .app / AppImage ships with an
-    EMPTY plugins/ directory and every plugin fails with "No module
-    named pinball_decryptor.plugins.<name>" at startup.  The picker
-    then shows "no manufacturer plugins registered" and the app is
-    unusable.  v0.7.1 shipped exactly that to macOS users.
+    Plugins are loaded dynamically via
+    ``importlib.import_module(<string>)`` in core/registry.py.
+    PyInstaller's static analyser cannot trace string-based imports,
+    AND ``--collect-submodules pinball_decryptor.plugins`` silently
+    no-ops at build time in PyInstaller 6.x for packages added via
+    ``--paths`` (v0.7.2 and v0.7.3 macOS builds confirmed: empty
+    plugins/ tree in the bundle, app crashed at startup with
+    "no manufacturer plugins registered").
 
-    Same applies to ``pinball_decryptor.core`` as a hedge against
-    future dynamic imports in the core/ tree silently regressing
-    the same way.
+    The bulletproof mechanism is an explicit ``--hidden-import`` for
+    each plugin package: PyInstaller then imports the package's
+    __init__.py during analysis and follows the transitive
+    manufacturer.py / pipeline.py imports the normal way.
+
+    Every plugin in the registry MUST appear in the build script's
+    --hidden-import list, or the bundle will silently drop it.
     """
     if not script.exists():
         pytest.skip(f"{script.name} not present in this checkout")
@@ -215,14 +229,19 @@ def test_pyinstaller_collects_plugin_submodules(script):
     assert "pyinstaller" in src.lower(), (
         f"{script.name} is no longer a PyInstaller build script — "
         f"this test needs an updated check.")
-    assert "--collect-submodules" in src, (
-        f"{script.name} dropped --collect-submodules — that's the "
-        f"v0.7.1 macOS dead-on-arrival regression.")
-    assert "pinball_decryptor.plugins" in src, (
-        f"{script.name} doesn't --collect-submodules "
-        f"pinball_decryptor.plugins — plugins are loaded dynamically "
-        f"by core/registry.py and PyInstaller can't trace them "
-        f"statically.")
+    missing = []
+    for pkg in _PLUGIN_PACKAGES:
+        # Tolerate either single- or double-quoted forms.
+        if (f'--hidden-import "{pkg}"' not in src
+                and f"--hidden-import '{pkg}'" not in src
+                and f"--hidden-import {pkg}" not in src):
+            missing.append(pkg)
+    assert not missing, (
+        f"{script.name} is missing --hidden-import for: "
+        f"{', '.join(missing)}.  Without these, the bundle ships "
+        f"with no plugin source code and the app crashes on launch "
+        f"with 'no manufacturer plugins registered'.  See the "
+        f"v0.7.4 fix notes for context.")
 
 
 def test_iss_repairs_python_permissions():

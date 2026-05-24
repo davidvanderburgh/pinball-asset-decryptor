@@ -52,6 +52,7 @@ class App:
             on_import=self._start_import,
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
+            on_check_updates=self._check_for_update_now,
         )
 
         # Start at the manufacturer picker.  Even if the user has a
@@ -1021,21 +1022,62 @@ class App:
     # ------------------------------------------------------------------
 
     def _check_for_update(self):
+        """Auto-run update check at startup (silent if up-to-date).
+
+        Result lands as a prominent banner at the top of the window
+        (``show_update_banner``) instead of in the per-manufacturer
+        log panel — the old per-mfr log placement coupled the update
+        notice to whichever manufacturer was selected, and the
+        notice would scroll off or disappear when the user switched
+        plugins.  The banner persists across picker ↔ working-view
+        transitions and is dismissible per-session.
+
+        Stays silent when the user is already on the latest version
+        — this is the *background* check; users who want explicit
+        confirmation either way click the "Check for updates" button,
+        which calls :meth:`_check_for_update_now` instead.
+        """
+        self._run_update_check(show_up_to_date_toast=False)
+
+    def _check_for_update_now(self):
+        """User-triggered "Check for updates" button click.
+
+        Same fetch as the startup auto-check but with two UX
+        affordances: the button reads "Checking…" while the request
+        is in flight (so the user knows the click was received), and
+        when the response says "no newer version", we pop a "you're
+        on the latest" modal so the user has feedback either way.
+        Also useful for local dev — flipping ``__version__`` to an
+        older string lets you exercise the banner code path on
+        demand without restarting the app.
+        """
+        self._run_update_check(show_up_to_date_toast=True)
+
+    def _run_update_check(self, *, show_up_to_date_toast):
+        """Shared worker for the auto / manual update checks."""
         mfr_repo = (self._current_mfr.update_repo
                     if self._current_mfr else None)
+        if show_up_to_date_toast:
+            self.window.set_update_check_running(True)
 
         def _run():
-            result = check_for_update(__version__, repo=mfr_repo)
-            if result:
-                version, url, notes = result
-                self.msg_queue.put(LogMsg(f"Update available: v{version}", "info"))
-                if notes:
-                    for line in notes.splitlines():
-                        line = line.strip()
-                        if line:
-                            self.msg_queue.put(LogMsg(f"  {line}", "info"))
-                self.msg_queue.put(LinkMsg(f"Download v{version}", url))
+            try:
+                result = check_for_update(__version__, repo=mfr_repo)
+            except Exception:
+                result = None
+            self.root.after(
+                0, self._handle_update_check_result,
+                result, show_up_to_date_toast)
         threading.Thread(target=_run, daemon=True).start()
+
+    def _handle_update_check_result(self, result, show_up_to_date_toast):
+        """Main-thread continuation of the update check."""
+        self.window.set_update_check_running(False)
+        if result:
+            version, url, _notes = result
+            self.window.show_update_banner(version, url)
+        elif show_up_to_date_toast:
+            self.window.show_up_to_date_toast()
 
     # ------------------------------------------------------------------
     # Settings

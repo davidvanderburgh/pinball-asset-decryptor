@@ -86,7 +86,8 @@ class MainWindow:
                  on_apply_delta=None,
                  on_recheck_prereqs=None, on_install_prereqs=None,
                  on_back=None,
-                 on_theme_change=None, initial_theme=None):
+                 on_theme_change=None, initial_theme=None,
+                 on_check_updates=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -101,6 +102,7 @@ class MainWindow:
         self._on_export = on_export
         self._on_import = on_import
         self._on_theme_change = on_theme_change
+        self._on_check_updates = on_check_updates
         self._app_title = app_title
 
         self._current_mfr = None
@@ -225,8 +227,18 @@ class MainWindow:
     def _build_ui(self):
         root = self.root
 
+        # ---- Update-available banner (top of window) ----------------
+        # Persistent across picker ↔ working-view switches; only
+        # visible once the GitHub update check turns up a newer
+        # release.  Lives ABOVE the back/title row so it's
+        # impossible to miss regardless of which view is showing.
+        # Dismissible per-session via the × button; reappears on
+        # next launch if still applicable.
+        self._build_update_banner(root)
+
         # ---- Top bar: Back, title, theme toggle ----------------------
         top = ttk.Frame(root)
+        self._top_bar = top  # banner uses this as `before=` anchor
         top.pack(fill=tk.X, padx=10, pady=(8, 0))
         # Back button — hidden until the user has picked a manufacturer.
         self._back_btn = ttk.Button(
@@ -240,6 +252,16 @@ class MainWindow:
         self._theme_btn = ttk.Button(top, text="", width=3,
                                      command=self._toggle_theme)
         self._theme_btn.pack(side=tk.RIGHT)
+        # "Check for updates" button — always visible.  Useful both as
+        # a manual override (user wants to check NOW instead of waiting
+        # for next launch) and as a dev convenience (lets you exercise
+        # the update-banner code path without juggling __version__).
+        # Packs second with side=RIGHT, so it sits to the LEFT of the
+        # theme toggle.
+        self._update_check_btn = ttk.Button(
+            top, text="Check for updates",
+            command=self._handle_check_updates)
+        self._update_check_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
         # ---- Picker view (the entry screen) --------------------------
         from .picker import ManufacturerPicker
@@ -2393,6 +2415,135 @@ class MainWindow:
         self._apply_theme(new)
         if self._on_theme_change:
             self._on_theme_change(new)
+
+    # ------------------------------------------------------------------
+    # Update-available banner
+    # ------------------------------------------------------------------
+
+    def _build_update_banner(self, parent):
+        """Build the persistent 'update available' banner widget.
+
+        Created but not packed.  ``show_update_banner`` packs it
+        above the back-button row using ``before=self._top_bar`` so
+        it stays at the very top of the window across picker ↔
+        working-view transitions.
+
+        Uses raw ``tk`` widgets (not ttk) so the contrasting blue
+        background + light-blue border stick regardless of the
+        current theme — the banner is intentionally hard to miss.
+        """
+        self._update_banner = tk.Frame(
+            parent, bg="#1e4a8a",
+            highlightbackground="#3794ff", highlightthickness=1)
+        # Lightning-bolt icon on the left.
+        tk.Label(
+            self._update_banner,
+            text="⚡",
+            bg="#1e4a8a", fg="#ffd700",
+            font=(_SANS_FONT, 14, "bold")
+        ).pack(side=tk.LEFT, padx=(10, 6), pady=4)
+        self._update_banner_text = tk.Label(
+            self._update_banner,
+            text="",
+            bg="#1e4a8a", fg="#ffffff",
+            font=(_SANS_FONT, 10),
+            anchor=tk.W)
+        self._update_banner_text.pack(
+            side=tk.LEFT, padx=0, pady=4, fill=tk.X, expand=True)
+        # Download button — opens the release page in the browser.
+        # tk.Button (not ttk) so its bg color sticks; ttk's themed
+        # blue would clash with the banner background on light mode.
+        tk.Button(
+            self._update_banner, text="Download",
+            bg="#3794ff", fg="#ffffff",
+            activebackground="#5fa5ff", activeforeground="#ffffff",
+            relief="flat", padx=10, pady=2, borderwidth=0,
+            cursor="hand2",
+            command=self._open_update_url,
+        ).pack(side=tk.LEFT, padx=4, pady=4)
+        # Dismiss × — closes the banner for this session.
+        tk.Button(
+            self._update_banner, text="✕",
+            bg="#1e4a8a", fg="#ffffff",
+            activebackground="#3a5a8a", activeforeground="#ffffff",
+            relief="flat", padx=6, pady=2, borderwidth=0,
+            cursor="hand2",
+            command=self._dismiss_update_banner,
+        ).pack(side=tk.LEFT, padx=(0, 6), pady=4)
+        # The URL to open when the Download button is clicked.
+        # Populated by show_update_banner.
+        self._update_banner_url = None
+
+    def show_update_banner(self, version, url):
+        """Display the 'update available' banner.
+
+        Called from :meth:`App._check_for_update` on the main thread
+        (via ``root.after(0, ...)``) when the GitHub release feed
+        reports a newer version.  Idempotent — re-calling with the
+        same args just re-shows / updates the banner; the user can
+        still dismiss it after.
+        """
+        from pinball_decryptor import __version__ as _current
+        self._update_banner_url = url
+        self._update_banner_text.configure(
+            text=f"Pinball Asset Decryptor v{version} is available "
+                 f"— you're on v{_current}.")
+        # Anchor above the back-button row so the banner sits at the
+        # very top of the window regardless of which view (picker /
+        # mfr) is currently shown.
+        try:
+            self._update_banner.pack(
+                fill=tk.X, side=tk.TOP,
+                before=self._top_bar)
+        except tk.TclError:
+            # Top bar not built yet — defer; this method runs on the
+            # main thread from a startup-time worker so the widgets
+            # should exist by now, but be defensive anyway.
+            self._update_banner.pack(fill=tk.X, side=tk.TOP)
+
+    def _dismiss_update_banner(self):
+        """Hide the update banner for this session."""
+        self._update_banner.pack_forget()
+
+    def _open_update_url(self):
+        """Open the release page in the user's default browser."""
+        if not self._update_banner_url:
+            return
+        import webbrowser
+        webbrowser.open(self._update_banner_url)
+
+    def _handle_check_updates(self):
+        """Manual 'Check for updates' button click."""
+        if self._on_check_updates:
+            self._on_check_updates()
+
+    def set_update_check_running(self, running):
+        """Toggle the 'Check for updates' button between idle / busy.
+
+        ``True`` while the GitHub fetch is in flight: button reads
+        "Checking…" and is disabled so the user can't queue up
+        concurrent requests.  ``False`` returns it to the idle
+        label.
+        """
+        if running:
+            self._update_check_btn.configure(
+                text="Checking…", state=tk.DISABLED)
+        else:
+            self._update_check_btn.configure(
+                text="Check for updates", state=tk.NORMAL)
+
+    def show_up_to_date_toast(self):
+        """Inform the user the manual check found nothing.
+
+        Called from app.py when ``check_for_update`` returns None on
+        a manual request.  Auto-check runs at startup silently no-op
+        in this case; only a user-initiated check triggers a
+        modal so they have feedback that the click was received.
+        """
+        from pinball_decryptor import __version__ as _current
+        messagebox.showinfo(
+            "Up to date",
+            f"You're on the latest version (v{_current}).")
 
     def _apply_theme(self, theme):
         c = THEMES[theme]

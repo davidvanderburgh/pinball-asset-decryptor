@@ -508,18 +508,27 @@ class App:
     def _confirm_admin_for_ssd(self):
         """Defence-in-depth elevation check before a Direct-SSD run.
 
+        Windows-only gate: ``wsl --mount`` and ``Set-Disk -IsOffline``
+        demand elevation and there's no in-process way around that.
+        macOS / Linux handle elevation differently — the pipeline's
+        :meth:`_debugfs_run_elevated` pops an osascript / pkexec
+        password dialog the moment it hits a permission-denied, so
+        the user runs the app normally and approves the prompt.
+        Blocking here on macOS/Linux would lock the user out for no
+        reason.
+
         The GUI already disables the Extract / Apply Modifications
-        buttons when SSD mode is on without admin — so this normally
-        won't fire.  It exists as a last-line guard for any code
-        path that bypasses the GUI gate (settings restored mid-run,
-        keyboard shortcut, future entry points).
+        buttons when this gate applies — so this normally won't
+        fire.  Kept as a last-line guard for code paths that
+        bypass the GUI (settings restored mid-run, keyboard
+        shortcut, future entry points).
 
         Returns True if the caller may proceed; False if they must
-        abort.  No auto-elevation — re-launching with UAC has
-        cross-environment failure modes (packaged vs source, venv vs
-        embeddable Python, frozen .exe vs .pyw) and a half-working
-        button is worse than a clear "restart manually" message.
+        abort.
         """
+        import sys
+        if sys.platform != "win32":
+            return True
         from .core.admin import is_admin
         if is_admin():
             return True

@@ -1511,14 +1511,18 @@ class MainWindow:
                 self._extract_ssd_warn.pack(
                     anchor=tk.W, padx=10, pady=(4, 2),
                     before=self._extract_output_row())
-                # Elevation banner — only shown when we're NOT admin.
-                # The standalone JJP decryptor learned the hard way
-                # that wsl --mount returns a cryptic
-                # WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK without
-                # elevation; a banner here heads that off.  Fills
-                # the panel width so the warning is unmissable.
+                # Elevation banner — only shown on Windows AND only
+                # when we're NOT admin.  The Windows gate (wsl --mount
+                # + Set-Disk -IsOffline both demanding elevation)
+                # doesn't exist on macOS / Linux: those use osascript
+                # / sudo prompts mid-run via the pipeline's own
+                # _debugfs_run_elevated path, so the user runs the
+                # app normally and confirms a password dialog when
+                # it pops.  Disabling the Extract button on macOS
+                # would just lock them out for no reason.
+                import sys
                 from ..core.admin import is_admin
-                if not is_admin():
+                if sys.platform == "win32" and not is_admin():
                     self._extract_admin_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._extract_output_row())
@@ -1559,10 +1563,11 @@ class MainWindow:
                 self._write_ssd_warn.pack(
                     anchor=tk.W, padx=10, pady=(4, 2),
                     before=self._write_filename_lbl)
-                # Elevation warning (write side).  Same as extract —
-                # see _build_extract_tab for the explanation.
+                # Elevation warning (write side).  Same Windows-only
+                # gate as Extract — see _build_extract_tab for why.
+                import sys
                 from ..core.admin import is_admin
-                if not is_admin():
+                if sys.platform == "win32" and not is_admin():
                     self._write_admin_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
@@ -1770,16 +1775,26 @@ class MainWindow:
     def _refresh_ssd_run_buttons(self):
         """Disable Extract / Apply Modifications when SSD + not admin.
 
+        Windows-only gate: the elevation requirement comes from
+        ``wsl --mount`` + ``Set-Disk -IsOffline``, both of which are
+        Windows-specific.  macOS / Linux handle elevation in-process
+        via osascript / sudo prompts in
+        :meth:`_debugfs_run_elevated`, so we should NOT disable the
+        Extract button there — the user runs the app normally and
+        types their password into the system dialog when prompted.
+
         Re-enabled the moment the user switches the radio back to ISO
         mode, or when ``is_admin()`` flips True (which only happens
         on a re-launched elevated process — same process can't gain
         admin mid-life).
         """
+        import sys
         from ..core.admin import is_admin
         admin = is_admin()
         mfr = self._current_mfr
         needs_admin = (
-            mfr is not None
+            sys.platform == "win32"
+            and mfr is not None
             and mfr.capabilities.direct_ssd
             and not admin)
         block_extract = (

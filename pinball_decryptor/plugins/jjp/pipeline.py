@@ -1625,6 +1625,61 @@ class DecryptionPipeline:
             timeout=timeout,
         )
 
+    def _run_shell_elevated(self, shell_cmd, timeout=120, label=None):
+        """Run an arbitrary shell command as root with the cached
+        admin password (single-prompt UX).
+
+        Factored out of :meth:`_debugfs_run_elevated` so the cleanup
+        ``e2fsck`` calls can reuse the cached credential instead of
+        popping fresh ``with administrator privileges`` dialogs (one
+        per A/B partition) at the end of every Direct-SSD run.
+
+        Returns the combined stdout+stderr text on success.  Raises
+        :class:`CommandError` for non-auth failures.  On bad-password
+        rejection (-60007), clears the cache, re-prompts once, then
+        raises :class:`PipelineError` if the second try also fails.
+        """
+        import getpass
+        user = getpass.getuser()
+        as_shell = shell_cmd.replace('\\', '\\\\').replace('"', '\\"')
+        user_escaped = user.replace('\\', '\\\\').replace('"', '\\"')
+        what = label or shell_cmd[:60]
+
+        for attempt in (0, 1):
+            if not getattr(self, '_cached_admin_password', None):
+                self._cached_admin_password = (
+                    self._prompt_for_admin_password())
+            pw_escaped = (self._cached_admin_password
+                          .replace('\\', '\\\\').replace('"', '\\"'))
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e",
+                     f'do shell script "{as_shell}" '
+                     f'user name "{user_escaped}" '
+                     f'password "{pw_escaped}" '
+                     f'with administrator privileges'],
+                    capture_output=True, text=True,
+                    encoding='utf-8', errors='replace', timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                raise CommandError(
+                    what, -1, f"Timed out after {timeout}s") from e
+            output = (result.stdout or "") + (result.stderr or "")
+            if result.returncode != 0 and "-60007" in output:
+                self._cached_admin_password = None
+                if attempt == 0:
+                    self.log(
+                        "Admin password rejected — try again.", "info")
+                    continue
+                raise PipelineError(
+                    "Mount",
+                    "Admin password failed twice. Cancelling. "
+                    "Re-run Extract / Apply to try again.")
+            if result.returncode != 0:
+                raise CommandError(what, result.returncode, output)
+            return output
+        # Unreachable — loop always either returns or raises.
+        return ""
+
     def _debugfs_run_elevated(self, command, writable=False, timeout=120):
         """Run debugfs as root with a CACHED admin password.
 
@@ -1647,75 +1702,35 @@ class DecryptionPipeline:
         re-prompt once, so a fat-fingered first attempt doesn't abort
         the whole run.
         """
-        import getpass
         native = self._native_debugfs_path
         w = "-w " if writable else ""
-        user = getpass.getuser()
         escaped_cmd = command.replace("'", "'\\''")
         shell_cmd = (
             f"'{native}' {w}-R '{escaped_cmd}' '{self._wsl_img}' 2>&1"
         )
-        # AppleScript string-literal escaping: backslash and double
-        # quote.  Same rule applies to the username and password
-        # interpolations below.
-        as_shell = shell_cmd.replace('\\', '\\\\').replace('"', '\\"')
-        user_escaped = user.replace('\\', '\\\\').replace('"', '\\"')
+        return self._run_shell_elevated(
+            shell_cmd, timeout=timeout,
+            label=f"debugfs -R '{command}'")
 
-        for attempt in (0, 1):
-            if not getattr(self, '_cached_admin_password', None):
-                self._cached_admin_password = (
-                    self._prompt_for_admin_password())
-            pw_escaped = (self._cached_admin_password
-                          .replace('\\', '\\\\').replace('"', '\\"'))
-            try:
-                result = subprocess.run(
-                    ["osascript", "-e",
-                     f'do shell script "{as_shell}" '
-                     f'user name "{user_escaped}" '
-                     f'password "{pw_escaped}" '
-                     f'with administrator privileges'],
-                    capture_output=True, text=True,
-                    encoding='utf-8', errors='replace', timeout=timeout)
-            except subprocess.TimeoutExpired as e:
-                raise CommandError(
-                    f"debugfs -R '{command}'", -1,
-                    f"Timed out after {timeout}s") from e
-            output = (result.stdout or "") + (result.stderr or "")
-            # AppleScript error -60007 = bad password.  Clear cache,
-            # loop one more time to re-prompt.
-            if result.returncode != 0 and "-60007" in output:
-                self._cached_admin_password = None
-                if attempt == 0:
-                    self.log(
-                        "Admin password rejected — try again.",
-                        "info")
-                    continue
-                raise PipelineError(
-                    "Mount",
-                    "Admin password failed twice. Cancelling. "
-                    "Re-run Extract / Apply to try again.")
-            if result.returncode != 0:
-                raise CommandError(
-                    f"debugfs -R '{command}'", result.returncode, output)
-            return output
-        # Unreachable — loop always either returns or raises.
-        return ""
-
-    def _edata_is_populated(self, edata_dir):
+    def _edata_is_populated(self, edata_dir, max_depth=3):
         """Quick "is the edata dir non-empty?" check via debugfs.
 
         JJP A/B firmware slots sometimes have ``/jjpe/gen1/<game>/
-        edata`` present as an empty directory on the inactive slot.
-        The macOS native-debugfs mount path uses this to decide
-        whether to swap to the A/B partner before kicking off the
-        decrypt scan, avoiding the "Found 0 files" dead-end the
-        first GnR macOS run hit on partition 3 (empty) when the
-        live data was on partition 5.
+        edata`` present on the inactive slot with the FULL directory
+        tree pre-created (``graphics/``, ``sound/``, etc.) but every
+        leaf empty.  Looking only at the top level isn't enough —
+        ``graphics/`` is a real directory entry on both the active
+        and inactive slots, so a "first non-dot entry wins" heuristic
+        false-positives on the empty slot and we end up scanning the
+        wrong partition (the GnR drive: partition 3 had the empty
+        tree, partition 5 had the live data).
 
-        Returns True iff the directory has at least one entry that
-        isn't ``.`` or ``..``.  Returns False on any debugfs error
-        — better to swap and try the partner than block on a
-        transient failure.
+        Walk recursively (bounded depth to keep this cheap — ~10
+        debugfs calls on a fully-populated tree before we hit the
+        first real file) and return True only when we find an actual
+        *file* entry, not just a directory entry.  Returns False on
+        any debugfs error — better to swap and try the partner than
+        block on a transient failure.
         """
         try:
             ls_out = self._debugfs_run(
@@ -1727,12 +1742,26 @@ class DecryptionPipeline:
             if not line or not line.startswith("/"):
                 continue
             # debugfs ls -p: /inode/mode/rec_len/name_len/name/
+            # trailing "/" present only for directories.
             parts = line.split("/")
             if len(parts) < 4:
                 continue
             name = parts[-2] if parts[-1] == "" else parts[-1]
             if name in (".", ".."):
                 continue
+            mode = parts[2] if len(parts) > 2 else ""
+            if mode.startswith("04"):
+                # Directory — recurse if we have depth budget left.
+                # On the active slot this returns True the moment we
+                # find the first file (cheap); on the inactive slot
+                # we exhaust the budget and fall through to False.
+                if max_depth <= 0:
+                    continue
+                if self._edata_is_populated(
+                        f"{edata_dir}/{name}", max_depth - 1):
+                    return True
+                continue
+            # Anything non-directory counts as a populated entry.
             return True
         return False
 
@@ -6369,35 +6398,68 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                                 f"commit journal...", "info")
                             try:
                                 if getattr(self, '_use_sudo', False):
-                                    # Use osascript for elevation
-                                    shell_cmd = f"'{e2fsck}' -fy '{raw}' 2>&1"
-                                    as_cmd = shell_cmd.replace(
-                                        '\\', '\\\\').replace('"', '\\"')
-                                    result = subprocess.run(
-                                        ["osascript", "-e",
-                                         f'do shell script "{as_cmd}" '
-                                         f'with administrator privileges'],
-                                        capture_output=True, text=True,
-                                        encoding='utf-8', errors='replace',
-                                        timeout=300)
+                                    # Reuse the cached admin password so
+                                    # the cleanup phase doesn't pop a
+                                    # fresh dialog per A/B partition.
+                                    # Previously each e2fsck pass used
+                                    # bare ``with administrator
+                                    # privileges`` (no user/password
+                                    # clause), which forced a re-prompt
+                                    # per call — three total prompts on
+                                    # a 2-slot A/B drive.
+                                    #
+                                    # ``osascript do shell script``
+                                    # raises if the shell rc is
+                                    # non-zero, but e2fsck legitimately
+                                    # returns 1 when it fixed errors
+                                    # (and 2 when filesystem changes
+                                    # need a reboot — also acceptable
+                                    # for our journal-replay use case).
+                                    # Capture rc explicitly and exit 0
+                                    # for the 0/1/2 happy band, letting
+                                    # higher rcs propagate as real
+                                    # failures.
+                                    shell_cmd = (
+                                        f"'{e2fsck}' -fy '{raw}' 2>&1; "
+                                        f"rc=$?; "
+                                        f"echo __E2FSCK_RC=$rc; "
+                                        f"[ $rc -le 2 ] && exit 0 "
+                                        f"|| exit $rc")
+                                    out = self._run_shell_elevated(
+                                        shell_cmd, timeout=300,
+                                        label=f"e2fsck {device}s{p}")
+                                    m = re.search(
+                                        r"__E2FSCK_RC=(\d+)", out)
+                                    rc = int(m.group(1)) if m else 0
+                                    if rc <= 1:
+                                        self.log(
+                                            f"e2fsck {device}s{p}: OK",
+                                            "success")
+                                    else:
+                                        self.log(
+                                            f"e2fsck {device}s{p} "
+                                            f"returned {rc} "
+                                            f"(filesystem changed — "
+                                            f"may need reboot)",
+                                            "info")
                                 else:
                                     result = subprocess.run(
                                         [e2fsck, "-fy", raw],
                                         capture_output=True, text=True,
                                         encoding='utf-8', errors='replace',
                                         timeout=300)
-                                # e2fsck returns 1 if it fixed errors,
-                                # 0 if clean — both are OK
-                                if result.returncode <= 1:
-                                    self.log(
-                                        f"e2fsck {device}s{p}: OK",
-                                        "success")
-                                else:
-                                    self.log(
-                                        f"e2fsck {device}s{p} returned "
-                                        f"{result.returncode}: "
-                                        f"{result.stderr[:200]}",
-                                        "info")
+                                    # e2fsck returns 1 if it fixed
+                                    # errors, 0 if clean — both are OK.
+                                    if result.returncode <= 1:
+                                        self.log(
+                                            f"e2fsck {device}s{p}: OK",
+                                            "success")
+                                    else:
+                                        self.log(
+                                            f"e2fsck {device}s{p} returned "
+                                            f"{result.returncode}: "
+                                            f"{result.stderr[:200]}",
+                                            "info")
                             except FileNotFoundError:
                                 self.log(
                                     f"e2fsck not found at {e2fsck} — "

@@ -337,3 +337,141 @@ class TestFormatPartitionMapForError:
         assert "partition 1" in out and "partition 2" in out
         assert "System" in out and "Unknown" in out
         assert "[efi]" in out and "[linux]" in out
+
+
+# ----------------------------------------------------------------------
+# A/B-slot edata content verification — the v0.7.7 fix
+# ----------------------------------------------------------------------
+
+class _EdataPopulatedStub:
+    """Stand-in that lets us script ``_debugfs_run('ls -p <path>')``
+    responses path-by-path, then drive the real
+    ``_edata_is_populated`` against it.
+
+    Borrows the real method so any change to the recursion logic
+    shows up in the test results without re-implementation.
+    """
+    _edata_is_populated = DirectSSDDecryptPipeline._edata_is_populated
+
+    def __init__(self, listings):
+        # listings: dict path -> debugfs ls -p output string
+        self._listings = listings
+
+    def _debugfs_run(self, command, timeout=10):
+        # The real call shape is `ls -p <path>` — pull <path> back out.
+        assert command.startswith("ls -p ")
+        path = command[len("ls -p "):]
+        if path not in self._listings:
+            raise AssertionError(
+                f"unexpected debugfs ls path: {path}")
+        return self._listings[path]
+
+
+def _dir_entry(inode, name):
+    """Render one debugfs `ls -p` line for a subdirectory entry."""
+    return f" /{inode}/040755/16/{len(name)}/{name}/"
+
+
+def _file_entry(inode, name):
+    """Render one debugfs `ls -p` line for a regular-file entry."""
+    return f" /{inode}/100644/16/{len(name)}/{name}"
+
+
+def _dot_lines():
+    """The `.` and `..` entries debugfs `ls -p` always emits first."""
+    return [
+        " /2/040755/12/1/./",
+        " /2/040755/4076/2/../",
+    ]
+
+
+class TestEdataIsPopulated:
+    """Inactive A/B slots carry the directory skeleton but no files.
+
+    The pre-fix heuristic (return True on any non-dot entry at the
+    top level) false-positived on those slots because `graphics/` is
+    a real directory entry on both the populated and the empty slot.
+    Recursing one or two levels deep distinguishes them: the live
+    slot has files at the leaves; the empty slot has empty leaves.
+    """
+
+    def test_top_level_files_count_as_populated(self):
+        # A populated slot may have files directly under edata/ —
+        # detect immediately without recursing.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/GunsNRoses/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _file_entry(1001, "manifest"),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/GunsNRoses/edata") is True
+
+    def test_dir_with_files_in_subdir_is_populated(self):
+        # Live slot shape: edata/ has subdirs, subdirs have real files.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/GunsNRoses/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _dir_entry(1100, "graphics"),
+                _dir_entry(1200, "sound"),
+            ]),
+            "/jjpe/gen1/GunsNRoses/edata/graphics": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _file_entry(1101, "splash.bin"),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/GunsNRoses/edata") is True
+
+    def test_empty_subdirs_only_is_NOT_populated(self):
+        # Inactive slot shape: edata/ has subdirs, every subdir is
+        # empty.  Pre-fix this returned True (wrong); post-fix it
+        # must return False so the mount path swaps to the partner.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/GunsNRoses/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _dir_entry(1100, "graphics"),
+                _dir_entry(1200, "sound"),
+            ]),
+            "/jjpe/gen1/GunsNRoses/edata/graphics": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+            ]),
+            "/jjpe/gen1/GunsNRoses/edata/sound": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/GunsNRoses/edata") is False
+
+    def test_completely_empty_dir_is_not_populated(self):
+        # No subdirs at all — just `.` and `..`.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/GunsNRoses/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/GunsNRoses/edata") is False
+
+    def test_depth_zero_does_not_recurse(self):
+        # max_depth=0 means "only look at the immediate level".  A
+        # dir whose only entries are subdirectories must return
+        # False at depth 0 even if those subdirectories DO have
+        # files — we don't recurse into them.  Guards the
+        # depth-budget bookkeeping.
+        stub = _EdataPopulatedStub({
+            "/jjpe/gen1/X/edata": "\n".join([
+                "debugfs 1.47.4 (6-Mar-2025)",
+                *_dot_lines(),
+                _dir_entry(1, "graphics"),
+            ]),
+        })
+        assert stub._edata_is_populated(
+            "/jjpe/gen1/X/edata", max_depth=0) is False

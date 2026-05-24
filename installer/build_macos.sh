@@ -28,6 +28,16 @@ pip3 install --quiet pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow 2>/dev/n
 
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.
+#
+# --collect-submodules on `pinball_decryptor.plugins` is REQUIRED:
+# core/registry.py loads plugins via importlib.import_module(<string>),
+# which PyInstaller's static analyser cannot trace.  Without this
+# flag the bundle ships an empty plugins/ directory and every plugin
+# fails with "No module named 'pinball_decryptor.plugins.<name>'"
+# at startup — the picker then shows "no manufacturer plugins
+# registered" and the app is unusable.  v0.7.1 shipped without it.
+# Also collect core/ so any future dynamic imports there don't
+# regress the same way.
 pyinstaller \
     --name "Pinball Asset Decryptor" \
     --windowed \
@@ -46,6 +56,8 @@ pyinstaller \
     --collect-all "pyogg" \
     --hidden-import "PIL" \
     --hidden-import "PIL.Image" \
+    --collect-submodules "pinball_decryptor.plugins" \
+    --collect-submodules "pinball_decryptor.core" \
     --noconfirm \
     --clean \
     --distpath "$SCRIPT_DIR/build/dist" \

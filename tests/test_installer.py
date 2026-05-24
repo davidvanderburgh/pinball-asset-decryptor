@@ -21,6 +21,13 @@ had no test coverage:
     parent ACL. The Inno installer repeats the repair on every
     install, so an install-over-the-top fixes an already-broken
     machine without re-running the prerequisites installer.
+  * macOS / Linux plugin discovery — PyInstaller's static-import
+    analyser cannot follow ``importlib.import_module(<string>)`` in
+    ``core/registry.py``, so without explicit ``--collect-submodules
+    pinball_decryptor.plugins`` the .app / AppImage shipped with an
+    empty plugins/ tree and every plugin failed with "No module
+    named pinball_decryptor.plugins.<name>" on launch (v0.7.1 macOS
+    build hit this).
 
 These tests guard those classes: installer shell scripts must stay
 LF-only and parse clean, the PowerShell installer must stay
@@ -43,6 +50,10 @@ INSTALLER = REPO / "installer"
 SH_SCRIPTS = sorted(INSTALLER.glob("*.sh"))
 PS1 = INSTALLER / "install_prerequisites.ps1"
 ISS = INSTALLER / "pinball_decryptor.iss"
+PYINSTALLER_BUILD_SCRIPTS = [
+    INSTALLER / "build_macos.sh",
+    INSTALLER / "build_linux.sh",
+]
 
 
 def test_installer_layout():
@@ -177,6 +188,41 @@ def test_pip_step_fixes_read_permissions():
         "group (SID S-1-5-32-545) read grant as a belt-and-suspenders "
         "guard for hardened systems with a non-standard Program Files "
         "ACL.")
+
+
+@pytest.mark.parametrize(
+    "script", PYINSTALLER_BUILD_SCRIPTS,
+    ids=lambda p: p.name)
+def test_pyinstaller_collects_plugin_submodules(script):
+    """Regression guard — v0.7.1 macOS dead-on-arrival bug.
+
+    PyInstaller's static-import analyser cannot trace
+    ``importlib.import_module(<string>)`` in core/registry.py — so
+    without explicit ``--collect-submodules
+    pinball_decryptor.plugins``, the .app / AppImage ships with an
+    EMPTY plugins/ directory and every plugin fails with "No module
+    named pinball_decryptor.plugins.<name>" at startup.  The picker
+    then shows "no manufacturer plugins registered" and the app is
+    unusable.  v0.7.1 shipped exactly that to macOS users.
+
+    Same applies to ``pinball_decryptor.core`` as a hedge against
+    future dynamic imports in the core/ tree silently regressing
+    the same way.
+    """
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    assert "pyinstaller" in src.lower(), (
+        f"{script.name} is no longer a PyInstaller build script — "
+        f"this test needs an updated check.")
+    assert "--collect-submodules" in src, (
+        f"{script.name} dropped --collect-submodules — that's the "
+        f"v0.7.1 macOS dead-on-arrival regression.")
+    assert "pinball_decryptor.plugins" in src, (
+        f"{script.name} doesn't --collect-submodules "
+        f"pinball_decryptor.plugins — plugins are loaded dynamically "
+        f"by core/registry.py and PyInstaller can't trace them "
+        f"statically.")
 
 
 def test_iss_repairs_python_permissions():

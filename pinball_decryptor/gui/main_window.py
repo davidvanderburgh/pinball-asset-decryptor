@@ -87,7 +87,9 @@ class MainWindow:
                  on_recheck_prereqs=None, on_install_prereqs=None,
                  on_back=None,
                  on_theme_change=None, initial_theme=None,
-                 on_check_updates=None):
+                 on_check_updates=None,
+                 initial_fda_acknowledged=False,
+                 on_fda_acknowledge=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -103,6 +105,16 @@ class MainWindow:
         self._on_import = on_import
         self._on_theme_change = on_theme_change
         self._on_check_updates = on_check_updates
+        # macOS FDA banner state.  Persisted in settings.json via
+        # ``on_fda_acknowledge`` so the dismissal survives restarts —
+        # the previous "always show" behaviour was out of sync with
+        # the actual TCC state and felt broken once a user had
+        # already granted Full Disk Access in System Settings.  We
+        # auto-set this to True on the first successful Direct-SSD
+        # run (proof that FDA works); the user can also click the
+        # "Hide this notice" link in the banner to dismiss manually.
+        self._fda_acknowledged = bool(initial_fda_acknowledged)
+        self._on_fda_acknowledge = on_fda_acknowledge
         self._app_title = app_title
 
         self._current_mfr = None
@@ -115,10 +127,13 @@ class MainWindow:
 
         # Default size picked so the picker fits all 4 current cards
         # (incl. Spooky's 14-game list) without scrolling on a typical
-        # 1080p display.  minsize stays modest because the scrollable
-        # canvas + log handle smaller windows gracefully.
-        root.geometry("820x940")
-        root.minsize(700, 600)
+        # 1080p display.  Height bumped in v0.7.11 from 940 → 1060 so
+        # the macOS FDA banner doesn't push the log frame below the
+        # viewport on the Extract / Write tabs.  minsize bumped to
+        # match — when smaller, the scrollable mfr-view (added v0.7.11)
+        # lets the user scroll the whole page so nothing is unreachable.
+        root.geometry("820x1060")
+        root.minsize(720, 700)
 
         if sys.platform == "win32":
             ico = os.path.join(os.path.dirname(os.path.dirname(__file__)),
@@ -287,7 +302,80 @@ class MainWindow:
         # Everything below this is parented to _mfr_view so we can hide
         # the whole thing with one pack_forget() and show the picker
         # instead.  Created but not packed; show_mfr_view() does that.
-        self._mfr_view = ttk.Frame(root)
+        #
+        # As of v0.7.11 the working view lives inside a vertical
+        # scrollable canvas so tall content (macOS FDA banner +
+        # admin banner + capability matrix + log) can't push the
+        # log frame below the visible area on smaller windows.  When
+        # the content fits the window, the scrollbar stays hidden;
+        # when it doesn't, the bar appears on the right and the
+        # user can scroll the whole working view.
+        self._mfr_view_wrapper = ttk.Frame(root)
+        self._mfr_view_canvas = tk.Canvas(
+            self._mfr_view_wrapper,
+            highlightthickness=0, borderwidth=0)
+        self._mfr_view_scroll = ttk.Scrollbar(
+            self._mfr_view_wrapper, orient="vertical",
+            command=self._mfr_view_canvas.yview)
+        self._mfr_view_canvas.configure(
+            yscrollcommand=self._mfr_view_scroll.set)
+        self._mfr_view_canvas.pack(
+            side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Scrollbar is packed-on-demand by ``_update_mfr_scroll``.
+        self._mfr_view = ttk.Frame(self._mfr_view_canvas)
+        self._mfr_view_id = self._mfr_view_canvas.create_window(
+            (0, 0), window=self._mfr_view, anchor="nw")
+
+        def _update_mfr_scroll(_e=None):
+            bbox = self._mfr_view_canvas.bbox("all")
+            if bbox is None:
+                return
+            self._mfr_view_canvas.configure(scrollregion=bbox)
+            visible = self._mfr_view_canvas.winfo_height()
+            content_h = bbox[3] - bbox[1]
+            if content_h > visible + 2:
+                self._mfr_view_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            else:
+                self._mfr_view_scroll.pack_forget()
+
+        self._mfr_view.bind("<Configure>", _update_mfr_scroll)
+        self._mfr_view_canvas.bind(
+            "<Configure>",
+            lambda e: (
+                self._mfr_view_canvas.itemconfig(
+                    self._mfr_view_id, width=e.width),
+                _update_mfr_scroll()))
+
+        # Mouse-wheel scroll the outer view when the pointer is over
+        # any non-scrollable region.  The inner log Text widget has
+        # its own scrollbar, so we explicitly forward wheel events
+        # ONLY when the pointer isn't inside the log frame — keeps
+        # log scrolling intuitive when there's a long extraction
+        # history to read.
+        def _on_mousewheel(event):
+            try:
+                widget_under = self.root.winfo_containing(
+                    event.x_root, event.y_root)
+            except Exception:
+                widget_under = None
+            w = widget_under
+            while w is not None:
+                if w is getattr(self, "_log_text", None):
+                    return  # let the log handle its own wheel
+                w = getattr(w, "master", None)
+            # Cross-platform wheel: macOS / Windows send delta; X11
+            # uses Button-4 / Button-5.
+            if event.num == 5 or getattr(event, "delta", 0) < 0:
+                self._mfr_view_canvas.yview_scroll(1, "units")
+            elif event.num == 4 or getattr(event, "delta", 0) > 0:
+                self._mfr_view_canvas.yview_scroll(-1, "units")
+
+        self._mfr_view_canvas.bind_all(
+            "<MouseWheel>", _on_mousewheel, add="+")
+        self._mfr_view_canvas.bind_all(
+            "<Button-4>", _on_mousewheel, add="+")
+        self._mfr_view_canvas.bind_all(
+            "<Button-5>", _on_mousewheel, add="+")
         mv = self._mfr_view
 
         # mfr_var stays for compatibility (some helpers read it) — but
@@ -779,6 +867,19 @@ class MainWindow:
             f, text=" Modified Files Preview ", padding=4)
         # Pack-managed by apply_manufacturer + _on_input_source_change.
 
+        # Refresh toolbar — when the user edits assets in another
+        # window while this app is open, the preview goes stale.
+        # An explicit button is cheaper than file-watching and gives
+        # the user direct control.  Also useful when the user
+        # changes the assets folder textbox and wants to re-scan
+        # without flipping tabs.
+        preview_toolbar = ttk.Frame(self._write_preview_frame)
+        preview_toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
+        self._write_preview_refresh_btn = ttk.Button(
+            preview_toolbar, text="🔄  Refresh",
+            command=self._scan_write_preview)
+        self._write_preview_refresh_btn.pack(side=tk.RIGHT)
+
         preview_inner = ttk.Frame(self._write_preview_frame)
         preview_inner.pack(fill=tk.BOTH, expand=True)
 
@@ -952,7 +1053,11 @@ class MainWindow:
 
     def show_picker(self):
         """Display the manufacturer picker and hide the working view."""
-        self._mfr_view.pack_forget()
+        # The scrollable wrapper, not the inner frame, is what's
+        # actually packed into the window — un-pack the wrapper so
+        # both the canvas and its (sometimes-packed) scrollbar
+        # disappear together.
+        self._mfr_view_wrapper.pack_forget()
         self._back_btn.pack_forget()
         # Hide the app-title label entirely — the window title bar
         # already says "Pinball Asset Decryptor" so showing it again in
@@ -969,7 +1074,7 @@ class MainWindow:
         self._back_btn.pack(side=tk.LEFT, padx=(0, 8))
         self._title_lbl.pack_forget()
         self._title_lbl.pack(side=tk.LEFT)
-        self._mfr_view.pack(fill=tk.BOTH, expand=True)
+        self._mfr_view_wrapper.pack(fill=tk.BOTH, expand=True)
 
     def set_back_enabled(self, enabled):
         """Enable / disable the Back button — called by App while a
@@ -1601,7 +1706,8 @@ class MainWindow:
                     self._extract_admin_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._extract_output_row())
-                elif sys.platform == "darwin":
+                elif (sys.platform == "darwin"
+                        and not self._fda_acknowledged):
                     self._extract_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._extract_output_row())
@@ -1651,7 +1757,8 @@ class MainWindow:
                     self._write_admin_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
-                elif sys.platform == "darwin":
+                elif (sys.platform == "darwin"
+                        and not self._fda_acknowledged):
                     self._write_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
@@ -1829,20 +1936,39 @@ class MainWindow:
         exact steps so users don't have to learn TCC the hard way
         (operation-not-permitted, password-loop, etc.).
 
-        Always shown when SSD mode is on and we're on macOS.  The
-        app can't reliably detect whether FDA has actually been
-        granted (TCC.db is SIP-protected), so we just keep the
-        instructions visible as a reference card.
+        Dismissible: the original "always shown" design fell out of
+        sync with the actual TCC state — a user who had already
+        granted everything in System Settings still saw the warning
+        and assumed the app didn't know.  The "Hide this notice"
+        link sets a persistent flag; the same flag is auto-set on
+        the first successful Direct-SSD run, since that's empirical
+        proof that FDA is working.
         """
         frame = tk.Frame(
             parent, bg="#5a1a1a", padx=12, pady=10,
             highlightbackground="#f44747", highlightthickness=2)
+        header = tk.Frame(frame, bg="#5a1a1a")
+        header.pack(fill=tk.X, anchor=tk.W)
         tk.Label(
-            frame,
+            header,
             text="⚠  macOS FULL DISK ACCESS REQUIRED",
             bg="#5a1a1a", fg="#ffd1d1",
             font=(_SANS_FONT, 11, "bold"),
-            anchor=tk.W).pack(fill=tk.X, anchor=tk.W)
+            anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True,
+                              anchor=tk.W)
+        # Dismiss link — styled as a clickable label rather than a
+        # ttk button so it blends with the banner's red colour
+        # scheme.  Cursor flips to a pointer on hover so it reads
+        # as interactive.
+        dismiss = tk.Label(
+            header,
+            text="Hide this notice ✕",
+            bg="#5a1a1a", fg="#ffd1d1",
+            font=(_SANS_FONT, 9, "underline"),
+            cursor="hand2")
+        dismiss.pack(side=tk.RIGHT, anchor=tk.E)
+        dismiss.bind("<Button-1>",
+                     lambda _e: self._dismiss_macos_fda_banner())
         tk.Label(
             frame,
             text=(
@@ -1865,12 +1991,36 @@ class MainWindow:
                 "   4.   Fully quit this app (⌘Q) and reopen.\n\n"
                 "Tip:  the binaries are in hidden folders.  In the "
                 "Full Disk Access file picker, press ⌘⇧G and paste "
-                "the full path."),
+                "the full path.\n\n"
+                "Already granted?  Click \"Hide this notice\" above "
+                "— it'll stay hidden across restarts.  The notice "
+                "auto-hides after your first successful SSD extract."),
             bg="#5a1a1a", fg="#ffffff",
             font=(_SANS_FONT, 9),
             justify=tk.LEFT, anchor=tk.W,
             wraplength=720).pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
         return frame
+
+    def _dismiss_macos_fda_banner(self):
+        """Hide the FDA banner everywhere it might currently be packed
+        and persist the dismissal via the app callback."""
+        self._fda_acknowledged = True
+        if self._on_fda_acknowledge is not None:
+            try:
+                self._on_fda_acknowledge(True)
+            except Exception:
+                pass
+        for attr in ("_extract_macos_fda_frame",
+                     "_write_macos_fda_frame"):
+            frame = getattr(self, attr, None)
+            if frame is not None:
+                frame.pack_forget()
+
+    def acknowledge_macos_fda(self):
+        """Public API for the app to mark FDA as proven-working
+        (called after a successful Direct-SSD run).  Idempotent."""
+        if not self._fda_acknowledged:
+            self._dismiss_macos_fda_banner()
 
     def _build_admin_warning_frame(self, parent):
         """Build the prominent "Administrator required" warning panel.

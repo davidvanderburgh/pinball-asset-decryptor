@@ -26,6 +26,7 @@ from pinball_decryptor.plugins.jjp.pipeline import (
     _parse_linux_partitions,
     _parse_macos_partitions,
     _parse_windows_partitions,
+    _PreventSystemSleep,
 )
 
 
@@ -613,3 +614,43 @@ class TestParseDebugfsLsLine:
         # for directories too; the parser tolerates both.
         assert self.parse("/12345/040755/20/6/Avatar/") == (
             "12345", "040755", "Avatar")
+
+
+class TestPreventSystemSleep:
+    """Sleep-prevention wraps Direct-SSD runs to keep macOS from
+    idle-sleeping mid-extraction (one field run reached 112 min
+    wall-clock for an ~30 min job, almost certainly because the
+    lid shut).  The mechanism is best-effort per platform — these
+    tests guard the contract, not the OS-specific assertion."""
+
+    def test_enter_exit_does_not_raise(self):
+        # Smoke test: spinning the context manager up and back
+        # down must never propagate an exception, even on
+        # platforms where the underlying helper isn't installed.
+        with _PreventSystemSleep(reason="test") as keeper:
+            assert keeper is not None
+
+    def test_returns_false_from_exit(self):
+        # Must not swallow exceptions from the wrapped block.
+        keeper = _PreventSystemSleep()
+        keeper.__enter__()
+        try:
+            assert keeper.__exit__(None, None, None) is False
+        finally:
+            # second exit should also be a no-op (idempotent)
+            assert keeper.__exit__(None, None, None) is False
+
+    def test_helper_failure_is_swallowed(self, monkeypatch):
+        # If subprocess.Popen or ctypes raises (e.g. caffeinate
+        # missing on a stripped-down macOS, or ctypes unavailable
+        # on some Python build), the context manager must still
+        # complete __enter__ — we never want sleep-prevention to
+        # take down the actual extraction.
+        import subprocess as sp
+
+        def _boom(*a, **kw):
+            raise FileNotFoundError("simulated missing helper")
+
+        monkeypatch.setattr(sp, "Popen", _boom)
+        with _PreventSystemSleep(reason="test"):
+            pass  # must not raise

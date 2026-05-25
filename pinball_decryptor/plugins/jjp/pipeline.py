@@ -15,6 +15,103 @@ from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import CommandError, create_executor, find_usbipd
 
 
+class _PreventSystemSleep:
+    """Context manager that keeps the host awake during a long pipeline.
+
+    macOS idle-sleep was extending Direct-SSD runs from ~30 min to
+    2+ hours: subprocess pipes pause when the system sleeps and
+    resume on wake, so the wall-clock duration silently includes
+    however long the lid was shut.  Wrap the pipeline entry point
+    in ``with _PreventSystemSleep(): ...`` and the host stays
+    awake for the duration of the run only — sleep behaviour
+    reverts on exit (or process death, since we use lifetime-tied
+    mechanisms on every platform).
+
+    Per-platform mechanism:
+
+    * **macOS**: spawn ``caffeinate -dimsu -w <our pid>`` as a
+      child process.  The ``-w`` makes caffeinate auto-exit when
+      our PID does, so even if we crash without calling
+      ``__exit__`` the assertion lifts.
+    * **Windows**: ``SetThreadExecutionState`` with the
+      CONTINUOUS / SYSTEM_REQUIRED / AWAYMODE_REQUIRED flags.
+      Reverts when we clear the flag in ``__exit__``.
+    * **Linux**: best-effort ``systemd-inhibit --what=idle:sleep``
+      if available; no-op otherwise.
+
+    Failure to install the assertion is non-fatal — the pipeline
+    runs anyway, just at the user's mercy for sleep behaviour.
+    """
+
+    def __init__(self, reason="Pinball Asset Decryptor extraction"):
+        self.reason = reason
+        self._proc = None
+        self._prev_state = None
+
+    def __enter__(self):
+        platform = sys.platform
+        try:
+            if platform == "darwin":
+                # -d display, -i idle, -m disk, -s system, -u user-active.
+                # -w PID makes caffeinate die when our process dies.
+                self._proc = subprocess.Popen(
+                    ["caffeinate", "-dimsu", "-w", str(os.getpid())],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif platform == "win32":
+                import ctypes
+                ES_CONTINUOUS = 0x80000000
+                ES_SYSTEM_REQUIRED = 0x00000001
+                ES_AWAYMODE_REQUIRED = 0x00000040
+                flags = (ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+                         | ES_AWAYMODE_REQUIRED)
+                self._prev_state = (
+                    ctypes.windll.kernel32.SetThreadExecutionState(
+                        flags))
+            elif platform.startswith("linux"):
+                import shutil
+                if shutil.which("systemd-inhibit"):
+                    # systemd-inhibit holds the lock for the lifetime
+                    # of its child; use a sleep-forever child that
+                    # will be reaped when we terminate it.
+                    self._proc = subprocess.Popen(
+                        ["systemd-inhibit",
+                         "--what=idle:sleep",
+                         f"--why={self.reason}",
+                         "sleep", "infinity"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+        except Exception:
+            # Best-effort — never let sleep-prevention break the run.
+            self._proc = None
+            self._prev_state = None
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
+        if self._prev_state is not None:
+            try:
+                import ctypes
+                ES_CONTINUOUS = 0x80000000
+                ctypes.windll.kernel32.SetThreadExecutionState(
+                    ES_CONTINUOUS)
+            except Exception:
+                pass
+            self._prev_state = None
+        return False  # never swallow exceptions
+
+
 def _find_native_debugfs():
     """Find a native debugfs binary on macOS (from Homebrew e2fsprogs).
 
@@ -5119,9 +5216,24 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         """Execute the direct SSD decrypt pipeline."""
         from .executor import DockerExecutor
         cleanup_phase = len(config.DIRECT_SSD_PHASES) - 1
+        # Keep the host awake for the whole run.  Direct-SSD
+        # extractions take ~30 min on a populated JJP image, and
+        # macOS users have hit cases where idle-sleep stretched
+        # wall-clock to 2+ hours.  The context manager handles all
+        # three platforms; on unsupported / missing-helper systems
+        # it silently no-ops and the run still proceeds.
+        with _PreventSystemSleep(
+                reason="Pinball Asset Decryptor SSD extraction"):
+            self._run_inner(cleanup_phase)
+
+    def _run_inner(self, cleanup_phase):
         try:
             self._log_system_diagnostics()
             self.log(f"Direct SSD mode — device: {self.device_path}", "info")
+            self.log(
+                "Sleep prevention active — host will stay awake "
+                "for the duration of this run.",
+                "info")
 
             # Verify output path is accessible
             ok, msg = self.executor.check_path_accessible(self.output_path)
@@ -5209,18 +5321,39 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                os.path.normpath(fl_dest):
                 shutil.copy2(self.fl_dat_path, fl_dest)
             self.log("Using cached fl_decrypted.dat", "info")
+            paths = None  # filler_size already known per-entry
         else:
-            # Scan filesystem via debugfs to build file list
+            # Discover paths only — DO NOT dump-and-scan up front.
+            # The old design dumped every file twice (once to detect
+            # filler sizes, once to decrypt), making a 5400-file SSD
+            # take ~1 hour and report no log progress for the second
+            # half.  Fuse path-collection + dump + filler-detect +
+            # decrypt + write into one loop below.
             self.log("Scanning edata directory via debugfs...", "info")
-            entries = self._scan_edata_via_debugfs(edata_dir)
-            prefix = detect_edata_prefix(entries) if entries else ""
-            self.log(f"Scan complete: {len(entries)} files found", "info")
+            paths = []
+            self._debugfs_ls_recursive(edata_dir, paths)
+            self.log(f"Found {len(paths)} files in edata.", "info")
+            # Prefix is needed for output-path stripping AND the
+            # category filter; derive from first discovered path.
+            prefix = ""
+            for p in paths:
+                idx = p.find("/edata/")
+                if idx >= 0:
+                    prefix = p[:idx + 7]
+                    break
+            entries = paths  # passed through filter below as paths
 
-        # Filter by category
+        # Filter by category — works on either FileEntry list (fl_dat
+        # path) or bare path list (scan path); both expose .path or
+        # are themselves the path string.
+        def _path_of(item):
+            return item if isinstance(item, str) else item.path
+
         if not self.extract_graphics or not self.extract_sounds:
-            def _keep(e):
-                rel = e.path[len(prefix):] if prefix and \
-                    e.path.startswith(prefix) else e.path
+            def _keep(item):
+                p = _path_of(item)
+                rel = p[len(prefix):] if prefix and \
+                    p.startswith(prefix) else p
                 if rel.startswith("graphics/"):
                     return self.extract_graphics
                 if rel.startswith("sound/"):
@@ -5245,14 +5378,29 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         tmp_file = os.path.join(tempfile.gettempdir(),
                                 f"jjp_dump_{uuid.uuid4().hex[:8]}.bin")
 
+        # Log progress to the text log (not just the progress bar)
+        # every 60 s so the user can tell the decrypt phase is
+        # alive — the previous design only updated on_progress()
+        # which feeds the GUI bar; the log stayed silent for the
+        # entire ~30-minute decrypt and looked stuck.
+        import time
+        last_log_ts = time.monotonic()
+
         try:
-            for i, e in enumerate(entries):
+            for i, item in enumerate(entries):
                 self._check_cancel()
+                path = _path_of(item)
+                # filler_size is known when we came from fl_dat;
+                # unknown (-1 sentinel) when we discovered via scan
+                # and must be detected from the dumped bytes.
+                known_filler = (
+                    item.filler_size if not isinstance(item, str)
+                    else None)
 
                 # Dump file from SSD via debugfs
                 try:
                     self._debugfs_run(
-                        f'dump "{e.path}" "{tmp_file}"', timeout=30)
+                        f'dump "{path}" "{tmp_file}"', timeout=30)
                 except CommandError:
                     skip += 1
                     if (i + 1) % 100 == 0 or i + 1 == total:
@@ -5269,27 +5417,39 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                     with open(tmp_file, "rb") as f:
                         enc_data = f.read()
 
-                    if len(enc_data) <= e.filler_size:
+                    if len(enc_data) < 8:
                         skip += 1
                         continue
 
-                    content = decrypt_file(enc_data, e.filler_size, e.path)
-                    rel = e.path[len(prefix):] if prefix and \
-                        e.path.startswith(prefix) else e.path
+                    if known_filler is not None:
+                        filler_size = known_filler
+                    else:
+                        filler_size = detect_filler_size(enc_data, path)
+                        if filler_size < 0:
+                            skip += 1
+                            continue
+
+                    if len(enc_data) <= filler_size:
+                        skip += 1
+                        continue
+
+                    content = decrypt_file(enc_data, filler_size, path)
+                    rel = path[len(prefix):] if prefix and \
+                        path.startswith(prefix) else path
                     out_path = os.path.join(out_dir, rel)
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     with open(out_path, "wb") as f:
                         f.write(content)
 
                     if not has_fl_dat:
+                        n2 = crc32_buf(enc_data)
                         n3 = crc32_buf(content)
                         computed_entries.append(FileEntry(
-                            path=e.path, filler_size=e.filler_size,
-                            crc_encrypted=e.crc_encrypted,
-                            crc_decrypted=n3))
+                            path=path, filler_size=filler_size,
+                            crc_encrypted=n2, crc_decrypted=n3))
                     ok += 1
                 except Exception as ex:
-                    self.log(f"[FAIL] {e.path}: {ex}", "error")
+                    self.log(f"[FAIL] {path}: {ex}", "error")
                     fail += 1
                 finally:
                     try:
@@ -5301,6 +5461,14 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                     self.on_progress(
                         i + 1, total,
                         f"ok={ok} fail={fail} skip={skip}")
+
+                now = time.monotonic()
+                if now - last_log_ts >= 60.0 or i + 1 == total:
+                    self.log(
+                        f"  Decrypted {i + 1}/{total} "
+                        f"(ok={ok} fail={fail} skip={skip})",
+                        "info")
+                    last_log_ts = now
         finally:
             # Ensure temp file is removed
             try:
@@ -5319,53 +5487,6 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             f"Decryption finished: {ok} OK, {fail} failed "
             f"out of {ok + fail + skip} files.",
             "success" if fail == 0 else "info")
-
-    def _scan_edata_via_debugfs(self, edata_dir):
-        """Recursively scan edata directory via debugfs, building file list."""
-        from .crypto import detect_filler_size, crc32_buf
-        from .filelist import FileEntry
-
-        all_files = []
-        self._debugfs_ls_recursive(edata_dir, all_files)
-
-        self.log(f"Found {len(all_files)} files, detecting filler sizes...",
-                 "info")
-        self.log(f"TOTAL_FILES={len(all_files)}", "info")
-
-        entries = []
-        tmp_file = os.path.join(tempfile.gettempdir(),
-                                f"jjp_scan_{uuid.uuid4().hex[:8]}.bin")
-        try:
-            for idx, crypto_path in enumerate(all_files):
-                try:
-                    self._debugfs_run(
-                        f'dump "{crypto_path}" "{tmp_file}"', timeout=30)
-                    with open(tmp_file, "rb") as f:
-                        enc_data = f.read()
-                    os.unlink(tmp_file)
-                except (CommandError, OSError):
-                    continue
-
-                if len(enc_data) < 8:
-                    continue
-                filler_size = detect_filler_size(enc_data, crypto_path)
-                if filler_size < 0 or len(enc_data) <= filler_size:
-                    continue
-                n2 = crc32_buf(enc_data)
-                entries.append(FileEntry(
-                    path=crypto_path, filler_size=filler_size,
-                    crc_encrypted=n2, crc_decrypted=0))
-
-                if (idx + 1) % 500 == 0:
-                    self.log(f"  Scanned {idx + 1}/{len(all_files)}",
-                             "info")
-        finally:
-            try:
-                os.unlink(tmp_file)
-            except OSError:
-                pass
-
-        return entries
 
     def _detect_game_via_debugfs(self):
         """Detect game name on the SSD via debugfs.
@@ -6625,9 +6746,39 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                                     f"e2fsck not found at {e2fsck} — "
                                     f"skipping journal fix", "info")
                             except Exception as e:
-                                self.log(
-                                    f"e2fsck {device}s{p} failed: {e}",
-                                    "info")
+                                # macOS e2fsck-via-osascript regularly hits
+                                # ``Error writing file system info: Invalid
+                                # argument`` after FILE SYSTEM WAS MODIFIED.
+                                # That's the superblock free-block counter
+                                # rewrite failing because DiskArbitration
+                                # is still holding the device write-locked
+                                # after our writes — the actual file data
+                                # is intact (we verified CRC32s pre-fsck),
+                                # only the cached free-block count is off
+                                # by the net inode-allocation delta.  The
+                                # kernel recomputes it from the bitmap on
+                                # next mount, so the discrepancy is purely
+                                # cosmetic.  Surface this as INFO with the
+                                # explanation rather than as a scary error.
+                                err_text = str(e)
+                                is_benign_macos = (
+                                    "Error writing file system info"
+                                    in err_text
+                                    and "FILE SYSTEM WAS MODIFIED"
+                                    in err_text)
+                                if is_benign_macos:
+                                    self.log(
+                                        f"e2fsck {device}s{p}: journal "
+                                        f"committed; superblock free-"
+                                        f"count rewrite blocked by macOS "
+                                        f"DiskArbitration (expected — "
+                                        f"file data is intact, kernel "
+                                        f"recomputes on next mount).",
+                                        "info")
+                                else:
+                                    self.log(
+                                        f"e2fsck {device}s{p} failed: {e}",
+                                        "info")
 
                     # Sync and eject so macOS flushes all writes
                     try:

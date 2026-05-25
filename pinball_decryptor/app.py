@@ -53,7 +53,16 @@ class App:
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
+            initial_fda_acknowledged=bool(
+                self._settings.get("macos_fda_acknowledged", False)),
+            on_fda_acknowledge=self._on_fda_acknowledge,
         )
+        # Tracks whether the run in flight is a Direct-SSD pipeline,
+        # so we can auto-acknowledge the macOS FDA banner after a
+        # successful run (empirical proof that Full Disk Access is
+        # actually working — that's a more reliable signal than the
+        # TCC.db, which is SIP-protected and can't be queried).
+        self._current_run_is_direct_ssd = False
 
         # Start at the manufacturer picker.  Even if the user has a
         # last_manufacturer saved, the explicit pick step makes "which
@@ -604,6 +613,7 @@ class App:
         self._save_settings()
 
         self._active_mode = "extract"
+        self._current_run_is_direct_ssd = True
         self.window.set_running(True, mode="extract")
         self.window.reset_steps(mode="extract")
 
@@ -776,6 +786,7 @@ class App:
         self._save_settings()
 
         self._active_mode = "write"
+        self._current_run_is_direct_ssd = True
         self.window.set_running(True, mode="write")
         self.window.reset_steps(mode="write")
 
@@ -1035,6 +1046,16 @@ class App:
                       else self._current_mfr.write_phases)
             if phases:
                 self.window.set_phase(len(phases), mode=self._active_mode)
+        # Empirical FDA proof: if a Direct-SSD run just completed
+        # successfully on macOS, Full Disk Access must be in order
+        # for every helper involved.  Auto-dismiss the banner so the
+        # warning matches reality going forward.  We do this on the
+        # FIRST success; idempotent on subsequent runs.
+        import sys as _sys
+        if (success and self._current_run_is_direct_ssd
+                and _sys.platform == "darwin"):
+            self.window.acknowledge_macos_fda()
+        self._current_run_is_direct_ssd = False
         self.window.set_running(False, mode=self._active_mode)
         if success:
             self.window.set_status("Complete!")
@@ -1132,6 +1153,16 @@ class App:
                 json.dump(self._settings, f, indent=2)
         except OSError:
             pass
+
+    def _on_fda_acknowledge(self, acknowledged):
+        """Persist the macOS FDA banner dismissal across restarts.
+
+        Called from the window when the user clicks "Hide this
+        notice" on the FDA banner, and also when we
+        auto-acknowledge after the first successful Direct-SSD run.
+        """
+        self._settings["macos_fda_acknowledged"] = bool(acknowledged)
+        self._save_settings()
 
     def _on_theme_change(self, _theme):
         self._save_settings()

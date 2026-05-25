@@ -49,9 +49,25 @@ def app():
     a.root.destroy()
 
 
+def _mfr_view_visible(window):
+    """Return True iff the manufacturer working view is currently shown.
+
+    v0.7.11 wrapped ``_mfr_view`` inside a Canvas (for the
+    scrollable working-view introduced for the macOS FDA-banner-
+    plus-log layout).  Tk's ``winfo_ismapped()`` on a canvas-item
+    widget returns 1 the moment the widget is registered via
+    ``create_window``, regardless of whether the canvas itself is
+    currently visible — so ``_mfr_view.winfo_ismapped()`` is no
+    longer a reliable visibility signal.  ``_mfr_view_wrapper``
+    is the directly-packed widget and is what actually reflects
+    user-visible state.
+    """
+    return bool(window._mfr_view_wrapper.winfo_ismapped())
+
+
 def test_app_starts_on_picker(app):
     assert app.window._picker_view.winfo_ismapped()
-    assert not app.window._mfr_view.winfo_ismapped()
+    assert not _mfr_view_visible(app.window)
     assert app._current_mfr is None
 
 
@@ -66,7 +82,7 @@ def test_mfr_select_switches_to_mfr_view(app, manufacturers_by_key):
     app._on_manufacturer_change(spooky)
     app.root.update(); app.root.update()
     assert app._current_mfr.key == "spooky"
-    assert app.window._mfr_view.winfo_ismapped()
+    assert _mfr_view_visible(app.window)
     assert not app.window._picker_view.winfo_ismapped()
 
 
@@ -76,7 +92,7 @@ def test_back_returns_to_picker(app, manufacturers_by_key):
     app._on_back_to_picker()
     app.root.update()
     assert app.window._picker_view.winfo_ismapped()
-    assert not app.window._mfr_view.winfo_ismapped()
+    assert not _mfr_view_visible(app.window)
 
 
 def test_per_mfr_log_persists_across_switches(app, manufacturers_by_key):

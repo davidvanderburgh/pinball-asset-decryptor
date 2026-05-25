@@ -20,6 +20,78 @@ from .executor import CommandError
 
 CHECKSUMS_FILE = ".checksums.md5"
 
+# BOF's newer Godot builds (May 2026 onward) rename the embedded PCK magic
+# from the stock "GDPC" to "GBOF" — likely to defeat off-the-shelf tools
+# like GDRE.  The PCK format is otherwise identical, so a 4-byte swap at the
+# header and trailer offsets is enough to make tools recognise it again.
+# DecryptPipeline patches the output binary (so the user / GDRE can browse
+# the PCK); ModifyPipeline patches the in-flight temp binary before calling
+# GDRE and then swaps the new binary back to GBOF before re-packaging so the
+# game still loads its PCK on the real machine.
+_BOF_PCK_MAGIC = b"GBOF"
+_GODOT_PCK_MAGIC = b"GDPC"
+
+# Inline python3 script executed via the shell to swap the 4-byte PCK magic
+# at both occurrences (PCK header + trailer) in an embedded-PCK Godot binary.
+# Returns one of:  "patched:..." | "skip:..." | "error:..."
+_PATCH_MAGIC_SCRIPT = r"""
+import os, struct, sys
+path, from_m, to_m = sys.argv[1], sys.argv[2].encode(), sys.argv[3].encode()
+size = os.path.getsize(path)
+if size < 12:
+    print("skip:too_small"); sys.exit(0)
+with open(path, "r+b") as f:
+    f.seek(size - 4); trailer = f.read(4)
+    if trailer == to_m:
+        print("skip:already_" + to_m.decode()); sys.exit(0)
+    if trailer != from_m:
+        print("skip:trailer=" + repr(trailer)); sys.exit(0)
+    f.seek(size - 12); pck_size = struct.unpack("<Q", f.read(8))[0]
+    header_off = size - 12 - pck_size
+    if header_off < 0 or header_off >= size - 12:
+        print("skip:bad_offset=" + str(header_off)); sys.exit(0)
+    f.seek(header_off); header = f.read(4)
+    if header != from_m:
+        print("skip:header=" + repr(header)); sys.exit(0)
+    f.seek(header_off); f.write(to_m)
+    f.seek(size - 4); f.write(to_m)
+print("patched:offset=" + str(header_off) + ",size=" + str(pck_size))
+"""
+
+
+def _patch_pck_magic(executor, exec_path, from_magic, to_magic, log_cb=None):
+    """Swap the Godot PCK magic in *exec_path* (a path on the executor's
+    filesystem) from *from_magic* to *to_magic*.  Both magics must be exactly
+    4 printable ASCII bytes.
+
+    Returns the raw status string from the helper script (caller may inspect
+    or log).  Never raises — the patch is best-effort; if the binary doesn't
+    have an embedded PCK or the magic doesn't match, this no-ops.
+    """
+    import base64 as _b64
+    assert len(from_magic) == 4 and len(to_magic) == 4
+    script_b64 = _b64.b64encode(_PATCH_MAGIC_SCRIPT.encode()).decode()
+    from_s = from_magic.decode()
+    to_s = to_magic.decode()
+    try:
+        out = executor.run(
+            f"echo {script_b64!r} | base64 -d | "
+            f"python3 - {exec_path!r} {from_s!r} {to_s!r} 2>&1",
+            timeout=120,
+        ).strip()
+    except Exception as e:
+        out = f"error:{e}"
+    if log_cb:
+        if out.startswith("patched"):
+            log_cb(f"  Patched PCK magic {from_s} -> {to_s} ({out})", "info")
+        elif out.startswith("skip:already_"):
+            log_cb(f"  PCK magic already {to_s}, no patch needed.", "info")
+        elif out.startswith("skip"):
+            log_cb(f"  Skipped PCK magic patch: {out}", "info")
+        else:
+            log_cb(f"  PCK magic patch failed: {out}", "warning")
+    return out
+
 
 def _parse_import_remap(import_file_path):
     """Parse a Godot .import file and return the dest path (relative to pck root).
@@ -474,6 +546,14 @@ class DecryptPipeline(_BasePipeline):
                           "success")
         except Exception:
             pass
+
+        # Patch BOF's custom "GBOF" PCK magic back to stock "GDPC" so the
+        # output binary works with GDRE Tools and any other Godot tooling.
+        # No-op for older BOF releases that still use GDPC.
+        if binary_name:
+            self._log("Checking PCK magic for BOF custom marker...", "info")
+            _patch_pck_magic(self.executor, binary_name,
+                             _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log)
 
         # Optional: unpack PCK with GDRE Tools
         if self.unpack_pck:
@@ -1150,6 +1230,16 @@ class ModifyPipeline(_BasePipeline):
             self._log(f"Patching {len(changed_pck)} file(s) into binary...", "info")
             self._progress(0, 100, "Patching PCK...")
 
+            # GDRE only recognises stock "GDPC" magic.  If this is a newer
+            # BOF binary with "GBOF" magic, temporarily swap it so GDRE can
+            # read the embedded PCK; we restore "GBOF" on the output binary
+            # further down so the game still loads on the real machine.
+            magic_status = _patch_pck_magic(
+                self.executor, binary_wsl,
+                _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log,
+            )
+            was_bof_magic = magic_status.startswith("patched")
+
             pck_dir_wsl = self.executor.to_exec_path(pck_dir)
             tmp_binary_wsl = f"/tmp/bof_{game_key}_patched.x86_64"
             gdre_prefix = self._gdre_prefix()
@@ -1211,6 +1301,14 @@ class ModifyPipeline(_BasePipeline):
             except CommandError as e:
                 raise PipelineError("Patch",
                     f"Failed to replace binary:\n{e.output}")
+
+            # GDRE's output uses stock "GDPC" magic.  If the source binary
+            # originally used BOF's "GBOF" marker, restore it on the new
+            # binary before md5/tar — otherwise the game can't find its own
+            # PCK at runtime.
+            if was_bof_magic:
+                _patch_pck_magic(self.executor, binary_wsl,
+                                 _GODOT_PCK_MAGIC, _BOF_PCK_MAGIC, self._log)
 
             # Update the md5 checksum file to match the patched binary
             binary_basename = os.path.basename(binary_wsl)

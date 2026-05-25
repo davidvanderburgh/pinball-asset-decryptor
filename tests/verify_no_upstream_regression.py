@@ -117,11 +117,16 @@ PLAN = {
         (None, "new"),
     "pinball_decryptor/plugins/bof/executor.py":
         ("bof/bof_decryptor/executor.py", "identical"),
-    # The whole DecryptPipeline + ModifyPipeline classes are
-    # upstream-verbatim — only the `from .config` import was rewired
-    # to our games.py.
+    # pipeline.py DIVERGED from upstream as of v0.7.12: the BOF May 2026
+    # firmware renamed the embedded Godot PCK magic from "GDPC" to "GBOF"
+    # to defeat off-the-shelf tools, so DecryptPipeline now patches the
+    # magic back to "GDPC" on extract (and ModifyPipeline restores "GBOF"
+    # before re-packing) so GDRE Tools and the user-facing browse/edit
+    # workflow keep working.  Upstream BOF decryptor lacks this swap and
+    # currently breaks on May code.  Behaviour covered by
+    # tests/test_bof_e2e.py + tests/test_bof_pck_magic.py.
     "pinball_decryptor/plugins/bof/pipeline.py":
-        ("bof/bof_decryptor/pipeline.py", "import-only"),
+        ("bof/bof_decryptor/pipeline.py", "ported"),
 
     # =======================================================
     #  Jersey Jack Pinball

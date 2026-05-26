@@ -339,12 +339,23 @@ class MainWindow:
                 self._mfr_view_scroll.pack_forget()
 
         self._mfr_view.bind("<Configure>", _update_mfr_scroll)
-        self._mfr_view_canvas.bind(
-            "<Configure>",
-            lambda e: (
-                self._mfr_view_canvas.itemconfig(
-                    self._mfr_view_id, width=e.width),
-                _update_mfr_scroll()))
+
+        def _resize_mfr_view(e):
+            # Force the inner canvas-window to be at least as tall as
+            # the canvas itself.  Otherwise the inner frame keeps its
+            # natural content height, leaving any extra canvas area
+            # painted in the canvas's bg — and, more importantly, the
+            # log frame (which packs with expand=True) has nothing
+            # extra to expand into.  When content is naturally taller
+            # than the canvas (small window), keep the content size
+            # so scrolling still works.
+            inner_h = self._mfr_view.winfo_reqheight()
+            self._mfr_view_canvas.itemconfig(
+                self._mfr_view_id, width=e.width,
+                height=max(e.height, inner_h))
+            _update_mfr_scroll()
+
+        self._mfr_view_canvas.bind("<Configure>", _resize_mfr_view)
 
         # Mouse-wheel scroll the outer view when the pointer is over
         # any non-scrollable region.  The inner log Text widget has
@@ -2946,15 +2957,36 @@ class MainWindow:
                         foreground="#7b9fd4", **icon_style)
         style.map("Moon.TButton", background=[("active", c["button"])])
 
+        # Match the Windows title bar to the theme via DWM's immersive
+        # dark mode.  Walk to the actual title-bearing HWND: Tk's
+        # winfo_id() returns the inner client-area HWND on Windows;
+        # GetParent walks up to the toplevel that owns the title bar.
+        # Earlier versions called GetForegroundWindow() instead, which
+        # at startup is whatever the user was focused on (a terminal,
+        # the launcher, Explorer) — so the dark title bar usually
+        # landed on the wrong window or was silently skipped.
         if sys.platform == "win32":
             try:
                 import ctypes
                 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
                 value = ctypes.c_int(1 if theme == "dark" else 0)
+                inner_hwnd = self.root.winfo_id()
+                title_hwnd = (ctypes.windll.user32.GetParent(inner_hwnd)
+                              or inner_hwnd)
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    ctypes.windll.user32.GetForegroundWindow(),
+                    title_hwnd,
                     DWMWA_USE_IMMERSIVE_DARK_MODE,
                     ctypes.byref(value),
                     ctypes.sizeof(value))
+            except Exception:
+                pass
+
+        # Repaint the scrollable mfr-view canvas to the theme bg.  Tk
+        # canvases default to system white, which otherwise shows
+        # through as an empty white strip below the log whenever the
+        # window is taller than the inner content.
+        if hasattr(self, "_mfr_view_canvas"):
+            try:
+                self._mfr_view_canvas.configure(background=c["bg"])
             except Exception:
                 pass

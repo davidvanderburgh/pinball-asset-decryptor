@@ -240,6 +240,14 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
     pck_start, pck_end = find_pck_section(original_binary)
     _log(f"PCK section: [{pck_start}, {pck_end}) ({pck_end - pck_start} bytes)")
 
+    # Read the PCK section into memory.  We need random-access here for
+    # the directory walk (sidecars/magics live throughout); the alternative
+    # would be a multi-pass file scan which is far slower for the typical
+    # 1.5 GB PCK.  We aim to keep ONE copy in memory and stream the
+    # rewrite directly to the output file (rather than buffering a second
+    # 1.5 GB+ bytearray) — see the streaming `_write_slice` below.  A
+    # 2.8 GB binary with this approach uses ~1.5 GB peak RSS instead of
+    # ~3 GB, which is what tripped the original MemoryError.
     with open(original_binary, "rb") as f:
         f.seek(pck_start)
         pck = bytearray(f.read(pck_end - pck_start))
@@ -252,10 +260,6 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
     adjacent, sequential = _read_pck_entries(pck)
     _log(f"Found {len(adjacent)} adjacent + {len(sequential)} sequential entries")
 
-    # Build a path -> (original-data, kind, sidecar_bytes, file_range) lookup
-    # for the rebuild step.
-    entries = []  # in document order: (file_data_bytes, sidecar_bytes, kind, path)
-    # Sort by file_start so we emit in order.
     all_items = []
     for kind, fs, fe, ss, se, p in adjacent:
         all_items.append((fs, fe, ss, se, p, kind))
@@ -263,74 +267,103 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
         all_items.append((fs, fe, ss, se, p, "sequential"))
     all_items.sort(key=lambda x: x[0])
 
-    # Track replaced count for log
     n_total = len(all_items)
     n_replaced = 0
-    out_pck = bytearray()
-    out_pck += bytes(pck[:PCK_HEADER_LEN + PCK_HEADER_PAD])  # header + 8-byte pad
 
-    cursor = PCK_HEADER_LEN + PCK_HEADER_PAD
-    for i, (fs, fe, ss, se, p, kind) in enumerate(all_items):
-        # Any gap between previous cursor and this file_start — copy verbatim.
-        if fs > cursor:
-            out_pck += bytes(pck[cursor:fs])
+    # Pre-copy the unchanged binary prefix (ELF/PE code) directly from
+    # the original to the output, then stream the PCK rewrite into the
+    # same handle.  This avoids ever holding a copy of the rebuilt PCK
+    # in memory — write-and-forget per slice.
+    out_long = (long_prefix + os.path.abspath(output_binary)
+                if sys.platform == "win32" else output_binary)
 
-        # Determine new file bytes
-        rel = p[len("res://"):] if p.startswith("res://") else p
-        local_path = os.path.abspath(
-            os.path.join(modified_pck_dir, rel.replace("/", os.sep)))
-        if sys.platform == "win32":
-            local_path = long_prefix + local_path
+    pck_bytes_written = 0
+    COPY_CHUNK = 8 * 1024 * 1024  # 8 MB chunks for the pre-PCK code copy
 
-        modified_bytes = None
-        if os.path.isfile(local_path):
-            try:
-                with open(local_path, "rb") as fh:
-                    modified_bytes = fh.read()
-            except OSError:
-                modified_bytes = None
+    with open(original_binary, "rb") as src, open(out_long, "wb") as dst:
+        # 1) Pre-PCK code section — copy bit-for-bit
+        remaining = pck_start
+        while remaining > 0:
+            chunk = src.read(min(COPY_CHUNK, remaining))
+            if not chunk:
+                break
+            dst.write(chunk)
+            remaining -= len(chunk)
 
-        orig_data = bytes(pck[fs:fe])
-        if modified_bytes is not None and modified_bytes != orig_data:
-            ext = os.path.splitext(p)[1].lower()
-            if kind == "adjacent_rscc":
-                new_payload = _maybe_strip_rsrc_magic(modified_bytes, ext)
-                new_data = _build_rscc_container(new_payload)
+        def _write_slice(start, end):
+            """Write pck[start:end] to dst WITHOUT materialising a copy.
+            Tracks pck_bytes_written via closure."""
+            nonlocal pck_bytes_written
+            if end <= start:
+                return
+            # memoryview avoids the copy that bytes()/slice would create
+            mv = memoryview(pck)[start:end]
+            dst.write(mv)
+            pck_bytes_written += (end - start)
+            mv.release()
+
+        # 2) PCK header + 8-byte pad — write directly from source
+        _write_slice(0, PCK_HEADER_LEN + PCK_HEADER_PAD)
+
+        cursor = PCK_HEADER_LEN + PCK_HEADER_PAD
+        for fs, fe, ss, se, p, kind in all_items:
+            # Any gap between previous cursor and this file_start — copy verbatim.
+            if fs > cursor:
+                _write_slice(cursor, fs)
+
+            # Determine new file bytes — only the modified file lives in
+            # transient memory, not the whole rebuilt PCK.
+            rel = p[len("res://"):] if p.startswith("res://") else p
+            local_path = os.path.abspath(
+                os.path.join(modified_pck_dir, rel.replace("/", os.sep)))
+            if sys.platform == "win32":
+                local_path = long_prefix + local_path
+
+            modified_bytes = None
+            if os.path.isfile(local_path):
+                try:
+                    with open(local_path, "rb") as fh:
+                        modified_bytes = fh.read()
+                except OSError:
+                    modified_bytes = None
+
+            if modified_bytes is not None and modified_bytes != bytes(pck[fs:fe]):
+                ext = os.path.splitext(p)[1].lower()
+                if kind == "adjacent_rscc":
+                    new_payload = _maybe_strip_rsrc_magic(modified_bytes, ext)
+                    new_data = _build_rscc_container(new_payload)
+                else:
+                    new_data = modified_bytes
+                dst.write(new_data)
+                pck_bytes_written += len(new_data)
+                n_replaced += 1
             else:
-                new_data = modified_bytes
-            n_replaced += 1
-        else:
-            new_data = orig_data
+                _write_slice(fs, fe)
 
-        out_pck += new_data
+            # Sidecar + any zero padding / RSCC separator between file
+            # end and sidecar start — copy verbatim from the original.
+            _write_slice(fe, se)
+            cursor = se
 
-        # Sidecar (and any zero padding / RSCC separator between file end
-        # and sidecar start) — copy verbatim from the original.
-        out_pck += bytes(pck[fe:se])
-        cursor = se
+        # 3) PCK tail (after the last sidecar — usually project settings + zero pad)
+        if cursor < len(pck):
+            _write_slice(cursor, len(pck))
 
-    # Tail of PCK (after the last sidecar — usually project settings + zero pad)
-    if cursor < len(pck):
-        out_pck += bytes(pck[cursor:])
+        # 4) New trailer reflecting whatever total we just wrote
+        new_trailer = struct.pack("<Q", pck_bytes_written) + PCK_MAGIC_STOCK
+        dst.write(new_trailer)
 
-    _log(f"Rebuilt PCK: {len(out_pck)} bytes (was {len(pck)}); {n_replaced} files substituted")
+    _log(f"Rebuilt PCK: {pck_bytes_written} bytes (was {len(pck)}); "
+         f"{n_replaced} files substituted")
 
-    # Now write the output binary: pre-PCK code + new PCK + new trailer
-    with open(original_binary, "rb") as f:
-        pre = f.read(pck_start)
+    # Release the input PCK buffer now that we're done with it.
+    del pck
 
-    new_trailer = struct.pack("<Q", len(out_pck)) + PCK_MAGIC_STOCK
-
-    out_long = long_prefix + os.path.abspath(output_binary) if sys.platform == "win32" else output_binary
-    with open(out_long, "wb") as f:
-        f.write(pre)
-        f.write(out_pck)
-        f.write(new_trailer)
-
+    new_binary_size = pck_start + pck_bytes_written + PCK_TRAILER_LEN
     return {
         "files_total": n_total,
         "files_replaced": n_replaced,
-        "original_pck_size": len(pck),
-        "new_pck_size": len(out_pck),
-        "new_binary_size": len(pre) + len(out_pck) + len(new_trailer),
+        "original_pck_size": pck_end - pck_start,
+        "new_pck_size": pck_bytes_written,
+        "new_binary_size": new_binary_size,
     }

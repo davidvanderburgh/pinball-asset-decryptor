@@ -586,6 +586,7 @@ class DecryptPipeline(_BasePipeline):
 
             if use_may_extractor:
                 from .may_extractor import extract_pck
+                from .source_converter import convert_imported_tree
                 pck_win = os.path.join(self.output_dir, "pck")
                 try:
                     stats = extract_pck(local_binary, pck_win, log_cb=self._log)
@@ -602,6 +603,26 @@ class DecryptPipeline(_BasePipeline):
                         self._log(
                             f"  {len(stats['unpaired_simple'])} sidecar paths "
                             f"had no extractable file data.", "warning")
+
+                    # Convert imported binaries into source formats
+                    # (.wav/.qoa/.ogg/.webp/.png/.ogv/.ttf/.otf) so the
+                    # user can play / view / edit them in standard tools.
+                    # Saves under pck/source/ alongside the imported tree.
+                    self._log(
+                        "Converting imported assets to source formats "
+                        "(audio→wav/qoa, textures→webp, video→ogv, fonts→ttf/otf)...",
+                        "info")
+                    src_dir = os.path.join(pck_win, "source")
+                    conv_stats = convert_imported_tree(
+                        pck_win, src_dir, log_cb=self._log)
+                    if conv_stats["success"]:
+                        ext_summary = ", ".join(
+                            f"{n} {ext}" for ext, n in
+                            sorted(conv_stats["by_ext"].items(),
+                                   key=lambda kv: -kv[1]))
+                        self._log(
+                            f"Source files at {src_dir}: {ext_summary}",
+                            "success")
                 except Exception as e:
                     self._log(
                         f"BOF May extractor failed: {e}", "error")

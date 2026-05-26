@@ -48,7 +48,14 @@ class App:
         # "just crashing before the GUI shows" failure mode).  Instead
         # we size root tiny + off-screen-ish + title-only so it's barely
         # visible behind the modal, then hand it off to MainWindow.
-        if not self._settings.get("disclaimer_accepted"):
+        #
+        # CI / test harnesses set ``PINBALL_SKIP_DISCLAIMER=1`` so the
+        # GUI smoke tests don't hang waiting for a user click against a
+        # modal that nobody can dismiss on a headless runner.
+        skip_disclaimer = (os.environ.get("PINBALL_SKIP_DISCLAIMER")
+                           or "PYTEST_CURRENT_TEST" in os.environ)
+        if not skip_disclaimer and not self._settings.get(
+                "disclaimer_accepted"):
             from .gui.disclaimer import show_disclaimer_dialog
             self.root.title(APP_NAME)
             self.root.geometry("1x1+0+0")  # minimal pre-dialog footprint

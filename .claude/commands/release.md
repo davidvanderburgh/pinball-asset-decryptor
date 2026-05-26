@@ -127,8 +127,6 @@ so we never again ship a tag where `__version__` lags the tag string
 - **Tag prefix:** `v`, always.  `v0.3.0` not `0.3.0`.
 - **Release notes structure** (the body of `gh release create --notes`):
   ```
-  # vX.Y.Z — <title>
-
   ## Highlights
   <2-4 paragraphs of WHAT'S NEW for the user>
 
@@ -138,6 +136,8 @@ so we never again ship a tag where `__version__` lags the tag string
   ## Requires
   <any new external dependencies, e.g. libpinmame, ffmpeg, gdre_tools>
   ```
+  - **Do NOT** start the notes body with `# vX.Y.Z — <title>` — GitHub already renders the title above the body from `--title`, so an H1 here shows as a duplicated header on the release page.  Open with `## Highlights` directly.
+  - **Do NOT hard-wrap paragraph text inside the heredoc.**  GitHub's markdown renderer preserves the hard wraps as awkward mid-sentence line breaks at full-width display.  Write each paragraph as one long line and let the renderer reflow.  Bullets and headings stay on their own lines; only running prose should be unwrapped.
 - **ROMs / paid content:** Never bundle or redistribute.  If a release adds ROM-dependent features, note "User-supplied. No ROMs are bundled or redistributed."
 
 ## Non-destructive default

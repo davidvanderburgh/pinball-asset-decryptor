@@ -2,7 +2,7 @@
 
 After ``may_extractor`` writes the imported binaries (``.ctex``,
 ``.sample``, ``.oggvorbisstr``, ``.fontdata``), this module re-decodes
-each one into a player/editor-friendly format under ``pck/source/``:
+each one into a player/editor-friendly format under ``pck/editable/``:
 
   * ``.ctex`` with ``GST2`` header → ``.webp`` (or ``.png`` if the embedded
     payload is PNG-encoded) — drag into any image viewer
@@ -15,12 +15,13 @@ each one into a player/editor-friendly format under ``pck/source/``:
   * ``.fontdata`` (Godot FontFile)    → ``.ttf`` / ``.otf``  — read the
     raw font binary out of the FontFile resource's ``data`` property
 
-Output is dropped under a sibling ``source/`` folder so the original
+Output is dropped under a sibling ``editable/`` folder so the original
 ``.godot/imported/`` tree stays intact for the Write pipeline:
 
     pck/
       .godot/imported/foo.png-HASH.ctex     (imported binary, untouched)
-      source/foo.webp                       (player-friendly copy)
+      editable/foo-HASH6.webp               (player-friendly copy)
+      editable/_README.txt                  (workflow hint for users)
 
 Filename collisions across different imported variants of the same
 source asset are resolved by appending the first 6 hash chars.
@@ -216,8 +217,13 @@ def _decode_sample(data):
     if payload is None:
         return None, None
 
-    # Check payload's own magic — non-PCM formats keep their own container
+    # Check payload's own magic — non-PCM formats either get decoded
+    # to WAV (QOA) or pass through (OGG).
     if payload.startswith(b"qoaf"):
+        wav = _decode_qoa_to_wav(payload)
+        if wav is not None:
+            return ".wav", wav
+        # Decoder unavailable / failed — fall back to preserving as-is
         return ".qoa", payload
     if payload.startswith(b"OggS"):
         return ".ogg", payload
@@ -229,10 +235,15 @@ def _decode_sample(data):
         return None, None
     channels = 2 if stereo else 1
     sample_width = 2 if godot_fmt == 1 else 1
+    return ".wav", _wrap_wav(payload, channels, sample_rate, sample_width)
+
+
+def _wrap_wav(pcm, channels, sample_rate, sample_width):
+    """Build a standard 44-byte RIFF/WAVE PCM header around raw PCM bytes."""
     byte_rate = sample_rate * channels * sample_width
     block_align = channels * sample_width
     bits_per_sample = sample_width * 8
-    data_chunk_size = len(payload)
+    data_chunk_size = len(pcm)
     riff_size = 36 + data_chunk_size
     wav = bytearray()
     wav += b"RIFF"
@@ -243,8 +254,19 @@ def _decode_sample(data):
                        byte_rate, block_align, bits_per_sample)
     wav += b"data"
     wav += struct.pack("<I", data_chunk_size)
-    wav += payload
-    return ".wav", bytes(wav)
+    wav += pcm
+    return bytes(wav)
+
+
+def _decode_qoa_to_wav(qoa_bytes):
+    """Decode a QOA byte string to a WAV byte string.  Returns None
+    if zstandard / qoa_codec import fails or decoding errors out."""
+    try:
+        from .qoa_codec import decode as qoa_decode
+        pcm, channels, rate = qoa_decode(qoa_bytes)
+        return _wrap_wav(pcm, channels, rate, 2)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +471,62 @@ DECODERS = {
 }
 
 
+_EDITABLE_README = """\
+=====================================================================
+  Edit these files to mod the game.
+=====================================================================
+
+The Pinball Asset Decryptor decoded every game asset from the .fun
+into this folder in a player-friendly format:
+
+  *.wav        — sound effects + voice clips (drag into VLC, Audacity,
+                 your DAW of choice).
+  *.webp       — UI images + textures (any modern image viewer; edit
+                 in Photoshop / GIMP / Affinity).
+  *.ogv        — video loops BOF stores as animated textures
+                 (open in VLC / mpv / your video editor).
+  *.ogg        — music + long ambience clips.
+  *.ttf / *.otf — fonts (preview by double-clicking on Windows).
+
+----------------------------------------------------------------------
+  How modding works
+----------------------------------------------------------------------
+
+1. Open any file in this folder, edit it, save it back with the SAME
+   FILENAME (don't rename — the hash suffix is how the Write pipeline
+   pairs your edit back to the right slot in the .fun).
+
+2. Switch to the "Write" tab in Pinball Asset Decryptor.
+
+3. The pipeline scans this folder for files newer than your last
+   Extract, re-encodes them into the Godot-imported format BOF
+   expects, then packs the new .fun for you.
+
+4. Copy the new .fun to a USB drive (FAT32) and install on the
+   machine.
+
+----------------------------------------------------------------------
+  Tips
+----------------------------------------------------------------------
+
+* Keep audio at the same sample rate + channel count as the original
+  for the cleanest result.  Sample rate is shown by Audacity / VLC's
+  Tools → Codec Information.
+* If your replacement .webp is much larger than the original, Godot
+  will still load it but the texture takes more VRAM; smaller is fine.
+* QOA-compressed audio gets re-encoded on Write, so the round-trip is
+  not bit-identical — for the cleanest result use lossless source
+  files (uncompressed .wav, not MP3 / AAC).
+* Don't delete files from this folder — Write only touches files
+  newer than the Extract baseline; deleting won't remove them from
+  the .fun.
+
+The matching imported binaries live in pck/.godot/imported/ —
+those are what actually ship in the .fun.  This folder is just a
+human-friendly view that gets re-encoded back into them on Write.
+"""
+
+
 def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
     """Walk ``pck_dir`` for every imported asset and decode each into a
     source-format file under ``source_dir``.  Returns a stats dict
@@ -472,6 +550,17 @@ def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
             progress_cb(cur, total, label)
 
     os.makedirs(source_dir, exist_ok=True)
+    # Drop a workflow hint so users opening the folder in Explorer
+    # immediately know what to do.  The leading underscore sorts the
+    # file to the top of an alphabetical listing in most file managers.
+    try:
+        readme = os.path.join(source_dir, "_README.txt")
+        with open(long_prefix + os.path.abspath(readme), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_EDITABLE_README)
+    except OSError:
+        pass
+
     stats = {"success": 0, "failed": 0, "by_ext": {}, "failures": []}
 
     # First pass — count candidates so we have a total for the bar.

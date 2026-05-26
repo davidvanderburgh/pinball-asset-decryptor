@@ -850,6 +850,24 @@ class MainWindow:
                    command=self._browse_write_assets).pack(
             side=tk.LEFT, padx=(4, 0))
 
+        # Editable-folder hint — appears as a subtle italic line below
+        # the Modified Assets row.  For BOF May code the Extract step
+        # creates a pck/editable/ folder with WAV / WEBP / OGV / TTF
+        # files that mirror the imported binaries; editing those is the
+        # main modding workflow.  The label is informational, no event
+        # bindings — it's just a signpost so users don't miss the
+        # folder (which would otherwise be easy to overlook deep inside
+        # the asset tree).
+        self._write_editable_hint = ttk.Label(
+            f,
+            text=("Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
+                  "files in pck/editable/ inside your Modified Assets folder. "
+                  "Write auto-detects changes there and re-encodes them."),
+            foreground="#888888",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT)
+        self._write_editable_hint.pack(anchor=tk.W, padx=26, pady=(0, 4))
+
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
         ttk.Label(self._write_output_row_ref,

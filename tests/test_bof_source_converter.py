@@ -99,12 +99,18 @@ def test_decode_sample_raw_pcm_wraps_in_wav():
     assert wav.endswith(pcm)
 
 
-def test_decode_sample_qoa_preserved():
-    qoa = b"qoaf" + struct.pack(">I", 1000) + b"\xFF" * 200
+def test_decode_sample_qoa_decoded_to_wav():
+    # Build a tiny but VALID QOA payload (silence) so the decoder can
+    # actually decompress it rather than falling through to .qoa
+    # preserve.
+    from pinball_decryptor.plugins.bof.qoa_codec import encode as qoa_encode
+    pcm = b"\x00\x00" * 100  # 100 mono samples of silence
+    qoa = qoa_encode(pcm, 1, 22050)
     sample = _build_audio_sample(qoa)
     ext, payload = sc._decode_sample(sample)
-    assert ext == ".qoa"
-    assert payload == qoa
+    assert ext == ".wav"
+    assert payload.startswith(b"RIFF")
+    assert payload[8:12] == b"WAVE"
 
 
 def test_decode_sample_ogg_preserved():

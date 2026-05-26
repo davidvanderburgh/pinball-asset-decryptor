@@ -617,15 +617,15 @@ class DecryptPipeline(_BasePipeline):
                             f"  {len(stats['unpaired_simple'])} sidecar paths "
                             f"had no extractable file data.", "warning")
 
-                    # Convert imported binaries into source formats
-                    # (.wav/.qoa/.ogg/.webp/.png/.ogv/.ttf/.otf) so the
-                    # user can play / view / edit them in standard tools.
-                    # Saves under pck/source/ alongside the imported tree.
+                    # Convert imported binaries into editable formats
+                    # (.wav/.ogg/.webp/.ogv/.ttf/.otf) so the user can
+                    # play / view / edit them in standard tools.  Saves
+                    # under pck/editable/ alongside the imported tree.
                     self._log(
-                        "Converting imported assets to source formats "
-                        "(audio→wav/qoa, textures→webp, video→ogv, fonts→ttf/otf)...",
+                        "Converting imported assets to editable formats "
+                        "(audio→wav, textures→webp, video→ogv, fonts→ttf/otf)...",
                         "info")
-                    src_dir = os.path.join(pck_win, "source")
+                    src_dir = os.path.join(pck_win, "editable")
                     conv_stats = convert_imported_tree(
                         pck_win, src_dir, log_cb=self._log,
                         progress_cb=_convert_progress)
@@ -635,8 +635,16 @@ class DecryptPipeline(_BasePipeline):
                             sorted(conv_stats["by_ext"].items(),
                                    key=lambda kv: -kv[1]))
                         self._log(
-                            f"Source files at {src_dir}: {ext_summary}",
+                            f"Editable files: {ext_summary}",
                             "success")
+                        self._log(
+                            f"To mod the game, edit any file in "
+                            f"{src_dir} and switch to the Write tab.",
+                            "success")
+                        if self.log_link:
+                            self.log_link(
+                                f"Open {os.path.basename(src_dir)}/ folder",
+                                src_dir)
                     self._progress(100, 100,
                                    f"{stats['files_written']} files extracted")
                 except Exception as e:
@@ -1366,12 +1374,51 @@ class ModifyPipeline(_BasePipeline):
         changed_pck = []
         if has_pck:
             export_log = os.path.join(pck_dir, "gdre_export.log")
-            baseline_mtime = (os.path.getmtime(export_log)
-                              if os.path.isfile(export_log) else 0)
+            checksums = os.path.join(pck_dir, ".checksums.md5")
+            # gdre_export.log is the GDRE-extracted baseline (pre-May
+            # code).  .checksums.md5 is the BOF May-extractor's baseline.
+            # Use whichever exists; otherwise fall back to 0 (treat all
+            # files as changed).
+            if os.path.isfile(export_log):
+                baseline_mtime = os.path.getmtime(export_log)
+            elif os.path.isfile(checksums):
+                baseline_mtime = os.path.getmtime(checksums)
+            else:
+                baseline_mtime = 0
 
-            _skip_names = {"gdre_export.log", ".DS_Store", "Thumbs.db", "desktop.ini"}
+            # First: re-encode anything the user edited under
+            # pck/editable/ back into the corresponding imported binary
+            # in pck/.godot/imported/.  This is the May-format
+            # workflow — pre-May extracts don't have an editable/ folder
+            # (GDRE writes decoded files in their original res:// path
+            # locations directly), so it no-ops for non-May code.
+            try:
+                from .inverse_converter import apply_source_edits
+                edit_stats = apply_source_edits(
+                    pck_dir, baseline_mtime,
+                    log_cb=self._log,
+                    progress_cb=self._progress)
+                # If we re-encoded anything, bump baseline so the next
+                # scan picks the regenerated imported binaries up.
+                if edit_stats["updated"]:
+                    # mtime is already in the future by virtue of the
+                    # writes — leave baseline alone; the imported files
+                    # we just wrote will land in changed_pck below.
+                    pass
+            except ImportError:
+                pass  # inverse_converter optional; missing → skip
+
+            _skip_names = {"gdre_export.log", ".checksums.md5", ".DS_Store",
+                           "Thumbs.db", "desktop.ini", "_README.txt"}
             for root, _dirs, files in os.walk(pck_dir):
                 if ".autoconverted" in root:
+                    continue
+                # Skip the editable/ folder — those are the user's source
+                # files that have already been re-encoded back into the
+                # imported tree above.  Including them in changed_pck
+                # would confuse the packer (no res:// path mapping).
+                rel_root = os.path.relpath(root, pck_dir)
+                if rel_root == "editable" or rel_root.startswith("editable" + os.sep):
                     continue
                 for fname in files:
                     if fname in _skip_names:

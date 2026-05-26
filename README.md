@@ -44,6 +44,13 @@ to a real pinball machine can render it inoperable until you flash a
 known-good image back. The maintainers accept no liability for damage
 to hardware, voided warranties, or any consequence of using this tool.
 
+The app shows a short version of this disclaimer in a modal dialog the
+first time you launch it, including a request to **not contact the
+manufacturer's support team** about issues that may have been caused by
+modified code — revert to stock firmware before opening a ticket, and
+disclose any past modifications. The acceptance is stored in
+`settings.json` and survives app updates; you only see the dialog once.
+
 ## Supported manufacturers
 
 | Manufacturer | Games | Input formats | Capabilities |

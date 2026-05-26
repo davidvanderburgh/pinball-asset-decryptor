@@ -15,3 +15,6 @@ installer/build/
 installer/Output/
 installer/get-pip.py
 installer/python-embed.zip
+
+# Claude Code runtime state
+.claude/

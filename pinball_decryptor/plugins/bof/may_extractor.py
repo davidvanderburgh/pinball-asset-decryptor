@@ -85,10 +85,14 @@ def find_pck_section(binary_path):
     with open(binary_path, "rb") as f:
         f.seek(size - PCK_TRAILER_LEN)
         trailer = f.read(PCK_TRAILER_LEN)
-    if trailer[8:12] != PCK_MAGIC_STOCK:
+    # Accept both stock GDPC and BOF's custom GBOF magic.  The
+    # packer needs to handle both so the May-format path (where the
+    # magic isn't patched ahead of time because may_packer is meant
+    # to preserve it for the real machine) doesn't false-fail here.
+    if trailer[8:12] not in (PCK_MAGIC_STOCK, b"GBOF"):
         raise ExtractorError(
-            f"Binary trailer magic is {trailer[8:12]!r}, expected {PCK_MAGIC_STOCK!r}. "
-            "Was the GBOF->GDPC patch applied?")
+            f"Binary trailer magic is {trailer[8:12]!r}, expected "
+            f"{PCK_MAGIC_STOCK!r} or b'GBOF'.")
     pck_data_size = struct.unpack("<Q", trailer[:8])[0]
     pck_end = size - PCK_TRAILER_LEN
     pck_start = pck_end - pck_data_size
@@ -96,29 +100,62 @@ def find_pck_section(binary_path):
 
 
 def is_may_format(pck_buf):
-    """Return True if this PCK uses BOF's May 2026+ custom format.
+    """Return True if this PCK uses BOF's custom format.
 
-    The distinguishing markers (vs stock Godot 4.x PCK):
+    Covers both observed BOF variants:
 
-      * pack_format_version == 3 (newer Godot, also used by stock 4.4+)
-      * pack_flags bit 0 set (``PACK_DIR_ENCRYPTED`` tripwire) — BOF
-        sets this without actually encrypting, which makes GDRE Tools
-        bail on the "encrypted" PCK before getting anywhere
-      * 8 zero bytes immediately after the 96-byte header, where stock
-        Godot would put a u32 file_count
+      * **Winchester (April 2026)** — stock ``GDPC`` magic, ``pack_flags``
+        bit 0 clear, but the post-header layout is BOF's: zero padding
+        followed by an ``RSCC`` Zstd container and the no-directory /
+        inline-sidecar scheme.  No anti-tooling obfuscation; just the
+        custom format itself.
+      * **Dune (May 2026+)** — same custom format underneath, but with
+        ``GBOF`` magic AND ``PACK_DIR_ENCRYPTED`` flag bit set as
+        anti-tooling tripwires.  ``pipeline._patch_pck_magic`` swaps
+        the magic to ``GDPC`` before this check runs.
 
-    A stock Godot PCK never sets the tripwire flag, so flag bit 0 alone
-    is a reliable discriminator.
+    Distinguishing both from stock Godot: the ``file_base_offset``
+    field (bytes 24-32 of the PCK header) points at an ``RSCC`` magic
+    in BOF binaries.  Stock Godot's file_base points into a
+    ``file_count`` u32 + directory entries instead.  Checking the
+    bytes AT file_base for the literal ``RSCC`` magic is the most
+    robust single-byte discriminator we have.
     """
     if len(pck_buf) < PCK_HEADER_LEN + PCK_HEADER_PAD:
         return False
-    if pck_buf[:4] != PCK_MAGIC_STOCK:
+    # Accept both stock GDPC and BOF's GBOF rename — extractor sees
+    # GDPC (DecryptPipeline patches first), packer sees GBOF (Modify
+    # preserves it so the rebuilt binary still loads on the machine).
+    if pck_buf[:4] not in (PCK_MAGIC_STOCK, b"GBOF"):
         return False
-    pack_flags = struct.unpack("<I", pck_buf[20:24])[0]
-    if not (pack_flags & 0x01):  # PACK_DIR_ENCRYPTED tripwire
+    # Bytes immediately after the 96-byte header should NOT look like
+    # a u32 file_count (stock Godot has a positive number here; BOF
+    # leaves it zero or near-zero).  Cheap pre-filter.
+    file_count_guess = struct.unpack("<I", pck_buf[PCK_HEADER_LEN:PCK_HEADER_LEN + 4])[0]
+    if file_count_guess != 0:
         return False
-    # Stock Godot puts a u32 file_count here; BOF puts 8 zero bytes.
-    return pck_buf[PCK_HEADER_LEN:PCK_HEADER_LEN + 8] == b"\x00" * 8
+    # Walk forward from offset 96 past any zero padding; the first
+    # non-zero region should start with a known imported-asset magic.
+    # In Dune the first file is always a font (RSCC v2); in Winchester
+    # the first observed file is also RSCC; in synthetic test fixtures
+    # without fonts the first byte could be GST2 / RIFF / OggS / RSRC
+    # instead.  Any of these is a strong indicator of BOF's custom
+    # layout vs stock Godot's u32 file_count directory.
+    p = PCK_HEADER_LEN
+    end = min(len(pck_buf), PCK_HEADER_LEN + 64)
+    while p < end and pck_buf[p] == 0:
+        p += 1
+    if p + 4 > len(pck_buf):
+        return False
+    magic = pck_buf[p:p+4]
+    if magic == b"RSCC":
+        # Tighten to v2 specifically — random bytes can spell "RSCC"
+        return (p + 8 <= len(pck_buf)
+                and pck_buf[p+4:p+8] == b"\x02\x00\x00\x00")
+    # Other known imported magics that BOF can store directly at the
+    # start of the file-data region (i.e. no font compression for the
+    # whole PCK).
+    return magic in (b"GST2", b"RIFF", b"OggS", b"RSRC")
 
 
 # BOF sidecars always end with `path="..."` followed by `\n`.  Texture

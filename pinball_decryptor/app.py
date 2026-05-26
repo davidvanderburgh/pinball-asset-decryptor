@@ -35,6 +35,39 @@ class App:
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
 
+        # First-launch disclaimer.  Boolean flag, unversioned: once the
+        # user accepts, they never see it again — including across app
+        # updates and reinstalls (the settings dir lives outside the
+        # install dir).  Declining or closing the dialog exits cleanly
+        # before we even build the main window.
+        #
+        # We CANNOT withdraw the root before showing the modal — on
+        # Windows pythonw a transient Toplevel whose parent is withdrawn
+        # never gets mapped, the grab fails silently, the dialog
+        # destroys immediately, and the app exits with no traceback (the
+        # "just crashing before the GUI shows" failure mode).  Instead
+        # we size root tiny + off-screen-ish + title-only so it's barely
+        # visible behind the modal, then hand it off to MainWindow.
+        if not self._settings.get("disclaimer_accepted"):
+            from .gui.disclaimer import show_disclaimer_dialog
+            self.root.title(APP_NAME)
+            self.root.geometry("1x1+0+0")  # minimal pre-dialog footprint
+            self.root.update_idletasks()
+            accepted = show_disclaimer_dialog(
+                self.root, theme_name=(saved_theme or "light"))
+            if not accepted:
+                self.root.destroy()
+                raise SystemExit(0)
+            self._settings["disclaimer_accepted"] = True
+            # Persist immediately, before MainWindow exists — we can't
+            # use _save_settings() yet (it touches self.window).
+            try:
+                os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(self._settings, f, indent=2)
+            except OSError:
+                pass
+
         self.window = MainWindow(
             self.root,
             app_title=APP_NAME,

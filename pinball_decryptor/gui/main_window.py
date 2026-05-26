@@ -576,6 +576,61 @@ class MainWindow:
                                        font=(_SANS_FONT, 9))
         self._extract_warn.pack(anchor=tk.W, padx=24)
 
+        # BOF-only callout — explains the custom-format conversion the
+        # Extract pipeline does behind the scenes.  Built but not packed;
+        # apply_manufacturer() packs it when the user picks BOF and
+        # hides it otherwise.  Stands out from the surrounding controls
+        # via a yellow background + amber border, matching the "tip"
+        # callout convention used elsewhere in the app.
+        self._extract_bof_banner = tk.Frame(
+            f, bg="#3a3416", padx=12, pady=10,
+            highlightbackground="#a08020", highlightthickness=1)
+        tk.Label(
+            self._extract_bof_banner, bg="#3a3416", fg="#ffd966",
+            font=(_SANS_FONT, 10, "bold"),
+            anchor=tk.W, justify=tk.LEFT,
+            text="About BOF Extract",
+        ).pack(anchor=tk.W)
+        tk.Label(
+            self._extract_bof_banner, bg="#3a3416", fg="#e8d8a0",
+            font=(_SANS_FONT, 9), anchor=tk.W, justify=tk.LEFT,
+            wraplength=720,
+            text=(
+                "Starting with the April 2026 firmware (Winchester 4/29, "
+                "Dune 5/13), BOF ships its games in a custom Godot PCK "
+                "format that no public extractor — including GDRE Tools — "
+                "can read. Older .fun files use stock Godot and work with "
+                "GDRE; this newer format needs the Pinball Asset Decryptor."
+            ),
+        ).pack(anchor=tk.W, pady=(4, 6))
+        tk.Label(
+            self._extract_bof_banner, bg="#3a3416", fg="#e8d8a0",
+            font=(_SANS_FONT, 9), anchor=tk.W, justify=tk.LEFT,
+            wraplength=720,
+            text=(
+                "During Extract, the app will:\n"
+                "   • Decrypt the .fun and pull out the Godot binary\n"
+                "   • Patch BOF's custom PCK magic markers back to stock Godot\n"
+                "   • Walk BOF's sequential file layout (no traditional directory)\n"
+                "   • Decompress fonts from BOF's Zstd \"RSCC\" container\n"
+                "   • Decode QOA-compressed audio → standard WAV\n"
+                "   • Unwrap textures (GST2 + WebP) → standard WEBP\n"
+                "   • Save everything to pck/_EDITABLE ASSETS/, organised "
+                "into audio/, images/, video/, and fonts/ subfolders"
+            ),
+        ).pack(anchor=tk.W, pady=(0, 6))
+        tk.Label(
+            self._extract_bof_banner, bg="#3a3416", fg="#a8e8a0",
+            font=(_SANS_FONT, 9, "italic"), anchor=tk.W, justify=tk.LEFT,
+            wraplength=720,
+            text=(
+                "After Extract, open _EDITABLE ASSETS/ — every audio file "
+                "is playable in VLC / Audacity, every texture in any image "
+                "viewer. Edit anything, then use the Write tab to repack "
+                "your changes back into a new .fun for the machine."
+            ),
+        ).pack(anchor=tk.W)
+
         # JJP-only (capabilities.asset_filters): per-category Extract
         # filters.  Mirrors the standalone JJP decryptor: an "Extract:"
         # label followed by Graphics / Sounds / File System
@@ -852,17 +907,17 @@ class MainWindow:
 
         # Editable-folder hint — appears as a subtle italic line below
         # the Modified Assets row.  For BOF May code the Extract step
-        # creates a pck/editable/ folder with WAV / WEBP / OGV / TTF
-        # files that mirror the imported binaries; editing those is the
-        # main modding workflow.  The label is informational, no event
-        # bindings — it's just a signpost so users don't miss the
-        # folder (which would otherwise be easy to overlook deep inside
-        # the asset tree).
+        # creates a pck/_EDITABLE ASSETS/ folder with WAV / WEBP / OGV
+        # / TTF files that mirror the imported binaries; editing those
+        # is the main modding workflow.  The label is informational,
+        # no event bindings — it's just a signpost so users don't
+        # miss the folder (which would otherwise be easy to overlook
+        # deep inside the asset tree).
         self._write_editable_hint = ttk.Label(
             f,
             text=("Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
-                  "files in pck/editable/ inside your Modified Assets folder. "
-                  "Write auto-detects changes there and re-encodes them."),
+                  "files in pck/_EDITABLE ASSETS/ inside your Modified Assets "
+                  "folder. Write auto-detects changes there and re-encodes them."),
             foreground="#888888",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
@@ -1204,6 +1259,22 @@ class MainWindow:
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
 
+        # BOF-only Extract callout — pack just below the Extract tab's
+        # warning label so users see it before they hit Extract.  Other
+        # manufacturers don't need this preamble; their extracts use
+        # standard tools (or none at all).  Checking mfr.key directly is
+        # OK here because the banner copy is BOF-specific (mentions Dune
+        # / Winchester / Labyrinth by name, references "GBOF" magic,
+        # etc.); promoting this to a generic capability would mean
+        # plumbing per-plugin banner text through the manifest, more
+        # surface area for one banner.
+        if mfr.key == "bof":
+            self._extract_bof_banner.pack(
+                fill=tk.X, padx=10, pady=(6, 6),
+                after=self._extract_warn)
+        else:
+            self._extract_bof_banner.pack_forget()
+
         # JJP (or any future plugin with caps.direct_ssd) gets an extra
         # "From ISO / From SSD" radio row above the input rows on both
         # the Extract and Write tabs.  Everyone else: reset the source
@@ -1234,11 +1305,25 @@ class MainWindow:
             self._write_ssd_warn.pack_forget()
             self._write_admin_frame.pack_forget()
             self._write_macos_fda_frame.pack_forget()
-            # The per-mode description + the Modified Files Preview
-            # are JJP/direct_ssd-specific; hide them for plugins
-            # whose Write tab is just the ISO-build flow.
+            # The per-mode description is JJP-specific; hide it for
+            # plugins whose Write tab is the ISO-build flow.
             self._write_desc.pack_forget()
-            self._write_preview_frame.pack_forget()
+            # Modified Files Preview — JJP gets it in SSD mode (handled
+            # in the direct_ssd branch above); BOF gets it always so
+            # modders can see exactly which files they've edited since
+            # Extract before hitting Write.  Other plugins don't show
+            # the tree.
+            if mfr.key == "bof":
+                self._write_preview_frame.pack(
+                    fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
+                    before=self._write_filename_lbl)
+                # Kick a scan so users see the tree populated when they
+                # switch tabs.  Has no effect if the assets folder
+                # isn't set yet — the scan will re-fire when the
+                # textbox is filled in.
+                self._scan_write_preview()
+            else:
+                self._write_preview_frame.pack_forget()
             # Restore the default "Build update" button label too.
             self._write_btn.configure(text="Build update")
             # Make sure the ISO rows are visible — _on_input_source_change
@@ -2233,7 +2318,14 @@ class MainWindow:
             relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         def _scan():
+            # ``.checksums.md5`` ships in two flavours depending on
+            # which plugin wrote it:
+            #   * JJP / md5sum style   — "<md5>  <path>"  (md5 first)
+            #   * BOF style            — "<path>\t<md5>"  (path first)
+            # Detect per-line: if the line starts with 32 hex chars,
+            # treat as md5sum; otherwise split on the last tab.
             saved = {}
+            md5sum_re = _re.compile(r'^([a-f0-9]{32})\s+\*?(.+)$')
             try:
                 with open(checksums_file, "r", encoding="utf-8",
                           errors="replace") as f:
@@ -2241,15 +2333,39 @@ class MainWindow:
                         line = line.strip()
                         if not line:
                             continue
-                        m = _re.match(
-                            r'^([a-f0-9]{32})\s+\*?(.+)$', line)
+                        m = md5sum_re.match(line)
                         if m:
+                            md5_val = m.group(1)
                             fp = m.group(2)
-                            if fp.startswith("./"):
-                                fp = fp[2:]
-                            saved[fp] = m.group(1)
+                        elif "\t" in line:
+                            fp, md5_val = line.rsplit("\t", 1)
+                            md5_val = md5_val.strip()
+                            if not _re.fullmatch(r'[a-f0-9]{32}', md5_val):
+                                continue
+                        else:
+                            continue
+                        if fp.startswith("./"):
+                            fp = fp[2:]
+                        saved[fp.replace("\\", "/")] = md5_val
             except OSError:
                 return
+
+            # BOF only: hide the imported-cache subtree from the
+            # preview.  Those files are pipeline-managed derivatives
+            # of the user's edits to ``_EDITABLE ASSETS/`` (the Write
+            # step re-encodes WAV/WEBP/etc. → .sample/.ctex/etc.), and
+            # they also accumulate stale state from prior cancelled or
+            # partial Write runs — both produce noise the user can't
+            # act on directly.  Practice-mode modders aren't affected:
+            # script edits live in ``pck/scripts``, scenes in
+            # ``pck/.godot/exported``, .tres in ``pck/assets`` — none
+            # of those paths are under ``pck/.godot/imported``.  The
+            # Write pipeline still MD5-scans the full tree (including
+            # imported/) so anything that genuinely differs there
+            # still ships into the binary.
+            current_mfr = self._current_mfr
+            hide_imported_cache = (
+                current_mfr is not None and current_mfr.key == "bof")
 
             changed = []
             for root_dir, _dirs, files in os.walk(assets_path):
@@ -2262,6 +2378,9 @@ class MainWindow:
                     rel = os.path.relpath(
                         full, assets_path).replace("\\", "/")
                     if rel not in saved:
+                        continue
+                    if (hide_imported_cache
+                            and rel.startswith("pck/.godot/imported/")):
                         continue
                     h = hashlib.md5()
                     try:
@@ -2314,7 +2433,8 @@ class MainWindow:
                 relx=0.5, rely=0.5, anchor=tk.CENTER)
 
     def _maybe_rescan_write_preview(self):
-        """Re-scan only when the SSD-mode Write tab is the active view.
+        """Re-scan only when the Write tab is the active view AND the
+        current plugin shows the preview tree.
 
         The ``write_assets_var`` trace fires on every keystroke, on
         every settings-restore, and on programmatic ``set()``; we
@@ -2322,9 +2442,14 @@ class MainWindow:
         the user isn't even looking at the preview.
         """
         mfr = self._current_mfr
-        if mfr is None or not mfr.capabilities.direct_ssd:
+        if mfr is None:
             return
-        if self.write_input_source_var.get() != "ssd":
+        # JJP shows the tree only in SSD mode; BOF shows it always.
+        # Other plugins don't have a preview tree at all.
+        if mfr.capabilities.direct_ssd:
+            if self.write_input_source_var.get() != "ssd":
+                return
+        elif mfr.key != "bof":
             return
         # Only scan if the Write tab is the currently-selected tab —
         # otherwise the user can't see the preview anyway.

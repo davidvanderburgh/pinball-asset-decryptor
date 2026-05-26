@@ -620,12 +620,13 @@ class DecryptPipeline(_BasePipeline):
                     # Convert imported binaries into editable formats
                     # (.wav/.ogg/.webp/.ogv/.ttf/.otf) so the user can
                     # play / view / edit them in standard tools.  Saves
-                    # under pck/editable/ alongside the imported tree.
+                    # under pck/_EDITABLE ASSETS/ alongside the imported tree.
                     self._log(
                         "Converting imported assets to editable formats "
                         "(audio→wav, textures→webp, video→ogv, fonts→ttf/otf)...",
                         "info")
-                    src_dir = os.path.join(pck_win, "editable")
+                    from .source_converter import EDITABLE_DIR_NAME
+                    src_dir = os.path.join(pck_win, EDITABLE_DIR_NAME)
                     conv_stats = convert_imported_tree(
                         pck_win, src_dir, log_cb=self._log,
                         progress_cb=_convert_progress)
@@ -838,17 +839,30 @@ class ModifyPipeline(_BasePipeline):
         local_tmp_out = tempfile.NamedTemporaryFile(
             delete=False, suffix=".x86_64").name
         try:
+            self._check_cancel()
             # cp via executor — fastest path on macOS, acceptable on WSL
             in_local_wsl = self.executor.to_exec_path(local_tmp_in)
             self.executor.run(
                 f"cp {binary_wsl!r} {in_local_wsl!r}",
                 timeout=600,
             )
+            self._check_cancel()
             self._log(
                 f"Packing {len(changed_pck)} file(s) into binary (native)...",
                 "info")
+
+            # Wrap log_cb so the packer's per-loop log calls also act
+            # as a cancellation polling point.  Without this the user
+            # has to wait until the next phase boundary for Cancel to
+            # take effect.
+            def _packer_log(msg, sev="info"):
+                self._check_cancel()
+                self._log(msg, sev)
+
             stats = pack_pck(local_tmp_in, pck_dir, local_tmp_out,
-                             log_cb=self._log)
+                             log_cb=_packer_log,
+                             cancel_cb=lambda: self._cancelled)
+            self._check_cancel()
             self._log(
                 f"  Replaced {stats['files_replaced']} files "
                 f"({stats['new_pck_size']} bytes PCK, "
@@ -1370,63 +1384,96 @@ class ModifyPipeline(_BasePipeline):
 
         self._log(f"Binary: {os.path.basename(binary_wsl)}", "info")
 
-        # Detect changed PCK files by mtime
+        # Detect changed PCK files by MD5 against the .checksums.md5
+        # baseline emitted at Extract time.  Mtime-based detection
+        # was unreliable: even with no user edits, re-extract and
+        # cross-tool file-touching events shifted mtimes past the
+        # baseline and the pipeline patched every file in the binary.
         changed_pck = []
         if has_pck:
-            export_log = os.path.join(pck_dir, "gdre_export.log")
-            checksums = os.path.join(pck_dir, ".checksums.md5")
-            # gdre_export.log is the GDRE-extracted baseline (pre-May
-            # code).  .checksums.md5 is the BOF May-extractor's baseline.
-            # Use whichever exists; otherwise fall back to 0 (treat all
-            # files as changed).
-            if os.path.isfile(export_log):
-                baseline_mtime = os.path.getmtime(export_log)
-            elif os.path.isfile(checksums):
-                baseline_mtime = os.path.getmtime(checksums)
-            else:
-                baseline_mtime = 0
+            # .checksums.md5 lives at the OUTPUT (assets_dir) root,
+            # not inside pck/ — it covers the whole extract.  Each
+            # line is `<rel_path_from_assets_dir>\t<md5>`.
+            checksums_file = os.path.join(self.assets_dir, ".checksums.md5")
+            baseline_md5 = {}
+            if os.path.isfile(checksums_file):
+                with open(checksums_file, "r", encoding="utf-8",
+                          errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if "\t" in line:
+                            path, md5 = line.rsplit("\t", 1)
+                            baseline_md5[path.replace("\\", "/")] = md5
 
             # First: re-encode anything the user edited under
-            # pck/editable/ back into the corresponding imported binary
-            # in pck/.godot/imported/.  This is the May-format
-            # workflow — pre-May extracts don't have an editable/ folder
-            # (GDRE writes decoded files in their original res:// path
-            # locations directly), so it no-ops for non-May code.
+            # pck/_EDITABLE ASSETS/ back into the corresponding imported
+            # binary in pck/.godot/imported/.  This is the May-format
+            # workflow — pre-May extracts won't have an editable folder
+            # so the call no-ops.  We pass the checksums file's mtime
+            # as the baseline so inverse-conversion fires only for
+            # files the user really touched after Extract.
             try:
                 from .inverse_converter import apply_source_edits
-                edit_stats = apply_source_edits(
-                    pck_dir, baseline_mtime,
+                baseline_mtime_for_edits = (
+                    os.path.getmtime(checksums_file)
+                    if os.path.isfile(checksums_file) else 0)
+                apply_source_edits(
+                    pck_dir,
+                    baseline_checksums_path=checksums_file,
+                    baseline_mtime=baseline_mtime_for_edits,
                     log_cb=self._log,
-                    progress_cb=self._progress)
-                # If we re-encoded anything, bump baseline so the next
-                # scan picks the regenerated imported binaries up.
-                if edit_stats["updated"]:
-                    # mtime is already in the future by virtue of the
-                    # writes — leave baseline alone; the imported files
-                    # we just wrote will land in changed_pck below.
-                    pass
+                    progress_cb=self._progress,
+                    cancel_cb=lambda: self._cancelled)
             except ImportError:
-                pass  # inverse_converter optional; missing → skip
+                pass
 
             _skip_names = {"gdre_export.log", ".checksums.md5", ".DS_Store",
                            "Thumbs.db", "desktop.ini", "_README.txt"}
+            from .source_converter import (
+                EDITABLE_DIR_NAME, LEGACY_DIR_NAMES)
+            _editable_names = (EDITABLE_DIR_NAME,) + LEGACY_DIR_NAMES
+
+            self._log("Comparing pck/ MD5s against extract baseline...",
+                      "info")
+            n_checked = 0
+            # Pre-walk to get a file count for progress + cancel checks
+            all_files = []
             for root, _dirs, files in os.walk(pck_dir):
                 if ".autoconverted" in root:
                     continue
-                # Skip the editable/ folder — those are the user's source
-                # files that have already been re-encoded back into the
-                # imported tree above.  Including them in changed_pck
-                # would confuse the packer (no res:// path mapping).
                 rel_root = os.path.relpath(root, pck_dir)
-                if rel_root == "editable" or rel_root.startswith("editable" + os.sep):
+                if any(rel_root == n or rel_root.startswith(n + os.sep)
+                       for n in _editable_names):
                     continue
                 for fname in files:
                     if fname in _skip_names:
                         continue
-                    abs_path = os.path.join(root, fname)
-                    if os.path.getmtime(abs_path) > baseline_mtime:
-                        rel = os.path.relpath(abs_path, pck_dir).replace("\\", "/")
-                        changed_pck.append(rel)
+                    all_files.append(os.path.join(root, fname))
+
+            for i, abs_path in enumerate(all_files):
+                # Respect Cancel between every file — MD5-hashing a
+                # 1.5 GB binary takes several seconds and the user
+                # shouldn't have to wait for that on a cancelled run.
+                self._check_cancel()
+                rel_from_pck = os.path.relpath(
+                    abs_path, pck_dir).replace("\\", "/")
+                rel_from_assets = "pck/" + rel_from_pck
+                saved_md5 = baseline_md5.get(rel_from_assets)
+                if not saved_md5:
+                    changed_pck.append(rel_from_pck)
+                    continue
+                current_md5 = _md5_file(abs_path)
+                n_checked += 1
+                if current_md5 != saved_md5:
+                    changed_pck.append(rel_from_pck)
+                if (i + 1) % 25 == 0:
+                    self._progress(
+                        i + 1, len(all_files),
+                        f"MD5-checking {i+1}/{len(all_files)}...")
+            self._log(
+                f"  MD5-compared {n_checked} file(s); "
+                f"{len(changed_pck)} changed since Extract.",
+                "info")
 
         if changed_pck:
             self._log(f"Found {len(changed_pck)} modified source file(s):", "info")

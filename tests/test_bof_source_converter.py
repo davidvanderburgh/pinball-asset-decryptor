@@ -146,7 +146,13 @@ def test_convert_imported_tree(tmp_path):
     assert stats["success"] == 2
     assert stats["by_ext"] == {".ogv": 1, ".qoa": 1}
 
-    # Output names use original basename (no extension) + short hash
-    names = sorted(p.name for p in src.iterdir())
+    # Output names use original basename (no extension) + short hash,
+    # bucketed into format-specific subfolders.
+    all_files = sorted(p for p in src.rglob("*") if p.is_file())
+    names = [p.name for p in all_files]
     assert any(n.startswith("loop-abcdef") and n.endswith(".ogv") for n in names)
     assert any(n.startswith("song-fedcba") and n.endswith(".qoa") for n in names)
+    # And they should live under audio/ + video/ respectively
+    rel_paths = {str(p.relative_to(src)).replace("\\", "/") for p in all_files}
+    assert any(p.startswith("video/") and p.endswith(".ogv") for p in rel_paths)
+    assert any(p.startswith("audio/") and p.endswith(".qoa") for p in rel_paths)

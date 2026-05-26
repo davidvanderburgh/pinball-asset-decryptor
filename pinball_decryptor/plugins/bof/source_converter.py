@@ -2,7 +2,8 @@
 
 After ``may_extractor`` writes the imported binaries (``.ctex``,
 ``.sample``, ``.oggvorbisstr``, ``.fontdata``), this module re-decodes
-each one into a player/editor-friendly format under ``pck/editable/``:
+each one into a player/editor-friendly format under
+``pck/_EDITABLE ASSETS/``:
 
   * ``.ctex`` with ``GST2`` header → ``.webp`` (or ``.png`` if the embedded
     payload is PNG-encoded) — drag into any image viewer
@@ -15,13 +16,17 @@ each one into a player/editor-friendly format under ``pck/editable/``:
   * ``.fontdata`` (Godot FontFile)    → ``.ttf`` / ``.otf``  — read the
     raw font binary out of the FontFile resource's ``data`` property
 
-Output is dropped under a sibling ``editable/`` folder so the original
-``.godot/imported/`` tree stays intact for the Write pipeline:
+Output is dropped under a sibling ``_EDITABLE ASSETS/`` folder so the
+original ``.godot/imported/`` tree stays intact for the Write pipeline:
 
     pck/
       .godot/imported/foo.png-HASH.ctex     (imported binary, untouched)
-      editable/foo-HASH6.webp               (player-friendly copy)
-      editable/_README.txt                  (workflow hint for users)
+      _EDITABLE ASSETS/foo-HASH6.webp       (player-friendly copy)
+      _EDITABLE ASSETS/_README.txt          (workflow hint for users)
+
+The leading underscore sorts the folder to the top of Explorer /
+Finder listings and the all-caps name draws the eye — modders
+shouldn't have to hunt for this.
 
 Filename collisions across different imported variants of the same
 source asset are resolved by appending the first 6 hash chars.
@@ -30,6 +35,16 @@ source asset are resolved by appending the first 6 hash chars.
 import os
 import re
 import struct
+
+
+# Folder name for the player/editor-friendly decoded copies.  Picked
+# for visibility: leading underscore sorts to the top of Windows
+# Explorer + Finder alphabetical listings, all-caps + plural noun
+# tells the user what to do at a glance.  Pre-May ``source/``
+# extracts used the lowercase name; we accept both on Write so
+# existing extracts still work.
+EDITABLE_DIR_NAME = "_EDITABLE ASSETS"
+LEGACY_DIR_NAMES = ("editable", "source")
 
 
 # `<orig_basename>.<orig_ext>-<32-hex-md5>.<imported_ext>`
@@ -169,35 +184,59 @@ def _find_data_pba(data, class_name):
     return None, None, None
 
 
+_PLAUSIBLE_RATES = (8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200,
+                    96000)
+
+
 def _parse_sample_trailer(trailer_bytes):
     """Best-effort parse of the trailer's (format, sample_rate, stereo)
-    triple.  Trailer layout varies (Godot's pack_into stores int values
-    after type+marker prefixes), so we just scan for plausible values."""
-    # Each int property is encoded as: type=3 (int), marker=3 (32-bit), value (u32).
-    # Search for the [3, 3, val] sub-pattern; first match = format, etc.
-    out = []
-    p = 0
-    while p + 12 <= len(trailer_bytes) and len(out) < 3:
-        a, b, v = struct.unpack("<III", trailer_bytes[p:p+12])
-        if (a, b) == (3, 3):   # int 32-bit
-            out.append(v)
-            p += 12
-            continue
-        if (a, b) == (7, 3):   # int 32-bit (mix_rate)
-            out.append(v)
-            p += 12
-            continue
-        if (a, b) == (8, 2):   # bool stereo
-            out.append(v)
-            p += 12
-            continue
-        p += 4
-    while len(out) < 3:
-        out.append(0)
-    return out[0], out[1], out[2]
+    triple.
+
+    BOF's .sample files use a mix of variant encodings for the
+    AudioStreamWAV properties — vtype values vary across QOA-payload
+    files (5 props, vtype=7) and raw-PCM files (4 props, vtype=3 for
+    format and vtype=2 for stereo).  Rather than chase every variant,
+    we look up properties by their string-table index pattern:
+
+      * sample rate: any LE u32 anywhere in the trailer matching a
+        known audio rate (8000-96000 Hz).
+      * stereo: scan for the property *marker* — the bytes
+        ``08 00 00 00`` (str_idx=8 = "stereo" per Godot's standard
+        AudioStreamWAV layout) followed by a vtype u32 and a u32
+        value of 0 or 1.
+
+    Format always assumed = 16-bit PCM (FORMAT_16_BITS=1); all BOF
+    .sample files we've seen use 16-bit.
+    """
+    sample_rate = 0
+    # Walk the trailer in 4-byte windows looking for any value that
+    # could be a real sample rate.  Use the first hit.
+    for i in range(0, len(trailer_bytes) - 4, 4):
+        v = struct.unpack("<I", trailer_bytes[i:i+4])[0]
+        if v in _PLAUSIBLE_RATES:
+            sample_rate = v
+            break
+
+    # Stereo: look for the property marker (str_idx=8 = "stereo") +
+    # vtype + value=0/1.  This works even when sample_rate isn't
+    # encoded — stereo is independent.  Scan all 4-byte-aligned
+    # offsets for the pattern.
+    stereo = 0
+    STEREO_MARKER = struct.pack("<I", 8)   # str_idx for "stereo"
+    for i in range(0, len(trailer_bytes) - 12, 4):
+        if trailer_bytes[i:i+4] == STEREO_MARKER:
+            # Next 4 bytes are vtype (any of 1=BOOL or 2=INT in
+            # observed BOF variants), then a 4-byte 0/1 value.
+            val = struct.unpack("<I", trailer_bytes[i+8:i+12])[0]
+            if val in (0, 1):
+                stereo = val
+                break
+
+    godot_fmt = 1
+    return godot_fmt, sample_rate, stereo
 
 
-def _decode_sample(data):
+def _decode_sample(data, fallback_rate=44100):
     """Decode a Godot AudioStreamWAV ``.sample`` into a player-friendly
     audio file.
 
@@ -207,6 +246,12 @@ def _decode_sample(data):
       * **QOA** ("qoaf" magic, Quite-OK Audio) — preserve as ``.qoa``
         (a small audio codec; mpv / qoaconv / online players accept it)
       * **OGG** ("OggS" magic) — preserve as ``.ogg``
+
+    ``fallback_rate`` is used when the file is raw PCM AND the trailer
+    doesn't encode a mix_rate property (BOF emits ``num_props=4``
+    samples without mix_rate, relying on the engine to default to
+    44100 — but in Dune the actual consensus rate is 48000, so callers
+    should pass the game's consensus rate when known).
 
     Returns ``(extension, audio_bytes)`` or ``(None, None)``.
     """
@@ -228,10 +273,27 @@ def _decode_sample(data):
     if payload.startswith(b"OggS"):
         return ".ogg", payload
 
-    # Raw PCM — parse trailer for sample rate / format / stereo
+    # Raw PCM — parse trailer for sample rate / format / stereo.  If
+    # the structural scan returns rate=0 (no plausible rate value
+    # anywhere in the trailer), fall back to BOF's default 22050 mono
+    # 16-bit rather than producing a WAV with byte_rate=0 (causes
+    # "27-hour" duration in every player).
     trailer = data[payload_end:]
     godot_fmt, sample_rate, stereo = _parse_sample_trailer(trailer)
-    if sample_rate <= 0 or sample_rate > 192000:
+    if sample_rate <= 0:
+        # Also scan the bytes BEFORE the payload — some BOF variants
+        # store the rate in the resource header instead of the trailer.
+        for i in range(0, max(0, payload_off - 32), 4):
+            v = struct.unpack("<I", data[i:i+4])[0]
+            if v in _PLAUSIBLE_RATES:
+                sample_rate = v
+                break
+    if sample_rate <= 0:
+        # Caller-provided fallback (the per-game consensus rate, when
+        # available).  Without that we default to 44100 (Godot's
+        # AudioStreamWAV.mix_rate constructor default).
+        sample_rate = fallback_rate
+    if sample_rate > 192000:
         return None, None
     channels = 2 if stereo else 1
     sample_width = 2 if godot_fmt == 1 else 1
@@ -471,36 +533,57 @@ DECODERS = {
 }
 
 
+# Subfolder under _EDITABLE ASSETS/ where each decoded format lands.
+# Cuts the previously-flat 1700+-file folder into four buckets that
+# match modders' workflow — audio editors / image editors / video
+# editors / font tools all expect distinct file types.
+EXT_FOLDERS = {
+    ".wav":  "audio",
+    ".qoa":  "audio",
+    ".ogg":  "audio",
+    ".webp": "images",
+    ".png":  "images",
+    ".ogv":  "video",
+    ".ttf":  "fonts",
+    ".otf":  "fonts",
+}
+
+
 _EDITABLE_README = """\
 =====================================================================
-  Edit these files to mod the game.
+  ★  EDIT THESE FILES TO MOD THE GAME  ★
 =====================================================================
 
-The Pinball Asset Decryptor decoded every game asset from the .fun
-into this folder in a player-friendly format:
+Every game asset from the .fun has been decoded into this folder
+in a player-friendly format, organised by what tool you use to edit:
 
-  *.wav        — sound effects + voice clips (drag into VLC, Audacity,
-                 your DAW of choice).
-  *.webp       — UI images + textures (any modern image viewer; edit
-                 in Photoshop / GIMP / Affinity).
-  *.ogv        — video loops BOF stores as animated textures
-                 (open in VLC / mpv / your video editor).
-  *.ogg        — music + long ambience clips.
-  *.ttf / *.otf — fonts (preview by double-clicking on Windows).
+  audio/    *.wav  — voice clips, sound effects, music
+                     (open in VLC, Audacity, your DAW)
+            *.ogg  — long ambience / music streams
+  images/   *.webp — UI graphics + textures
+                     (any image viewer; Photoshop / GIMP / Affinity)
+            *.png  — assets BOF stored in PNG format
+  video/    *.ogv  — animation loops BOF ships as Theora video
+                     (VLC / mpv / video editors)
+  fonts/    *.ttf  — TrueType fonts (preview by double-click on Windows)
+            *.otf  — OpenType fonts
 
 ----------------------------------------------------------------------
   How modding works
 ----------------------------------------------------------------------
 
-1. Open any file in this folder, edit it, save it back with the SAME
-   FILENAME (don't rename — the hash suffix is how the Write pipeline
-   pairs your edit back to the right slot in the .fun).
+1. Browse into a subfolder (audio/, images/, video/, fonts/), find
+   the file you want to modify, and edit it in your tool of choice.
 
-2. Switch to the "Write" tab in Pinball Asset Decryptor.
+2. Save it back with the SAME FILENAME — don't rename, the hash
+   suffix is how the Write pipeline pairs your edit back to the
+   right slot in the .fun.  You may MOVE files between subfolders
+   without breaking anything (Write walks recursively).
 
-3. The pipeline scans this folder for files newer than your last
+3. Switch to the "Write" tab in Pinball Asset Decryptor.  The
+   pipeline scans this folder tree for files newer than your last
    Extract, re-encodes them into the Godot-imported format BOF
-   expects, then packs the new .fun for you.
+   expects, then builds a new .fun for you.
 
 4. Copy the new .fun to a USB drive (FAT32) and install on the
    machine.
@@ -522,8 +605,8 @@ into this folder in a player-friendly format:
   the .fun.
 
 The matching imported binaries live in pck/.godot/imported/ —
-those are what actually ship in the .fun.  This folder is just a
-human-friendly view that gets re-encoded back into them on Write.
+those are what actually ship in the .fun.  These subfolders are just
+a human-friendly view that gets re-encoded back into them on Write.
 """
 
 
@@ -550,6 +633,55 @@ def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
             progress_cb(cur, total, label)
 
     os.makedirs(source_dir, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Per-game consensus sample-rate detection.  For .sample files that
+    # don't store a mix_rate property explicitly (BOF emits these with
+    # num_props=4; Godot defaults their playback to 44100), we want to
+    # use whatever rate THIS game's other .sample files use.  In Dune
+    # the consensus is 48000 — using the global default of 44100 makes
+    # the no-rate files play ~8 % slow.
+    #
+    # Pre-pass: scan a handful of .sample files in the input tree,
+    # parse their trailers for any rate value, take the mode.  Capped
+    # at 100 samples so a 4 GB Dune extract doesn't add minutes here.
+    consensus_rate = 44100  # Godot default if pre-pass finds nothing
+    rate_counts = {}
+    sample_paths = []
+    for dp, _, fs in os.walk(pck_dir):
+        if os.path.abspath(dp).startswith(os.path.abspath(source_dir)):
+            continue
+        for f in fs:
+            if f.endswith(".sample"):
+                sample_paths.append(os.path.join(dp, f))
+                if len(sample_paths) >= 100:
+                    break
+        if len(sample_paths) >= 100:
+            break
+
+    for p in sample_paths:
+        try:
+            with open(long_prefix + os.path.abspath(p), "rb") as fh:
+                d = fh.read()
+        except OSError:
+            continue
+        if not d.startswith(b"RSRC"):
+            continue
+        # Walk to the data PBA payload_end, then scan the trailer
+        try:
+            _, _, payload_end = _find_data_pba(d, b"AudioStreamWAV")
+            trailer = d[payload_end:]
+            _, rate, _ = _parse_sample_trailer(trailer)
+            if rate > 0:
+                rate_counts[rate] = rate_counts.get(rate, 0) + 1
+        except Exception:
+            continue
+    if rate_counts:
+        consensus_rate = max(rate_counts, key=rate_counts.get)
+        _log(
+            f"Consensus sample rate for this game: {consensus_rate} Hz "
+            f"(from {sum(rate_counts.values())} probed files: {rate_counts})",
+            "info")
     # Drop a workflow hint so users opening the folder in Explorer
     # immediately know what to do.  The leading underscore sorts the
     # file to the top of an alphabetical listing in most file managers.
@@ -591,7 +723,12 @@ def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
             continue
 
         try:
-            new_ext, new_data = decoder(data)
+            # The .sample decoder takes a per-game fallback sample rate;
+            # everything else is a single-arg callable.
+            if ext_lower == ".sample":
+                new_ext, new_data = decoder(data, fallback_rate=consensus_rate)
+            else:
+                new_ext, new_data = decoder(data)
         except Exception as e:
             new_ext, new_data = None, None
             stats["failures"].append((f, f"decode crash: {e}"))
@@ -613,7 +750,19 @@ def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
         # foo.png-HASH.ctex; the meaningful name is just "foo")
         stem = os.path.splitext(orig_base)[0]
         out_name = f"{stem}-{hash6}{new_ext}"
-        out_path = os.path.join(source_dir, out_name)
+        # Bucket into the right subfolder by output extension.  Falls
+        # back to the top level if the extension isn't recognised.
+        sub = EXT_FOLDERS.get(new_ext, "")
+        if sub:
+            sub_dir = os.path.join(source_dir, sub)
+            try:
+                os.makedirs(long_prefix + os.path.abspath(sub_dir),
+                            exist_ok=True)
+            except OSError:
+                pass
+            out_path = os.path.join(sub_dir, out_name)
+        else:
+            out_path = os.path.join(source_dir, out_name)
         try:
             with open(long_prefix + os.path.abspath(out_path), "wb") as fh:
                 fh.write(new_data)

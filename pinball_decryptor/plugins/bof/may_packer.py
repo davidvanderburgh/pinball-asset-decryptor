@@ -222,7 +222,8 @@ def _read_pck_entries(pck_buf):
     return adjacent, sequential
 
 
-def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
+def pack_pck(original_binary, modified_pck_dir, output_binary,
+             log_cb=None, cancel_cb=None):
     """Repack the PCK section of ``original_binary`` using whatever's
     in ``modified_pck_dir`` (mirror of the extractor's output tree).
 
@@ -239,6 +240,15 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
 
     pck_start, pck_end = find_pck_section(original_binary)
     _log(f"PCK section: [{pck_start}, {pck_end}) ({pck_end - pck_start} bytes)")
+
+    # Read the original 12-byte trailer so we can preserve its magic
+    # bytes for the rebuilt binary.  BOF May code uses GBOF here; if
+    # we wrote GDPC instead, the game's bootstrap loader on the real
+    # machine would fail to find the PCK section.  Pre-May Winchester
+    # (and stock Godot) uses GDPC; preserve that too.
+    with open(original_binary, "rb") as f:
+        f.seek(pck_end)
+        original_trailer_magic = f.read(PCK_TRAILER_LEN)[8:12]
 
     # Read the PCK section into memory.  We need random-access here for
     # the directory walk (sidecars/magics live throughout); the alternative
@@ -260,6 +270,20 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
     adjacent, sequential = _read_pck_entries(pck)
     _log(f"Found {len(adjacent)} adjacent + {len(sequential)} sequential entries")
 
+    # ---- Build the replacement list ---------------------------------
+    # For each file entry that the user actually edited, record the
+    # byte range of its FILE DATA in the original PCK plus the new
+    # bytes that should appear there.  We DON'T touch sidecar bytes at
+    # all — for adjacent entries the sidecar lives right after the
+    # file data and gets copied verbatim with surrounding content;
+    # for sequential entries (.gdc, .scn, .res) the sidecar lives far
+    # away (the trailing-text area of the PCK) and is also unchanged.
+    #
+    # The previous algorithm walked entries and wrote each entry's
+    # [file_end, sidecar_end] slice individually — for sequential
+    # entries that ~1.4 GB slice could be re-written 469× (once per
+    # .gdc entry), producing 200+ GB output.  This rewrite walks the
+    # PCK bytes monotonically and writes each byte exactly once.
     all_items = []
     for kind, fs, fe, ss, se, p in adjacent:
         all_items.append((fs, fe, ss, se, p, kind))
@@ -305,52 +329,97 @@ def pack_pck(original_binary, modified_pck_dir, output_binary, log_cb=None):
         # 2) PCK header + 8-byte pad — write directly from source
         _write_slice(0, PCK_HEADER_LEN + PCK_HEADER_PAD)
 
-        cursor = PCK_HEADER_LEN + PCK_HEADER_PAD
-        for fs, fe, ss, se, p, kind in all_items:
-            # Any gap between previous cursor and this file_start — copy verbatim.
-            if fs > cursor:
-                _write_slice(cursor, fs)
-
-            # Determine new file bytes — only the modified file lives in
-            # transient memory, not the whole rebuilt PCK.
+        # ---- Pass 1: build the replacement list -------------------
+        # Each replacement is (start, end, new_bytes).  The byte-walk
+        # in Pass 2 writes [cursor, start] verbatim, then new_bytes,
+        # then advances cursor to end.
+        #
+        # For **adjacent** entries (textures, audio, fonts, etc.) the
+        # entry's [fs, fe] range exactly bounds the file data — the
+        # reader knows fe because the next byte is the .import sidecar
+        # marker.  Safe to substitute new bytes of any size.
+        #
+        # For **sequential** entries (.gdc / .scn / .res) the reader
+        # picks fe heuristically (next GDSC start, or next sidecar) so
+        # the range may include bytes past the actual file end.
+        # Replacing the whole range would clobber whatever sits in
+        # those tail bytes (sometimes other files, sometimes padding).
+        # We log a warning and SKIP the replacement, leaving the
+        # original sequential file in place.  Mod authors who need to
+        # change scripts / scenes today need to either match the exact
+        # original byte size (which we can't easily verify) or use a
+        # separate tool.
+        skipped_sequential = []
+        replacements = []
+        for idx, (fs, fe, ss, se, p, kind) in enumerate(all_items):
+            if cancel_cb is not None and idx % 25 == 0 and cancel_cb():
+                raise RuntimeError("pack cancelled by user")
             rel = p[len("res://"):] if p.startswith("res://") else p
             local_path = os.path.abspath(
                 os.path.join(modified_pck_dir, rel.replace("/", os.sep)))
             if sys.platform == "win32":
                 local_path = long_prefix + local_path
-
-            modified_bytes = None
-            if os.path.isfile(local_path):
-                try:
-                    with open(local_path, "rb") as fh:
-                        modified_bytes = fh.read()
-                except OSError:
-                    modified_bytes = None
-
-            if modified_bytes is not None and modified_bytes != bytes(pck[fs:fe]):
-                ext = os.path.splitext(p)[1].lower()
-                if kind == "adjacent_rscc":
-                    new_payload = _maybe_strip_rsrc_magic(modified_bytes, ext)
-                    new_data = _build_rscc_container(new_payload)
-                else:
-                    new_data = modified_bytes
-                dst.write(new_data)
-                pck_bytes_written += len(new_data)
-                n_replaced += 1
+            if not os.path.isfile(local_path):
+                continue
+            try:
+                with open(local_path, "rb") as fh:
+                    modified_bytes = fh.read()
+            except OSError:
+                continue
+            if modified_bytes == bytes(pck[fs:fe]):
+                continue   # not actually different
+            if kind == "sequential":
+                skipped_sequential.append(rel)
+                continue
+            ext = os.path.splitext(p)[1].lower()
+            if kind == "adjacent_rscc":
+                new_payload = _maybe_strip_rsrc_magic(modified_bytes, ext)
+                new_data = _build_rscc_container(new_payload)
             else:
-                _write_slice(fs, fe)
+                new_data = modified_bytes
+            replacements.append((fs, fe, new_data))
+            n_replaced += 1
+        if skipped_sequential:
+            _log(
+                f"Skipped {len(skipped_sequential)} sequential-entry "
+                f"replacements (.gdc/.scn/.res) — these don't have stable "
+                f"byte boundaries in BOF's PCK layout so we can't safely "
+                f"substitute. First few: "
+                f"{', '.join(skipped_sequential[:3])}",
+                "warning")
+        # Sort by start so we can byte-walk in order.  Resolve any
+        # overlaps by preferring the earlier entry — the file-finder
+        # in _read_pck_entries should produce disjoint file-data
+        # ranges in practice, but be defensive.
+        replacements.sort(key=lambda r: r[0])
+        deduped = []
+        for fs, fe, new_data in replacements:
+            if deduped and fs < deduped[-1][1]:
+                continue   # overlap; drop the later entry
+            deduped.append((fs, fe, new_data))
+        replacements = deduped
 
-            # Sidecar + any zero padding / RSCC separator between file
-            # end and sidecar start — copy verbatim from the original.
-            _write_slice(fe, se)
-            cursor = se
+        # ---- Pass 2: byte-walk through the PCK --------------------
+        # Each byte in the original PCK is touched at most once.
+        # Between replacements, bytes go verbatim; inside a
+        # replacement range, the new bytes replace the original.
+        cursor = PCK_HEADER_LEN + PCK_HEADER_PAD
+        for fs, fe, new_data in replacements:
+            if fs > cursor:
+                _write_slice(cursor, fs)
+            dst.write(new_data)
+            pck_bytes_written += len(new_data)
+            cursor = fe
 
-        # 3) PCK tail (after the last sidecar — usually project settings + zero pad)
+        # 3) PCK tail — everything from cursor to end of PCK
         if cursor < len(pck):
             _write_slice(cursor, len(pck))
 
-        # 4) New trailer reflecting whatever total we just wrote
-        new_trailer = struct.pack("<Q", pck_bytes_written) + PCK_MAGIC_STOCK
+        # 4) New trailer reflecting whatever total we just wrote.  Use
+        # the ORIGINAL trailer magic (GBOF for May code, GDPC for
+        # Winchester / stock Godot) so the rebuilt binary still loads
+        # on the real machine.
+        new_trailer = struct.pack("<Q", pck_bytes_written) + original_trailer_magic
         dst.write(new_trailer)
 
     _log(f"Rebuilt PCK: {pck_bytes_written} bytes (was {len(pck)}); "

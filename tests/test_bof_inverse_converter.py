@@ -159,7 +159,7 @@ def test_encode_image_rejects_non_gst2(tmp_path):
 def test_apply_source_edits_picks_up_changed_wav(tmp_path):
     # Build a minimal pck/ tree: editable/ folder + .godot/imported/
     pck = tmp_path / "pck"
-    editable = pck / "editable"
+    editable = pck / "_EDITABLE ASSETS"
     imported = pck / ".godot" / "imported"
     editable.mkdir(parents=True)
     imported.mkdir(parents=True)
@@ -189,14 +189,14 @@ def test_apply_source_edits_picks_up_changed_wav(tmp_path):
 
 def test_apply_source_edits_skips_unmatched_filename(tmp_path):
     pck = tmp_path / "pck"
-    (pck / "editable").mkdir(parents=True)
+    (pck / "_EDITABLE ASSETS").mkdir(parents=True)
     (pck / ".godot" / "imported").mkdir(parents=True)
 
     import time
     baseline = time.time()
     time.sleep(0.05)
     # Filename without the -hash6 suffix won't match
-    bad = pck / "editable" / "just_a_file.wav"
+    bad = pck / "_EDITABLE ASSETS" / "just_a_file.wav"
     bad.write_bytes(b"RIFF" + b"\x00" * 100)
 
     stats = ic.apply_source_edits(str(pck), baseline)

@@ -589,9 +589,22 @@ class DecryptPipeline(_BasePipeline):
                 from .source_converter import convert_imported_tree
                 pck_win = os.path.join(self.output_dir, "pck")
                 try:
-                    stats = extract_pck(local_binary, pck_win, log_cb=self._log)
-                    self._progress(100, 100,
-                                   f"{stats['files_written']} files extracted")
+                    # Extract phase drives the progress bar over the first
+                    # 80% of the range; the source converter (much faster
+                    # but still 2-5s of work on a Dune-sized PCK) gets the
+                    # last 20%.  Without the split the bar would jump
+                    # from 100% (after extract) back down — confusing.
+                    def _extract_progress(cur, total, label):
+                        pct = int(80 * cur / max(total, 1))
+                        self._progress(pct, 100, label)
+
+                    def _convert_progress(cur, total, label):
+                        pct = 80 + int(20 * cur / max(total, 1))
+                        self._progress(pct, 100, label)
+
+                    stats = extract_pck(local_binary, pck_win,
+                                        log_cb=self._log,
+                                        progress_cb=_extract_progress)
                     self._log(
                         f"PCK extracted: {stats['files_written']} files "
                         f"({stats['adjacent_count']} imported + "
@@ -614,7 +627,8 @@ class DecryptPipeline(_BasePipeline):
                         "info")
                     src_dir = os.path.join(pck_win, "source")
                     conv_stats = convert_imported_tree(
-                        pck_win, src_dir, log_cb=self._log)
+                        pck_win, src_dir, log_cb=self._log,
+                        progress_cb=_convert_progress)
                     if conv_stats["success"]:
                         ext_summary = ", ".join(
                             f"{n} {ext}" for ext, n in
@@ -623,6 +637,8 @@ class DecryptPipeline(_BasePipeline):
                         self._log(
                             f"Source files at {src_dir}: {ext_summary}",
                             "success")
+                    self._progress(100, 100,
+                                   f"{stats['files_written']} files extracted")
                 except Exception as e:
                     self._log(
                         f"BOF May extractor failed: {e}", "error")

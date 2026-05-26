@@ -214,7 +214,7 @@ def _maybe_fix_resource_magic(data, ext):
     return data
 
 
-def extract_pck(binary_path, out_dir, log_cb=None):
+def extract_pck(binary_path, out_dir, log_cb=None, progress_cb=None):
     """Extract a BOF May 2026+ binary's PCK section into ``out_dir``.
 
     Returns a dict with extraction stats:
@@ -227,10 +227,16 @@ def extract_pck(binary_path, out_dir, log_cb=None):
       ``total_bytes`` — total bytes written
 
     ``log_cb(msg, severity)`` is optional and receives progress info.
+    ``progress_cb(current, total, label)`` is optional and is called
+    on every batch of writes during the extract loop.
     """
     def _log(msg, sev="info"):
         if log_cb:
             log_cb(msg, sev)
+
+    def _progress(cur, total, label):
+        if progress_cb:
+            progress_cb(cur, total, label)
 
     pck_start, pck_end = find_pck_section(binary_path)
     _log(f"PCK section: bytes {pck_start} – {pck_end} ({pck_end - pck_start} bytes)")
@@ -305,11 +311,21 @@ def extract_pck(binary_path, out_dir, log_cb=None):
 
         return fstart, fend
 
+    # Pre-compute total work so the progress bar can show meaningful %.
+    # Indexing the sidecars (a regex scan over the entire PCK) is fast
+    # but parsing them into entries + the per-file write loop dominate;
+    # weight them at 1 each and let the progress bar reflect that.
+    n_sidecars = len(sidecar_starts)
+    total_work = n_sidecars * 2  # indexing + writing
+    work_done = 0
+    _progress(0, total_work, "Indexing PCK directory...")
+
     adjacent_entries = []   # (file_start, file_end, path)
     simple_by_ext = {}       # ext -> [paths] in document order
     prev_end = PCK_HEADER_LEN + PCK_HEADER_PAD
 
-    for s in sidecar_starts:
+    INDEX_BATCH = max(1, n_sidecars // 50)  # ~50 progress updates
+    for i, s in enumerate(sidecar_starts):
         e = _find_sidecar_end(pck, s)
         text = pck[s:e].decode("utf-8", errors="replace")
         p = _parse_path(text)
@@ -326,6 +342,12 @@ def extract_pck(binary_path, out_dir, log_cb=None):
             fstart, fend = _adjacent_file_bounds(pck, s, prev_end)
             adjacent_entries.append((fstart, fend, p))
         prev_end = e
+        if (i + 1) % INDEX_BATCH == 0:
+            work_done = i + 1
+            pct = int(100 * work_done / total_work)
+            _progress(work_done, total_work,
+                      f"Indexing PCK... {i+1}/{n_sidecars}")
+    work_done = n_sidecars  # indexing complete
 
     _log(f"Adjacent (imported) entries: {len(adjacent_entries)}; "
          f"simple sidecars by ext: { {k: len(v) for k, v in simple_by_ext.items()} }")
@@ -340,7 +362,8 @@ def extract_pck(binary_path, out_dir, log_cb=None):
     }
 
     # Phase 1: adjacent (imported) files
-    for fs, fe, p in adjacent_entries:
+    WRITE_BATCH = max(1, n_sidecars // 50)
+    for i, (fs, fe, p) in enumerate(adjacent_entries):
         fdata = bytes(pck[fs:fe])
         if is_rscc_at(fdata, 0):
             try:
@@ -355,6 +378,10 @@ def extract_pck(binary_path, out_dir, log_cb=None):
             stats["files_written"] += 1
             stats["adjacent_count"] += 1
             stats["total_bytes"] += len(fdata)
+        if (i + 1) % WRITE_BATCH == 0:
+            _progress(work_done + i + 1, total_work,
+                      f"Writing imported assets... "
+                      f"{stats['files_written']}/{n_sidecars}")
 
     # Phase 2: simple sidecars paired sequentially by magic
     # Two strategies depending on file type:
@@ -399,6 +426,23 @@ def extract_pck(binary_path, out_dir, log_cb=None):
 
     rsrc_files = None  # lazily computed only if a simple sidecar needs it
 
+    # Total simple-sidecar entries (across all extensions) — used to
+    # report progress through the sequential phase.
+    total_simple = sum(len(v) for v in simple_by_ext.values())
+    seq_written = 0
+    # Sequential write progress shares the "writing" half of total_work
+    # with the adjacent phase; keep batching the same.
+    base_write_done = work_done + len(adjacent_entries)
+    SEQ_BATCH = max(1, total_simple // 50) if total_simple else 1
+
+    def _bump_seq_progress():
+        nonlocal seq_written
+        seq_written += 1
+        if seq_written % SEQ_BATCH == 0:
+            _progress(
+                base_write_done + seq_written, total_work,
+                f"Writing scripts/scenes... {seq_written}/{total_simple}")
+
     for ext, paths in simple_by_ext.items():
         if ext == ".gdc":
             magic = b"GDSC"
@@ -407,6 +451,9 @@ def extract_pck(binary_path, out_dir, log_cb=None):
                 _log(f"  .gdc magic count mismatch: {len(positions)} GDSC vs "
                      f"{len(paths)} paths", "warning")
                 stats["unpaired_simple"].extend(paths)
+                # Still account for the work so the bar advances correctly
+                for _ in paths:
+                    _bump_seq_progress()
                 continue
             for i, gp in enumerate(positions):
                 end = positions[i + 1] if i + 1 < len(positions) else len(pck)
@@ -423,6 +470,7 @@ def extract_pck(binary_path, out_dir, log_cb=None):
                     stats["files_written"] += 1
                     stats["sequential_count"] += 1
                     stats["total_bytes"] += len(fdata)
+                _bump_seq_progress()
             continue
 
         if ext in (".scn", ".res"):
@@ -467,10 +515,19 @@ def extract_pck(binary_path, out_dir, log_cb=None):
                     stats["files_written"] += 1
                     stats["sequential_count"] += 1
                     stats["total_bytes"] += len(fdata)
+                _bump_seq_progress()
+            # Account for any unpaired paths (positions < paths)
+            for _ in range(max(0, len(paths) - len(positions))):
+                _bump_seq_progress()
             continue
 
-        # Unknown extension — leave unpaired
+        # Unknown extension — leave unpaired but advance progress
         stats["unpaired_simple"].extend(paths)
+        for _ in paths:
+            _bump_seq_progress()
+
+    _progress(total_work, total_work,
+              f"Extracted {stats['files_written']} files")
 
     _log(
         f"Wrote {stats['files_written']} files "

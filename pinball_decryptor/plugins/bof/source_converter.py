@@ -449,13 +449,16 @@ DECODERS = {
 }
 
 
-def convert_imported_tree(pck_dir, source_dir, log_cb=None):
+def convert_imported_tree(pck_dir, source_dir, log_cb=None, progress_cb=None):
     """Walk ``pck_dir`` for every imported asset and decode each into a
     source-format file under ``source_dir``.  Returns a stats dict
     ``{success: N, failed: N, by_ext: {".wav": N, ".webp": N, ...}}``.
 
     Idempotent — safe to call after every Extract; overwrites prior
     output.  ``source_dir`` is created if missing.
+
+    ``progress_cb(current, total, label)`` is optional and is called
+    on every batch during the conversion loop.
     """
     import sys
     long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
@@ -464,59 +467,84 @@ def convert_imported_tree(pck_dir, source_dir, log_cb=None):
         if log_cb:
             log_cb(msg, sev)
 
+    def _progress(cur, total, label):
+        if progress_cb:
+            progress_cb(cur, total, label)
+
     os.makedirs(source_dir, exist_ok=True)
     stats = {"success": 0, "failed": 0, "by_ext": {}, "failures": []}
 
+    # First pass — count candidates so we have a total for the bar.
+    candidates = []
     for dp, _, files in os.walk(pck_dir):
-        # Don't descend into the source/ folder we're producing
         if os.path.abspath(dp).startswith(os.path.abspath(source_dir)):
             continue
         for f in files:
-            ext_lower = os.path.splitext(f)[1].lower()
-            decoder = DECODERS.get(ext_lower)
-            if decoder is None:
-                continue
-            in_path = os.path.join(dp, f)
-            try:
-                with open(long_prefix + os.path.abspath(in_path), "rb") as fh:
-                    data = fh.read()
-            except OSError as e:
-                stats["failed"] += 1
-                stats["failures"].append((f, f"read error: {e}"))
-                continue
+            if os.path.splitext(f)[1].lower() in DECODERS:
+                candidates.append((dp, f))
 
-            try:
-                new_ext, new_data = decoder(data)
-            except Exception as e:
-                new_ext, new_data = None, None
-                stats["failures"].append((f, f"decode crash: {e}"))
+    total = len(candidates)
+    _progress(0, total, "Decoding to source formats...")
+    BATCH = max(1, total // 50)
 
-            if new_ext is None or new_data is None:
-                stats["failed"] += 1
-                continue
+    for idx, (dp, f) in enumerate(candidates):
+        ext_lower = os.path.splitext(f)[1].lower()
+        decoder = DECODERS.get(ext_lower)
+        if decoder is None:
+            continue
+        in_path = os.path.join(dp, f)
+        try:
+            with open(long_prefix + os.path.abspath(in_path), "rb") as fh:
+                data = fh.read()
+        except OSError as e:
+            stats["failed"] += 1
+            stats["failures"].append((f, f"read error: {e}"))
+            continue
 
-            orig_base, hash6 = _parse_imported_name(f)
-            if orig_base is None:
-                # Filename doesn't match the imported pattern — fall back
-                # to the file's own basename without extension.
-                orig_base = os.path.splitext(f)[0]
-                hash6 = "xxxxxx"
-            # Drop the original extension (BOF stores .png → OGV under
-            # foo.png-HASH.ctex; the meaningful name is just "foo")
-            stem = os.path.splitext(orig_base)[0]
-            out_name = f"{stem}-{hash6}{new_ext}"
-            out_path = os.path.join(source_dir, out_name)
-            try:
-                with open(long_prefix + os.path.abspath(out_path), "wb") as fh:
-                    fh.write(new_data)
-            except OSError as e:
-                stats["failed"] += 1
-                stats["failures"].append((f, f"write error: {e}"))
-                continue
+        try:
+            new_ext, new_data = decoder(data)
+        except Exception as e:
+            new_ext, new_data = None, None
+            stats["failures"].append((f, f"decode crash: {e}"))
 
-            stats["success"] += 1
-            stats["by_ext"][new_ext] = stats["by_ext"].get(new_ext, 0) + 1
+        if new_ext is None or new_data is None:
+            stats["failed"] += 1
+            if (idx + 1) % BATCH == 0:
+                _progress(idx + 1, total,
+                          f"Decoding to source formats... {idx+1}/{total}")
+            continue
 
+        orig_base, hash6 = _parse_imported_name(f)
+        if orig_base is None:
+            # Filename doesn't match the imported pattern — fall back
+            # to the file's own basename without extension.
+            orig_base = os.path.splitext(f)[0]
+            hash6 = "xxxxxx"
+        # Drop the original extension (BOF stores .png → OGV under
+        # foo.png-HASH.ctex; the meaningful name is just "foo")
+        stem = os.path.splitext(orig_base)[0]
+        out_name = f"{stem}-{hash6}{new_ext}"
+        out_path = os.path.join(source_dir, out_name)
+        try:
+            with open(long_prefix + os.path.abspath(out_path), "wb") as fh:
+                fh.write(new_data)
+        except OSError as e:
+            stats["failed"] += 1
+            stats["failures"].append((f, f"write error: {e}"))
+            if (idx + 1) % BATCH == 0:
+                _progress(idx + 1, total,
+                          f"Decoding to source formats... {idx+1}/{total}")
+            continue
+
+        stats["success"] += 1
+        stats["by_ext"][new_ext] = stats["by_ext"].get(new_ext, 0) + 1
+
+        if (idx + 1) % BATCH == 0:
+            _progress(idx + 1, total,
+                      f"Decoding to source formats... {idx+1}/{total}")
+
+    _progress(total, total,
+              f"Decoded {stats['success']} files")
     _log(
         f"Converted {stats['success']} files to source formats "
         f"(failed: {stats['failed']}). By ext: {stats['by_ext']}",

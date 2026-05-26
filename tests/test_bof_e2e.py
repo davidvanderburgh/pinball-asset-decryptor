@@ -14,8 +14,15 @@ We deliberately don't test "modify a file + Write picks it up" — BOF's
 Write pipeline only repacks files from a `pck/` subdirectory produced
 by GDRE Tools, so testing that requires GDRE Tools and a real Godot
 binary; out of scope for fixture-based CI.
+
+**Local-only.**  These tests shell out to gpg + tar + (on Windows) WSL
+and have historically been slow / flaky on the GitHub-hosted runners.
+We mark them as local-only and gate on a ``RUN_BOF_E2E=1`` env var so
+``pytest tests/`` on a CI runner skips them entirely.  Run locally
+with ``RUN_BOF_E2E=1 python -m pytest tests/test_bof_e2e.py``.
 """
 
+import os
 import sys
 
 import pytest
@@ -27,9 +34,14 @@ from tests.conftest import HAS_GPG, HAS_WSL
 
 
 # BOF needs gpg everywhere AND, on Windows, also needs WSL because its
-# executor shells everything out to bash.
+# executor shells everything out to bash.  CI also skips outright
+# unless RUN_BOF_E2E=1 is set in the environment, because these tests
+# have been the source of intermittent multi-hour CI hangs.
 _SKIP_REASON = None
-if not HAS_GPG:
+if not os.environ.get("RUN_BOF_E2E"):
+    _SKIP_REASON = ("BOF E2E tests are local-only; set RUN_BOF_E2E=1 "
+                    "to run them")
+elif not HAS_GPG:
     _SKIP_REASON = "gpg not installed; BOF .fun tests require it"
 elif sys.platform == "win32" and not HAS_WSL:
     _SKIP_REASON = "BOF on Windows requires WSL2 (not present on CI runner)"

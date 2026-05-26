@@ -1,5 +1,8 @@
 # Pinball Asset Decryptor — Python dependencies
 #
-# The main application uses only the Python standard library.
-# Pillow is only needed to regenerate the app icon from source.
+# The main application uses mostly the Python standard library.
+# Pillow regenerates the app icon from source.
+# zstandard powers the BOF May 2026+ PCK extractor/packer (Zstd
+# decompression for the custom RSCC container BOF wraps fonts in).
 Pillow>=10.0
+zstandard>=0.22

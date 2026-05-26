@@ -555,97 +555,144 @@ class DecryptPipeline(_BasePipeline):
             _patch_pck_magic(self.executor, binary_name,
                              _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log)
 
-        # Optional: unpack PCK with GDRE Tools
+        # Optional: unpack PCK
         if self.unpack_pck:
             self._set_phase(2)  # still in extract phase visually
-            self._log("Unpacking Godot PCK with GDRE Tools...", "info")
-            self._progress(0, 100, "Starting...")
-            try:
-                pck_out = f"{out_wsl}/pck"
-                binary_wsl = binary_name if binary_name else f"{out_wsl}/GDCraze.x86_64"
-                gdre_prefix = self._gdre_prefix()
 
-                # GDRE outputs phase progress as "Phase name... [===] XX%" separated
-                # by \r (not \n), so we split each streamed line on \r and parse.
-                # Phases mapped to overall 0-100%:
-                # Poll the Windows-side pck folder in a background thread.
-                # We parse "Verified X files" from GDRE output to set the extraction
-                # total; the export phase writes additional converted files beyond that.
-                pck_win = os.path.join(self.output_dir, "pck")
-                os.makedirs(pck_win, exist_ok=True)
-                baseline = sum(len(fs) for _, _, fs in os.walk(pck_win))
-                _stop_poll = threading.Event()
-                _last_count = [0]
-                _extract_done = [False]
-                _extract_snap = [0]   # file count at moment extraction finishes
-                _LOG_EVERY = 500
-
-                def _poll_pck():
-                    prev_logged = 0
-                    while not _stop_poll.is_set():
-                        raw = sum(len(fs) for _, _, fs in os.walk(pck_win))
-                        count = max(0, raw - baseline)
-                        _last_count[0] = count
-                        if _extract_done[0]:
-                            converted = max(0, count - _extract_snap[0])
-                            self._progress(0, 0,
-                                           f"Converting resources... {converted} converted")
-                            if converted - prev_logged >= _LOG_EVERY and converted > 0:
-                                prev_logged = (converted // _LOG_EVERY) * _LOG_EVERY
-                                self._log(f"  {converted} resources converted...", "info")
-                        else:
-                            self._progress(0, 0, f"Extracting... {count} files")
-                            if count - prev_logged >= _LOG_EVERY and count > 0:
-                                prev_logged = (count // _LOG_EVERY) * _LOG_EVERY
-                                self._log(f"  {count} files extracted...", "info")
-                        _stop_poll.wait(1.0)
-
-                poll_thread = threading.Thread(target=_poll_pck, daemon=True)
-                poll_thread.start()
-
-                # Stream --recover; parse key lines to drive progress state
-                _extracted_re = re.compile(r'Extracted (\d+) files')
-                _skip = ("Godot Engine", "input_file", "Input files", "GDRE Tools",
-                         "Ubuntu", "Loading import", "Loading GDScript",
-                         "Reading PCK", "Extracting files", "Exporting resources",
-                         "Reading folder", "Generating filesystem")
+            # First — check whether this is BOF's May 2026+ custom PCK
+            # format.  If so, GDRE Tools can't read it and our own
+            # may_extractor handles it natively.
+            local_binary = (os.path.join(self.output_dir,
+                                          os.path.basename(binary_name))
+                            if binary_name else None)
+            use_may_extractor = False
+            if local_binary and os.path.isfile(local_binary):
                 try:
-                    for raw in self.executor.stream(
-                        f"mkdir -p {pck_out!r} && "
-                        f"{gdre_prefix} --recover={binary_wsl!r} --output={pck_out!r} 2>&1",
-                        timeout=GDRE_TIMEOUT,
-                    ):
-                        for chunk in raw.split('\r'):
-                            chunk = chunk.strip()
-                            if not chunk:
-                                continue
-                            em = _extracted_re.search(chunk)
-                            if em:
-                                _extract_done[0] = True
-                                _extract_snap[0] = _last_count[0]
-                                self._log(f"  {chunk}", "info")
-                                self._log("  Converting resources to source formats"
-                                          " (decompiling scripts, textures → PNG, etc.)...",
-                                          "info")
-                                continue
-                            if any(chunk.startswith(s) for s in _skip):
-                                continue
-                            if any(tag in chunk for tag in ("ERROR", "WARN")):
-                                self._log(f"  {chunk}", "warning")
-                            else:
-                                self._log(f"  {chunk}", "info")
-                finally:
-                    _stop_poll.set()
-                    poll_thread.join(timeout=2)
+                    from .may_extractor import is_may_format, find_pck_section
+                    pck_start, pck_end = find_pck_section(local_binary)
+                    # Read just enough to detect format (first 200 bytes
+                    # of PCK section is sufficient).
+                    with open(local_binary, "rb") as f:
+                        f.seek(pck_start)
+                        pck_head = f.read(200)
+                    if is_may_format(pck_head):
+                        use_may_extractor = True
+                        self._log(
+                            "Detected BOF May 2026+ custom PCK format "
+                            "— using native extractor (GDRE can't read this format).",
+                            "info")
+                except Exception as _e:
+                    pass  # Fall through to GDRE
 
-                final = _last_count[0]
-                self._progress(100, 100, f"{final} files extracted")
-                self._log(f"PCK unpacked to pck/ subfolder ({final} files).",
-                          "success")
-            except CommandError as e:
-                self._log(
-                    f"GDRE Tools failed (PCK may still be usable as binary): {e.output}",
-                    "error")
+            if use_may_extractor:
+                from .may_extractor import extract_pck
+                pck_win = os.path.join(self.output_dir, "pck")
+                try:
+                    stats = extract_pck(local_binary, pck_win, log_cb=self._log)
+                    self._progress(100, 100,
+                                   f"{stats['files_written']} files extracted")
+                    self._log(
+                        f"PCK extracted: {stats['files_written']} files "
+                        f"({stats['adjacent_count']} imported + "
+                        f"{stats['sequential_count']} scripts/scenes, "
+                        f"{stats['rscc_count']} Zstd-decompressed, "
+                        f"{stats['total_bytes'] / 1024 / 1024:.1f} MB).",
+                        "success")
+                    if stats["unpaired_simple"]:
+                        self._log(
+                            f"  {len(stats['unpaired_simple'])} sidecar paths "
+                            f"had no extractable file data.", "warning")
+                except Exception as e:
+                    self._log(
+                        f"BOF May extractor failed: {e}", "error")
+                # Skip GDRE path entirely
+            else:
+                self._log("Unpacking Godot PCK with GDRE Tools...", "info")
+                self._progress(0, 100, "Starting...")
+                try:
+                    pck_out = f"{out_wsl}/pck"
+                    binary_wsl = binary_name if binary_name else f"{out_wsl}/GDCraze.x86_64"
+                    gdre_prefix = self._gdre_prefix()
+
+                    # GDRE outputs phase progress as "Phase name... [===] XX%" separated
+                    # by \r (not \n), so we split each streamed line on \r and parse.
+                    # Poll the Windows-side pck folder in a background thread.
+                    # We parse "Verified X files" from GDRE output to set the extraction
+                    # total; the export phase writes additional converted files beyond that.
+                    pck_win = os.path.join(self.output_dir, "pck")
+                    os.makedirs(pck_win, exist_ok=True)
+                    baseline = sum(len(fs) for _, _, fs in os.walk(pck_win))
+                    _stop_poll = threading.Event()
+                    _last_count = [0]
+                    _extract_done = [False]
+                    _extract_snap = [0]
+                    _LOG_EVERY = 500
+
+                    def _poll_pck():
+                        prev_logged = 0
+                        while not _stop_poll.is_set():
+                            raw = sum(len(fs) for _, _, fs in os.walk(pck_win))
+                            count = max(0, raw - baseline)
+                            _last_count[0] = count
+                            if _extract_done[0]:
+                                converted = max(0, count - _extract_snap[0])
+                                self._progress(0, 0,
+                                               f"Converting resources... {converted} converted")
+                                if converted - prev_logged >= _LOG_EVERY and converted > 0:
+                                    prev_logged = (converted // _LOG_EVERY) * _LOG_EVERY
+                                    self._log(f"  {converted} resources converted...", "info")
+                            else:
+                                self._progress(0, 0, f"Extracting... {count} files")
+                                if count - prev_logged >= _LOG_EVERY and count > 0:
+                                    prev_logged = (count // _LOG_EVERY) * _LOG_EVERY
+                                    self._log(f"  {count} files extracted...", "info")
+                            _stop_poll.wait(1.0)
+
+                    poll_thread = threading.Thread(target=_poll_pck, daemon=True)
+                    poll_thread.start()
+
+                    _extracted_re = re.compile(r'Extracted (\d+) files')
+                    _skip = ("Godot Engine", "input_file", "Input files", "GDRE Tools",
+                             "Ubuntu", "Loading import", "Loading GDScript",
+                             "Reading PCK", "Extracting files", "Exporting resources",
+                             "Reading folder", "Generating filesystem")
+                    try:
+                        for raw in self.executor.stream(
+                            f"mkdir -p {pck_out!r} && "
+                            f"{gdre_prefix} --recover={binary_wsl!r} --output={pck_out!r} 2>&1",
+                            timeout=GDRE_TIMEOUT,
+                        ):
+                            for chunk in raw.split('\r'):
+                                chunk = chunk.strip()
+                                if not chunk:
+                                    continue
+                                em = _extracted_re.search(chunk)
+                                if em:
+                                    _extract_done[0] = True
+                                    _extract_snap[0] = _last_count[0]
+                                    self._log(f"  {chunk}", "info")
+                                    self._log("  Converting resources to source formats"
+                                              " (decompiling scripts, textures → PNG, etc.)...",
+                                              "info")
+                                    continue
+                                if any(chunk.startswith(s) for s in _skip):
+                                    continue
+                                if any(tag in chunk for tag in ("ERROR", "WARN")):
+                                    self._log(f"  {chunk}", "warning")
+                                else:
+                                    self._log(f"  {chunk}", "info")
+                    finally:
+                        _stop_poll.set()
+                        poll_thread.join(timeout=2)
+
+                    final = _last_count[0]
+                    self._progress(100, 100, f"{final} files extracted")
+                    self._log(f"PCK unpacked to pck/ subfolder ({final} files).",
+                              "success")
+                except CommandError as e:
+                    self._log(
+                        f"GDRE Tools failed (PCK may still be usable as binary): {e.output}",
+                        "error")
 
         # Phase 3 — Checksums
         self._set_phase(3)
@@ -687,6 +734,94 @@ class ModifyPipeline(_BasePipeline):
         self.output_fun_path = output_fun_path
         self.game_key = game_key
         self.executor = executor
+
+    # ------------------------------------------------------------------
+    # BOF May 2026+ custom-format detection + native packer
+    # ------------------------------------------------------------------
+
+    def _detect_may_format(self, binary_wsl):
+        """Sniff a binary's PCK header (via the executor) to decide if
+        this is BOF's May 2026+ custom format that needs our native
+        packer instead of GDRE Tools."""
+        import base64 as _b64
+        import struct as _struct
+        try:
+            trailer_b64 = self.executor.run(
+                f"tail -c 12 {binary_wsl!r} | base64",
+                timeout=30,
+            ).strip()
+            trailer = _b64.b64decode(trailer_b64)
+            if len(trailer) != 12 or trailer[8:12] not in (b"GDPC", b"GBOF"):
+                return False
+            pck_size = _struct.unpack("<Q", trailer[:8])[0]
+            # Grab the first 200 bytes of the PCK section.  tail+head pipe
+            # is portable across macOS / Linux without needing dd seeks.
+            pck_head_b64 = self.executor.run(
+                f"tail -c $(({pck_size} + 12)) {binary_wsl!r} | "
+                f"head -c 200 | base64",
+                timeout=30,
+            ).strip()
+            pck_head = _b64.b64decode(pck_head_b64)
+            # is_may_format checks magic GDPC, but BOF binaries may still
+            # have GBOF here; normalise before checking.
+            if pck_head[:4] == b"GBOF":
+                pck_head = b"GDPC" + pck_head[4:]
+            from .may_extractor import is_may_format
+            return is_may_format(pck_head)
+        except Exception:
+            return False
+
+    def _may_pack_binary(self, binary_wsl, pck_dir, changed_pck):
+        """Use our native may_packer to replace the modified files
+        directly inside a BOF May 2026+ binary, in place via the
+        executor's filesystem.
+
+        Because may_packer needs to read the full binary, we read it
+        via the executor (works on both WSL and native macOS) and
+        write back the modified result to the same path.
+        """
+        import base64 as _b64
+        import tempfile
+        from .may_packer import pack_pck
+
+        # Read the original binary out of the executor's /tmp.  On
+        # Windows this is via WSL's /mnt/c bridge; on macOS the path
+        # is local.  Either way, we copy to a Windows-side temp file
+        # for the packer.
+        local_tmp_in = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".x86_64").name
+        local_tmp_out = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".x86_64").name
+        try:
+            # cp via executor — fastest path on macOS, acceptable on WSL
+            in_local_wsl = self.executor.to_exec_path(local_tmp_in)
+            self.executor.run(
+                f"cp {binary_wsl!r} {in_local_wsl!r}",
+                timeout=600,
+            )
+            self._log(
+                f"Packing {len(changed_pck)} file(s) into binary (native)...",
+                "info")
+            stats = pack_pck(local_tmp_in, pck_dir, local_tmp_out,
+                             log_cb=self._log)
+            self._log(
+                f"  Replaced {stats['files_replaced']} files "
+                f"({stats['new_pck_size']} bytes PCK, "
+                f"{stats['new_binary_size']} bytes binary).",
+                "info")
+            # Copy back into the executor's path
+            out_local_wsl = self.executor.to_exec_path(local_tmp_out)
+            self.executor.run(
+                f"cp {out_local_wsl!r} {binary_wsl!r} && "
+                f"chmod +x {binary_wsl!r}",
+                timeout=600,
+            )
+        finally:
+            for p in (local_tmp_in, local_tmp_out):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # Asset reimport helpers
@@ -1230,85 +1365,107 @@ class ModifyPipeline(_BasePipeline):
             self._log(f"Patching {len(changed_pck)} file(s) into binary...", "info")
             self._progress(0, 100, "Patching PCK...")
 
+            # Detect BOF May 2026+ custom PCK format BEFORE patching the
+            # GBOF magic.  May-format binaries can't be patched by GDRE
+            # Tools — we use our own may_packer below.  We need the
+            # local Windows-side binary path for that (not the WSL
+            # executor path); the local copy lives in tmp_dir on the
+            # executor's filesystem, which on Windows is reachable via
+            # /mnt/c or \\wsl$\Ubuntu\... — both equivalent.
+            use_may_packer = self._detect_may_format(binary_wsl)
+
             # GDRE only recognises stock "GDPC" magic.  If this is a newer
             # BOF binary with "GBOF" magic, temporarily swap it so GDRE can
             # read the embedded PCK; we restore "GBOF" on the output binary
             # further down so the game still loads on the real machine.
-            magic_status = _patch_pck_magic(
-                self.executor, binary_wsl,
-                _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log,
-            )
-            was_bof_magic = magic_status.startswith("patched")
-
-            pck_dir_wsl = self.executor.to_exec_path(pck_dir)
-            tmp_binary_wsl = f"/tmp/bof_{game_key}_patched.x86_64"
-            gdre_prefix = self._gdre_prefix()
-
-            # Write patch args to a temp script to avoid quoting / arg-length limits
-            import base64 as _b64
-            patch_script = f"/tmp/bof_{game_key}_patch.sh"
-            script_lines = [
-                "#!/bin/bash",
-                "set -e",
-                f'{gdre_prefix} \\',
-                f"  --pck-patch={binary_wsl!r} \\",
-                f"  --output={tmp_binary_wsl!r} \\",
-                f"  --embed={binary_wsl!r} \\",
-            ]
-            for i, rel in enumerate(changed_pck):
-                local_path = f"{pck_dir_wsl}/{rel}"
-                cont = " \\" if i < len(changed_pck) - 1 else ""
-                script_lines.append(
-                    f"  --patch-file='{local_path}=res://{rel}'{cont}"
+            # Skip the swap for May format — our packer handles GBOF natively.
+            if not use_may_packer:
+                magic_status = _patch_pck_magic(
+                    self.executor, binary_wsl,
+                    _BOF_PCK_MAGIC, _GODOT_PCK_MAGIC, self._log,
                 )
-            script_b64 = _b64.b64encode(
-                ("\n".join(script_lines) + "\n").encode()
-            ).decode()
+                was_bof_magic = magic_status.startswith("patched")
+            else:
+                was_bof_magic = True   # will be preserved by may_packer
 
-            self.executor.run(
-                f"echo {script_b64!r} | base64 -d > {patch_script} && "
-                f"chmod +x {patch_script}",
-                timeout=30,
-            )
+            if use_may_packer:
+                self._log(
+                    "Detected BOF May 2026+ custom PCK format — using "
+                    "native packer (GDRE Tools can't write this format).",
+                    "info")
+                self._may_pack_binary(binary_wsl, pck_dir, changed_pck)
+                # may_packer preserves the GBOF magic natively, so no
+                # post-patch magic restore is needed.
+            else:
+                pck_dir_wsl = self.executor.to_exec_path(pck_dir)
+                tmp_binary_wsl = f"/tmp/bof_{game_key}_patched.x86_64"
+                gdre_prefix = self._gdre_prefix()
 
-            try:
-                for chunk in self.executor.stream(
-                    f"bash {patch_script} 2>&1", timeout=GDRE_TIMEOUT
-                ):
-                    for part in chunk.split("\r"):
-                        part = part.strip()
-                        if not part:
-                            continue
-                        pct_match = re.search(r'(\d+)%', part)
-                        if pct_match:
-                            pct = int(pct_match.group(1))
-                            self._progress(pct, 100, f"Patching... {pct}%")
-                        elif part:
-                            self._log(f"  {part}", "info")
-            except CommandError as e:
-                raise PipelineError("Patch",
-                    f"GDRE patch failed:\n{e.output}\n\n"
-                    f"Make sure GDRE Tools is installed and the changed files "
-                    f"are valid Godot assets.")
+                # Write patch args to a temp script to avoid quoting / arg-length limits
+                import base64 as _b64
+                patch_script = f"/tmp/bof_{game_key}_patch.sh"
+                script_lines = [
+                    "#!/bin/bash",
+                    "set -e",
+                    f'{gdre_prefix} \\',
+                    f"  --pck-patch={binary_wsl!r} \\",
+                    f"  --output={tmp_binary_wsl!r} \\",
+                    f"  --embed={binary_wsl!r} \\",
+                ]
+                for i, rel in enumerate(changed_pck):
+                    local_path = f"{pck_dir_wsl}/{rel}"
+                    cont = " \\" if i < len(changed_pck) - 1 else ""
+                    script_lines.append(
+                        f"  --patch-file='{local_path}=res://{rel}'{cont}"
+                    )
+                script_b64 = _b64.b64encode(
+                    ("\n".join(script_lines) + "\n").encode()
+                ).decode()
 
-            # Replace binary in the temp extract with the patched one
-            try:
                 self.executor.run(
-                    f"mv -f {tmp_binary_wsl!r} {binary_wsl!r} && "
-                    f"chmod +x {binary_wsl!r}",
-                    timeout=600,
+                    f"echo {script_b64!r} | base64 -d > {patch_script} && "
+                    f"chmod +x {patch_script}",
+                    timeout=30,
                 )
-            except CommandError as e:
-                raise PipelineError("Patch",
-                    f"Failed to replace binary:\n{e.output}")
 
-            # GDRE's output uses stock "GDPC" magic.  If the source binary
-            # originally used BOF's "GBOF" marker, restore it on the new
-            # binary before md5/tar — otherwise the game can't find its own
-            # PCK at runtime.
-            if was_bof_magic:
-                _patch_pck_magic(self.executor, binary_wsl,
-                                 _GODOT_PCK_MAGIC, _BOF_PCK_MAGIC, self._log)
+                try:
+                    for chunk in self.executor.stream(
+                        f"bash {patch_script} 2>&1", timeout=GDRE_TIMEOUT
+                    ):
+                        for part in chunk.split("\r"):
+                            part = part.strip()
+                            if not part:
+                                continue
+                            pct_match = re.search(r'(\d+)%', part)
+                            if pct_match:
+                                pct = int(pct_match.group(1))
+                                self._progress(pct, 100, f"Patching... {pct}%")
+                            elif part:
+                                self._log(f"  {part}", "info")
+                except CommandError as e:
+                    raise PipelineError("Patch",
+                        f"GDRE patch failed:\n{e.output}\n\n"
+                        f"Make sure GDRE Tools is installed and the changed files "
+                        f"are valid Godot assets.")
+
+                # Replace binary in the temp extract with the patched one
+                try:
+                    self.executor.run(
+                        f"mv -f {tmp_binary_wsl!r} {binary_wsl!r} && "
+                        f"chmod +x {binary_wsl!r}",
+                        timeout=600,
+                    )
+                except CommandError as e:
+                    raise PipelineError("Patch",
+                        f"Failed to replace binary:\n{e.output}")
+
+                # GDRE's output uses stock "GDPC" magic.  If the source binary
+                # originally used BOF's "GBOF" marker, restore it on the new
+                # binary before md5/tar — otherwise the game can't find its own
+                # PCK at runtime.
+                if was_bof_magic:
+                    _patch_pck_magic(self.executor, binary_wsl,
+                                     _GODOT_PCK_MAGIC, _BOF_PCK_MAGIC, self._log)
 
             # Update the md5 checksum file to match the patched binary
             binary_basename = os.path.basename(binary_wsl)

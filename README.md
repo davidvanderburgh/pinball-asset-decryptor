@@ -55,7 +55,7 @@ disclose any past modifications. The acceptance is stored in
 
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
-| **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack |
+| **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack — native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes them back into Godot-format `.sample`/`.ctex`/`.fontdata` automatically.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss) so you can see exactly what's about to ship before clicking *Build update*. |
 | **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` Clonezilla image, or **directly from the game SSD** | Extract, Write, Mod Pack, **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in). |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
@@ -271,6 +271,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
 4. Modify any files in the output folder you want to change.
+   *(BOF specifically:* edit the human-friendly files under
+   `pck/_EDITABLE ASSETS/audio|images|video|fonts/` — drop in a new
+   `.wav`, `.webp`, `.ogv`, or `.ttf` with the same filename and the
+   Write pipeline re-encodes it back into the matching Godot binary
+   for you.  You don't need to touch the raw `.sample` / `.ctex` /
+   `.fontdata` files.)*
 5. **Write tab** — pick the original file, the (now-modified) assets
    folder, and an output folder; click *Build update*. You get an
    installable file that's ready for a USB drive.
@@ -293,7 +299,7 @@ those plugins need.
 
 | Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt | Other |
 |---|---|---|---|
-| Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** (auto-downloaded by Install Prerequisites from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases)) |
+| Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** — only required for pre-May 2026 firmware; the May 2026+ format (GBOF-magic PCK with RSCC Zstd containers) is handled by the bundled native extractor.  Install Prerequisites auto-downloads GDRE from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases) regardless so older `.fun` files still work. |
 | Chicago Gaming Company | – | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model, ~75 MB downloaded on first use, runs entirely on CPU). |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |

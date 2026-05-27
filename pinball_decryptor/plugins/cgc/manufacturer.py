@@ -22,12 +22,18 @@ class CGCManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=False,
         transcribe=True,
+        # WPC remakes (MM/AFM/MB) ship the original Williams ROM --
+        # surfaces a "Decode DMD scenes (experimental)" checkbox that
+        # decodes scenes/animations/fonts into output_dir/dmd/.
+        # Default OFF; output is extract-only (not written back).
+        decode_dmd=True,
     )
     input_spec = InputSpec(
         label="CGC installer images",
         extensions=(".img",),
     )
-    extract_phases = ("Detect", "Outer image", "Inner image", "Checksums")
+    extract_phases = ("Detect", "Outer image", "Inner image",
+                      "Decode game data", "Checksums")
     write_phases = ("Detect", "Copy original", "Stage partitions", "Patch")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     # CGC's nested-disk-image extraction needs ext4 read/write tooling.
@@ -62,10 +68,12 @@ class CGCManufacturer(Manufacturer):
                     manufacturer_key="cgc")
 
     def make_extract_pipeline(self, input_path, output_dir,
-                              log_cb, phase_cb, progress_cb, done_cb):
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              **kwargs):
         return ExtractPipeline(
             input_path, output_dir,
-            log_cb, phase_cb, progress_cb, done_cb)
+            log_cb, phase_cb, progress_cb, done_cb,
+            decode_dmd=bool(kwargs.get("decode_dmd", False)))
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb):
@@ -92,7 +100,14 @@ class CGCManufacturer(Manufacturer):
                 "the boot logo bitmap. Tick the Auto-transcribe checkbox "
                 "before Extract to also emit a callouts.csv mapping each "
                 "WAV to its spoken text (requires the faster-whisper "
-                "prereq -- install via the Install Prerequisites step).")
+                "prereq -- install via the Install Prerequisites step). "
+                "Tick the \"Decode DMD scenes\" checkbox to also decode "
+                "the bundled Williams WPC ROM into PNG scenes + MP4 "
+                "animations under `dmd/` -- experimental, extract-only "
+                "(the renders aren't written back to the installer), "
+                "rendered at 1920x480 in the original amber-DMD look "
+                "(CGC's runtime LCD colorization is not shipped as data "
+                "and so isn't applied to these renders).")
 
     def write_install_help(self):
         return ("1. Flash the output .img to a USB drive with Rufus, "

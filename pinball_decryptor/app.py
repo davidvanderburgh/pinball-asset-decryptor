@@ -512,6 +512,10 @@ class App:
             chained_done_cb = self._maybe_wrap_done_for_transcribe(
                 done_cb, output_path)
             extra_kwargs = self._collect_asset_filter_kwargs()
+            if getattr(
+                    self._current_mfr.capabilities, "decode_dmd", False):
+                extra_kwargs["decode_dmd"] = bool(
+                    self.window.decode_dmd_var.get())
             self.pipeline = self._current_mfr.make_extract_pipeline(
                 in_path, output_path,
                 log_cb, phase_cb, progress_cb, chained_done_cb,

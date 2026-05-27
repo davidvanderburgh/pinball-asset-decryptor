@@ -73,6 +73,14 @@ class Capabilities:
     # passes ``extract_graphics`` / ``extract_sounds`` / ``full_dump``
     # kwargs to the manufacturer's extract factories.
     asset_filters: bool = False
+    # Optional WPC-DMD decode pass: surfaces a "Decode DMD scenes
+    # (experimental, extract-only)" checkbox on the Extract tab.
+    # When True, app.py passes ``decode_dmd`` to the extract factory.
+    # Used by CGC's WPC remakes (MM/AFM/MB) — the bundled Williams
+    # ROM is decoded into PNG scenes + MP4 animations + font sheets
+    # under ``dmd/``.  Default OFF because the render is slow (a few
+    # minutes) and the output isn't writable back to the eMMC.
+    decode_dmd: bool = False
 
 
 @dataclass(frozen=True)

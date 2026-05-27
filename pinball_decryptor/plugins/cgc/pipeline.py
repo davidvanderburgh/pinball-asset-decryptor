@@ -29,9 +29,27 @@ from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.transcribe import CALLOUTS_CSV
+from ..williams import wpc_extract
 from .formats import (detect_game, find_data_partition, find_game_partition,
                       is_img_file, read_mbr_partitions)
 from .games import GAME_DB
+
+
+# CGC's WPC remakes (MM/AFM/MB) ship the original Williams WPC ROM
+# inside their assets.  We decode that ROM into PNG scenes + MP4
+# animations + font sheets just like the Williams plugin -- the
+# data is identical bytes.  Rendered at pixel_size=15 each 128x32
+# DMD becomes a 1920x480 PNG, matching the LCD-backbox width on
+# the actual CGC cabinet (the original 128x32 DMD area letterboxed
+# in a 1920x1080 panel).  The colorization layer is real-time GPU
+# code in emumm and is *not* shipped as data, so the output stays
+# monochrome amber -- same look as the original Williams DMD.
+CGC_DMD_PIXEL_SIZE = 15
+
+# Subdir under the CGC output folder that holds derived DMD assets.
+# Kept separate from the eMMC asset mirror so the Write pipeline
+# can ignore it -- it has no counterpart inside the inner ext4.
+DMD_SUBDIR = "dmd"
 
 
 # Path of emmc.img inside the installer's P3 ext4 partition.  Same for
@@ -61,11 +79,17 @@ class ExtractPipeline(BasePipeline):
     """
 
     def __init__(self, img_path, output_dir,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 decode_dmd=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.img_path = img_path
         self.output_dir = output_dir
         self.executor = create_executor()
+        # Optional WPC DMD decode (experimental, extract-only).  Wired
+        # to the "Decode DMD scenes" checkbox on the Extract tab.
+        # Default OFF -- the render is slow (a few minutes) and the
+        # output PNGs/MP4s aren't writable back to the eMMC.
+        self.decode_dmd = decode_dmd
 
     def _exec_to_host(self, exec_path):
         """Inverse of ``executor.to_exec_path`` for our /tmp/cgc_stage_*
@@ -228,26 +252,130 @@ class ExtractPipeline(BasePipeline):
             except Exception:
                 pass
 
-        # Pulp Fiction post-step: explode each `.bnk` JPS sound bank into
-        # its constituent WAVs + manifest.json so users can hear and
-        # selectively replace individual sounds.  The .bnk stays in place
-        # (Write pipeline will re-pack from the exploded subdir).  Other
-        # CGC games (WPC remakes) have direct .wav assets already.
+        # Decode game data (phase 3) -- per-title post-step:
+        #   * Pulp Fiction: explode each `.bnk` JPS sound bank into its
+        #     constituent WAVs + manifest.json so users can hear and
+        #     selectively replace individual sounds.  The .bnk stays in
+        #     place (Write pipeline will re-pack from the exploded
+        #     subdir).
+        #   * MM/AFM/MB (WPC remakes): if the user opted in via the
+        #     "Decode DMD scenes (experimental)" checkbox, decode every
+        #     scene + animation + font from the bundled Williams ROM
+        #     into the dmd/ subdir.  Default OFF since the render is
+        #     slow and the output is extract-only (not written back).
+        self._set_phase(3)
+        dmd_results = None
         if game_key == "pulp_fiction":
             self._explode_jps_banks()
+        elif self.decode_dmd:
+            dmd_results = self._extract_dmd_assets(info)
+        else:
+            self._log(
+                "DMD scene decode skipped (experimental — tick the "
+                "\"Decode DMD scenes\" checkbox on the Extract tab to "
+                "enable).", "info")
 
-        self._set_phase(3)
+        self._set_phase(4)
         self._log("Generating baseline checksums...", "info")
+        # Skip the dmd/ subtree -- its files are derived from the WPC
+        # ROM, don't correspond to any path inside the eMMC ext4, and
+        # would otherwise be diff'd as "new files" by the Write
+        # pipeline and uselessly written into the inner partition.
         n = generate_checksums(
-            self.output_dir, log_cb=self._log, progress_cb=self._progress)
+            self.output_dir, log_cb=self._log, progress_cb=self._progress,
+            exclude_dirs={DMD_SUBDIR})
+
+        dmd_help = ""
+        if dmd_results is not None:
+            dmd_help = (
+                f"\nDMD scenes:     {dmd_results['scenes']}"
+                f"\nAnimations:     {dmd_results['animations']}"
+                f"\nFonts:          {dmd_results['fonts']}"
+                f"\n\n  dmd/dmd_scenes/scene_*.png — every still bitmap "
+                f"(jackpot splashes, mode-start screens, status panels), "
+                f"rendered at 1920x480 to match the LCD width."
+                f"\n  dmd/animations/anim_*.mp4 — the game cinematics that "
+                f"play on the LCD during attract mode and feature shots."
+                f"\n  dmd/fonts/font_*.png — DMD glyph atlases.\n  "
+                f"Note: the CGC LCD colorization is applied in real time "
+                f"by emumm and is not shipped as data, so these renders "
+                f"are the underlying amber-DMD output.")
 
         self._log("Done.", "success")
         self._done(True,
             f"{info['display']} assets extracted.\n\n"
             f"Output: {self.output_dir}\n"
-            f"Files:  {n}\n\n"
+            f"Files:  {n}"
+            f"{dmd_help}\n\n"
             f"Modify any audio (.wav / .bnk), ROM, or logo files, then use "
             f"the Write tab to build a new installer.img.")
+
+    def _extract_dmd_assets(self, info):
+        """Decode the WPC ROM bundled inside the CGC assets into PNG
+        scenes + MP4 animations + font sheets under ``output_dir/dmd/``.
+
+        Searches under ``<data_dir>/`` for a WPC-sized .rom file --
+        each title parks the ROM somewhere different:
+
+          MM  → appdata/rom/mm_10.rom        (clean WPC layout)
+          AFM → afmdata/rom/afm_113b.rom
+          MB  → mbdata/xMB_G11.rom           (no rom/ subdir, x-prefix
+                                              CGC-specific filename)
+
+        We walk the whole data_dir, take every ``.rom`` file whose size
+        matches a known WPC bank (256 KB, 512 KB, or 1 MB), and pick
+        the largest -- mirrors the Williams formats.list_game_roms
+        fallback so we cope with any future CGC title that re-arranges
+        the directory layout.
+
+        Returns the result dict from the decoder, or ``None`` if no
+        WPC-shaped ROM was found.
+        """
+        WPC_ROM_SIZES = {0x40000, 0x80000, 0x100000}
+        data_dir = os.path.join(self.output_dir, info["data_dir"])
+        if not os.path.isdir(data_dir):
+            self._log(
+                f"  No {info['data_dir']}/ directory found — "
+                f"skipping DMD scene extraction.", "warning")
+            return None
+        candidates = []
+        for dirpath, _, filenames in os.walk(data_dir):
+            for fn in filenames:
+                if not fn.lower().endswith(".rom"):
+                    continue
+                abs_p = os.path.join(dirpath, fn)
+                try:
+                    sz = os.path.getsize(abs_p)
+                except OSError:
+                    continue
+                if sz in WPC_ROM_SIZES:
+                    candidates.append((sz, abs_p))
+        if not candidates:
+            self._log(
+                f"  No WPC-sized .rom file under {info['data_dir']}/ — "
+                f"skipping DMD scene extraction.", "warning")
+            return None
+        candidates.sort(reverse=True)  # largest first
+        rom_path = candidates[0][1]
+        rom_name = os.path.relpath(rom_path, self.output_dir).replace(
+            "\\", "/")
+        self._log(f"Decoding WPC ROM: {rom_name}", "info")
+        with open(rom_path, "rb") as f:
+            rom_bytes = f.read()
+        dmd_out = os.path.join(self.output_dir, DMD_SUBDIR)
+        try:
+            return wpc_extract.extract_dmd_assets(
+                rom_bytes,
+                dmd_out,
+                pixel_size=CGC_DMD_PIXEL_SIZE,
+                source_label=rom_name,
+                log_cb=self._log,
+                progress_cb=self._progress,
+                check_cancel=self._check_cancel,
+            )
+        except wpc_extract.WpcDecodeError as e:
+            self._log(f"  DMD decode failed: {e}", "warning")
+            return None
 
     def _explode_jps_banks(self):
         """Extract each .bnk under the assets dir into a sibling subdir
@@ -599,8 +727,13 @@ def _diff_assets(assets_dir, baseline):
     # Capture brand-new files too (everything not claimed above).
     # callouts.csv + JPS decoded subdirs (sound_*.wav, manifest.json)
     # are plugin metadata -- the game engine doesn't read them, so don't
-    # waste eMMC space shipping them back.
-    for dirpath, _, filenames in os.walk(assets_dir):
+    # waste eMMC space shipping them back.  The dmd/ subtree is also
+    # plugin-derived (decoded from the WPC ROM by the Extract step) and
+    # doesn't correspond to anything inside the inner ext4 -- skip it
+    # at the top of os.walk so we don't even hash the thousand+ PNGs.
+    for dirpath, dirnames, filenames in os.walk(assets_dir):
+        if os.path.relpath(dirpath, assets_dir).replace("\\", "/") == ".":
+            dirnames[:] = [d for d in dirnames if d != DMD_SUBDIR]
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
                     or fn == CALLOUTS_CSV

@@ -19,14 +19,31 @@ def md5_file(path):
     return h.hexdigest()
 
 
-def generate_checksums(folder, log_cb=None, progress_cb=None):
+def generate_checksums(folder, log_cb=None, progress_cb=None,
+                       exclude_dirs=None):
     """Walk *folder* and write ``.checksums.md5``.  Returns file count.
 
     Symlinks and unreadable files (broken targets, locked files, OneDrive
     placeholders) are skipped with a warning rather than aborting.
+
+    *exclude_dirs* is an optional iterable of directory names (relative
+    to *folder*, with ``/`` separators) to skip entirely.  Used by the
+    CGC plugin to keep the derived ``dmd/`` extraction folder out of
+    the modding baseline -- those files don't correspond to anything
+    inside the eMMC's ext4 partition.
     """
+    excluded = {d.replace("\\", "/").strip("/")
+                for d in (exclude_dirs or ())}
     files = []
-    for dirpath, _, filenames in os.walk(folder):
+    for dirpath, dirnames, filenames in os.walk(folder):
+        rel_dir = os.path.relpath(dirpath, folder).replace("\\", "/")
+        if rel_dir == ".":
+            rel_dir = ""
+        # Prune excluded subtrees in-place so os.walk doesn't descend.
+        dirnames[:] = [
+            d for d in dirnames
+            if (f"{rel_dir}/{d}" if rel_dir else d) not in excluded
+        ]
         for fn in filenames:
             if fn.startswith("."):
                 continue

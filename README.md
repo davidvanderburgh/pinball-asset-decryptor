@@ -56,7 +56,7 @@ disclose any past modifications. The acceptance is stored in
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
 | **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack — native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes them back into Godot-format `.sample`/`.ctex`/`.fontdata` automatically.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss) so you can see exactly what's about to ship before clicking *Build update*. |
-| **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. |
+| **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. Optional **Decode DMD scenes** (experimental, extract-only) decodes the bundled WPC ROM into 1920×480 PNG scenes + MP4 animations under `dmd/` so you can browse the cinematics outside the cabinet. |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` Clonezilla image, or **directly from the game SSD** | Extract, Write, Mod Pack, **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in). |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |
@@ -172,6 +172,30 @@ The `faster-whisper` pip package is treated as a real prerequisite and
 auto-installed by **Install Prerequisites** (same flow as the WSL
 tools). The model itself (~75 MB) downloads on first transcribe-run
 and is cached in `%USERPROFILE%\.cache\huggingface\`.
+
+### Decode DMD scenes to PNG/MP4 (experimental, opt-in)
+
+CGC's MM / AFM / MB remakes bundle the original Williams WPC game ROM
+and run it under their `emumm` emulator. Tick **Decode DMD scenes to
+PNG/MP4 (experimental, extract-only)** on the Extract tab to also walk
+that ROM's master tables and emit:
+
+- `dmd/dmd_scenes/scene_*.png` — every still bitmap in the ROM
+  (jackpot splashes, mode-start screens, status panels), rendered at
+  1920×480 to match the LCD-backbox width.
+- `dmd/animations/anim_*.mp4` — the cinematics from the ROM's
+  animation table, one MP4 per sequence (attract-mode shorts,
+  feature-shot reactions, etc.).
+- `dmd/fonts/font_*.png` — DMD glyph sprite sheets.
+
+The decode adds a few minutes to Extract. Output is **extract-only**:
+the `dmd/` folder is excluded from the modding baseline and the Write
+pipeline so the derived renders are never pushed back into the
+installer. CGC's runtime LCD colorization is applied by the `emumm`
+binary's GPU code and isn't shipped as data, so these renders come out
+in the original amber-DMD look (the same look the Williams plugin
+produces). Same `wpc_decode` / `dmd_render` modules under the hood, so
+any decoder fix benefits both.
 
 ## Install
 

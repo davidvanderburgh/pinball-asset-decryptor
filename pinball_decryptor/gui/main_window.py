@@ -185,6 +185,11 @@ class MainWindow:
         # the "Extract audio" phase).  Re-probed on every input change;
         # True when no file is selected yet so the UI isn't pre-hidden.
         self._extract_audio_supported = True
+        # CGC-only: "Decode DMD scenes (experimental)" toggle on the
+        # Extract tab.  When ON, the Extract pipeline decodes the
+        # bundled Williams WPC ROM into PNG scenes + MP4 animations
+        # under output_dir/dmd/.  Default OFF -- experimental and slow.
+        self.decode_dmd_var = tk.BooleanVar(value=False)
 
         # JJP-only (capabilities.asset_filters): per-category Extract
         # checkboxes — Graphics / Sounds / File System.  Match the
@@ -787,6 +792,20 @@ class MainWindow:
         # makes sense as a chained step after the CSV exists.
         self._transcribe_rename_check.state(["disabled"])
 
+        # Decode DMD checkbox -- packed only when the active manufacturer
+        # has capabilities.decode_dmd (currently just CGC).  When ON,
+        # Extract decodes the bundled Williams WPC ROM into PNG scenes
+        # + MP4 animations under output_dir/dmd/.  Off by default since
+        # the decode adds a few minutes to Extract and the output isn't
+        # writable back to the installer.
+        self._decode_dmd_frame = ttk.Frame(f)
+        self._decode_dmd_check = ttk.Checkbutton(
+            self._decode_dmd_frame,
+            text=("Decode DMD scenes to PNG/MP4 "
+                  "(experimental, extract-only)"),
+            variable=self.decode_dmd_var)
+        self._decode_dmd_check.pack(side=tk.LEFT, padx=(24, 8))
+
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._extract_btn = ttk.Button(btn_row, text="Extract",
                                        command=self._on_extract)
@@ -1384,6 +1403,7 @@ class MainWindow:
         # static extract emits standalone WAVs, so for capture-capable
         # plugins they sit under "Basic extract" and track it.
         self._update_transcribe_visibility()
+        self._update_decode_dmd_visibility()
 
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
@@ -1516,6 +1536,19 @@ class MainWindow:
             self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
         # Keep the rename checkbox's enabled state in sync.
         self._on_transcribe_toggle()
+
+    def _update_decode_dmd_visibility(self):
+        """Show the "Decode DMD scenes" checkbox only when the active
+        manufacturer advertises ``capabilities.decode_dmd`` (CGC).
+        """
+        if self._current_mfr is None:
+            return
+        caps = self._current_mfr.capabilities
+        if not getattr(caps, "decode_dmd", False):
+            self._decode_dmd_frame.pack_forget()
+            self.decode_dmd_var.set(False)
+            return
+        self._decode_dmd_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
 
     def _update_capture_help_text(self):
         basic = self.static_extract_var.get()

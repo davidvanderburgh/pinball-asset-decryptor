@@ -249,6 +249,8 @@ class MainWindow:
         # work on every keystroke into the Browse field.
         self.write_assets_var.trace_add(
             "write", lambda *_: self._maybe_rescan_write_preview())
+        self.write_assets_var.trace_add(
+            "write", lambda *_: self._refresh_write_assets_warning())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -923,6 +925,19 @@ class MainWindow:
         ttk.Button(self._write_assets_row_ref, text="Browse...",
                    command=self._browse_write_assets).pack(
             side=tk.LEFT, padx=(4, 0))
+
+        # Inline warning that appears when the picked Modified Assets
+        # folder doesn't contain a `.checksums.md5` baseline (the user
+        # most likely pointed at a subfolder of the Extract output).
+        # Sits directly under the Modified Assets row so the warning
+        # is impossible to miss — the same condition also surfaces in
+        # the Modified Files Preview empty state, but that pane is
+        # easy to overlook when focused on the path field.
+        # Pack-managed by _refresh_write_assets_warning().
+        self._write_assets_warning = ttk.Label(
+            f, text="", foreground="#d04040",
+            font=(_SANS_FONT, 9),
+            wraplength=720, justify=tk.LEFT)
 
         # Editable-folder hint — appears as a subtle italic line below
         # the Modified Assets row.  For BOF May code the Extract step
@@ -2509,8 +2524,75 @@ class MainWindow:
 
     def _browse_write_assets(self):
         path = filedialog.askdirectory(title="Select modified assets folder")
-        if path:
-            self.write_assets_var.set(path)
+        if not path:
+            return
+        # If the picked folder has no `.checksums.md5` but a parent
+        # within a couple of levels does, the user almost certainly
+        # drilled into a subfolder of the Extract output by mistake
+        # (e.g. picked `sound/` when the real folder is its parent).
+        # Offer to use the parent rather than silently accepting a
+        # path that'll fail at Scan time.
+        if not os.path.isfile(os.path.join(path, ".checksums.md5")):
+            parent_with_checksums = self._find_checksums_ancestor(path)
+            if parent_with_checksums:
+                use_parent = messagebox.askyesno(
+                    "Use parent folder?",
+                    "The folder you picked doesn't contain a "
+                    "`.checksums.md5` baseline, but its parent "
+                    f"`{parent_with_checksums}` does — that's the "
+                    "folder Extract produced.\n\n"
+                    "Use the parent folder instead?")
+                if use_parent:
+                    path = parent_with_checksums
+        self.write_assets_var.set(path)
+
+    def _find_checksums_ancestor(self, path, max_levels=3):
+        """Walk up from *path* looking for a directory that contains
+        `.checksums.md5`.  Returns the matching directory or None.
+
+        Limited to ``max_levels`` hops so we don't suggest an
+        unrelated ancestor far up the tree.
+        """
+        current = path
+        for _ in range(max_levels):
+            parent = os.path.dirname(current)
+            if not parent or parent == current:
+                return None
+            if os.path.isfile(os.path.join(parent, ".checksums.md5")):
+                return parent
+            current = parent
+        return None
+
+    def _refresh_write_assets_warning(self):
+        """Show/hide the inline warning under the Modified Assets row.
+
+        Visible when a path is set, exists, and lacks `.checksums.md5`
+        at its root — the same precondition that makes the Write
+        phase fail with "No .checksums.md5 found".
+        """
+        label = getattr(self, "_write_assets_warning", None)
+        if label is None:
+            return
+        path = (self.write_assets_var.get() or "").strip()
+        if (path and os.path.isdir(path)
+                and not os.path.isfile(
+                    os.path.join(path, ".checksums.md5"))):
+            ancestor = self._find_checksums_ancestor(path)
+            if ancestor:
+                msg = ("⚠ No `.checksums.md5` here. Did you mean the "
+                       f"parent folder `{ancestor}`?")
+            else:
+                msg = ("⚠ No `.checksums.md5` here. Pick the folder "
+                       "produced by Extract (it should contain "
+                       "`.checksums.md5` at the root).")
+            label.configure(text=msg)
+            if not label.winfo_ismapped():
+                label.pack(anchor=tk.W, padx=26, pady=(0, 4),
+                           before=self._write_editable_hint)
+        else:
+            label.configure(text="")
+            if label.winfo_ismapped():
+                label.pack_forget()
 
     def _browse_write_output(self):
         path = filedialog.askdirectory(title="Select output folder")

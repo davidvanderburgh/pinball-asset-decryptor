@@ -143,6 +143,35 @@ def make_spooky_aes_pkg(out_path, key_name="rm_pkg", files=None):
 
 
 # ---------------------------------------------------------------------------
+# American Pinball AES .pkg — uses the universal key baked into the plugin
+# ---------------------------------------------------------------------------
+
+def make_ap_aes_pkg(out_path, files=None):
+    """Generate a minimal American Pinball AES-256-CBC .pkg.
+
+    Builds a tiny ZIP in memory and encrypts it with the plugin's own
+    encrypt_aes_pkg helper (universal AP key).
+    """
+    from pinball_decryptor.plugins.ap.crypto import encrypt_aes_pkg
+
+    files = files or {
+        "game.txt": b"AP synthetic content",
+        "config.yaml": b"version: test\n",
+    }
+
+    tmp_zip = str(out_path) + ".tmp.zip"
+    with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for relpath, data in files.items():
+            zf.writestr(relpath, data)
+    try:
+        encrypt_aes_pkg(tmp_zip, str(out_path))
+    finally:
+        if os.path.exists(tmp_zip):
+            os.remove(tmp_zip)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
 # BOF .fun — gpg symmetric over a tar.gz, requires gpg binary
 # ---------------------------------------------------------------------------
 

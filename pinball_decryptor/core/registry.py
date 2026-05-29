@@ -18,6 +18,10 @@ from .prereqs import Prerequisite  # re-exported for plugins
 # dropdown ordering; auto-detect tries them in this sequence too.
 _PLUGIN_MODULES = [
     "pinball_decryptor.plugins.pb",
+    # AP must precede spooky: AP's detector is key-validated (only claims
+    # .pkg files that decrypt to a ZIP with the AP key), while spooky's
+    # generic AES-magic fallback would otherwise grab AP packages first.
+    "pinball_decryptor.plugins.ap",
     "pinball_decryptor.plugins.spooky",
     "pinball_decryptor.plugins.bof",
     "pinball_decryptor.plugins.jjp",

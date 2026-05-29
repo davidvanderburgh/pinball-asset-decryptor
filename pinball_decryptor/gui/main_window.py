@@ -943,10 +943,10 @@ class MainWindow:
         # the Modified Assets row.  For BOF May code the Extract step
         # creates a pck/_EDITABLE ASSETS/ folder with WAV / WEBP / OGV
         # / TTF files that mirror the imported binaries; editing those
-        # is the main modding workflow.  The label is informational,
-        # no event bindings — it's just a signpost so users don't
-        # miss the folder (which would otherwise be easy to overlook
-        # deep inside the asset tree).
+        # is the main modding workflow.  Other plugins (JJP, CGC, PB,
+        # Spooky) have no auto re-encode step — replacement files must
+        # already be in the game's native format — so apply_manufacturer
+        # packs this hint only when mfr.key == "bof".
         self._write_editable_hint = ttk.Label(
             f,
             text=("Tip: edit your audio (.wav), images (.webp), and video (.ogv) "
@@ -955,7 +955,6 @@ class MainWindow:
             foreground="#888888",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
-        self._write_editable_hint.pack(anchor=tk.W, padx=26, pady=(0, 4))
 
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
@@ -1308,6 +1307,19 @@ class MainWindow:
                 after=self._extract_warn)
         else:
             self._extract_bof_banner.pack_forget()
+
+        # Write-tab editable-folder hint is BOF-only — see widget
+        # construction comment for why.  Showing it on JJP/CGC/PB/Spooky
+        # actively misleads users into thinking the app re-encodes
+        # arbitrary input formats (it doesn't on those plugins —
+        # replacements must already be in the game's native format).
+        if mfr.key == "bof" and caps.write:
+            if not self._write_editable_hint.winfo_ismapped():
+                self._write_editable_hint.pack(
+                    anchor=tk.W, padx=26, pady=(0, 4),
+                    before=self._write_output_row_ref)
+        else:
+            self._write_editable_hint.pack_forget()
 
         # JJP (or any future plugin with caps.direct_ssd) gets an extra
         # "From ISO / From SSD" radio row above the input rows on both
@@ -2587,8 +2599,11 @@ class MainWindow:
                        "`.checksums.md5` at the root).")
             label.configure(text=msg)
             if not label.winfo_ismapped():
+                # Anchor on the assets-row frame (always packed) rather
+                # than the editable hint (BOF-only) so the warning still
+                # appears on non-BOF plugins where the hint is hidden.
                 label.pack(anchor=tk.W, padx=26, pady=(0, 4),
-                           before=self._write_editable_hint)
+                           after=self._write_assets_row_ref)
         else:
             label.configure(text="")
             if label.winfo_ismapped():

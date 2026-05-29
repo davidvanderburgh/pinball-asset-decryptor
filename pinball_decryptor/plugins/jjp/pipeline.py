@@ -2228,6 +2228,7 @@ class ModPipeline(DecryptionPipeline):
         # Collect files to scan
         all_files = []
         untracked_system = 0
+        untracked_assets = []  # (rel_path, full_path) for non-system stragglers
         for root, _dirs, files in os.walk(self.assets_folder):
             for name in files:
                 if name.startswith('.') or name == 'fl_decrypted.dat' or name.endswith('.img'):
@@ -2238,6 +2239,8 @@ class ModPipeline(DecryptionPipeline):
                     all_files.append((rel_path, full_path))
                 elif rel_path.startswith("system/"):
                     untracked_system += 1
+                else:
+                    untracked_assets.append((rel_path, full_path))
 
         if untracked_system > 0:
             self.log(
@@ -2280,6 +2283,53 @@ class ModPipeline(DecryptionPipeline):
             )
         else:
             self.log("No modified files detected.", "info")
+            # Diagnostic: when nothing is detected, surface likely
+            # format-mismatch culprits — untracked files whose stem
+            # matches a tracked file in the same directory but with a
+            # different extension (e.g. user dropped in `song.mp3`
+            # next to the original `song.ogg`).  This catches Mike's
+            # exact failure mode where Windows hides extensions, the
+            # "replace" looks correct visually, and the new file is
+            # just a sibling rather than an overwrite.
+            tracked_by_dir = {}
+            for rel in saved:
+                d, _, base = rel.rpartition('/')
+                stem, _, _ext = base.rpartition('.')
+                if stem:
+                    tracked_by_dir.setdefault(d, {}).setdefault(
+                        stem.lower(), base)
+            collisions = []
+            for rel, _ in untracked_assets:
+                d, _, base = rel.rpartition('/')
+                stem, _, _ext = base.rpartition('.')
+                if not stem:
+                    continue
+                original = tracked_by_dir.get(d, {}).get(stem.lower())
+                if original and original != base:
+                    collisions.append((rel, f"{d}/{original}" if d else original))
+            if collisions:
+                lines = [
+                    f"  {wrong}  (original is {orig})"
+                    for wrong, orig in collisions[:10]
+                ]
+                more = (f"\n  …and {len(collisions) - 10} more"
+                        if len(collisions) > 10 else "")
+                self.log(
+                    "Possible format mismatch — the following untracked "
+                    "files share a name with a tracked original but use "
+                    "a different extension:\n"
+                    + "\n".join(lines) + more + "\n"
+                    "JJP does not auto-convert formats. Replacements must "
+                    "use the original file's extension (audio: .ogg, "
+                    "images: PNG/JPG as originally stored).",
+                    "error")
+            elif untracked_assets:
+                self.log(
+                    f"Note: {len(untracked_assets)} untracked file(s) in "
+                    "the assets folder are being ignored. Replacements "
+                    "must overwrite the original file (same path, same "
+                    "filename, same extension) to be picked up.",
+                    "info")
 
     # (Backup phase removed — the original ISO serves as the backup.
     #  The raw image can be re-extracted from the ISO at any time.)

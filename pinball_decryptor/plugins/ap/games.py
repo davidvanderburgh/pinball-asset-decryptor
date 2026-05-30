@@ -89,7 +89,9 @@ PKG_FILENAME_PATTERNS = [
     ("hot_wheels",  "hot_wheels"),
     ("hot-wheels",  "hot_wheels"),
     ("valhalla",    "legends_of_valhalla"),
+    ("lov",         "legends_of_valhalla"),
     ("galactic",    "galactic_tank_force"),
     ("gtf",         "galactic_tank_force"),
+    ("tank",        "galactic_tank_force"),
     ("bbq",         "bbq"),
 ]

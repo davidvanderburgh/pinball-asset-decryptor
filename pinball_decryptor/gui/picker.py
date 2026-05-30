@@ -39,6 +39,10 @@ _MFR_VISUALS = {
     # CGC's brand uses a chrome/silver palette; muted blue-grey reads
     # as "premium remake" and stays distinct from BOF's saturated blue.
     "cgc":      {"color": "#37474f", "letter": "C"},
+    # American Pinball's brand leans on a flag-inspired navy/red/silver
+    # palette; deep navy reads patriotic without clashing with BOF's
+    # brighter blue.
+    "ap":       {"color": "#1a237e", "letter": "A"},
 }
 
 

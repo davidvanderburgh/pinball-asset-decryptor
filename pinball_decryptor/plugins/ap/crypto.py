@@ -110,9 +110,17 @@ def looks_like_ap_pkg(path, key=AP_AES_KEY):
         return False
     if len(head) < 8 + 16 + 16:
         return False
-    # Bytes [4:8] are the high dword of the 64-bit size — zero for every
-    # real (<4 GiB) package; a cheap pre-filter before the AES probe.
-    if struct.unpack("<I", head[4:8])[0] != 0:
+    # Sanity-check the declared plaintext size against the file size before
+    # firing up AES.  Real packages have origsize ≈ filesize - 24, padded up
+    # to a 16-byte multiple — cheap to verify, and ~no real .pkg from any
+    # maker will pass this and then *also* decrypt to PK\x03\x04 with our key.
+    try:
+        file_size = os.path.getsize(path)
+    except OSError:
+        return False
+    origsize = struct.unpack("<Q", head[:8])[0]
+    expected = 8 + 16 + ((origsize + 15) & ~15)
+    if origsize == 0 or expected != file_size:
         return False
     try:
         plain = AES.new(key, AES.MODE_CBC, head[8:24]).decrypt(head[24:40])

@@ -1,9 +1,9 @@
 # Pinball Asset Decryptor
 
 One app to extract, view, and modify game assets from pinball machines made
-by **Barrels of Fun**, **Chicago Gaming Company**, **Jersey Jack Pinball**,
-**Pinball Brothers**, **Spooky Pinball**, and **Williams** (WPC-era) —
-70+ games across six manufacturers.
+by **American Pinball**, **Barrels of Fun**, **Chicago Gaming Company**,
+**Jersey Jack Pinball**, **Pinball Brothers**, **Spooky Pinball**, and
+**Williams** (WPC-era) — 70+ games across seven manufacturers.
 
 This is a unified replacement for separate decryptor apps that all shared
 the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
@@ -15,9 +15,10 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 ## Disclaimer
 
 This project is an independent interoperability utility. It is **not
-affiliated with, endorsed by, or sponsored by** Chicago Gaming Company,
-Planetary Pinball Supply, Bally, Williams, Stern Pinball, Jersey Jack
-Pinball, Pinball Brothers, Spooky Pinball, Barrels of Fun, or any other
+affiliated with, endorsed by, or sponsored by** American Pinball, Chicago
+Gaming Company, Planetary Pinball Supply, Bally, Williams, Stern Pinball,
+Jersey Jack Pinball, Pinball Brothers, Spooky Pinball, Barrels of Fun, or
+any other
 pinball manufacturer, publisher, or rights holder. All trademarks and
 game titles referenced are the property of their respective owners and
 are used here in their nominative/descriptive sense only — to identify
@@ -55,6 +56,7 @@ disclose any past modifications. The acceptance is stored in
 
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
+| **American Pinball** | 6 (Houdini, Oktoberfest, Hot Wheels, Legends of Valhalla, Galactic Tank Force, Barry-O's BBQ) | `.pkg` (AES-256-CBC encrypted ZIP) | Extract, Write — the P-ROC / pyprocgame game tree ships as an AES-256-CBC ZIP behind an `[8B size][16B IV]` header (the `pkgprocess` container, shared lineage with Spooky). A single **static key** — recovered from `PACKAGE_SIGNING_KEY` in `/usr/bin/pkgprocess` on the Houdini / Oktoberfest / Hot Wheels Clonezilla images — decrypts every title across 2020-2024, so Write re-zips the modified tree and re-encrypts with the same key. Clonezilla `.iso` extraction (partclone ext4) is planned. See [docs/AP_PKG_RE.md](docs/AP_PKG_RE.md). |
 | **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack — native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes them back into Godot-format `.sample`/`.ctex`/`.fontdata` automatically.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss) so you can see exactly what's about to ship before clicking *Build update*. |
 | **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. Optional **Decode DMD scenes** (experimental, extract-only) decodes the bundled WPC ROM into 1920×480 PNG scenes + MP4 animations under `dmd/` so you can browse the cinematics outside the cabinet. |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` Clonezilla image, or **directly from the game SSD** | Extract, Write, Mod Pack, **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in). |
@@ -64,6 +66,7 @@ disclose any past modifications. The acceptance is stored in
 
 The full per-game lists with the format-specific quirks live in the plugin
 sources:
+[ap/games.py](pinball_decryptor/plugins/ap/games.py),
 [bof/games.py](pinball_decryptor/plugins/bof/games.py),
 [cgc/games.py](pinball_decryptor/plugins/cgc/games.py),
 [jjp/games.py](pinball_decryptor/plugins/jjp/games.py),

@@ -817,6 +817,130 @@ class ModifyPipeline(_BasePipeline):
         except Exception:
             return False
 
+    # Files in the .fun whose line-2 comment carries the update version
+    # date the game compares against ("# YYYY.MM.DD ").  The line above it
+    # reads "Godot Code looks for the date on the next line".
+    _VERSION_DATE_FILES = ("updated_bash_profile", "updated_updatecode")
+    _VERSION_DATE_RE = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})")
+    # Per-game working-folder file that remembers the last update-version
+    # date this pipeline produced, so successive rebuilds keep climbing.
+    _MODVERSION_FILE = ".bof_modversion"
+
+    def _bump_update_version(self, tmp_dir_wsl):
+        """Advance the update-version date inside the extracted .fun so the
+        game treats this build as *newer* code and actually applies it.
+
+        The running game reads the ``YYYY.MM.DD`` on line 2 of
+        ``updated_bash_profile`` / ``updated_updatecode`` (the line after
+        "Godot Code looks for the date on the next line") and only installs
+        the .fun when that date is newer than what's already running.  We
+        re-tar those files unchanged otherwise, so a mod of the current code
+        would ship the current date and the game would just log "no new
+        code" and skip it.
+
+        The new date must clear two bars at once:
+
+        * **Beat what's installed** so the build actually applies — and stay
+          ahead of the *previous* build too, or a second iteration from the
+          same folder would reproduce the same date and the game would
+          reject it as "not newer".  We track the last date we emitted in
+          ``assets_dir/.bof_modversion`` and climb one day past it each
+          rebuild (monotonic across iterations).
+        * **Stay below real BOF releases** so a genuine future update (dated
+          months out in the real calendar) still looks newer and installs
+          over the mod — the machine is never locked out of official code.
+          That's why we step up from the *embedded* date, not from "today":
+          today+1 could out-rank an official update with an earlier stamp.
+
+        So: ``new = max(embedded_dates, last_emitted) + 1 day``, written to
+        both files and remembered for next time.  The arithmetic is done in
+        Python — the executor's ``date`` is GNU on WSL/Linux but BSD on
+        macOS, and ``date -d '+1 day'`` isn't portable; ``sed`` is.
+        """
+        import datetime as _dt
+
+        # Highest embedded date across the two files = the stock baseline.
+        baseline = None
+        present = []  # (fname, exec_path) for files that actually exist
+        for fname in self._VERSION_DATE_FILES:
+            path = f"{tmp_dir_wsl}/{fname}"
+            try:
+                line2 = self.executor.run(
+                    f"sed -n '2p' {path!r}", timeout=15).strip()
+            except CommandError:
+                continue  # file absent in this code variant — skip quietly
+            m = self._VERSION_DATE_RE.search(line2)
+            if not m:
+                self._log(
+                    f"  {fname}: no version date on line 2 — left as-is.",
+                    "info")
+                continue
+            try:
+                embedded = _dt.date(int(m.group(1)), int(m.group(2)),
+                                    int(m.group(3)))
+            except ValueError:
+                self._log(
+                    f"  {fname}: unparseable date {m.group(0)!r} — left "
+                    f"as-is.", "info")
+                continue
+            present.append((fname, path))
+            baseline = embedded if baseline is None else max(baseline, embedded)
+
+        if baseline is None:
+            self._log(
+                "  No update-version date found — nothing to bump.", "info")
+            return
+
+        # Climb one day past whichever is later: the stock baseline or the
+        # last date we emitted for this folder (remembered across rebuilds).
+        last_emitted = self._read_last_modversion()
+        floor = baseline if last_emitted is None else max(baseline, last_emitted)
+        new_date = floor + _dt.timedelta(days=1)
+        new_str = new_date.strftime("%Y.%m.%d")
+
+        for fname, path in present:
+            # Replace line 2 wholesale, preserving the original "# <date> "
+            # shape (trailing space) the BOF template uses.
+            try:
+                self.executor.run(
+                    f"sed -i '2s|.*|# {new_str} |' {path!r}", timeout=15)
+            except CommandError as e:
+                self._log(
+                    f"  Warning: could not bump version in {fname}: "
+                    f"{e.output}", "error")
+                continue
+            self._log(f"  {fname}: update version -> {new_str}", "info")
+
+        self._write_last_modversion(new_str)
+        self._log(
+            f"  (stock baseline {baseline.strftime('%Y.%m.%d')}; this build "
+            f"is {new_str} — any later official BOF release still supersedes "
+            f"it.)", "info")
+
+    def _read_last_modversion(self):
+        """Return the last update-version date emitted for this assets
+        folder, or None.  Stored host-side (not via the executor) since
+        ``assets_dir`` is a plain host path."""
+        import datetime as _dt
+        try:
+            marker = os.path.join(self.assets_dir, self._MODVERSION_FILE)
+            with open(marker, "r", encoding="utf-8") as f:
+                m = self._VERSION_DATE_RE.search(f.read())
+            if m:
+                return _dt.date(int(m.group(1)), int(m.group(2)),
+                                int(m.group(3)))
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def _write_last_modversion(self, date_str):
+        try:
+            marker = os.path.join(self.assets_dir, self._MODVERSION_FILE)
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(date_str + "\n")
+        except OSError:
+            pass  # best-effort; iteration still works if installs advance it
+
     def _may_pack_binary(self, binary_wsl, pck_dir, changed_pck):
         """Use our native may_packer to replace the modified files
         directly inside a BOF May 2026+ binary, in place via the
@@ -1613,6 +1737,12 @@ class ModifyPipeline(_BasePipeline):
             self._log("Binary patched.", "success")
         else:
             self._log("No modified PCK files — using original binary.", "info")
+        self._check_cancel()
+
+        # Advance the update-version date so the game accepts this build as
+        # newer code (otherwise it logs "no new code" and skips the .fun).
+        self._log("Bumping update version date...", "info")
+        self._bump_update_version(tmp_dir_wsl)
         self._check_cancel()
 
         # Phase 2 — Repack: re-tar the temp dir (same structure as original)

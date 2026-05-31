@@ -755,6 +755,14 @@ class App:
                 "Choose a different output folder.")
             return
 
+        # Validate a manual update-version date (BOF, Auto unchecked).
+        if getattr(self._current_mfr.capabilities,
+                   "write_version_date", False):
+            err = self.window.write_version_validation_error()
+            if err:
+                messagebox.showwarning("Invalid Version Date", err)
+                return
+
         self._save_settings()
 
         self._active_mode = "write"
@@ -763,9 +771,19 @@ class App:
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
 
+        write_kwargs = {}
+        if getattr(self._current_mfr.capabilities,
+                   "write_version_date", False):
+            # None in Auto mode; an explicit "YYYY.MM.DD" when the user
+            # unchecks Auto and types one.  validate_write() already
+            # blocked an invalid manual entry before we got here.
+            write_kwargs["version_date_override"] = (
+                self.window.write_version_override())
+
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
+            **write_kwargs,
         )
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 

@@ -769,17 +769,90 @@ class DecryptPipeline(_BasePipeline):
 # Modify (re-encrypt) pipeline
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Update-version date helpers
+# ---------------------------------------------------------------------------
+# The game applies a .fun only when the YYYY.MM.DD on line 2 of the embedded
+# updated_bash_profile / updated_updatecode (the line after "Godot Code looks
+# for the date on the next line") is newer than what's installed.  Extract
+# copies those files into the assets folder, so the GUI can read the baseline
+# host-side; the Write pipeline bumps it executor-side at build time.
+
+_UPDATE_VERSION_FILES = ("updated_bash_profile", "updated_updatecode")
+_UPDATE_VERSION_RE = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})")
+# Per-game working-folder marker remembering the last date Write emitted, so
+# successive rebuilds from the same folder keep climbing instead of colliding.
+MODVERSION_FILE = ".bof_modversion"
+
+
+def parse_update_date(text):
+    """Return the ``datetime.date`` embedded in *text* (YYYY.MM.DD), or None."""
+    import datetime as _dt
+    m = _UPDATE_VERSION_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        return _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def peek_next_update_version(assets_dir):
+    """Host-side preview of the update-version dates for *assets_dir*.
+
+    Returns ``(baseline_date, next_date_str)`` where ``baseline_date`` is the
+    stock version embedded in the extracted files and ``next_date_str`` is the
+    ``YYYY.MM.DD`` the next auto Write would stamp (one day past the later of
+    the baseline and the last-emitted marker).  Returns ``(None, None)`` when
+    the folder has no readable BOF update-version files (e.g. a non-BOF or
+    partial extract).  The GUI uses this to show the concrete date; the Write
+    pipeline computes the same value executor-side at build time.
+    """
+    import datetime as _dt
+
+    baseline = None
+    for fname in _UPDATE_VERSION_FILES:
+        try:
+            with open(os.path.join(assets_dir, fname), "r",
+                      encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+        d = parse_update_date(lines[1]) if len(lines) >= 2 else None
+        if d:
+            baseline = d if baseline is None else max(baseline, d)
+
+    if baseline is None:
+        return None, None
+
+    last = None
+    try:
+        with open(os.path.join(assets_dir, MODVERSION_FILE), "r",
+                  encoding="utf-8") as f:
+            last = parse_update_date(f.read())
+    except OSError:
+        pass
+
+    floor = baseline if last is None else max(baseline, last)
+    return baseline, (floor + _dt.timedelta(days=1)).strftime("%Y.%m.%d")
+
+
 class ModifyPipeline(_BasePipeline):
     """Patch modified assets into a copy of the original .fun file."""
 
     def __init__(self, original_fun, assets_dir, output_fun_path, game_key,
-                 executor, log_cb, phase_cb, progress_cb, done_cb):
+                 executor, log_cb, phase_cb, progress_cb, done_cb,
+                 version_date_override=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.original_fun = original_fun
         self.assets_dir = assets_dir
         self.output_fun_path = output_fun_path
         self.game_key = game_key
         self.executor = executor
+        # Optional explicit "YYYY.MM.DD" the user typed in the Write tab's
+        # version field (Auto unchecked).  None => auto-climb.  Used to
+        # force-install, e.g. stamping official code above a higher-dated mod.
+        self.version_date_override = version_date_override
 
     # ------------------------------------------------------------------
     # BOF May 2026+ custom-format detection + native packer
@@ -817,15 +890,6 @@ class ModifyPipeline(_BasePipeline):
         except Exception:
             return False
 
-    # Files in the .fun whose line-2 comment carries the update version
-    # date the game compares against ("# YYYY.MM.DD ").  The line above it
-    # reads "Godot Code looks for the date on the next line".
-    _VERSION_DATE_FILES = ("updated_bash_profile", "updated_updatecode")
-    _VERSION_DATE_RE = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})")
-    # Per-game working-folder file that remembers the last update-version
-    # date this pipeline produced, so successive rebuilds keep climbing.
-    _MODVERSION_FILE = ".bof_modversion"
-
     def _bump_update_version(self, tmp_dir_wsl):
         """Advance the update-version date inside the extracted .fun so the
         game treats this build as *newer* code and actually applies it.
@@ -838,50 +902,43 @@ class ModifyPipeline(_BasePipeline):
         would ship the current date and the game would just log "no new
         code" and skip it.
 
-        The new date must clear two bars at once:
+        Two modes:
 
-        * **Beat what's installed** so the build actually applies — and stay
-          ahead of the *previous* build too, or a second iteration from the
-          same folder would reproduce the same date and the game would
-          reject it as "not newer".  We track the last date we emitted in
-          ``assets_dir/.bof_modversion`` and climb one day past it each
-          rebuild (monotonic across iterations).
-        * **Stay below real BOF releases** so a genuine future update (dated
-          months out in the real calendar) still looks newer and installs
-          over the mod — the machine is never locked out of official code.
-          That's why we step up from the *embedded* date, not from "today":
-          today+1 could out-rank an official update with an earlier stamp.
+        * **Explicit** (``version_date_override`` set — the user typed a date
+          in the Write tab with Auto unchecked): stamp exactly that date.
+          This is the escape hatch for force-installing, e.g. putting
+          official code that's dated *older* than an installed mod back on
+          the machine by stamping it above the mod.
+        * **Auto** (default): ``new = max(embedded_dates, last_emitted) + 1``.
+          Climbing from the embedded baseline (not "today") keeps the mod
+          version-adjacent to stock, so any genuine future BOF release still
+          out-dates it and installs over the top — the machine is never
+          locked out of official code.  The last date we emitted is tracked
+          in ``assets_dir/.bof_modversion`` so successive rebuilds from the
+          same folder keep climbing instead of reproducing the same date
+          (which the game would reject as "not newer").
 
-        So: ``new = max(embedded_dates, last_emitted) + 1 day``, written to
-        both files and remembered for next time.  The arithmetic is done in
-        Python — the executor's ``date`` is GNU on WSL/Linux but BSD on
-        macOS, and ``date -d '+1 day'`` isn't portable; ``sed`` is.
+        The arithmetic is done in Python — the executor's ``date`` is GNU on
+        WSL/Linux but BSD on macOS, and ``date -d '+1 day'`` isn't portable;
+        ``sed`` is.
         """
         import datetime as _dt
 
         # Highest embedded date across the two files = the stock baseline.
         baseline = None
         present = []  # (fname, exec_path) for files that actually exist
-        for fname in self._VERSION_DATE_FILES:
+        for fname in _UPDATE_VERSION_FILES:
             path = f"{tmp_dir_wsl}/{fname}"
             try:
                 line2 = self.executor.run(
                     f"sed -n '2p' {path!r}", timeout=15).strip()
             except CommandError:
                 continue  # file absent in this code variant — skip quietly
-            m = self._VERSION_DATE_RE.search(line2)
-            if not m:
+            embedded = parse_update_date(line2)
+            if embedded is None:
                 self._log(
                     f"  {fname}: no version date on line 2 — left as-is.",
                     "info")
-                continue
-            try:
-                embedded = _dt.date(int(m.group(1)), int(m.group(2)),
-                                    int(m.group(3)))
-            except ValueError:
-                self._log(
-                    f"  {fname}: unparseable date {m.group(0)!r} — left "
-                    f"as-is.", "info")
                 continue
             present.append((fname, path))
             baseline = embedded if baseline is None else max(baseline, embedded)
@@ -891,11 +948,25 @@ class ModifyPipeline(_BasePipeline):
                 "  No update-version date found — nothing to bump.", "info")
             return
 
-        # Climb one day past whichever is later: the stock baseline or the
-        # last date we emitted for this folder (remembered across rebuilds).
-        last_emitted = self._read_last_modversion()
-        floor = baseline if last_emitted is None else max(baseline, last_emitted)
-        new_date = floor + _dt.timedelta(days=1)
+        override = parse_update_date(self.version_date_override)
+        if self.version_date_override and override is None:
+            self._log(
+                f"  Ignoring invalid version date "
+                f"{self.version_date_override!r} — falling back to auto.",
+                "error")
+
+        if override is not None:
+            new_date = override
+            self._log(
+                f"  Using explicit update version {override.strftime('%Y.%m.%d')}"
+                f" (stock baseline {baseline.strftime('%Y.%m.%d')}).", "info")
+        else:
+            # Climb one day past whichever is later: the stock baseline or
+            # the last date we emitted for this folder (across rebuilds).
+            last_emitted = self._read_last_modversion()
+            floor = (baseline if last_emitted is None
+                     else max(baseline, last_emitted))
+            new_date = floor + _dt.timedelta(days=1)
         new_str = new_date.strftime("%Y.%m.%d")
 
         for fname, path in present:
@@ -912,30 +983,26 @@ class ModifyPipeline(_BasePipeline):
             self._log(f"  {fname}: update version -> {new_str}", "info")
 
         self._write_last_modversion(new_str)
-        self._log(
-            f"  (stock baseline {baseline.strftime('%Y.%m.%d')}; this build "
-            f"is {new_str} — any later official BOF release still supersedes "
-            f"it.)", "info")
+        if override is None:
+            self._log(
+                f"  (stock baseline {baseline.strftime('%Y.%m.%d')}; this "
+                f"build is {new_str} — any later official BOF release still "
+                f"supersedes it.)", "info")
 
     def _read_last_modversion(self):
         """Return the last update-version date emitted for this assets
         folder, or None.  Stored host-side (not via the executor) since
         ``assets_dir`` is a plain host path."""
-        import datetime as _dt
         try:
-            marker = os.path.join(self.assets_dir, self._MODVERSION_FILE)
+            marker = os.path.join(self.assets_dir, MODVERSION_FILE)
             with open(marker, "r", encoding="utf-8") as f:
-                m = self._VERSION_DATE_RE.search(f.read())
-            if m:
-                return _dt.date(int(m.group(1)), int(m.group(2)),
-                                int(m.group(3)))
-        except (OSError, ValueError):
-            pass
-        return None
+                return parse_update_date(f.read())
+        except OSError:
+            return None
 
     def _write_last_modversion(self, date_str):
         try:
-            marker = os.path.join(self.assets_dir, self._MODVERSION_FILE)
+            marker = os.path.join(self.assets_dir, MODVERSION_FILE)
             with open(marker, "w", encoding="utf-8") as f:
                 f.write(date_str + "\n")
         except OSError:

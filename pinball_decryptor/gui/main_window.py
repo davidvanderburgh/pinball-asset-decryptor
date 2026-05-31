@@ -191,6 +191,18 @@ class MainWindow:
         # under output_dir/dmd/.  Default OFF -- experimental and slow.
         self.decode_dmd_var = tk.BooleanVar(value=False)
 
+        # BOF-only (capabilities.write_version_date): the "Update version
+        # date" control on the Write tab.  Auto (default) lets the pipeline
+        # stamp one day past the installed code; unticking it enables the
+        # entry so the user can force an explicit YYYY.MM.DD (e.g. to
+        # reinstall official code over a higher-dated mod).  The entry
+        # always shows the concrete date — auto-computed from the assets
+        # folder when Auto is on, user-typed when it's off.
+        self.write_version_auto_var = tk.BooleanVar(value=True)
+        self.write_version_date_var = tk.StringVar()
+        # Stock baseline date read from the assets folder (for the hint).
+        self._write_version_baseline = None
+
         # JJP-only (capabilities.asset_filters): per-category Extract
         # checkboxes — Graphics / Sounds / File System.  Match the
         # standalone JJP decryptor's defaults: assets on, full
@@ -251,6 +263,8 @@ class MainWindow:
             "write", lambda *_: self._maybe_rescan_write_preview())
         self.write_assets_var.trace_add(
             "write", lambda *_: self._refresh_write_assets_warning())
+        self.write_assets_var.trace_add(
+            "write", lambda *_: self._refresh_write_version_field())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -956,6 +970,30 @@ class MainWindow:
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
 
+        # BOF-only: update-version date control.  The game only applies a
+        # .fun whose version date (line 2 of updated_bash_profile /
+        # updated_updatecode) is newer than what's installed, so Write
+        # advances it.  This row shows the concrete date that will be
+        # stamped and lets the user override it.  Pack-managed by
+        # apply_manufacturer (BOF only); see write_version_date capability.
+        self._write_version_frame = ttk.Frame(f)
+        ttk.Label(self._write_version_frame,
+                  text="Update version:", width=16, anchor=tk.W).pack(
+            side=tk.LEFT)
+        self._write_version_auto_check = ttk.Checkbutton(
+            self._write_version_frame, text="Auto",
+            variable=self.write_version_auto_var,
+            command=self._on_write_version_auto_toggle)
+        self._write_version_auto_check.pack(side=tk.LEFT)
+        self._write_version_entry = ttk.Entry(
+            self._write_version_frame,
+            textvariable=self.write_version_date_var, width=12)
+        self._write_version_entry.pack(side=tk.LEFT, padx=(8, 0))
+        self._write_version_hint = ttk.Label(
+            self._write_version_frame, text="",
+            foreground="#888888", font=(_SANS_FONT, 9, "italic"))
+        self._write_version_hint.pack(side=tk.LEFT, padx=(8, 0))
+
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
         ttk.Label(self._write_output_row_ref,
@@ -1320,6 +1358,17 @@ class MainWindow:
                     before=self._write_output_row_ref)
         else:
             self._write_editable_hint.pack_forget()
+
+        # Update-version date control (BOF) — sits just above the output
+        # row.  Refresh its concrete date from the current assets folder.
+        if getattr(caps, "write_version_date", False) and caps.write:
+            if not self._write_version_frame.winfo_ismapped():
+                self._write_version_frame.pack(
+                    fill=tk.X, padx=10, pady=(2, 2),
+                    before=self._write_output_row_ref)
+            self._refresh_write_version_field()
+        else:
+            self._write_version_frame.pack_forget()
 
         # JJP (or any future plugin with caps.direct_ssd) gets an extra
         # "From ISO / From SSD" radio row above the input rows on both
@@ -2608,6 +2657,94 @@ class MainWindow:
             label.configure(text="")
             if label.winfo_ismapped():
                 label.pack_forget()
+
+    # ------------------------------------------------------------------
+    # BOF update-version date field
+    # ------------------------------------------------------------------
+
+    def _on_write_version_auto_toggle(self):
+        """Auto checkbox flipped: lock the entry to the computed date, or
+        unlock it for a manual override (seeded with the auto date so the
+        user edits from a sensible starting point)."""
+        # Seed the value only when switching to a blank manual field; in
+        # Auto mode the refresh always mirrors the computed date.
+        seed = (not self.write_version_auto_var.get()
+                and not (self.write_version_date_var.get() or "").strip())
+        self._refresh_write_version_field(force_value=seed)
+
+    def _refresh_write_version_field(self, force_value=False):
+        """Recompute the concrete update-version date from the current
+        assets folder and refresh the entry + hint.
+
+        In Auto mode the entry mirrors what the pipeline will stamp and is
+        read-only; with Auto off it's editable and only seeded (not
+        overwritten) so the user's typing survives folder re-scans.
+        """
+        frame = getattr(self, "_write_version_frame", None)
+        if frame is None:
+            return
+        from ..plugins.bof.pipeline import peek_next_update_version
+
+        path = (self.write_assets_var.get() or "").strip()
+        baseline, next_str = (None, None)
+        if path and os.path.isdir(path):
+            try:
+                baseline, next_str = peek_next_update_version(path)
+            except Exception:
+                baseline, next_str = (None, None)
+        self._write_version_baseline = baseline
+
+        auto = self.write_version_auto_var.get()
+        try:
+            self._write_version_entry.configure(
+                state="readonly" if auto else "normal")
+        except tk.TclError:
+            pass
+
+        if auto or force_value:
+            self.write_version_date_var.set(next_str or "")
+
+        if next_str is None:
+            hint = ("(select your extracted assets folder — the date is read "
+                    "from it)")
+        elif auto:
+            hint = (f"auto: one day past installed code "
+                    f"({baseline.strftime('%Y.%m.%d')})")
+        else:
+            hint = (f"installed code is {baseline.strftime('%Y.%m.%d')} — "
+                    f"enter a newer date to install")
+        try:
+            self._write_version_hint.configure(text=hint)
+        except tk.TclError:
+            pass
+
+    def write_version_override(self):
+        """Return the explicit YYYY.MM.DD the pipeline should stamp, or None
+        in Auto mode (pipeline computes it).  Called by app.py on Write."""
+        if self.write_version_auto_var.get():
+            return None
+        return (self.write_version_date_var.get() or "").strip() or None
+
+    def write_version_validation_error(self):
+        """Return a user-facing error string if a manual version date is
+        invalid, else None.  Auto mode never errors."""
+        if self.write_version_auto_var.get():
+            return None
+        from ..plugins.bof.pipeline import parse_update_date
+        raw = (self.write_version_date_var.get() or "").strip()
+        if not raw:
+            return ("Enter an update version date as YYYY.MM.DD, or re-check "
+                    "Auto to let the app pick one.")
+        d = parse_update_date(raw)
+        if d is None:
+            return (f"'{raw}' isn't a valid date. Use the format "
+                    f"YYYY.MM.DD (e.g. 2026.01.15).")
+        base = self._write_version_baseline
+        if base is not None and d <= base:
+            return (f"{raw} isn't newer than the installed code "
+                    f"({base.strftime('%Y.%m.%d')}). The game only installs "
+                    f"a newer date — pick something after it.")
+        return None
 
     def _browse_write_output(self):
         path = filedialog.askdirectory(title="Select output folder")

@@ -132,3 +132,69 @@ def test_prereq_indicators_render_for_current_mfr(app, manufacturers_by_key):
 def test_manufacturer_picker_alphabetical_order(app):
     displays = [m.display for m in app._manufacturers]
     assert displays == sorted(displays, key=str.lower)
+
+
+# ---------------------------------------------------------------------------
+# BOF update-version date field (capabilities.write_version_date)
+# ---------------------------------------------------------------------------
+
+def _seed_bof_assets(tmp_path):
+    marker = "# Update check string\n"
+    (tmp_path / "updated_bash_profile").write_text(
+        marker + "# 2025.06.23 \n", encoding="utf-8")
+    (tmp_path / "updated_updatecode").write_text(
+        marker + "# 2025.06.20 \n", encoding="utf-8")
+    (tmp_path / ".checksums.md5").write_text("", encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_version_field_shown_for_bof_hidden_otherwise(
+        app, manufacturers_by_key):
+    # winfo_manager() == "pack" means the row is laid out on the Write tab
+    # (winfo_ismapped() would read 0 unless that tab is the raised one).
+    app._on_manufacturer_change(manufacturers_by_key["bof"])
+    app.root.update()
+    assert app.window._write_version_frame.winfo_manager() == "pack"
+
+    app._on_back_to_picker()
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assert app.window._write_version_frame.winfo_manager() == ""
+
+
+def test_version_field_auto_shows_concrete_date(
+        app, manufacturers_by_key, tmp_path):
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["bof"])
+    app.root.update()
+    w.write_assets_var.set(_seed_bof_assets(tmp_path))
+    app.root.update()
+    # Auto on by default → entry shows baseline+1, read-only, no override.
+    assert w.write_version_auto_var.get() is True
+    assert w.write_version_date_var.get() == "2025.06.24"
+    assert w.write_version_override() is None
+    assert w.write_version_validation_error() is None
+
+
+def test_version_field_manual_override_and_validation(
+        app, manufacturers_by_key, tmp_path):
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["bof"])
+    app.root.update()
+    w.write_assets_var.set(_seed_bof_assets(tmp_path))
+    app.root.update()
+
+    # Uncheck Auto → manual mode; a too-old date is rejected.
+    w.write_version_auto_var.set(False)
+    w._on_write_version_auto_toggle()
+    w.write_version_date_var.set("2025.06.10")  # older than installed 06.23
+    assert w.write_version_validation_error() is not None
+
+    # A newer explicit date validates and is returned as the override.
+    w.write_version_date_var.set("2026.01.15")
+    assert w.write_version_validation_error() is None
+    assert w.write_version_override() == "2026.01.15"
+
+    # Garbage is rejected.
+    w.write_version_date_var.set("not-a-date")
+    assert w.write_version_validation_error() is not None

@@ -77,6 +77,14 @@ class Capabilities:
     # passes ``extract_graphics`` / ``extract_sounds`` / ``full_dump``
     # kwargs to the manufacturer's extract factories.
     asset_filters: bool = False
+    # Update-version date field: surfaces an "Update version date" control
+    # on the Write tab (an Auto checkbox + an editable YYYY.MM.DD entry).
+    # Used by BOF, whose game only applies a .fun whose embedded version
+    # date is newer than what's installed — the field lets the user see the
+    # date Write will stamp and override it (e.g. to force-install official
+    # code over a higher-dated mod).  When set, app.py passes
+    # ``version_date_override`` (None in Auto mode) to make_write_pipeline.
+    write_version_date: bool = False
     # Optional WPC-DMD decode pass: surfaces a "Decode DMD scenes
     # (experimental, extract-only)" checkbox on the Extract tab.
     # When True, app.py passes ``decode_dmd`` to the extract factory.

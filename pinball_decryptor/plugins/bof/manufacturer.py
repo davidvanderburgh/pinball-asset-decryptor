@@ -41,7 +41,8 @@ class _WriteWrapper(ModifyPipeline):
     """Adapt the BOF ModifyPipeline ctor to the unified factory signature."""
 
     def __init__(self, original_path, assets_dir, output_path,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 version_date_override=None):
         game_key = detect_game(original_path)
         if game_key is None:
             # Defer the friendly error to run() — done_cb is the only way to
@@ -64,6 +65,7 @@ class _WriteWrapper(ModifyPipeline):
             phase_cb=phase_cb,
             progress_cb=progress_cb,
             done_cb=done_cb,
+            version_date_override=version_date_override,
         )
 
     def run(self):
@@ -79,6 +81,9 @@ class BOFManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=False,
+        # Surfaces the "Update version date" control on the Write tab — the
+        # game only applies a .fun dated newer than what's installed.
+        write_version_date=True,
     )
     input_spec = InputSpec(
         label="Barrels of Fun game files",
@@ -136,9 +141,11 @@ class BOFManufacturer(Manufacturer):
                                log_cb, phase_cb, progress_cb, done_cb)
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
-                            log_cb, phase_cb, progress_cb, done_cb):
+                            log_cb, phase_cb, progress_cb, done_cb,
+                            version_date_override=None):
         return _WriteWrapper(original_path, assets_dir, output_path,
-                             log_cb, phase_cb, progress_cb, done_cb)
+                             log_cb, phase_cb, progress_cb, done_cb,
+                             version_date_override=version_date_override)
 
     def extract_input_help(self):
         return ("Decrypt a Barrels of Fun `.fun` update file (Labyrinth, "

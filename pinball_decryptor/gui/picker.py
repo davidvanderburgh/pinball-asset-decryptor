@@ -43,6 +43,10 @@ _MFR_VISUALS = {
     # palette; deep navy reads patriotic without clashing with BOF's
     # brighter blue.
     "ap":       {"color": "#1a237e", "letter": "A"},
+    # Dutch Pinball's logo is a tulip-orange on black; a warm amber-orange
+    # evokes the Dutch national colour and stays distinct from Spooky's
+    # redder Halloween orange.
+    "dp":       {"color": "#ff6f00", "letter": "D"},
 }
 
 
@@ -181,17 +185,19 @@ class ManufacturerPicker(ttk.Frame):
             background=c["button"], foreground=c["fg"])
         name.pack(side=tk.LEFT)
 
-        # Beta badge — small inline pill for plugins with the
-        # ``beta = True`` flag.  Helps set expectations that the
-        # pipeline is actively being tuned and rough edges are
-        # expected.
-        if getattr(mfr, "beta", False):
-            beta_badge = tk.Label(
-                name_row, text="BETA",
+        # Corner badge — a custom ``badge`` (e.g. "EXTRACT ONLY") takes
+        # precedence, otherwise ``beta = True`` shows an amber "BETA" pill.
+        badge_text = (getattr(mfr, "badge", "")
+                      or ("BETA" if getattr(mfr, "beta", False) else ""))
+        badge_widget = None
+        if badge_text:
+            badge_color = "#e6a700" if badge_text == "BETA" else "#546e7a"
+            badge_widget = tk.Label(
+                name_row, text=badge_text,
                 font=(_SANS_FONT, 8, "bold"),
-                foreground="#ffffff", background="#e6a700",
+                foreground="#ffffff", background=badge_color,
                 padx=5, pady=0)
-            beta_badge.pack(side=tk.LEFT, padx=(8, 0))
+            badge_widget.pack(side=tk.LEFT, padx=(8, 0))
 
         n_games = len(mfr.games)
         n_unsup = sum(1 for g in mfr.games if not g.supported)
@@ -220,8 +226,8 @@ class ManufacturerPicker(ttk.Frame):
         # hot zone).
         all_widgets = [card, header, logo, title_block, name_row, name,
                        subtitle, games_box]
-        if getattr(mfr, "beta", False):
-            all_widgets.append(beta_badge)
+        if badge_widget is not None:
+            all_widgets.append(badge_widget)
         game_labels = []
 
         # 3-column layout — wide enough to fit most game names while

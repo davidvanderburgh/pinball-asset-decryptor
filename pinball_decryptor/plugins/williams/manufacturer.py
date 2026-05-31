@@ -25,7 +25,7 @@ class WilliamsManufacturer(Manufacturer):
     # PinMAME runtime-capture pipeline + scripted per-game playthrough
     # are still bringing up — the static extract path is stable but
     # the capture path is actively being tuned per title.
-    beta = True
+    badge = "EXTRACT ONLY"
     capabilities = Capabilities(
         extract=True, write=False, modpack=False,
         apply_delta=False, iso=False,

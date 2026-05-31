@@ -111,6 +111,7 @@ Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\pb\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\spooky\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\bof\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\jjp\__pycache__"
+Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\dp\__pycache__"
 
 [Code]
 function InitializeSetup(): Boolean;

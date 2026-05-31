@@ -2,8 +2,9 @@
 
 One app to extract, view, and modify game assets from pinball machines made
 by **American Pinball**, **Barrels of Fun**, **Chicago Gaming Company**,
-**Jersey Jack Pinball**, **Pinball Brothers**, **Spooky Pinball**, and
-**Williams** (WPC-era) — 70+ games across seven manufacturers.
+**Dutch Pinball**, **Jersey Jack Pinball**, **Pinball Brothers**,
+**Spooky Pinball**, and **Williams** (WPC-era) — 70+ games across eight
+manufacturers.
 
 This is a unified replacement for separate decryptor apps that all shared
 the same Tk GUI shell, queue-based pipeline contract, checksum tracking,
@@ -17,8 +18,8 @@ lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 This project is an independent interoperability utility. It is **not
 affiliated with, endorsed by, or sponsored by** American Pinball, Chicago
 Gaming Company, Planetary Pinball Supply, Bally, Williams, Stern Pinball,
-Jersey Jack Pinball, Pinball Brothers, Spooky Pinball, Barrels of Fun, or
-any other
+Jersey Jack Pinball, Pinball Brothers, Spooky Pinball, Barrels of Fun,
+Dutch Pinball, or any other
 pinball manufacturer, publisher, or rights holder. All trademarks and
 game titles referenced are the property of their respective owners and
 are used here in their nominative/descriptive sense only — to identify
@@ -40,10 +41,14 @@ firmware is not supported by this tool and is **your responsibility to
 avoid** — those activities have separate legal considerations the tool
 does not address.
 
-No warranty. Use entirely at your own risk; flashing a modified `.img`
-to a real pinball machine can render it inoperable until you flash a
-known-good image back. The maintainers accept no liability for damage
-to hardware, voided warranties, or any consequence of using this tool.
+No warranty. Use entirely at your own risk. **Always make a complete,
+working backup before modifying a machine** — a failed, interrupted, or
+incorrect update can leave it unbootable ("bricked"), and without a
+known-good backup image you may be unable to recover it. Flashing a
+modified `.img` or installing a modified update can render a machine
+inoperable until you restore a known-good image. The maintainers accept
+no liability for bricked machines, damaged hardware, lost data, voided
+warranties, or any other consequence of using this tool.
 
 The app shows a short version of this disclaimer in a modal dialog the
 first time you launch it, including a request to **not contact the
@@ -59,6 +64,7 @@ disclose any past modifications. The acceptance is stored in
 | **American Pinball** | 6 (Houdini, Oktoberfest, Hot Wheels, Legends of Valhalla, Galactic Tank Force, Barry-O's BBQ) | `.pkg` (AES-256-CBC encrypted ZIP) | Extract, Write — the P-ROC / pyprocgame game tree ships as an AES-256-CBC ZIP behind an `[8B size][16B IV]` header (the `pkgprocess` container, shared lineage with Spooky). A single **static key** — recovered from `PACKAGE_SIGNING_KEY` in `/usr/bin/pkgprocess` on the Houdini / Oktoberfest / Hot Wheels Clonezilla images — decrypts every title across 2020-2024, so Write re-zips the modified tree and re-encrypts with the same key. Clonezilla `.iso` extraction (partclone ext4) is planned. See [docs/AP_PKG_RE.md](docs/AP_PKG_RE.md). |
 | **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack — native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes them back into Godot-format `.sample`/`.ctex`/`.fontdata` automatically.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss) so you can see exactly what's about to ship before clicking *Build update*.  Write also stamps the package with an **update version date** one day past the installed code (shown in an editable *Update version* field — leave it on *Auto*, or override it to force-install, e.g. to put official code back over a higher-dated mod) so the machine accepts the update instead of logging "no new code". |
 | **Chicago Gaming Company** | 4 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction) | `.img` (raw bootable installer disk image) | Extract, Write, Mod Pack — audio only (WPC remakes: 1300+ DCS `.wav` samples + ROM; Pulp Fiction: 6 JPS sound banks that the plugin auto-decodes into ~1,000 individual `.wav` files you can edit, then repacks back into the bnk on Write). CGC games render all DMD/LCD video in real time, so there are no video files to mod. Optional **Generate callouts.csv** action runs Whisper across the extracted WAVs (skipping non-speech via VAD) so you can search "who says *Excellent!*" instead of opening files blind. Optional **Decode DMD scenes** (experimental, extract-only) decodes the bundled WPC ROM into 1920×480 PNG scenes + MP4 animations under `dmd/` so you can browse the cinematics outside the cabinet. |
+| **Dutch Pinball** | 2 (The Big Lebowski, Alice's Adventures in Wonderland) | TBL: `.zip` (full + delta updates); AAIW: `.img` (Clonezilla auto-installer) | Extract, Write, Apply Delta, Mod Pack — **unencrypted**. **The Big Lebowski**: plain-zip extraction; the LCD's full-colour video ships as a custom `.cdmd` format the plugin decodes to MP4/PNG (audio auto-synced from the paired `.wav`), with an optional dot-matrix (DMD) display-effect shader. Supply a full image plus the delta(s) you need and Extract **auto-merges** them in version order (remapping onto the base version, validated against each delta's compatible-base list); Write rebuilds an installable update labelled one version newer than the merged version — with a fresh `delta` marker — so the machine's USB update accepts it. **Alice's Adventures in Wonderland**: reconstructs the game SSD from the Clonezilla partclone-v2 + zstd image with a pure-Python reader — fast local 7-Zip path (no WSL needed; WSL fallback). Assets are standard `.mp4` / `.mov` / `.wav` / `.png`; an optional toggle converts the game's ProRes `.mov` videos to playable H.264 MP4. |
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` Clonezilla image, or **directly from the game SSD** | Extract, Write, Mod Pack, **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in). |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack |

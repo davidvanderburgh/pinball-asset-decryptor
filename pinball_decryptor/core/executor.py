@@ -33,6 +33,16 @@ class CommandExecutor:
     def stream(self, bash_cmd, timeout=600):
         raise NotImplementedError
 
+    def popen_binary(self, bash_cmd):
+        """Start *bash_cmd* and return a Popen with a **binary** stdout pipe.
+
+        Used to stream large data out of the executor environment (e.g.
+        ``cat`` a partclone image or ``tar`` an asset tree) without staging
+        it on the slow Windows drvfs mount.  Caller must read stdout to
+        completion and then ``wait()``.
+        """
+        raise NotImplementedError
+
     def to_exec_path(self, host_path):
         raise NotImplementedError
 
@@ -85,6 +95,11 @@ class WslExecutor(CommandExecutor):
         finally:
             with self._lock:
                 self._current_proc = None
+
+    def popen_binary(self, bash_cmd):
+        full_cmd = ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        return subprocess.Popen(
+            full_cmd, stdout=subprocess.PIPE, creationflags=_CREATE_FLAGS)
 
     def to_exec_path(self, host_path):
         path = host_path.replace("\\", "/")
@@ -141,6 +156,10 @@ class NativeExecutor(CommandExecutor):
             with self._lock:
                 self._current_proc = None
 
+    def popen_binary(self, bash_cmd):
+        return subprocess.Popen([*self._prefix(), bash_cmd],
+                                stdout=subprocess.PIPE)
+
     def to_exec_path(self, host_path):
         return host_path
 
@@ -195,6 +214,10 @@ class MacExecutor(CommandExecutor):
         finally:
             with self._lock:
                 self._current_proc = None
+
+    def popen_binary(self, bash_cmd):
+        return subprocess.Popen(["bash", "-c", self._wrap(bash_cmd)],
+                                stdout=subprocess.PIPE, env=self._env())
 
     def to_exec_path(self, host_path):
         return host_path

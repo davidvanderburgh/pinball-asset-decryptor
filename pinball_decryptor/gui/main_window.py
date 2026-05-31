@@ -151,6 +151,16 @@ class MainWindow:
         # Tk vars
         self.extract_input_var = tk.StringVar()
         self.extract_output_var = tk.StringVar()
+        # Optional delta updates to merge during Extract (chain_deltas
+        # plugins, e.g. Dutch Pinball).  The list holds the chosen paths;
+        # the StringVar shows a short summary.
+        self.extract_delta_paths = []
+        self.extract_deltas_display_var = tk.StringVar(value="No updates added")
+        # Re-evaluate game-specific Extract controls (DMD shader, delta
+        # merge) when the chosen input changes — a multi-game plugin shows
+        # them for some games (TBL) and not others (AAIW).
+        self.extract_input_var.trace_add(
+            "write", lambda *a: self._on_extract_input_changed())
         self.write_upd_var = tk.StringVar()
         self.write_assets_var = tk.StringVar()
         self.write_output_var = tk.StringVar()
@@ -822,6 +832,29 @@ class MainWindow:
             variable=self.decode_dmd_var)
         self._decode_dmd_check.pack(side=tk.LEFT, padx=(24, 8))
 
+        # Chain-deltas — optional "supply full image + delta(s)" merge.
+        # Packed only when the active manufacturer advertises
+        # ``capabilities.chain_deltas`` (Dutch Pinball).  Extract auto-applies
+        # the added delta updates on top of the full image input above.
+        self._extract_deltas_frame = ttk.LabelFrame(
+            f, text="Optional: updates to merge on top")
+        self._extract_deltas_desc = ttk.Label(
+            self._extract_deltas_frame,
+            text=("Supply a full image as the Input above, then add the delta "
+                  "update(s) needed to reach the version you want — Extract "
+                  "merges them automatically, in version order."),
+            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=620)
+        self._extract_deltas_desc.pack(anchor=tk.W, padx=8, pady=(4, 2))
+        _deltas_row = ttk.Frame(self._extract_deltas_frame)
+        _deltas_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+        ttk.Button(_deltas_row, text="Add updates...",
+                   command=self._browse_extract_deltas).pack(side=tk.LEFT)
+        ttk.Button(_deltas_row, text="Clear",
+                   command=self._clear_extract_deltas).pack(
+            side=tk.LEFT, padx=(6, 0))
+        ttk.Label(_deltas_row, textvariable=self.extract_deltas_display_var,
+                  font=(_SANS_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
+
         btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
         self._extract_btn = ttk.Button(btn_row, text="Extract",
                                        command=self._on_extract)
@@ -1066,7 +1099,7 @@ class MainWindow:
         # tree via .place; the scan code shows/hides it.
         self._write_preview_empty = ttk.Label(
             preview_inner,
-            text="Switch to this tab to scan for modified files",
+            text="Select your modified assets folder above to preview changed files.",
             foreground="#888888",
             anchor=tk.CENTER, justify=tk.CENTER)
         self._write_preview_empty.place(
@@ -1187,16 +1220,11 @@ class MainWindow:
         if text == "Write":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack(fill=tk.X, before=self._progress_bar)
-            # When the Write tab is selected on a Direct-SSD plugin in
-            # SSD mode, auto-scan the assets folder so the preview is
-            # populated by the time the user looks at it.  The scan
-            # itself is no-op when the folder isn't set yet, so this
-            # is safe even pre-Decrypt.
-            mfr = self._current_mfr
-            if (mfr is not None
-                    and mfr.capabilities.direct_ssd
-                    and self.write_input_source_var.get() == "ssd"):
-                self._scan_write_preview()
+            # Auto-scan the assets folder when the Write tab is selected so
+            # the Modified Files Preview is populated by the time the user
+            # looks at it.  _maybe_rescan_write_preview() applies the correct
+            # per-plugin gating and is a no-op when the folder isn't set yet.
+            self._maybe_rescan_write_preview()
         else:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
@@ -1403,12 +1431,11 @@ class MainWindow:
             # The per-mode description is JJP-specific; hide it for
             # plugins whose Write tab is the ISO-build flow.
             self._write_desc.pack_forget()
-            # Modified Files Preview — JJP gets it in SSD mode (handled
-            # in the direct_ssd branch above); BOF gets it always so
-            # modders can see exactly which files they've edited since
-            # Extract before hitting Write.  Other plugins don't show
-            # the tree.
-            if mfr.key == "bof":
+            # Modified Files Preview — shown for every plugin that can
+            # build an update (JJP also gets it in SSD mode, handled in the
+            # direct_ssd branch above) so modders can see exactly which
+            # files they've edited since Extract before hitting Write.
+            if mfr.capabilities.write:
                 self._write_preview_frame.pack(
                     fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
                     before=self._write_filename_lbl)
@@ -1480,6 +1507,7 @@ class MainWindow:
         # plugins they sit under "Basic extract" and track it.
         self._update_transcribe_visibility()
         self._update_decode_dmd_visibility()
+        self._update_chain_deltas_visibility()
 
         # Show/hide apply-delta + install help inside Write tab
         if caps.apply_delta:
@@ -1619,11 +1647,19 @@ class MainWindow:
         """
         if self._current_mfr is None:
             return
-        caps = self._current_mfr.capabilities
-        if not getattr(caps, "decode_dmd", False):
+        # Game-aware: a multi-game plugin (Dutch Pinball) hides this for the
+        # input games it doesn't apply to (AAIW), via decode_dmd_applies().
+        applies = self._current_mfr.decode_dmd_applies(
+            self.extract_input_var.get().strip())
+        if not applies:
             self._decode_dmd_frame.pack_forget()
             self.decode_dmd_var.set(False)
             return
+        # The label is game-specific (CGC decodes a ROM; Dutch Pinball shows
+        # a dot-matrix shader for TBL and a ProRes->MP4 convert for AAIW).
+        self._decode_dmd_check.configure(
+            text=self._current_mfr.decode_dmd_label_for(
+                self.extract_input_var.get().strip()))
         self._decode_dmd_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
 
     def _update_capture_help_text(self):
@@ -1889,6 +1925,55 @@ class MainWindow:
             title="Select input file", filetypes=self._input_filetypes())
         if path:
             self.extract_input_var.set(path)
+
+    def _browse_extract_deltas(self):
+        paths = filedialog.askopenfilenames(
+            title="Select delta update(s) to merge on top",
+            filetypes=self._input_filetypes())
+        for p in paths:
+            if p and p not in self.extract_delta_paths:
+                self.extract_delta_paths.append(p)
+        self._refresh_deltas_display()
+
+    def _clear_extract_deltas(self):
+        self.extract_delta_paths = []
+        self._refresh_deltas_display()
+
+    def _refresh_deltas_display(self):
+        n = len(self.extract_delta_paths)
+        if not n:
+            self.extract_deltas_display_var.set("No updates added")
+            return
+        names = ", ".join(os.path.basename(p) for p in self.extract_delta_paths)
+        self.extract_deltas_display_var.set(
+            f"{n} update(s): {names}" if len(names) <= 70
+            else f"{n} update(s) added")
+
+    def _on_extract_input_changed(self):
+        """Re-run game-specific Extract control visibility when the input
+        path changes (e.g. switching between a TBL .zip and an AAIW .img
+        within the Dutch Pinball plugin)."""
+        if self._current_mfr is None or not hasattr(self, "_decode_dmd_frame"):
+            return
+        self._update_decode_dmd_visibility()
+        self._update_chain_deltas_visibility()
+
+    def _update_chain_deltas_visibility(self):
+        """Show the optional 'updates to merge' picker only for plugins that
+        advertise ``capabilities.chain_deltas`` (Dutch Pinball)."""
+        if self._current_mfr is None:
+            return
+        # Game-aware: hidden for plugin inputs it doesn't apply to (AAIW).
+        if not self._current_mfr.chain_deltas_applies(
+                self.extract_input_var.get().strip()):
+            self._extract_deltas_frame.pack_forget()
+            self.extract_delta_paths = []
+            self._refresh_deltas_display()
+            return
+        self._extract_deltas_desc.configure(
+            text=getattr(self._current_mfr, "chain_deltas_help",
+                         self._extract_deltas_desc.cget("text")))
+        self._extract_deltas_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
 
     # ------------------------------------------------------------------
     # Direct-SSD source toggle + drive picker (caps.direct_ssd plugins)
@@ -2404,7 +2489,8 @@ class MainWindow:
             *self._write_preview_tree.get_children())
         if not assets_path or not os.path.isdir(assets_path):
             self._write_preview_empty.configure(
-                text="Switch to this tab to scan for modified files")
+                text="Select your modified assets folder above to preview "
+                     "changed files.")
             self._write_preview_empty.place(
                 relx=0.5, rely=0.5, anchor=tk.CENTER)
             return
@@ -2553,12 +2639,13 @@ class MainWindow:
         mfr = self._current_mfr
         if mfr is None:
             return
-        # JJP shows the tree only in SSD mode; BOF shows it always.
-        # Other plugins don't have a preview tree at all.
+        # JJP shows the tree only in SSD mode; every other write-capable
+        # plugin shows it always.  Plugins that can't build an update
+        # (e.g. Williams) have no preview tree.
         if mfr.capabilities.direct_ssd:
             if self.write_input_source_var.get() != "ssd":
                 return
-        elif mfr.key != "bof":
+        elif not mfr.capabilities.write:
             return
         # Only scan if the Write tab is the currently-selected tab —
         # otherwise the user can't see the preview anyway.

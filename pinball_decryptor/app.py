@@ -516,6 +516,11 @@ class App:
                     self._current_mfr.capabilities, "decode_dmd", False):
                 extra_kwargs["decode_dmd"] = bool(
                     self.window.decode_dmd_var.get())
+            if getattr(
+                    self._current_mfr.capabilities, "chain_deltas", False):
+                deltas = list(getattr(self.window, "extract_delta_paths", []))
+                if deltas:
+                    extra_kwargs["deltas"] = deltas
             self.pipeline = self._current_mfr.make_extract_pipeline(
                 in_path, output_path,
                 log_cb, phase_cb, progress_cb, chained_done_cb,

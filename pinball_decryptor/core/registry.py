@@ -27,6 +27,7 @@ _PLUGIN_MODULES = [
     "pinball_decryptor.plugins.jjp",
     "pinball_decryptor.plugins.cgc",
     "pinball_decryptor.plugins.williams",
+    "pinball_decryptor.plugins.dp",
 ]
 
 
@@ -93,6 +94,13 @@ class Capabilities:
     # under ``dmd/``.  Default OFF because the render is slow (a few
     # minutes) and the output isn't writable back to the eMMC.
     decode_dmd: bool = False
+    # Chain-deltas-into-extract: surfaces an optional multi-file "updates
+    # to apply on top" picker on the Extract tab.  The user supplies a full
+    # image as the input plus the delta(s) needed; the extract auto-applies
+    # them in version order so the output is a complete, up-to-date asset
+    # set.  When True, app.py passes ``deltas`` (a list of paths) to the
+    # extract factory.  Used by Dutch Pinball (The Big Lebowski).
+    chain_deltas: bool = False
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,21 @@ class Manufacturer(ABC):
     # is empty (no prereqs to verify — e.g. PB's stdlib-only flow).
     prerequisites: Tuple[Prerequisite, ...] = ()
 
+    # Label for the optional "decode DMD" extract checkbox (shown only when
+    # ``capabilities.decode_dmd`` is True).  Plugins override this so the
+    # toggle reads sensibly for their format (CGC decodes a WPC ROM; Dutch
+    # Pinball applies a dot-matrix shader to its colour videos).
+    decode_dmd_label: str = ("Decode DMD scenes to PNG/MP4 "
+                             "(experimental, extract-only)")
+
+    # Description text for the optional "updates to merge on top" picker
+    # (shown only when ``capabilities.chain_deltas`` is True).  Plugins
+    # override this to tell the user exactly which files to download.
+    chain_deltas_help: str = (
+        "Supply a full image as the Input above, then add the delta "
+        "update(s) needed to reach the version you want — Extract merges "
+        "them automatically, in version order.")
+
     # Optional: GitHub repo override.  When None, the core update checker
     # uses :data:`core.config.GITHUB_REPO`.
     update_repo: Optional[str] = None
@@ -160,6 +183,11 @@ class Manufacturer(ABC):
     # development (e.g. capture pipeline emerging from initial
     # bring-up) so users know to expect rough edges.
     beta: bool = False
+
+    # Optional custom corner badge shown on the manufacturer picker card
+    # (e.g. "EXTRACT ONLY").  Takes precedence over the default "BETA" badge
+    # that ``beta = True`` produces.
+    badge: str = ""
 
     @abstractmethod
     def detect(self, path):
@@ -252,6 +280,32 @@ class Manufacturer(ABC):
         overrides this — only DCS-era ROMs have decodable audio.
         """
         return self.capabilities.transcribe
+
+    def decode_dmd_applies(self, input_path) -> bool:
+        """Whether the optional "decode DMD" checkbox applies to *input_path*.
+
+        Default: tied to the static ``decode_dmd`` capability.  Multi-game
+        plugins override this to hide the control for games it doesn't apply
+        to (Dutch Pinball: TBL only, not the AAIW disk image).
+        """
+        return self.capabilities.decode_dmd
+
+    def chain_deltas_applies(self, input_path) -> bool:
+        """Whether the optional "merge updates" picker applies to *input_path*.
+
+        Default: tied to the static ``chain_deltas`` capability.  Overridden
+        by multi-game plugins (Dutch Pinball: TBL only).
+        """
+        return self.capabilities.chain_deltas
+
+    def decode_dmd_label_for(self, input_path) -> str:
+        """Checkbox label for the optional video-processing toggle.
+
+        Default returns the static :attr:`decode_dmd_label`.  Multi-game
+        plugins override this so the toggle reads correctly per input (Dutch
+        Pinball: a dot-matrix shader for TBL, a ProRes->MP4 convert for AAIW).
+        """
+        return self.decode_dmd_label
 
     # ------------------------------------------------------------------
     # Misc UI hints — override if you want non-default phrasing.

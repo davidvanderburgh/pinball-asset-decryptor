@@ -280,3 +280,122 @@ def make_williams_rom_zip(out_path, game_key="fish_tales"):
         for n in info["sound_roms"]:
             zf.writestr(n, b"\x00" * sound_size)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Dutch Pinball — TBL .cdmd video, TBL update .zip, AAIW installer .img,
+# and a partclone v2 image (for the pure-Python reader)
+# ---------------------------------------------------------------------------
+
+def make_cdmd(nframes=2, w=2, h=2):
+    """Build a minimal but format-valid TBL ``.cdmd`` video byte string.
+
+    Header: magic 01 02 15 20 + nframes + canvasW + canvasH, then each
+    frame is x,y,w,h + w*h*4 ARGB bytes (here a full-canvas solid colour).
+    """
+    out = bytearray(b"\x01\x02\x15\x20")
+    out += struct.pack("<3I", nframes, w, h)
+    for i in range(nframes):
+        out += struct.pack("<4I", 0, 0, w, h)
+        # opaque colour that varies per frame: A=0xff, R=i, G=0x40, B=0x80
+        out += bytes([0xff, i & 0xff, 0x40, 0x80]) * (w * h)
+    return bytes(out)
+
+
+def make_tbl_zip(out_path, version="1.00", delta_bases=None, extra_files=None):
+    """Generate a minimal TBL update zip (full, or a delta if delta_bases set).
+
+    Carries a ``<version>/assets/sequences/clip/clip.cdmd`` video plus a
+    sound ``.wav`` so detection and the cdmd-decode pass have real input.
+    *delta_bases* (a list of compatible base versions) writes the
+    ``<version>/delta`` marker that identifies the zip as a delta.
+    *extra_files* maps ``<version>``-relative paths to bytes (used to give a
+    delta a recognisable changed/added file).
+    """
+    files = {
+        f"{version}/start": b"#!/bin/sh\n",
+        f"{version}/assets/sequences/clip/clip.cdmd": make_cdmd(2, 2, 2),
+        f"{version}/assets/sequences/clip/clip.wav": b"RIFFsynthetic-wav",
+        f"{version}/assets/sound/beep.wav": b"RIFFbeep",
+    }
+    if delta_bases:
+        files[f"{version}/delta"] = (",".join(delta_bases)).encode()
+    for rel, data in (extra_files or {}).items():
+        files[f"{version}/{rel}"] = data
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for relpath, data in files.items():
+            zf.writestr(relpath, data)
+    return out_path
+
+
+def make_aaiw_img(out_path, hint_name=True):
+    """Generate a tiny file with an AAIW-shaped MBR (2 parts: FAT + Linux).
+
+    Only the 512-byte MBR matters for ``is_aaiw_img`` detection; the rest
+    is a sparse placeholder so we don't write gigabytes.
+    """
+    mbr = bytearray(512)
+    # Partition 1: FAT (type 0x0c), start LBA 2048, 1024000 sectors.
+    struct.pack_into("<B", mbr, 446 + 4, 0x0c)
+    struct.pack_into("<II", mbr, 446 + 8, 2048, 1024000)
+    # Partition 2: Linux (type 0x83), start LBA 1026048, 4096000 sectors.
+    struct.pack_into("<B", mbr, 446 + 16 + 4, 0x83)
+    struct.pack_into("<II", mbr, 446 + 16 + 8, 1026048, 4096000)
+    mbr[510:512] = b"\x55\xaa"
+    name = out_path
+    with open(name, "wb") as f:
+        f.write(mbr)
+    return out_path
+
+
+def make_partclone_v2(out_path, used_blocks=(0, 2), totalblock=4,
+                      block_size=512, blocks_per_checksum=2):
+    """Build a tiny partclone **image format v2** for the reader round-trip.
+
+    Each used block is filled with a recognisable byte (block index + 1).
+    Returns ``(path, expected_raw_bytes)`` so a test can assert the restore.
+    """
+    used = set(used_blocks)
+    # --- image_desc_v2 header (110 bytes) ---
+    head = bytearray()
+    head += b"partclone-image\x00"                 # magic[16]
+    head += b"0.3.36".ljust(14, b"\x00")           # ptc_version[14]
+    head += b"0002"                                 # version[4]
+    head += struct.pack("<H", 0xC0DE)               # endianess
+    head += b"EXTFS".ljust(16, b"\x00")             # fs[16]
+    head += struct.pack("<4Q", totalblock * block_size, totalblock,
+                        len(used), len(used))        # sizes/usedblocks
+    head += struct.pack("<I", block_size)            # block_size
+    head += struct.pack("<I", 18)                    # feature_size
+    head += struct.pack("<H", 2)                     # image_version
+    head += struct.pack("<H", 64)                    # cpu_bits
+    head += struct.pack("<H", 32)                    # checksum_mode (CRC32)
+    head += struct.pack("<H", 4)                     # checksum_size
+    head += struct.pack("<I", blocks_per_checksum)   # blocks_per_checksum
+    head += bytes([1, 1])                            # reseed, bitmap_mode
+    head += struct.pack("<I", 0)                     # header crc (unverified)
+    assert len(head) == 110, len(head)
+
+    # --- bitmap (1 bit/block, LSB first) + its CRC ---
+    nbytes = (totalblock + 7) // 8
+    bitmap = bytearray(nbytes)
+    for b in used:
+        bitmap[b >> 3] |= 1 << (b & 7)
+    body = bytes(bitmap) + b"\x00\x00\x00\x00"
+
+    # --- data blocks (in block order) with interleaved CRCs ---
+    expected = bytearray(totalblock * block_size)
+    written = 0
+    for blk in range(totalblock):
+        if blk not in used:
+            continue
+        data = bytes([(blk + 1) & 0xff]) * block_size
+        expected[blk * block_size:(blk + 1) * block_size] = data
+        body += data
+        written += 1
+        if written % blocks_per_checksum == 0:
+            body += b"\x00\x00\x00\x00"  # interleaved CRC (unverified)
+
+    with open(out_path, "wb") as f:
+        f.write(head + body)
+    return out_path, bytes(expected)

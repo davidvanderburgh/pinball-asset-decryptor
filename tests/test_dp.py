@@ -312,6 +312,50 @@ def test_tbl_chain_deltas_rejects_incompatible(manufacturers_by_key, tmp_path):
     assert "1.00" in done["msg"] and "1.15" in done["msg"]
 
 
+def test_dp_direct_ssd_wiring(manufacturers_by_key):
+    """Dutch Pinball advertises direct-SSD and builds the SSD pipelines."""
+    dp = manufacturers_by_key["dp"]
+    assert dp.capabilities.direct_ssd is True
+    assert all(isinstance(p, str) for p in dp.direct_ssd_extract_phases)
+    assert all(isinstance(p, str) for p in dp.direct_ssd_write_phases)
+    cbs = (lambda *a, **k: None,) * 4
+    ex = dp.make_direct_ssd_extract_pipeline(r"\\.\PHYSICALDRIVE3", "out", *cbs)
+    wr = dp.make_direct_ssd_write_pipeline(r"\\.\PHYSICALDRIVE3", "assets",
+                                           *cbs, partition_override=2)
+    assert type(ex).__name__ == "DpDirectSsdExtractPipeline"
+    assert type(wr).__name__ == "DpDirectSsdWritePipeline"
+    assert wr.partition_override == 2
+
+
+def test_dp_ssd_subtree_detection():
+    """find_game_subtree spots AAIW's fixed path and TBL's assets dir."""
+    from pinball_decryptor.plugins.dp import ssd
+    from pinball_decryptor.core.executor import CommandError
+
+    class FakeExec:
+        def __init__(self, game):
+            self.game = game
+
+        def run(self, cmd, timeout=None):
+            if "test -d" in cmd and "/opt/assets/alice" in cmd:
+                if self.game == "aaiw":
+                    return ""
+                raise CommandError(cmd, 1, "")
+            if cmd.lstrip().startswith("find "):
+                if self.game == "tbl":
+                    return "/mnt/x/home/lebowski/assets/sequences\n"
+                return ""
+            if "ls " in cmd and ".cdmd" in cmd:
+                if self.game == "tbl":
+                    return ""
+                raise CommandError(cmd, 1, "")
+            raise CommandError(cmd, 1, "")
+
+    assert ssd.find_game_subtree(FakeExec("aaiw"), "/mnt/x") == "/opt/assets/alice"
+    assert ssd.find_game_subtree(FakeExec("tbl"), "/mnt/x") == "/home/lebowski/assets"
+    assert ssd.find_game_subtree(FakeExec("none"), "/mnt/x") is None
+
+
 def test_tbl_apply_delta(manufacturers_by_key, tmp_path):
     dp = manufacturers_by_key["dp"]
     # Extract a base, then overlay a delta that changes one file + adds one.

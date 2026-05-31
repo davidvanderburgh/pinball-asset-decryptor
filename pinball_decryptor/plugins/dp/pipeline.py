@@ -11,7 +11,7 @@ from ...core.checksums import (generate_checksums, md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.tar_utils import format_size
-from . import aaiw, cdmd
+from . import aaiw, cdmd, ssd
 from .formats import detect_game
 from .games import GAME_DB
 
@@ -231,6 +231,102 @@ class AaiwExtractPipeline(BasePipeline):
             f"Files:  {n_ck}\n\n"
             f"Standard .mp4 / .mov / .wav / .png assets — edit in place. "
             f"(Re-imaging the SSD to install mods is not yet supported.)")
+
+
+# ---------------------------------------------------------------------------
+# Direct-SSD Extract / Write (read/write a physically-connected game SSD)
+# ---------------------------------------------------------------------------
+
+class DpDirectSsdExtractPipeline(BasePipeline):
+    """Copy the game asset subtree directly off a connected game SSD."""
+
+    def __init__(self, device_path, output_dir,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 partition_override=None):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.device_path = device_path
+        self.output_dir = output_dir
+        self.partition_override = partition_override
+        self.executor = create_executor()
+
+    def _run(self):
+        self._set_phase(0)  # Mount
+        try:
+            ssd.extract_from_ssd(
+                self.device_path, self.output_dir, self.executor,
+                partition_override=self.partition_override,
+                log_cb=self._log, progress_cb=self._progress,
+                cancel_cb=lambda: self._cancelled)
+        except RuntimeError as e:
+            raise PipelineError("Extract", str(e))
+        except CommandError as e:
+            raise PipelineError("Extract", f"Executor error: {e}")
+        self._check_cancel()
+
+        self._set_phase(1)  # Checksums
+        self._log("Generating baseline checksums...", "info")
+        n_ck = generate_checksums(
+            self.output_dir, log_cb=self._log, progress_cb=self._progress)
+        self._done(True,
+            f"Extracted {n_ck} asset file(s) directly from the game SSD.\n\n"
+            f"Output: {self.output_dir}\n\n"
+            f"Edit files in place, then use Write -> \"Write to SSD\" to apply "
+            f"them. Always keep a backup of the machine first.")
+
+
+class DpDirectSsdWritePipeline(BasePipeline):
+    """Write modified asset files directly back onto a connected game SSD."""
+
+    def __init__(self, device_path, assets_dir,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 partition_override=None):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.device_path = device_path
+        self.assets_dir = assets_dir
+        self.partition_override = partition_override
+        self.executor = create_executor()
+
+    def _run(self):
+        self._set_phase(0)  # Scan
+        self._log("Scanning for modified files...", "info")
+        baseline = read_checksums(self.assets_dir)
+        if not baseline:
+            raise PipelineError("Scan",
+                f"No baseline checksums in:\n  {self.assets_dir}\n\n"
+                f"Run \"Extract from SSD\" first to create them.")
+        changed = []
+        for rel, orig_md5 in baseline.items():
+            abs_path = os.path.join(self.assets_dir, rel)
+            if os.path.isfile(abs_path) and md5_file(abs_path) != orig_md5:
+                changed.append((rel, abs_path))
+        if not changed:
+            self._done(True,
+                "No modified files — the SSD already matches your assets "
+                "folder. Nothing written.")
+            return
+        self._log(f"  {len(changed)} modified file(s):", "info")
+        for rel, _ in sorted(changed)[:25]:
+            self._log(f"    {rel}", "info")
+        if len(changed) > 25:
+            self._log(f"    ... and {len(changed) - 25} more", "info")
+        self._check_cancel()
+
+        self._set_phase(1)  # Mount + Write
+        try:
+            written = ssd.write_to_ssd(
+                self.device_path, changed, self.executor,
+                partition_override=self.partition_override,
+                log_cb=self._log, progress_cb=self._progress,
+                cancel_cb=lambda: self._cancelled)
+        except RuntimeError as e:
+            raise PipelineError("Write", str(e))
+        except CommandError as e:
+            raise PipelineError("Write", f"Executor error: {e}")
+
+        self._done(True,
+            f"Wrote {written} modified file(s) directly to the game SSD.\n\n"
+            f"Reboot the machine to load the changes. If anything misbehaves, "
+            f"restore from your backup.")
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,8 @@ from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from .formats import detect_game
 from .games import GAME_DB
-from .pipeline import (AaiwExtractPipeline, TblExtractPipeline,
+from .pipeline import (AaiwExtractPipeline, DpDirectSsdExtractPipeline,
+                       DpDirectSsdWritePipeline, TblExtractPipeline,
                        TblWritePipeline, apply_delta)
 
 _GAMES = tuple(
@@ -19,8 +20,11 @@ class DutchPinballManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=True,
-        decode_dmd=True, chain_deltas=True,
+        decode_dmd=True, chain_deltas=True, direct_ssd=True,
     )
+    # Direct-SSD: read/write the game's physical SSD without an .img/.zip.
+    direct_ssd_extract_phases = ("Copy from SSD", "Checksums")
+    direct_ssd_write_phases = ("Scan", "Write to SSD")
     input_spec = InputSpec(
         label="Dutch Pinball files",
         extensions=(".zip", ".img"),
@@ -108,6 +112,22 @@ class DutchPinballManufacturer(Manufacturer):
         return TblWritePipeline(
             original_path, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb)
+
+    def make_direct_ssd_extract_pipeline(
+            self, device_path, output_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        return DpDirectSsdExtractPipeline(
+            device_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=partition_override)
+
+    def make_direct_ssd_write_pipeline(
+            self, device_path, assets_dir,
+            log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=None):
+        return DpDirectSsdWritePipeline(
+            device_path, assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            partition_override=partition_override)
 
     def apply_delta(self, assets_dir, delta_path,
                     log_cb=None, progress_cb=None):

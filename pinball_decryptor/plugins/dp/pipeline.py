@@ -155,7 +155,12 @@ class TblExtractPipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(3)
-        merged = (f"\nMerged updates: {' -> '.join([base_version] + applied)}"
+        # base_version can be None when the base zip carries no detectable
+        # version (e.g. a full image) — every other use of it guards for that,
+        # and this summary join must too, or it raises "sequence item 0:
+        # expected str instance, NoneType found" after a successful extract.
+        chain = [base_version or "base image"] + [a for a in applied if a]
+        merged = (f"\nMerged updates: {' -> '.join(chain)}"
                   if applied else "")
         self._done(True,
             f"The Big Lebowski extracted successfully.\n\n"

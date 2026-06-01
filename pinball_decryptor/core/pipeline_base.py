@@ -39,6 +39,16 @@ class BasePipeline:
         except PipelineError as e:
             self._done(False, e.message)
         except Exception as e:
+            # Unexpected (non-PipelineError) failures used to surface only as
+            # a one-line modal with no detail — impossible to diagnose from a
+            # user's screenshot.  Dump the full traceback to the log pane (the
+            # console the user can see + copy) before the terminal modal.
+            try:
+                import traceback
+                self._log(f"Unexpected error: {e}", "error")
+                self._log(traceback.format_exc().rstrip(), "error")
+            except Exception:
+                pass  # logging must never mask the original failure
             self._done(False, f"Unexpected error: {e}")
 
     def _run(self):

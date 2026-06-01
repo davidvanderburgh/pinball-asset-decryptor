@@ -790,7 +790,9 @@ class App:
             log_cb, phase_cb, progress_cb, done_cb,
             **write_kwargs,
         )
-        threading.Thread(target=self.pipeline.run, daemon=True).start()
+        threading.Thread(
+            target=self._run_pipeline_with_audio, args=(assets_dir,),
+            daemon=True).start()
 
     # ------------------------------------------------------------------
     # Direct-SSD write (JJP-only as of v0.6.5)
@@ -863,7 +865,9 @@ class App:
             log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override,
         )
-        threading.Thread(target=self.pipeline.run, daemon=True).start()
+        threading.Thread(
+            target=self._run_pipeline_with_audio, args=(assets_dir,),
+            daemon=True).start()
 
     # ------------------------------------------------------------------
     # Transcribe (CGC opt-in, faster-whisper)
@@ -1091,6 +1095,42 @@ class App:
                     "Import Failed", str(e)))
 
         threading.Thread(target=_run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Replace Audio — auto-applied as part of Write (no manual stage step)
+    # ------------------------------------------------------------------
+
+    def _run_pipeline_with_audio(self, assets_dir):
+        """Worker-thread entry for a Write run: apply any Replace-Audio
+        assignments into the assets folder first, then run the pipeline."""
+        self._stage_pending_audio(assets_dir)
+        self.pipeline.run()
+
+    def _stage_pending_audio(self, assets_dir):
+        """Convert + write the user's assigned replacement tracks over the
+        matching files in *assets_dir* (so the Write pipeline that follows
+        repacks them).  Runs on the write worker thread; logs via the queue.
+        A no-op when nothing is assigned for this folder."""
+        pend = self.window.pending_audio_assignments(assets_dir)
+        if not pend:
+            return
+        slots_by_rel, assignments, trim = pend
+        from .core.audio_slots import stage_replacements
+        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        self.msg_queue.put(LogMsg(
+            f"Applying {len(assignments)} audio replacement(s) before "
+            f"repack...", "info"))
+        try:
+            staged, failures = stage_replacements(
+                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb)
+            self.msg_queue.put(LogMsg(
+                f"Applied {staged} audio replacement(s)."
+                + (f"  {len(failures)} could not be converted (see above)."
+                   if failures else ""),
+                "success" if not failures else "error"))
+        except Exception as e:
+            self.msg_queue.put(LogMsg(
+                f"Audio replacement failed: {e}", "error"))
 
     # ------------------------------------------------------------------
     # Cancel / Done

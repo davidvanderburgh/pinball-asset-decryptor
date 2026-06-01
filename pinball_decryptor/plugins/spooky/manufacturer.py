@@ -33,6 +33,7 @@ class SpookyManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=True,
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="Spooky game files",

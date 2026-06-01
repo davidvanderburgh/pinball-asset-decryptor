@@ -27,6 +27,13 @@ class CGCManufacturer(Manufacturer):
         # decodes scenes/animations/fonts into output_dir/dmd/.
         # Default OFF; output is extract-only (not written back).
         decode_dmd=True,
+        # Replace-Audio tab: WPC remakes (MM/AFM/MB) expose loose .wav;
+        # Pulp Fiction exposes the decoded Wwise <bnk>/ WAVs.  Both are
+        # plain .wav in the extract — Write's _repack_modified_jps_bnks
+        # re-encodes edited bank WAVs back into the .bnk, and loose WAVs
+        # write straight back.  Default whole-tree scan is correct (the
+        # extract-only dmd/ render holds no audio).
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="CGC installer images",

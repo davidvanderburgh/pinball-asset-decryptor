@@ -21,6 +21,7 @@ class DutchPinballManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=True,
         decode_dmd=True, chain_deltas=True, direct_ssd=True,
+        replace_audio=True,
     )
     # Direct-SSD: read/write the game's physical SSD without an .img/.zip.
     direct_ssd_extract_phases = ("Copy from SSD", "Checksums")
@@ -80,6 +81,14 @@ class DutchPinballManufacturer(Manufacturer):
     def chain_deltas_applies(self, input_path):
         # Delta-merging is TBL-only (AAIW ships a full SSD image).
         return self.capabilities.chain_deltas and not self._is_aaiw_input(input_path)
+
+    def audio_length_note(self):
+        # Verified against the assets: each track's only sidecar is a
+        # `volume: X` file — no duration / loop-length metadata anywhere — so
+        # the engine plays the .wav as-is and loops it. Any length works.
+        return ("Dutch Pinball plays tracks at their own length (the engine "
+                "loops them), so no trimming is needed — leave “Trim / "
+                "pad” off to keep your full song.")
 
     def detect(self, path):
         key = detect_game(path)

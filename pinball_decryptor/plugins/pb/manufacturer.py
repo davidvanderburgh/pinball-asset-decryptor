@@ -21,6 +21,7 @@ class PBManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=True, iso=True,
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="PB game files",

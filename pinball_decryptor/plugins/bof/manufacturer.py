@@ -84,6 +84,12 @@ class BOFManufacturer(Manufacturer):
         # Surfaces the "Update version date" control on the Write tab — the
         # game only applies a .fun dated newer than what's installed.
         write_version_date=True,
+        # Replace-Audio tab: BoF audio lives in the Godot PCK as imported
+        # .sample/.oggvorbisstr binaries.  Extract writes editable .wav/.ogg
+        # copies under pck/_EDITABLE ASSETS/; Write inverse-converts edits
+        # there back into the PCK.  audio_slot_dirs() restricts the scan to
+        # that folder so the dot-prefixed import cache never shows up.
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="Barrels of Fun game files",
@@ -134,6 +140,28 @@ class BOFManufacturer(Manufacturer):
             return None
         info = GAME_DB[key]
         return Game(key=key, display=info["display"], manufacturer_key="bof")
+
+    def audio_slot_dirs(self, assets_dir):
+        """Restrict the Replace-Audio scan to the ``_EDITABLE ASSETS``
+        folder(s) — the only audio Write re-imports into the PCK.  Files
+        anywhere else (the .godot import cache, raw pck resources) would be
+        dead-ends if staged, so they're kept out of the slot list."""
+        import os
+        from .source_converter import EDITABLE_DIR_NAME
+        roots = []
+        for dirpath, dirnames, _files in os.walk(assets_dir):
+            if EDITABLE_DIR_NAME in dirnames:
+                roots.append(os.path.join(dirpath, EDITABLE_DIR_NAME))
+        return roots or None
+
+    def audio_slot_exts(self, assets_dir):
+        """Only surface ``.wav`` slots.  The editable-folder re-import
+        (inverse_converter, used for `_EDITABLE ASSETS/`) encodes ``.wav`` ->
+        ``.sample`` but has no ``.ogg`` -> ``.oggvorbisstr`` encoder yet, so a
+        staged ``.ogg`` would silently vanish at Write — better not to offer
+        it.  (The pipeline's ``_ogg_to_oggvorbisstr`` only runs for loose
+        source files with ``.import`` sidecars, not the editable folder.)"""
+        return (".wav",)
 
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb):

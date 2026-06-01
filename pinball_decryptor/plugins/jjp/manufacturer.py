@@ -174,6 +174,7 @@ class JJPManufacturer(Manufacturer):
         # standalone pipeline's extract_graphics / extract_sounds /
         # full_dump knobs.
         asset_filters=True,
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",
@@ -215,6 +216,12 @@ class JJPManufacturer(Manufacturer):
                      reason="Audio processing for Write pipeline",
                      install_hint="apt-get install ffmpeg (in WSL)"),
     )
+
+    def audio_length_note(self):
+        return ("Jersey Jack automatically matches every track to its original "
+                "slot length on Write — a longer replacement is trimmed to fit "
+                "and a shorter one padded with silence, regardless of the "
+                "“Trim / pad” box.")
 
     def detect(self, path):
         if not path.lower().endswith(".iso"):

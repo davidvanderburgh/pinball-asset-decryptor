@@ -19,6 +19,7 @@ class AmericanPinballManufacturer(Manufacturer):
     games = _GAMES
     capabilities = Capabilities(
         extract=True, write=True, modpack=False, apply_delta=False, iso=False,
+        replace_audio=True,
     )
     input_spec = InputSpec(
         label="American Pinball game files",

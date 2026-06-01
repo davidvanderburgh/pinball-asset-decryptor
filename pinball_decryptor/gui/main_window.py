@@ -129,10 +129,12 @@ class MainWindow:
         # (incl. Spooky's 14-game list) without scrolling on a typical
         # 1080p display.  Height bumped in v0.7.11 from 940 → 1060 so
         # the macOS FDA banner doesn't push the log frame below the
-        # viewport on the Extract / Write tabs.  minsize bumped to
-        # match — when smaller, the scrollable mfr-view (added v0.7.11)
-        # lets the user scroll the whole page so nothing is unreachable.
-        root.geometry("820x1060")
+        # viewport on the Extract / Write tabs; bumped again to 1200 so the
+        # Replace-Audio tab's preview player (spectrogram + transport) fits
+        # without the mfr-view scrollbar.  minsize stays small — when the
+        # window is shorter, the scrollable mfr-view lets the user reach
+        # everything anyway.
+        root.geometry("820x1200")
         root.minsize(720, 700)
 
         if sys.platform == "win32":
@@ -164,6 +166,40 @@ class MainWindow:
         self.write_upd_var = tk.StringVar()
         self.write_assets_var = tk.StringVar()
         self.write_output_var = tk.StringVar()
+        # Replace-Audio tab state (capabilities.replace_audio plugins).
+        # The tab scans the assets folder for .wav/.ogg slots and lets the
+        # user assign a replacement track per slot; staging writes the
+        # converted replacements over the originals so Write repacks them.
+        self.audio_search_var = tk.StringVar()
+        self.audio_sort_var = tk.StringVar(value="Name")
+        # Off by default: most users replacing *music* want their whole
+        # track, not one clipped to the original slot's length.  Games that
+        # require exact-length slots (JJP/Spooky) already trim/pad in their
+        # own Write step regardless of this toggle.
+        self.audio_trim_var = tk.BooleanVar(value=False)
+        self.audio_status_var = tk.StringVar(value="")
+        self._audio_slots = []           # list[AudioSlot] from last scan
+        self._audio_slots_by_rel = {}    # rel_path -> AudioSlot
+        self._audio_assignments = {}     # rel_path -> replacement file path
+        self._audio_scan_id = 0          # bump-counter to drop stale scans
+        self._audio_scan_dir = ""        # folder the current slots came from
+        self._audio_play_proc = None     # ffplay preview handle, if any
+        # Preview strip (seekable spectrogram) state.
+        self._audio_preview_path = None  # file currently loaded in the strip
+        self._audio_preview_dur = 0.0    # its duration (s)
+        self._audio_preview_pos = 0.0    # playhead position (s)
+        self._audio_preview_playing = False
+        self._audio_preview_start_pos = 0.0  # ffplay -ss offset in flight
+        self._audio_preview_start_t = 0.0    # monotonic clock at playback start
+        self._audio_spec_img = None      # PhotoImage ref (must stay alive)
+        self._audio_spec_render_id = 0   # bump to drop stale async renders
+        self._audio_tick_job = None      # after() id for the position timer
+        self._audio_select_job = None    # debounce: render seek bar on select
+        self._audio_current_rel = None   # the slot loaded in the preview player
+        self.audio_search_var.trace_add(
+            "write", lambda *a: self._refresh_audio_list())
+        self.audio_sort_var.trace_add(
+            "write", lambda *a: self._refresh_audio_list())
         # Williams-only: "Use PinMAME runtime capture" toggle on the
         # Extract tab.  When ON, the Extract button kicks off the
         # libpinmame-driven capture pipeline (composed cinematics +
@@ -447,14 +483,17 @@ class MainWindow:
         self._notebook.pack(fill=tk.X, expand=False, padx=10, pady=(8, 0))
 
         self._tab_extract = ttk.Frame(self._notebook)
+        self._tab_audio = ttk.Frame(self._notebook)
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
 
         self._notebook.add(self._tab_extract, text="  Extract  ")
+        self._notebook.add(self._tab_audio, text="  Replace Audio  ")
         self._notebook.add(self._tab_write, text="  Write  ")
         self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
 
         self._build_extract_tab()
+        self._build_audio_tab()
         self._build_write_tab()
         self._build_modpack_tab()
 
@@ -1179,6 +1218,770 @@ class MainWindow:
                    command=self._on_import).pack(
             anchor=tk.W, padx=8, pady=(2, 6))
 
+    # ------------------------------------------------------------------
+    # Replace Audio tab (capabilities.replace_audio plugins)
+    # ------------------------------------------------------------------
+
+    def _build_audio_tab(self):
+        """Build the 'Replace Audio' tab: a searchable list of the audio
+        files in the extracted assets folder, each a slot the user can
+        assign + preview a replacement track for.  Staging converts the
+        replacements to each slot's native format and writes them over the
+        originals so the normal Write step repacks them."""
+        f = self._tab_audio
+        pad = {"padx": 10, "pady": 4}
+
+        ttk.Label(
+            f,
+            text="Swap a game's music / sound files without copy-pasting and "
+                 "renaming. Your replacement can be almost any audio format "
+                 "(mp3, wav, ogg, flac, m4a, …) — it doesn't need to match the "
+                 "original; it's auto-converted to the original track's format "
+                 "for you. Pick your extracted folder, assign a track to a slot, "
+                 "then build the update on the Write tab.",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+
+        # ffmpeg-missing banner.  Same-format swaps (.wav→.wav) work without
+        # ffmpeg, but converting other formats / matching sample-rate needs
+        # it.  Pack-managed by _refresh_audio_ffmpeg_warning(); positioned
+        # before the assets row.
+        self._audio_ffmpeg_warn = ttk.Label(
+            f,
+            text="⚠ ffmpeg not found — you can still swap files already in the "
+                 "game's format (.wav→.wav, .ogg→.ogg), but converting other "
+                 "formats (mp3, flac, …) or matching sample rate needs ffmpeg. "
+                 "Install it with “Install Missing” above the tabs.",
+            foreground="#d04040", font=(_SANS_FONT, 9),
+            wraplength=720, justify=tk.LEFT)
+
+        # Assets folder row (shared with the Write / Mod Pack tabs).
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        self._audio_assets_row = row
+        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(row, text="Browse...",
+                   command=self._browse_write_assets).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Button(row, text="Scan",
+                   command=self._scan_audio_slots_async).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(f, text="(the folder Extract produced — shared with the "
+                          "Write tab)",
+                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
+
+        # Search + sort toolbar.
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
+        ttk.Entry(tools, textvariable=self.audio_search_var, width=24).pack(
+            side=tk.LEFT, padx=(4, 12))
+        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
+        ttk.Combobox(tools, textvariable=self.audio_sort_var, width=12,
+                     state="readonly",
+                     values=("Name", "Longest first", "Folder")).pack(
+            side=tk.LEFT, padx=(4, 0))
+        self._audio_status_lbl = ttk.Label(
+            tools, textvariable=self.audio_status_var,
+            font=(_SANS_FONT, 9))
+        self._audio_status_lbl.pack(side=tk.RIGHT)
+
+        # Slot list.
+        list_frame = ttk.Frame(f)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        self._audio_tree = ttk.Treeview(
+            list_frame, columns=("len", "fmt", "rep"),
+            height=12, selectmode="browse")
+        self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
+        self._audio_tree.heading("len", text="Length", anchor=tk.W)
+        self._audio_tree.heading("fmt", text="Format", anchor=tk.W)
+        self._audio_tree.heading("rep", text="Replacement", anchor=tk.W)
+        self._audio_tree.column("#0", width=330, minwidth=180)
+        self._audio_tree.column("len", width=60, minwidth=50, anchor=tk.W)
+        self._audio_tree.column("fmt", width=150, minwidth=90)
+        self._audio_tree.column("rep", width=220, minwidth=120)
+        audio_scroll = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self._audio_tree.yview)
+        self._audio_tree.configure(yscrollcommand=audio_scroll.set)
+        audio_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._audio_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Double-click a row → play its original (and show the seek bar).
+        self._audio_tree.bind("<Double-1>", self._audio_on_tree_double)
+        # Click in the Replacement column → open the file picker (the column
+        # acts as a per-row "Choose…" button).
+        self._audio_tree.bind("<Button-1>", self._audio_on_tree_click, add="+")
+        # Right-click → context menu (replace / play / clear).  Button-2 +
+        # Control-click cover macOS.
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self._audio_tree.bind(seq, self._audio_on_tree_right)
+        # Selecting a row loads its original into the seek-bar strip (no
+        # autoplay), debounced so arrowing through the list doesn't thrash.
+        self._audio_tree.bind("<<TreeviewSelect>>", self._audio_on_tree_select)
+
+        self._audio_empty = ttk.Label(
+            list_frame,
+            text="Pick your extracted assets folder above, then click Scan.",
+            foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
+        self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # --- Preview player: a media-player-style panel with the spectrogram
+        # seek bar and the transport controls (play/pause, stop, time, and an
+        # A/B Original ↔ Replacement source switch) all colocated. ---
+        player = ttk.LabelFrame(f, text=" Preview ")
+        player.pack(fill=tk.X, padx=10, pady=(4, 2))
+
+        # Spectrogram = the seek bar.  Click or drag anywhere to seek; the
+        # playhead tracks playback.  Rendered by ffmpeg, shown via Pillow.
+        self._audio_spec_canvas = tk.Canvas(
+            player, height=90, highlightthickness=1, bd=0, cursor="hand2")
+        self._audio_spec_canvas.pack(fill=tk.X, padx=6, pady=(6, 2))
+        self._audio_spec_canvas.bind("<Button-1>", self._audio_seek_click)
+        self._audio_spec_canvas.bind("<B1-Motion>", self._audio_seek_click)
+
+        transport = ttk.Frame(player)
+        transport.pack(fill=tk.X, padx=6, pady=(2, 6))
+        # Borderless, same-family icons drawn on a Canvas (play/pause triangle
+        # ↔ two bars, stop square) so they're crisp, uniform, and have no
+        # button box around them.  Coloured + sized in _draw_audio_icon.
+        _IB = dict(width=26, height=26, highlightthickness=0, bd=0,
+                   cursor="hand2", takefocus=0)
+        self._audio_play_canvas = tk.Canvas(transport, **_IB)
+        self._audio_play_canvas.pack(side=tk.LEFT)
+        self._audio_play_canvas.bind(
+            "<Button-1>", lambda _e: self._audio_toggle_play())
+        self._audio_stop_canvas = tk.Canvas(transport, **_IB)
+        self._audio_stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
+        self._audio_stop_canvas.bind(
+            "<Button-1>", lambda _e: self._audio_stop_to_start())
+        self.audio_time_var = tk.StringVar(value="0:00 / 0:00")
+        ttk.Label(transport, textvariable=self.audio_time_var,
+                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
+
+        # A/B source switch — flip between the original and your replacement
+        # to compare them in the same player.  Replacement is disabled until
+        # the selected slot has one assigned.
+        self.audio_source_var = tk.StringVar(value="orig")
+        srcbox = ttk.Frame(transport); srcbox.pack(side=tk.RIGHT)
+        ttk.Label(srcbox, text="Source:").pack(side=tk.LEFT, padx=(0, 4))
+        self._audio_src_orig = ttk.Radiobutton(
+            srcbox, text="Original", value="orig",
+            variable=self.audio_source_var,
+            command=self._audio_on_source_change)
+        self._audio_src_orig.pack(side=tk.LEFT)
+        self._audio_src_rep = ttk.Radiobutton(
+            srcbox, text="Replacement", value="rep", state=tk.DISABLED,
+            variable=self.audio_source_var,
+            command=self._audio_on_source_change)
+        self._audio_src_rep.pack(side=tk.LEFT, padx=(4, 0))
+
+        # Length-matching option + per-manufacturer guidance note.
+        ttk.Checkbutton(
+            f, text="Trim / pad replacements to the original slot length",
+            variable=self.audio_trim_var).pack(anchor=tk.W, padx=12, pady=(6, 0))
+        self._audio_length_note_lbl = ttk.Label(
+            f, text="", font=(_SANS_FONT, 8, "italic"),
+            foreground="#888888", wraplength=720, justify=tk.LEFT)
+        self._audio_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+
+        # No explicit "stage" step: the replacements you assign are applied
+        # (converted + written into the assets folder) automatically when you
+        # build the update on the Write tab.
+        ttk.Label(
+            f,
+            text="Assigned replacements are applied automatically when you "
+                 "build the update on the Write tab — no extra step.",
+            font=(_SANS_FONT, 9), foreground="#888888",
+            wraplength=720, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(8, 8))
+
+        self._refresh_audio_ffmpeg_warning()
+
+    def _refresh_audio_ffmpeg_warning(self):
+        """Show the ffmpeg-missing banner only when ffmpeg can't be found.
+
+        Re-probes on each tab visit (the cache is cleared first) so installing
+        ffmpeg mid-session via 'Install Missing' clears the banner next time
+        the user opens the tab — no app restart needed."""
+        warn = getattr(self, "_audio_ffmpeg_warn", None)
+        if warn is None:
+            return
+        from ..core import audio as _audio
+        _audio._ffmpeg_path = None  # force a fresh probe, not the cached result
+        if _audio.find_ffmpeg():
+            warn.pack_forget()
+        elif not warn.winfo_ismapped():
+            warn.pack(fill=tk.X, padx=12, pady=(0, 4),
+                      before=self._audio_assets_row)
+
+    # ---- Replace Audio: scanning -------------------------------------
+
+    def _scan_audio_slots_async(self):
+        """Scan the assets folder for audio slots on a worker thread, then
+        repopulate the list.  Stale scans are dropped via a bump-counter."""
+        import threading
+        from ..core.audio_slots import scan_audio_slots
+
+        assets_path = (self.write_assets_var.get() or "").strip()
+        self._audio_scan_id += 1
+        scan_id = self._audio_scan_id
+
+        if not assets_path or not os.path.isdir(assets_path):
+            self._audio_slots = []
+            self._audio_slots_by_rel = {}
+            self._refresh_audio_list()
+            self._audio_empty.configure(
+                text="Pick your extracted assets folder above, then click Scan.")
+            self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+
+        self._audio_empty.configure(text="Scanning for audio files…")
+        self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # Let the plugin narrow the scan to its real audio edit surface
+        # (CGC: whole tree; BoF: only _EDITABLE ASSETS/).  Default None
+        # scans everything.  Computed in the worker since it walks the tree.
+        mfr = self._current_mfr
+
+        def _work():
+            try:
+                roots = mfr.audio_slot_dirs(assets_path) if mfr else None
+            except Exception:
+                roots = None
+            try:
+                exts = mfr.audio_slot_exts(assets_path) if mfr else None
+            except Exception:
+                exts = None
+            try:
+                slots = scan_audio_slots(assets_path, roots=roots, exts=exts)
+            except Exception:
+                slots = []
+            if self._audio_scan_id != scan_id:
+                return
+            self._tk_root().after(
+                0, self._populate_audio_after_scan,
+                slots, scan_id, assets_path)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _populate_audio_after_scan(self, slots, scan_id, scan_dir):
+        """Main-thread: store scan results and refresh the list."""
+        if self._audio_scan_id != scan_id:
+            return
+        self._audio_slots = slots
+        self._audio_slots_by_rel = {s.rel_path: s for s in slots}
+        # A new folder invalidates any assignments aimed at the old one;
+        # keep assignments whose slot still exists (re-scan of same folder).
+        if scan_dir != self._audio_scan_dir:
+            self._audio_assignments = {}
+        else:
+            self._audio_assignments = {
+                rel: rep for rel, rep in self._audio_assignments.items()
+                if rel in self._audio_slots_by_rel}
+        self._audio_scan_dir = scan_dir
+        self._refresh_audio_list()
+
+    def _refresh_audio_list(self):
+        """Apply the search filter + sort and repopulate the slot tree."""
+        tree = getattr(self, "_audio_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+
+        query = (self.audio_search_var.get() or "").strip().lower()
+        slots = [s for s in self._audio_slots
+                 if not query or query in s.rel_path.lower()]
+        sort = self.audio_sort_var.get()
+        if sort == "Longest first":
+            slots.sort(key=lambda s: s.duration, reverse=True)
+        elif sort == "Folder":
+            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
+        else:
+            slots.sort(key=lambda s: s.rel_path.lower())
+
+        for s in slots:
+            rep = self._audio_assignments.get(s.rel_path)
+            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
+                        values=(s.duration_str(), s.format_summary(), rep_disp),
+                        tags=("assigned",) if rep else ())
+
+        total = len(self._audio_slots)
+        assigned = len(self._audio_assignments)
+        if total == 0:
+            self.audio_status_var.set("")
+            self._audio_empty.configure(
+                text="No .wav / .ogg audio found in this folder.")
+            self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        else:
+            shown = len(slots)
+            extra = f"  ({shown} shown)" if shown != total else ""
+            self.audio_status_var.set(
+                f"{assigned} of {total} slots assigned{extra}")
+            self._audio_empty.place_forget()
+
+    def _maybe_rescan_audio(self):
+        """Auto-scan when the Replace Audio tab becomes visible and the
+        folder has changed since the last scan."""
+        if self._current_mfr is None:
+            return
+        if not getattr(self._current_mfr.capabilities, "replace_audio", False):
+            return
+        assets_path = (self.write_assets_var.get() or "").strip()
+        if assets_path and assets_path != self._audio_scan_dir:
+            self._scan_audio_slots_async()
+
+    # ---- Replace Audio: per-slot actions -----------------------------
+
+    def _audio_selected_rel(self):
+        sel = self._audio_tree.selection() if hasattr(self, "_audio_tree") else ()
+        return sel[0] if sel else None
+
+    def _audio_assign_selected(self):
+        rel = self._audio_selected_rel()
+        if rel is None:
+            messagebox.showinfo(
+                "No Slot Selected",
+                "Select a track in the list first, then choose a replacement.")
+            return
+        self._audio_assign_rel(rel)
+
+    def _audio_assign_rel(self, rel):
+        """Open the replacement picker for *rel* and record the assignment."""
+        if not rel or rel not in self._audio_slots_by_rel:
+            return
+        path = filedialog.askopenfilename(
+            title=f"Choose a replacement for {rel}",
+            filetypes=[("Audio files",
+                        "*.wav *.ogg *.mp3 *.flac *.m4a *.aac *.opus "
+                        "*.wma *.aiff *.aif"),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        self._audio_assignments[rel] = path
+        self._refresh_audio_list()
+        if rel == self._audio_current_rel:
+            self._audio_update_source_radio()  # enable the Replacement toggle
+        try:
+            self._audio_tree.selection_set(rel)
+            self._audio_tree.see(rel)
+        except tk.TclError:
+            pass
+
+    # ---- Replace Audio: table interactions ---------------------------
+
+    def _cancel_audio_select_job(self):
+        if self._audio_select_job is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_select_job)
+            except Exception:
+                pass
+            self._audio_select_job = None
+
+    def _audio_on_tree_select(self, _event=None):
+        # Debounce: render the selected original's seek-bar strip after a
+        # short idle, so arrowing through the list doesn't fire ffmpeg per row.
+        self._cancel_audio_select_job()
+        self._audio_select_job = self._tk_root().after(
+            250, self._audio_preview_selected)
+
+    def _audio_preview_selected(self):
+        self._audio_select_job = None
+        if self._audio_preview_playing:
+            return  # don't yank a track that's currently playing
+        rel = self._audio_selected_rel()
+        if rel is None or rel == self._audio_current_rel:
+            return
+        self.audio_source_var.set("orig")
+        self._audio_load_track(rel, autoplay=False)  # shows seek bar, no play
+
+    def _audio_on_tree_double(self, _event=None):
+        self._cancel_audio_select_job()
+        self._audio_play_original()
+
+    def _audio_on_tree_click(self, event):
+        # A click in the Replacement column opens the picker (the column is a
+        # per-row "Choose…" button).  Other columns fall through to normal
+        # selection.
+        tree = self._audio_tree
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)  # columns=(len,fmt,rep) -> #1,#2,#3
+        if row and col == "#3":
+            tree.selection_set(row)
+            self._cancel_audio_select_job()
+            self._audio_assign_rel(row)
+
+    def _audio_on_tree_right(self, event):
+        tree = self._audio_tree
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        menu = tk.Menu(tree, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="▶  Play original",
+                         command=self._audio_play_original)
+        menu.add_command(label="Choose replacement…",
+                         command=lambda r=row: self._audio_assign_rel(r))
+        if self._audio_assignments.get(row):
+            menu.add_command(label="▶  Play replacement",
+                             command=self._audio_play_replacement)
+            menu.add_separator()
+            menu.add_command(label="Clear replacement",
+                             command=self._audio_clear_selected)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _audio_clear_selected(self):
+        rel = self._audio_selected_rel()
+        if rel is not None and rel in self._audio_assignments:
+            del self._audio_assignments[rel]
+            self._refresh_audio_list()
+            if rel == self._audio_current_rel:
+                self._audio_update_source_radio()
+            try:
+                self._audio_tree.selection_set(rel)
+            except tk.TclError:
+                pass
+
+    def _audio_play_original(self):
+        rel = self._audio_selected_rel()
+        if rel is None:
+            messagebox.showinfo("No Slot Selected",
+                                "Select a track to preview.")
+            return
+        self.audio_source_var.set("orig")
+        self._audio_load_track(rel, autoplay=True)
+
+    def _audio_play_replacement(self):
+        rel = self._audio_selected_rel()
+        if not (rel and self._audio_assignments.get(rel)):
+            messagebox.showinfo(
+                "No Replacement",
+                "Assign a replacement to this slot first.")
+            return
+        self.audio_source_var.set("rep")
+        self._audio_load_track(rel, autoplay=True)
+
+    # ---- Replace Audio: preview player (transport + seek) ------------
+
+    def _audio_load_track(self, rel, autoplay=False):
+        """Make *rel* the active track in the preview player and load the
+        currently-selected source (original or replacement) into it."""
+        if rel not in self._audio_slots_by_rel:
+            return
+        self._audio_current_rel = rel
+        self._audio_update_source_radio()
+        self._audio_load_current_source(autoplay=autoplay)
+
+    def _audio_current_source_path(self):
+        rel = self._audio_current_rel
+        if rel is None:
+            return None
+        if self.audio_source_var.get() == "rep":
+            return self._audio_assignments.get(rel)
+        slot = self._audio_slots_by_rel.get(rel)
+        return slot.abs_path if slot else None
+
+    def _audio_load_current_source(self, autoplay=False):
+        self._audio_stop_playback()
+        path = self._audio_current_source_path()
+        if not path or not os.path.isfile(path):
+            self._audio_preview_path = None
+            self._audio_preview_dur = 0.0
+            self._audio_preview_pos = 0.0
+            self._audio_spec_render_id += 1
+            if hasattr(self, "_audio_spec_canvas"):
+                self._audio_spec_canvas.delete("all")
+            self._audio_update_time()
+            return
+        self._audio_load_preview(path)
+        if autoplay:
+            self._audio_start_playback(0.0)
+
+    def _audio_on_source_change(self):
+        # Flip A/B between original and replacement; keep playing if we were,
+        # so the comparison is immediate.
+        self._audio_load_current_source(autoplay=self._audio_preview_playing)
+
+    def _audio_update_source_radio(self):
+        rel = self._audio_current_rel
+        has_rep = bool(rel and self._audio_assignments.get(rel))
+        if hasattr(self, "_audio_src_rep"):
+            self._audio_src_rep.configure(
+                state=(tk.NORMAL if has_rep else tk.DISABLED))
+        if not has_rep and self.audio_source_var.get() == "rep":
+            self.audio_source_var.set("orig")
+
+    def _audio_toggle_play(self):
+        """Play/pause.  ffplay (-nodisp) can't pause in place, so pause =
+        stop + remember position; resume = restart ffplay at that position."""
+        if self._audio_preview_path is None:
+            rel = self._audio_selected_rel()
+            if rel is not None:
+                self._audio_load_track(rel, autoplay=True)
+            return
+        if self._audio_preview_playing:
+            self._audio_stop_playback()  # pause, keeps position
+        else:
+            if (self._audio_preview_dur > 0
+                    and self._audio_preview_pos
+                    >= self._audio_preview_dur - 0.05):
+                self._audio_preview_pos = 0.0  # replay from start
+            self._audio_start_playback(self._audio_preview_pos)
+
+    def _audio_stop_to_start(self):
+        self._audio_stop_playback()
+        self._audio_preview_pos = 0.0
+        self._audio_draw_playhead()
+
+    def _audio_set_play_btn(self, playing):
+        if hasattr(self, "_audio_play_canvas"):
+            self._draw_audio_icon(self._audio_play_canvas,
+                                  "pause" if playing else "play")
+
+    def _draw_audio_icon(self, canvas, kind):
+        """Draw a crisp, borderless transport icon (play triangle / pause two
+        bars / stop square) filled with the theme foreground — one visual
+        family, identical sizing."""
+        canvas.delete("all")
+        c = THEMES.get(self._current_theme, {})
+        fg = c.get("fg", "#dddddd")
+        try:
+            s = int(canvas.cget("width"))
+        except (tk.TclError, ValueError):
+            s = 26
+        m = s * 0.27  # margin so all three icons share the same bounding box
+        if kind == "play":
+            canvas.create_polygon(m, m, m, s - m, s - m, s / 2.0,
+                                  fill=fg, outline=fg)
+        elif kind == "pause":
+            bw, gap = s * 0.17, s * 0.11
+            canvas.create_rectangle(s / 2 - gap - bw, m, s / 2 - gap, s - m,
+                                    fill=fg, outline=fg)
+            canvas.create_rectangle(s / 2 + gap, m, s / 2 + gap + bw, s - m,
+                                    fill=fg, outline=fg)
+        elif kind == "stop":
+            canvas.create_rectangle(m, m, s - m, s - m, fill=fg, outline=fg)
+
+    def _audio_load_preview(self, path):
+        from ..core import audio as _audio
+        self._audio_preview_path = path
+        self._audio_preview_dur = _audio.probe_duration(path) or 0.0
+        self._audio_preview_pos = 0.0
+        self._render_audio_spectrogram(path)
+        self._audio_update_time()
+
+    def _render_audio_spectrogram(self, path):
+        """Render the full-track spectrogram on a worker thread, then draw
+        it.  Stale renders (folder/track changed) are dropped via a counter."""
+        canvas = getattr(self, "_audio_spec_canvas", None)
+        if canvas is None:
+            return
+        self._audio_spec_render_id += 1
+        rid = self._audio_spec_render_id
+        w = max(200, canvas.winfo_width())
+        h = 90  # fixed canvas height (widget is created height=90)
+        canvas.delete("all")
+        if not _HAVE_PIL:
+            canvas.create_text(w // 2, h // 2, fill="#888888",
+                               text="(install Pillow to see the spectrogram)")
+            return
+        canvas.create_text(w // 2, h // 2, fill="#888888",
+                           text="rendering preview…", tags=("hint",))
+
+        import threading
+        from ..core import audio as _audio
+
+        def _work():
+            png = _audio.render_spectrogram_png(path, w, h)
+            if self._audio_spec_render_id != rid:
+                return
+            self._tk_root().after(
+                0, self._show_audio_spectrogram, png, rid, w, h)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_audio_spectrogram(self, png, rid, w, h):
+        if self._audio_spec_render_id != rid:
+            return
+        canvas = self._audio_spec_canvas
+        canvas.delete("all")
+        if png:
+            try:
+                import io
+                from PIL import Image, ImageTk
+                img = Image.open(io.BytesIO(png)).convert("RGB")
+                self._audio_spec_img = ImageTk.PhotoImage(img)
+                canvas.create_image(0, 0, anchor=tk.NW,
+                                    image=self._audio_spec_img, tags=("spec",))
+            except Exception:
+                self._audio_spec_img = None
+        else:
+            canvas.create_text(w // 2, h // 2, fill="#888888",
+                               text="(preview needs ffmpeg)")
+        self._audio_draw_playhead()
+
+    def _audio_start_playback(self, pos):
+        import time
+        from ..core import audio as _audio
+        _audio.stop_audio(self._audio_play_proc)
+        proc = _audio.play_audio_file(self._audio_preview_path, start=pos)
+        if proc is None:
+            self._audio_preview_playing = False
+            self._audio_set_play_btn(False)
+            messagebox.showwarning(
+                "Can't Preview",
+                "Audio preview needs ffplay (part of ffmpeg) on your PATH.\n\n"
+                "Install ffmpeg to hear tracks before staging.")
+            return
+        self._audio_play_proc = proc
+        self._audio_preview_start_pos = pos
+        self._audio_preview_start_t = time.monotonic()
+        self._audio_preview_pos = pos
+        self._audio_preview_playing = True
+        self._audio_set_play_btn(True)
+        self._audio_schedule_tick()
+
+    def _audio_schedule_tick(self):
+        if self._audio_tick_job is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_tick_job)
+            except Exception:
+                pass
+        self._audio_tick_job = self._tk_root().after(60, self._audio_tick)
+
+    def _audio_tick(self):
+        import time
+        self._audio_tick_job = None
+        if not self._audio_preview_playing:
+            return
+        proc = self._audio_play_proc
+        self._audio_preview_pos = (
+            self._audio_preview_start_pos
+            + (time.monotonic() - self._audio_preview_start_t))
+        ended = (proc is None or proc.poll() is not None
+                 or (self._audio_preview_dur > 0
+                     and self._audio_preview_pos >= self._audio_preview_dur))
+        if ended:
+            self._audio_preview_playing = False
+            self._audio_preview_pos = 0.0  # reset so ▶ replays from the start
+            self._audio_set_play_btn(False)
+            self._audio_draw_playhead()
+            return
+        self._audio_draw_playhead()
+        self._audio_schedule_tick()
+
+    def _audio_draw_playhead(self):
+        canvas = getattr(self, "_audio_spec_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("playhead")
+        dur = self._audio_preview_dur
+        if dur > 0 and self._audio_preview_path:
+            w = max(1, canvas.winfo_width())
+            h = canvas.winfo_height() or 90
+            x = int((self._audio_preview_pos / dur) * w)
+            x = max(0, min(w, x))
+            canvas.create_line(x, 0, x, h, fill="#ffffff", width=1,
+                               tags=("playhead",))
+        self._audio_update_time()
+
+    def _audio_update_time(self):
+        def _fmt(s):
+            s = max(0, int(s))
+            return f"{s // 60}:{s % 60:02d}"
+        if self._audio_preview_path and self._audio_preview_dur > 0:
+            self.audio_time_var.set(
+                f"{_fmt(self._audio_preview_pos)} / "
+                f"{_fmt(self._audio_preview_dur)}")
+        else:
+            self.audio_time_var.set("0:00 / 0:00")
+
+    def _audio_seek_click(self, event):
+        canvas = self._audio_spec_canvas
+        if not self._audio_preview_path or self._audio_preview_dur <= 0:
+            return
+        w = max(1, canvas.winfo_width())
+        frac = max(0.0, min(1.0, event.x / w))
+        self._audio_preview_pos = frac * self._audio_preview_dur
+        if self._audio_preview_playing:
+            self._audio_start_playback(self._audio_preview_pos)  # live re-seek
+        else:
+            self._audio_draw_playhead()
+
+    def _audio_stop_playback(self):
+        """Stop playback (keeps the strip + playhead where it landed)."""
+        from ..core import audio as _audio
+        _audio.stop_audio(self._audio_play_proc)
+        self._audio_play_proc = None
+        self._audio_preview_playing = False
+        if self._audio_tick_job is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_tick_job)
+            except Exception:
+                pass
+            self._audio_tick_job = None
+        self._audio_set_play_btn(False)
+        self._audio_draw_playhead()
+
+    def _audio_clear_preview(self):
+        """Reset the preview player entirely (used on manufacturer switch)."""
+        self._cancel_audio_select_job()
+        self._audio_stop_playback()
+        self._audio_current_rel = None
+        self._audio_preview_path = None
+        self._audio_preview_dur = 0.0
+        self._audio_preview_pos = 0.0
+        self._audio_spec_render_id += 1  # drop any in-flight render
+        self._audio_spec_img = None
+        if hasattr(self, "audio_source_var"):
+            self.audio_source_var.set("orig")
+        if hasattr(self, "_audio_src_rep"):
+            self._audio_src_rep.configure(state=tk.DISABLED)
+        if hasattr(self, "_audio_spec_canvas"):
+            self._audio_spec_canvas.delete("all")
+        self._audio_update_time()
+
+    # ---- Replace Audio: pending assignments (applied at Write time) --
+
+    def pending_audio_assignments(self, assets_dir):
+        """Return ``(slots_by_rel, assignments, trim)`` of replacements the
+        user assigned for *assets_dir*, or ``None`` when there's nothing to
+        apply.  Called by the Write flow to auto-stage edits just before it
+        repacks — there is no manual "stage" step.
+
+        Guarded so it only fires when the folder being written is the same one
+        the assignments were made against (so stale assignments from a
+        different extract can't leak in)."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(
+                mfr.capabilities, "replace_audio", False):
+            return None
+        if not assets_dir:
+            return None
+        scanned = self._audio_scan_dir or ""
+        if (os.path.normcase(os.path.normpath(assets_dir))
+                != os.path.normcase(os.path.normpath(scanned))):
+            return None
+        assignments = {rel: rep for rel, rep in self._audio_assignments.items()
+                       if rep and rel in self._audio_slots_by_rel}
+        if not assignments:
+            return None
+        return (dict(self._audio_slots_by_rel), assignments,
+                bool(self.audio_trim_var.get()))
+
     def _build_phase_steps(self, parent, phases, mode):
         labels = []
         for name in phases:
@@ -1225,6 +2028,13 @@ class MainWindow:
             # looks at it.  _maybe_rescan_write_preview() applies the correct
             # per-plugin gating and is a no-op when the folder isn't set yet.
             self._maybe_rescan_write_preview()
+        elif text == "Replace Audio":
+            # The phase indicators don't apply to the audio tab — staging is
+            # a single quick step, not a multi-phase pipeline.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._refresh_audio_ffmpeg_warning()
+            self._maybe_rescan_audio()
         else:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
@@ -1355,8 +2165,20 @@ class MainWindow:
                  else "Original:")
 
         # Show/hide tabs by capability.
+        self._configure_tab("Replace Audio", caps.replace_audio)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
+        # New mfr: clear any audio slots/assignments from the previous one
+        # so a stale list can't leak across a manufacturer switch.
+        self._audio_slots = []
+        self._audio_slots_by_rel = {}
+        self._audio_assignments = {}
+        self._audio_scan_dir = ""
+        self._audio_clear_preview()
+        self._refresh_audio_list()
+        if hasattr(self, "_audio_length_note_lbl"):
+            self._audio_length_note_lbl.configure(
+                text=mfr.audio_length_note() or "")
 
         # BOF-only Extract callout — pack just below the Extract tab's
         # warning label so users see it before they hit Extract.  Other
@@ -2081,10 +2903,8 @@ class MainWindow:
                 self._write_desc.pack(
                     anchor=tk.W, padx=10, pady=(2, 6),
                     before=self._write_filename_lbl)
-                # Modified Files Preview only makes sense for SSD
-                # mode — the ISO-build flow has its own scan +
-                # convert phases the user watches via the phase
-                # indicator.
+                # Modified Files Preview (shown in both ISO and SSD
+                # modes; the ISO branch packs its own copy below).
                 self._write_preview_frame.pack(
                     fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
                     before=self._write_filename_lbl)
@@ -2119,6 +2939,13 @@ class MainWindow:
                     self._write_output_row_ref.pack(
                         fill=tk.X, padx=10, pady=4,
                         before=self._write_filename_lbl)
+                # Modified Files Preview in ISO mode too — useful for
+                # confirming hand-edited or Replace-Audio-staged files
+                # registered as changes before building the update.
+                self._write_preview_frame.pack(
+                    fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
+                    before=self._write_filename_lbl)
+                self._scan_write_preview()
             # Either branch may have changed the phase indicator
             # shape — refresh both extract and write phases.
             self._refresh_extract_phases()
@@ -2639,13 +3466,10 @@ class MainWindow:
         mfr = self._current_mfr
         if mfr is None:
             return
-        # JJP shows the tree only in SSD mode; every other write-capable
-        # plugin shows it always.  Plugins that can't build an update
-        # (e.g. Williams) have no preview tree.
-        if mfr.capabilities.direct_ssd:
-            if self.write_input_source_var.get() != "ssd":
-                return
-        elif not mfr.capabilities.write:
+        # The preview now shows for every write-capable plugin in both
+        # ISO and SSD modes.  Plugins that can't build an update (e.g.
+        # Williams) have no preview tree.
+        if not mfr.capabilities.write:
             return
         # Only scan if the Write tab is the currently-selected tab —
         # otherwise the user can't see the preview anyway.
@@ -3431,6 +4255,18 @@ class MainWindow:
         if hasattr(self, "_write_preview_tree"):
             self._write_preview_tree.tag_configure(
                 "modified", foreground=c["link"])
+        if hasattr(self, "_audio_tree"):
+            self._audio_tree.tag_configure("assigned", foreground=c["success"])
+        if hasattr(self, "_audio_spec_canvas"):
+            self._audio_spec_canvas.configure(
+                background=c["field_bg"], highlightbackground=c["border"])
+        if hasattr(self, "_audio_play_canvas"):
+            for cv in (self._audio_play_canvas, self._audio_stop_canvas):
+                cv.configure(background=c["bg"])
+            self._draw_audio_icon(
+                self._audio_play_canvas,
+                "pause" if self._audio_preview_playing else "play")
+            self._draw_audio_icon(self._audio_stop_canvas, "stop")
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

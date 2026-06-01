@@ -101,6 +101,16 @@ class Capabilities:
     # set.  When True, app.py passes ``deltas`` (a list of paths) to the
     # extract factory.  Used by Dutch Pinball (The Big Lebowski).
     chain_deltas: bool = False
+    # Replace-audio path: surfaces a "Replace Audio" tab that scans the
+    # extracted assets folder for loose .wav/.ogg files, lists them as
+    # named slots, and lets the user assign + preview a replacement track
+    # per slot.  Assignments are format-matched to the original and staged
+    # over the extracted files so the normal Write pipeline repacks them.
+    # Set True only for plugins whose audio is loose .wav/.ogg in the
+    # extract output (JJP, Spooky, American Pinball, Pinball Brothers,
+    # Dutch Pinball) — not CGC (indexed sound banks) or BOF (Godot
+    # .sample/.oggvorbisstr).
+    replace_audio: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,6 +279,43 @@ class Manufacturer(ABC):
         raise NotImplementedError(
             f"{self.display} does not implement a Direct-SSD "
             f"write pipeline.")
+
+    def audio_slot_dirs(self, assets_dir):
+        """Subdirectories of *assets_dir* that hold replaceable audio slots.
+
+        Drives the Replace-Audio tab's scan when ``capabilities.replace_audio``
+        is set.  Return ``None`` (the default) to scan the whole extract for
+        loose .wav/.ogg — correct for JJP / Spooky / AP / PB / DP.  Plugins
+        whose audio lives in a specific edit surface override this so the slot
+        list shows only files Write can repack (CGC: the decoded ``<bnk>/``
+        dirs; BoF: the ``_EDITABLE ASSETS`` folder), not unrelated decode
+        derivatives elsewhere in the tree.
+        """
+        return None
+
+    def audio_slot_exts(self, assets_dir):
+        """Audio extensions the Replace-Audio tab should surface as slots.
+
+        Return ``None`` (default) to use both ``.wav`` and ``.ogg``.  Override
+        to narrow it when a plugin's Write can only repack some formats — BoF
+        returns ``(".wav",)`` because its editable-folder re-import handles
+        ``.wav`` but not ``.ogg`` yet, so surfacing ``.ogg`` slots would invite
+        dead-end edits that silently vanish at Write.
+        """
+        return None
+
+    def audio_length_note(self) -> str:
+        """One-line guidance for the Replace-Audio tab: does a replacement
+        need to match the original track's length?
+
+        Default: length is flexible (most engines play the file as-is), so
+        trimming usually isn't needed.  Plugins whose Write *forces* a length
+        match (JJP) or whose engine is explicitly length-agnostic (Dutch
+        Pinball) override this with a more specific message.
+        """
+        return ("Replacements play at their own length — trimming usually "
+                "isn't needed. Tick “Trim / pad” below only if a "
+                "track sounds cut off or mistimed in-game.")
 
     def audio_export_supported(self, path) -> bool:
         """Whether extracting *path* yields audio assets the

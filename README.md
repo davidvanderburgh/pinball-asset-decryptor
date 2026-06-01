@@ -385,8 +385,10 @@ pinball_decryptor/
 ├── gui/
 │   └── main_window.py            # manufacturer-aware window
 ├── plugins/
+│   ├── ap/                       # American Pinball (AES-256 .pkg -> zip)
 │   ├── bof/                      # Barrels of Fun (gpg + GDRE Tools)
 │   ├── cgc/                      # Chicago Gaming Company (nested .img -> ext4)
+│   ├── dp/                       # Dutch Pinball (TBL zip deltas + AAIW Clonezilla)
 │   ├── jjp/                      # Jersey Jack Pinball (+ private Docker)
 │   ├── pb/                       # Pinball Brothers
 │   ├── spooky/                   # Spooky Pinball (+ private Docker)
@@ -394,6 +396,10 @@ pinball_decryptor/
 ├── app.py                        # controller — wires GUI ↔ plugins
 └── icon.{ico,png}
 ```
+
+For a deep dive on any one plugin — its container/encryption format, extract and
+write pipelines, audio handling, detection, and gotchas — see the per-manufacturer
+architecture docs in [docs/architecture/](docs/architecture/README.md).
 
 Each plugin subclasses [`Manufacturer`](pinball_decryptor/core/registry.py) and
 sets a few attributes — `key`, `display`, `games`, `capabilities`,

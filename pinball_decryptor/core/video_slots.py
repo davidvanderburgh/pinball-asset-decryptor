@@ -37,8 +37,9 @@ class VideoSlot:
     rel_path: str                  # forward-slash path relative to assets_dir
     abs_path: str
     ext: str                       # ".mp4" / ".mov" / ".webm" / ".ogv" / …
-    info: Optional[VideoInfo]      # None if ffprobe couldn't read it
+    info: Optional[VideoInfo]      # None if not yet probed / ffprobe failed
     size: int
+    probed: bool = False           # True once ffprobe has been attempted
 
     @property
     def folder(self) -> str:
@@ -78,7 +79,8 @@ class VideoSlot:
         return f"{m}:{s:02d}"
 
 
-def scan_video_slots(assets_dir: str, roots=None, exts=None) -> List[VideoSlot]:
+def scan_video_slots(assets_dir: str, roots=None, exts=None,
+                     probe: bool = True) -> List[VideoSlot]:
     """Walk *assets_dir* and return a VideoSlot for every video file, sorted
     by relative path.  Hidden dot-folders and our own ``*.stage.*`` temp files
     are skipped.
@@ -90,6 +92,16 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None) -> List[VideoSlot]:
     *exts* optionally narrows which video extensions count as slots (default
     :data:`core.video.VIDEO_EXTS`).  Spooky passes ``(".ogv",)`` so only its
     repackable Godot videos surface, not Unity ``.webm`` pulled from bundles.
+
+    *probe* controls whether ffprobe metadata (duration / resolution / codec)
+    is read during the walk.  Probing spawns one ffprobe process per file,
+    which is far too slow for a folder of hundreds of clips, so the GUI passes
+    ``probe=False`` to list slots instantly and fills metadata in afterwards on
+    a background thread (each unprobed slot has ``probed=False`` until then).
+    Custom-backend files
+    (``.cdmd``) are *always* probed — their info is pure-Python (a 16-byte
+    header read) and also tells us whether the file is a real clip vs. a font
+    glyph / single-frame still that should be dropped.
     """
     slots: List[VideoSlot] = []
     if not assets_dir or not os.path.isdir(assets_dir):
@@ -109,13 +121,17 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None) -> List[VideoSlot]:
                 if abs_path in seen:
                     continue
                 seen.add(abs_path)
-                info = detect_video_info(abs_path)
-                # Custom-backend formats (.cdmd) reuse one extension for both
-                # video clips and non-video data (font glyphs, single-frame
-                # stills); the backend returns None for the latter, so drop
-                # them rather than offering a dead slot.
-                if info is None and backend_for(abs_path) is not None:
-                    continue
+                is_backend = backend_for(abs_path) is not None
+                if is_backend:
+                    # Cheap pure-Python info; also filters non-video .cdmd
+                    # (font glyphs, single-frame stills) — drop those.
+                    info = detect_video_info(abs_path)
+                    if info is None:
+                        continue
+                elif probe:
+                    info = detect_video_info(abs_path)
+                else:
+                    info = None
                 rel = os.path.relpath(abs_path, assets_dir).replace(os.sep, "/")
                 try:
                     size = os.path.getsize(abs_path)
@@ -123,7 +139,7 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None) -> List[VideoSlot]:
                     size = 0
                 slots.append(VideoSlot(
                     rel_path=rel, abs_path=abs_path, ext=ext,
-                    info=info, size=size))
+                    info=info, size=size, probed=is_backend or probe))
 
     slots.sort(key=lambda s: s.rel_path.lower())
     return slots

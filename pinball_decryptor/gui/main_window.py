@@ -2244,7 +2244,11 @@ class MainWindow:
             except Exception:
                 exts = None
             try:
-                slots = scan_video_slots(assets_path, roots=roots, exts=exts)
+                # Fast walk: list slots instantly; ffprobe metadata is filled
+                # in afterwards on a background pass (a folder can hold
+                # hundreds of clips and one ffprobe per file would hang).
+                slots = scan_video_slots(assets_path, roots=roots, exts=exts,
+                                         probe=False)
             except Exception:
                 slots = []
             if self._video_scan_id != scan_id:
@@ -2269,6 +2273,64 @@ class MainWindow:
                 if rel in self._video_slots_by_rel}
         self._video_scan_dir = scan_dir
         self._refresh_video_list()
+        # Now fill in duration / resolution / codec on a background thread so
+        # the list is usable immediately even with hundreds of clips.
+        self._probe_video_metadata_async(scan_id)
+
+    def _probe_video_metadata_async(self, scan_id):
+        """Probe ffprobe metadata for the just-scanned slots on a small thread
+        pool, updating each row as its info arrives.  Backend (.cdmd) slots are
+        already populated by the scan, so only ffmpeg-format slots are probed.
+        Stale passes (a newer scan started) drop out via the scan-id."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from ..core.video import backend_for, detect_video_info
+
+        pending = [s for s in self._video_slots
+                   if s.info is None and backend_for(s.abs_path) is None]
+        if not pending:
+            return
+
+        def _coordinator():
+            workers = min(8, (os.cpu_count() or 4))
+            try:
+                with ThreadPoolExecutor(max_workers=workers) as ex:
+                    futs = {ex.submit(detect_video_info, s.abs_path): s
+                            for s in pending}
+                    for fut in as_completed(futs):
+                        if self._video_scan_id != scan_id:
+                            for f in futs:
+                                f.cancel()
+                            return
+                        slot = futs[fut]
+                        try:
+                            info = fut.result()
+                        except Exception:
+                            info = None
+                        self._tk_root().after(
+                            0, self._apply_video_meta,
+                            scan_id, slot.rel_path, info)
+            except Exception:
+                pass
+
+        threading.Thread(target=_coordinator, daemon=True).start()
+
+    def _apply_video_meta(self, scan_id, rel, info):
+        """Main-thread: store a probed slot's metadata and update its row."""
+        if self._video_scan_id != scan_id:
+            return
+        slot = self._video_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        slot.info = info
+        slot.probed = True
+        tree = getattr(self, "_video_tree", None)
+        if tree is None or not tree.exists(rel):
+            return
+        rep = self._video_assignments.get(rel)
+        rep_disp = os.path.basename(rep) if rep else "Choose…"
+        tree.item(rel, values=(slot.duration_str(), slot.resolution_str(),
+                               slot.format_summary(), rep_disp))
 
     def _refresh_video_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
@@ -2291,9 +2353,12 @@ class MainWindow:
         for s in slots:
             rep = self._video_assignments.get(s.rel_path)
             rep_disp = os.path.basename(rep) if rep else "Choose…"
+            if s.info is None and not s.probed:
+                length, res = "…", "…"  # metadata still loading
+            else:
+                length, res = s.duration_str(), s.resolution_str()
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(s.duration_str(), s.resolution_str(),
-                                s.format_summary(), rep_disp),
+                        values=(length, res, s.format_summary(), rep_disp),
                         tags=("assigned",) if rep else ())
 
         total = len(self._video_slots)
@@ -2309,6 +2374,16 @@ class MainWindow:
             self.video_status_var.set(
                 f"{assigned} of {total} slots assigned{extra}")
             self._video_empty.place_forget()
+
+    def _default_assets_from_extract(self):
+        """Default the (shared) assets folder to the Extract tab's output when
+        it's still empty — the common case is extract then immediately swap
+        audio/video, so they shouldn't have to re-pick the same folder."""
+        if (self.write_assets_var.get() or "").strip():
+            return
+        out = (self.extract_output_var.get() or "").strip()
+        if out and os.path.isdir(out):
+            self.write_assets_var.set(out)
 
     def _maybe_rescan_video(self):
         """Auto-scan when the Replace Video tab becomes visible and the folder
@@ -2970,11 +3045,13 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._refresh_audio_ffmpeg_warning()
+            self._default_assets_from_extract()
             self._maybe_rescan_audio()
         elif text == "Replace Video":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._refresh_video_ffmpeg_warning()
+            self._default_assets_from_extract()
             self._maybe_rescan_video()
         else:
             # Leaving the video tab: don't let an embedded clip keep playing
@@ -4472,6 +4549,24 @@ class MainWindow:
                 if use_parent:
                     path = parent_with_checksums
         self.write_assets_var.set(path)
+        # Picking a folder is a strong signal the user wants to work with it —
+        # kick off the scan for whichever replace tab is open instead of making
+        # them click Scan separately.
+        self._autoscan_active_assets_tab()
+
+    def _autoscan_active_assets_tab(self):
+        """Scan the assets folder for whichever tab is currently visible."""
+        try:
+            idx = self._notebook.index(self._notebook.select())
+            text = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
+        except Exception:
+            return
+        if text == "Replace Video":
+            self._scan_video_slots_async()
+        elif text == "Replace Audio":
+            self._scan_audio_slots_async()
+        elif text == "Write":
+            self._maybe_rescan_write_preview()
 
     def _find_checksums_ancestor(self, path, max_levels=3):
         """Walk up from *path* looking for a directory that contains

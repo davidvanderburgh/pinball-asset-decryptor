@@ -20,6 +20,10 @@ class AmericanPinballManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=False, apply_delta=False, iso=False,
         replace_audio=True,
+        # AP re-zips the whole game tree on Write with no extension filter, so
+        # any loose video clip (LCD attract / mode footage) round-trips the
+        # same way audio does.  The tab self-empties for games that ship none.
+        replace_video=True,
     )
     input_spec = InputSpec(
         label="American Pinball game files",

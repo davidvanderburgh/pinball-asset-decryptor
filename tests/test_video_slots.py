@@ -69,6 +69,16 @@ def test_scan_exts_restricts(tmp_path):
     assert [s.rel_path for s in ogv_only] == ["a.ogv"]
 
 
+def test_probe_false_defers_metadata(tmp_path):
+    # Fast scan: no ffprobe per file (so a folder of hundreds of clips lists
+    # instantly).  Slots come back with info=None and probed=False.
+    (tmp_path / "a.mp4").write_bytes(b"\x00")
+    (tmp_path / "b.webm").write_bytes(b"\x00")
+    slots = scan_video_slots(str(tmp_path), probe=False)
+    assert len(slots) == 2
+    assert all(s.info is None and s.probed is False for s in slots)
+
+
 def test_duration_property_handles_missing_info():
     slot = VideoSlot(rel_path="x.mp4", abs_path="x.mp4", ext=".mp4",
                      info=None, size=0)
@@ -94,12 +104,14 @@ def test_longest_first_sort_uses_duration():
 # ---- capability + hook wiring --------------------------------------------
 
 def test_replace_video_capability_flags(manufacturers_by_key):
-    # Enabled where Write actually round-trips loose video.
-    for key in ("jjp", "spooky", "dp"):
+    # Enabled where Write round-trips loose files generically (JJP/Spooky/DP
+    # ship video today; AP/PB repack any file the same way audio does, so the
+    # tab lights up if a game ships a clip and self-empties otherwise).
+    for key in ("jjp", "spooky", "dp", "ap", "pb"):
         assert manufacturers_by_key[key].capabilities.replace_video is True
-    # Disabled where it would be a dead-end (no inverse encoder / real-time
-    # render / no video assets).
-    for key in ("bof", "cgc", "ap", "pb"):
+    # Disabled where it would be a dead-end: BOF has no .ogv->.ctex encoder;
+    # CGC renders all video in real time (no loose video files to replace).
+    for key in ("bof", "cgc"):
         assert manufacturers_by_key[key].capabilities.replace_video is False
 
 

@@ -22,6 +22,10 @@ class PBManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=True, iso=True,
         replace_audio=True,
+        # PB re-archives the tar member-by-member with no extension filter, so
+        # a loose video clip round-trips like audio does.  The tab self-empties
+        # for games that ship none.
+        replace_video=True,
     )
     input_spec = InputSpec(
         label="PB game files",

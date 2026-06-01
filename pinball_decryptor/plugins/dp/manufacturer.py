@@ -22,6 +22,10 @@ class DutchPinballManufacturer(Manufacturer):
         extract=True, write=True, modpack=True, apply_delta=True,
         decode_dmd=True, chain_deltas=True, direct_ssd=True,
         replace_audio=True,
+        # AAIW ships loose .mp4 / .mov (ProRes 4444 with alpha) that the
+        # Direct-SSD write repacks in place.  TBL's videos are .cdmd with no
+        # inverse encoder, so video_slot_dirs() hides its decoded derivatives.
+        replace_video=True,
     )
     # Direct-SSD: read/write the game's physical SSD without an .img/.zip.
     direct_ssd_extract_phases = ("Copy from SSD", "Checksums")
@@ -89,6 +93,41 @@ class DutchPinballManufacturer(Manufacturer):
         return ("Dutch Pinball plays tracks at their own length (the engine "
                 "loops them), so no trimming is needed — leave “Trim / "
                 "pad” off to keep your full song.")
+
+    def video_slot_dirs(self, assets_dir):
+        # TBL's only video-extension files are the decoded, non-repackable
+        # .mp4s under _DECODED VIDEOS (its real videos are .cdmd, which have
+        # no inverse encoder).  Walk every subfolder EXCEPT that one, so a TBL
+        # extract surfaces no editable video while AAIW (loose .mp4/.mov under
+        # its filesystem tree) scans normally.
+        import os
+        if not assets_dir or not os.path.isdir(assets_dir):
+            return None
+        try:
+            from .pipeline import DECODED_DIR
+        except ImportError:
+            DECODED_DIR = "_DECODED VIDEOS"
+        roots = [os.path.join(assets_dir, d) for d in os.listdir(assets_dir)
+                 if d != DECODED_DIR
+                 and os.path.isdir(os.path.join(assets_dir, d))]
+        return roots or None
+
+    def video_slot_exts(self, assets_dir):
+        # Add The Big Lebowski's native .cdmd colour-DMD clips to the standard
+        # video set so they're replaceable (re-encoded back into .cdmd via the
+        # registered backend).  AAIW has no .cdmd, so this is harmless there;
+        # non-video .cdmd (font glyphs, single-frame stills) are filtered out
+        # by the scan because the backend reports them as not-a-video.
+        from ...core.video import VIDEO_EXTS
+        return VIDEO_EXTS + (".cdmd",)
+
+    def video_length_note(self):
+        return ("Dutch Pinball plays clips at their own length, so trimming "
+                "usually isn't needed. Big Lebowski .cdmd clips keep the "
+                "original's frame count so they stay in sync with their "
+                "sound; Alice in Wonderland's .mov clips are ProRes 4444 with "
+                "transparency — that alpha channel is kept when your "
+                "replacement is re-encoded.")
 
     def detect(self, path):
         key = detect_game(path)

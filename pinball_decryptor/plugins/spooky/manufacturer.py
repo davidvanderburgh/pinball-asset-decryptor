@@ -34,6 +34,11 @@ class SpookyManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=True,
         replace_audio=True,
+        # Godot games ship loose .ogv videos that repack as-is (the same
+        # loose-file path Replace-Audio already uses).  Unity .webm is pulled
+        # out of bundles and can't be written back, so video_slot_exts()
+        # narrows the scan to .ogv only.
+        replace_video=True,
     )
     input_spec = InputSpec(
         label="Spooky game files",
@@ -68,6 +73,12 @@ class SpookyManufacturer(Manufacturer):
                      reason="zstd-compressed Clonezilla images (BJ, LT)",
                      install_hint="apt-get install zstd python3-zstandard (in WSL)"),
     )
+
+    def video_slot_exts(self, assets_dir):
+        # Only .ogv (Godot, copied as-is on extract) round-trips through Write;
+        # Unity .webm comes out of bundles and can't be repacked, so it stays
+        # off the Replace-Video list.
+        return (".ogv",)
 
     def detect(self, path):
         gf = _detect_game(path)

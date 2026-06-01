@@ -1097,13 +1097,15 @@ class App:
         threading.Thread(target=_run, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # Replace Audio — auto-applied as part of Write (no manual stage step)
+    # Replace Audio / Video — auto-applied as part of Write (no manual step)
     # ------------------------------------------------------------------
 
     def _run_pipeline_with_audio(self, assets_dir):
-        """Worker-thread entry for a Write run: apply any Replace-Audio
-        assignments into the assets folder first, then run the pipeline."""
+        """Worker-thread entry for a Write run: apply any Replace-Audio and
+        Replace-Video assignments into the assets folder first, then run the
+        pipeline (which repacks the now-changed files)."""
         self._stage_pending_audio(assets_dir)
+        self._stage_pending_video(assets_dir)
         self.pipeline.run()
 
     def _stage_pending_audio(self, assets_dir):
@@ -1131,6 +1133,32 @@ class App:
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Audio replacement failed: {e}", "error"))
+
+    def _stage_pending_video(self, assets_dir):
+        """Re-encode + write the user's assigned replacement clips over the
+        matching files in *assets_dir* (so the Write pipeline that follows
+        repacks them).  Runs on the write worker thread; logs via the queue.
+        A no-op when nothing is assigned for this folder."""
+        pend = self.window.pending_video_assignments(assets_dir)
+        if not pend:
+            return
+        slots_by_rel, assignments, trim = pend
+        from .core.video_slots import stage_replacements
+        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        self.msg_queue.put(LogMsg(
+            f"Applying {len(assignments)} video replacement(s) before "
+            f"repack...", "info"))
+        try:
+            staged, failures = stage_replacements(
+                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb)
+            self.msg_queue.put(LogMsg(
+                f"Applied {staged} video replacement(s)."
+                + (f"  {len(failures)} could not be converted (see above)."
+                   if failures else ""),
+                "success" if not failures else "error"))
+        except Exception as e:
+            self.msg_queue.put(LogMsg(
+                f"Video replacement failed: {e}", "error"))
 
     # ------------------------------------------------------------------
     # Cancel / Done

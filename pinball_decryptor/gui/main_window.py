@@ -200,6 +200,45 @@ class MainWindow:
             "write", lambda *a: self._refresh_audio_list())
         self.audio_sort_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
+        # Replace-Video tab state (capabilities.replace_video plugins).
+        # Mirrors the audio tab, but the preview is an embedded player: a
+        # decode thread streams raw frames from ffmpeg to a canvas while
+        # ffplay carries the sound, both seeked together.
+        self.video_search_var = tk.StringVar()
+        self.video_sort_var = tk.StringVar(value="Name")
+        self.video_trim_var = tk.BooleanVar(value=False)
+        self.video_status_var = tk.StringVar(value="")
+        self._video_slots = []           # list[VideoSlot] from last scan
+        self._video_slots_by_rel = {}    # rel_path -> VideoSlot
+        self._video_assignments = {}     # rel_path -> replacement file path
+        self._video_scan_id = 0          # bump-counter to drop stale scans
+        self._video_scan_dir = ""        # folder the current slots came from
+        # Embedded preview-player state.
+        self._video_preview_path = None  # file currently loaded in the player
+        self._video_preview_info = None  # its VideoInfo (dims / fps / alpha)
+        self._video_preview_dur = 0.0    # duration (s)
+        self._video_preview_pos = 0.0    # playhead position (s)
+        self._video_preview_playing = False
+        self._video_preview_start_pos = 0.0  # decode/audio -ss offset in flight
+        self._video_preview_start_t = 0.0    # monotonic clock at playback start
+        self._video_audio_proc = None    # ffplay handle carrying the sound
+        self._video_decode_proc = None   # ffmpeg raw-frame stream handle
+        self._video_decode_thread = None
+        self._video_stop_event = None    # signals the decode thread to exit
+        self._video_frame_q = None       # queue of (idx, rgb_bytes) frames
+        self._video_session = 0          # bump to invalidate a play session
+        self._video_render_id = 0        # bump to drop stale single-frame renders
+        self._video_frame_img = None     # PhotoImage ref (must stay alive)
+        self._video_disp_w = 320         # frame-canvas draw size (aspect-fit)
+        self._video_disp_h = 180
+        self._video_tick_job = None      # after() id for the playback timer
+        self._video_select_job = None    # debounce: load preview on select
+        self._video_scrub_job = None     # debounce: decode a frame while scrubbing
+        self._video_current_rel = None   # slot loaded in the preview player
+        self.video_search_var.trace_add(
+            "write", lambda *a: self._refresh_video_list())
+        self.video_sort_var.trace_add(
+            "write", lambda *a: self._refresh_video_list())
         # Williams-only: "Use PinMAME runtime capture" toggle on the
         # Extract tab.  When ON, the Extract button kicks off the
         # libpinmame-driven capture pipeline (composed cinematics +
@@ -484,16 +523,19 @@ class MainWindow:
 
         self._tab_extract = ttk.Frame(self._notebook)
         self._tab_audio = ttk.Frame(self._notebook)
+        self._tab_video = ttk.Frame(self._notebook)
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
 
         self._notebook.add(self._tab_extract, text="  Extract  ")
         self._notebook.add(self._tab_audio, text="  Replace Audio  ")
+        self._notebook.add(self._tab_video, text="  Replace Video  ")
         self._notebook.add(self._tab_write, text="  Write  ")
         self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
 
         self._build_extract_tab()
         self._build_audio_tab()
+        self._build_video_tab()
         self._build_write_tab()
         self._build_modpack_tab()
 
@@ -1982,6 +2024,900 @@ class MainWindow:
         return (dict(self._audio_slots_by_rel), assignments,
                 bool(self.audio_trim_var.get()))
 
+    # ==================================================================
+    # Replace Video tab
+    # ==================================================================
+
+    def _build_video_tab(self):
+        """Build the 'Replace Video' tab: a searchable list of the video files
+        in the extracted assets folder, each a slot the user can assign + an
+        embedded-preview a replacement clip for.  Staging re-encodes each
+        replacement to its slot's container/codec/resolution and writes it over
+        the original so the normal Write step repacks it."""
+        f = self._tab_video
+        pad = {"padx": 10, "pady": 4}
+
+        ttk.Label(
+            f,
+            text="Swap a game's videos without copy-pasting and renaming. Your "
+                 "replacement can be almost any video format — it's auto-"
+                 "re-encoded to the original clip's format, resolution and "
+                 "frame rate for you (transparency is kept where the original "
+                 "has it). Pick your extracted folder, assign a clip to a slot, "
+                 "then build the update on the Write tab.",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+
+        # ffmpeg-missing banner.  Video matching is always a re-encode, so
+        # ffmpeg is effectively required here.  Pack-managed by
+        # _refresh_video_ffmpeg_warning(); positioned before the assets row.
+        self._video_ffmpeg_warn = ttk.Label(
+            f,
+            text="⚠ ffmpeg not found — replacing video needs ffmpeg to "
+                 "re-encode + preview clips. Install it with “Install "
+                 "Missing” above the tabs.",
+            foreground="#d04040", font=(_SANS_FONT, 9),
+            wraplength=720, justify=tk.LEFT)
+
+        # Assets folder row (shared with the Write / Replace Audio tabs).
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        self._video_assets_row = row
+        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(row, text="Browse...",
+                   command=self._browse_write_assets).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Button(row, text="Scan",
+                   command=self._scan_video_slots_async).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(f, text="(the folder Extract produced — shared with the "
+                          "Write tab)",
+                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
+
+        # Search + sort toolbar.
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
+        ttk.Entry(tools, textvariable=self.video_search_var, width=24).pack(
+            side=tk.LEFT, padx=(4, 12))
+        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
+        ttk.Combobox(tools, textvariable=self.video_sort_var, width=12,
+                     state="readonly",
+                     values=("Name", "Longest first", "Folder")).pack(
+            side=tk.LEFT, padx=(4, 0))
+        self._video_status_lbl = ttk.Label(
+            tools, textvariable=self.video_status_var,
+            font=(_SANS_FONT, 9))
+        self._video_status_lbl.pack(side=tk.RIGHT)
+
+        # Slot list.
+        list_frame = ttk.Frame(f)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        self._video_tree = ttk.Treeview(
+            list_frame, columns=("len", "res", "fmt", "rep"),
+            height=9, selectmode="browse")
+        self._video_tree.heading("#0", text="Original Video", anchor=tk.W)
+        self._video_tree.heading("len", text="Length", anchor=tk.W)
+        self._video_tree.heading("res", text="Resolution", anchor=tk.W)
+        self._video_tree.heading("fmt", text="Format", anchor=tk.W)
+        self._video_tree.heading("rep", text="Replacement", anchor=tk.W)
+        self._video_tree.column("#0", width=300, minwidth=160)
+        self._video_tree.column("len", width=56, minwidth=46, anchor=tk.W)
+        self._video_tree.column("res", width=90, minwidth=70, anchor=tk.W)
+        self._video_tree.column("fmt", width=140, minwidth=80)
+        self._video_tree.column("rep", width=200, minwidth=110)
+        video_scroll = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self._video_tree.yview)
+        self._video_tree.configure(yscrollcommand=video_scroll.set)
+        video_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._video_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._video_tree.bind("<Double-1>", self._video_on_tree_double)
+        self._video_tree.bind("<Button-1>", self._video_on_tree_click, add="+")
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self._video_tree.bind(seq, self._video_on_tree_right)
+        self._video_tree.bind("<<TreeviewSelect>>", self._video_on_tree_select)
+
+        self._video_empty = ttk.Label(
+            list_frame,
+            text="Pick your extracted assets folder above, then click Scan.",
+            foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
+        self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # --- Embedded preview player: a frame canvas (a decode thread streams
+        # frames here while ffplay carries the sound), a seek bar, and the
+        # transport controls + an A/B Original ↔ Replacement source switch. ---
+        player = ttk.LabelFrame(f, text=" Preview ")
+        player.pack(fill=tk.X, padx=10, pady=(4, 2))
+
+        self._video_canvas = tk.Canvas(
+            player, width=360, height=203, highlightthickness=1, bd=0,
+            background="#000000")
+        self._video_canvas.pack(padx=6, pady=(6, 2))
+
+        # Seek bar: click or drag to seek; the playhead tracks playback.
+        self._video_seek_canvas = tk.Canvas(
+            player, height=16, highlightthickness=1, bd=0, cursor="hand2")
+        self._video_seek_canvas.pack(fill=tk.X, padx=6, pady=(0, 2))
+        self._video_seek_canvas.bind("<Button-1>", self._video_seek_click)
+        self._video_seek_canvas.bind("<B1-Motion>", self._video_seek_click)
+
+        transport = ttk.Frame(player)
+        transport.pack(fill=tk.X, padx=6, pady=(2, 6))
+        _IB = dict(width=26, height=26, highlightthickness=0, bd=0,
+                   cursor="hand2", takefocus=0)
+        self._video_play_canvas = tk.Canvas(transport, **_IB)
+        self._video_play_canvas.pack(side=tk.LEFT)
+        self._video_play_canvas.bind(
+            "<Button-1>", lambda _e: self._video_toggle_play())
+        self._video_stop_canvas = tk.Canvas(transport, **_IB)
+        self._video_stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
+        self._video_stop_canvas.bind(
+            "<Button-1>", lambda _e: self._video_stop_to_start())
+        self.video_time_var = tk.StringVar(value="0:00 / 0:00")
+        ttk.Label(transport, textvariable=self.video_time_var,
+                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
+
+        self.video_source_var = tk.StringVar(value="orig")
+        srcbox = ttk.Frame(transport); srcbox.pack(side=tk.RIGHT)
+        ttk.Label(srcbox, text="Source:").pack(side=tk.LEFT, padx=(0, 4))
+        self._video_src_orig = ttk.Radiobutton(
+            srcbox, text="Original", value="orig",
+            variable=self.video_source_var,
+            command=self._video_on_source_change)
+        self._video_src_orig.pack(side=tk.LEFT)
+        self._video_src_rep = ttk.Radiobutton(
+            srcbox, text="Replacement", value="rep", state=tk.DISABLED,
+            variable=self.video_source_var,
+            command=self._video_on_source_change)
+        self._video_src_rep.pack(side=tk.LEFT, padx=(4, 0))
+
+        ttk.Checkbutton(
+            f, text="Trim / pad replacements to the original clip length",
+            variable=self.video_trim_var).pack(anchor=tk.W, padx=12, pady=(6, 0))
+        self._video_length_note_lbl = ttk.Label(
+            f, text="", font=(_SANS_FONT, 8, "italic"),
+            foreground="#888888", wraplength=720, justify=tk.LEFT)
+        self._video_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+
+        ttk.Label(
+            f,
+            text="Assigned replacements are applied automatically when you "
+                 "build the update on the Write tab — no extra step.",
+            font=(_SANS_FONT, 9), foreground="#888888",
+            wraplength=720, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(8, 8))
+
+        self._video_set_play_btn(False)
+        if hasattr(self, "_video_stop_canvas"):
+            self._draw_audio_icon(self._video_stop_canvas, "stop")
+        self._refresh_video_ffmpeg_warning()
+
+    def _refresh_video_ffmpeg_warning(self):
+        """Show the ffmpeg-missing banner only when ffmpeg can't be found.
+        Re-probes on each tab visit so installing ffmpeg mid-session clears
+        the banner next time the tab is opened."""
+        warn = getattr(self, "_video_ffmpeg_warn", None)
+        if warn is None:
+            return
+        from ..core import audio as _audio
+        _audio._ffmpeg_path = None  # force a fresh probe, not the cached result
+        if _audio.find_ffmpeg():
+            warn.pack_forget()
+        elif not warn.winfo_ismapped():
+            warn.pack(fill=tk.X, padx=12, pady=(0, 4),
+                      before=self._video_assets_row)
+
+    # ---- Replace Video: scanning -------------------------------------
+
+    def _scan_video_slots_async(self):
+        """Scan the assets folder for video slots on a worker thread, then
+        repopulate the list.  Stale scans are dropped via a bump-counter."""
+        import threading
+        from ..core.video_slots import scan_video_slots
+
+        assets_path = (self.write_assets_var.get() or "").strip()
+        self._video_scan_id += 1
+        scan_id = self._video_scan_id
+
+        if not assets_path or not os.path.isdir(assets_path):
+            self._video_slots = []
+            self._video_slots_by_rel = {}
+            self._refresh_video_list()
+            self._video_empty.configure(
+                text="Pick your extracted assets folder above, then click Scan.")
+            self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+
+        self._video_empty.configure(text="Scanning for video files…")
+        self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        mfr = self._current_mfr
+
+        def _work():
+            try:
+                roots = mfr.video_slot_dirs(assets_path) if mfr else None
+            except Exception:
+                roots = None
+            try:
+                exts = mfr.video_slot_exts(assets_path) if mfr else None
+            except Exception:
+                exts = None
+            try:
+                slots = scan_video_slots(assets_path, roots=roots, exts=exts)
+            except Exception:
+                slots = []
+            if self._video_scan_id != scan_id:
+                return
+            self._tk_root().after(
+                0, self._populate_video_after_scan,
+                slots, scan_id, assets_path)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _populate_video_after_scan(self, slots, scan_id, scan_dir):
+        """Main-thread: store scan results and refresh the list."""
+        if self._video_scan_id != scan_id:
+            return
+        self._video_slots = slots
+        self._video_slots_by_rel = {s.rel_path: s for s in slots}
+        if scan_dir != self._video_scan_dir:
+            self._video_assignments = {}
+        else:
+            self._video_assignments = {
+                rel: rep for rel, rep in self._video_assignments.items()
+                if rel in self._video_slots_by_rel}
+        self._video_scan_dir = scan_dir
+        self._refresh_video_list()
+
+    def _refresh_video_list(self):
+        """Apply the search filter + sort and repopulate the slot tree."""
+        tree = getattr(self, "_video_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+
+        query = (self.video_search_var.get() or "").strip().lower()
+        slots = [s for s in self._video_slots
+                 if not query or query in s.rel_path.lower()]
+        sort = self.video_sort_var.get()
+        if sort == "Longest first":
+            slots.sort(key=lambda s: s.duration, reverse=True)
+        elif sort == "Folder":
+            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
+        else:
+            slots.sort(key=lambda s: s.rel_path.lower())
+
+        for s in slots:
+            rep = self._video_assignments.get(s.rel_path)
+            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
+                        values=(s.duration_str(), s.resolution_str(),
+                                s.format_summary(), rep_disp),
+                        tags=("assigned",) if rep else ())
+
+        total = len(self._video_slots)
+        assigned = len(self._video_assignments)
+        if total == 0:
+            self.video_status_var.set("")
+            self._video_empty.configure(
+                text="No replaceable video found in this folder.")
+            self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        else:
+            shown = len(slots)
+            extra = f"  ({shown} shown)" if shown != total else ""
+            self.video_status_var.set(
+                f"{assigned} of {total} slots assigned{extra}")
+            self._video_empty.place_forget()
+
+    def _maybe_rescan_video(self):
+        """Auto-scan when the Replace Video tab becomes visible and the folder
+        has changed since the last scan."""
+        if self._current_mfr is None:
+            return
+        if not getattr(self._current_mfr.capabilities, "replace_video", False):
+            return
+        assets_path = (self.write_assets_var.get() or "").strip()
+        if assets_path and assets_path != self._video_scan_dir:
+            self._scan_video_slots_async()
+
+    # ---- Replace Video: per-slot actions -----------------------------
+
+    def _video_selected_rel(self):
+        sel = self._video_tree.selection() if hasattr(self, "_video_tree") else ()
+        return sel[0] if sel else None
+
+    def _video_assign_rel(self, rel):
+        """Open the replacement picker for *rel* and record the assignment."""
+        if not rel or rel not in self._video_slots_by_rel:
+            return
+        path = filedialog.askopenfilename(
+            title=f"Choose a replacement for {rel}",
+            filetypes=[("Video files",
+                        "*.mp4 *.mov *.m4v *.webm *.ogv *.avi *.mkv *.mpg "
+                        "*.mpeg *.wmv *.flv *.ts *.3gp *.gif"),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        self._video_assignments[rel] = path
+        self._refresh_video_list()
+        if rel == self._video_current_rel:
+            self._video_update_source_radio()
+        try:
+            self._video_tree.selection_set(rel)
+            self._video_tree.see(rel)
+        except tk.TclError:
+            pass
+
+    # ---- Replace Video: table interactions ---------------------------
+
+    def _cancel_video_select_job(self):
+        if self._video_select_job is not None:
+            try:
+                self._tk_root().after_cancel(self._video_select_job)
+            except Exception:
+                pass
+            self._video_select_job = None
+
+    def _video_on_tree_select(self, _event=None):
+        self._cancel_video_select_job()
+        self._video_select_job = self._tk_root().after(
+            250, self._video_preview_selected)
+
+    def _video_preview_selected(self):
+        self._video_select_job = None
+        if self._video_preview_playing:
+            return
+        rel = self._video_selected_rel()
+        if rel is None or rel == self._video_current_rel:
+            return
+        self.video_source_var.set("orig")
+        self._video_load_track(rel, autoplay=False)
+
+    def _video_on_tree_double(self, _event=None):
+        self._cancel_video_select_job()
+        self._video_play_original()
+
+    def _video_on_tree_click(self, event):
+        tree = self._video_tree
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)  # cols=(len,res,fmt,rep) -> #1..#4
+        if row and col == "#4":
+            tree.selection_set(row)
+            self._cancel_video_select_job()
+            self._video_assign_rel(row)
+
+    def _video_on_tree_right(self, event):
+        tree = self._video_tree
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        menu = tk.Menu(tree, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="▶  Play original",
+                         command=self._video_play_original)
+        menu.add_command(label="Choose replacement…",
+                         command=lambda r=row: self._video_assign_rel(r))
+        if self._video_assignments.get(row):
+            menu.add_command(label="▶  Play replacement",
+                             command=self._video_play_replacement)
+            menu.add_separator()
+            menu.add_command(label="Clear replacement",
+                             command=self._video_clear_selected)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _video_clear_selected(self):
+        rel = self._video_selected_rel()
+        if rel is not None and rel in self._video_assignments:
+            del self._video_assignments[rel]
+            self._refresh_video_list()
+            if rel == self._video_current_rel:
+                self._video_update_source_radio()
+            try:
+                self._video_tree.selection_set(rel)
+            except tk.TclError:
+                pass
+
+    def _video_play_original(self):
+        rel = self._video_selected_rel()
+        if rel is None:
+            messagebox.showinfo("No Slot Selected",
+                                "Select a clip to preview.")
+            return
+        self.video_source_var.set("orig")
+        self._video_load_track(rel, autoplay=True)
+
+    def _video_play_replacement(self):
+        rel = self._video_selected_rel()
+        if not (rel and self._video_assignments.get(rel)):
+            messagebox.showinfo("No Replacement",
+                                "Assign a replacement to this slot first.")
+            return
+        self.video_source_var.set("rep")
+        self._video_load_track(rel, autoplay=True)
+
+    # ---- Replace Video: embedded preview player ----------------------
+
+    def _video_load_track(self, rel, autoplay=False):
+        """Make *rel* the active clip in the preview player and load the
+        currently-selected source (original or replacement) into it."""
+        if rel not in self._video_slots_by_rel:
+            return
+        self._video_current_rel = rel
+        self._video_update_source_radio()
+        self._video_load_current_source(autoplay=autoplay)
+
+    def _video_current_source_path(self):
+        rel = self._video_current_rel
+        if rel is None:
+            return None
+        if self.video_source_var.get() == "rep":
+            return self._video_assignments.get(rel)
+        slot = self._video_slots_by_rel.get(rel)
+        return slot.abs_path if slot else None
+
+    def _video_load_current_source(self, autoplay=False):
+        self._video_stop_playback()
+        path = self._video_current_source_path()
+        if not path or not os.path.isfile(path):
+            self._video_preview_path = None
+            self._video_preview_info = None
+            self._video_preview_dur = 0.0
+            self._video_preview_pos = 0.0
+            self._video_render_id += 1
+            if hasattr(self, "_video_canvas"):
+                self._video_canvas.delete("all")
+            self._video_draw_playhead()
+            return
+        self._video_load_preview(path)
+        if autoplay:
+            self._video_start_playback(0.0)
+
+    def _video_on_source_change(self):
+        self._video_load_current_source(autoplay=self._video_preview_playing)
+
+    def _video_update_source_radio(self):
+        rel = self._video_current_rel
+        has_rep = bool(rel and self._video_assignments.get(rel))
+        if hasattr(self, "_video_src_rep"):
+            self._video_src_rep.configure(
+                state=(tk.NORMAL if has_rep else tk.DISABLED))
+        if not has_rep and self.video_source_var.get() == "rep":
+            self.video_source_var.set("orig")
+
+    def _video_set_play_btn(self, playing):
+        if hasattr(self, "_video_play_canvas"):
+            self._draw_audio_icon(self._video_play_canvas,
+                                  "pause" if playing else "play")
+
+    def _video_toggle_play(self):
+        if self._video_preview_path is None:
+            rel = self._video_selected_rel()
+            if rel is not None:
+                self._video_load_track(rel, autoplay=True)
+            return
+        if self._video_preview_playing:
+            self._video_stop_playback()  # pause, keeps position
+            self._video_draw_playhead()
+        else:
+            if (self._video_preview_dur > 0
+                    and self._video_preview_pos
+                    >= self._video_preview_dur - 0.05):
+                self._video_preview_pos = 0.0  # replay from start
+            self._video_start_playback(self._video_preview_pos)
+
+    def _video_stop_to_start(self):
+        self._video_stop_playback()
+        self._video_preview_pos = 0.0
+        self._video_draw_playhead()
+        if self._video_preview_path:
+            self._render_video_poster(self._video_preview_path, 0.0)
+
+    def _video_compute_disp_size(self, info):
+        """Aspect-fit the clip inside the frame canvas; store the even-numbered
+        draw size used by both the poster render and the decode stream."""
+        max_w, max_h = 360, 203
+        if info and info.width > 0 and info.height > 0:
+            w, h = info.width, info.height
+        else:
+            w, h = 16, 9
+        scale = min(max_w / w, max_h / h)
+        dw = max(16, int(w * scale))
+        dh = max(16, int(h * scale))
+        self._video_disp_w = dw - (dw % 2)
+        self._video_disp_h = dh - (dh % 2)
+
+    def _video_load_preview(self, path):
+        from ..core import video as _video
+        self._video_preview_path = path
+        info = _video.detect_video_info(path)
+        self._video_preview_info = info
+        dur = (info.duration if info and info.duration > 0
+               else _video.probe_video_duration(path))
+        self._video_preview_dur = dur or 0.0
+        self._video_preview_pos = 0.0
+        self._video_compute_disp_size(info)
+        self._render_video_poster(path, 0.0)
+        self._video_update_time()
+
+    def _render_video_poster(self, path, pos):
+        """Decode a single frame at *pos* on a worker thread, then show it.
+        Stale renders (clip/seek changed) are dropped via a counter."""
+        canvas = getattr(self, "_video_canvas", None)
+        if canvas is None:
+            return
+        self._video_render_id += 1
+        rid = self._video_render_id
+        cw = canvas.winfo_width() or 360
+        ch = canvas.winfo_height() or 203
+        canvas.delete("all")
+        if not _HAVE_PIL:
+            canvas.create_text(cw // 2, ch // 2, fill="#bbbbbb",
+                               width=cw - 16,
+                               text="Install Pillow to preview frames in-app "
+                                    "(Play still opens an ffplay window).")
+            return
+        canvas.create_text(cw // 2, ch // 2, fill="#888888",
+                           text="loading frame…")
+
+        import threading
+        from ..core import video as _video
+
+        def _work():
+            png = _video.extract_frame_png(
+                path, pos, self._video_disp_w, self._video_disp_h)
+            if self._video_render_id != rid:
+                return
+            self._tk_root().after(0, self._show_video_poster, png, rid)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_video_poster(self, png, rid):
+        if self._video_render_id != rid:
+            return
+        canvas = self._video_canvas
+        canvas.delete("all")
+        cw = canvas.winfo_width() or 360
+        ch = canvas.winfo_height() or 203
+        if png and _HAVE_PIL:
+            try:
+                import io
+                img = Image.open(io.BytesIO(png)).convert("RGB")
+                self._video_frame_img = ImageTk.PhotoImage(img)
+                canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
+                                    image=self._video_frame_img, tags=("frame",))
+            except Exception:
+                self._video_frame_img = None
+        else:
+            canvas.create_text(cw // 2, ch // 2, fill="#888888",
+                               text="(preview needs ffmpeg)")
+        self._video_draw_playhead()
+
+    def _show_video_frame_rgb(self, data):
+        """Display one raw rgb24 frame (from the decode thread) on the canvas."""
+        if not _HAVE_PIL:
+            return
+        w, h = self._video_disp_w, self._video_disp_h
+        if not data or len(data) != w * h * 3:
+            return
+        try:
+            img = Image.frombytes("RGB", (w, h), data)
+            self._video_frame_img = ImageTk.PhotoImage(img)
+            canvas = self._video_canvas
+            cw = canvas.winfo_width() or 360
+            ch = canvas.winfo_height() or 203
+            canvas.delete("frame")
+            canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
+                                image=self._video_frame_img, tags=("frame",))
+        except Exception:
+            pass
+
+    def _video_start_playback(self, pos):
+        import threading
+        import queue
+        import time
+        from ..core import audio as _audio
+        from ..core import video as _video
+
+        self._video_stop_playback()  # tear down any prior session
+        path = self._video_preview_path
+        if not path:
+            return
+        info = self._video_preview_info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+        w, h = self._video_disp_w, self._video_disp_h
+
+        proc = (_video.open_raw_stream(path, w, h, fps, start=pos)
+                if _HAVE_PIL else None)
+        if proc is None:
+            # No ffmpeg frame stream (or no Pillow): fall back to a windowed
+            # ffplay that plays video + audio in its own window.
+            ap = _video.play_video_windowed(path, start=pos)
+            if ap is None:
+                messagebox.showwarning(
+                    "Can't Preview",
+                    "Video preview needs ffmpeg / ffplay on your PATH.\n\n"
+                    "Install ffmpeg to preview clips before staging.")
+                return
+            self._video_audio_proc = ap
+        else:
+            self._video_session += 1
+            session = self._video_session
+            self._video_decode_proc = proc
+            stop_event = threading.Event()
+            self._video_stop_event = stop_event
+            q = queue.Queue(maxsize=int(max(8, fps)))  # ~1s of frames
+            self._video_frame_q = q
+            framesize = w * h * 3
+            t = threading.Thread(
+                target=self._video_decode_worker,
+                args=(session, proc, framesize, q, stop_event), daemon=True)
+            self._video_decode_thread = t
+            t.start()
+            # Sound: ffplay -nodisp carries the audio track.  Most formats play
+            # their own audio; a custom backend (.cdmd) points at a sibling
+            # .wav instead.
+            if info is None or info.has_audio:
+                asrc = _video.audio_source_for(path)
+                if asrc:
+                    self._video_audio_proc = _audio.play_audio_file(
+                        asrc, start=pos)
+
+        self._video_preview_start_pos = pos
+        self._video_preview_start_t = time.monotonic()
+        self._video_preview_pos = pos
+        self._video_preview_playing = True
+        self._video_set_play_btn(True)
+        self._video_schedule_tick()
+
+    def _video_decode_worker(self, session, proc, framesize, q, stop_event):
+        """Worker thread: read raw rgb24 frames from ffmpeg into *q* until the
+        stream ends or the session is cancelled."""
+        import queue as _q
+        idx = 0
+        try:
+            stdout = proc.stdout
+            while not stop_event.is_set():
+                data = stdout.read(framesize)
+                if not data or len(data) < framesize:
+                    break
+                while not stop_event.is_set():
+                    try:
+                        q.put((idx, data), timeout=0.2)
+                        break
+                    except _q.Full:
+                        continue
+                idx += 1
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                q.put((None, None), timeout=0.2)  # sentinel: stream ended
+            except Exception:
+                pass
+
+    def _video_schedule_tick(self):
+        info = self._video_preview_info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+        # Poll a bit faster than the frame rate so the queue stays drained.
+        interval = int(1000 / (fps * 1.3))
+        interval = max(10, min(45, interval))
+        if self._video_tick_job is not None:
+            try:
+                self._tk_root().after_cancel(self._video_tick_job)
+            except Exception:
+                pass
+        self._video_tick_job = self._tk_root().after(
+            interval, self._video_tick)
+
+    def _video_tick(self):
+        import time
+        import queue as _q
+        self._video_tick_job = None
+        if not self._video_preview_playing:
+            return
+
+        self._video_preview_pos = (
+            self._video_preview_start_pos
+            + (time.monotonic() - self._video_preview_start_t))
+        info = self._video_preview_info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+
+        ended = False
+        q = self._video_frame_q
+        if q is not None:
+            # Drain up to the frame the clock has reached; show the latest.
+            desired = int(
+                (self._video_preview_pos - self._video_preview_start_pos) * fps)
+            frame = None
+            while True:
+                try:
+                    idx, data = q.get_nowait()
+                except _q.Empty:
+                    break
+                if idx is None:
+                    ended = True
+                    break
+                frame = data
+                if idx >= desired:
+                    break
+            if frame is not None:
+                self._show_video_frame_rgb(frame)
+        else:
+            # Windowed-ffplay fallback: end when that process exits.
+            ap = self._video_audio_proc
+            if ap is not None and ap.poll() is not None:
+                ended = True
+
+        if not ended and self._video_preview_dur > 0 \
+                and self._video_preview_pos >= self._video_preview_dur:
+            ended = True
+
+        if ended:
+            self._video_stop_playback()
+            self._video_preview_pos = 0.0  # so ▶ replays from the start
+            self._video_draw_playhead()
+            if self._video_preview_path:
+                self._render_video_poster(self._video_preview_path, 0.0)
+            return
+
+        self._video_draw_playhead()
+        self._video_schedule_tick()
+
+    def _video_draw_playhead(self):
+        canvas = getattr(self, "_video_seek_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        w = max(1, canvas.winfo_width())
+        h = canvas.winfo_height() or 16
+        c = THEMES.get(self._current_theme, {})
+        canvas.create_rectangle(0, 0, w, h,
+                                fill=c.get("field_bg", "#222222"), outline="")
+        dur = self._video_preview_dur
+        if dur > 0 and self._video_preview_path:
+            x = int((self._video_preview_pos / dur) * w)
+            x = max(0, min(w, x))
+            canvas.create_rectangle(0, 0, x, h,
+                                    fill=c.get("select_bg", "#3a6ea5"),
+                                    outline="")
+            canvas.create_line(x, 0, x, h, fill="#ffffff", width=2)
+        self._video_update_time()
+
+    def _video_update_time(self):
+        def _fmt(s):
+            s = max(0, int(s))
+            return f"{s // 60}:{s % 60:02d}"
+        if self._video_preview_path and self._video_preview_dur > 0:
+            self.video_time_var.set(
+                f"{_fmt(self._video_preview_pos)} / "
+                f"{_fmt(self._video_preview_dur)}")
+        else:
+            self.video_time_var.set("0:00 / 0:00")
+
+    def _video_seek_click(self, event):
+        canvas = self._video_seek_canvas
+        if not self._video_preview_path or self._video_preview_dur <= 0:
+            return
+        w = max(1, canvas.winfo_width())
+        frac = max(0.0, min(1.0, event.x / w))
+        self._video_preview_pos = frac * self._video_preview_dur
+        if self._video_preview_playing:
+            self._video_start_playback(self._video_preview_pos)  # live re-seek
+        else:
+            self._video_draw_playhead()
+            self._schedule_video_scrub()  # decode the frame at rest (debounced)
+
+    def _schedule_video_scrub(self):
+        if self._video_scrub_job is not None:
+            try:
+                self._tk_root().after_cancel(self._video_scrub_job)
+            except Exception:
+                pass
+        self._video_scrub_job = self._tk_root().after(120, self._do_video_scrub)
+
+    def _do_video_scrub(self):
+        self._video_scrub_job = None
+        if self._video_preview_playing or not self._video_preview_path:
+            return
+        self._render_video_poster(self._video_preview_path,
+                                  self._video_preview_pos)
+
+    def _video_stop_playback(self):
+        """Stop playback: cancel the session, kill the decode + audio
+        processes, and stop the timer (keeps the playhead where it landed)."""
+        from ..core import audio as _audio
+        self._video_session += 1  # invalidate any in-flight session
+        if self._video_stop_event is not None:
+            self._video_stop_event.set()
+        if self._video_decode_proc is not None:
+            try:
+                if self._video_decode_proc.poll() is None:
+                    self._video_decode_proc.terminate()
+            except OSError:
+                pass
+        self._video_decode_proc = None
+        _audio.stop_audio(self._video_audio_proc)
+        self._video_audio_proc = None
+        self._video_decode_thread = None
+        self._video_stop_event = None
+        self._video_frame_q = None
+        self._video_preview_playing = False
+        if self._video_tick_job is not None:
+            try:
+                self._tk_root().after_cancel(self._video_tick_job)
+            except Exception:
+                pass
+            self._video_tick_job = None
+        self._video_set_play_btn(False)
+
+    def _video_clear_preview(self):
+        """Reset the preview player entirely (used on manufacturer switch)."""
+        self._cancel_video_select_job()
+        if self._video_scrub_job is not None:
+            try:
+                self._tk_root().after_cancel(self._video_scrub_job)
+            except Exception:
+                pass
+            self._video_scrub_job = None
+        self._video_stop_playback()
+        self._video_current_rel = None
+        self._video_preview_path = None
+        self._video_preview_info = None
+        self._video_preview_dur = 0.0
+        self._video_preview_pos = 0.0
+        self._video_render_id += 1
+        self._video_frame_img = None
+        if hasattr(self, "video_source_var"):
+            self.video_source_var.set("orig")
+        if hasattr(self, "_video_src_rep"):
+            self._video_src_rep.configure(state=tk.DISABLED)
+        if hasattr(self, "_video_canvas"):
+            self._video_canvas.delete("all")
+        if hasattr(self, "_video_seek_canvas"):
+            self._video_seek_canvas.delete("all")
+        self._video_update_time()
+
+    # ---- Replace Video: pending assignments (applied at Write time) --
+
+    def pending_video_assignments(self, assets_dir):
+        """Return ``(slots_by_rel, assignments, trim)`` of replacements the
+        user assigned for *assets_dir*, or ``None`` when there's nothing to
+        apply.  Called by the Write flow to auto-stage edits just before it
+        repacks — there is no manual "stage" step.
+
+        Guarded so it only fires when the folder being written is the same one
+        the assignments were made against."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(
+                mfr.capabilities, "replace_video", False):
+            return None
+        if not assets_dir:
+            return None
+        scanned = self._video_scan_dir or ""
+        if (os.path.normcase(os.path.normpath(assets_dir))
+                != os.path.normcase(os.path.normpath(scanned))):
+            return None
+        assignments = {rel: rep for rel, rep in self._video_assignments.items()
+                       if rep and rel in self._video_slots_by_rel}
+        if not assignments:
+            return None
+        return (dict(self._video_slots_by_rel), assignments,
+                bool(self.video_trim_var.get()))
+
     def _build_phase_steps(self, parent, phases, mode):
         labels = []
         for name in phases:
@@ -2035,7 +2971,15 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._refresh_audio_ffmpeg_warning()
             self._maybe_rescan_audio()
+        elif text == "Replace Video":
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._refresh_video_ffmpeg_warning()
+            self._maybe_rescan_video()
         else:
+            # Leaving the video tab: don't let an embedded clip keep playing
+            # (decode thread + ffplay) under another tab.
+            self._video_stop_playback()
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
@@ -2166,6 +3110,7 @@ class MainWindow:
 
         # Show/hide tabs by capability.
         self._configure_tab("Replace Audio", caps.replace_audio)
+        self._configure_tab("Replace Video", caps.replace_video)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
         # New mfr: clear any audio slots/assignments from the previous one
@@ -2179,6 +3124,16 @@ class MainWindow:
         if hasattr(self, "_audio_length_note_lbl"):
             self._audio_length_note_lbl.configure(
                 text=mfr.audio_length_note() or "")
+        # Same clean slate for the video tab.
+        self._video_slots = []
+        self._video_slots_by_rel = {}
+        self._video_assignments = {}
+        self._video_scan_dir = ""
+        self._video_clear_preview()
+        self._refresh_video_list()
+        if hasattr(self, "_video_length_note_lbl"):
+            self._video_length_note_lbl.configure(
+                text=mfr.video_length_note() or "")
 
         # BOF-only Extract callout — pack just below the Extract tab's
         # warning label so users see it before they hit Extract.  Other
@@ -4267,6 +5222,21 @@ class MainWindow:
                 self._audio_play_canvas,
                 "pause" if self._audio_preview_playing else "play")
             self._draw_audio_icon(self._audio_stop_canvas, "stop")
+
+        if hasattr(self, "_video_tree"):
+            self._video_tree.tag_configure("assigned", foreground=c["success"])
+        if hasattr(self, "_video_seek_canvas"):
+            self._video_seek_canvas.configure(highlightbackground=c["border"])
+            self._video_draw_playhead()
+        if hasattr(self, "_video_canvas"):
+            self._video_canvas.configure(highlightbackground=c["border"])
+        if hasattr(self, "_video_play_canvas"):
+            for cv in (self._video_play_canvas, self._video_stop_canvas):
+                cv.configure(background=c["bg"])
+            self._draw_audio_icon(
+                self._video_play_canvas,
+                "pause" if self._video_preview_playing else "play")
+            self._draw_audio_icon(self._video_stop_canvas, "stop")
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

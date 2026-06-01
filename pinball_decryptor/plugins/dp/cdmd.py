@@ -171,6 +171,172 @@ def frame_count(data):
 
 
 # ---------------------------------------------------------------------------
+# Encoding  (Replace-Video: write a replacement clip back into .cdmd)
+# ---------------------------------------------------------------------------
+#
+# The decoder above is fully reversible, so we can round-trip: a replacement
+# video is decoded to RGB frames, scaled to the original's canvas, resampled
+# to the original's frame count (so the sibling .wav stays in sync), and
+# written back as a .cdmd.  Each frame is emitted as a single full-canvas
+# dirty rectangle (x=y=0, w=canvasW, h=canvasH) — always valid, and the size
+# cost is negligible for these small DMD panels.
+
+def _rgb24_to_argb(rgb):
+    """Pack an opaque rgb24 byte string into the cdmd ARGB byte order."""
+    px = len(rgb) // 3
+    out = bytearray(px * 4)
+    out[0::4] = b"\xff" * px   # A (opaque)
+    out[1::4] = rgb[0::3]      # R
+    out[2::4] = rgb[1::3]      # G
+    out[3::4] = rgb[2::3]      # B
+    return bytes(out)
+
+
+def write_cdmd(dst_path, frames_rgb, nframes, canvas_w, canvas_h):
+    """Write *frames_rgb* (an iterable of rgb24 byte strings, each exactly
+    ``canvas_w*canvas_h*3`` bytes) to *dst_path* as a cdmd of *nframes*
+    full-canvas frames.  Frames beyond *nframes* are ignored; if the iterable
+    is short the last frame is repeated so the header count stays honest."""
+    frame_bytes = canvas_w * canvas_h * 3
+    rect = struct.pack("<4I", 0, 0, canvas_w, canvas_h)
+    os.makedirs(os.path.dirname(dst_path) or ".", exist_ok=True)
+    with open(dst_path, "wb") as f:
+        f.write(CDMD_MAGIC)
+        f.write(struct.pack("<3I", nframes, canvas_w, canvas_h))
+        it = iter(frames_rgb)
+        last = b"\x00" * frame_bytes
+        for _ in range(nframes):
+            try:
+                rgb = next(it)
+                if len(rgb) == frame_bytes:
+                    last = rgb
+            except StopIteration:
+                rgb = last  # ran out early: hold the final frame
+            f.write(rect)
+            f.write(_rgb24_to_argb(last if len(rgb) != frame_bytes else rgb))
+
+
+def cdmd_video_info(path):
+    """Return ``(canvas_w, canvas_h, nframes, fps, duration, wav)`` for a
+    multi-frame *video* cdmd, or ``None`` for anything that isn't one.
+
+    Returns None for non-video .cdmd (font/glyph data with a different magic),
+    unreadable files, and single-frame stills (icons / text strips) — only
+    real clips are offered as Replace-Video slots.  The frame rate is derived
+    from the paired .wav when present so the reported length matches playback.
+    """
+    if not is_cdmd(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+        nframes, cw, ch = parse_header(head)
+    except (OSError, ValueError):
+        return None
+    if nframes <= 1:
+        return None
+    wav = _sibling_wav(path)
+    dur = _wav_duration(wav) if wav else None
+    if dur and dur > 0:
+        fps = max(1.0, min(nframes / dur, 60.0))
+        duration = dur
+    else:
+        fps = float(DEFAULT_FPS)
+        duration = nframes / float(DEFAULT_FPS)
+    return (cw, ch, nframes, fps, duration, wav)
+
+
+def iter_preview_rgb(path, target_w, target_h, start_index=0):
+    """Yield composited frames of *path* as rgb24 bytes scaled to
+    *target_w* x *target_h* (flattened on black — the raw clip content, no
+    dot-matrix shader).  Skips the first *start_index* frames (for seeking).
+
+    The canvas must be composited from frame 0, so skipped frames are still
+    decoded; they're just not yielded.
+    """
+    with open(path, "rb") as f:
+        data = f.read()
+    for i, img in enumerate(iter_frames(data)):
+        if i < start_index:
+            continue
+        flat = Image.new("RGB", img.size, (0, 0, 0))
+        flat.paste(img, (0, 0), img)
+        if flat.size != (target_w, target_h):
+            flat = flat.resize((target_w, target_h), Image.BILINEAR)
+        yield flat.tobytes()
+
+
+def preview_frame_png(path, pos, target_w, target_h):
+    """Return PNG bytes of the frame at *pos* seconds, scaled to fit
+    *target_w* x *target_h* — used for the poster frame + seek scrubbing."""
+    info = cdmd_video_info(path)
+    if info is None:
+        return None
+    _cw, _ch, nframes, fps, _dur, _wav = info
+    idx = max(0, min(nframes - 1, int(round(pos * fps))))
+    with open(path, "rb") as f:
+        data = f.read()
+    last = None
+    for i, img in enumerate(iter_frames(data)):
+        last = img
+        if i >= idx:
+            break
+    if last is None:
+        return None
+    flat = Image.new("RGB", last.size, (0, 0, 0))
+    flat.paste(last, (0, 0), last)
+    flat.thumbnail((target_w, target_h), Image.BILINEAR)
+    import io
+    buf = io.BytesIO()
+    flat.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def video_to_cdmd(src_video, dst_path, canvas_w, canvas_h, nframes):
+    """Re-encode an arbitrary *src_video* into *dst_path* as a cdmd of exactly
+    *nframes* frames at *canvas_w* x *canvas_h*.
+
+    The source is decoded + scaled by ffmpeg at a frame rate chosen so its full
+    duration maps onto *nframes* (keeping the clip in sync with the original's
+    untouched sibling .wav).  Returns ``(ok, detail)``.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return False, "need ffmpeg to convert video to .cdmd"
+    if nframes <= 0:
+        return False, "original cdmd has no frames to match"
+
+    from ...core.video import probe_video_duration
+    dur = probe_video_duration(src_video)
+    fps_out = (nframes / dur) if (dur and dur > 0) else float(DEFAULT_FPS)
+    fps_out = max(0.1, fps_out)
+
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", src_video,
+           "-vf", f"scale={canvas_w}:{canvas_h},fps={fps_out:.6f}",
+           "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=900,
+                           creationflags=_NO_WINDOW)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return False, str(e)
+    if r.returncode != 0 or not r.stdout:
+        err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        return False, (err[-1] if err else "ffmpeg decode failed")
+
+    frame_bytes = canvas_w * canvas_h * 3
+    raw = r.stdout
+    frames = [raw[i:i + frame_bytes]
+              for i in range(0, len(raw) - frame_bytes + 1, frame_bytes)]
+    if not frames:
+        return False, "no frames decoded from replacement"
+    try:
+        write_cdmd(dst_path, frames, nframes, canvas_w, canvas_h)
+    except OSError as e:
+        return False, str(e)
+    return True, f"→.cdmd {canvas_w}x{canvas_h}, {nframes}f"
+
+
+# ---------------------------------------------------------------------------
 # Audio sync helpers
 # ---------------------------------------------------------------------------
 
@@ -398,6 +564,57 @@ def decode_cdmd_file(cdmd_path, out_dir, rel_base=None, dmd=True, cell=DMD_CELL)
     return out, "png"
 
 
+# ---------------------------------------------------------------------------
+# Replace-Video backend  (registered with core.video so the generic tab can
+# scan / preview / stage .cdmd clips like any other video format)
+# ---------------------------------------------------------------------------
+
+class _CdmdBackend:
+    """Adapts the cdmd codec to core.video's pluggable-backend interface."""
+
+    def info(self, path):
+        from ...core.video import VideoInfo
+        res = cdmd_video_info(path)
+        if res is None:
+            return None
+        cw, ch, nframes, fps, dur, wav = res
+        return VideoInfo(
+            path, vcodec="cdmd", width=cw, height=ch, fps=fps, duration=dur,
+            has_audio=bool(wav), has_alpha=False, pix_fmt="argb",
+            container="cdmd", nframes=nframes)
+
+    def frame_png(self, path, pos, w, h):
+        try:
+            return preview_frame_png(path, pos, w, h)
+        except Exception:
+            return None
+
+    def open_stream(self, path, w, h, fps, start=0.0):
+        from ...core.video import GeneratorStream
+        idx = int(round(start * fps)) if (fps and start) else 0
+        try:
+            return GeneratorStream(iter_preview_rgb(path, w, h, start_index=idx))
+        except Exception:
+            return None
+
+    def audio_path(self, path):
+        return _sibling_wav(path)
+
+    def encode(self, src_path, dst_path, reference_path):
+        """Re-encode *src_path* into *dst_path* as a cdmd matching the geometry
+        and frame count of the original *reference_path* (so its sibling .wav
+        stays in sync)."""
+        if not os.path.isfile(src_path):
+            return False, "replacement file not found"
+        try:
+            with open(reference_path, "rb") as f:
+                head = f.read(16)
+            nframes, cw, ch = parse_header(head)
+        except (OSError, ValueError) as e:
+            return False, f"can't read original .cdmd: {e}"
+        return video_to_cdmd(src_path, dst_path, cw, ch, nframes)
+
+
 def convert_all_cdmd(input_dir, output_dir, progress_cb=None, log_cb=None,
                      cancel_cb=None, dmd=True, cell=DMD_CELL):
     """Walk *input_dir* for ``.cdmd`` files and decode each into *output_dir*.
@@ -459,3 +676,11 @@ def convert_all_cdmd(input_dir, output_dir, progress_cb=None, log_cb=None,
         + (f", {failed} failed." if failed else "."),
         "success" if converted else "warning")
     return converted, failed
+
+
+# Make .cdmd a first-class Replace-Video format (scan / preview / stage).
+try:
+    from ...core.video import register_backend as _register_backend
+    _register_backend(".cdmd", _CdmdBackend())
+except Exception:  # core.video import shouldn't ever fail, but never block load
+    pass

@@ -111,6 +111,18 @@ class Capabilities:
     # Dutch Pinball) — not CGC (indexed sound banks) or BOF (Godot
     # .sample/.oggvorbisstr).
     replace_audio: bool = False
+    # Replace-video path: surfaces a "Replace Video" tab that scans the
+    # extracted assets folder for loose video files (.mp4/.mov/.webm/.ogv/…),
+    # lists them as named slots, and lets the user assign + embedded-preview a
+    # replacement clip per slot.  Assignments are re-encoded to the original's
+    # container / codec / resolution (alpha preserved) and staged over the
+    # extracted files so the normal Write pipeline repacks them.  Set True only
+    # for plugins whose video is loose files Write actually round-trips — JJP
+    # (loose containers), Dutch Pinball AAIW (.mp4/.mov; gated off for TBL,
+    # whose .cdmd videos have no inverse encoder), and Spooky (Godot .ogv).
+    # NOT BOF (no .ogv->.ctex encoder yet) and NOT CGC/Williams (real-time
+    # render, no video files to swap).
+    replace_video: bool = False
 
 
 @dataclass(frozen=True)
@@ -316,6 +328,41 @@ class Manufacturer(ABC):
         return ("Replacements play at their own length — trimming usually "
                 "isn't needed. Tick “Trim / pad” below only if a "
                 "track sounds cut off or mistimed in-game.")
+
+    def video_slot_dirs(self, assets_dir):
+        """Subdirectories of *assets_dir* that hold replaceable video slots.
+
+        Drives the Replace-Video tab's scan when ``capabilities.replace_video``
+        is set.  Return ``None`` (the default) to scan the whole extract for
+        loose video — correct for JJP.  Plugins override this to keep
+        dead-end videos out of the list: Dutch Pinball excludes The Big
+        Lebowski's decoded ``_DECODED VIDEOS`` (no .mp4->.cdmd encoder), so a
+        TBL extract shows no editable video while an AAIW extract scans the
+        whole tree.
+        """
+        return None
+
+    def video_slot_exts(self, assets_dir):
+        """Video extensions the Replace-Video tab should surface as slots.
+
+        Return ``None`` (default) to use :data:`core.video.VIDEO_EXTS`.
+        Override to narrow it when only some formats round-trip — Spooky
+        returns ``(".ogv",)`` because its Godot videos repack as loose .ogv
+        but Unity ``.webm`` pulled from bundles can't be written back.
+        """
+        return None
+
+    def video_length_note(self) -> str:
+        """One-line guidance for the Replace-Video tab: does a replacement
+        need to match the original clip's length?
+
+        Default: length is flexible (most engines play the file as-is), so
+        trimming usually isn't needed.  Plugins whose engine is sensitive to
+        clip length override this.
+        """
+        return ("Replacements play at their own length — trimming usually "
+                "isn't needed. Tick “Trim / pad” below only if a clip looks "
+                "cut off or mistimed in-game.")
 
     def audio_export_supported(self, path) -> bool:
         """Whether extracting *path* yields audio assets the

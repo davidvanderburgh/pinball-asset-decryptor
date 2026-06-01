@@ -175,6 +175,10 @@ class JJPManufacturer(Manufacturer):
         # full_dump knobs.
         asset_filters=True,
         replace_audio=True,
+        # JJP ships loose video containers (.webm/.mp4/.mov/.avi) that the
+        # generic changed-file repack re-encrypts like any other asset, so a
+        # swapped clip round-trips with no special handling.
+        replace_video=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",

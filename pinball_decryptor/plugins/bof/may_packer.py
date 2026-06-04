@@ -233,8 +233,76 @@ def _read_pck_entries(pck_buf):
     return adjacent, sequential
 
 
+# Imported resource types we can substitute by raw bytes (the on-disk
+# extract holds the exact PCK bytes for these; fonts are RSCC-compressed
+# and not user-editable, so they're never substituted here).
+_SUBSTITUTABLE_EXTS = (".sample", ".ctex", ".oggvorbisstr")
+
+
+def _pack_via_directory(original_binary, pckdir, modified_pck_dir,
+                        output_binary, changed_pck, _log, cancel_cb,
+                        progress_cb):
+    """Directory-aware repack: substitute edited imported files (any size)
+    and rewrite the PCK directory so every entry's absolute offset stays
+    correct.  This is what lets a longer replacement boot — the engine
+    locates resources by the directory's offsets."""
+    from . import pck_directory
+    long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
+    by_path = pckdir.by_path()
+
+    # Which files to consider: the pipeline's changed list when available
+    # (fast + precise), else every directory entry of a substitutable type.
+    if changed_pck:
+        candidates = [c.replace("\\", "/") for c in changed_pck]
+    else:
+        candidates = [e["praw"].rstrip(b"\x00").decode("latin1", "replace")
+                      for e in pckdir.entries]
+
+    subs = {}
+    n_replaced = 0
+    with open(long_prefix + os.path.abspath(original_binary), "rb") as binf:
+        for rel in candidates:
+            if cancel_cb is not None and cancel_cb():
+                raise RuntimeError("pack cancelled by user")
+            ext = os.path.splitext(rel)[1].lower()
+            if ext not in _SUBSTITUTABLE_EXTS:
+                continue
+            entry = by_path.get(rel.encode("latin1", "replace"))
+            if entry is None:
+                continue
+            local = os.path.abspath(os.path.join(
+                modified_pck_dir, rel.replace("/", os.sep)))
+            if sys.platform == "win32":
+                local = long_prefix + local
+            if not os.path.isfile(local):
+                continue
+            with open(local, "rb") as fh:
+                new_bytes = fh.read()
+            binf.seek(pckdir.pck_off + pckdir.base + entry["ofs"])
+            orig_bytes = binf.read(entry["size"])
+            if new_bytes == orig_bytes:
+                continue
+            subs[entry["ofs"]] = new_bytes
+            n_replaced += 1
+            _log(f"  replace {rel} {entry['size']} -> {len(new_bytes)} bytes")
+
+    _log(f"Directory repack: {n_replaced} substitution(s) across "
+         f"{pckdir.file_count} entries "
+         f"({'encrypted' if pckdir.encrypted else 'plaintext'} directory).")
+    stats = pck_directory.rewrite(pckdir, subs, output_binary,
+                                  log_cb=_log, progress_cb=progress_cb)
+    return {
+        "files_total": pckdir.file_count,
+        "files_replaced": n_replaced,
+        "fonts_verbatim": 0,
+        "original_pck_size": pckdir.dir_off + 0,   # informational
+        "new_pck_size": stats["new_pck_size"],
+        "new_binary_size": stats["new_binary_size"],
+    }
+
+
 def pack_pck(original_binary, modified_pck_dir, output_binary,
-             log_cb=None, cancel_cb=None, progress_cb=None):
+             log_cb=None, cancel_cb=None, progress_cb=None, changed_pck=None):
     """Repack the PCK section of ``original_binary`` using whatever's
     in ``modified_pck_dir`` (mirror of the extractor's output tree).
 
@@ -242,12 +310,34 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
     original bytes.  Files that do are substituted in place.  The
     binary's PE/ELF code section is bit-copied; only the PCK section
     is rewritten and the trailer's pck_size is updated.
+
+    BOF's real builds carry a Godot v3 PCK directory (encrypted on Dune,
+    plaintext on Winchester) of ABSOLUTE file offsets; when we can read it
+    we take the directory-aware path (``pck_directory.rewrite``), which
+    supports replacements of ANY size by updating every entry's offset.
+    If that directory isn't present/readable we fall back to the legacy
+    size-neutral marker-scan walk below.
     """
     def _log(msg, sev="info"):
         if log_cb:
             log_cb(msg, sev)
 
     long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
+
+    # ---- Directory-aware path (real BOF games) ----------------------
+    try:
+        from . import pck_directory
+        pckdir = pck_directory.read(original_binary)
+    except pck_directory.DirectoryError as e:
+        _log(f"PCK directory present but unreadable ({e}); "
+             f"using size-neutral fallback.", "warning")
+        pckdir = None
+    except Exception:
+        pckdir = None
+    if pckdir is not None:
+        return _pack_via_directory(
+            original_binary, pckdir, modified_pck_dir, output_binary,
+            changed_pck, _log, cancel_cb, progress_cb)
 
     pck_start, pck_end = find_pck_section(original_binary)
     _log(f"PCK section: [{pck_start}, {pck_end}) ({pck_end - pck_start} bytes)")

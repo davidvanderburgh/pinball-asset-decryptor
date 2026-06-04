@@ -150,23 +150,21 @@ def test_encode_wav_conforms_to_original_channels_and_rate(tmp_path):
     assert ch2 == 2 and rate2 == 48000
 
 
-def test_encode_wav_auto_trims_longer_replacement(tmp_path):
-    """A replacement LONGER than the original must be auto-trimmed so its
-    QOA payload fits the original's byte footprint (the repacker is
-    size-neutral — BOF's encrypted PCK directory can't be shifted).  The
-    encoder warns via log_cb instead of failing."""
+def test_encode_wav_keeps_full_length_replacement(tmp_path):
+    """A LONGER replacement is kept at full length (NOT trimmed) — the
+    directory-aware repacker handles any size.  The new QOA payload simply
+    grows and still conforms to the original's channels + rate."""
     import math
     from pinball_decryptor.plugins.bof import qoa_codec
+    from pinball_decryptor.plugins.bof.source_converter import _find_data_pba
 
     # Original: a SHORT stereo/48k QOA callout (1 second).
     short_pcm = b"".join(
         struct.pack("<hh", int(2000 * math.sin(i * 0.05)),
                     int(2000 * math.sin(i * 0.05)))
         for i in range(48000))
-    qoa = qoa_codec.encode(short_pcm, 2, 48000)
-    orig_payload_len = len(qoa)
     orig_sample = tmp_path / "loop.sample"
-    orig_sample.write_bytes(_build_pcm_sample(qoa))
+    orig_sample.write_bytes(_build_pcm_sample(qoa_codec.encode(short_pcm, 2, 48000)))
 
     # User supplies a much LONGER clip (5 seconds, stereo 48k).
     long_pcm = b"".join(
@@ -176,22 +174,15 @@ def test_encode_wav_auto_trims_longer_replacement(tmp_path):
     user_wav = tmp_path / "loop.wav"
     _write_wav(str(user_wav), long_pcm, channels=2, rate=48000, width=2)
 
-    warnings = []
-    new_sample = ic.encode_wav_to_sample(
-        str(user_wav), str(orig_sample),
-        log_cb=lambda m, s="info": warnings.append((s, m)))
+    new_sample = ic.encode_wav_to_sample(str(user_wav), str(orig_sample))
 
-    # The new .sample fits within the original's byte footprint, and its
-    # QOA payload is a valid, shorter, decodable stream.
-    assert len(new_sample) <= len(orig_sample.read_bytes())
-    from pinball_decryptor.plugins.bof.source_converter import _find_data_pba
+    # Bigger than the original, full 5 seconds preserved, format conformed.
+    assert len(new_sample) > len(orig_sample.read_bytes())
     new_payload, _off, _end = _find_data_pba(new_sample, b"AudioStreamWAV")
     assert new_payload[:4] == b"qoaf"
-    assert len(new_payload) <= orig_payload_len
     pcm2, ch2, rate2 = qoa_codec.decode(new_payload)
     assert ch2 == 2 and rate2 == 48000
-    assert len(pcm2) // (2 * 2) < 48000 * 5          # was trimmed
-    assert any(s == "warning" and "trim" in m.lower() for s, m in warnings)
+    assert len(pcm2) // (2 * 2) == 48000 * 5         # full length kept
 
 
 # ----------------------------------------------------------------------

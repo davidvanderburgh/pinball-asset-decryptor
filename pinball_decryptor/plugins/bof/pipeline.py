@@ -1061,7 +1061,8 @@ class ModifyPipeline(_BasePipeline):
             stats = pack_pck(local_tmp_in, pck_dir, local_tmp_out,
                              log_cb=_packer_log,
                              cancel_cb=lambda: self._cancelled,
-                             progress_cb=self._bp)
+                             progress_cb=self._bp,
+                             changed_pck=changed_pck)
             self._check_cancel()
             self._log(
                 f"  Replaced {stats['files_replaced']} files "

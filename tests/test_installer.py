@@ -190,14 +190,15 @@ def test_pip_step_fixes_read_permissions():
         "ACL.")
 
 
-_PLUGIN_PACKAGES = (
-    "pinball_decryptor.plugins.pb",
-    "pinball_decryptor.plugins.spooky",
-    "pinball_decryptor.plugins.bof",
-    "pinball_decryptor.plugins.jjp",
-    "pinball_decryptor.plugins.cgc",
-    "pinball_decryptor.plugins.williams",
-)
+# Derived from the registry's actual load list, NOT hardcoded — so the
+# guard can never go stale.  The moment a manufacturer is added to
+# core/registry._PLUGIN_MODULES it becomes required in the build scripts
+# too.  A hardcoded copy here is precisely what let American Pinball (ap)
+# and Dutch Pinball (dp) be wired into the registry yet omitted from the
+# PyInstaller --hidden-import list, so the Linux AppImage / macOS .app
+# silently shipped without them (Windows bundles the whole source tree,
+# so it was unaffected — which is why the bug only showed on Mint).
+from pinball_decryptor.core.registry import _PLUGIN_MODULES as _PLUGIN_PACKAGES
 
 
 @pytest.mark.parametrize(

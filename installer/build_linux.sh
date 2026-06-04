@@ -46,11 +46,13 @@ pyinstaller \
     --hidden-import "PIL" \
     --hidden-import "PIL.Image" \
     --hidden-import "pinball_decryptor.plugins.pb" \
+    --hidden-import "pinball_decryptor.plugins.ap" \
     --hidden-import "pinball_decryptor.plugins.spooky" \
     --hidden-import "pinball_decryptor.plugins.bof" \
     --hidden-import "pinball_decryptor.plugins.jjp" \
     --hidden-import "pinball_decryptor.plugins.cgc" \
     --hidden-import "pinball_decryptor.plugins.williams" \
+    --hidden-import "pinball_decryptor.plugins.dp" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

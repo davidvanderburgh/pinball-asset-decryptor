@@ -88,8 +88,9 @@ def test_encode_wav_to_sample_swaps_pcm_payload(tmp_path):
     orig_sample = tmp_path / "voice.sample"
     orig_sample.write_bytes(_build_pcm_sample(orig_pcm))
 
-    # User's new WAV with different PCM bytes
-    new_pcm = b"\x55\x00" * 100
+    # User's new WAV with different PCM bytes (same length — a larger
+    # clip would be auto-trimmed to fit the original's footprint).
+    new_pcm = b"\x55\x00" * 50
     new_wav = tmp_path / "voice.wav"
     _write_wav(str(new_wav), new_pcm, channels=1, rate=22050, width=2)
 
@@ -147,6 +148,50 @@ def test_encode_wav_conforms_to_original_channels_and_rate(tmp_path):
     assert int.from_bytes(new_qoa[9:12], "big") == 48000, "rate not conformed"
     pcm2, ch2, rate2 = qoa_codec.decode(new_qoa)
     assert ch2 == 2 and rate2 == 48000
+
+
+def test_encode_wav_auto_trims_longer_replacement(tmp_path):
+    """A replacement LONGER than the original must be auto-trimmed so its
+    QOA payload fits the original's byte footprint (the repacker is
+    size-neutral — BOF's encrypted PCK directory can't be shifted).  The
+    encoder warns via log_cb instead of failing."""
+    import math
+    from pinball_decryptor.plugins.bof import qoa_codec
+
+    # Original: a SHORT stereo/48k QOA callout (1 second).
+    short_pcm = b"".join(
+        struct.pack("<hh", int(2000 * math.sin(i * 0.05)),
+                    int(2000 * math.sin(i * 0.05)))
+        for i in range(48000))
+    qoa = qoa_codec.encode(short_pcm, 2, 48000)
+    orig_payload_len = len(qoa)
+    orig_sample = tmp_path / "loop.sample"
+    orig_sample.write_bytes(_build_pcm_sample(qoa))
+
+    # User supplies a much LONGER clip (5 seconds, stereo 48k).
+    long_pcm = b"".join(
+        struct.pack("<hh", int(2000 * math.sin(i * 0.05)),
+                    int(2000 * math.sin(i * 0.05)))
+        for i in range(48000 * 5))
+    user_wav = tmp_path / "loop.wav"
+    _write_wav(str(user_wav), long_pcm, channels=2, rate=48000, width=2)
+
+    warnings = []
+    new_sample = ic.encode_wav_to_sample(
+        str(user_wav), str(orig_sample),
+        log_cb=lambda m, s="info": warnings.append((s, m)))
+
+    # The new .sample fits within the original's byte footprint, and its
+    # QOA payload is a valid, shorter, decodable stream.
+    assert len(new_sample) <= len(orig_sample.read_bytes())
+    from pinball_decryptor.plugins.bof.source_converter import _find_data_pba
+    new_payload, _off, _end = _find_data_pba(new_sample, b"AudioStreamWAV")
+    assert new_payload[:4] == b"qoaf"
+    assert len(new_payload) <= orig_payload_len
+    pcm2, ch2, rate2 = qoa_codec.decode(new_payload)
+    assert ch2 == 2 and rate2 == 48000
+    assert len(pcm2) // (2 * 2) < 48000 * 5          # was trimmed
+    assert any(s == "warning" and "trim" in m.lower() for s, m in warnings)
 
 
 # ----------------------------------------------------------------------
@@ -209,7 +254,7 @@ def test_apply_source_edits_picks_up_changed_wav(tmp_path):
     import time
     baseline = time.time()
     time.sleep(0.05)  # ensure mtime > baseline
-    new_pcm = b"\x55\x00" * 100
+    new_pcm = b"\x55\x00" * 50
     user_wav = editable / "voice-1c4a29.wav"
     _write_wav(str(user_wav), new_pcm, channels=1, rate=22050, width=2)
 

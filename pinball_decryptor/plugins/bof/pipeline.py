@@ -163,9 +163,10 @@ class _BasePipeline:
                 except Exception:
                     cur = 0
                 if expected_bytes > 0:
-                    pct = min(int(100 * cur / expected_bytes), 99)
-                    parent._progress(pct, 100,
-                                     f"{label} {pct}%" if label else f"{pct}%")
+                    pct = min(cur, expected_bytes)  # clamp; banded below
+                    label_pct = min(int(100 * cur / expected_bytes), 99)
+                    parent._bp(pct, expected_bytes,
+                               f"{label} {label_pct}%" if label else f"{label_pct}%")
                 stop.wait(1.0)
 
         class _Ctx:
@@ -1032,9 +1033,10 @@ class ModifyPipeline(_BasePipeline):
         try:
             self._check_cancel()
             # cp via executor — fastest path on macOS, acceptable on WSL.
-            # A shell `cp` gives no byte feedback, so march the bar in
-            # indeterminate mode (total=0) while the ~2.7 GB copy runs.
-            self._progress(0, 0, "Preparing binary for packing...")
+            # A shell `cp` gives no byte feedback; report a definite banded
+            # value (the band floor) rather than flipping to an
+            # indeterminate "marching" animation that looks like a reset.
+            self._bp(0, 100, "Preparing binary for packing...")
             in_local_wsl = self.executor.to_exec_path(local_tmp_in)
             self.executor.run(
                 f"cp {binary_wsl!r} {in_local_wsl!r}",
@@ -1053,13 +1055,13 @@ class ModifyPipeline(_BasePipeline):
                 self._check_cancel()
                 self._log(msg, sev)
 
-            # Forward the packer's byte-level progress to the GUI so the
-            # native pack shows a moving determinate bar instead of
+            # Forward the packer's byte-level progress to the GUI (banded)
+            # so the native pack shows a moving, monotonic bar instead of
             # sitting frozen at 0% for the whole multi-minute rebuild.
             stats = pack_pck(local_tmp_in, pck_dir, local_tmp_out,
                              log_cb=_packer_log,
                              cancel_cb=lambda: self._cancelled,
-                             progress_cb=self._progress)
+                             progress_cb=self._bp)
             self._check_cancel()
             self._log(
                 f"  Replaced {stats['files_replaced']} files "
@@ -1067,7 +1069,7 @@ class ModifyPipeline(_BasePipeline):
                 f"{stats['new_binary_size']} bytes binary).",
                 "info")
             # Copy back into the executor's path
-            self._progress(0, 0, "Finalizing binary...")
+            self._bp(100, 100, "Finalizing binary...")
             out_local_wsl = self.executor.to_exec_path(local_tmp_out)
             self.executor.run(
                 f"cp {out_local_wsl!r} {binary_wsl!r} && "
@@ -1528,11 +1530,14 @@ class ModifyPipeline(_BasePipeline):
         tmp_tar_wsl = f"/tmp/bof_{game_key}_mod.tar.gz"
         tmp_dir_wsl = f"/tmp/bof_{game_key}_repack"
 
-        # Phase 0 — Decrypt original .fun → tar.gz → extract to temp dir
+        # Phase 0 — Decrypt original .fun → tar.gz → extract to temp dir.
+        # Banded progress (0→100 across all 5 phases, never resetting):
+        # Decrypt+Extract own 0–15%.
         self._set_phase(0)
+        self._set_band(0, 12)
         self._log(f"Decrypting original {os.path.basename(self.original_fun)}...",
                   "info")
-        self._progress(0, 100, "Decrypting original...")
+        self._bp(0, 100, "Decrypting original...")
 
         fun_size = os.path.getsize(self.original_fun)
         try:
@@ -1548,8 +1553,11 @@ class ModifyPipeline(_BasePipeline):
                 f"Check that the original .fun file is valid.")
         self._log("Original decrypted.", "success")
 
-        # Extract tar to temp dir (preserves original structure)
-        self._progress(0, 100, "Extracting original...")
+        # Extract tar to temp dir (preserves original structure).  The
+        # untar gives no byte feedback, so band it 12→15 and let it land
+        # at 15 on completion rather than freezing the bar at a low value.
+        self._set_band(12, 15)
+        self._bp(0, 100, "Extracting original...")
         try:
             self.executor.run(
                 f"rm -rf {tmp_dir_wsl!r} && mkdir -p {tmp_dir_wsl!r} && "
@@ -1559,11 +1567,14 @@ class ModifyPipeline(_BasePipeline):
         except CommandError as e:
             raise PipelineError("Decrypt",
                 f"tar extract failed:\n{e.output}")
+        self._bp(100, 100, "Original extracted.")
         self._log("Original extracted to temp dir.", "success")
         self._check_cancel()
 
-        # Phase 1 — Patch: find changed PCK files and patch the binary
+        # Phase 1 — Patch: find changed PCK files and patch the binary.
+        # Owns 15–80% (MD5 diff 15–30, native pack 30–80).
         self._set_phase(1)
+        self._set_band(15, 30)
 
         pck_dir = os.path.join(self.assets_dir, "pck")
         has_pck = os.path.isdir(pck_dir)
@@ -1666,7 +1677,7 @@ class ModifyPipeline(_BasePipeline):
                 if current_md5 != saved_md5:
                     changed_pck.append(rel_from_pck)
                 if (i + 1) % 25 == 0:
-                    self._progress(
+                    self._bp(
                         i + 1, len(all_files),
                         f"MD5-checking {i+1}/{len(all_files)}...")
             self._log(
@@ -1686,14 +1697,15 @@ class ModifyPipeline(_BasePipeline):
             # picks up the change at runtime.
             pck_dir_wsl = self.executor.to_exec_path(pck_dir)
             self._log("Reimporting assets for Godot...", "info")
-            self._progress(0, 0, "Reimporting assets...")
+            self._set_band(30, 33)
+            self._bp(0, 100, "Reimporting assets...")
             extra = self._reimport_assets(changed_pck, pck_dir, pck_dir_wsl)
             if extra:
                 self._log(f"Reimported {len(extra)} imported asset(s)", "success")
                 changed_pck.extend(extra)
 
             self._log(f"Patching {len(changed_pck)} file(s) into binary...", "info")
-            self._progress(0, 100, "Patching PCK...")
+            self._bp(100, 100, "Patching PCK...")
 
             # Detect BOF May 2026+ custom PCK format BEFORE patching the
             # GBOF magic.  May-format binaries can't be patched by GDRE
@@ -1723,10 +1735,12 @@ class ModifyPipeline(_BasePipeline):
                     "Detected BOF May 2026+ custom PCK format — using "
                     "native packer (GDRE Tools can't write this format).",
                     "info")
+                self._set_band(33, 78)   # native pack owns 33–78%
                 self._may_pack_binary(binary_wsl, pck_dir, changed_pck)
                 # may_packer preserves the GBOF magic natively, so no
                 # post-patch magic restore is needed.
             else:
+                self._set_band(33, 78)   # GDRE patch owns 33–78%
                 pck_dir_wsl = self.executor.to_exec_path(pck_dir)
                 tmp_binary_wsl = f"/tmp/bof_{game_key}_patched.x86_64"
                 gdre_prefix = self._gdre_prefix()
@@ -1769,7 +1783,7 @@ class ModifyPipeline(_BasePipeline):
                             pct_match = re.search(r'(\d+)%', part)
                             if pct_match:
                                 pct = int(pct_match.group(1))
-                                self._progress(pct, 100, f"Patching... {pct}%")
+                                self._bp(pct, 100, f"Patching... {pct}%")
                             elif part:
                                 self._log(f"  {part}", "info")
                 except CommandError as e:
@@ -1822,8 +1836,9 @@ class ModifyPipeline(_BasePipeline):
 
         # Phase 2 — Repack: re-tar the temp dir (same structure as original)
         self._set_phase(2)
+        self._set_band(78, 90)   # repack tar owns 78–90% (no byte feedback)
         self._log("Repacking archive...", "info")
-        self._progress(0, 100, "Creating tar.gz...")
+        self._bp(0, 100, "Creating tar.gz...")
 
         repack_tar_wsl = f"/tmp/bof_{game_key}_repack.tar.gz"
         try:
@@ -1836,6 +1851,7 @@ class ModifyPipeline(_BasePipeline):
             )
         except CommandError as e:
             raise PipelineError("Repack", f"tar repack failed:\n{e.output}")
+        self._bp(100, 100, "Archive created.")
 
         # Get tar size for encrypt progress
         tar_bytes = 0
@@ -1856,8 +1872,9 @@ class ModifyPipeline(_BasePipeline):
 
         # Phase 3 — Encrypt: GPG encrypt → output .fun
         self._set_phase(3)
+        self._set_band(90, 99)   # encrypt owns 90–99% (polled by file size)
         self._log(f"Encrypting to {os.path.basename(self.output_fun_path)}...", "info")
-        self._progress(0, 100, "GPG encrypting...")
+        self._bp(0, 100, "GPG encrypting...")
 
         os.makedirs(os.path.dirname(self.output_fun_path) or ".", exist_ok=True)
         try:
@@ -1877,6 +1894,8 @@ class ModifyPipeline(_BasePipeline):
 
         # Phase 4 — Cleanup
         self._set_phase(4)
+        self._set_band(99, 100)
+        self._bp(0, 100, "Cleaning up...")
         try:
             self.executor.run(
                 f"rm -rf {tmp_tar_wsl!r} {tmp_dir_wsl!r} {repack_tar_wsl!r} "
@@ -1886,6 +1905,7 @@ class ModifyPipeline(_BasePipeline):
             )
         except Exception:
             pass
+        self._bp(100, 100, "Done.")
         self._log("Cleanup complete.", "success")
 
         self._done(True,

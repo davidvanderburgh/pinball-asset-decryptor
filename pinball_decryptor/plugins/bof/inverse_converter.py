@@ -246,9 +246,48 @@ def _splice_pba_payload(orig_sample_bytes, new_payload):
     raise ValueError("no PBA found in AudioStreamWAV properties")
 
 
-def encode_wav_to_sample(wav_path, orig_sample_path):
+_QOA_FRAME_SAMPLES = 5120
+
+
+def _qoa_encoded_size(n_samples, channels):
+    """Exact byte size qoa_codec.encode() produces for ``n_samples`` per
+    channel (matches the encoder's framing: 8-byte file header, then per
+    frame 8-byte header + 16*ch LMS state + 8*ceil(spc/20)*ch slices)."""
+    if n_samples <= 0:
+        return 8
+    size = 8
+    full, rem = divmod(n_samples, _QOA_FRAME_SAMPLES)
+    size += full * (8 + 16 * channels + 8 * (_QOA_FRAME_SAMPLES // 20) * channels)
+    if rem:
+        size += 8 + 16 * channels + 8 * ((rem + 19) // 20) * channels
+    return size
+
+
+def _max_qoa_samples(max_bytes, channels):
+    """Largest per-channel sample count whose QOA encoding fits in
+    ``max_bytes`` (binary search over the exact size formula)."""
+    lo, hi = 0, max(0, (max_bytes // max(1, channels)))  # generous upper bound
+    hi = max(hi, 1)
+    while _qoa_encoded_size(hi, channels) <= max_bytes:
+        hi *= 2
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _qoa_encoded_size(mid, channels) <= max_bytes:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def encode_wav_to_sample(wav_path, orig_sample_path, log_cb=None):
     """Re-encode a user-edited .wav into a Godot .sample, preserving
-    whatever wrapper + payload encoding the original used."""
+    whatever wrapper + payload encoding the original used.
+
+    The repacker can only substitute size-neutrally (BOF's encrypted PCK
+    directory stores absolute offsets), so the new payload must fit the
+    original's byte footprint.  If the replacement audio is longer than
+    the original, this auto-trims the tail to fit and warns via
+    ``log_cb`` rather than failing the whole Write."""
     long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
     with open(long_prefix + os.path.abspath(orig_sample_path), "rb") as f:
         orig = f.read()
@@ -282,20 +321,36 @@ def encode_wav_to_sample(wav_path, orig_sample_path):
     # → black screen).  Conform the user's audio to it.
     dst_ch, dst_rate = _original_sample_format(orig, orig_payload, channels, rate)
 
+    pcm = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
+    total_samples = len(pcm) // (dst_ch * 2)
+
+    def _warn_trim(kept_samples):
+        if log_cb and kept_samples < total_samples:
+            cut = (total_samples - kept_samples) / max(1, dst_rate)
+            log_cb(
+                f"  Replacement is longer than the original; auto-trimmed "
+                f"{cut:.1f}s off the end to fit "
+                f"({kept_samples / max(1, dst_rate):.1f}s kept). The game's "
+                f"file format can't store a longer clip in this slot.",
+                "warning")
+
     if payload_head[:4] == b"qoaf":
-        # Re-encode WAV PCM to QOA at the original's channels + rate.
+        # Re-encode WAV PCM to QOA at the original's channels + rate,
+        # auto-trimming to fit the original payload's byte footprint.
         from .qoa_codec import encode as qoa_encode
-        pcm = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
+        if _qoa_encoded_size(total_samples, dst_ch) > old_len:
+            keep = _max_qoa_samples(old_len, dst_ch)
+            pcm = pcm[:keep * dst_ch * 2]
+            _warn_trim(keep)
         new_payload = qoa_encode(pcm, dst_ch, dst_rate)
-    elif payload_head[:4] == b"OggS":
-        # User edited a WAV but original was OGG — leave a clear marker
-        # so the Modify pipeline can warn.  For now, fall back to raw PCM
-        # which the Godot loader will play (slightly different size but
-        # still decodes).
-        new_payload = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
     else:
-        # Raw 16-bit PCM payload — conform to the declared format too.
-        new_payload = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
+        # Raw 16-bit PCM (or an OGG-original fallback to PCM): conform,
+        # then trim the tail to the original payload byte length if longer.
+        if len(pcm) > old_len:
+            keep = (old_len // (dst_ch * 2))
+            pcm = pcm[:keep * dst_ch * 2]
+            _warn_trim(keep)
+        new_payload = pcm
 
     return _splice_pba_payload(orig, new_payload)
 
@@ -326,7 +381,7 @@ def _original_sample_format(orig, orig_payload, fallback_ch, fallback_rate):
 # .webp / .png → .ctex (GST2)
 # ---------------------------------------------------------------------------
 
-def encode_image_to_ctex(image_path, orig_ctex_path):
+def encode_image_to_ctex(image_path, orig_ctex_path, log_cb=None):
     """Replace the image payload inside a GST2 .ctex while preserving
     its header.  Accepts WebP or PNG; the surrounding GST2 stays
     untouched so Godot's loader still sees the right width/height."""
@@ -378,7 +433,7 @@ ENCODERS = {
 }
 
 
-def reencode_source_file(src_path, orig_imported_path):
+def reencode_source_file(src_path, orig_imported_path, log_cb=None):
     """Top-level entry: dispatch by source extension.  Returns rebuilt
     bytes for the imported binary, or raises ``ValueError`` with a
     human-readable reason."""
@@ -386,7 +441,7 @@ def reencode_source_file(src_path, orig_imported_path):
     enc = ENCODERS.get(ext)
     if enc is None:
         raise ValueError(f"no inverse encoder for {ext} files yet")
-    return enc(src_path, orig_imported_path)
+    return enc(src_path, orig_imported_path, log_cb=log_cb)
 
 
 def apply_source_edits(pck_dir, baseline_mtime=0, *,
@@ -538,7 +593,7 @@ def apply_source_edits(pck_dir, baseline_mtime=0, *,
             skipped.append((name, f"no matching imported binary for {stem}/{hash6}"))
             continue
         try:
-            new_bytes = reencode_source_file(src_full, imported)
+            new_bytes = reencode_source_file(src_full, imported, log_cb=log_cb)
         except Exception as e:
             skipped.append((name, str(e)))
             continue

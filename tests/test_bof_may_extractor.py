@@ -212,18 +212,20 @@ def test_pack_with_no_modifications_keeps_file_count(tmp_path):
 
 
 def test_pack_substitutes_modified_texture(tmp_path):
-    """When a user modifies a texture and re-packs, the new bytes
-    appear in the output binary's extract."""
-    original_texture = b"GST2" + b"\x01" * 100
+    """When a user modifies a texture with a SMALLER replacement and
+    re-packs, the new bytes appear in the output binary's extract (the
+    packer zero-pads the entry back to its original size, which the
+    extractor trims)."""
+    original_texture = b"GST2" + b"\x01" * 200
     binary = _build_may_binary(tmp_path, texture_payload=original_texture)
 
     # First extract so we have the mods directory shape
     mods_dir = tmp_path / "mods"
     may_extractor.extract_pck(binary, str(mods_dir))
 
-    # Modify the texture
+    # Modify the texture — SMALLER so it fits the original footprint.
     ctex = list(mods_dir.rglob("*.ctex"))[0]
-    new_texture = b"GST2" + b"\x02" * 200  # bigger + different bytes
+    new_texture = b"GST2" + b"\x02" * 50  # smaller + different bytes
     ctex.write_bytes(new_texture)
 
     # Repack
@@ -232,10 +234,26 @@ def test_pack_substitutes_modified_texture(tmp_path):
     assert stats["files_replaced"] == 1
 
     # Re-extract from the modded binary and verify the new bytes are there
+    # (trailing zero-pad is trimmed by the extractor's bounds logic).
     verify_dir = tmp_path / "verify"
     may_extractor.extract_pck(str(out), str(verify_dir))
     re_ctex = list(verify_dir.rglob("*.ctex"))[0]
     assert re_ctex.read_bytes() == new_texture
+
+
+def test_pack_rejects_larger_replacement(tmp_path):
+    """A replacement BIGGER than the original entry must be refused — BOF's
+    encrypted PCK directory stores absolute offsets we can't shift, so a
+    grow would brick the game.  The packer raises a clear PackerError."""
+    binary = _build_may_binary(tmp_path, texture_payload=b"GST2" + b"\x01" * 80)
+    mods_dir = tmp_path / "mods"
+    may_extractor.extract_pck(binary, str(mods_dir))
+    ctex = list(mods_dir.rglob("*.ctex"))[0]
+    ctex.write_bytes(b"GST2" + b"\x02" * 400)  # bigger than original
+
+    out = tmp_path / "modded.x86_64"
+    with pytest.raises(may_packer.PackerError, match="larger than the original"):
+        may_packer.pack_pck(binary, str(mods_dir), str(out))
 
 
 def _entry_offsets(binary):
@@ -262,9 +280,9 @@ def test_pack_leaves_unchanged_fonts_verbatim(tmp_path):
     mods_dir = tmp_path / "mods"
     may_extractor.extract_pck(binary, str(mods_dir))
 
-    # Edit ONLY the texture; leave both fonts untouched.
+    # Edit ONLY the texture (smaller, fits footprint); leave fonts untouched.
     ctex = list(mods_dir.rglob("*.ctex"))[0]
-    ctex.write_bytes(b"GST2" + b"\x02" * 137)  # different size + bytes
+    ctex.write_bytes(b"GST2" + b"\x02" * 50)  # different bytes, smaller
 
     out = tmp_path / "modded.x86_64"
     stats = may_packer.pack_pck(binary, str(mods_dir), str(out))
@@ -280,40 +298,34 @@ def test_pack_leaves_unchanged_fonts_verbatim(tmp_path):
     assert orig.count(b"RSCC") == new.count(b"RSCC")  # no font separator lost
 
 
-def test_pack_preserves_16byte_alignment(tmp_path):
-    """A size-changing adjacent substitution must keep every downstream
-    entry on its original 16-byte boundary — the packer pads the
-    replacement so its length stays ≡ the original (mod 16).  BOF's
-    no-directory loader walks the PCK forward and relies on this; the
-    bug it guards against dropped alignment retention from 96% to ~49%
-    on the real Dune binary."""
+def test_pack_is_size_neutral(tmp_path):
+    """A size-changing (shrinking) adjacent substitution must keep EVERY
+    other entry at its EXACT original byte offset — the packer zero-pads
+    the replacement back to the original footprint so nothing downstream
+    shifts.  This is load-critical: BOF's May PCK is a Godot v3 pack whose
+    real file directory (encrypted, at the header dir_offset) stores
+    ABSOLUTE offsets the engine uses; any net shift makes it read later
+    resources at stale offsets and the game black-screens."""
     binary = _build_may_binary(
         tmp_path,
         font_payloads=[b"FONT_" * 90],
-        texture_payload=b"GST2" + b"\x00" * 100,
+        texture_payload=b"GST2" + b"\x11" * 300,
         gdsc_payloads=[b"\xAB" * 200, b"\xCD" * 200],
     )
     before = _entry_offsets(binary)
+    orig_size = os.path.getsize(binary)
 
     mods_dir = tmp_path / "mods"
     may_extractor.extract_pck(binary, str(mods_dir))
     ctex = list(mods_dir.rglob("*.ctex"))[0]
-    # Grow by 7 bytes — deliberately NOT a multiple of 16, so an
-    # unpadded packer would knock everything downstream out of phase.
-    ctex.write_bytes(b"GST2" + b"\x00" * 107)
+    ctex.write_bytes(b"GST2" + b"\x22" * 60)  # much smaller -> gets zero-padded
 
     out = tmp_path / "modded.x86_64"
     may_packer.pack_pck(binary, str(mods_dir), str(out))
     may_extractor.extract_pck(str(out), str(tmp_path / "verify"))  # still extractable
     after = _entry_offsets(str(out))
 
-    tex_path = next(p for p in before if p.endswith(".ctex"))
-    edited_start = before[tex_path][0]
-    # Every entry at/after the edited one keeps its (offset mod 16) phase.
-    for path, (fs, ss) in before.items():
-        if fs < edited_start:
-            assert after[path] == (fs, ss)          # untouched, exact
-        else:
-            nfs, nss = after[path]
-            assert nfs % 16 == fs % 16, f"{path} file_start phase drifted"
-            assert nss % 16 == ss % 16, f"{path} sidecar phase drifted"
+    # Output binary is the EXACT same size, and every entry — including
+    # the edited one — sits at its original (file_start, sidecar_start).
+    assert os.path.getsize(str(out)) == orig_size
+    assert after == before

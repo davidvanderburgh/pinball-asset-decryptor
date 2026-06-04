@@ -446,19 +446,39 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
                     continue   # not actually different
                 new_data = modified_bytes
 
-            # Preserve the PCK's 16-byte entry alignment.  The original keeps
-            # ~96% of file/sidecar starts at offset ≡ 8 (mod 16); BOF's
-            # no-directory loader walks the PCK forward and relies on this.
-            # Pad the replacement with trailing zeros — which land in the
-            # inter-entry gap the loader already trims — so this region keeps
-            # the same length-mod-16 as the original.  Without this, any
-            # size-changing substitution shifts every following entry off its
-            # boundary (measured: alignment retention drops from 96% to ~49%).
-            pad = ((fe - fs) - len(new_data)) % 16
+            # SIZE-NEUTRAL substitution — the replacement MUST keep the
+            # entry's exact original byte length so nothing downstream
+            # shifts.  BOF's May PCK is a Godot v3 pack whose REAL file
+            # directory lives encrypted at the header's dir_offset and
+            # stores ABSOLUTE file offsets (verified by RE: the engine is
+            # stock Godot 4.5.2 PackedSourcePCK + FileAccessEncrypted).
+            # Our extractor sidesteps that directory by marker-scanning,
+            # but the running engine uses it — so any net size change
+            # leaves every later file's stored offset stale and the engine
+            # reads boot resources at the wrong place → black screen (even
+            # for an edit to a gameplay-only asset, because the shift
+            # corrupts everything after it).  We can't rewrite the
+            # encrypted directory (its AES key isn't statically
+            # recoverable), so we forbid growth and zero-pad shrinkage back
+            # to the original footprint.  The resource loader ignores the
+            # trailing bytes (standard PCK padding) and QOA stops at its
+            # frame count, so the pad is inert.
+            orig_len = fe - fs
+            if len(new_data) > orig_len:
+                raise PackerError(
+                    f"Replacement for '{rel}' is larger than the original "
+                    f"({len(new_data)} > {orig_len} bytes). BOF's encrypted "
+                    f"PCK directory stores absolute file offsets that can't "
+                    f"be safely shifted, so a replacement must fit within the "
+                    f"original's byte footprint. Audio is auto-trimmed to fit; "
+                    f"for an image, supply a smaller/more-compressible file "
+                    f"(e.g. lower resolution or higher WebP compression).")
+            pad = orig_len - len(new_data)
             if pad:
                 new_data = new_data + b"\x00" * pad
-            _log(f"  replace {rel} [{kind}] {fe - fs} -> {len(new_data)} bytes"
-                 + (f" (+{pad}B align pad)" if pad else ""))
+            _log(f"  replace {rel} [{kind}] {len(modified_bytes)} -> "
+                 f"{orig_len} bytes (size-neutral"
+                 + (f", +{pad}B zero-pad)" if pad else ")"))
             replacements.append((fs, fe, new_data))
             n_replaced += 1
         if skipped_sequential:

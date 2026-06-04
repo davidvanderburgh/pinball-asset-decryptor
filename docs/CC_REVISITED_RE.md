@@ -186,6 +186,52 @@ The art bytes live in `art/wmsimg.bin` (original Williams DMD art) and
   `asset_subtree=/home/debian/pin`; (c) build the per-format extract/repack tools
   above.
 
+## DCS audio extraction — SOLVED (session 2, 2026-06-03)
+
+Approach chosen: **integrate mjrgh's DCSExplorer** (BSD, the same tool that almost
+certainly generated `dcsrom.c`). Prebuilt Windows binary:
+`DCSExplorer.exe` v1.1 → `https://github.com/mjrgh/DCSExplorer/releases/download/v1.1/DCSExplorer.exe`
+(kept locally at `c:\tmp\cc_image\tools\DCSExplorer.exe`). `DCSEncoder.exe` from the
+same release is the repack counterpart for later.
+
+**Verified ROM address mapping** (all 629 samples obey it): the `dcsrom.c` global
+address packs the ROM at a 2 MB stride —
+`rom_file = s[(addr>>21)+2]`, `offset = addr & 0xFFFFF` (bit 20 never set).
+`field3` = stream format/channel; `field4` = frame count (~30 compressed bytes/frame,
+240 samples/frame @ 31250 Hz). DCSExplorer's own listing uses a *contiguous* 1 MB-stride
+flat address instead (its "folded" form), so its stream addresses = `(addr>>21)*0x100000
++ (addr&0xFFFFF)`.
+
+**The DCSExplorer recipe that works:**
+
+1. Pull `ccdata/rom/s2.rom … s7.rom` out of the inner emmc.img P2 (nested dd/debugfs
+   chain). Keep the `sN.rom` names — the loader needs the chip digit in the filename.
+2. **Zip them into a file whose basename matches `^cc_\d.*`** (e.g. `cc_113.zip`).
+   This is REQUIRED: DCSExplorer maps zip files to U2–U9 by *filename digit + an internal
+   "S/U<digit> dd/dd/dd" signature* ([DCSDecoderZipLoader.cpp:168-203]). Cactus Canyon's
+   **U7 ROM is internally mislabeled "SAV6"** (a Williams factory error — `s7.rom` head =
+   `SAV6_8 06/04/98`, same digit as `s6.rom`). The loader has a special case to accept a
+   digit-6 signature as U7 *only when the zip basename matches `^cc_\d.*`*. A zip named
+   anything else (e.g. `cc_dcs_roms.zip`) silently **drops s7 / loses 90 samples**.
+3. Decode all samples to WAV:
+   ```
+   DCSExplorer.exe -I --silent --terse --extract-streams="<outdir>\" cc_113.zip
+   ```
+   `-I` ignores checksum mismatches (CGC's set won't match PinMAME CRCs). Output:
+   **629 WAVs, 0 errors, 21.1 min, 31250 Hz mono 16-bit PCM**, ~75 MB. Files are named
+   `_<track>_<streamidx>_<romaddr>.wav` (romaddr = DCSExplorer flat/folded address).
+   `--extract-tracks=` instead exports the assembled command-program tracks.
+
+DCSExplorer auto-recognizes the set: "Known pinball machine: Cactus Canyon / DCS-95 A/V
+board, Software 1.05 (1997) / catalog $06000 / max track $08B6 / 6 channels."
+
+**Still to do for a full repo tool:** (a) wire the nested-image ROM pull + zip-naming +
+DCSExplorer call into a `cc` plugin extract pipeline; (b) map the `_<...>_<addr>.wav` names
+to friendly names (cross-ref `dcsrom.c`'s `dcs_sample[]`, or run the existing
+faster-whisper transcribe step); (c) repack via `DCSEncoder.exe` and inject ROMs back into
+the nested image (Write pipeline). Bundling: DCSExplorer/Encoder are Win32 binaries; Linux/mac
+would build from source (the project already has per-OS executors).
+
 ## Open questions / next sessions
 
 1. DCS sample table fields 3 & 4 semantics; confirm DCS address→ROM mapping and

@@ -113,6 +113,42 @@ def test_encode_wav_rejects_non_audiostreamwav(tmp_path):
         ic.encode_wav_to_sample(str(wav), str(bogus))
 
 
+def test_encode_wav_conforms_to_original_channels_and_rate(tmp_path):
+    """A mono / 44.1 kHz user file replacing a stereo / 48 kHz QOA callout
+    must be conformed to stereo / 48 kHz.  We splice into the original
+    resource and keep its mix_rate / stereo properties verbatim, so the
+    new audio's channel count + rate MUST match — a channel mismatch makes
+    Godot read the QOA buffer with the wrong stride and crashes (black
+    screen at boot)."""
+    import math
+    from pinball_decryptor.plugins.bof import qoa_codec
+
+    # Original: stereo 48 kHz QOA payload inside an AudioStreamWAV blob.
+    stereo_pcm = b"".join(
+        struct.pack("<hh", int(3000 * math.sin(i * 0.05)),
+                    int(-3000 * math.sin(i * 0.05)))
+        for i in range(3000))
+    qoa = qoa_codec.encode(stereo_pcm, 2, 48000)
+    assert qoa[8] == 2 and int.from_bytes(qoa[9:12], "big") == 48000
+    orig_sample = tmp_path / "callout.sample"
+    orig_sample.write_bytes(_build_pcm_sample(qoa))
+
+    # User supplies MONO / 44.1 kHz — the worst-case mismatch.
+    mono_pcm = b"".join(
+        struct.pack("<h", int(2000 * math.sin(i * 0.07))) for i in range(2205))
+    user_wav = tmp_path / "callout.wav"
+    _write_wav(str(user_wav), mono_pcm, channels=1, rate=44100, width=2)
+
+    new_sample = ic.encode_wav_to_sample(str(user_wav), str(orig_sample))
+
+    new_qoa = new_sample[new_sample.find(b"qoaf"):]
+    assert new_qoa[:4] == b"qoaf"
+    assert new_qoa[8] == 2, "channel count not conformed to original (stereo)"
+    assert int.from_bytes(new_qoa[9:12], "big") == 48000, "rate not conformed"
+    pcm2, ch2, rate2 = qoa_codec.decode(new_qoa)
+    assert ch2 == 2 and rate2 == 48000
+
+
 # ----------------------------------------------------------------------
 # .webp → .ctex
 # ----------------------------------------------------------------------

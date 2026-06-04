@@ -1031,7 +1031,10 @@ class ModifyPipeline(_BasePipeline):
             delete=False, suffix=".x86_64").name
         try:
             self._check_cancel()
-            # cp via executor — fastest path on macOS, acceptable on WSL
+            # cp via executor — fastest path on macOS, acceptable on WSL.
+            # A shell `cp` gives no byte feedback, so march the bar in
+            # indeterminate mode (total=0) while the ~2.7 GB copy runs.
+            self._progress(0, 0, "Preparing binary for packing...")
             in_local_wsl = self.executor.to_exec_path(local_tmp_in)
             self.executor.run(
                 f"cp {binary_wsl!r} {in_local_wsl!r}",
@@ -1050,9 +1053,13 @@ class ModifyPipeline(_BasePipeline):
                 self._check_cancel()
                 self._log(msg, sev)
 
+            # Forward the packer's byte-level progress to the GUI so the
+            # native pack shows a moving determinate bar instead of
+            # sitting frozen at 0% for the whole multi-minute rebuild.
             stats = pack_pck(local_tmp_in, pck_dir, local_tmp_out,
                              log_cb=_packer_log,
-                             cancel_cb=lambda: self._cancelled)
+                             cancel_cb=lambda: self._cancelled,
+                             progress_cb=self._progress)
             self._check_cancel()
             self._log(
                 f"  Replaced {stats['files_replaced']} files "
@@ -1060,6 +1067,7 @@ class ModifyPipeline(_BasePipeline):
                 f"{stats['new_binary_size']} bytes binary).",
                 "info")
             # Copy back into the executor's path
+            self._progress(0, 0, "Finalizing binary...")
             out_local_wsl = self.executor.to_exec_path(local_tmp_out)
             self.executor.run(
                 f"cp {out_local_wsl!r} {binary_wsl!r} && "

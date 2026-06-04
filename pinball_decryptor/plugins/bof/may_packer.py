@@ -234,7 +234,7 @@ def _read_pck_entries(pck_buf):
 
 
 def pack_pck(original_binary, modified_pck_dir, output_binary,
-             log_cb=None, cancel_cb=None):
+             log_cb=None, cancel_cb=None, progress_cb=None):
     """Repack the PCK section of ``original_binary`` using whatever's
     in ``modified_pck_dir`` (mirror of the extractor's output tree).
 
@@ -316,6 +316,17 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
     pck_bytes_written = 0
     COPY_CHUNK = 8 * 1024 * 1024  # 8 MB chunks for the pre-PCK code copy
 
+    # Total output bytes (≈ prefix + PCK; close enough for a progress bar).
+    # Reported as bytes-written so the GUI shows a moving determinate bar
+    # through the otherwise-silent multi-minute native pack — the May path
+    # used to look frozen at 0% because it emitted no progress at all.
+    total_out = pck_start + (pck_end - pck_start)
+    bytes_out = 0
+
+    def _report():
+        if progress_cb:
+            progress_cb(bytes_out, total_out, "Packing binary…")
+
     with open(original_binary, "rb") as src, open(out_long, "wb") as dst:
         # 1) Pre-PCK code section — copy bit-for-bit
         remaining = pck_start
@@ -325,18 +336,31 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
                 break
             dst.write(chunk)
             remaining -= len(chunk)
+            bytes_out += len(chunk)
+            _report()
 
         def _write_slice(start, end):
-            """Write pck[start:end] to dst WITHOUT materialising a copy.
-            Tracks pck_bytes_written via closure."""
+            """Write pck[start:end] to dst WITHOUT materialising a copy,
+            in chunks so the progress bar keeps moving through large
+            verbatim runs.  Tracks pck_bytes_written via closure."""
+            nonlocal bytes_out
             nonlocal pck_bytes_written
             if end <= start:
                 return
-            # memoryview avoids the copy that bytes()/slice would create
-            mv = memoryview(pck)[start:end]
-            dst.write(mv)
-            pck_bytes_written += (end - start)
-            mv.release()
+            # memoryview avoids the copy that bytes()/slice would create;
+            # write in COPY_CHUNK steps so the bar advances on big runs.
+            base = memoryview(pck)
+            p = start
+            while p < end:
+                q = min(p + COPY_CHUNK, end)
+                mv = base[p:q]
+                dst.write(mv)
+                mv.release()
+                pck_bytes_written += (q - p)
+                bytes_out += (q - p)
+                _report()
+                p = q
+            base.release()
 
         # 2) PCK header + 8-byte pad — write directly from source
         _write_slice(0, PCK_HEADER_LEN + PCK_HEADER_PAD)
@@ -467,6 +491,8 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
                 _write_slice(cursor, fs)
             dst.write(new_data)
             pck_bytes_written += len(new_data)
+            bytes_out += len(new_data)
+            _report()
             cursor = fe
 
         # 3) PCK tail — everything from cursor to end of PCK

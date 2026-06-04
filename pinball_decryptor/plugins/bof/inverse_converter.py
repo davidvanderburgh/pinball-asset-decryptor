@@ -96,6 +96,119 @@ def _read_wav(path):
     return pcm, channels, rate, width
 
 
+def _clip16(v):
+    return -32768 if v < -32768 else (32767 if v > 32767 else int(v))
+
+
+def _pcm_to_channels(pcm, src_ch, width):
+    """De-interleave raw PCM into a list of ``src_ch`` int16 ``array``s,
+    converting 8/24/32-bit samples down to 16-bit.  Returns
+    ``(channels, n_frames)``."""
+    import array
+    n = len(pcm) // (src_ch * width)
+    chans = [array.array("h", bytes(2 * n)) for _ in range(src_ch)]
+    if width == 2:
+        allv = array.array("h")
+        allv.frombytes(pcm[:n * src_ch * 2])
+        if sys.byteorder == "big":
+            allv.byteswap()
+        for f in range(n):
+            base = f * src_ch
+            for c in range(src_ch):
+                chans[c][f] = allv[base + c]
+    elif width == 1:                              # 8-bit unsigned
+        for f in range(n):
+            base = f * src_ch
+            for c in range(src_ch):
+                chans[c][f] = (pcm[base + c] - 128) << 8
+    elif width == 3:                              # 24-bit LE signed → top 16
+        for f in range(n):
+            o = f * src_ch * 3
+            for c in range(src_ch):
+                p = o + c * 3
+                v = pcm[p] | (pcm[p + 1] << 8) | (pcm[p + 2] << 16)
+                if v & 0x800000:
+                    v -= 1 << 24
+                chans[c][f] = v >> 8
+    elif width == 4:                              # 32-bit LE signed → top 16
+        allv = array.array("i")
+        allv.frombytes(pcm[:n * src_ch * 4])
+        if sys.byteorder == "big":
+            allv.byteswap()
+        for f in range(n):
+            base = f * src_ch
+            for c in range(src_ch):
+                chans[c][f] = allv[base + c] >> 16
+    else:
+        raise ValueError(f"unsupported WAV sample width: {width} bytes")
+    return chans, n
+
+
+def _resample_linear(ch, src_rate, dst_rate):
+    """Linear-interpolation resample one int16 channel array.  Adequate
+    for the speech callouts BOF ships; avoids a scipy/numpy dependency."""
+    import array
+    n = len(ch)
+    if n == 0 or src_rate == dst_rate:
+        return ch
+    out_n = max(1, round(n * dst_rate / src_rate))
+    out = array.array("h", bytes(2 * out_n))
+    ratio = src_rate / dst_rate
+    for i in range(out_n):
+        x = i * ratio
+        i0 = int(x)
+        if i0 + 1 < n:
+            frac = x - i0
+            out[i] = _clip16(ch[i0] * (1.0 - frac) + ch[i0 + 1] * frac)
+        else:
+            out[i] = ch[n - 1]
+    return out
+
+
+def _interleave(chans):
+    import array
+    n = len(chans[0])
+    ch = len(chans)
+    out = array.array("h", bytes(2 * n * ch))
+    for f in range(n):
+        for c in range(ch):
+            out[f * ch + c] = chans[c][f]
+    if sys.byteorder == "big":
+        out.byteswap()
+    return out.tobytes()
+
+
+def _conform_pcm(pcm, src_ch, src_rate, src_width, dst_ch, dst_rate):
+    """Remix / resample / re-depth user PCM so it matches the channel
+    count and sample rate the *original* ``.sample`` declares.
+
+    This keeps the spliced resource internally consistent: we re-use the
+    original's ``format`` / ``mix_rate`` / ``stereo`` properties verbatim,
+    so the audio those properties describe must actually match.  A
+    channel-count mismatch in particular makes Godot read the QOA buffer
+    with the wrong stride — an out-of-bounds crash that black-screens the
+    game when the sample is preloaded at boot (e.g. a callout).
+    """
+    if (src_width == 2 and src_ch == dst_ch
+            and (src_rate == dst_rate or not src_rate or not dst_rate)):
+        return pcm                                # already matches — fast path
+    chans, _n = _pcm_to_channels(pcm, src_ch, src_width)
+    if src_ch != dst_ch:                          # down-mix to mono, then fan out
+        import array
+        n = len(chans[0])
+        mono = array.array("h", bytes(2 * n))
+        for f in range(n):
+            mono[f] = _clip16(sum(c[f] for c in chans) // src_ch)
+        chans = [mono]
+    if src_rate and dst_rate and src_rate != dst_rate:
+        chans = [_resample_linear(c, src_rate, dst_rate) for c in chans]
+    if len(chans) < dst_ch:                       # fan mono out to dst channels
+        chans = [chans[0]] * dst_ch
+    elif len(chans) > dst_ch:
+        chans = chans[:dst_ch]
+    return _interleave(chans)
+
+
 def _splice_pba_payload(orig_sample_bytes, new_payload):
     """Replace the AudioStreamWAV data PBA payload in place, returning
     the rebuilt .sample bytes.  Preserves the resource header, string
@@ -156,25 +269,57 @@ def encode_wav_to_sample(wav_path, orig_sample_path):
         if vtype == _VTYPE_PBA:
             old_len = struct.unpack("<I", orig[cursor:cursor+4])[0]
             payload_head = orig[cursor+4:cursor+8]
+            orig_payload = orig[cursor+4:cursor+4+old_len]
             break
         cursor += 4
     else:
         raise ValueError("can't locate original payload")
 
+    # Determine the channel count + sample rate the original .sample
+    # declares.  We splice into its wrapper and keep its format/mix_rate/
+    # stereo properties verbatim, so the new audio MUST match that format
+    # or the resource lies about itself (a channel mismatch crashes Godot
+    # → black screen).  Conform the user's audio to it.
+    dst_ch, dst_rate = _original_sample_format(orig, orig_payload, channels, rate)
+
     if payload_head[:4] == b"qoaf":
-        # Re-encode WAV PCM to QOA
+        # Re-encode WAV PCM to QOA at the original's channels + rate.
         from .qoa_codec import encode as qoa_encode
-        new_payload = qoa_encode(pcm, channels, rate)
+        pcm = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
+        new_payload = qoa_encode(pcm, dst_ch, dst_rate)
     elif payload_head[:4] == b"OggS":
         # User edited a WAV but original was OGG — leave a clear marker
         # so the Modify pipeline can warn.  For now, fall back to raw PCM
         # which the Godot loader will play (slightly different size but
         # still decodes).
-        new_payload = pcm
+        new_payload = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
     else:
-        new_payload = pcm
+        # Raw 16-bit PCM payload — conform to the declared format too.
+        new_payload = _conform_pcm(pcm, channels, rate, width, dst_ch, dst_rate)
 
     return _splice_pba_payload(orig, new_payload)
+
+
+def _original_sample_format(orig, orig_payload, fallback_ch, fallback_rate):
+    """Return ``(channels, sample_rate)`` the original .sample declares.
+
+    QOA payloads are self-describing (channels + samplerate live in the
+    stream header), so prefer those; otherwise parse the resource trailer
+    (``stereo`` + ``mix_rate``).  Falls back to the user's own values when
+    nothing is recoverable, which leaves behaviour unchanged from before."""
+    if orig_payload[:4] == b"qoaf" and len(orig_payload) >= 12:
+        ch = orig_payload[8] or fallback_ch
+        sr = int.from_bytes(orig_payload[9:12], "big") or fallback_rate
+        return ch, sr
+    try:
+        from .source_converter import _find_data_pba, _parse_sample_trailer
+        pl, _off, end = _find_data_pba(orig, b"AudioStreamWAV")
+        if pl is not None:
+            _fmt, rate, stereo = _parse_sample_trailer(orig[end:])
+            return (2 if stereo else 1), (rate or fallback_rate)
+    except Exception:
+        pass
+    return fallback_ch, fallback_rate
 
 
 # ---------------------------------------------------------------------------

@@ -106,6 +106,31 @@ def find_dcs_explorer() -> Optional[str]:
     return None
 
 
+_dcs_encoder_path: Optional[str] = None
+
+
+def find_dcs_encoder() -> Optional[str]:
+    """Locate the DCSEncoder executable (used by the CGC Cactus Canyon DCS
+    *repack* path).  Prefers the binary bundled in ``vendor/`` (Windows),
+    then falls back to PATH.  Caches the result for the life of the process."""
+    global _dcs_encoder_path
+    if _dcs_encoder_path is not None:
+        return _dcs_encoder_path or None
+    bundled = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "vendor",
+        "DCSEncoder.exe" if sys.platform == "win32" else "DCSEncoder")
+    if os.path.isfile(bundled):
+        _dcs_encoder_path = bundled
+        return bundled
+    for name in ("DCSEncoder", "DCSEncoder.exe", "dcsencoder"):
+        found = shutil.which(name)
+        if found:
+            _dcs_encoder_path = found
+            return found
+    _dcs_encoder_path = ""
+    return None
+
+
 _is_dcs_cache: dict = {}
 
 
@@ -166,7 +191,8 @@ def _read_wav_meta(path: str):
 
 
 def extract_dcs(rom_zip_path: str, output_dir: str,
-                log_cb: Optional[Callable[[str, str], None]] = None
+                log_cb: Optional[Callable[[str, str], None]] = None,
+                ignore_checksum: bool = False
                 ) -> DcsResult:
     """Decode the DCS sound ROMs in *rom_zip_path* into per-track WAVs.
 
@@ -177,6 +203,12 @@ def extract_dcs(rom_zip_path: str, output_dir: str,
     non-error outcome for pre-DCS games — the caller should just skip
     audio extraction for those.  *output_dir* is left empty (and
     removed if it was created) when nothing is extracted.
+
+    *ignore_checksum* passes DCSExplorer's ``-I`` flag.  Williams MAME
+    romsets match DCSExplorer's known CRCs so the default is off; set it
+    for CGC-distributed sets whose ROMs may differ from the PinMAME
+    checksums (e.g. the Cactus Canyon remake), so a CRC mismatch doesn't
+    block the decode.
     """
     def log(msg: str, level: str = "info"):
         if log_cb is not None:
@@ -203,7 +235,10 @@ def extract_dcs(rom_zip_path: str, output_dir: str,
     # DCSExplorer forms each filename as <prefix>_<track-id>.wav — it
     # inserts its own separator, so the prefix carries none.
     prefix = os.path.join(output_dir, "track")
-    cmd = [exe, f"--extract-tracks={prefix}", rom_zip_path]
+    cmd = [exe]
+    if ignore_checksum:
+        cmd.append("-I")
+    cmd += [f"--extract-tracks={prefix}", rom_zip_path]
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True,

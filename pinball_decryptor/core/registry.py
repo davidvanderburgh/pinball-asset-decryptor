@@ -329,6 +329,16 @@ class Manufacturer(ABC):
                 "isn't needed. Tick “Trim / pad” below only if a "
                 "track sounds cut off or mistimed in-game.")
 
+    def audio_forces_length_match(self) -> bool:
+        """Whether this plugin's Write ALWAYS trims/pads replacements to the
+        original slot length, regardless of the "Trim / pad" checkbox.
+
+        When True, the GUI forces the checkbox on and disables it (the toggle
+        would be misleading otherwise).  Used by JJP, whose Write step matches
+        every track to its original slot length unconditionally.  Default
+        False (the toggle is a real user choice)."""
+        return False
+
     def video_slot_dirs(self, assets_dir):
         """Subdirectories of *assets_dir* that hold replaceable video slots.
 

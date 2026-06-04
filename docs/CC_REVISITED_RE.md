@@ -149,21 +149,158 @@ The art bytes live in `art/wmsimg.bin` (original Williams DMD art) and
   tiles. Needs RE.
 - `gels.bin`: uniform `f8 ba` (0xBAF8 RGB565) → solid-color gel/cel data.
 
-## Encrypted/packed blobs — cgc.so / usb.so
+## Display art — SOLVED (session 3, 2026-06-04): cgc.so IS the art archive
 
-- **`cgc.so`** (71 MB): Shannon entropy **8.000** over the first 2 MB = effectively
-  random → **encrypted** (or already-compressed-then-encrypted). Custom header
-  `42 51 5D 43 43 43 47 43 25 20 31 03 …` = `"BQ]CCCGC% 1\x03…"` (note the "CCCGC"
-  magic). No gzip/zlib/zstd magic. `pin` loads `ccdata/cgc.so`.
-- **`usb.so`** (185 MB): entropy ~7.06 (structured/compressed, not pure random).
-  `pin` loads `ccdata/usb.so`. Despite the name + nearby USB strings, 185 MB is far
-  too large for I/O firmware — together cgc.so+usb.so (256 MB) dominate the 301 MB
-  `ccdata`, so the **bulk of new content (new speech/music and/or color animation
-  frames) almost certainly lives here** *(hypothesis, unverified)*.
-- The `.so` extension is misdirection (none are ELF). `pin` strings include
-  `usbcp_decrypt_rx` / `usbcp_encrypt_tx` — there's a crypto path in the binary.
-- **Next step for these:** disassemble `pin` (it's *not stripped*) around the
-  `cgc.so`/`usb.so` open/read sites to recover the container format + key/cipher.
+**Major correction:** the loose `art/wmsimg.bin` / `newimg.bin` / `gels.bin` files are
+**truncated, incomplete copies** (a red herring). The authoritative art lives inside
+**`ccdata/cgc.so`** — i.e. the "encrypted" blob above is actually CGC's obfuscated **art
+archive**, not audio. Fully reverse-engineered from the `pin` loader and extracted:
+**2044/2044 images → PNG** (verified visually; `c:\tmp\cc_image\agent_art\`, copied to
+`D:\Cactus Canyon Revisited\art_png\`).
+
+**Container `cgc.so` — custom "CCCG" archive:**
+- `[0:4]` stored CRC32; `[4:8]` magic `"CCCG"`; `[8:0x10]` header words; `[0x10:]` obfuscated body.
+- Body = sequential members, each a 32-byte header `{char name[16]; u32 size@0x10; u32
+  dataptr@0x14 (runtime); u32 @0x18; u32 @0x1c}` + `size` payload bytes. Members (true sizes):
+  `wmsimg.bin` 31,419,388 · **`newimg.bin` 40,775,382** · `gels.bin` 1,015,808 ·
+  `cc_font.bin` 422,622. Loaded by `z5_ramfile_tarload` (pin vaddr 0x7da48; magic + CRC checked).
+- **De-obfuscation** (`z5_ramfile_tarload`): a **stateless per-byte cipher** over bytes `[0x10:]`
+  — each output byte depends only on its input byte and absolute index (XOR against index-modulo
+  byte tables at .rodata `0xc79c4–0xc79f4` + an index-parity bit-rotate). Reproduced byte-exactly
+  by Unicorn emulation of the inner loop (`emu_deobf.py` → `cgc_deobf.bin`); decoded magic/member
+  table confirm correctness. *(Not yet simplified to a closed-form pure-Python cipher — needed for
+  a plugin integration without a Unicorn dependency.)*
+
+**Image index = static `cc_art` array compiled into `pin`** (vaddr `0xfc694`, **2044 entries ×
+60 bytes** — NOT in the .bin members):
+- `+0x00 char name[32]` · `+0x20 u32 width` · `+0x24 u32 height` · `+0x28 u32 flag` (0x18/0x20 =
+  colourise/blit mode) · `+0x2c u32 data_off` (offset into the pixel buffer, **in 16-bit words**) ·
+  `+0x30` three u32 (sub-frame/parallax, usually 0). Accessors `z5_art_get(i)=cc_art+i*60`,
+  `z5_art_getpix(i)=pixbase + data_off*2`.
+- **Pixel buffer = the `newimg.bin` member** (set by `cgc_image_powerup` @0x4ec28 from
+  `z5_ramfile_get(1)`); cc_art's max byte offset == newimg size exactly.
+- **Pixel format: 16-bit little-endian RGB565**, row-major `width*height`, no per-image header;
+  `0x0000` = transparent. Most images **256×64** (1908/2044 — CGC's 2× upscale of the original
+  128×32 Williams DMD); rest are small sprites (50×50 guns, 78×58 riders, 24×24, etc.). Names span
+  every mode (bandelero, marksman, high_noon, tumbleweed, topper_bart, …).
+- `gels.bin` (colour-cel/tint data, consumed by `text_color_gel*`/`gel_table`) and `cc_font.bin`
+  (glyph data) members are decoded but **not** indexed by `cc_art` — they need separate descriptor
+  logic to render.
+
+### Two pixel encodings — raw vs RLE (session 4, 2026-06-04)
+
+A frame's encoding is selected by **`cc_art[i].extra[0] & 0x10000`** (the u32 at entry +0x30;
+verified against `z5_art_blit` @ pin 0x6dfb0: `ldr r6,[r0,#0x30]; ands fp,r6,#0x10000; bne …RLE`):
+- **bit clear → RAW**: `w*h` LE RGB565 words at `newimg + doff*2` (1206 frames).
+- **bit set → RLE sprite** (838 frames — `hn_celebration_*`, `hu_eject_*`, etc., with
+  transparency): a 16-bit LE token stream, `budget = w*h` pixels:
+  - `tok & 0x8000` → **transparent run** of `tok & 0x7FFF` pixels (no payload words);
+  - `tok == 0` → no-op;
+  - else → **literal run**: the next `tok` words are RGB565, copied verbatim.
+  Each RLE frame consumes exactly the byte-spacing to the next frame (independent correctness
+  check). Reading an RLE frame as raw gave the "colour noise" that earlier extracts showed.
+- `extra[0] & 0x20000` = a horizontal-mirror render hint (raw path); the decoder leaves the
+  stored data as-is (visually fine), so the flip isn't applied/needed for extract.
+
+**Integrated** in [cc_art.py](../pinball_decryptor/plugins/cgc/cc_art.py) (`_decode_rle_words`,
+`_frame_words`, `read_cc_art` now returns `extra0`). All 2044 frames decode cleanly. **Repack
+caveat:** only RAW frames are editable (fixed size, spliced in place). RLE sprites are
+variable-length packed *and* their offsets live in `pin` (not the archive), so editing one would
+shift every following frame + the baked-in `cc_art` table — `repack_art` skips RLE edits and warns.
+
+### Display-art videos (session 4)
+
+[cc_video.py](../pinball_decryptor/plugins/cgc/cc_video.py): groups `display_art/` frames into
+animation sequences (by `<base>_NN` naming; 228 sequences) and renders each to `videos/<base>.mp4`
+through the colour dot-matrix shader (`dp.cdmd.render_dmd`) + ffmpeg
+(`williams.dmd_render.render_pngs_to_mp4`) — same DMD look as the other CGC/DP videos. Wired to the
+"Decode DMD scenes" extract checkbox for Cactus Canyon (off by default; needs ffmpeg). Extract-only
+(the engine renders the display live; there are no video files in the eMMC).
+
+## usb.so — SOLVED (session 3): the NEW audio, as raw PCM
+
+`ccdata/usb.so` (193,860,184 B) is **encrypted** (a custom byte transform, NOT compressed
+at the container level). Loaded by `dcs_load_samplefile` @ pin 0x52174 → decrypted **in place**
+by **`dcs_decrypt` @ 0x52300**. Three stages over the whole buffer (all verified byte-exact vs a
+Unicorn emulation of the pin loop):
+1. word-level byte-shuffle exchanging the lower/upper file halves;
+2. XOR every 32-bit word with `dcsxor13_keys_32[i % 13]` (key object @ VA 0x11a5a8, 13 words:
+   `0x53697ca5, 0x1b2d3a4e, …`);
+3. a 16-bit running prefix-sum over all halfwords.
+Decryption oracle passes exactly: decrypted `hdr[8]^hdr[0xc] == filesize`.
+
+**Decrypted container = a sound bank:** 16-byte header + **756 records of 0x58 bytes**
+(`filename`@+0x04, `data_off`@+0x44, `decoded_len`@+0x4C, `sample_count`@+0x50) followed by the
+concatenated audio payloads. **VERIFIED the payloads are raw 48 kHz 16-bit mono PCM, NOT
+DCS-compressed** (`decoded_len == 2*sample_count` for **756/756**; each record's on-disk gap ≈
+`decoded_len`; `silence_100ms.wav` decodes to silence, `mu_DCS0002_muMainPlayLim.wav` is a 45.7 s
+music track with a real waveform). So usb.so is **directly extractable to WAV** — slice
+`data[off : off+decoded_len]` and wrap in a 48 kHz/mono/16-bit WAV header; no codec needed.
+Names confirm this is CGC's **added** content: music (`mu_DCS####_*`), the Continued-style modes
+(`StampedeMultiball`, `ShowdownIntro`), speech callouts (`MC_*`, `BOSS_*`, `CC_*`), SFX, loops.
+Working decoder: `c:\tmp\cc_image\agent_blobs\decode_all.py` → `usb.dec` + `usb_manifest.txt`.
+
+## i2c.so — SOLVED (session 3): plaintext DCS playlist index
+
+`ccdata/i2c.so` (42,137 B) is **plaintext** (loaded raw by `dcs_load_plfile` @ 0x5225c — two plain
+`fread`s, no decrypt). A flat array of little-endian `uint32`: groups of small ascending indices
+separated by `0xffffffff` sentinels — the **DCS playlist / sound-group table** mapping sound events
+to sample indices in usb.so.
+
+## cgc.so cipher — closed form (for pure-Python plugin port)
+
+(Container/content covered in "Display art" above.) The blob agent derived the de-obfuscation in
+**closed form** (the art agent's Unicorn emulation matches it): 16-byte plaintext header
+(`+0x00` CRC32 of magic+payload, IEEE table @ pin `crc32Table` 0x1d46c0 seed 0xffffffff no final
+invert; `+0x04` magic `"CCGC"` = 0x43474343; `+0x08`/`+0x0c` version/flags, e.g. 0x03312025 /
+0x00020821), payload from `+0x10`. Per payload byte `i` (i=0 at file offset 0x10):
+```
+plain[i] = enc[i] ^ key1[i%3] ^ key2[i%7] ^ key3[i%13] ^ key4[i%17] ^ key5[i%19]
+if (i % 5) is odd:  plain[i] = ROL8(plain[i], 3)
+```
+Keys are pin .rodata objects (prime lengths 3/7/13/17/19) at VAs
+`0xc79c4 / 0xc79c8 / 0xc79d0 / 0xc79e0 / 0xc79f4`:
+`key1=[10,67,194]`, `key2=[189,94,176,23,207,155,99]`,
+`key3=[231,226,119,144,165,34,204,208,36,199,166,20,133]`, `key4=[17,55,116,…,145]` (17),
+`key5=[112,163,…,243]` (19). Matches the real pin loop byte-for-byte. This is a stateless function
+of `(byte, index)` → portable to pure Python with no Unicorn dependency.
+
+## All surfaces — status
+
+| Surface | Files | Status | Output |
+|---|---|---|---|
+| Original DCS audio | `rom/s2..s7.rom` | ✅ **in plugin** (extract) | 735 tracks → `dcs_audio/` (DCSExplorer) |
+| New audio | `usb.so` | ✅ **in plugin** (extract) | 756 raw-PCM WAVs → `new_audio/` ([cc_usb_audio.py](../pinball_decryptor/plugins/cgc/cc_usb_audio.py)) |
+| Color art + fonts | `cgc.so` (`wmsimg/newimg/gels/cc_font`) | ✅ **in plugin** (extract) | 2044 RGB565 PNGs → `display_art/` ([cc_art.py](../pinball_decryptor/plugins/cgc/cc_art.py)) |
+| Sound playlist index | `i2c.so` | ✅ understood | uint32 group table (plaintext) |
+| Game ROM (rules/DMD) | `rom/cc_g11.1_3` | ✅ known | WPC-95; Williams decoder reads it |
+| Logos / fonts | `*.bmp`, `*.raw` | ✅ trivial | plain BMP / 640×320 RGBA |
+
+**Repack / Write — DONE (session 4, 2026-06-04).** All three surfaces round-trip in software
+(extract → edit → Write → re-extract → verified; no-op Write is byte-for-byte). Wired as a
+`_repack_modified_cc_assets` Write pre-step (mirrors the JPS `_repack_modified_jps_bnks`):
+- **DCS** ([cc_dcs.py](../pinball_decryptor/plugins/cgc/cc_dcs.py)): extract now produces
+  addressable **streams** (`DCSExplorer --extract-streams`, filename carries the ROM `$ADDR`).
+  Repack re-decodes the current ROMs to diff which streams changed, emits a DCSEncoder script
+  (`Stream s "<wav>" replaces $ADDR;` — **stride-form** address, e.g. `$4F1DD4`; the folded form
+  is rejected), runs `DCSEncoder --patch --rom-size=*` and unzips the new `s2..s7.rom`. Edits to
+  any stream rewrite the whole ROM set (DCSEncoder rebuilds it); verified: silencing one stream
+  re-extracts silent, others preserved.
+- **new audio** ([cc_usb_audio.py](../pinball_decryptor/plugins/cgc/cc_usb_audio.py)):
+  `_dcs_encrypt` is the exact inverse (un-prefix-sum → XOR → un-shuffle); `encrypt(decrypt(file))
+  == file` verified byte-exact. Repack splices edited PCM (trimmed/padded to the record's original
+  length, so the size-check word stays valid) and re-encrypts.
+- **art** ([cc_art.py](../pinball_decryptor/plugins/cgc/cc_art.py)): `cgc_reobfuscate` = inverse
+  (conditional `ROR8(,3)` → XOR); edits detected in rendered-RGBA space (RGB565→RGBA isn't
+  idempotent, so untouched images keep exact bytes), re-encoded to RGB565 into the `newimg`
+  member, re-obfuscated, header CRC32 fixed. Edited PNGs must keep their original dimensions.
+
+`DCSEncoder.exe` (v1.1) is bundled alongside `DCSExplorer.exe` in `williams/vendor/`
+(`dcs_decode.find_dcs_encoder`). The rebuilt `s*.rom`/`usb.so`/`cgc.so` are real eMMC files, so
+the existing CGC debugfs Write injects them unchanged. **Still unverified on real hardware**
+(software round-trip only).
+
+## Moddability triage (historical — see "All surfaces" above for current status)
 
 ## Moddability triage (for tool-building priority)
 
@@ -225,12 +362,26 @@ flat address instead (its "folded" form), so its stream addresses = `(addr>>21)*
 DCSExplorer auto-recognizes the set: "Known pinball machine: Cactus Canyon / DCS-95 A/V
 board, Software 1.05 (1997) / catalog $06000 / max track $08B6 / 6 channels."
 
-**Still to do for a full repo tool:** (a) wire the nested-image ROM pull + zip-naming +
-DCSExplorer call into a `cc` plugin extract pipeline; (b) map the `_<...>_<addr>.wav` names
-to friendly names (cross-ref `dcsrom.c`'s `dcs_sample[]`, or run the existing
-faster-whisper transcribe step); (c) repack via `DCSEncoder.exe` and inject ROMs back into
-the nested image (Write pipeline). Bundling: DCSExplorer/Encoder are Win32 binaries; Linux/mac
-would build from source (the project already has per-OS executors).
+**Plugin integration — DONE (session 3, 2026-06-04).** Cactus Canyon is now a game in the
+existing `cgc` plugin (reusing the nested dd/debugfs chain), not a separate plugin:
+- `games.py` — `cactus_canyon` entry (`asset_subtree=/home/debian/pin`, `data_dir=ccdata`,
+  filename hints incl. `cactuscanyon`/`cc113`).
+- `pipeline.py` — Phase-3 branch `_extract_dcs_audio(info)`: collects `ccdata/rom/s2..s7.rom`
+  (regex `_DCS_ROM_RE`, excludes the WPC game ROM), zips them as `_DCS_ZIP_NAME = cc_113.zip`
+  (the `^cc_\d.*` rule), calls the **reused** `williams/dcs_decode.extract_dcs(...,
+  ignore_checksum=True)` → `dcs_audio/track_*.wav` + `manifest.json`. `dcs_audio/` is added to
+  the checksum `exclude_dirs` and pruned from the Write diff (extract-only; no repack yet).
+- `williams/dcs_decode.py` — added an `ignore_checksum` param (default off, Williams unchanged)
+  that passes DCSExplorer's `-I`.
+- Reuses the already-bundled `williams/vendor/DCSExplorer.exe` — no new binary to ship.
+- Tests: `tests/test_cgc_cactus_canyon.py` (detection, ROM selector, zip-name rule, Write-diff
+  exclusion). Verified end-to-end on the real card image: detect → nested extract (49 files) →
+  **735 DCS tracks** → checksums with 0 `dcs_audio/` entries.
+
+**Still to do:** (a) friendly-name tracks (faster-whisper transcribe already works; or cross-ref
+`dcsrom.c`); (b) DCS **repack** via `DCSEncoder.exe` + a Write path that injects edited ROMs back
+into the nested image; (c) the other surfaces below (art `*.bin`, encrypted `cgc.so`/`usb.so`).
+Bundling note: DCSExplorer/Encoder are Win32 binaries; Linux/mac build from source.
 
 ## Open questions / next sessions
 

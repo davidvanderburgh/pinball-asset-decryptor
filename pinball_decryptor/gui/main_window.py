@@ -1417,10 +1417,14 @@ class MainWindow:
             command=self._audio_on_source_change)
         self._audio_src_rep.pack(side=tk.LEFT, padx=(4, 0))
 
-        # Length-matching option + per-manufacturer guidance note.
-        ttk.Checkbutton(
+        # Length-matching option + per-manufacturer guidance note.  The
+        # checkbox is forced on + disabled for plugins whose Write always
+        # length-matches regardless (audio_forces_length_match), set in
+        # apply_manufacturer.
+        self._audio_trim_cb = ttk.Checkbutton(
             f, text="Trim / pad replacements to the original slot length",
-            variable=self.audio_trim_var).pack(anchor=tk.W, padx=12, pady=(6, 0))
+            variable=self.audio_trim_var)
+        self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
         self._audio_length_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
@@ -3061,6 +3065,26 @@ class MainWindow:
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
 
+        # Size the notebook to the tab now showing so a short tab (e.g.
+        # Extract) doesn't reserve the tallest tab's height -- the freed
+        # space then flows to the expand=True Log pane below.
+        self._notebook.after_idle(self._resize_notebook_to_current_tab)
+
+    def _resize_notebook_to_current_tab(self):
+        """Set the notebook's pane height to the currently-selected tab's
+        natural height.  ttk.Notebook otherwise sizes every tab to the
+        tallest one (here the Replace Audio/Video tabs), leaving dead space
+        on shorter tabs; pinning it to the current tab lets the Log pane
+        flex into that space instead."""
+        try:
+            cur = self._notebook.nametowidget(self._notebook.select())
+        except Exception:
+            return
+        cur.update_idletasks()
+        h = cur.winfo_reqheight()
+        if h > 1:
+            self._notebook.configure(height=h)
+
     # ------------------------------------------------------------------
     # View navigation (picker <-> manufacturer working view)
     # ------------------------------------------------------------------
@@ -3089,6 +3113,9 @@ class MainWindow:
         self._title_lbl.pack_forget()
         self._title_lbl.pack(side=tk.LEFT)
         self._mfr_view_wrapper.pack(fill=tk.BOTH, expand=True)
+        # Right-size the notebook to the visible tab so the Log pane fills
+        # any leftover vertical space (see _resize_notebook_to_current_tab).
+        self._notebook.after_idle(self._resize_notebook_to_current_tab)
 
     def set_back_enabled(self, enabled):
         """Enable / disable the Back button — called by App while a
@@ -3201,6 +3228,13 @@ class MainWindow:
         if hasattr(self, "_audio_length_note_lbl"):
             self._audio_length_note_lbl.configure(
                 text=mfr.audio_length_note() or "")
+        # Force the Trim/pad checkbox on + disabled for plugins whose Write
+        # always length-matches (e.g. JJP), so the toggle isn't misleading.
+        if hasattr(self, "_audio_trim_cb"):
+            forces = mfr.audio_forces_length_match()
+            self.audio_trim_var.set(True if forces else False)
+            self._audio_trim_cb.configure(
+                state=(tk.DISABLED if forces else tk.NORMAL))
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}

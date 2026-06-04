@@ -227,6 +227,11 @@ class JJPManufacturer(Manufacturer):
                 "and a shorter one padded with silence, regardless of the "
                 "“Trim / pad” box.")
 
+    def audio_forces_length_match(self):
+        # JJP's Write always trims/pads to the original slot length, so the
+        # "Trim / pad" checkbox is forced on + disabled (see audio_length_note).
+        return True
+
     def detect(self, path):
         if not path.lower().endswith(".iso"):
             return None

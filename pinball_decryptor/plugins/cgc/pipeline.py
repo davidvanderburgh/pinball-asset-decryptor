@@ -20,9 +20,12 @@ Linux, Docker on macOS) since Python has no in-tree ext4 writer.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 
 from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
                                md5_file, read_checksums)
@@ -50,6 +53,42 @@ CGC_DMD_PIXEL_SIZE = 15
 # Kept separate from the eMMC asset mirror so the Write pipeline
 # can ignore it -- it has no counterpart inside the inner ext4.
 DMD_SUBDIR = "dmd"
+
+# Subdir under the CGC output folder that holds decoded DCS audio
+# (Cactus Canyon).  Like ``dmd/`` it's a derived asset excluded from the
+# checksum baseline + Write diff: the WAVs are decoded from the s*.rom
+# DCS sound ROMs and don't correspond to any path inside the inner ext4.
+# DCS *repack* (edited WAVs -> ROMs via DCSEncoder) is future work, so for
+# now the decoded audio is listen/transcribe-only and must never be
+# written back as loose files.
+DCS_SUBDIR = "dcs_audio"
+
+# Name of the throwaway zip handed to DCSExplorer for Cactus Canyon's DCS
+# ROMs.  The basename MUST match ``^cc_\d.*`` -- DCSExplorer's ROM loader
+# only applies its Cactus-Canyon special case (s7.rom's internal signature
+# is factory-mislabeled "U6") when the zip is named like a PinMAME cc_*
+# romset; any other name silently drops s7.rom and loses ~90 samples.
+# See docs/CC_REVISITED_RE.md and DCSDecoderZipLoader.cpp.
+_DCS_ZIP_NAME = "cc_113.zip"
+
+# DCS sound ROMs inside Cactus Canyon's ccdata/rom/ are named s2.rom..s7.rom.
+# (cc_g11.* is the WPC-95 game CPU ROM, not a DCS sound ROM -- excluded.)
+_DCS_ROM_RE = re.compile(r"^s\d+\.rom$", re.IGNORECASE)
+
+# Cactus Canyon's other decoded surfaces (top-level output subdirs):
+#   new_audio/    -- CGC's added music/speech/SFX decoded from ccdata/usb.so
+#   display_art/  -- the 2044 colour images decoded from ccdata/cgc.so
+NEW_AUDIO_SUBDIR = "new_audio"
+ART_SUBDIR = "display_art"
+VIDEO_SUBDIR = "videos"
+
+# All derived/decoded output subdirs.  Excluded from the checksum baseline and
+# pruned from the Write diff -- they're decoded from eMMC files (the s*.rom DCS
+# ROMs, usb.so, cgc.so, the WPC ROM) and don't correspond to inner-ext4 paths,
+# so they must never be written back as loose files.  (Repack of each format
+# back into its source blob is separate, future work.)
+_DERIVED_SUBDIRS = (DMD_SUBDIR, DCS_SUBDIR, NEW_AUDIO_SUBDIR, ART_SUBDIR,
+                    VIDEO_SUBDIR)
 
 
 # Path of emmc.img inside the installer's P3 ext4 partition.  Same for
@@ -125,7 +164,7 @@ class ExtractPipeline(BasePipeline):
                 f"Cannot identify CGC game from filename: "
                 f"{os.path.basename(self.img_path)}\n\n"
                 f"Recognised hints: MedievalMadness, AttackFromMars, "
-                f"MonsterBash, PulpFiction (case-insensitive).")
+                f"MonsterBash, PulpFiction, CactusCanyon (case-insensitive).")
         info = GAME_DB[game_key]
         self._log(f"Game detected: {info['display']}", "success")
         self._log(f"  Platform: {info['platform']}", "info")
@@ -265,8 +304,20 @@ class ExtractPipeline(BasePipeline):
         #     slow and the output is extract-only (not written back).
         self._set_phase(3)
         dmd_results = None
+        dcs_track_count = 0
+        cc_counts = None
         if game_key == "pulp_fiction":
             self._explode_jps_banks()
+        elif game_key == "cactus_canyon":
+            dcs_track_count = self._extract_dcs_audio(info)
+            new_audio = self._extract_usb_audio(info)
+            art = self._extract_art(info)
+            cc_counts = {"new_audio": new_audio, "art": art, "videos": 0}
+            # Optional: render the display-art animation sequences to MP4 with
+            # the colour dot-matrix shader (wired to the "Decode DMD scenes"
+            # checkbox; off by default — slow, needs ffmpeg).
+            if self.decode_dmd and art:
+                cc_counts["videos"] = self._render_cc_videos()
         elif self.decode_dmd:
             dmd_results = self._extract_dmd_assets(info)
         else:
@@ -283,7 +334,7 @@ class ExtractPipeline(BasePipeline):
         # pipeline and uselessly written into the inner partition.
         n = generate_checksums(
             self.output_dir, log_cb=self._log, progress_cb=self._progress,
-            exclude_dirs={DMD_SUBDIR})
+            exclude_dirs=set(_DERIVED_SUBDIRS))
 
         dmd_help = ""
         if dmd_results is not None:
@@ -301,12 +352,46 @@ class ExtractPipeline(BasePipeline):
                 f"by emumm and is not shipped as data, so these renders "
                 f"are the underlying amber-DMD output.")
 
+        dcs_help = ""
+        if dcs_track_count:
+            dcs_help = (
+                f"\nDCS streams:    {dcs_track_count}"
+                f"\n  {DCS_SUBDIR}/st_*.wav — the original 1998 Williams DCS "
+                f"audio (music, voice, SFX) from s2-s7.rom, one WAV per stream. "
+                f"Tick Auto-transcribe to map spoken lines to text. Edit a WAV "
+                f"and Write re-encodes it back into the ROMs (DCSEncoder).")
+        if cc_counts:
+            if cc_counts.get("new_audio"):
+                dcs_help += (
+                    f"\n\nNew audio:      {cc_counts['new_audio']}"
+                    f"\n  {NEW_AUDIO_SUBDIR}/*.wav — CGC's ADDED music, speech, "
+                    f"and SFX (Stampede/Showdown/High-Noon modes, callouts) "
+                    f"from usb.so. Edit a WAV and Write re-packs usb.so.")
+            if cc_counts.get("art"):
+                dcs_help += (
+                    f"\n\nDisplay art:    {cc_counts['art']}"
+                    f"\n  {ART_SUBDIR}/*.png — the colour LCD images from "
+                    f"cgc.so (RGB565). Edit a PNG (keep its dimensions) and "
+                    f"Write re-packs cgc.so.")
+            if cc_counts.get("videos"):
+                dcs_help += (
+                    f"\n\nAnimations:     {cc_counts['videos']}"
+                    f"\n  {VIDEO_SUBDIR}/*.mp4 — display-art animation "
+                    f"sequences rendered with the DMD shader (extract-only "
+                    f"preview).")
+
         self._log("Done.", "success")
+        cc_edit_help = ("" if not cc_counts else
+            f"\n\nTo mod Cactus Canyon, edit files under {DCS_SUBDIR}/, "
+            f"{NEW_AUDIO_SUBDIR}/, or {ART_SUBDIR}/ (or any logo/ROM), then use "
+            f"the Write tab — the edits are re-encoded back into their source "
+            f"blobs automatically.")
         self._done(True,
             f"{info['display']} assets extracted.\n\n"
             f"Output: {self.output_dir}\n"
             f"Files:  {n}"
-            f"{dmd_help}\n\n"
+            f"{dmd_help}{dcs_help}"
+            f"{cc_edit_help if cc_counts else ''}\n\n"
             f"Modify any audio (.wav / .bnk), ROM, or logo files, then use "
             f"the Write tab to build a new installer.img.")
 
@@ -425,6 +510,140 @@ class ExtractPipeline(BasePipeline):
                            f"{stem} ({n} sounds)")
         self._log(f"  Total: {total_buffers} sounds across "
                   f"{len(bnks)} bank(s).", "success")
+
+    def _extract_dcs_audio(self, info):
+        """Decode Cactus Canyon's original Williams DCS audio (the 1998 Bally
+        sound ROMs ``<data_dir>/rom/s2..s7.rom``) into addressable per-stream
+        WAVs under ``output_dir/dcs_audio/`` via :mod:`.cc_dcs` (DCSExplorer).
+
+        Streams (not "tracks") are the editable unit: DCSEncoder's repack
+        replaces audio by stream address, and each stream filename carries that
+        address.  Output is excluded from the Write baseline; edits are
+        re-encoded back into the ROMs by ``_repack_modified_cc_assets`` at
+        Write time.  Returns the stream count (0 if ROMs/decoder absent)."""
+        from . import cc_dcs
+        from ..williams import dcs_decode
+
+        rom_dir = os.path.join(self.output_dir, info["data_dir"], "rom")
+        if not os.path.isdir(rom_dir):
+            self._log(f"  No {info['data_dir']}/rom/ directory — skipping DCS "
+                      f"audio decode.", "warning")
+            return 0
+        if dcs_decode.find_dcs_explorer() is None:
+            self._log("  DCSExplorer not available (bundled Windows binary; on "
+                      "macOS/Linux put it on PATH) — skipping DCS audio "
+                      "decode.", "warning")
+            return 0
+        self._check_cancel()
+        self._log("Decoding original DCS audio (s2-s7.rom) to streams...",
+                  "info")
+        out = os.path.join(self.output_dir, DCS_SUBDIR)
+        try:
+            n = cc_dcs.extract_streams(rom_dir, out, log_cb=self._log)
+        except Exception as e:
+            self._log(f"  DCS audio extraction error: {e}", "warning")
+            return 0
+        if n == 0:
+            self._log("  No DCS streams produced — skipped.", "info")
+            return 0
+        self._log(f"  {n} DCS stream(s) -> {DCS_SUBDIR}/", "success")
+        return n
+
+    def _extract_usb_audio(self, info):
+        """Decode Cactus Canyon's NEW audio (CGC's added music/speech/SFX)
+        from the encrypted ``ccdata/usb.so`` bank into WAVs under
+        ``output_dir/new_audio/``.  Extract-only (excluded from the Write
+        baseline).  Returns the number of WAVs written (0 if absent/failed)."""
+        from . import cc_usb_audio
+        usb_path = os.path.join(self.output_dir, info["data_dir"], "usb.so")
+        if not os.path.isfile(usb_path):
+            self._log(f"  No {info['data_dir']}/usb.so — skipping new-audio "
+                      f"decode.", "info")
+            return 0
+        self._check_cancel()
+        self._log("Decoding new audio (usb.so)...", "info")
+        out = os.path.join(self.output_dir, NEW_AUDIO_SUBDIR)
+        try:
+            n = cc_usb_audio.extract_usb_audio(
+                usb_path, out, log_cb=self._log, progress_cb=self._progress)
+        except ImportError:
+            self._log("  numpy not available — skipping new-audio decode "
+                      "(install numpy to enable usb.so audio export).",
+                      "warning")
+            return 0
+        except cc_usb_audio.UsbAudioError as e:
+            self._log(f"  usb.so not the expected audio bank ({e}) — skipped.",
+                      "warning")
+            return 0
+        except Exception as e:
+            self._log(f"  new-audio decode error: {e}", "warning")
+            return 0
+        self._log(f"  {n} new-audio track(s) -> {NEW_AUDIO_SUBDIR}/",
+                  "success")
+        return n
+
+    def _extract_art(self, info):
+        """Decode Cactus Canyon's colour display art from the obfuscated
+        ``ccdata/cgc.so`` archive (indexed by the ``cc_art`` table inside the
+        extracted ``pin`` binary) into PNGs under ``output_dir/display_art/``.
+        Extract-only.  Returns the number of PNGs written (0 if absent/failed)."""
+        from . import cc_art
+        cgc_path = os.path.join(self.output_dir, info["data_dir"], "cgc.so")
+        pin_path = os.path.join(self.output_dir, "pin")
+        if not os.path.isfile(cgc_path):
+            self._log(f"  No {info['data_dir']}/cgc.so — skipping art decode.",
+                      "info")
+            return 0
+        if not os.path.isfile(pin_path):
+            self._log("  No pin binary in extract — can't read the art index; "
+                      "skipping art decode.", "warning")
+            return 0
+        self._check_cancel()
+        self._log("Decoding colour display art (cgc.so)...", "info")
+        out = os.path.join(self.output_dir, ART_SUBDIR)
+        try:
+            n = cc_art.extract_art(
+                cgc_path, pin_path, out,
+                log_cb=self._log, progress_cb=self._progress)
+        except ImportError:
+            self._log("  numpy/Pillow not available — skipping art decode.",
+                      "warning")
+            return 0
+        except cc_art.ArtError as e:
+            self._log(f"  cgc.so not the expected art archive ({e}) — skipped.",
+                      "warning")
+            return 0
+        except Exception as e:
+            self._log(f"  art decode error: {e}", "warning")
+            return 0
+        self._log(f"  {n} image(s) -> {ART_SUBDIR}/", "success")
+        return n
+
+    def _render_cc_videos(self):
+        """Group the decoded ``display_art/`` frames into animation sequences
+        and render each to an MP4 under ``output_dir/videos/`` with the colour
+        dot-matrix shader (same look as the other CGC/DP videos).  Optional;
+        needs ffmpeg.  Returns the number of MP4s written."""
+        from . import cc_video
+        art_dir = os.path.join(self.output_dir, ART_SUBDIR)
+        if not os.path.isdir(art_dir):
+            return 0
+        self._check_cancel()
+        self._log("Rendering display-art animations to MP4 (DMD shader)...",
+                  "info")
+        out = os.path.join(self.output_dir, VIDEO_SUBDIR)
+        try:
+            n = cc_video.render_animations(
+                art_dir, out, log_cb=self._log, progress_cb=self._progress)
+        except Exception as e:
+            self._log(f"  video render error: {e}", "warning")
+            return 0
+        if n == 0:
+            self._log("  No animation videos produced (ffmpeg missing or no "
+                      "multi-frame sequences).", "info")
+        else:
+            self._log(f"  {n} animation video(s) -> {VIDEO_SUBDIR}/", "success")
+        return n
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +913,12 @@ def _diff_assets(assets_dir, baseline):
     # eMMC, so we also gather their rel-paths into ``jps_subdir_files``
     # for filtering further down.
     jps_subdir_files = _repack_modified_jps_bnks(assets_dir)
+    # CGC Cactus Canyon pre-step: re-encode any edited decoded assets
+    # (dcs_audio/ streams, new_audio/ WAVs, display_art/ PNGs) back into their
+    # source eMMC blobs (s*.rom / usb.so / cgc.so) in place, so the baseline
+    # md5 diff below picks the blobs up as changed.  No-op when those dirs
+    # aren't present (other CGC titles / non-CC extracts).
+    _repack_modified_cc_assets(assets_dir)
 
     changed = {}
     missing = []
@@ -733,7 +958,8 @@ def _diff_assets(assets_dir, baseline):
     # at the top of os.walk so we don't even hash the thousand+ PNGs.
     for dirpath, dirnames, filenames in os.walk(assets_dir):
         if os.path.relpath(dirpath, assets_dir).replace("\\", "/") == ".":
-            dirnames[:] = [d for d in dirnames if d != DMD_SUBDIR]
+            dirnames[:] = [d for d in dirnames
+                           if d not in _DERIVED_SUBDIRS]
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
                     or fn == CALLOUTS_CSV
@@ -804,6 +1030,71 @@ def _repack_modified_jps_bnks(assets_dir):
                     except OSError:
                         pass
     return decoded_subdir_files
+
+
+def _repack_modified_cc_assets(assets_dir):
+    """Re-encode edited Cactus Canyon decoded assets back into their source
+    eMMC blobs, in place, so the Write diff picks the blobs up as changed.
+
+    Mirrors ``_repack_modified_jps_bnks``: each repacker is no-op-safe (an
+    unedited set reproduces the original bytes / writes nothing), and any
+    failure leaves the original blob untouched so Write still ships a valid
+    (unmodified) image.  Handles three independent surfaces:
+
+      * ``dcs_audio/`` streams  -> ``ccdata/rom/s2..s7.rom``  (cc_dcs / DCSEncoder)
+      * ``new_audio/`` WAVs      -> ``ccdata/usb.so``          (cc_usb_audio)
+      * ``display_art/`` PNGs    -> ``ccdata/cgc.so``          (cc_art)
+    """
+    data_rom = os.path.join(assets_dir, "ccdata", "rom")
+    dcs_dir = os.path.join(assets_dir, DCS_SUBDIR)
+    usb_so = os.path.join(assets_dir, "ccdata", "usb.so")
+    new_audio = os.path.join(assets_dir, NEW_AUDIO_SUBDIR)
+    cgc_so = os.path.join(assets_dir, "ccdata", "cgc.so")
+    art_dir = os.path.join(assets_dir, ART_SUBDIR)
+    pin_bin = os.path.join(assets_dir, "pin")
+
+    # DCS streams -> s*.rom (DCSEncoder; writes the s*.rom set in place).
+    if os.path.isdir(data_rom) and os.path.isdir(dcs_dir):
+        try:
+            from . import cc_dcs
+            cc_dcs.repack(data_rom, dcs_dir, data_rom)
+        except Exception:
+            pass
+
+    # new_audio WAVs -> usb.so (re-encrypt).
+    if os.path.isfile(usb_so) and os.path.isdir(new_audio):
+        try:
+            from . import cc_usb_audio
+            tmp = usb_so + ".repack_tmp"
+            summary = cc_usb_audio.repack_usb(usb_so, new_audio, tmp)
+            if summary.get("modified_count", 0) > 0 and os.path.isfile(tmp):
+                os.replace(tmp, usb_so)
+            elif os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            if os.path.exists(usb_so + ".repack_tmp"):
+                try:
+                    os.remove(usb_so + ".repack_tmp")
+                except OSError:
+                    pass
+
+    # display_art PNGs -> cgc.so (re-encode RGB565 + re-obfuscate + CRC).
+    if os.path.isfile(cgc_so) and os.path.isdir(art_dir) \
+            and os.path.isfile(pin_bin):
+        try:
+            from . import cc_art
+            tmp = cgc_so + ".repack_tmp"
+            summary = cc_art.repack_art(cgc_so, pin_bin, art_dir, tmp)
+            if summary.get("modified_count", 0) > 0 and os.path.isfile(tmp):
+                os.replace(tmp, cgc_so)
+            elif os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            if os.path.exists(cgc_so + ".repack_tmp"):
+                try:
+                    os.remove(cgc_so + ".repack_tmp")
+                except OSError:
+                    pass
 
 
 def _find_renamed_sibling(assets_dir, baseline_rel):

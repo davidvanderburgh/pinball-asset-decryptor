@@ -7,6 +7,10 @@
 # pycryptodome powers the BOF Dune write path: its PCK directory of
 # absolute file offsets is AES-256-CFB encrypted, and we decrypt + re-encrypt
 # it to repack edits of any size (Winchester's directory is plaintext).
+# numpy powers the CGC Cactus Canyon decoders: the 185 MB usb.so audio
+# de-encryption (byte-shuffle + XOR + 16-bit prefix-sum) and the cgc.so
+# art de-obfuscation + RGB565->PNG render would be far too slow in pure Python.
 Pillow>=10.0
 zstandard>=0.22
 pycryptodome>=3
+numpy>=1.24

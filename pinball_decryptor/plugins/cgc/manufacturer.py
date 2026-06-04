@@ -64,6 +64,17 @@ class CGCManufacturer(Manufacturer):
                      probe="python:faster_whisper",
                      reason="Auto-transcribe samples to callouts.csv",
                      install_hint="pip install faster-whisper"),
+        # Needed by the optional "Decode DMD scenes" pass to assemble MP4s:
+        # the WPC-remake animation MP4s (MM/AFM/MB) and Cactus Canyon's
+        # display-art animation videos.
+        Prerequisite(name="ffmpeg", where="host",
+                     probe="ffmpeg -version",
+                     reason="Assemble decoded DMD / display-art frames into "
+                            "MP4 animations (optional)",
+                     install_hint=(
+                         "winget install Gyan.FFmpeg  (Windows)\n"
+                         "brew install ffmpeg          (macOS)\n"
+                         "apt-get install ffmpeg       (Linux)")),
     )
 
     def detect(self, path):
@@ -73,6 +84,20 @@ class CGCManufacturer(Manufacturer):
         info = GAME_DB[key]
         return Game(key=key, display=info["display"],
                     manufacturer_key="cgc")
+
+    def decode_dmd_applies(self, input_path):
+        # MM/AFM/MB: decode the bundled Williams WPC ROM to PNG scenes + MP4s.
+        # Cactus Canyon: render the cgc.so display-art animation sequences to
+        # MP4 with the colour dot-matrix shader.  Pulp Fiction has neither, so
+        # the checkbox stays hidden for it.
+        return detect_game(input_path) in (
+            "mm_remake", "afm_remake", "mb_remake", "cactus_canyon")
+
+    def decode_dmd_label_for(self, input_path):
+        if detect_game(input_path) == "cactus_canyon":
+            return ("Render display-art animations to MP4 "
+                    "(DMD shader, experimental, needs ffmpeg)")
+        return self.decode_dmd_label
 
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
@@ -98,7 +123,13 @@ class CGCManufacturer(Manufacturer):
     def extract_input_help(self):
         return ("Extract a Chicago Gaming Company installer `.img` "
                 "(Medieval Madness Remake, Attack From Mars Remake, "
-                "Monster Bash Remake, Pulp Fiction). Requires WSL2 "
+                "Monster Bash Remake, Pulp Fiction, Cactus Canyon). "
+                "Cactus Canyon ships only on a physical microSD master "
+                "card — image the whole card to a .img (e.g. with dd / "
+                "Win32DiskImager) and name it so it contains "
+                "\"CactusCanyon\"; its original DCS sound ROMs are decoded "
+                "to WAV under dcs_audio/ via the bundled DCSExplorer. "
+                "Requires WSL2 "
                 "(Windows) / Docker (macOS) with e2fsprogs (debugfs). "
                 "Note: CGC games render all video in real time (no .mp4 "
                 "files to mod); the extracted folder contains the "
@@ -117,11 +148,23 @@ class CGCManufacturer(Manufacturer):
                 "and so isn't applied to these renders).")
 
     def write_install_help(self):
-        return ("1. Flash the output .img to a USB drive with Rufus, "
+        return ("Medieval Madness / Attack From Mars / Monster Bash / Pulp "
+                "Fiction (USB installer):\n"
+                "1. Flash the output .img to a USB drive with Rufus, "
                 "Etcher, or `dd` (the whole drive — it's a bootable disk "
                 "image, not a single file).\n"
                 "2. With the machine powered off, insert the USB drive "
                 "into the BeagleBone Black's USB port.\n"
                 "3. Power on. The installer auto-runs and writes the "
                 "modified image to /dev/mmcblk1; the machine reboots "
-                "into the new build when finished.")
+                "into the new build when finished.\n\n"
+                "Cactus Canyon (microSD master — no USB installer):\n"
+                "1. Flash the output .img to a microSD card (the whole card) "
+                "with Rufus / Etcher / `dd` / Win32DiskImager — it is the "
+                "master/installer card, not a USB image.\n"
+                "2. With the machine powered off, swap the card into the "
+                "BeagleBone Black's microSD slot.\n"
+                "3. Power on. The on-card installer auto-copies the modified "
+                "image to the internal eMMC, then you reseat the original "
+                "card / reboot into the new build (keep a backup of the "
+                "untouched card first).")

@@ -84,4 +84,25 @@ GAME_DB = {
         "asset_subtree": "/home/ubuntu/pin",
         "data_dir": "data",
     },
+    # Cactus Canyon remake: a CGC original-engine (`pin`) title that runs
+    # the original 1998 Bally Cactus Canyon WPC-95 game ROM + DCS sound
+    # ROMs under emulation, with CGC's colour-LCD art layered on.  Unlike
+    # the four titles above it ships only on a physical microSD master
+    # card (a paid expansion, no web download), but the card is structured
+    # exactly like an installer .img (P1 boot / P2 installer rootfs / P3
+    # data with emmc.img), so the same nested dd/debugfs chain applies.
+    # The `pin` engine lives at /home/debian/pin (debian user, vs Pulp
+    # Fiction's ubuntu user).  Assets are in ccdata/: the DCS sound ROMs
+    # (rom/s2..s7.rom -> decoded to WAV via DCSExplorer), the WPC-95 game
+    # ROM (rom/cc_g11.*), custom packed display art (art/wmsimg.bin,
+    # newimg.bin, gels.bin), encrypted blobs (cgc.so, usb.so), fonts and
+    # logos.  See docs/CC_REVISITED_RE.md.
+    "cactus_canyon": {
+        "display": "Cactus Canyon",
+        "filename_hints": ["cactuscanyon", "cactus_canyon", "cc113",
+                           "cc_113", "ccrevisited", "cactus"],
+        "platform": "CGC pin binary (SDL/OpenGL ES) on BeagleBone Black",
+        "asset_subtree": "/home/debian/pin",
+        "data_dir": "ccdata",
+    },
 }

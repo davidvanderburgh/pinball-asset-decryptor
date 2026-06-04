@@ -134,6 +134,10 @@ class _BasePipeline:
         self._done = done_cb
         self._cancelled = False
         self.log_link = None  # optional: fn(text, url)
+        # Active progress "band" — a [lo, hi] sub-range of 0..100 that
+        # phase-local progress is mapped into, so the multi-phase Write
+        # drives ONE monotonic 0→100 bar instead of resetting each phase.
+        self._band = (0.0, 100.0)
 
     def cancel(self):
         self._cancelled = True
@@ -144,6 +148,19 @@ class _BasePipeline:
 
     def _set_phase(self, index):
         self._phase_cb(index)
+
+    def _set_band(self, lo, hi):
+        """Set the global progress band subsequent ``_bp`` calls map into."""
+        self._band = (float(lo), float(hi))
+
+    def _bp(self, cur, total, desc=""):
+        """Banded progress: map a phase-local ``(cur, total)`` into the
+        active band and emit a global 0..100 value.  ``total<=0`` reports
+        the band floor (a definite value, NOT indeterminate) so the bar
+        never flips animation styles or resets mid-run."""
+        lo, hi = self._band
+        frac = (min(max(cur, 0), total) / total) if total and total > 0 else 0.0
+        self._progress(int(round(lo + (hi - lo) * frac)), 100, desc)
 
     def _poll_file_progress(self, wsl_path, expected_bytes, label=""):
         """Return a context manager that polls a WSL file's size in a

@@ -236,3 +236,84 @@ def test_pack_substitutes_modified_texture(tmp_path):
     may_extractor.extract_pck(str(out), str(verify_dir))
     re_ctex = list(verify_dir.rglob("*.ctex"))[0]
     assert re_ctex.read_bytes() == new_texture
+
+
+def _entry_offsets(binary):
+    """Map res:// path -> (file_start, sidecar_start) for every adjacent
+    entry in a binary's PCK (PCK-relative offsets)."""
+    ps, pe = may_extractor.find_pck_section(binary)
+    with open(binary, "rb") as f:
+        f.seek(ps)
+        pck = bytearray(f.read(pe - ps))
+    adj, _seq = may_packer._read_pck_entries(pck)
+    return {p: (fs, ss) for (k, fs, fe, ss, se, p) in adj}
+
+
+def test_pack_leaves_unchanged_fonts_verbatim(tmp_path):
+    """An audio/texture-only edit must NOT re-wrap fonts.  Fonts live
+    compressed in the PCK but extract decompressed, so a naive byte
+    compare always flags them 'changed' — re-wrapping them needlessly
+    perturbs the PCK's byte alignment (the real regression)."""
+    binary = _build_may_binary(
+        tmp_path,
+        font_payloads=[b"FONT_A_" * 80, b"FONT_B_" * 120],
+        texture_payload=b"GST2" + b"\x01" * 100,
+    )
+    mods_dir = tmp_path / "mods"
+    may_extractor.extract_pck(binary, str(mods_dir))
+
+    # Edit ONLY the texture; leave both fonts untouched.
+    ctex = list(mods_dir.rglob("*.ctex"))[0]
+    ctex.write_bytes(b"GST2" + b"\x02" * 137)  # different size + bytes
+
+    out = tmp_path / "modded.x86_64"
+    stats = may_packer.pack_pck(binary, str(mods_dir), str(out))
+
+    assert stats["files_replaced"] == 1          # only the texture
+    assert stats["fonts_verbatim"] == 2          # both fonts left alone
+
+    # And the fonts must be byte-identical in the repacked PCK.
+    ps, pe = may_extractor.find_pck_section(binary)
+    orig = open(binary, "rb").read()[ps:pe]
+    ps2, pe2 = may_extractor.find_pck_section(str(out))
+    new = open(str(out), "rb").read()[ps2:pe2]
+    assert orig.count(b"RSCC") == new.count(b"RSCC")  # no font separator lost
+
+
+def test_pack_preserves_16byte_alignment(tmp_path):
+    """A size-changing adjacent substitution must keep every downstream
+    entry on its original 16-byte boundary — the packer pads the
+    replacement so its length stays ≡ the original (mod 16).  BOF's
+    no-directory loader walks the PCK forward and relies on this; the
+    bug it guards against dropped alignment retention from 96% to ~49%
+    on the real Dune binary."""
+    binary = _build_may_binary(
+        tmp_path,
+        font_payloads=[b"FONT_" * 90],
+        texture_payload=b"GST2" + b"\x00" * 100,
+        gdsc_payloads=[b"\xAB" * 200, b"\xCD" * 200],
+    )
+    before = _entry_offsets(binary)
+
+    mods_dir = tmp_path / "mods"
+    may_extractor.extract_pck(binary, str(mods_dir))
+    ctex = list(mods_dir.rglob("*.ctex"))[0]
+    # Grow by 7 bytes — deliberately NOT a multiple of 16, so an
+    # unpadded packer would knock everything downstream out of phase.
+    ctex.write_bytes(b"GST2" + b"\x00" * 107)
+
+    out = tmp_path / "modded.x86_64"
+    may_packer.pack_pck(binary, str(mods_dir), str(out))
+    may_extractor.extract_pck(str(out), str(tmp_path / "verify"))  # still extractable
+    after = _entry_offsets(str(out))
+
+    tex_path = next(p for p in before if p.endswith(".ctex"))
+    edited_start = before[tex_path][0]
+    # Every entry at/after the edited one keeps its (offset mod 16) phase.
+    for path, (fs, ss) in before.items():
+        if fs < edited_start:
+            assert after[path] == (fs, ss)          # untouched, exact
+        else:
+            nfs, nss = after[path]
+            assert nfs % 16 == fs % 16, f"{path} file_start phase drifted"
+            assert nss % 16 == ss % 16, f"{path} sidecar phase drifted"

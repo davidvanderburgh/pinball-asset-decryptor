@@ -18,6 +18,17 @@ What works today:
     user's modified .fontdata starts with the "RSRC" magic, it's
     stripped before compression (BOF's format omits the magic and
     reconstructs it at load time, mirroring our extractor's fix-up).
+    A font whose *decompressed payload* is unchanged is left byte-for-
+    byte verbatim — fonts extract decompressed but live compressed, so
+    a raw byte compare would otherwise re-wrap every font on every Write
+    and shift the PCK out of alignment (see below).
+
+Alignment: the PCK keeps entries on a 16-byte boundary (~96% of
+file/sidecar starts at offset ≡ 8 mod 16 on real Dune).  Every
+size-changing substitution is zero-padded so its region stays the same
+length-mod-16 as the original, keeping all downstream entries on their
+boundaries — BOF's no-directory loader walks the PCK forward and an
+unpadded shift knocks ~half the entries out of phase.
   * **Sequential files (.gdc, .scn, .res)** — file bytes replace the
     corresponding sequential blob; their sidecars are unchanged.
 
@@ -293,6 +304,7 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
 
     n_total = len(all_items)
     n_replaced = 0
+    n_font_verbatim = 0   # fonts left untouched (payload unchanged)
 
     # Pre-copy the unchanged binary prefix (ELF/PE code) directly from
     # the original to the output, then stream the PCK rewrite into the
@@ -366,17 +378,63 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
                     modified_bytes = fh.read()
             except OSError:
                 continue
-            if modified_bytes == bytes(pck[fs:fe]):
-                continue   # not actually different
+            orig_region = bytes(pck[fs:fe])
+
             if kind == "sequential":
-                skipped_sequential.append(rel)
+                # .gdc/.scn/.res have no stable byte boundaries — only flag
+                # as skipped if the file genuinely differs.
+                if modified_bytes != orig_region:
+                    skipped_sequential.append(rel)
                 continue
+
             ext = os.path.splitext(p)[1].lower()
             if kind == "adjacent_rscc":
+                # Fonts live COMPRESSED in the PCK but are extracted
+                # DECOMPRESSED, so a raw byte compare always reports
+                # "changed" even for untouched fonts.  Compare at the
+                # decompressed-payload level instead, so an unchanged font
+                # is left byte-for-byte verbatim.  Re-wrapping it would
+                # shift every downstream entry off the PCK's 16-byte
+                # alignment for no reason (and the .ttf/.otf→.fontdata
+                # encoder isn't implemented, so fonts are never actually
+                # user-edited — they only reached here via the byte compare).
                 new_payload = _maybe_strip_rsrc_magic(modified_bytes, ext)
-                new_data = _build_rscc_container(new_payload)
-            else:
+                ro = orig_region.find(b"RSCC")
+                orig_payload = orig_csz = None
+                if ro >= 0:
+                    try:
+                        orig_payload, orig_csz = decompress(orig_region, ro)
+                    except Exception:
+                        orig_payload = None
+                if orig_payload is not None and new_payload == orig_payload:
+                    n_font_verbatim += 1
+                    continue   # unchanged font — leave verbatim
+                new_container = _build_rscc_container(new_payload)
+                # Preserve the bytes around the container — any lead, plus
+                # the trailing 4-byte "RSCC" alignment separator before the
+                # sidecar — so the inter-entry layout matches the original.
+                lead = orig_region[:ro] if ro > 0 else b""
+                trail = (orig_region[ro + orig_csz:]
+                         if orig_csz is not None else b"")
+                new_data = lead + new_container + trail
+            else:  # adjacent_raw (.sample / .ctex / .oggvorbisstr)
+                if modified_bytes == orig_region:
+                    continue   # not actually different
                 new_data = modified_bytes
+
+            # Preserve the PCK's 16-byte entry alignment.  The original keeps
+            # ~96% of file/sidecar starts at offset ≡ 8 (mod 16); BOF's
+            # no-directory loader walks the PCK forward and relies on this.
+            # Pad the replacement with trailing zeros — which land in the
+            # inter-entry gap the loader already trims — so this region keeps
+            # the same length-mod-16 as the original.  Without this, any
+            # size-changing substitution shifts every following entry off its
+            # boundary (measured: alignment retention drops from 96% to ~49%).
+            pad = ((fe - fs) - len(new_data)) % 16
+            if pad:
+                new_data = new_data + b"\x00" * pad
+            _log(f"  replace {rel} [{kind}] {fe - fs} -> {len(new_data)} bytes"
+                 + (f" (+{pad}B align pad)" if pad else ""))
             replacements.append((fs, fe, new_data))
             n_replaced += 1
         if skipped_sequential:
@@ -423,7 +481,8 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
         dst.write(new_trailer)
 
     _log(f"Rebuilt PCK: {pck_bytes_written} bytes (was {len(pck)}); "
-         f"{n_replaced} files substituted")
+         f"{n_replaced} files substituted, "
+         f"{n_font_verbatim} unchanged font(s) left verbatim")
 
     # Release the input PCK buffer now that we're done with it.
     del pck
@@ -432,6 +491,7 @@ def pack_pck(original_binary, modified_pck_dir, output_binary,
     return {
         "files_total": n_total,
         "files_replaced": n_replaced,
+        "fonts_verbatim": n_font_verbatim,
         "original_pck_size": pck_end - pck_start,
         "new_pck_size": pck_bytes_written,
         "new_binary_size": new_binary_size,

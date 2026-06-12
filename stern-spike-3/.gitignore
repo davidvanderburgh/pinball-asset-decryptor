@@ -1,0 +1,15 @@
+# Derived / extracted artifacts — never commit Stern firmware or keys
+extractor_card_out/
+out/
+*.raw
+boot.img
+boot.sig
+*.cpio
+*.cpio.zst
+*.zst
+ir/
+__pycache__/
+*.pyc
+
+# the test fixture is a synthesized non-Stern header we DO want committed
+!tests/fixtures/luks2_test_header.bin

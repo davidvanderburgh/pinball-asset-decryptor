@@ -1,0 +1,4 @@
+# Shell scripts must check out LF (run under bash/WSL); see repo root .gitattributes.
+*.sh text eol=lf
+# Binary test fixture — never line-ending-mangle.
+*.bin binary

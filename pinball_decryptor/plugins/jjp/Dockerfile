@@ -1,10 +1,15 @@
-# All-in-one Docker image for JJP Asset Decryptor
-# Usage:
+# Lightweight container for JJP Asset Decryptor
+# Provides the Linux tools needed for ISO partition extraction, ext4
+# editing, and ISO rebuild on macOS (where there's no WSL).
+#
+# Usage (standalone):
 #   docker build -t jjp-decryptor .
-#   docker run --privileged --rm \
-#     -v /path/to/isos:/data \
-#     -v /path/to/output:/output \
-#     jjp-decryptor decrypt -i /data/game.iso -o /output
+#   docker run --privileged --rm -v /path/to/data:/data jjp-decryptor bash
+#
+# The GUI app builds and manages this container automatically on macOS:
+# it runs the image with `sleep infinity` and `docker exec`s individual
+# tool commands into it.  partclone_to_raw.py is staged into the
+# bind-mounted /tmp at runtime, so the image only needs to carry tools.
 
 FROM alpine:latest
 
@@ -22,9 +27,6 @@ RUN apk add --no-cache \
     util-linux \
     findmnt
 
-COPY jjp_decryptor/ /app/jjp_decryptor/
-COPY partclone_to_raw.py /app/
+WORKDIR /tmp
 
-WORKDIR /app
-
-ENTRYPOINT ["python3", "-m", "jjp_decryptor.cli"]
+CMD ["bash"]

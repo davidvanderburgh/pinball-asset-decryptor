@@ -4,3 +4,10 @@
 # Windows checkout would rewrite them to CRLF and corrupt them (this is
 # exactly what broke the GDRE Tools installer — see installer/install_gdre.sh).
 *.sh text eol=lf
+
+# Dockerfiles are consumed by `docker build` (macOS Spooky/JJP flows).
+# A CRLF after a `\` line-continuation in a multi-line RUN breaks the
+# build, and the build context dir is bundled verbatim into the .app —
+# so a Windows checkout must NOT rewrite these to CRLF.
+Dockerfile text eol=lf
+**/Dockerfile text eol=lf

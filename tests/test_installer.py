@@ -284,6 +284,62 @@ def test_iss_repairs_python_permissions():
         "which is the whole point of moving the fix into the installer.")
 
 
+DOCKERFILES = sorted((REPO / "pinball_decryptor" / "plugins").glob("*/Dockerfile"))
+
+
+@pytest.mark.parametrize("dockerfile", DOCKERFILES,
+                         ids=lambda p: p.parent.name)
+def test_dockerfile_copy_sources_exist(dockerfile):
+    """Regression guard — JJP macOS dead-on-arrival (TonyScoots report).
+
+    The macOS DockerExecutor builds these images with the Dockerfile's
+    own directory as the build context.  A COPY of a path that isn't in
+    that directory makes `docker build` fail, which surfaces as
+    "Missing prerequisites: partclone, xorriso" (the tools live inside
+    the image, so a failed build reads as missing tools).
+
+    The JJP Dockerfile shipped with `COPY jjp_decryptor/ ...` — a
+    directory that only existed in the old standalone repo, never in the
+    unified app's build context — so the image NEVER built on macOS and
+    JJP extract was impossible there.  Verify every COPY source exists.
+    """
+    ctx = dockerfile.parent
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.upper().startswith("COPY "):
+            continue
+        # COPY <src>... <dest> — last token is the destination.
+        parts = stripped.split()[1:]
+        srcs = parts[:-1]
+        for src in srcs:
+            src = src.rstrip("/")
+            assert (ctx / src).exists(), (
+                f"{dockerfile.parent.name}/Dockerfile COPYs '{src}', which "
+                f"does not exist in the build context ({ctx}). `docker build` "
+                f"will fail and the macOS app will report the in-image tools "
+                f"as missing prerequisites.")
+
+
+@pytest.mark.parametrize("dockerfile", DOCKERFILES,
+                         ids=lambda p: p.parent.name)
+def test_dockerfile_has_no_hijacking_entrypoint(dockerfile):
+    """The DockerExecutor runs each image with an explicit command
+    (`sleep infinity`) and `docker exec`s tool commands into it.  An
+    ENTRYPOINT prepends to that command, so `ENTRYPOINT ["python3",
+    "-m", "jjp_decryptor.cli"]` would turn the run command into
+    `python3 -m jjp_decryptor.cli sleep infinity` — the container exits
+    immediately and every later `docker exec` fails.  The image must be
+    a plain toolbox (no ENTRYPOINT, or a shell CMD)."""
+    has_entrypoint = any(
+        line.strip().upper().startswith("ENTRYPOINT")
+        for line in dockerfile.read_text(encoding="utf-8").splitlines())
+    assert not has_entrypoint, (
+        f"{dockerfile.parent.name}/Dockerfile declares an ENTRYPOINT — the "
+        f"macOS executor runs the image with `sleep infinity` and execs into "
+        f"it, so an ENTRYPOINT hijacks that command and the container dies "
+        f"on start. Use `CMD [\"bash\"]` instead.")
+
+
 def test_gdre_prereq_probe_matches_install_location():
     """Regression guard — GDRE prereq false-negative (Joe_Blasi report).
 

@@ -3182,11 +3182,18 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             prereq_results = check_prerequisites(self.executor, standalone=True)
             # Decrypt pipeline only needs WSL/Docker/System + partclone + xorriso
             core = {"WSL2", "partclone", "xorriso", "Docker", "System"}
-            missing = [name for name, passed, _ in prereq_results
+            missing = [(name, msg) for name, passed, msg in prereq_results
                        if not passed and name in core]
             if missing:
+                # Surface the per-prereq detail — on macOS partclone/xorriso
+                # live inside the Docker image, so a "missing" here usually
+                # means the image build or container start failed (the real
+                # reason is in the message), not that a tool is absent.
+                names = ", ".join(n for n, _ in missing)
+                details = "\n".join(f"  {n}: {m}" for n, m in missing if m)
                 raise PipelineError("Extract",
-                    f"Missing prerequisites: {', '.join(missing)}\n\n"
+                    f"Missing prerequisites: {names}\n"
+                    f"{details}\n\n"
                     "Click 'Install Missing' on the main screen to install "
                     "them, or install manually and restart the app.")
 
@@ -3618,10 +3625,18 @@ class StandaloneModPipeline(ModPipeline):
 
             # Check all prerequisites before starting
             prereq_results = check_prerequisites(self.executor, standalone=True)
-            missing = [name for name, passed, _ in prereq_results if not passed]
+            missing = [(name, msg) for name, passed, msg in prereq_results
+                       if not passed]
             if missing:
+                # Surface the per-prereq detail — on macOS partclone/xorriso
+                # live inside the Docker image, so a "missing" here usually
+                # means the image build or container start failed (the real
+                # reason is in the message), not that a tool is absent.
+                names = ", ".join(n for n, _ in missing)
+                details = "\n".join(f"  {n}: {m}" for n, m in missing if m)
                 raise PipelineError("Scan",
-                    f"Missing prerequisites: {', '.join(missing)}\n\n"
+                    f"Missing prerequisites: {names}\n"
+                    f"{details}\n\n"
                     "Click 'Install Missing' on the main screen to install "
                     "them, or install manually and restart the app.")
 

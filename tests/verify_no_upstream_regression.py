@@ -172,8 +172,18 @@ PLAN = {
     # equivalence no longer holds and isn't meaningful here either.
     "pinball_decryptor/plugins/jjp/updater.py":
         ("jjp/jjp_decryptor/updater.py", "ported"),
+    # The upstream Dockerfile COPYs the standalone repo's jjp_decryptor/
+    # package + runs it as an ENTRYPOINT.  In the unified app the Docker
+    # build context is pinball_decryptor/plugins/jjp/ (no jjp_decryptor/
+    # subdir), so that COPY made `docker build` fail on macOS and the app
+    # reported the in-image tools (partclone, xorriso) as missing — JJP
+    # extract was impossible on Mac.  Our image is a plain toolbox (no
+    # COPY/ENTRYPOINT; the executor execs tools into it and stages
+    # partclone_to_raw.py into the bind-mounted /tmp), matching Spooky's
+    # working Dockerfile.  Build-context sanity is guarded by
+    # tests/test_installer.py::test_dockerfile_copy_sources_exist.
     "pinball_decryptor/plugins/jjp/Dockerfile":
-        ("jjp/Dockerfile", "identical"),
+        ("jjp/Dockerfile", "ported"),
     "pinball_decryptor/plugins/jjp/partclone_to_raw.py":
         ("jjp/partclone_to_raw.py", "identical"),
 }

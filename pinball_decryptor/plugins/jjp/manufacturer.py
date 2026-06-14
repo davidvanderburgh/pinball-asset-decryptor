@@ -96,7 +96,13 @@ class _WriteWrapper(StandaloneModPipeline):
         super().__init__(
             image_path=original_path,
             assets_folder=assets_dir,
-            fl_dat_path=None,
+            # The Encrypt pass NEEDS fl_decrypted.dat (filler sizes +
+            # CRC32 per file) to forge checksums that pass the game's
+            # integrity check — without it the standalone Write bails
+            # with "no fl_decrypted.dat is available".  The standalone
+            # Decrypt always writes one into the assets folder, so look
+            # for it there (mirrors make_direct_ssd_write_pipeline).
+            fl_dat_path=_find_fl_dat([assets_dir]),
             log_cb=log_cb, phase_cb=phase_cb,
             progress_cb=progress_cb,
             done_cb=self._intercept_done,

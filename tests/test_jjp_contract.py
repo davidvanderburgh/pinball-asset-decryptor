@@ -55,6 +55,53 @@ def test_jjp_write_wrapper_moves_output(manufacturers_by_key, tmp_path):
     assert "Final output:" in seen["summary"]
 
 
+def test_jjp_write_wrapper_finds_fl_dat_in_assets(manufacturers_by_key, tmp_path):
+    """The ISO Write flow must locate fl_decrypted.dat in the assets folder.
+
+    Regression for v0.13.2: _WriteWrapper hardcoded fl_dat_path=None, so the
+    standalone Encrypt pass always bailed with "no fl_decrypted.dat is
+    available" even when the Decrypt phase had written one right next to the
+    user's modified assets.  Verify the wrapper now picks it up (mirrors the
+    Direct-SSD write path)."""
+    jjp = manufacturers_by_key["jjp"]
+
+    fake_original = tmp_path / "EltonJohn-v02.03.iso"
+    fake_original.write_bytes(b"\x00")
+    assets_dir = tmp_path / "assets"; assets_dir.mkdir()
+    fl_dat = assets_dir / "fl_decrypted.dat"
+    fl_dat.write_bytes(b"FL_DAT")
+
+    wrapper = jjp.make_write_pipeline(
+        str(fake_original), str(assets_dir), str(tmp_path / "out.iso"),
+        log_cb=lambda *a, **k: None,
+        phase_cb=lambda *a, **k: None,
+        progress_cb=lambda *a, **k: None,
+        done_cb=lambda *a, **k: None)
+
+    assert wrapper.fl_dat_path is not None, \
+        "Write pipeline ignored fl_decrypted.dat in the assets folder"
+    assert os.path.normpath(wrapper.fl_dat_path) == os.path.normpath(str(fl_dat))
+
+
+def test_jjp_write_wrapper_fl_dat_absent_is_none(manufacturers_by_key, tmp_path):
+    """No fl_decrypted.dat in the assets folder -> fl_dat_path stays None
+    (the Encrypt pass then surfaces its actionable 'run Decrypt first' error)."""
+    jjp = manufacturers_by_key["jjp"]
+
+    fake_original = tmp_path / "EltonJohn-v02.03.iso"
+    fake_original.write_bytes(b"\x00")
+    assets_dir = tmp_path / "assets"; assets_dir.mkdir()
+
+    wrapper = jjp.make_write_pipeline(
+        str(fake_original), str(assets_dir), str(tmp_path / "out.iso"),
+        log_cb=lambda *a, **k: None,
+        phase_cb=lambda *a, **k: None,
+        progress_cb=lambda *a, **k: None,
+        done_cb=lambda *a, **k: None)
+
+    assert wrapper.fl_dat_path is None
+
+
 def test_jjp_capabilities_match_expected(manufacturers_by_key):
     jjp = manufacturers_by_key["jjp"]
     caps = jjp.capabilities

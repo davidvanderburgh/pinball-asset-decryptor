@@ -3307,12 +3307,32 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
         from .executor import DockerExecutor
         if isinstance(self.executor, DockerExecutor):
             # Docker on macOS: write module source into cache dir (mounted
-            # as /tmp).  Read via pkgutil.get_data which works with both
+            # as /tmp).  Read via pkgutil.get_data, which works for both
             # source installs and PyInstaller bundles (--add-data files).
+            # The package is pinball_decryptor.plugins.jjp — NOT the old
+            # standalone repo's "jjp_decryptor".  get_data returns None
+            # (it does not raise) when the package/resource is missing, and
+            # writing that None used to crash with the opaque "a bytes-like
+            # object is required, not 'NoneType'" — so resolve the right
+            # package, fall back to the colocated source file, and guard.
             import pkgutil
+            pkg = __package__ or "pinball_decryptor.plugins.jjp"
+            this_dir = os.path.dirname(os.path.abspath(__file__))
             cache_dir = self.executor._cache_dir()
             for module in ("crypto.py", "filelist.py"):
-                data = pkgutil.get_data("jjp_decryptor", module)
+                data = pkgutil.get_data(pkg, module)
+                if data is None:
+                    # Fallback: read the .py sitting next to this file
+                    # (source installs, and onedir bundles that keep it).
+                    src = os.path.join(this_dir, module)
+                    if os.path.isfile(src):
+                        with open(src, "rb") as f:
+                            data = f.read()
+                if data is None:
+                    raise PipelineError("Decrypt",
+                        f"Could not load {module} to deploy into the "
+                        f"decryption container — this is a packaging bug. "
+                        f"Please report it with your app version.")
                 dst = os.path.join(cache_dir, f"jjp_{module}")
                 with open(dst, "wb") as f:
                     f.write(data)

@@ -11,9 +11,47 @@ these tests to:
 """
 
 import os
+import pkgutil
 import shutil
 
 import pytest
+
+JJP_PKG = "pinball_decryptor.plugins.jjp"
+
+
+def test_jjp_decrypt_modules_loadable_via_get_data():
+    """Regression guard — macOS "a bytes-like object is required, not
+    'NoneType'" (TonyScoots report).
+
+    The standalone decrypt phase deploys crypto.py + filelist.py into the
+    macOS Docker container by reading their source with
+    ``pkgutil.get_data(<package>, <module>)``.  It used the old standalone
+    repo's package name ("jjp_decryptor"), which doesn't exist in the
+    unified app — so get_data returned None (it doesn't raise) and the
+    pipeline crashed writing None to a file, at the very end of an Extract.
+
+    These resources MUST be loadable via the real package name.
+    """
+    for module in ("crypto.py", "filelist.py"):
+        data = pkgutil.get_data(JJP_PKG, module)
+        assert data, (
+            f"pkgutil.get_data({JJP_PKG!r}, {module!r}) returned "
+            f"{data!r} — the decrypt phase can't deploy it into the "
+            f"macOS container and Extract will crash with a NoneType "
+            f"write error.")
+
+
+def test_jjp_pipeline_has_no_dead_jjp_decryptor_package():
+    """The unified plugin must not reference the old standalone
+    "jjp_decryptor" package name in a get_data/import — that name
+    resolves to nothing here and silently returns None."""
+    import pinball_decryptor.plugins.jjp.pipeline as _p
+    src = open(_p.__file__, encoding="utf-8").read()
+    assert 'get_data("jjp_decryptor"' not in src, (
+        "pipeline.py still reads from the dead 'jjp_decryptor' package "
+        "via pkgutil.get_data — use __package__ / "
+        "'pinball_decryptor.plugins.jjp' instead (get_data returns None "
+        "for the missing package and the write crashes).")
 
 
 def test_jjp_write_wrapper_moves_output(manufacturers_by_key, tmp_path):

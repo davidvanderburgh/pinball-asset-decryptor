@@ -186,6 +186,167 @@ def test_encode_wav_keeps_full_length_replacement(tmp_path):
 
 
 # ----------------------------------------------------------------------
+# Engine-loop injection (opt-in "Loop replaced music")
+# ----------------------------------------------------------------------
+
+# Real Dune AudioStreamWAV string table (verified from dune.fun): every
+# .sample lists all 10 property names, so loop injection needs no string-table
+# surgery — only appends 3 INT props referencing the existing loop_* names.
+_REAL_NAMES = ["resource_local_to_scene", "resource_name", "data", "format",
+               "loop_mode", "loop_begin", "loop_end", "mix_rate", "stereo",
+               "script"]
+_GDV_INT, _GDV_BOOL, _GDV_NIL, _GDV_PBA = 3, 2, 1, 31
+
+
+def _build_real_sample(payload, extra_props=()):
+    """A .sample matching Dune's real layout: RSRC header, the 10-name string
+    table, then an AudioStreamWAV resource (data/format/mix_rate/stereo/script,
+    plus any *extra_props* as (str_idx, vtype, value))."""
+    st = struct.pack("<I", len(_REAL_NAMES))
+    for nm in _REAL_NAMES:
+        b = nm.encode() + b"\x00"
+        st += struct.pack("<I", len(b)) + b
+    header = b"RSRC" + b"\x00" * 20 + st + struct.pack("<I", 0)  # +ext_res count
+    cls = struct.pack("<I", len(b"AudioStreamWAV") + 1) + b"AudioStreamWAV\x00"
+    props = (struct.pack("<II", 2, _GDV_PBA) + struct.pack("<I", len(payload))
+             + payload + b"\x00" * ((4 - len(payload) % 4) % 4))
+    props += struct.pack("<III", 3, _GDV_INT, 3)        # format = QOA
+    props += struct.pack("<III", 7, _GDV_INT, 48000)    # mix_rate
+    props += struct.pack("<III", 8, _GDV_BOOL, 1)       # stereo
+    props += struct.pack("<II", 9, _GDV_NIL)            # script (NIL, no value)
+    n = 5 + len(extra_props)
+    for sidx, vt, val in extra_props:
+        props += struct.pack("<III", sidx, vt, val)
+    return header + cls + struct.pack("<I", n) + props
+
+
+def _read_named_props(sample_bytes):
+    """Return ``{name: value}`` for the AudioStreamWAV INT/BOOL props."""
+    names = ic._parse_string_table(sample_bytes)
+    inv = {v: k for k, v in names.items()}
+    needle = struct.pack("<I", len(b"AudioStreamWAV") + 1) + b"AudioStreamWAV\x00"
+    p = sample_bytes.rfind(needle) + len(needle)
+    nprops = struct.unpack("<I", sample_bytes[p:p + 4])[0]
+    p += 4
+    out = {}
+    for _ in range(nprops):
+        sidx = struct.unpack("<I", sample_bytes[p:p + 4])[0]
+        vt = struct.unpack("<I", sample_bytes[p + 4:p + 8])[0]
+        p += 8
+        if vt == _GDV_PBA:
+            ln = struct.unpack("<I", sample_bytes[p:p + 4])[0]
+            p += 4 + ln + ((4 - ln % 4) % 4)
+        elif vt in (_GDV_INT, _GDV_BOOL):
+            out[inv.get(sidx, sidx)] = struct.unpack("<i", sample_bytes[p:p + 4])[0]
+            p += 4
+        elif vt == _GDV_NIL:
+            pass
+        else:
+            break
+    return out
+
+
+def test_inject_engine_loop_adds_forward_loop(tmp_path):
+    """Opt-in loop injection appends loop_mode/begin/end matching the clip
+    length, preserves the audio payload, and is decodable."""
+    import math
+    from pinball_decryptor.plugins.bof import qoa_codec
+    from pinball_decryptor.plugins.bof.source_converter import _find_data_pba
+
+    frames = 48000  # 1s
+    qoa = qoa_codec.encode(
+        b"".join(struct.pack("<hh", int(2000 * math.sin(i * 0.05)),
+                             int(2000 * math.sin(i * 0.05)))
+                 for i in range(frames)), 2, 48000)
+    orig = _build_real_sample(qoa)
+    injected = ic._inject_engine_loop(orig, frames)
+
+    props = _read_named_props(injected)
+    assert props["loop_mode"] == 1          # forward
+    assert props["loop_begin"] == 0
+    assert props["loop_end"] == frames
+    assert props["format"] == 3 and props["mix_rate"] == 48000  # untouched
+    # Audio payload still intact + decodable
+    payload, _o, _e = _find_data_pba(injected, b"AudioStreamWAV")
+    assert payload[:4] == b"qoaf"
+    pcm, ch, rate = qoa_codec.decode(payload)
+    assert ch == 2 and rate == 48000 and len(pcm) // 4 == frames
+
+
+def test_inject_engine_loop_skips_when_already_looping(tmp_path):
+    """If a sample already declares loop_mode, injection is a no-op."""
+    orig = _build_real_sample(b"qoaf" + b"\x00" * 60,
+                              extra_props=[(4, _GDV_INT, 1)])  # loop_mode present
+    assert ic._inject_engine_loop(orig, 1000) == orig
+
+
+def test_encode_wav_inject_loop_end_to_end(tmp_path):
+    """encode_wav_to_sample(inject_loop=True) produces a looping sample."""
+    import math
+    from pinball_decryptor.plugins.bof import qoa_codec
+    qoa = qoa_codec.encode(
+        b"".join(struct.pack("<hh", int(1000 * math.sin(i * 0.03)),
+                             int(1000 * math.sin(i * 0.03)))
+                 for i in range(48000)), 2, 48000)
+    orig = tmp_path / "music_LOOP.sample"
+    orig.write_bytes(_build_real_sample(qoa))
+    pcm = b"".join(struct.pack("<hh", int(1500 * math.sin(i * 0.04)),
+                              int(1500 * math.sin(i * 0.04)))
+                   for i in range(24000))  # 0.5s replacement
+    wav = tmp_path / "music_LOOP.wav"
+    _write_wav(str(wav), pcm, channels=2, rate=48000, width=2)
+
+    no_loop = ic.encode_wav_to_sample(str(wav), str(orig), inject_loop=False)
+    looped = ic.encode_wav_to_sample(str(wav), str(orig), inject_loop=True)
+    assert "loop_mode" not in _read_named_props(no_loop)
+    p = _read_named_props(looped)
+    assert p["loop_mode"] == 1 and p["loop_begin"] == 0 and p["loop_end"] == 24000
+
+
+def test_apply_source_edits_loops_only_named_slots(tmp_path):
+    """apply_source_edits injects an engine loop only into the slots named in
+    inject_loop_names (so a ticked LOOP track loops but a one-shot doesn't)."""
+    import math
+    import time
+    from pinball_decryptor.plugins.bof import qoa_codec
+
+    pck = tmp_path / "pck"
+    editable = pck / "_EDITABLE ASSETS" / "audio"
+    imported = pck / ".godot" / "imported"
+    editable.mkdir(parents=True)
+    imported.mkdir(parents=True)
+
+    qoa = qoa_codec.encode(
+        b"".join(struct.pack("<hh", int(2000 * math.sin(i * 0.05)),
+                             int(2000 * math.sin(i * 0.05)))
+                 for i in range(48000)), 2, 48000)
+    h1 = "1c4a29c1874032b7a7a4d19647d0c93e"
+    h2 = "2c4a29c1874032b7a7a4d19647d0c93e"
+    (imported / f"song_LOOP.wav-{h1}.sample").write_bytes(_build_real_sample(qoa))
+    (imported / f"sfx.wav-{h2}.sample").write_bytes(_build_real_sample(qoa))
+
+    baseline = time.time()
+    time.sleep(0.05)
+    pcm = b"".join(struct.pack("<hh", int(1500 * math.sin(i * 0.04)),
+                              int(1500 * math.sin(i * 0.04)))
+                   for i in range(24000))
+    _write_wav(str(editable / "song_LOOP-1c4a29.wav"), pcm, 2, 48000, 2)
+    _write_wav(str(editable / "sfx-2c4a29.wav"), pcm, 2, 48000, 2)
+
+    stats = ic.apply_source_edits(
+        str(pck), baseline,
+        inject_loop_names={"song_LOOP-1c4a29.wav"})
+    assert len(stats["updated"]) == 2
+
+    loop_props = _read_named_props(
+        (imported / f"song_LOOP.wav-{h1}.sample").read_bytes())
+    sfx_props = _read_named_props(
+        (imported / f"sfx.wav-{h2}.sample").read_bytes())
+    assert loop_props.get("loop_mode") == 1           # looped slot
+    assert "loop_mode" not in sfx_props               # one-shot untouched
+
+
+# ----------------------------------------------------------------------
 # .webp → .ctex
 # ----------------------------------------------------------------------
 

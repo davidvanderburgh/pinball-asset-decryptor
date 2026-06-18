@@ -86,6 +86,16 @@ class Capabilities:
     # code over a higher-dated mod).  When set, app.py passes
     # ``version_date_override`` (None in Auto mode) to make_write_pipeline.
     write_version_date: bool = False
+    # Per-slot audio-loop injection: surfaces a "Loop" checkbox column on the
+    # Replace Audio tab (one per track, defaulted ON for tracks whose name
+    # contains "LOOP").  When a looped slot's replacement is repacked, the
+    # inverse converter adds resource-level forward looping to it.  Used by
+    # BOF: Dune plays its mode-music stems once (engine loop is off), so a
+    # replacement shorter than the long original goes silent partway through a
+    # mode; looping the clip fills the mode (the game's music system fades/
+    # stops it on the next song change).  app.py passes the set of looped
+    # slot filenames to make_write_pipeline as ``loop_names``.
+    audio_loop_inject: bool = False
     # Optional WPC-DMD decode pass: surfaces a "Decode DMD scenes
     # (experimental, extract-only)" checkbox on the Extract tab.
     # When True, app.py passes ``decode_dmd`` to the extract factory.

@@ -785,6 +785,11 @@ class App:
             write_kwargs["version_date_override"] = (
                 self.window.write_version_override())
 
+        if getattr(self._current_mfr.capabilities,
+                   "audio_loop_inject", False):
+            write_kwargs["loop_names"] = self.window.audio_loop_basenames(
+                assets_dir)
+
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,

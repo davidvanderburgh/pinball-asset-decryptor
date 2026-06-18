@@ -42,7 +42,7 @@ class _WriteWrapper(ModifyPipeline):
 
     def __init__(self, original_path, assets_dir, output_path,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 version_date_override=None):
+                 version_date_override=None, loop_names=None):
         game_key = detect_game(original_path)
         if game_key is None:
             # Defer the friendly error to run() — done_cb is the only way to
@@ -66,6 +66,7 @@ class _WriteWrapper(ModifyPipeline):
             progress_cb=progress_cb,
             done_cb=done_cb,
             version_date_override=version_date_override,
+            loop_names=loop_names,
         )
 
     def run(self):
@@ -84,6 +85,11 @@ class BOFManufacturer(Manufacturer):
         # Surfaces the "Update version date" control on the Write tab — the
         # game only applies a .fun dated newer than what's installed.
         write_version_date=True,
+        # Surfaces the per-track "Loop" column on the Replace Audio tab — Dune
+        # plays its mode-music stems once, so a shorter replacement goes
+        # silent mid-mode unless we loop it at the resource level.  Defaulted
+        # ON for "LOOP"-named tracks.
+        audio_loop_inject=True,
         # Replace-Audio tab: BoF audio lives in the Godot PCK as imported
         # .sample/.oggvorbisstr binaries.  Extract writes editable .wav/.ogg
         # copies under pck/_EDITABLE ASSETS/; Write inverse-converts edits
@@ -170,10 +176,11 @@ class BOFManufacturer(Manufacturer):
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb,
-                            version_date_override=None):
+                            version_date_override=None, loop_names=None):
         return _WriteWrapper(original_path, assets_dir, output_path,
                              log_cb, phase_cb, progress_cb, done_cb,
-                             version_date_override=version_date_override)
+                             version_date_override=version_date_override,
+                             loop_names=loop_names)
 
     def extract_input_help(self):
         return ("Decrypt a Barrels of Fun `.fun` update file (Labyrinth, "

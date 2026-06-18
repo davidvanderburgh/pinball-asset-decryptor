@@ -860,13 +860,18 @@ class ModifyPipeline(_BasePipeline):
 
     def __init__(self, original_fun, assets_dir, output_fun_path, game_key,
                  executor, log_cb, phase_cb, progress_cb, done_cb,
-                 version_date_override=None):
+                 version_date_override=None, loop_names=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.original_fun = original_fun
         self.assets_dir = assets_dir
         self.output_fun_path = output_fun_path
         self.game_key = game_key
         self.executor = executor
+        # Source filenames (basenames) of replaced audio the user marked
+        # "Loop" on the Replace Audio tab — the inverse converter adds
+        # resource-level forward looping to each so a short music clip loops to
+        # fill its mode instead of going silent (Dune plays these stems once).
+        self.loop_names = frozenset(loop_names or ())
         # Optional explicit "YYYY.MM.DD" the user typed in the Write tab's
         # version field (Auto unchecked).  None => auto-climb.  Used to
         # force-install, e.g. stamping official code above a higher-dated mod.
@@ -1537,6 +1542,16 @@ class ModifyPipeline(_BasePipeline):
             self._done(False, f"Unexpected error: {e}")
 
     def _run(self):
+        # Fail fast if the chosen output path is an existing folder.  Otherwise
+        # the whole multi-minute repack runs and only dies at the final encrypt
+        # with a cryptic gpg "can't create '<path>': Is a directory".
+        if os.path.isdir(self.output_fun_path):
+            raise PipelineError(
+                "Setup",
+                f"The output path is a folder, not a file:\n"
+                f"{self.output_fun_path}\n\n"
+                f"Choose a destination file name ending in .fun (for example "
+                f"on the Desktop), not an existing folder.")
         game_info = GAME_DB[self.game_key]
         passphrase = game_info["passphrase"]
         game_key = self.game_key
@@ -1651,7 +1666,8 @@ class ModifyPipeline(_BasePipeline):
                     baseline_mtime=baseline_mtime_for_edits,
                     log_cb=self._log,
                     progress_cb=self._progress,
-                    cancel_cb=lambda: self._cancelled)
+                    cancel_cb=lambda: self._cancelled,
+                    inject_loop_names=self.loop_names)
             except ImportError:
                 pass
 

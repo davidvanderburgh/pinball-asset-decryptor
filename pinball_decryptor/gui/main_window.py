@@ -181,6 +181,8 @@ class MainWindow:
         self._audio_slots = []           # list[AudioSlot] from last scan
         self._audio_slots_by_rel = {}    # rel_path -> AudioSlot
         self._audio_assignments = {}     # rel_path -> replacement file path
+        self._audio_loop_flags = {}      # rel_path -> bool (BOF loop-inject)
+        self._audio_loop_tip = None      # Loop-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
         self._audio_play_proc = None     # ffplay preview handle, if any
@@ -1332,17 +1334,30 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        # "loop" is the last data column so the Replacement column stays #3
+        # whether or not Loop is shown; apply_manufacturer hides it (via
+        # displaycolumns) for plugins without the audio_loop_inject capability.
         self._audio_tree = ttk.Treeview(
-            list_frame, columns=("len", "fmt", "rep"),
+            list_frame, columns=("len", "fmt", "rep", "loop"),
             height=12, selectmode="browse")
         self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
         self._audio_tree.heading("len", text="Length", anchor=tk.W)
         self._audio_tree.heading("fmt", text="Format", anchor=tk.W)
         self._audio_tree.heading("rep", text="Replacement", anchor=tk.W)
-        self._audio_tree.column("#0", width=330, minwidth=180)
-        self._audio_tree.column("len", width=60, minwidth=50, anchor=tk.W)
-        self._audio_tree.column("fmt", width=150, minwidth=90)
-        self._audio_tree.column("rep", width=220, minwidth=120)
+        self._audio_tree.heading("loop", text="Loop", anchor=tk.CENTER)
+        # Keep the base widths small enough that their sum fits a narrow
+        # window — ttk clips the rightmost column (Loop) when the total
+        # configured width exceeds the widget, and stretch only ever *grows*
+        # columns, never shrinks them.  Only the track-name (#0) and
+        # Replacement columns stretch to absorb extra width; the rest are fixed
+        # and compact so Loop is always on-screen at any app width.
+        self._audio_tree.column("#0", width=150, minwidth=80, stretch=True)
+        self._audio_tree.column("len", width=46, minwidth=42, anchor=tk.W,
+                                stretch=False)
+        self._audio_tree.column("fmt", width=124, minwidth=104, stretch=False)
+        self._audio_tree.column("rep", width=150, minwidth=110, stretch=True)
+        self._audio_tree.column("loop", width=44, minwidth=40, anchor=tk.CENTER,
+                                stretch=False)
         audio_scroll = ttk.Scrollbar(
             list_frame, orient=tk.VERTICAL, command=self._audio_tree.yview)
         self._audio_tree.configure(yscrollcommand=audio_scroll.set)
@@ -1360,6 +1375,10 @@ class MainWindow:
         # Selecting a row loads its original into the seek-bar strip (no
         # autoplay), debounced so arrowing through the list doesn't thrash.
         self._audio_tree.bind("<<TreeviewSelect>>", self._audio_on_tree_select)
+        # Hover over the Loop column → tooltip explaining the feature.
+        self._audio_tree.bind("<Motion>", self._audio_on_tree_motion, add="+")
+        self._audio_tree.bind(
+            "<Leave>", lambda _e: self._hide_audio_loop_tip(), add="+")
 
         self._audio_empty = ttk.Label(
             list_frame,
@@ -1524,6 +1543,12 @@ class MainWindow:
             self._audio_assignments = {
                 rel: rep for rel, rep in self._audio_assignments.items()
                 if rel in self._audio_slots_by_rel}
+        # Per-slot Loop flag (BOF): default ON for "LOOP"-named tracks; keep
+        # any flag the user already toggled for a slot that still exists.
+        self._audio_loop_flags = {
+            s.rel_path: self._audio_loop_flags.get(
+                s.rel_path, "loop" in os.path.basename(s.rel_path).lower())
+            for s in slots}
         self._audio_scan_dir = scan_dir
         self._refresh_audio_list()
 
@@ -1548,8 +1573,10 @@ class MainWindow:
         for s in slots:
             rep = self._audio_assignments.get(s.rel_path)
             rep_disp = os.path.basename(rep) if rep else "Choose…"
+            loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(s.duration_str(), s.format_summary(), rep_disp),
+                        values=(s.duration_str(), s.format_summary(),
+                                rep_disp, loop_disp),
                         tags=("assigned",) if rep else ())
 
         total = len(self._audio_slots)
@@ -1647,17 +1674,94 @@ class MainWindow:
 
     def _audio_on_tree_click(self, event):
         # A click in the Replacement column opens the picker (the column is a
-        # per-row "Choose…" button).  Other columns fall through to normal
-        # selection.
+        # per-row "Choose…" button); a click in the Loop column toggles that
+        # slot's loop flag.  Other columns fall through to normal selection.
         tree = self._audio_tree
         if tree.identify_region(event.x, event.y) != "cell":
             return
         row = tree.identify_row(event.y)
-        col = tree.identify_column(event.x)  # columns=(len,fmt,rep) -> #1,#2,#3
+        # columns=(len,fmt,rep,loop) -> #1,#2,#3,#4 (#4 hidden for non-BOF).
+        col = tree.identify_column(event.x)
         if row and col == "#3":
             tree.selection_set(row)
             self._cancel_audio_select_job()
             self._audio_assign_rel(row)
+        elif row and col == "#4":
+            self._audio_toggle_loop(row)
+
+    def _audio_toggle_loop(self, rel):
+        """Flip a slot's Loop flag and redraw just its glyph."""
+        if rel not in self._audio_slots_by_rel:
+            return
+        new = not self._audio_loop_flags.get(rel, False)
+        self._audio_loop_flags[rel] = new
+        try:
+            vals = list(self._audio_tree.item(rel, "values"))
+            if len(vals) >= 4:
+                vals[3] = "☑" if new else "☐"
+                self._audio_tree.item(rel, values=vals)
+        except tk.TclError:
+            pass
+
+    _AUDIO_LOOP_TIP_TEXT = (
+        "Loop this replacement in-game.\n\n"
+        "These music stems normally play once — there's no built-in loop — so "
+        "a replacement that's shorter than the original goes silent partway "
+        "through its mode. Ticking Loop bakes a forward-loop flag into the "
+        "rebuilt audio (the same loop_mode flag Godot's importer would set), "
+        "so the engine repeats your clip to fill the mode; the game stops or "
+        "fades it on the next song change.\n\n"
+        "Defaults ON for tracks with \"LOOP\" in the name (the mode music). "
+        "Leave it OFF for one-shot sound effects and callouts.")
+
+    def _audio_on_tree_motion(self, event):
+        """Show the Loop-column explainer tooltip while hovering over it."""
+        tree = self._audio_tree
+        # Only when the Loop column is actually shown (BOF).
+        disp = tree["displaycolumns"]
+        if disp not in ("#all", ()) and "loop" not in disp:
+            self._hide_audio_loop_tip()
+            return
+        region = tree.identify_region(event.x, event.y)
+        col = tree.identify_column(event.x)
+        # Resolve the display column id to its name (robust to displaycolumns).
+        cols = tree["columns"] if disp in ("#all", ()) else disp
+        name = None
+        if col and col != "#0":
+            i = int(col[1:]) - 1
+            if 0 <= i < len(cols):
+                name = cols[i]
+        if region in ("cell", "heading") and name == "loop":
+            self._show_audio_loop_tip(event)
+        else:
+            self._hide_audio_loop_tip()
+
+    def _show_audio_loop_tip(self, event):
+        if self._audio_loop_tip is not None:
+            return
+        try:
+            c = THEMES[self._current_theme]
+            tip = tk.Toplevel(self._audio_tree)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(
+                f"+{event.x_root + 14}+{event.y_root + 18}")
+            tip.configure(background=c["tooltip_bg"])
+            tk.Label(
+                tip, text=self._AUDIO_LOOP_TIP_TEXT,
+                background=c["tooltip_bg"], foreground=c["tooltip_fg"],
+                relief="solid", borderwidth=1, font=(_SANS_FONT, 9),
+                padx=6, pady=4, wraplength=360, justify=tk.LEFT).pack()
+            self._audio_loop_tip = tip
+        except tk.TclError:
+            self._audio_loop_tip = None
+
+    def _hide_audio_loop_tip(self):
+        if self._audio_loop_tip is not None:
+            try:
+                self._audio_loop_tip.destroy()
+            except tk.TclError:
+                pass
+            self._audio_loop_tip = None
 
     def _audio_on_tree_right(self, event):
         tree = self._audio_tree
@@ -2027,6 +2131,25 @@ class MainWindow:
             return None
         return (dict(self._audio_slots_by_rel), assignments,
                 bool(self.audio_trim_var.get()))
+
+    def audio_loop_basenames(self, assets_dir):
+        """Set of editable source filenames the user marked "Loop" (and
+        assigned a replacement for) in *assets_dir*.  app.py passes this to the
+        write pipeline so the inverse converter loops just those .sample files.
+        Same folder-match guard as pending_audio_assignments()."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(
+                mfr.capabilities, "audio_loop_inject", False) or not assets_dir:
+            return frozenset()
+        scanned = self._audio_scan_dir or ""
+        if (os.path.normcase(os.path.normpath(assets_dir))
+                != os.path.normcase(os.path.normpath(scanned))):
+            return frozenset()
+        return frozenset(
+            os.path.basename(rel)
+            for rel, rep in self._audio_assignments.items()
+            if rep and rel in self._audio_slots_by_rel
+            and self._audio_loop_flags.get(rel))
 
     # ==================================================================
     # Replace Video tab
@@ -3222,7 +3345,16 @@ class MainWindow:
         self._audio_slots = []
         self._audio_slots_by_rel = {}
         self._audio_assignments = {}
+        self._audio_loop_flags = {}
         self._audio_scan_dir = ""
+        # Show the per-track "Loop" column only for plugins that support
+        # resource-level loop injection (BOF); hide it for everyone else.
+        if hasattr(self, "_audio_tree"):
+            if getattr(caps, "audio_loop_inject", False):
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "rep",
+                                                      "loop")
+            else:
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "rep")
         self._audio_clear_preview()
         self._refresh_audio_list()
         if hasattr(self, "_audio_length_note_lbl"):
@@ -4380,30 +4512,42 @@ class MainWindow:
         # Clear whatever's there from a prior scan.
         self._write_preview_tree.delete(
             *self._write_preview_tree.get_children())
+
+        # Bump the scan-id up front so any older in-flight scan stops posting
+        # results AND the pending rows below share the id with the on-disk scan.
+        self._write_preview_scan_id += 1
+        scan_id = self._write_preview_scan_id
+
+        # In-memory Replace-Audio / Replace-Video assignments are staged onto
+        # disk only at build time, so the MD5 scan below can't see them yet.
+        # List them up front as "Pending" so the preview reflects what the
+        # build will actually apply (otherwise a staged replacement looks like
+        # nothing's changed).
+        pending_n = self._add_pending_preview_rows(assets_path, scan_id)
+
         if not assets_path or not os.path.isdir(assets_path):
-            self._write_preview_empty.configure(
-                text="Select your modified assets folder above to preview "
-                     "changed files.")
-            self._write_preview_empty.place(
-                relx=0.5, rely=0.5, anchor=tk.CENTER)
+            if not pending_n:
+                self._write_preview_empty.configure(
+                    text="Select your modified assets folder above to preview "
+                         "changed files.")
+                self._write_preview_empty.place(
+                    relx=0.5, rely=0.5, anchor=tk.CENTER)
             return
         checksums_file = os.path.join(assets_path, ".checksums.md5")
         if not os.path.isfile(checksums_file):
-            self._write_preview_empty.configure(
-                text=("Pick a folder produced by Extract first "
-                      "(no .checksums.md5 found)."))
-            self._write_preview_empty.place(
-                relx=0.5, rely=0.5, anchor=tk.CENTER)
+            if not pending_n:
+                self._write_preview_empty.configure(
+                    text=("Pick a folder produced by Extract first "
+                          "(no .checksums.md5 found)."))
+                self._write_preview_empty.place(
+                    relx=0.5, rely=0.5, anchor=tk.CENTER)
             return
 
-        # Bump the scan-id so any older in-flight scan stops
-        # posting results.
-        self._write_preview_scan_id += 1
-        scan_id = self._write_preview_scan_id
-        self._write_preview_empty.configure(
-            text="Scanning for modified files…")
-        self._write_preview_empty.place(
-            relx=0.5, rely=0.5, anchor=tk.CENTER)
+        if not pending_n:
+            self._write_preview_empty.configure(
+                text="Scanning for modified files…")
+            self._write_preview_empty.place(
+                relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         def _scan():
             # ``.checksums.md5`` ships in two flavours depending on
@@ -4495,7 +4639,30 @@ class MainWindow:
 
         threading.Thread(target=_scan, daemon=True).start()
 
-    def _add_write_preview_row(self, rel, ext, status, scan_id):
+    def _add_pending_preview_rows(self, assets_path, scan_id):
+        """List in-memory Replace-Audio / Replace-Video assignments for
+        *assets_path* as "Pending" preview rows (they're staged to disk only at
+        build time, so the MD5 scan can't see them).  Returns the count added."""
+        import os
+        n = 0
+        for getter, label in (
+                (self.pending_audio_assignments, "Replace Audio"),
+                (self.pending_video_assignments, "Replace Video")):
+            try:
+                pend = getter(assets_path)
+            except Exception:
+                pend = None
+            if not pend:
+                continue
+            assignments = pend[1]
+            for rel in sorted(assignments):
+                ext = os.path.splitext(rel)[1].lstrip(".") or "?"
+                self._add_write_preview_row(
+                    rel, ext, f"Pending ({label})", scan_id, tag="pending")
+                n += 1
+        return n
+
+    def _add_write_preview_row(self, rel, ext, status, scan_id, tag="modified"):
         """Insert one row into the preview tree (main-thread only)."""
         if self._write_preview_scan_id != scan_id:
             return
@@ -4506,7 +4673,7 @@ class MainWindow:
             pass
         self._write_preview_tree.insert(
             "", tk.END, text=rel, values=(ext, status),
-            tags=("modified",))
+            tags=(tag,))
         # Tag colour is set in _apply_theme so it tracks dark/light
         # mode; nothing per-row here.
 
@@ -4514,7 +4681,15 @@ class MainWindow:
         """End-of-scan housekeeping (main-thread only)."""
         if self._write_preview_scan_id != scan_id:
             return
-        if n_changed == 0:
+        # Base the empty state on the actual tree contents — pending
+        # Replace-Audio/Video rows count too, so "No modified files" only
+        # shows when truly nothing (on disk or staged) is going to change.
+        if self._write_preview_tree.get_children():
+            try:
+                self._write_preview_empty.place_forget()
+            except tk.TclError:
+                pass
+        else:
             self._write_preview_empty.configure(
                 text="No modified files detected.")
             self._write_preview_empty.place(
@@ -5339,6 +5514,10 @@ class MainWindow:
         if hasattr(self, "_write_preview_tree"):
             self._write_preview_tree.tag_configure(
                 "modified", foreground=c["link"])
+            # Pending Replace-Audio/Video rows — staged at build, not on disk
+            # yet; use the "success" hue to read as queued-and-ready.
+            self._write_preview_tree.tag_configure(
+                "pending", foreground=c["success"])
         if hasattr(self, "_audio_tree"):
             self._audio_tree.tag_configure("assigned", foreground=c["success"])
         if hasattr(self, "_audio_spec_canvas"):

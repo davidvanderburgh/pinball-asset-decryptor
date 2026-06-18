@@ -246,14 +246,152 @@ def _splice_pba_payload(orig_sample_bytes, new_payload):
     raise ValueError("no PBA found in AudioStreamWAV properties")
 
 
-def encode_wav_to_sample(wav_path, orig_sample_path, log_cb=None):
+# ---------------------------------------------------------------------------
+# Optional engine-loop injection (opt-in "Loop replaced music")
+# ---------------------------------------------------------------------------
+#
+# Godot's *resource-binary* Variant type ids (core/io/resource_format_binary.h).
+# NB: these are NOT the same as source_converter's mislabeled _VTYPE_* (which
+# only ever needed to match PBA=31); real ids are BOOL=2, INT=3, FLOAT=4,
+# STRING=5, PACKED_BYTE_ARRAY=31.  Loop injection walks the *typed* property
+# list, so it must use the real ids.
+_GDV_NIL = 1
+_GDV_BOOL = 2
+_GDV_INT = 3
+_GDV_FLOAT = 4
+_GDV_STRING = 5
+_GDV_PBA = 31
+_LOOP_FORWARD = 1
+
+
+def _qoa_or_pcm_frames(payload, channels):
+    """Per-channel sample (frame) count of a .sample data payload."""
+    if payload[:4] == b"qoaf" and len(payload) >= 8:
+        return struct.unpack(">I", payload[4:8])[0]
+    return len(payload) // (channels * 2) if channels else 0
+
+
+def _parse_string_table(data):
+    """Locate the RSRC string table and return ``{name: index}``.
+
+    Godot stores it as ``u32 count`` then ``count`` unicode strings — each a
+    ``u32 len`` (incl. trailing NUL) followed by exactly ``len`` bytes, NO
+    4-byte padding.  We brute-force the start offset (the header before it is
+    version-dependent) and accept the first run that contains the
+    AudioStreamWAV property names.  Returns None if not found."""
+    n = len(data)
+    for off in range(4, min(n - 4, 2048)):
+        cnt = struct.unpack("<I", data[off:off + 4])[0]
+        if not (2 <= cnt <= 256):
+            continue
+        o = off + 4
+        names = []
+        ok = True
+        for _ in range(cnt):
+            if o + 4 > n:
+                ok = False
+                break
+            ln = struct.unpack("<I", data[o:o + 4])[0]
+            if ln == 0 or ln > 256 or o + 4 + ln > n:
+                ok = False
+                break
+            raw = data[o + 4:o + 4 + ln].rstrip(b"\x00")
+            if not all(32 <= c < 127 for c in raw):
+                ok = False
+                break
+            names.append(raw.decode("ascii"))
+            o += 4 + ln
+        if ok and "data" in names and "format" in names:
+            return {nm: i for i, nm in enumerate(names)}
+    return None
+
+
+def _walk_props(data, start, num_props, str_idx_of_interest=None):
+    """Walk ``num_props`` typed properties from ``start``.  Returns
+    ``(end_offset, found_idx)`` where ``end_offset`` is just past the last
+    property and ``found_idx`` is True if ``str_idx_of_interest`` appears as a
+    property name index.  Returns ``(None, False)`` on an unhandled variant
+    (so the caller leaves the file untouched rather than risk a bad edit)."""
+    p = start
+    found = False
+    n = len(data)
+    for _ in range(num_props):
+        if p + 8 > n:
+            return None, found
+        sidx = struct.unpack("<I", data[p:p + 4])[0]
+        vt = struct.unpack("<I", data[p + 4:p + 8])[0]
+        p += 8
+        if str_idx_of_interest is not None and sidx == str_idx_of_interest:
+            found = True
+        if vt == _GDV_PBA:
+            ln = struct.unpack("<I", data[p:p + 4])[0]
+            p += 4 + ln + ((4 - ln % 4) % 4)
+        elif vt in (_GDV_INT, _GDV_BOOL, _GDV_FLOAT):
+            p += 4
+        elif vt == _GDV_NIL:
+            pass
+        else:
+            return None, found       # STRING/array/etc — don't risk it
+    return p, found
+
+
+def _inject_engine_loop(sample_bytes, frames, log_cb=None):
+    """Add ``loop_mode=Forward`` / ``loop_begin=0`` / ``loop_end=frames`` to an
+    AudioStreamWAV ``.sample`` so the engine loops the whole clip.
+
+    Dune's music plays these stems once (engine loop is off in every original
+    ``.sample`` and the game never sets a loop mode); a replacement shorter
+    than the long original then goes dead-quiet partway through the mode.
+    Looping the stream at the resource level makes a clip of *any* length fill
+    the mode — the game's music system already fades/stops it on the next song
+    change.  The string table in every ``.sample`` already carries the
+    ``loop_*`` names, so we only append three INT properties (no string-table
+    surgery).  Anything we can't safely parse is left untouched."""
+    if frames <= 0:
+        return sample_bytes
+    names = _parse_string_table(sample_bytes)
+    if not names or not all(k in names
+                            for k in ("loop_mode", "loop_begin", "loop_end")):
+        return sample_bytes
+    needle = struct.pack("<I", len(b"AudioStreamWAV") + 1) + b"AudioStreamWAV\x00"
+    base = sample_bytes.rfind(needle)
+    if base < 0:
+        return sample_bytes
+    np_off = base + len(needle)
+    if np_off + 4 > len(sample_bytes):
+        return sample_bytes
+    num_props = struct.unpack("<I", sample_bytes[np_off:np_off + 4])[0]
+    if not (1 <= num_props <= 256):
+        return sample_bytes
+    end, already = _walk_props(sample_bytes, np_off + 4, num_props,
+                               str_idx_of_interest=names["loop_mode"])
+    if end is None or already:
+        return sample_bytes          # unparsable, or already has a loop_mode
+    add = b""
+    for name, val in (("loop_mode", _LOOP_FORWARD),
+                      ("loop_begin", 0), ("loop_end", frames)):
+        add += struct.pack("<III", names[name], _GDV_INT, val)
+    out = bytearray(sample_bytes)
+    out[np_off:np_off + 4] = struct.pack("<I", num_props + 3)
+    out[end:end] = add
+    if log_cb:
+        log_cb(f"    injected engine loop (loop_end={frames} frames)", "info")
+    return bytes(out)
+
+
+def encode_wav_to_sample(wav_path, orig_sample_path, log_cb=None,
+                         inject_loop=False):
     """Re-encode a user-edited .wav into a Godot .sample, preserving
     whatever wrapper + payload encoding the original used.
 
     The replacement may be any length: the repacker rewrites BOF's PCK
     directory of absolute offsets, so a longer/shorter clip repacks
     correctly.  We only conform the audio to the original's channel count
-    and sample-rate (a mismatch there crashes Godot)."""
+    and sample-rate (a mismatch there crashes Godot).
+
+    ``inject_loop`` (opt-in) adds resource-level forward looping so a music
+    replacement loops to fill its mode instead of cutting out (see
+    ``_inject_engine_loop``)."""
     long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
     with open(long_prefix + os.path.abspath(orig_sample_path), "rb") as f:
         orig = f.read()
@@ -299,7 +437,11 @@ def encode_wav_to_sample(wav_path, orig_sample_path, log_cb=None):
         # Raw 16-bit PCM (or an OGG-original fallback to PCM).
         new_payload = pcm
 
-    return _splice_pba_payload(orig, new_payload)
+    spliced = _splice_pba_payload(orig, new_payload)
+    if inject_loop:
+        frames = _qoa_or_pcm_frames(new_payload, dst_ch)
+        spliced = _inject_engine_loop(spliced, frames, log_cb=log_cb)
+    return spliced
 
 
 def _original_sample_format(orig, orig_payload, fallback_ch, fallback_rate):
@@ -380,20 +522,27 @@ ENCODERS = {
 }
 
 
-def reencode_source_file(src_path, orig_imported_path, log_cb=None):
+def reencode_source_file(src_path, orig_imported_path, log_cb=None,
+                         inject_loop=False):
     """Top-level entry: dispatch by source extension.  Returns rebuilt
     bytes for the imported binary, or raises ``ValueError`` with a
-    human-readable reason."""
+    human-readable reason.
+
+    ``inject_loop`` only applies to ``.wav`` → ``.sample`` (audio); other
+    encoders ignore it."""
     ext = os.path.splitext(src_path)[1].lower()
     enc = ENCODERS.get(ext)
     if enc is None:
         raise ValueError(f"no inverse encoder for {ext} files yet")
+    if ext == ".wav":
+        return enc(src_path, orig_imported_path, log_cb=log_cb,
+                   inject_loop=inject_loop)
     return enc(src_path, orig_imported_path, log_cb=log_cb)
 
 
 def apply_source_edits(pck_dir, baseline_mtime=0, *,
                        baseline_checksums_path=None, log_cb=None,
-                       progress_cb=None, cancel_cb=None):
+                       progress_cb=None, cancel_cb=None, inject_loop_names=None):
     """Scan the editable folder for files that differ from the Extract
     baseline and re-encode each one back into its imported binary
     under ``pck_dir/.godot/imported/``.
@@ -540,7 +689,11 @@ def apply_source_edits(pck_dir, baseline_mtime=0, *,
             skipped.append((name, f"no matching imported binary for {stem}/{hash6}"))
             continue
         try:
-            new_bytes = reencode_source_file(src_full, imported, log_cb=log_cb)
+            # Loop only the slots the user ticked "Loop" for (keyed by the
+            # editable source filename, which is unique per slot).
+            inject_loop = bool(inject_loop_names and name in inject_loop_names)
+            new_bytes = reencode_source_file(src_full, imported, log_cb=log_cb,
+                                             inject_loop=inject_loop)
         except Exception as e:
             skipped.append((name, str(e)))
             continue

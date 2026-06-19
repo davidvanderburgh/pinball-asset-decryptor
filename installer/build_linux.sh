@@ -53,6 +53,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.cgc" \
     --hidden-import "pinball_decryptor.plugins.williams" \
     --hidden-import "pinball_decryptor.plugins.dp" \
+    --hidden-import "pinball_decryptor.plugins.stern" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

@@ -71,6 +71,15 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.williams" \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
+    --hidden-import "pinball_decryptor.plugins.stern.ext4" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.elf" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.rbtree" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.emulator" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.codec" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.parallel" \
+    --collect-all "unicorn" \
+    --collect-all "capstone" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

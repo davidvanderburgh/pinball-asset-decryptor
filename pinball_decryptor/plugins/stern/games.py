@@ -15,8 +15,10 @@ codec is fully reverse-engineered — every cat-0 sound decodes to WAV from
 ``image.bin`` + ``game_real`` alone, and new audio can be re-encoded back in
 (size-neutral), bit-exact, for all 32 codec "scale" variants, mono and stereo.
 
-The decode params + keystream are firmware-specific, so each supported title
-ships a small derived-params blob (see ``data/``).
+Nothing title-specific is bundled: every sound's decode params are derived at
+runtime by driving the card's own ``game_real`` firmware, then cached by a
+fingerprint of ``game_real`` + ``image.bin`` (so re-runs are instant).  A new
+Spike 2 title works as soon as its card is recognized.
 """
 
 GAME_DB = {
@@ -25,7 +27,20 @@ GAME_DB = {
         "platform": "spike2",
         # Filename substrings that hint at this title on a raw .img.
         "filename_hints": ["tmnt", "turtle", "ninja"],
-        # Per-firmware derived data shipped with the plugin (under data/).
-        "params": "tmnt_cat0_decode_params.pkl",
+    },
+    "dnd": {
+        "display": "Dungeons & Dragons (Spike 2)",
+        "platform": "spike2",
+        "filename_hints": ["dungeons", "dragons"],
+    },
+    "king_kong": {
+        "display": "King Kong (Spike 2)",
+        "platform": "spike2",
+        "filename_hints": ["king_kong", "kong"],
+    },
+    "metallica": {
+        "display": "Metallica Remastered (Spike 2)",
+        "platform": "spike2",
+        "filename_hints": ["metallica"],
     },
 }

@@ -245,6 +245,49 @@ def test_pyinstaller_explicit_plugin_hidden_imports(script):
         f"v0.7.4 fix notes for context.")
 
 
+# Stern is the one plugin whose engine is imported LAZILY (inside functions,
+# via relative imports) so its heavy deps (unicorn/capstone/numpy) aren't
+# required at plugin-discovery time.  PyInstaller's static analyser can't
+# follow those lazy imports, so each engine submodule needs its own explicit
+# --hidden-import or the Linux/macOS bundle silently drops it — and the app
+# would crash only later, the moment a user runs Extract/Write.  Glob-derived
+# so adding a spike2 module makes it required in the build scripts too (it
+# can't go stale the way the v0.7.x per-plugin list did).
+_STERN = REPO / "pinball_decryptor" / "plugins" / "stern"
+
+
+def _stern_lazy_modules():
+    mods = ["pinball_decryptor.plugins.stern.ext4",
+            "pinball_decryptor.plugins.stern.spike2"]
+    for p in sorted((_STERN / "spike2").glob("*.py")):
+        if p.stem != "__init__":
+            mods.append("pinball_decryptor.plugins.stern.spike2." + p.stem)
+    return mods
+
+
+@pytest.mark.skipif(not (_STERN / "spike2").is_dir(),
+                    reason="stern spike2 engine not present")
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_stern_lazy_engine_hidden_imports(script):
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    missing = [m for m in _stern_lazy_modules()
+               if f'--hidden-import "{m}"' not in src
+               and f"--hidden-import '{m}'" not in src
+               and f"--hidden-import {m}" not in src]
+    assert not missing, (
+        f"{script.name} is missing --hidden-import for stern's lazily-loaded "
+        f"engine module(s): {', '.join(missing)}.  PyInstaller cannot follow "
+        f"the lazy imports in stern/engine.py, so the bundle would drop these "
+        f"and Extract/Write would crash on Linux/macOS.")
+    for dep in ("unicorn", "capstone"):
+        assert (f'--collect-all "{dep}"' in src or f"--collect-all '{dep}'" in src
+                or f"--collect-all {dep}" in src), (
+            f"{script.name} must --collect-all {dep} (it ships a native library "
+            f"the Spike 2 engine loads at runtime).")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

@@ -1,16 +1,14 @@
-"""Stern Spike pipelines: Extract (image.bin -> per-sound WAV) and Write /
-Direct-SD (edited WAV -> re-encode -> patch image.bin).
+"""Stern Spike pipelines: Extract (card image -> per-sound WAV) and Write
+(edited WAV -> re-encode -> patch image in place).
 
 (Spike 2 stores its code + assets on an SD card; the framework's generic
 ``direct_ssd`` capability is surfaced here as "Direct SD".)
 
-The decode/replace engine (``engine.py``) is the proven standalone Spike 2
-codec, validated bit-exact for all 32 scale-variants (mono + stereo).  Wiring
-it through these pipelines — reading ``image.bin`` + ``game_real`` from the
-card's ext partitions (pure-Python ext4) and letting the emulator derive
-everything else (vf2 + rt tables are boot-built; params via the chain) — is
-being finished with GUI verification; until then the pipelines detect the input
-and report a clear status instead of failing opaquely.
+The decode/replace engine (``engine.py`` over ``spike2/`` + ``ext4.py``) is the
+proven standalone Spike 2 codec, validated bit-exact for all 32 scale-variants
+(mono + stereo).  These pipelines locate ``image.bin`` + ``game_real`` in the
+card's ext partitions (pure-Python ext4), boot the firmware in an emulator to
+derive every sound's keystream, then decode/re-encode.
 """
 
 import os
@@ -25,20 +23,20 @@ except Exception:                      # pragma: no cover - engine deps may be a
     engine = None
 
 
-_PENDING = (
-    "Stern Spike 2 support is in active bring-up.\n\n"
-    "The audio codec is fully reverse-engineered and validated — every sound "
-    "decodes to WAV and re-encodes back bit-exact (mono + stereo, all 32 "
-    "codec variants), entirely from the card (game_real + image.bin; no extra "
-    "data needed). GUI wiring (pure-Python ext4 read of the card partitions + "
-    "running the engine) is being finished with testing.\n\n"
-    "Standalone tools are available now: spike2_extract.py / spike2_replace.py."
+_DIRECT_PENDING = (
+    "Direct SD read/write is not enabled for Spike 2 yet.\n\n"
+    "For now, image the card to a raw .img file (e.g. with Win32 Disk Imager "
+    "or `dd`) and use the file-based Extract / Write here — those are fully "
+    "supported.  Reading/writing the physical card directly is the next step."
 )
 
 
 def _require_engine():
     if engine is None or not getattr(engine, "AVAILABLE", False):
-        raise PipelineError("Engine", _PENDING)
+        raise PipelineError(
+            "Engine",
+            "Spike 2 audio engine unavailable. Install its prerequisites "
+            "(pip install unicorn capstone numpy) and try again.")
 
 
 class SternExtractPipeline(BasePipeline):
@@ -65,23 +63,23 @@ class SternExtractPipeline(BasePipeline):
         self._set_phase(1)  # Locate partitions
         self._log("Reading partition table...", "info")
         parts = linux_partitions(self.input_path)
-        if len(parts) < 2:
+        if len(parts) < 1:
             raise PipelineError(
                 "Locate partitions",
-                "Expected at least two Linux (ext) partitions on a Spike card "
-                "(rootfs + data); found %d." % len(parts))
+                "No Linux (ext) partition found on the card image.")
         self._log("Found %d ext partition(s)." % len(parts), "info")
         self._check_cancel()
 
-        self._set_phase(2)  # Decode audio
         _require_engine()
         os.makedirs(self.output_dir, exist_ok=True)
-        engine.extract_all(
+        # extract_all drives phases 2 (Extract video) and 3 (Decode audio).
+        n = engine.extract_all(
             self.input_path, parts, self.output_dir,
-            log=self._log, progress=self._bp, cancel=lambda: self._cancelled)
+            log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
+            phase=self._set_phase)
 
-        self._set_phase(3)  # Checksums
-        self._done(True, f"Extracted Spike 2 audio to {self.output_dir}")
+        self._set_phase(4)  # Checksums
+        self._done(True, "Extracted %d Spike 2 sound(s) to %s" % (n, self.output_dir))
 
 
 class SternWritePipeline(BasePipeline):
@@ -99,13 +97,14 @@ class SternWritePipeline(BasePipeline):
         if detect_game(self.original_path) is None:
             raise PipelineError("Detect", "Original is not a Spike card image.")
         self._check_cancel()
-        self._set_phase(2)  # Re-encode audio
+        self._set_phase(1)  # Stage
         _require_engine()
-        engine.write_image(
+        self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
+        n = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
-            log=self._log, progress=self._bp, cancel=lambda: self._cancelled)
-        self._set_phase(3)
-        self._done(True, f"Wrote patched image to {self.output_path}")
+            log=self._log, progress=self._progress, cancel=lambda: self._cancelled)
+        self._set_phase(3)  # Patch image
+        self._done(True, "Wrote %d replaced sound(s) to %s" % (n, self.output_path))
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
@@ -118,9 +117,8 @@ class SternDirectSsdExtractPipeline(BasePipeline):
         self.partition_override = partition_override
 
     def _run(self):
-        self._set_phase(1)
-        _require_engine()
-        raise PipelineError("Direct SD", _PENDING)
+        self._set_phase(0)
+        raise PipelineError("Direct SD", _DIRECT_PENDING)
 
 
 class SternDirectSsdWritePipeline(BasePipeline):
@@ -133,6 +131,5 @@ class SternDirectSsdWritePipeline(BasePipeline):
         self.partition_override = partition_override
 
     def _run(self):
-        self._set_phase(1)
-        _require_engine()
-        raise PipelineError("Direct SD", _PENDING)
+        self._set_phase(0)
+        raise PipelineError("Direct SD", _DIRECT_PENDING)

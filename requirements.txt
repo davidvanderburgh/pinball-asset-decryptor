@@ -10,7 +10,12 @@
 # numpy powers the CGC Cactus Canyon decoders: the 185 MB usb.so audio
 # de-encryption (byte-shuffle + XOR + 16-bit prefix-sum) and the cgc.so
 # art de-obfuscation + RGB565->PNG render would be far too slow in pure Python.
+# unicorn + capstone power the Stern Spike 2 audio engine: it drives the card's
+# own game_real firmware in an ARM emulator to recover the per-sound codec
+# keystream (decode every sound to WAV; re-encode replacements bit-exact).
 Pillow>=10.0
 zstandard>=0.22
 pycryptodome>=3
 numpy>=1.24
+unicorn>=2.0
+capstone>=5.0

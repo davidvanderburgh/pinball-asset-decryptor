@@ -15,6 +15,7 @@ normal Write copies verbatim).
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
+from ...core.transcribe import TranscribePipeline
 from .formats import detect_game
 from .games import GAME_DB
 from .pipeline import (SternDirectSsdExtractPipeline,
@@ -42,13 +43,19 @@ class SternManufacturer(Manufacturer):
         write=True,
         modpack=True,
         direct_ssd=True,
+        # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
+        # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
+        # spoken text, keeping the idx prefix so Write still round-trips.
+        transcribe=True,
     )
     input_spec = InputSpec(
         label="Stern Spike SD-card images",
         extensions=(".img", ".bin", ".raw"),
     )
-    extract_phases = ("Detect", "Locate partitions", "Decode audio", "Checksums")
+    extract_phases = ("Detect", "Locate partitions", "Extract video",
+                      "Decode audio", "Checksums")
     write_phases = ("Detect", "Stage", "Re-encode audio", "Patch image")
+    transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     direct_ssd_extract_phases = ("Read SD card", "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
     # The decode/replace engine emulates the ARM game firmware via unicorn.
@@ -62,6 +69,17 @@ class SternManufacturer(Manufacturer):
                      probe="python:numpy",
                      reason="Audio sample math for decode / encode.",
                      install_hint="pip install numpy"),
+        Prerequisite(name="capstone", where="host",
+                     probe="python:capstone",
+                     reason="Locates the codec's companding point to recover "
+                            "the keystream when re-encoding replaced audio.",
+                     install_hint="pip install capstone"),
+        # Optional — only the Auto-transcribe action needs it; extract/write
+        # work without it.
+        Prerequisite(name="faster-whisper", where="host",
+                     probe="python:faster_whisper",
+                     reason="Auto-transcribe spoken callouts to name the WAVs.",
+                     install_hint="pip install faster-whisper"),
     )
     beta = True
     badge = "BETA"
@@ -107,7 +125,16 @@ class SternManufacturer(Manufacturer):
             device_path, assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override)
 
+    def make_transcribe_pipeline(self, assets_dir,
+                                 log_cb, phase_cb, progress_cb, done_cb,
+                                 rename_after=False):
+        return TranscribePipeline(
+            assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            rename_after=rename_after)
+
     def extract_input_help(self):
         return ("Select a Stern Spike 2 SD-card image (raw .img/.bin), or use "
                 "the Direct SD option to read the card itself. Extract decodes "
-                "its packed audio to per-sound WAVs.")
+                "its packed audio to per-sound WAVs (audio/) and copies out the "
+                "LCD videos (video/). Tick Auto-transcribe to rename voice "
+                "callouts by their spoken text.")

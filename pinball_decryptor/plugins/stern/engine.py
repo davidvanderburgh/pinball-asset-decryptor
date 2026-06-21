@@ -253,7 +253,7 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     phase = phase or (lambda i: None)
-    from .spike2.emulator import Spike2Emu, firmware_build_supported
+    from .spike2.emulator import Spike2Emu, audio_decode_supported
 
     def _read_prog(c, t):
         if progress:
@@ -282,11 +282,12 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             return 0
 
         phase(3)  # Decode audio
-        if not firmware_build_supported(gr_path):
+        if not audio_decode_supported(gr_path):
             log("Audio decode isn't supported for this title yet: its game "
-                "firmware is a different Spike 2 build than the one the codec "
-                "engine is mapped to, so the per-sound keystream can't be "
-                "derived. Video extraction completed normally.", "warning")
+                "firmware uses a Spike 2 codec the engine can't locate a "
+                "single decode path for (e.g. a dual-path codec), so the "
+                "per-sound keystream can't be derived. Video extraction "
+                "completed normally.", "warning")
             phase(4)  # Checksums
             return 0
         log("Booting firmware codec engine...", "info")

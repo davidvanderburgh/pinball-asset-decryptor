@@ -40,6 +40,18 @@ from .elf import parse_elf
 _R = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4,
       UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8, UC_ARM_REG_R9,
       UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12]
+# r0..r15 (sp=13, lr=14, pc=15) for decoding LDREX/STREX register fields.
+_R16 = _R + [UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC]
+
+# LDREX/STREX family (ARM A1, cond=0xE) -> (is_store, byte-width).  unicorn's
+# bare ARM core has no exclusive monitor, so these raise; in a single-threaded
+# emulation they are correct as plain load / store-returns-success.
+_ATOMIC = {0x01900090: (False, 4), 0x01d00090: (False, 1), 0x01f00090: (False, 2),
+           0x01b00090: (False, 8), 0x01800090: (True, 4), 0x01c00090: (True, 1),
+           0x01e00090: (True, 2), 0x01a00090: (True, 8)}
+
+def _atomic_kind(w):
+    return _ATOMIC.get(w & 0x0FF000F0) if (w >> 28) == 0xE else None
 
 PAGE = 0x1000
 
@@ -54,6 +66,20 @@ def _u16(b, o=0):
 
 def _u32(b, o=0):
     return struct.unpack_from("<I", b, o)[0]
+
+
+def _next_prime(n):
+    """Smallest prime >= n (libstdc++ _M_next_bkt semantics; n capped sanely)."""
+    n = max(2, int(n) & 0xffffffff)
+    if n > 1 << 24:            # absurd request -> a fixed large prime
+        return 16777259
+    if n <= 2:
+        return 2
+    n |= 1                     # primes > 2 are odd
+    while True:
+        if all(n % d for d in range(3, int(n ** 0.5) + 1, 2)):
+            return n
+        n += 2
 
 
 # --- firmware addresses (this Spike 2 build) --------------------------------
@@ -89,12 +115,8 @@ _BUILD_SIG = {
 }
 
 
-def firmware_build_supported(game_real_path):
-    """True if the card's ``game`` firmware is the build the codec oracle was
-    mapped from (so the hardcoded addresses above are valid).  Cheap: parses the
-    ELF program headers and compares a few prologue bytes; never boots."""
+def _build_supported_raw(raw):
     try:
-        raw = open(game_real_path, "rb").read()
         segs, _ = parse_elf(raw)
     except Exception:
         return False
@@ -106,6 +128,32 @@ def firmware_build_supported(game_real_path):
         return b""
 
     return all(_at(va, len(sig)) == sig for va, sig in _BUILD_SIG.items())
+
+
+def firmware_build_supported(game_real_path):
+    """True if the card's ``game`` firmware is the validated (TMNT 1.58) build
+    the codec oracle's hardcoded addresses were mapped from.  Cheap: parses the
+    ELF program headers and compares a few prologue bytes; never boots."""
+    try:
+        raw = open(game_real_path, "rb").read()
+    except Exception:
+        return False
+    return _build_supported_raw(raw)
+
+
+def audio_decode_supported(game_real_path):
+    """True if this firmware's audio can be decoded: either the validated build
+    (above) or a *different* single-path build whose codec addresses locate
+    generically (see :mod:`.locate`).  Dual-path codecs (no resolvable
+    ``PROV``/``QMUL``) return False, so the engine skips audio gracefully."""
+    try:
+        raw = open(game_real_path, "rb").read()
+    except Exception:
+        return False
+    if _build_supported_raw(raw):
+        return True
+    from . import locate
+    return locate.locate_all(raw=raw) is not None
 
 
 class Spike2Emu:
@@ -120,13 +168,34 @@ class Spike2Emu:
     def __init__(self, game_real_path, image_path):
         raw = open(game_real_path, "rb").read()
         segs, relocs = parse_elf(raw)
+        self._segs = segs   # (vaddr, off, filesz, memsz) — for fn-ptr validation
+        # Firmware addresses: the validated (TMNT) build uses the hardcoded
+        # module constants; any other build's codec lives elsewhere, so locate
+        # every address generically (see :mod:`.locate`).  ``audio_supported``
+        # is False for dual-path / unlocatable builds (engine skips audio).
+        self._generic = not _build_supported_raw(raw)
+        if self._generic:
+            from . import locate
+            addrs = locate.locate_all(raw=raw)
+            self.audio_supported = addrs is not None
+        else:
+            addrs = None
+            self.audio_supported = True
+        self._set_addrs(addrs)
         mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
         self.mu = mu
+        self._atomic_pcs = set()
         for vaddr, off, filesz, memsz in segs:
             b = vaddr & ~0xfff
             e = _algn(vaddr + memsz)
             mu.mem_map(b, e - b)
             mu.mem_write(vaddr, raw[off:off + filesz])
+            # index every LDREX/STREX so the global hook can emulate them inline
+            # (the firmware's C++ runtime uses atomics heavily; unicorn has no
+            # exclusive monitor, so without this they raise and abort the boot).
+            for i in range(0, filesz & ~3, 4):
+                if _atomic_kind(_u32(raw, off + i)):
+                    self._atomic_pcs.add(vaddr + i)
         mu.mem_map(self.STK, self.STKSZ)
         mu.mem_map(self.HEAP, self.HEAPSZ)
         mu.mem_map(self.IMPORT & ~0xfff, 0x4000)
@@ -164,6 +233,37 @@ class Spike2Emu:
         self._decode_ready = False
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
+        self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+
+    def _set_addrs(self, addrs):
+        """Bind every firmware address as an instance attribute.  Defaults are
+        the validated (TMNT) module constants; ``addrs`` (from :mod:`.locate`)
+        overrides them for any other build.  ``OBJREG`` is the band-build's
+        codec-obj pointer register (TMNT r7); ``FIND_BL`` is the band-template
+        lookup ``bl`` skipped on generic builds (None on the validated build,
+        whose real lookup already works)."""
+        self.BOOT_LO = BOOT_LO; self.BOOT_HI = BOOT_HI
+        self.VF2_VA = VF2_VA; self.REG_BASE = REG_BASE
+        self.PROV = PROV; self.DISPATCH = DISPATCH; self.QMUL_TABLE = QMUL_TABLE
+        self.CAT0_REGISTER = CAT0_REGISTER
+        self.RBTREE_HDR = RBTREE_HDR; self.RBTREE_ACC = RBTREE_ACC
+        self.MASTERDIR_DECODE = MASTERDIR_DECODE
+        self.MASTERDIR_MALLOC = MASTERDIR_MALLOC
+        self.BANDLOOP = BANDLOOP; self.BANDOBJ = BANDOBJ
+        self.CHAIN_STUBS = CHAIN_STUBS; self.LENGTH_XOR = LENGTH_XOR
+        self.OBJREG = 7
+        self.FIND_BL = None
+        if addrs:
+            for k in ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV",
+                      "DISPATCH", "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR",
+                      "RBTREE_ACC", "MASTERDIR_DECODE", "MASTERDIR_MALLOC",
+                      "BANDLOOP", "BANDOBJ", "FIND_BL"):
+                setattr(self, k, addrs[k])
+            self.OBJREG = addrs["OBJREG"]
+            # generic derive skips the template lookup (find-skip) instead of
+            # stubbing the chain helpers, and takes the length from the raw obj.
+            self.CHAIN_STUBS = ()
+            self.LENGTH_XOR = 0
 
     # ---- on-demand paging ---------------------------------------------------
     def _backing_byte_offset(self, addr):
@@ -208,6 +308,9 @@ class Spike2Emu:
         # runs at full JIT speed instead of paying a Python callback on every
         # one of its ~13k instructions per block (~100x faster decode).
         def code(mu, addr, size, ud):
+            if addr in self._atomic_pcs:
+                self._emu_atomic(addr)
+                return
             if addr in self.imports:
                 self._imp(addr)
                 return
@@ -272,6 +375,38 @@ class Spike2Emu:
                     UC_HOOK_CODE, self._on_extra, begin=a, end=a)
 
     # ---- import stubs -------------------------------------------------------
+    def _emu_atomic(self, addr):
+        """Emulate the LDREX*/STREX* at *addr* as a plain load / store-success,
+        then step past it (correct for single-threaded emulation)."""
+        mu = self.mu
+        w = _u32(bytes(mu.mem_read(addr, 4)))
+        k = _atomic_kind(w)
+        if k is not None:
+            is_store, width = k
+            base = mu.reg_read(_R16[(w >> 16) & 0xf])
+            try:
+                if not is_store:
+                    rt = (w >> 12) & 0xf
+                    d = bytes(mu.mem_read(base, width))
+                    if width == 8:
+                        lo, hi = struct.unpack("<II", d)
+                        mu.reg_write(_R16[rt], lo); mu.reg_write(_R16[rt + 1], hi)
+                    else:
+                        mu.reg_write(_R16[rt], int.from_bytes(d, "little"))
+                else:
+                    rd = (w >> 12) & 0xf; rt = w & 0xf
+                    if width == 8:
+                        mu.mem_write(base, struct.pack(
+                            "<II", mu.reg_read(_R16[rt]) & 0xffffffff,
+                            mu.reg_read(_R16[rt + 1]) & 0xffffffff))
+                    else:
+                        mu.mem_write(base, (mu.reg_read(_R16[rt])
+                                            & ((1 << (8 * width)) - 1)).to_bytes(width, "little"))
+                    mu.reg_write(_R16[rd], 0)
+            except UcError:
+                pass
+        mu.reg_write(UC_ARM_REG_PC, addr + 4)
+
     def _ret(self, val=0):
         self.mu.reg_write(UC_ARM_REG_R0, val & 0xffffffff)
         self.mu.reg_write(UC_ARM_REG_PC, self.mu.reg_read(UC_ARM_REG_LR))
@@ -321,8 +456,19 @@ class Spike2Emu:
             self._mmap(); return
         if nm in ("munmap", "close", "read", "pread", "lseek", "lseek64"):
             self._ret(0); return
-        if nm.startswith("std::_Rb_tree_insert_and_rebalance"):
+        # ``.dynsym`` names are mangled (``_ZSt29_Rb_tree_insert_and_rebalance``);
+        # accept the demangled spelling too.  (On TMNT the hardcoded PLT stub
+        # masked this; other builds reach it only by name via the GOT path.)
+        if (nm.startswith("_ZSt29_Rb_tree_insert_and_rebalance")
+                or nm.startswith("std::_Rb_tree_insert_and_rebalance")):
             self._rbinsert_regs(); return
+        # std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned n) const
+        # returns the next prime >= n for a std::unordered_map's bucket count.
+        # Returning 0 (the default stub) leaves bucket_count==0, so a later
+        # bucket = hash % bucket_count divides by zero and the firmware's
+        # band-template lookup throws.  Return a real prime so the map works.
+        if nm.startswith("_ZNKSt8__detail20_Prime_rehash_policy11_M_next_bkt"):
+            self._ret(_next_prime(mu.reg_read(UC_ARM_REG_R1))); return
         self._ret(0)
 
     def _read_cstr(self, va, maxn=96):
@@ -419,21 +565,27 @@ class Spike2Emu:
         mu.reg_write(UC_ARM_REG_SP, self.STK + self.STKSZ - 0x20000)
         mu.reg_write(UC_ARM_REG_LR, 0xdeadbeef)
         try:
-            mu.emu_start(BOOT_LO, BOOT_HI, count=50_000_000)
+            mu.emu_start(self.BOOT_LO, self.BOOT_HI, count=50_000_000)
         except UcError as e:
             self.log.append(("keystream_err", str(e)))
-        vf2 = bytes(mu.mem_read(VF2_VA, 0x4000))
-        rt = _u32(bytes(mu.mem_read(REG_BASE + 0xac4, 4)))
+        vf2 = bytes(mu.mem_read(self.VF2_VA, 0x4000))
+        if self._generic:
+            # The rt-table pointer at REG_BASE+0xac4 is populated only on the
+            # validated build; other builds keep the codec's runtime tables
+            # elsewhere (e.g. Godzilla leaves +0xac4 == 0 yet decodes fine), so
+            # the keystream being built is the only universal success signal.
+            return any(vf2)
+        rt = _u32(bytes(mu.mem_read(self.REG_BASE + 0xac4, 4)))
         return any(vf2) and rt != 0
 
     def _init_rbtree(self):
-        mu = self.mu; hdr = RBTREE_HDR
+        mu = self.mu; hdr = self.RBTREE_HDR
         mu.mem_write(hdr + 0,    struct.pack("<I", 0))      # color red
         mu.mem_write(hdr + 4,    struct.pack("<I", 0))      # root null
         mu.mem_write(hdr + 8,    struct.pack("<I", hdr))    # left = &header
         mu.mem_write(hdr + 0xc,  struct.pack("<I", hdr))    # right = &header
         mu.mem_write(hdr + 0x10, struct.pack("<I", 0))      # node_count
-        mu.mem_write(RBTREE_ACC, b"\x00" * 8)
+        mu.mem_write(self.RBTREE_ACC, b"\x00" * 8)
 
     def call(self, fn, args=(), limit=200_000_000):
         mu = self.mu
@@ -452,15 +604,23 @@ class Spike2Emu:
         """Build the keystream + rt tables, init the registry, register cat 0."""
         if not self._build_keystream():
             raise RuntimeError("Spike 2 boot: keystream/rt build failed")
+        if self._generic:
+            # A nonzero unordered_map bucket count so the band-template lookup's
+            # ``hash % bucket_count`` (run before the find we skip) can't divide
+            # by zero.  Re-asserted in derive_params (boot may zero this bss).
+            try:
+                self.mu.mem_write(self.REG_BASE + 0xad8, struct.pack("<I", 11))
+            except UcError:
+                pass
         self._init_rbtree()
-        st = self.call(CAT0_REGISTER, (0,), limit=5_000_000)
+        st = self.call(self.CAT0_REGISTER, (0,), limit=5_000_000)
         if st[0] != "ok":
             raise RuntimeError("Spike 2 boot: cat-0 register failed: %r" % (st,))
         return self
 
     def qmul(self, chan):
         v = VOL[chan]
-        return _u16(bytes(self.mu.mem_read(QMUL_TABLE + 2 * v, 2)))
+        return _u16(bytes(self.mu.mem_read(self.QMUL_TABLE + 2 * v, 2)))
 
     # ---- params derivation (chain) -----------------------------------------
     def derive_params(self):
@@ -485,11 +645,26 @@ class Spike2Emu:
                     sp=sp, frame=bytes(m.mem_read(sp, 0x2a0)))
                 m.emu_stop()
 
-        self.extra[MASTERDIR_MALLOC] = at_md
-        self.extra[BANDLOOP] = at_bb
-        self.call(MASTERDIR_DECODE, (0,), limit=120_000_000)
-        self.extra.pop(MASTERDIR_MALLOC, None)
-        self.extra.pop(BANDLOOP, None)
+        if self._generic:
+            # find-skip scratch + nonzero bucket count (see boot()/_drive_step).
+            self._blank_buf = self.alloc(0x100)
+            self._blank_node = self.alloc(0x10)
+            mu.mem_write(self._blank_buf, b"\x00" * 0x100)
+            mu.mem_write(self._blank_node, struct.pack("<I", self._blank_buf))
+            try:
+                mu.mem_write(self.REG_BASE + 0xad8, struct.pack("<I", 11))
+            except UcError:
+                pass
+
+        self.extra[self.MASTERDIR_MALLOC] = at_md
+        self.extra[self.BANDLOOP] = at_bb
+        # Generous cap: at_bb emu_stops the instant BANDLOOP is reached, so this
+        # only bounds the master-directory decode.  Big catalogs (e.g. D&D's
+        # ~10.5k sounds across image-scNN segments) need more than the ~120M a
+        # ~2k-sound card uses.
+        self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
+        self.extra.pop(self.MASTERDIR_MALLOC, None)
+        self.extra.pop(self.BANDLOOP, None)
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:
             raise RuntimeError("Spike 2 params: registration did not reach "
                                "band-build (cap=%r)" % ({k: v for k, v in cap.items()
@@ -503,7 +678,7 @@ class Spike2Emu:
         def _stub(eng):
             eng.mu.reg_write(UC_ARM_REG_R0, 0)
             eng.mu.reg_write(UC_ARM_REG_PC, eng.mu.reg_read(UC_ARM_REG_LR))
-        for a in CHAIN_STUBS:
+        for a in self.CHAIN_STUBS:
             self.extra[a] = _stub
         _orig_imp = self._imp
 
@@ -523,21 +698,31 @@ class Spike2Emu:
             for idx in range(nrec):
                 rec = md[idx * 24: idx * 24 + 24]
                 dw0 = _u32(rec, 0)
-                length = (LENGTH_XOR ^ _u32(rec, 16)) & 0xffffffff
+                length = (self.LENGTH_XOR ^ _u32(rec, 16)) & 0xffffffff
                 obj, nxt = self._drive_step(cur, rec)
                 if obj is None:
                     break
-                rows.append(dict(
+                row = dict(
                     idx=idx, body_off=dw0, length=length,
                     pred16=_u16(obj, 0x18), seed_a=_u32(obj, 0x14),
-                    band0_keyoff_rel=(_u32(obj, 0x0c) - VF2_VA) & 0xffffffff,
-                    stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d]))
+                    band0_keyoff_rel=(_u32(obj, 0x0c) - self.VF2_VA) & 0xffffffff,
+                    stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d])
+                if self._generic:
+                    # The generic decode replays the raw band-build obj verbatim
+                    # (no per-build field reassembly), with body_off / length /
+                    # scale / chan read straight from it (no LENGTH_XOR).
+                    row["_rawobj"] = obj
+                    row["body_off"] = _u32(obj, 0x00)
+                    row["length"] = _u32(obj, 0x10)
+                    row["scale"] = obj[0x1d]
+                    row["chan"] = obj[0x1b]
+                rows.append(row)
                 if nxt is None:
                     break
                 cur = dict(regs=nxt[0], sp=nxt[1], frame=nxt[2])
         finally:
             self._imp = _orig_imp
-            for a in CHAIN_STUBS:
+            for a in self.CHAIN_STUBS:
                 self.extra.pop(a, None)
         return rows
 
@@ -564,21 +749,35 @@ class Spike2Emu:
                     nsp, bytes(m.mem_read(nsp, 0x2a0)))
                 m.emu_stop()
 
+        objreg = _R[self.OBJREG]
+
         def at_bd(eng):
-            m = eng.mu; r7 = m.reg_read(UC_ARM_REG_R7)
+            m = eng.mu
             try:
-                cap["obj"] = bytes(m.mem_read(r7, 0x80))
+                cap["obj"] = bytes(m.mem_read(m.reg_read(objreg), 0x80))
             except UcError:
                 pass
 
-        self.extra[BANDLOOP] = at_bl
-        self.extra[BANDOBJ] = at_bd
+        # generic builds skip the band-template std::unordered_map lookup: inject
+        # a blank writable scratch node and step past the find `bl`.  The build
+        # only *writes* the codec-obj fields into the node (never reads the
+        # template), so a blank node is bit-exact (validated on TMNT too).
+        find_skip = self._generic and self.FIND_BL is not None
+        if find_skip:
+            def at_find(eng):
+                eng.mu.reg_write(UC_ARM_REG_R0, self._blank_node)
+                eng.mu.reg_write(UC_ARM_REG_PC, self.FIND_BL + 4)
+            self.extra[self.FIND_BL] = at_find
+        self.extra[self.BANDLOOP] = at_bl
+        self.extra[self.BANDOBJ] = at_bd
         try:
-            mu.emu_start(BANDLOOP, 0, count=limit)
+            mu.emu_start(self.BANDLOOP, 0, count=limit)
         except UcError:
             pass
-        self.extra.pop(BANDLOOP, None)
-        self.extra.pop(BANDOBJ, None)
+        if find_skip:
+            self.extra.pop(self.FIND_BL, None)
+        self.extra.pop(self.BANDLOOP, None)
+        self.extra.pop(self.BANDOBJ, None)
         return cap["obj"], cap["next"]
 
     # ---- decode -------------------------------------------------------------
@@ -597,7 +796,7 @@ class Spike2Emu:
         # map the obj + voice page(s)
         base = self.OBJ_VA & ~0xfff
         mu.mem_map(base, _algn(self.VOICE_VA + 0x80) - base)
-        self.add_hook(PROV, self._at_prov)
+        self.add_hook(self.PROV, self._at_prov)
         self._decode_ready = True
 
     def _at_prov(self, eng):
@@ -618,9 +817,13 @@ class Spike2Emu:
             self.BBSZ = _algn(span)
 
     def _build_obj(self, p):
+        # generic builds replay the raw band-build obj verbatim (proven correct
+        # by hardware capture); the validated build reassembles it from fields.
+        if self._generic:
+            return p["_rawobj"]
         obj = bytearray(0x80)
         struct.pack_into("<I", obj, 0x00, p["body_off"])
-        struct.pack_into("<I", obj, 0x0c, (VF2_VA + p["band0_keyoff_rel"]) & 0xffffffff)
+        struct.pack_into("<I", obj, 0x0c, (self.VF2_VA + p["band0_keyoff_rel"]) & 0xffffffff)
         struct.pack_into("<I", obj, 0x10, p["length"] & 0xffffffff)
         struct.pack_into("<I", obj, 0x14, p["seed_a"] & 0xffffffff)
         struct.pack_into("<I", obj, 0x18,
@@ -637,23 +840,88 @@ class Spike2Emu:
 
     def codec_fns(self, scale, chan):
         """Return ``(render_fn, decode_fn)`` for a sound's scale/chan from the
-        firmware dispatch table."""
+        firmware dispatch table (render slot base, decode slot at +0x20)."""
         mu = self.mu
         sub = 0 if chan == 2 else 1
-        render = _u32(bytes(mu.mem_read(DISPATCH + scale * 0x40 + sub * 4, 4)))
-        decode = _u32(bytes(mu.mem_read(DISPATCH + 0x20 + scale * 0x40 + sub * 4, 4)))
+        render = _u32(bytes(mu.mem_read(self.DISPATCH + scale * 0x40 + sub * 4, 4)))
+        decode = _u32(bytes(mu.mem_read(self.DISPATCH + 0x20 + scale * 0x40 + sub * 4, 4)))
         return render, decode
 
     def decode(self, p, max_secs=None, cancel=None):
-        """Decode one sound to ``(L, R, stereo)`` int64 arrays (R == L for mono
-        consumers only use L).  Returns None if cancelled mid-decode."""
+        """Decode one sound to ``(L, R, stereo)`` int64 arrays (mono consumers
+        use only L).  Returns None if cancelled or no codec entry resolved."""
+        if self._generic:
+            entry = self._resolve_entry(p)
+            if entry is None:
+                return None
+        else:
+            render_fn, decode_fn = self.codec_fns(p["scale"], p["chan"])
+            entry = render_fn if p["chan"] == 2 else decode_fn
+        return self._decode_with_entry(p, entry, max_secs=max_secs, cancel=cancel)
+
+    @staticmethod
+    def _specflat(x):
+        """Spectral flatness of a signal: ~0.8+ for white noise, <0.45 for real
+        audio.  Used to pick the audio-producing codec slot on generic builds."""
+        import numpy as np
+        x = np.asarray(x, float)
+        if len(x) < 64 or np.std(x) < 1e-6:
+            return 1.0
+        n = 1 << int(np.floor(np.log2(len(x))))
+        X = np.abs(np.fft.rfft((x[:n] - x[:n].mean()) * np.hanning(n)))[1:]
+        X = np.maximum(X, 1e-9)
+        return float(np.exp(np.mean(np.log(X))) / np.mean(X))
+
+    def _resolve_entry(self, p):
+        """Pick the codec function that actually decodes audio for a generic
+        build.  The audio fn lives at the *render* slot on some builds and the
+        *decode* slot on others (both reference PROV/QMUL, so they're
+        indistinguishable statically) -> dereference both slots and probe a
+        short decode, taking the first that yields audio (specflat < 0.45).
+        Cached per (scale, chan); decoding the wrong slot corrupts state, so we
+        stop probing the instant we find the audio slot."""
+        key = (p["scale"], p["chan"])
+        if key in self._slot_cache:
+            return self._slot_cache[key]
+        sub = 0 if p["chan"] == 2 else 1
+        mu = self.mu
+        cands = [
+            _u32(bytes(mu.mem_read(self.DISPATCH + p["scale"] * 0x40 + sub * 4, 4))),
+            _u32(bytes(mu.mem_read(self.DISPATCH + 0x20 + p["scale"] * 0x40 + sub * 4, 4))),
+        ]
+        best, bestsf = None, 2.0
+        for fnv in cands:
+            if fnv == 0 or self._backing_off(fnv) is None:
+                continue
+            try:
+                res = self._decode_with_entry(p, fnv, max_secs=0.5)
+            except Exception:
+                res = None
+            if res is None:
+                continue
+            sf = self._specflat(res[0])
+            if sf < bestsf:
+                bestsf, best = sf, fnv
+            if sf < 0.45:
+                break
+        self._slot_cache[key] = best
+        return best
+
+    def _backing_off(self, va):
+        """File offset of a firmware vaddr (None if not in a load segment) —
+        used to sanity-check a dispatch-slot fn pointer before probing it."""
+        for vaddr, off, filesz, _memsz in self._segs:
+            if vaddr <= va < vaddr + filesz:
+                return off + (va - vaddr)
+        return None
+
+    def _decode_with_entry(self, p, entry, max_secs=None, cancel=None):
+        """Decode one sound by driving codec ``entry``; see :meth:`decode`."""
         import numpy as np
         self.setup_decode()
         mu = self.mu
         chan = p["chan"]; stereo = (chan == 2); length = p["length"]
         Rmul, Roff = (4, 800) if stereo else (2, 400)
-        render_fn, decode_fn = self.codec_fns(p["scale"], chan)
-        entry = render_fn if stereo else decode_fn
         OBJ = self._build_obj(p)
         VOICE = self._voice(chan)
         vol = VOL[chan]

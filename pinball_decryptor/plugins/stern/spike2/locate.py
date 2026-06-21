@@ -236,9 +236,39 @@ def _find_cat0(fw, idx):
     return starts[0] if starts else None
 
 
+def _find_masterdir_decode(fw):
+    """Locate MASTERDIR_DECODE by its own band-build epilogue rather than the
+    boot call site.  Scans ``.text`` for the codec-obj scale/chan store
+    ``strb _,[rN,#0x1d]`` ; ``strb _,[rN,#0x1c]`` (e5cN_T01d / e5cN_T01c, same
+    base reg), takes each hit's enclosing function, and returns the one whose
+    internal PCs (the ``*24`` record malloc + band loop + band-obj epilogue) all
+    resolve.  That signature is unique and reproduces the boot-derived address
+    exactly on every locatable build, so it's a safe fallback for builds whose
+    boot doesn't expose the ``str [r6],#4`` call site (the large Foo Fighters /
+    Led Zeppelin builds)."""
+    t = fw.secs[".text"]; base = t["addr"]; o = t["off"]; size = t["size"] & ~3
+    starts = set()
+    for i in range(0, size - 4, 4):
+        if (_u32(fw.raw, o + i) & 0xfff00fff) != 0xe5c0001d:
+            continue
+        w0 = _u32(fw.raw, o + i); w1 = _u32(fw.raw, o + i + 4)
+        if ((w1 & 0xfff00fff) == 0xe5c0001c
+                and ((w0 >> 16) & 0xf) == ((w1 >> 16) & 0xf)):
+            s = _func_start(fw, base + i, back=0x2000)
+            if s:
+                starts.add(s)
+    for s in sorted(starts):
+        ipc = _find_internal_pcs(fw, s)
+        if all(ipc.get(k) for k in ("MASTERDIR_MALLOC", "BANDLOOP", "BANDOBJ")):
+            return s
+    return None
+
+
 def _boot_md_hi(fw, boot_lo):
     """From the boot disasm: MASTERDIR_DECODE (the ``bl`` after ``str [r6],#4``)
-    and BOOT_HI (the instr after the ``bne`` guarded by ``cmp r6,..``)."""
+    and BOOT_HI (the instr after the ``bne`` guarded by ``cmp r6,..``).  Large
+    builds whose boot lacks the ``str [r6],#4`` call site fall back to locating
+    MASTERDIR_DECODE by its band-build signature (:func:`_find_masterdir_decode`)."""
     ins = list(_disasm(fw, boot_lo, boot_lo + 0x400))
     md = bh = None
     for i, x in enumerate(ins):
@@ -249,6 +279,8 @@ def _boot_md_hi(fw, boot_lo):
         if (x.mnemonic == "bne" and ins[i - 1].mnemonic == "cmp"
                 and "r6" in ins[i - 1].op_str):
             bh = ins[i + 1].address
+    if md is None:
+        md = _find_masterdir_decode(fw)
     return md, bh
 
 

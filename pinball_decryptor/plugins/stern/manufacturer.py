@@ -16,7 +16,7 @@ normal Write copies verbatim).
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from ...core.transcribe import TranscribePipeline
-from .formats import detect_game
+from .formats import detect_game, display_for_key
 from .games import GAME_DB
 from .pipeline import (SternDirectSsdExtractPipeline,
                        SternDirectSsdWritePipeline, SternExtractPipeline,
@@ -93,8 +93,7 @@ class SternManufacturer(Manufacturer):
         key = detect_game(path)
         if key is None:
             return None
-        info = GAME_DB[key]
-        return Game(key=key, display=info["display"],
+        return Game(key=key, display=display_for_key(key, path),
                     manufacturer_key="stern",
                     notes="Spike 2 card image")
 

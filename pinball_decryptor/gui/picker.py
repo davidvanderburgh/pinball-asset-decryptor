@@ -47,6 +47,10 @@ _MFR_VISUALS = {
     # evokes the Dutch national colour and stays distinct from Spooky's
     # redder Halloween orange.
     "dp":       {"color": "#ff6f00", "letter": "D"},
+    # Stern Pinball's brand red (the "STERN" wordmark).  Shares the letter "S"
+    # with Spooky but is a saturated true-red vs Spooky's orange, and the card's
+    # name label disambiguates.
+    "stern":    {"color": "#d9001c", "letter": "S"},
 }
 
 

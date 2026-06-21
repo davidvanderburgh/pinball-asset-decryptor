@@ -14,8 +14,7 @@ derive every sound's keystream, then decode/re-encode.
 import os
 
 from ...core.pipeline_base import BasePipeline, PipelineError
-from .formats import detect_game, linux_partitions
-from .games import GAME_DB
+from .formats import detect_game, display_for_key, linux_partitions
 
 try:                                   # engine import is optional during bring-up
     from . import engine
@@ -57,7 +56,7 @@ class SternExtractPipeline(BasePipeline):
                 "Detect",
                 "Not a recognized Stern Spike card image (need a raw .img/.bin "
                 "with the Spike partition layout).")
-        self._log(f"Detected: {GAME_DB[key]['display']}", "success")
+        self._log(f"Detected: {display_for_key(key, self.input_path)}", "success")
         self._check_cancel()
 
         self._set_phase(1)  # Locate partitions

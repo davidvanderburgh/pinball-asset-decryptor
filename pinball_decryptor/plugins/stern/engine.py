@@ -23,7 +23,6 @@ import hashlib
 import os
 import pickle
 import re
-import struct
 import tempfile
 import wave
 
@@ -592,26 +591,15 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
         nb = min(nblk, (len(L0) + 199) // 200)
         if nb == 0:
             return False
+        # Re-encode only the first ``nb`` blocks (truncate the target so
+        # encode_sound stops there) and compare over that range; encode_sound
+        # applies the build's body-word offset so the self-test sees the same
+        # bytes a full Write would lay down.
+        cmp_n = nb * 200
         if stereo:
-            body = bytearray(4 * p["length"])
-            for k in range(nb):
-                g0 = 200 * k
-                seg = L0[g0:g0 + 200]
-                if len(seg) == 0:
-                    break
-                rec = sr.recover_block(p, 200 + 200 * k, nf=len(seg)); m = rec["m"]
-                frame, _ = sr.encode_block(L0[g0:g0 + m], R0[g0:g0 + m], rec)
-                struct.pack_into("<%dH" % (2 * m), body, 4 * g0, *frame.tolist())
+            body = sr.encode_sound(p, L0[:cmp_n], R0[:cmp_n])
         else:
-            body = bytearray(2 * p["length"])
-            for k in range(nb):
-                g0 = 200 * k
-                seg = L0[g0:g0 + 200]
-                if len(seg) == 0:
-                    break
-                K, rb = gr.recover_block(p, 200 + 200 * k, n=len(seg)); m = len(K)
-                enc, _ = gr.encode_block(L0[g0:g0 + m], K, rb)
-                struct.pack_into("<%dH" % m, body, 2 * g0, *enc.tolist())
+            body = gr.encode_sound(p, L0[:cmp_n])
         if not isinstance(emu.mm, _BodyOverlay):
             emu.mm = _BodyOverlay(emu.mm)
         emu.mm.patch = (p["body_off"], bytes(body))
@@ -622,7 +610,6 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
         if out1 is None:
             return False
         L1 = np.asarray(out1[0], np.int64); R1 = np.asarray(out1[1], np.int64)
-        cmp_n = nb * 200
         m = min(len(L0), len(L1), cmp_n)
         if int(np.count_nonzero(L0[:m] != L1[:m])):
             return False
@@ -640,17 +627,7 @@ def _encode_mono(emu, gr, p, wav_path, np):
     s = _load_wav(wav_path, False, np)
     s = _amplitude_fit(s, _MONO_RANGE, np)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), length, np)
-    body = bytearray(2 * length)
-    for k in range((length + 199) // 200):
-        g0 = 200 * k
-        seg = tgt[g0:g0 + 200]
-        if len(seg) == 0:
-            break
-        K, rb = gr.recover_block(p, 200 + 200 * k, n=len(seg))
-        m = len(K)
-        enc, _ = gr.encode_block(seg[:m], K, rb)
-        struct.pack_into("<%dH" % m, body, 2 * g0, *enc.tolist())
-    return bytes(body)
+    return gr.encode_sound(p, tgt)
 
 
 def _encode_stereo(emu, sr, p, wav_path, np):
@@ -659,17 +636,7 @@ def _encode_stereo(emu, sr, p, wav_path, np):
     a = _amplitude_fit(a, _STEREO_RANGE, np)
     L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), length, np)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), length, np)
-    body = bytearray(4 * length)
-    for k in range((length + 199) // 200):
-        g0 = 200 * k
-        segL = L[g0:g0 + 200]
-        if len(segL) == 0:
-            break
-        rec = sr.recover_block(p, 200 + 200 * k, nf=len(segL))
-        m = rec["m"]
-        frame, _ = sr.encode_block(L[g0:g0 + m], R[g0:g0 + m], rec)
-        struct.pack_into("<%dH" % (2 * m), body, 4 * g0, *frame.tolist())
-    return bytes(body)
+    return sr.encode_sound(p, L, R)
 
 
 # --------------------------------------------------------------------------

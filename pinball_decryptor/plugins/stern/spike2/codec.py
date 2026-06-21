@@ -123,13 +123,6 @@ def _find_companding_all(mu, fn_addr, n=0xC00):
     return out
 
 
-def _find_companding(mu, fn_addr, n=0x600):
-    comps = _find_companding_all(mu, fn_addr, n)
-    if not comps:
-        raise RuntimeError("companding mul not found in 0x%x" % fn_addr)
-    return comps[0]
-
-
 class GenRecover:
     """Mono keystream recovery + analytic encode, driven on a booted emulator."""
 
@@ -141,6 +134,7 @@ class GenRecover:
         self._capreg = None
         self._hooked = set()
         self.qmul = emu.qmul(1)
+        self._calib = {}   # (scale, chan) -> (dom_mul_addr, S_reg, body_word_delta)
 
     def _install_hook(self, mul_addr):
         if mul_addr in self._hooked:
@@ -151,29 +145,92 @@ class GenRecover:
         self.emu.add_hook(mul_addr, cap)
         self._hooked.add(mul_addr)
 
-    def _decode_block_capture(self, p, cursor, body_u16):
+    def _drive_decode(self, p, cursor, body_u16):
+        """Run one codec decode from ``cursor`` over the ``body_u16`` probe (no
+        capture; the caller installs its own hooks).  The probe is written at the
+        block's body base and a margin BEFORE it is filled with the probe's first
+        value: the first output sample of a block reads body word ``base-1`` (the
+        per-build body-word offset, see :meth:`_calibrate`), so without the margin
+        that sample's keystream would be recovered from stale memory."""
         emu = self.emu; mu = self.mu
         decode_fn = emu.recover_entry(p)   # resolved audio slot (generic) / decode_fn (validated)
-        mul_addr, sreg = _find_companding(mu, decode_fn)
-        self._capreg = sreg
-        self._install_hook(mul_addr)
-        OBJ = emu._build_obj(p); VOICE = emu._voice(1)
+        arr = np.asarray(body_u16, dtype="<u2")
         R = max(0, 2 * cursor - 400)
         emu._ensure_body(_algn(R + 0x4000))
-        mu.mem_write(emu.BB + R, b"\x00" * 0x1000)
-        mu.mem_write(emu.BB + R, np.asarray(body_u16, dtype="<u2").tobytes())
-        mu.mem_write(emu.OBJ_VA, OBJ); mu.mem_write(emu.VOICE_VA, VOICE)
+        pv = int(arr.ravel()[0]) & 0xffff if arr.size else 0
+        fill = struct.pack("<H", pv)
+        marg = min(R, 0x80)
+        mu.mem_write(emu.BB + R - marg, fill * ((marg + 0x1000) // 2))
+        mu.mem_write(emu.BB + R, arr.tobytes())
+        mu.mem_write(emu.OBJ_VA, emu._build_obj(p))
+        mu.mem_write(emu.VOICE_VA, emu._voice(1))
         emu.st["R"] = R; emu.st["k"] = R
         mu.mem_write(emu.VOICE_VA + 0xc, struct.pack("<I", cursor))
         mu.mem_write(emu.ACC, b"\x00" * 0x8000)
-        r1 = emu.ACC + 0x80
         mu.reg_write(UC_ARM_REG_R0, emu.VOICE_VA)
-        mu.reg_write(UC_ARM_REG_R1, r1)
+        mu.reg_write(UC_ARM_REG_R1, emu.ACC + 0x80)
         mu.reg_write(UC_ARM_REG_R2, VOL[1])
         mu.reg_write(UC_ARM_REG_SP, emu.STK + emu.STKSZ - 0x80000)
         mu.reg_write(UC_ARM_REG_LR, emu.LAND)
-        self._cap = []
         mu.emu_start(decode_fn, emu.LAND, count=20_000_000)
+
+    def _calibrate(self, p):
+        """Resolve, per ``(scale, chan)``, the codec's DOMINANT companding site
+        and its body-word offset ``delta`` (output sample ``i`` reads body word
+        ``i + delta``).  Both vary by build:
+
+          * ``_find_companding_all`` returns several companding sites in code
+            order; on some builds the *first* one sits in a not-executed path and
+            fires 0x (its captured keystream is empty/garbage).  Pick the site
+            that actually fires (the most-fired).
+          * the body pointer is set ``base + (voice[0x20]-1)`` words on some
+            builds (delta = -1) and ``base`` on others (delta = 0), so a
+            contiguous re-encode is one word off on the former.
+
+        Two cheap probe decodes (one zeros, one single-marker), cached."""
+        key = (p["scale"], p["chan"])
+        if key in self._calib:
+            return self._calib[key]
+        emu = self.emu
+        fn = emu.recover_entry(p)
+        comps = _find_companding_all(emu.mu, fn)
+        if not comps:
+            raise RuntimeError("companding mul not found in 0x%x" % fn)
+        # decode #1 (zeros): count fires + capture each site's S (= K there).
+        caps = {a: [] for a, _ in comps}
+        for a, reg in comps:
+            def mk(addr, rr):
+                def cb(eng):
+                    caps[addr].append(eng.mu.reg_read(rr) & 0xffff)
+                return cb
+            emu.add_hook(a, mk(a, reg))
+        self._drive_decode(p, 200, np.zeros(260, np.uint16))
+        for a, _ in comps:
+            emu.del_hook(a)
+        dom_addr, sreg = max(comps, key=lambda ar: len(caps[ar[0]]))
+        K = caps[dom_addr]
+        # decode #2 (one body word = 0xFFFF): the affected sample reveals delta
+        # (0xFFFF is rotate-invariant, so S^K == 0xFFFF exactly at that sample).
+        q = 10
+        marker = np.zeros(260, np.uint16); marker[q] = 0xFFFF
+        capm = []
+        emu.add_hook(dom_addr, lambda eng: capm.append(eng.mu.reg_read(sreg) & 0xffff))
+        self._drive_decode(p, 200, marker)
+        emu.del_hook(dom_addr)
+        delta = 0
+        for i in range(min(len(capm), len(K))):
+            if (capm[i] ^ K[i]) & 0xffff == 0xffff:
+                delta = q - i
+                break
+        self._calib[key] = (dom_addr, sreg, delta)
+        return self._calib[key]
+
+    def _decode_block_capture(self, p, cursor, body_u16):
+        dom_addr, sreg, _delta = self._calibrate(p)
+        self._capreg = sreg
+        self._install_hook(dom_addr)
+        self._cap = []
+        self._drive_decode(p, cursor, body_u16)
         return list(self._cap)
 
     def recover_block(self, p, cursor, n=200):
@@ -194,6 +251,28 @@ class GenRecover:
                        rb.astype(np.int64)).astype(np.uint16)
         return body16, err
 
+    def encode_sound(self, p, target):
+        """Full size-neutral mono body bytes that re-decode to ``target``:
+        per-block keystream recovery + analytic encode, written at the build's
+        body-word offset (see :meth:`_calibrate`)."""
+        length = p["length"]
+        _a, _r, delta = self._calibrate(p)
+        tgt = np.asarray(target, np.int64)
+        body = np.zeros(length, np.uint16)
+        for k in range((length + 199) // 200):
+            g0 = 200 * k
+            seg = tgt[g0:g0 + 200]
+            if len(seg) == 0:
+                break
+            K, rb = self.recover_block(p, 200 + 200 * k, n=len(seg))
+            m = len(K)
+            enc, _ = self.encode_block(seg[:m], K, rb)
+            lo = g0 + delta
+            s = max(0, -lo); e = min(m, length - lo)   # clip words out of range
+            if s < e:
+                body[lo + s:lo + e] = enc[s:e]
+        return body.tobytes()
+
 
 class StereoRecover:
     """Stereo (joint L/R) keystream recovery + analytic encode."""
@@ -205,6 +284,7 @@ class StereoRecover:
         self.qmul = emu.qmul(2)
         self._cap = []
         self._hooked = set()
+        self._calib = {}   # (scale, chan) -> body_frame_delta
 
     def _hook(self, addr, reg):
         key = (addr, reg)
@@ -246,6 +326,12 @@ class StereoRecover:
         OBJ = emu._build_obj(p); VOICE = emu._voice(2)
         R = max(0, 4 * cursor - 800)
         emu._ensure_body(_algn(R + 0x8000))
+        # mirror the first frame into a margin BEFORE the base: the first sample
+        # of a block reads body frame ``base-1`` on builds with a -1 frame offset
+        # (see :meth:`_calibrate`), so it must see the probe, not stale memory.
+        first = body_bytes[:4] if len(body_bytes) >= 4 else b"\x00\x00\x00\x00"
+        marg = min(R, 0x80)
+        mu.mem_write(emu.BB + R - marg, first * (marg // 4))
         mu.mem_write(emu.BB + R, b"\x00" * 0x2000)
         mu.mem_write(emu.BB + R, body_bytes)
         mu.mem_write(emu.OBJ_VA, OBJ); mu.mem_write(emu.VOICE_VA, VOICE)
@@ -261,6 +347,50 @@ class StereoRecover:
         self._cap = []
         mu.emu_start(render_fn, emu.LAND, count=30_000_000)
         return self._split_lr(self._cap)
+
+    def _calibrate(self, p):
+        """Body-frame offset ``delta`` (output sample ``i`` reads body frame
+        ``i + delta``), cached per ``(scale, chan)``.  Same -1/0 split as the
+        mono path (see :meth:`GenRecover._calibrate`); the live L/R companding
+        sites are already picked by fire count in :meth:`_split_lr`."""
+        key = (p["scale"], p["chan"])
+        if key in self._calib:
+            return self._calib[key]
+        nf = 60
+        L0, _R0 = self._drive(p, 200, self._frame_body(nf, 0, 0))   # KL
+        q = 10
+        a = np.zeros(2 * nf, dtype="<u2"); a[2 * q] = 0xFFFF        # marker in u0
+        Lm, _Rm = self._drive(p, 200, a.tobytes())
+        delta = 0
+        for i in range(min(len(L0), len(Lm))):
+            if (int(Lm[i]) ^ int(L0[i])) & 0xffff == 0xffff:
+                delta = q - i
+                break
+        self._calib[key] = delta
+        return delta
+
+    def encode_sound(self, p, targetL, targetR):
+        """Full size-neutral stereo body bytes (interleaved u0/u1 per frame) that
+        re-decode to ``(targetL, targetR)``, written at the build's body-frame
+        offset (see :meth:`_calibrate`)."""
+        length = p["length"]
+        delta = self._calibrate(p)
+        L = np.asarray(targetL, np.int64); R = np.asarray(targetR, np.int64)
+        body = np.zeros(2 * length, np.uint16)   # interleaved u0, u1
+        for k in range((length + 199) // 200):
+            g0 = 200 * k
+            segL = L[g0:g0 + 200]
+            if len(segL) == 0:
+                break
+            rec = self.recover_block(p, 200 + 200 * k, nf=len(segL))
+            m = rec["m"]
+            frame, _ = self.encode_block(L[g0:g0 + m], R[g0:g0 + m], rec)
+            fr = frame.reshape(-1, 2)          # [m, 2] -> (u0, u1) per frame
+            lo = g0 + delta
+            s = max(0, -lo); e = min(m, length - lo)   # clip frames out of range
+            if s < e:
+                body[2 * (lo + s):2 * (lo + e)] = fr[s:e].ravel()
+        return body.tobytes()
 
     def recover_block(self, p, cursor, nf=200):
         L0, R0 = self._drive(p, cursor, self._frame_body(nf + 4, 0, 0))   # KL, KR

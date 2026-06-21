@@ -586,18 +586,20 @@ class MainWindow:
         # standalone JJP decryptor so users moving over see the same
         # shape.
         self._extract_source_frame = ttk.Frame(f)
-        ttk.Radiobutton(
+        self._extract_iso_radio = ttk.Radiobutton(
             self._extract_source_frame, text="From ISO",
             value="iso",
             variable=self.extract_input_source_var,
             command=lambda: self._on_input_source_change("extract"),
-        ).pack(side=tk.LEFT, padx=(10, 12))
-        ttk.Radiobutton(
+        )
+        self._extract_iso_radio.pack(side=tk.LEFT, padx=(10, 12))
+        self._extract_ssd_radio = ttk.Radiobutton(
             self._extract_source_frame, text="From SSD",
             value="ssd",
             variable=self.extract_input_source_var,
             command=lambda: self._on_input_source_change("extract"),
-        ).pack(side=tk.LEFT)
+        )
+        self._extract_ssd_radio.pack(side=tk.LEFT)
 
         # ISO file-picker row — shown when source == "iso".
         self._extract_input_row = ttk.Frame(f)
@@ -962,18 +964,20 @@ class MainWindow:
         # "Write to SSD" reads more naturally than "From ISO" /
         # "From SSD".  Mirrors the standalone JJP decryptor.
         self._write_source_frame = ttk.Frame(f)
-        ttk.Radiobutton(
+        self._write_iso_radio = ttk.Radiobutton(
             self._write_source_frame, text="Build USB ISO",
             value="iso",
             variable=self.write_input_source_var,
             command=lambda: self._on_input_source_change("write"),
-        ).pack(side=tk.LEFT, padx=(10, 12))
-        ttk.Radiobutton(
+        )
+        self._write_iso_radio.pack(side=tk.LEFT, padx=(10, 12))
+        self._write_ssd_radio = ttk.Radiobutton(
             self._write_source_frame, text="Write to SSD",
             value="ssd",
             variable=self.write_input_source_var,
             command=lambda: self._on_input_source_change("write"),
-        ).pack(side=tk.LEFT)
+        )
+        self._write_ssd_radio.pack(side=tk.LEFT)
 
         # ISO original file row.
         self._write_upd_row = ttk.Frame(f)
@@ -3423,6 +3427,16 @@ class MainWindow:
         # the Extract and Write tabs.  Everyone else: reset the source
         # to "iso" and hide the radio + the SSD-only frames.
         if caps.direct_ssd:
+            # Per-manufacturer wording for the source/destination toggle (Stern
+            # Spike is an SD card, JJP an ISO/SSD; see Manufacturer defaults).
+            self._extract_iso_radio.configure(
+                text=getattr(mfr, "extract_iso_label", "From ISO"))
+            self._extract_ssd_radio.configure(
+                text=getattr(mfr, "extract_ssd_label", "From SSD"))
+            self._write_iso_radio.configure(
+                text=getattr(mfr, "write_iso_label", "Build USB ISO"))
+            self._write_ssd_radio.configure(
+                text=getattr(mfr, "write_ssd_label", "Write to SSD"))
             self._extract_source_frame.pack(
                 fill=tk.X, padx=10, pady=(6, 0),
                 before=self._extract_input_row)

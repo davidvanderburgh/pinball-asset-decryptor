@@ -43,6 +43,11 @@ class SternManufacturer(Manufacturer):
         write=True,
         modpack=True,
         direct_ssd=True,
+        # Audio is loose per-sound idxNNNN.wav in the extract output, so the
+        # per-slot Replace Audio tab works: assignments are staged over those
+        # WAVs and the Write pipeline re-encodes the changed ones into image.bin
+        # (only the changed ones — Write diffs against .checksums.md5).
+        replace_audio=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -83,6 +88,12 @@ class SternManufacturer(Manufacturer):
     )
     beta = True
     badge = "BETA"
+    # Spike 2 ships on an SD card (not an ISO/SSD), so the source/destination
+    # toggle reads in those terms (see Manufacturer defaults).
+    extract_iso_label = "From SD-card image"
+    extract_ssd_label = "From SD card"
+    write_iso_label = "Build SD-card image"
+    write_ssd_label = "Write to SD card"
 
     def audio_length_note(self):
         return ("Replacements are encoded size-neutral: each sound is fit to "

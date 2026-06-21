@@ -222,6 +222,16 @@ class Manufacturer(ABC):
     # that ``beta = True`` produces.
     badge: str = ""
 
+    # Labels for the Extract/Write source-vs-destination toggle (shown only
+    # when ``capabilities.direct_ssd`` is True).  Defaults match JJP's "ISO file
+    # vs physical SSD" wording; override per manufacturer when the medium is
+    # different (e.g. Stern Spike ships on an SD card, so it reads "SD-card
+    # image" / "SD card").
+    extract_iso_label: str = "From ISO"
+    extract_ssd_label: str = "From SSD"
+    write_iso_label: str = "Build USB ISO"
+    write_ssd_label: str = "Write to SSD"
+
     @abstractmethod
     def detect(self, path):
         """Return a :class:`Game` if this manufacturer claims *path*, else None."""

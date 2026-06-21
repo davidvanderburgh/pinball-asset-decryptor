@@ -438,6 +438,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 
         # re-encode each edited sound into its body bytes
         patches = {}   # body_off -> bytes
+        skipped = []
         gr = sr = None
         for n, (idx, wav_path) in enumerate(sorted(edits.items())):
             if cancel():
@@ -451,13 +452,32 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                          "Re-encoding idx %d" % idx)
             if p["chan"] == 2:
                 sr = sr or StereoRecover(emu)
-                body = _encode_stereo(emu, sr, p, wav_path, np)
             else:
                 gr = gr or GenRecover(emu)
+            # Verify the keystream recovery actually round-trips for THIS sound
+            # before trusting its re-encode -- skip (never patch) sounds whose
+            # codec variant the analytic encode can't yet reproduce bit-exact, so
+            # Write can't silently corrupt them (see _recovery_valid).
+            if not _recovery_valid(emu, gr, sr, p, np):
+                skipped.append(idx)
+                log("idx %d: re-encode isn't bit-exact for this sound's codec "
+                    "(skipped -- left unchanged in the output)." % idx, "warning")
+                continue
+            if p["chan"] == 2:
+                body = _encode_stereo(emu, sr, p, wav_path, np)
+            else:
                 body = _encode_mono(emu, gr, p, wav_path, np)
             patches[p["body_off"]] = body
             log("Re-encoded idx %d (%s, %d samples)."
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]), "info")
+        if skipped:
+            log("%d sound(s) skipped (re-encode unsupported for their codec): %s"
+                % (len(skipped), ", ".join(map(str, skipped))), "warning")
+        if not patches:
+            raise RuntimeError(
+                "None of the edited sounds could be re-encoded bit-exact for this "
+                "title's codec yet, so nothing was written (the card image was not "
+                "modified).")
 
         # copy the card image, then patch the changed bodies in place
         log("Copying card image to output...", "info")
@@ -519,6 +539,100 @@ def _amplitude_fit(samples, rng, np, headroom=0.97):
 
 _MONO_RANGE = 11147
 _STEREO_RANGE = 21452
+
+
+class _BodyOverlay:
+    """Read-through overlay on the image.bin mmap: returns patched bytes for one
+    body offset so a freshly re-encoded body can be decoded back *without*
+    copying the whole multi-GB image.  Used by :func:`_recovery_valid` to verify
+    a sound's re-encode round-trips before Write trusts it."""
+
+    def __init__(self, mm):
+        self._mm = mm
+        self.patch = None      # (file_off, bytes) or None
+
+    def __getitem__(self, sl):
+        data = bytearray(self._mm[sl])
+        if self.patch is not None and isinstance(sl, slice):
+            off, b = self.patch
+            start = sl.start or 0
+            lo = max(off, start)
+            hi = min(off + len(b), start + len(data))
+            if lo < hi:
+                data[lo - start:hi - start] = b[lo - off:hi - off]
+        return bytes(data)
+
+    def size(self):
+        return self._mm.size()
+
+    def close(self):
+        self._mm.close()
+
+
+def _recovery_valid(emu, gr, sr, p, np, nblk=4):
+    """True iff re-encoding the sound's *own* decoded audio reproduces it
+    bit-exact over the first ``nblk`` blocks.
+
+    The analytic re-encode recovers a per-sample keystream by driving the codec;
+    that recovery is exact for the codecs validated so far but does not yet model
+    every variant (e.g. multi-band sounds, where the companding fires several
+    times per output sample and the captured keystream interleaves).  This
+    self-test catches such sounds so Write can skip them rather than patch a body
+    that would decode to noise -- protecting both the newly-located titles and
+    any multi-band sound in an already-supported title.  Any failure to drive the
+    recovery (e.g. no companding site located) is treated as 'not valid' so the
+    sound is skipped, never written blind."""
+    secs = (nblk * 200 + 200) / 44100.0
+    try:
+        out0 = emu.decode(p, max_secs=secs)
+        if out0 is None:
+            return False
+        L0 = np.asarray(out0[0], np.int64); R0 = np.asarray(out0[1], np.int64)
+        stereo = out0[2]
+        nb = min(nblk, (len(L0) + 199) // 200)
+        if nb == 0:
+            return False
+        if stereo:
+            body = bytearray(4 * p["length"])
+            for k in range(nb):
+                g0 = 200 * k
+                seg = L0[g0:g0 + 200]
+                if len(seg) == 0:
+                    break
+                rec = sr.recover_block(p, 200 + 200 * k, nf=len(seg)); m = rec["m"]
+                frame, _ = sr.encode_block(L0[g0:g0 + m], R0[g0:g0 + m], rec)
+                struct.pack_into("<%dH" % (2 * m), body, 4 * g0, *frame.tolist())
+        else:
+            body = bytearray(2 * p["length"])
+            for k in range(nb):
+                g0 = 200 * k
+                seg = L0[g0:g0 + 200]
+                if len(seg) == 0:
+                    break
+                K, rb = gr.recover_block(p, 200 + 200 * k, n=len(seg)); m = len(K)
+                enc, _ = gr.encode_block(L0[g0:g0 + m], K, rb)
+                struct.pack_into("<%dH" % m, body, 2 * g0, *enc.tolist())
+        if not isinstance(emu.mm, _BodyOverlay):
+            emu.mm = _BodyOverlay(emu.mm)
+        emu.mm.patch = (p["body_off"], bytes(body))
+        try:
+            out1 = emu.decode(p, max_secs=secs)
+        finally:
+            emu.mm.patch = None
+        if out1 is None:
+            return False
+        L1 = np.asarray(out1[0], np.int64); R1 = np.asarray(out1[1], np.int64)
+        cmp_n = nb * 200
+        m = min(len(L0), len(L1), cmp_n)
+        if int(np.count_nonzero(L0[:m] != L1[:m])):
+            return False
+        if stereo:
+            mr = min(len(R0), len(R1), cmp_n)
+            if int(np.count_nonzero(R0[:mr] != R1[:mr])):
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def _encode_mono(emu, gr, p, wav_path, np):

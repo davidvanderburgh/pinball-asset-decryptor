@@ -392,23 +392,53 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 
     import numpy as np
 
+    from ...core.checksums import md5_file, read_checksums
     from .spike2.codec import GenRecover, StereoRecover
     from .spike2.emulator import Spike2Emu, audio_decode_supported
 
-    # which idx slots did the user edit?  Scan recursively so the user can
-    # point Write at the extract root or its audio/ subdir; the leading index
-    # in the filename survives an Auto-transcribe rename (idx0651 - text.wav).
-    edits = {}
+    # Every idxNNNN.wav under assets_dir (the leading index survives an
+    # Auto-transcribe rename, e.g. "idx0651 - text.wav"); scan recursively so the
+    # user can point Write at the extract root or its audio/ subdir.
+    all_wavs = {}
     for root, _dirs, files in os.walk(assets_dir):
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue
             m = _WAV_RE.match(os.path.splitext(fn)[0])
             if m:
-                edits[int(m.group(1))] = os.path.join(root, fn)
-    if not edits:
+                all_wavs[int(m.group(1))] = os.path.join(root, fn)
+    if not all_wavs:
         raise FileNotFoundError("No idxNNNN.wav files found in %s" % assets_dir)
-    log("Found %d edited sound(s) to write." % len(edits), "info")
+
+    # Only re-encode the sounds the user actually changed.  The folder is
+    # normally the whole Extract output (thousands of WAVs); without diffing
+    # against the Extract baseline (.checksums.md5) every sound would be
+    # re-encoded.  Match by idx so an Auto-transcribe rename of an *unedited*
+    # sound (md5 unchanged) is correctly skipped.
+    baseline = read_checksums(assets_dir)
+    base_by_idx = {}
+    for rel in baseline:
+        mm = _WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
+        if mm:
+            base_by_idx[int(mm.group(1))] = baseline[rel]
+    if base_by_idx:
+        edits = {}
+        for idx, path in all_wavs.items():
+            try:
+                if md5_file(path) != base_by_idx.get(idx):
+                    edits[idx] = path
+            except OSError:
+                edits[idx] = path
+        if not edits:
+            raise FileNotFoundError(
+                "No edited sounds found: every idxNNNN.wav still matches the "
+                "Extract baseline (.checksums.md5), so there's nothing to "
+                "re-encode. Edit a WAV first, then Write.")
+        log("Found %d edited sound(s) of %d to write." % (len(edits), len(all_wavs)), "info")
+    else:
+        edits = all_wavs
+        log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
+            % len(edits), "warning")
 
     def _read_prog(c, t):
         if progress:

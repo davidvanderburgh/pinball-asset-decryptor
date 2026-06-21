@@ -13,6 +13,7 @@ derive every sound's keystream, then decode/re-encode.
 
 import os
 
+from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
 from .formats import detect_game, display_for_key, linux_partitions
 
@@ -78,6 +79,12 @@ class SternExtractPipeline(BasePipeline):
             phase=self._set_phase)
 
         self._set_phase(4)  # Checksums
+        # Baseline so Write/Mod Pack can tell which assets the user edited (and
+        # so the Write tab accepts this folder as an Extract output).
+        self._log("Generating checksums...", "info")
+        self._progress(0, 0, "Generating checksums...")
+        generate_checksums(self.output_dir, log_cb=self._log,
+                           progress_cb=self._progress)
         self._done(True, "Extracted %d Spike 2 sound(s) to %s" % (n, self.output_dir))
 
 

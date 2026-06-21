@@ -10,9 +10,10 @@ string xrefs and instruction-pattern matching.
 
 Validated: every address here reproduces the TMNT hardcoded constants exactly
 (so the emulator can use this path on TMNT too without drift), and the full set
-drives a bit-exact Godzilla decode.  Builds whose codec is *dual-path* (no
-``PROV``/``QMUL`` resolvable from a decode-slot function — e.g. Aerosmith, D&D)
-return ``None`` from :func:`locate_all`, so the engine skips audio gracefully.
+drives a bit-exact Godzilla decode.  Builds whose firmware shape this module
+can't fully locate (e.g. the very large Foo Fighters / Led Zeppelin builds,
+whose master-directory decoder isn't found yet) return ``None`` from
+:func:`locate_all`, so the engine skips audio gracefully.
 
 Everything is read straight from the ELF bytes; nothing here boots or needs
 unicorn.  capstone is used only for the few instruction-pattern scans.
@@ -327,11 +328,34 @@ def _find_rbtree_hdr(fw, cat0):
     return sorted(v for v, _ in c.most_common(2))[-1]
 
 
+def _is_body_provider(fw, va):
+    """True if ``va`` begins the shared codec body provider, identified by its
+    distinctive prologue: ``push {r4-r8,sb,sl,fp,lr}`` ; ``movw r6,#imm`` ;
+    ``movt r6,#1`` ; ``cmp r6,#0`` (a guard on a ~0x1_0000 asset-registry count).
+    Every decode-slot fn calls this one function to fetch its body, so the PROV
+    ``bl`` is identified by its *target*, not the call site -- the body-descriptor
+    pointer arg is loaded from ``[_,#0x38]`` on some builds and ``[_,#0xa94]`` on
+    others, so anchoring on a fixed call-site ``ldr`` offset misses many."""
+    t = fw.secs[".text"]
+    if not (t["addr"] <= va < t["addr"] + t["size"]):
+        return False
+    w0 = fw.w_text(va); w1 = fw.w_text(va + 4); w2 = fw.w_text(va + 8)
+    return (w0 == 0xe92d4ff0
+            and (w1 & 0xfff0f000) == 0xe3006000      # movw r6, #imm
+            and (w2 & 0xfff0ffff) == 0xe3406001)     # movt r6, #1
+
+
 def _resolve_prov_qmul(fw, disp):
     """PROV (shared body provider) + QMUL_TABLE from a populated decode-slot
-    function: PROV = the ``bl`` after ``ldr _,[_,#0x38]``; QMUL_TABLE = the
-    function's first movw/movt const + 0x98.  Returns (prov, qmul) or (None,..)
-    if no scale resolves both (the codec is dual-path / unsupported)."""
+    function: QMUL_TABLE = the fn's first movw/movt const + 0x98; PROV = the
+    first ``bl`` whose target is the shared body provider (:func:`_is_body_provider`).
+    Returns (prov, qmul) or (None, None) if no scale resolves both.
+
+    Many builds emit the codec's ``cursor>=length`` early-out path *first*, so
+    the normal decode body -- and its PROV ``bl`` -- can sit ~0x480 into the fn,
+    well past the old fixed 0x140 prologue window.  Scan the whole fn instead.
+    The fn's own ``push`` prologue may itself sit a few instrs in (after the
+    qmul-table setup), so anchor the end-of-fn search after that push."""
     t = fw.secs[".text"]; tlo, thi = t["addr"], t["addr"] + t["size"]
     for scale in range(32):
         fn = fw.u32_va(disp + 0x20 + scale * 0x40 + 4)
@@ -340,19 +364,22 @@ def _resolve_prov_qmul(fw, disp):
         of = fw.off_of(fn)
         if of is None:
             continue
-        code = fw.raw[of:of + 0x140]
-        prov = qmul = pend = None; prev38 = False
+        p0 = fn
+        for off in range(0, 0x20, 4):
+            w = fw.w_text(fn + off)
+            if (w & 0xFFFF0000) == 0xE92D0000 and (w & 0x4000):  # push {..,lr}
+                p0 = fn + off; break
+        code = fw.raw[of:of + (_func_end(fw, p0) - fn)]
+        prov = qmul = pend = None
         for x in _cs.disasm(code, fn):
             if x.mnemonic == "movw":
                 pend = int(x.op_str.split("#")[1], 0)
             elif x.mnemonic == "movt" and pend is not None and qmul is None:
                 qmul = ((int(x.op_str.split("#")[1], 0) << 16) | pend) + 0x98
-            if x.mnemonic == "ldr" and "#0x38]" in x.op_str:
-                prev38 = True
-            elif x.mnemonic == "bl" and prev38:
-                prov = int(x.op_str.lstrip("#"), 0); break
             elif x.mnemonic == "bl":
-                prev38 = False
+                tgt = int(x.op_str.lstrip("#"), 0)
+                if _is_body_provider(fw, tgt):
+                    prov = tgt; break
         if prov is not None and qmul is not None:
             return prov, qmul
     return None, None

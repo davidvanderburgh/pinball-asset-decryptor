@@ -48,6 +48,13 @@ class SternManufacturer(Manufacturer):
         # WAVs and the Write pipeline re-encodes the changed ones into image.bin
         # (only the changed ones — Write diffs against .checksums.md5).
         replace_audio=True,
+        # Video is loose H.264 .asset clips copied out to video/ (named from
+        # scene.radium).  The Replace Video tab stages a replacement over each,
+        # and Write patches it back into the SD-card image IN PLACE via the
+        # ext4 file->disk map (size-neutral: the .asset isn't resized, so a
+        # replacement is fit to the original's byte size — padded if smaller,
+        # re-encoded down if larger, skipped if it still won't fit).
+        replace_video=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -59,7 +66,7 @@ class SternManufacturer(Manufacturer):
     )
     extract_phases = ("Detect", "Locate partitions", "Extract video",
                       "Decode audio", "Checksums")
-    write_phases = ("Detect", "Stage", "Re-encode audio", "Patch image")
+    write_phases = ("Detect", "Stage", "Re-encode", "Patch image")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     direct_ssd_extract_phases = ("Read SD card", "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
@@ -99,6 +106,14 @@ class SternManufacturer(Manufacturer):
         return ("Replacements are encoded size-neutral: each sound is fit to "
                 "its original slot length (longer is trimmed, shorter padded "
                 "with silence) and amplitude-limited into the codec's range.")
+
+    def video_length_note(self):
+        return ("Video is patched into the SD-card image in place, so each "
+                "replacement is fit to its original clip's byte size: a small "
+                "enough clip drops straight in, a larger one is automatically "
+                "re-encoded down to fit, and one that still won't fit is "
+                "skipped (left unchanged) — use a shorter / lower-resolution "
+                "clip. Tick “Trim / pad” to also match the original length.")
 
     def detect(self, path):
         key = detect_game(path)

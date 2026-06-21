@@ -436,3 +436,77 @@ def transcode_video_to(src_path, dst_path, original_info,
         return True, ", ".join(a for a in actions if a)
     err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
     return False, (err[-1] if err else f"ffmpeg failed (code {r.returncode})")
+
+
+def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
+                         attempts=3):
+    """Re-encode *src_path* into *dst_path* (same container/codec/resolution)
+    targeting a muxed file no larger than *max_bytes*.
+
+    Needed for in-place asset patching (e.g. Stern Spike 2), where a
+    replacement must fit the original file's exact byte slot — the filesystem
+    isn't resized, so the new bytes have to be ``<= max_bytes``.  Derives a
+    video bitrate from the clip's duration and the byte budget, hard-caps the
+    rate (``-maxrate`` / ``-bufsize``), and retries with a smaller budget if
+    the muxed result still overshoots.  Returns ``(ok, detail)`` — on success
+    *detail* is the final byte size as a string; on failure it's an error
+    message.  The caller pads the (``<= max_bytes``) result up to the exact
+    slot size.  Requires ffmpeg.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return False, "need ffmpeg to shrink video"
+    if max_bytes <= 0:
+        return False, "no byte budget"
+    ext = os.path.splitext(dst_path)[1].lower()
+    info = original_info or detect_video_info(src_path)
+    alpha = bool(info and info.has_alpha)
+    vargs, aargs = _video_codec_args(ext, alpha)
+    if vargs is None:
+        return False, f"unsupported target format {ext}"
+    dur = (info.duration if info and info.duration > 0
+           else probe_duration(src_path))
+    if not dur or dur <= 0:
+        return False, "could not determine clip duration"
+    # Reserve some bits for an audio track (if any) + container overhead.
+    abps = 96_000 if (info is None or info.has_audio) else 0
+
+    vf = []
+    if info and info.width > 0 and info.height > 0:
+        vf.append(f"scale={info.width}:{info.height}"
+                  f":force_original_aspect_ratio=decrease")
+        vf.append(f"pad={info.width}:{info.height}:(ow-iw)/2:(oh-ih)/2"
+                  + (":color=#00000000" if alpha else ""))
+
+    headrooms = [0.92, 0.80, 0.62][:max(1, attempts)]
+    last_err = ""
+    for hr in headrooms:
+        vbps = int(max_bytes * 8 * hr / dur) - abps
+        if vbps < 40_000:
+            vbps = 40_000
+        cmd = [ffmpeg, "-y", "-i", src_path]
+        if vf:
+            cmd += ["-vf", ",".join(vf)]
+        if info and info.fps > 0:
+            cmd += ["-r", f"{info.fps:.4f}"]
+        cmd += vargs + ["-b:v", str(vbps), "-maxrate", str(vbps),
+                        "-bufsize", str(vbps * 2)]
+        if abps:
+            cmd += aargs + ["-b:a", str(abps)]
+        else:
+            cmd += ["-an"]
+        cmd.append(dst_path)
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=900,
+                               creationflags=_CREATE_FLAGS)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return False, str(e)
+        if r.returncode == 0 and os.path.isfile(dst_path):
+            sz = os.path.getsize(dst_path)
+            if 0 < sz <= max_bytes:
+                return True, str(sz)
+            last_err = f"re-encode landed at {sz} > {max_bytes} bytes"
+        else:
+            err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            last_err = err[-1] if err else f"ffmpeg failed (code {r.returncode})"
+    return False, last_err or "could not shrink to fit"

@@ -382,10 +382,152 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     return ok
 
 
+# --------------------------------------------------------------------------
+# Replace-Video: size-neutral in-place patch of the loose .asset clips
+# --------------------------------------------------------------------------
+_VIDEO_MANIFEST = "manifest.txt"
+
+
+def _pad_isobmff(data, target):
+    """Pad an MP4/MOV (ISO-BMFF / QuickTime) byte string up to exactly *target*
+    bytes by appending a trailing ``free`` box, which compliant demuxers skip —
+    the original ``moov``/``mdat`` are left untouched.  ``len(data)`` must be
+    ``<= target``."""
+    pad = target - len(data)
+    if pad <= 0:
+        return data[:target]
+    if pad < 8:
+        # Too small for a box header; a few trailing bytes after a complete
+        # file are ignored by MP4/MOV demuxers.
+        return data + b"\x00" * pad
+    if pad < 0x1_0000_0000:
+        return data + pad.to_bytes(4, "big") + b"free" + b"\x00" * (pad - 8)
+    # 64-bit box: size word = 1, then the real size as an 8-byte largesize.
+    return (data + (1).to_bytes(4, "big") + b"free"
+            + pad.to_bytes(8, "big") + b"\x00" * (pad - 16))
+
+
+def _changed_videos(assets_dir, baseline):
+    """Return ``[(fname, card_path, staged_path), ...]`` for the videos under
+    ``assets_dir/video`` whose current bytes differ from the Extract baseline
+    (``.checksums.md5``).  Empty when there's no ``video/manifest.txt`` (an
+    audio-only extract, or Write pointed at a subfolder)."""
+    from ...core.checksums import md5_file
+    vid_dir = os.path.join(assets_dir, "video")
+    manifest = os.path.join(vid_dir, _VIDEO_MANIFEST)
+    if not os.path.isfile(manifest):
+        return []
+    out = []
+    with open(manifest, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < 2:
+                continue
+            fname, card_path = cols[0], cols[1]
+            staged = os.path.join(vid_dir, fname)
+            if not os.path.isfile(staged):
+                continue
+            base = baseline.get("video/" + fname)
+            try:
+                if base is not None and md5_file(staged) == base:
+                    continue           # untouched since extract
+            except OSError:
+                pass
+            out.append((fname, card_path, staged))
+    return out
+
+
+def _video_nodes(reader, card_paths, cancel):
+    """One filesystem pass: ``{card_path: inode}`` for the wanted card paths."""
+    want = set(card_paths)
+    found = {}
+    if not want:
+        return found
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            break
+        if path in want:
+            found[path] = node
+            if len(found) == len(want):
+                break
+    return found
+
+
+def _fit_video_payload(staged_path, target, work_dir, log):
+    """Return exactly *target* bytes to overwrite the original ``.asset``, or
+    ``None`` if the replacement can't be made to fit.  A clip ``<= target``
+    pads up with a trailing free box; a larger clip is re-encoded down to the
+    byte budget first (and skipped if even that overshoots)."""
+    with open(staged_path, "rb") as f:
+        data = f.read()
+    name = os.path.basename(staged_path)
+    if len(data) <= target:
+        return _pad_isobmff(data, target)
+
+    from ...core.video import detect_video_info, shrink_video_to_size
+    tmp = os.path.join(work_dir, "fit_" + name)
+    info = detect_video_info(staged_path)
+    ok, detail = shrink_video_to_size(staged_path, tmp, target,
+                                      original_info=info)
+    if not ok:
+        log("Video %s is %d bytes but the original slot is only %d and it "
+            "couldn't be shrunk to fit (%s); skipped (left unchanged). Use a "
+            "shorter / lower-resolution clip."
+            % (name, len(data), target, detail), "warning")
+        return None
+    try:
+        with open(tmp, "rb") as f:
+            shrunk = f.read()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    if len(shrunk) > target:
+        log("Video %s still too large after re-encode; skipped." % name,
+            "warning")
+        return None
+    log("Video %s re-encoded to fit (%d -> %d bytes of %d)."
+        % (name, len(data), len(shrunk), target), "info")
+    return _pad_isobmff(shrunk, target)
+
+
+def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
+    """Resolve each changed video to its card inode and size-fit its bytes.
+    Returns ``([(node, payload), ...], n_skipped)`` where every payload is
+    exactly the inode's size, ready for an in-place ``disk_ranges`` write."""
+    nodes = _video_nodes(reader, [cp for (_f, cp, _s) in video_edits], cancel)
+    patches = []
+    skipped = 0
+    for fname, card_path, staged in video_edits:
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Video %s: its original (%s) wasn't found on the card; "
+                "skipped." % (fname, card_path), "warning")
+            skipped += 1
+            continue
+        payload = _fit_video_payload(staged, node["size"], work_dir, log)
+        if payload is None:
+            skipped += 1
+            continue
+        patches.append((node, payload))
+        log("Video %s: ready to patch (%d bytes)." % (fname, node["size"]),
+            "info")
+    return patches, skipped
+
+
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 cancel=None):
-    """Re-encode edited WAVs under ``assets_dir`` and patch them into a copy of
-    the card image at ``output_path`` (size-neutral, in place)."""
+    """Patch a copy of the card image at ``output_path`` with the user's edits
+    (size-neutral, in place): re-encoded audio bodies inside ``image.bin`` and
+    replaced LCD videos written over their original ``.asset`` files.  Either
+    kind of edit may be absent — a video-only write skips the firmware
+    emulator entirely."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     import shutil
@@ -407,38 +549,45 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             m = _WAV_RE.match(os.path.splitext(fn)[0])
             if m:
                 all_wavs[int(m.group(1))] = os.path.join(root, fn)
-    if not all_wavs:
-        raise FileNotFoundError("No idxNNNN.wav files found in %s" % assets_dir)
-
-    # Only re-encode the sounds the user actually changed.  The folder is
-    # normally the whole Extract output (thousands of WAVs); without diffing
-    # against the Extract baseline (.checksums.md5) every sound would be
-    # re-encoded.  Match by idx so an Auto-transcribe rename of an *unedited*
-    # sound (md5 unchanged) is correctly skipped.
+    # Only re-encode/patch what the user actually changed.  The folder is
+    # normally the whole Extract output (thousands of WAVs + the LCD videos);
+    # diff each asset against the Extract baseline (.checksums.md5) so an
+    # untouched (or merely Auto-transcribe-renamed) sound/clip is skipped.
     baseline = read_checksums(assets_dir)
     base_by_idx = {}
     for rel in baseline:
         mm = _WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
         if mm:
             base_by_idx[int(mm.group(1))] = baseline[rel]
-    if base_by_idx:
-        edits = {}
-        for idx, path in all_wavs.items():
-            try:
-                if md5_file(path) != base_by_idx.get(idx):
-                    edits[idx] = path
-            except OSError:
-                edits[idx] = path
-        if not edits:
-            raise FileNotFoundError(
-                "No edited sounds found: every idxNNNN.wav still matches the "
-                "Extract baseline (.checksums.md5), so there's nothing to "
-                "re-encode. Edit a WAV first, then Write.")
-        log("Found %d edited sound(s) of %d to write." % (len(edits), len(all_wavs)), "info")
-    else:
-        edits = all_wavs
-        log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
-            % len(edits), "warning")
+    audio_edits = {}
+    if all_wavs:
+        if base_by_idx:
+            for idx, path in all_wavs.items():
+                try:
+                    if md5_file(path) != base_by_idx.get(idx):
+                        audio_edits[idx] = path
+                except OSError:
+                    audio_edits[idx] = path
+        else:
+            audio_edits = dict(all_wavs)
+
+    video_edits = _changed_videos(assets_dir, baseline)
+
+    if not audio_edits and not video_edits:
+        raise FileNotFoundError(
+            "Nothing to write: every idxNNNN.wav still matches the Extract "
+            "baseline (.checksums.md5) and no replaced videos were found under "
+            "%s. Edit a sound or assign a Replace Video clip first, then Write."
+            % assets_dir)
+    if audio_edits:
+        if base_by_idx:
+            log("Found %d edited sound(s) of %d to write."
+                % (len(audio_edits), len(all_wavs)), "info")
+        else:
+            log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
+                % len(audio_edits), "warning")
+    if video_edits:
+        log("Found %d replaced video(s) to write." % len(video_edits), "info")
 
     def _read_prog(c, t):
         if progress:
@@ -449,81 +598,125 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     emu = None
     disk_f = open(original_path, "rb")
     try:
-        gr_path, img_path, img_reader, _fw_node, img_node = _extract_inputs(
-            disk_f, parts, work, log, _read_prog)
-        if cancel():
-            return 0
-        if not audio_decode_supported(gr_path):
-            raise RuntimeError(
-                "Audio re-encode isn't supported for this title yet: its game "
-                "firmware uses a Spike 2 codec the engine can't locate a single "
-                "decode path for (e.g. a dual-path codec), so the per-sound "
-                "keystream can't be derived.")
-        log("Booting firmware codec engine...", "info")
-        emu = Spike2Emu(gr_path, img_path)
-        emu.boot()
-        params = _load_or_derive_params(emu, gr_path, img_path, log, progress)
-        byidx = {p["idx"]: p for p in params}
-
-        # re-encode each edited sound into its body bytes
-        patches = {}   # body_off -> bytes
-        skipped = []
-        gr = sr = None
-        for n, (idx, wav_path) in enumerate(sorted(edits.items())):
+        audio_patches = {}     # body_off -> bytes (inside image.bin)
+        img_node = None
+        reader = None
+        if audio_edits:
+            gr_path, img_path, reader, _fw_node, img_node = _extract_inputs(
+                disk_f, parts, work, log, _read_prog)
             if cancel():
                 return 0
-            if idx not in byidx:
-                log("idx %d not a known sound; skipping." % idx, "warning")
-                continue
-            p = byidx[idx]
-            if progress:
-                progress(10 + int(n * 80 / max(len(edits), 1)), 100,
-                         "Re-encoding idx %d" % idx)
-            if p["chan"] == 2:
-                sr = sr or StereoRecover(emu)
+            if not audio_decode_supported(gr_path):
+                # This title's audio codec can't be re-encoded.  If the user
+                # only edited video, carry on and write that; otherwise it's a
+                # hard error.
+                msg = (
+                    "Audio re-encode isn't supported for this title yet: its "
+                    "game firmware uses a Spike 2 codec the engine can't locate "
+                    "a single decode path for (e.g. a dual-path codec), so the "
+                    "per-sound keystream can't be derived.")
+                if not video_edits:
+                    raise RuntimeError(msg)
+                log(msg + "  Writing only the replaced video(s).", "warning")
+                audio_edits = {}
             else:
-                gr = gr or GenRecover(emu)
-            # Verify the keystream recovery actually round-trips for THIS sound
-            # before trusting its re-encode -- skip (never patch) sounds whose
-            # codec variant the analytic encode can't yet reproduce bit-exact, so
-            # Write can't silently corrupt them (see _recovery_valid).
-            if not _recovery_valid(emu, gr, sr, p, np):
-                skipped.append(idx)
-                log("idx %d: re-encode isn't bit-exact for this sound's codec "
-                    "(skipped -- left unchanged in the output)." % idx, "warning")
-                continue
-            if p["chan"] == 2:
-                body = _encode_stereo(emu, sr, p, wav_path, np)
-            else:
-                body = _encode_mono(emu, gr, p, wav_path, np)
-            patches[p["body_off"]] = body
-            log("Re-encoded idx %d (%s, %d samples)."
-                % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]), "info")
-        if skipped:
-            log("%d sound(s) skipped (re-encode unsupported for their codec): %s"
-                % (len(skipped), ", ".join(map(str, skipped))), "warning")
-        if not patches:
-            raise RuntimeError(
-                "None of the edited sounds could be re-encoded bit-exact for this "
-                "title's codec yet, so nothing was written (the card image was not "
-                "modified).")
+                log("Booting firmware codec engine...", "info")
+                emu = Spike2Emu(gr_path, img_path)
+                emu.boot()
+                params = _load_or_derive_params(emu, gr_path, img_path, log,
+                                                progress)
+                byidx = {p["idx"]: p for p in params}
 
-        # copy the card image, then patch the changed bodies in place
+                # re-encode each edited sound into its body bytes
+                skipped = []
+                gr = sr = None
+                for n, (idx, wav_path) in enumerate(sorted(audio_edits.items())):
+                    if cancel():
+                        return 0
+                    if idx not in byidx:
+                        log("idx %d not a known sound; skipping." % idx, "warning")
+                        continue
+                    p = byidx[idx]
+                    if progress:
+                        progress(10 + int(n * 75 / max(len(audio_edits), 1)), 100,
+                                 "Re-encoding idx %d" % idx)
+                    if p["chan"] == 2:
+                        sr = sr or StereoRecover(emu)
+                    else:
+                        gr = gr or GenRecover(emu)
+                    # Verify the keystream recovery actually round-trips for THIS
+                    # sound before trusting its re-encode -- skip (never patch)
+                    # sounds whose codec variant the analytic encode can't yet
+                    # reproduce bit-exact, so Write can't silently corrupt them
+                    # (see _recovery_valid).
+                    if not _recovery_valid(emu, gr, sr, p, np):
+                        skipped.append(idx)
+                        log("idx %d: re-encode isn't bit-exact for this sound's "
+                            "codec (skipped -- left unchanged in the output)."
+                            % idx, "warning")
+                        continue
+                    if p["chan"] == 2:
+                        body = _encode_stereo(emu, sr, p, wav_path, np)
+                    else:
+                        body = _encode_mono(emu, gr, p, wav_path, np)
+                    audio_patches[p["body_off"]] = body
+                    log("Re-encoded idx %d (%s, %d samples)."
+                        % (idx, "stereo" if p["chan"] == 2 else "mono",
+                           p["length"]), "info")
+                if skipped:
+                    log("%d sound(s) skipped (re-encode unsupported for their "
+                        "codec): %s"
+                        % (len(skipped), ", ".join(map(str, skipped))), "warning")
+                if not audio_patches and not video_edits:
+                    raise RuntimeError(
+                        "None of the edited sounds could be re-encoded bit-exact "
+                        "for this title's codec yet, so nothing was written (the "
+                        "card image was not modified).")
+
+        # A video-only write (or one whose audio turned out unsupported) still
+        # needs a reader to resolve the .asset inodes.
+        if reader is None:
+            reader, _fw_node, _img_node = _locate(disk_f, parts)
+
+        video_patches = []     # (inode, payload bytes == inode size)
+        if video_edits:
+            if progress:
+                progress(88, 100, "Preparing video...")
+            video_patches, _vskip = _prepare_video_patches(
+                reader, video_edits, work, log, cancel)
+            if cancel():
+                return 0
+
+        if not audio_patches and not video_patches:
+            raise RuntimeError(
+                "Nothing could be written: no sound re-encoded and no replaced "
+                "video could be fit to its original slot (the card image was "
+                "not modified).")
+
+        # copy the card image, then patch the changed bytes in place
         log("Copying card image to output...", "info")
         if progress:
             progress(0, 0, "Copying image...")
         shutil.copyfile(original_path, output_path)
 
         with open(output_path, "r+b") as out:
-            for body_off, body in patches.items():
-                for disk, n in img_reader.disk_ranges(img_node, body_off, len(body)):
+            for body_off, body in audio_patches.items():
+                for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                     out.seek(disk)
                     out.write(body[:n])
                     body = body[n:]
+            for node, payload in video_patches:
+                off = 0
+                for disk, n in reader.disk_ranges(node, 0, len(payload)):
+                    out.seek(disk)
+                    out.write(payload[off:off + n])
+                    off += n
             out.flush()
             os.fsync(out.fileno())
-        log("Wrote patched image: %s" % output_path, "success")
-        return len(patches)
+        n_written = len(audio_patches) + len(video_patches)
+        log("Wrote patched image: %s (%d sound(s), %d video(s))."
+            % (output_path, len(audio_patches), len(video_patches)), "success")
+        return n_written
     finally:
         if disk_f is not None:
             disk_f.close()

@@ -394,7 +394,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     import numpy as np
 
     from .spike2.codec import GenRecover, StereoRecover
-    from .spike2.emulator import Spike2Emu, firmware_build_supported
+    from .spike2.emulator import Spike2Emu, audio_decode_supported
 
     # which idx slots did the user edit?  Scan recursively so the user can
     # point Write at the extract root or its audio/ subdir; the leading index
@@ -424,11 +424,12 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             disk_f, parts, work, log, _read_prog)
         if cancel():
             return 0
-        if not firmware_build_supported(gr_path):
+        if not audio_decode_supported(gr_path):
             raise RuntimeError(
                 "Audio re-encode isn't supported for this title yet: its game "
-                "firmware is a different Spike 2 build than the one the codec "
-                "engine is mapped to.")
+                "firmware uses a Spike 2 codec the engine can't locate a single "
+                "decode path for (e.g. a dual-path codec), so the per-sound "
+                "keystream can't be derived.")
         log("Booting firmware codec engine...", "info")
         emu = Spike2Emu(gr_path, img_path)
         emu.boot()

@@ -21,6 +21,7 @@ import struct
 
 import numpy as np
 from capstone import CS_ARCH_ARM, CS_MODE_ARM, Cs
+from capstone.arm import ARM_OP_REG, ARM_SFT_ASR
 from unicorn.arm_const import (UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1,
                                UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4,
                                UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7,
@@ -83,22 +84,40 @@ def _invG(target, qmul):
     return (best & 0xffff), besterr
 
 
+def _asr16_src_regs(ins):
+    """Register operands this instruction arithmetic-shifts right by 16 -- the
+    codec's ``>>16`` after the volume multiply.  Capstone tags the shifted
+    operand the same way for BOTH the standalone ``asr rD, rS, #0x10`` (the rS
+    operand carries ``asr #16``) and the folded ``add rD, rN, rM, asr #16`` (the
+    rM operand carries it), so one rule covers both.  Older builds use the
+    standalone form; some (e.g. Godzilla stereo) fold the shift into the
+    consuming add, which the old standalone-only scan missed entirely."""
+    return [ins.reg_name(o.reg) for o in ins.operands
+            if o.type == ARM_OP_REG and o.shift.type == ARM_SFT_ASR
+            and o.shift.value == 16]
+
+
 def _find_companding_all(mu, fn_addr, n=0xC00):
-    """All distinct ``(mul_addr, S_reg)`` companding points (mul feeding
-    ``asr #0x10``), in code order.  Mono codecs have 1; stereo render_fns 2."""
+    """All distinct ``(mul_addr, S_reg)`` companding points -- a ``mul`` of a
+    sign-extended value whose product is then ``>>16`` (see _asr16_src_regs) --
+    in code order.  Mono codecs have 1; stereo render_fns 2.  (Dead sites past
+    the function epilogue may be picked up when the scan window overruns into a
+    neighbouring fn, but they never execute, so the L/R split -- keyed on the
+    addresses that actually fire -- ignores them.)"""
     insns = list(_md.disasm(bytes(mu.mem_read(fn_addr, n)), fn_addr))
     out = []; muls = []; last_sxth = None
     for ins in insns:
         if ins.mnemonic == "sxth":
             last_sxth = ins.op_str.split(",")[0].strip()
-        elif ins.mnemonic == "mul":
+            continue
+        if ins.mnemonic == "mul":
             regs = [t.strip() for t in ins.op_str.replace(",", " ").split()]
             muls.append((ins.address, regs[0], regs, last_sxth))
-        elif ins.mnemonic == "asr" and "#0x10" in ins.op_str:
-            dst = ins.op_str.split(",")[0].strip()
-            seen = [o[0] for o in out]
+            continue
+        seen = [o[0] for o in out]
+        for src in _asr16_src_regs(ins):
             for addr, mdst, regs, sx in reversed(muls):
-                if mdst == dst and sx in regs and sx in _UCREG and addr not in seen:
+                if mdst == src and sx in regs and sx in _UCREG and addr not in seen:
                     out.append((addr, _UCREG[sx]))
                     break
     return out
@@ -134,7 +153,7 @@ class GenRecover:
 
     def _decode_block_capture(self, p, cursor, body_u16):
         emu = self.emu; mu = self.mu
-        _, decode_fn = emu.codec_fns(p["scale"], 1)
+        decode_fn = emu.recover_entry(p)   # resolved audio slot (generic) / decode_fn (validated)
         mul_addr, sreg = _find_companding(mu, decode_fn)
         self._capreg = sreg
         self._install_hook(mul_addr)
@@ -218,7 +237,7 @@ class StereoRecover:
 
     def _drive(self, p, cursor, body_bytes):
         emu = self.emu; mu = self.mu
-        render_fn, _ = emu.codec_fns(p["scale"], 2)
+        render_fn = emu.recover_entry(p)   # resolved audio slot (generic) / render_fn (validated)
         comps = _find_companding_all(mu, render_fn, n=0xC00)
         if len(comps) < 2:
             raise RuntimeError("stereo render_fn must have >=2 companding pts")

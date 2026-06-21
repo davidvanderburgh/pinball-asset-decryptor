@@ -859,6 +859,20 @@ class Spike2Emu:
         decode = _u32(bytes(mu.mem_read(self.DISPATCH + 0x20 + scale * 0x40 + sub * 4, 4)))
         return render, decode
 
+    def recover_entry(self, p):
+        """Codec entry function that the keystream recovery / re-encode path must
+        drive — identical to what :meth:`decode` runs for this sound.  On a
+        generic build the audio fn sits at a build-specific dispatch sub-slot
+        (the channel->slot parity flips per build), so resolve it the same way
+        decode does (:meth:`_resolve_entry`, cached per scale/chan).  The
+        validated build keeps the dispatch render/decode fn (bit-exact path).
+        ``codec_fns`` alone is wrong here: it predates the slot-parity fix and
+        returns the noise slot on flipped builds."""
+        if self._generic:
+            return self._resolve_entry(p)
+        render_fn, decode_fn = self.codec_fns(p["scale"], p["chan"])
+        return render_fn if p["chan"] == 2 else decode_fn
+
     def decode(self, p, max_secs=None, cancel=None):
         """Decode one sound to ``(L, R, stereo)`` int64 arrays (mono consumers
         use only L).  Returns None if cancelled or no codec entry resolved."""

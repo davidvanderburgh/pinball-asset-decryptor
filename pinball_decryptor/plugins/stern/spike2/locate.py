@@ -290,14 +290,26 @@ def _find_internal_pcs(fw, md_start):
 
 
 def _find_find_bl(fw, md_start, md_end):
-    """The band-build template-lookup ``bl`` (skipped at runtime).  Pattern at
-    A: ``add rN,rN,#0x10`` (any rN, Rn==Rd); A-0x14: ``cmp r0,#0``; A-0x18: a
-    ``bl``.  The counter register is build-specific so match any rN."""
+    """The band-build template-lookup ``bl`` (skipped at runtime).  Canonical
+    epilogue after the lookup returns the map node ptr in r0::
+
+        A-0x18: bl <lookup>
+        A-0x14: cmp r0, #0
+        A-0x0c: ldr rX, [r0]        ; rX = *node (value-part base)
+        A:      add rD, rX, #0x10    ; advance past the key (rD = OBJREG)
+
+    The destination rD is build-specific and is NOT always == rX (Avengers:
+    ``add r7,r7,#0x10``; Stranger Things: ``add r8,r3,#0x10``), so match any rD
+    and anchor on the ``ldr rX,[r0]`` deref (Rt == the add's Rn) instead."""
     for va in range(md_start, md_end, 4):
         w = fw.w_text(va)
-        if ((w & 0xfff00fff) == 0xe2800010 and ((w >> 16) & 0xf) == ((w >> 12) & 0xf)
-                and fw.w_text(va - 0x14) == 0xe3500000
-                and (fw.w_text(va - 0x18) & 0x0f000000) == 0x0b000000):
+        if (w & 0xfff00fff) != 0xe2800010:     # add rD, rX, #0x10 (imm, cond=e)
+            continue
+        rx = (w >> 16) & 0xf                    # Rn = dereferenced node register
+        ldr = fw.w_text(va - 0xc)              # ldr rX, [r0]
+        if (((ldr & 0xffff0fff) == 0xe5900000) and ((ldr >> 12) & 0xf) == rx
+                and fw.w_text(va - 0x14) == 0xe3500000              # cmp r0, #0
+                and (fw.w_text(va - 0x18) & 0x0f000000) == 0x0b000000):  # bl
             return va - 0x18
     return None
 

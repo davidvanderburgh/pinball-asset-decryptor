@@ -798,9 +798,13 @@ class Spike2Emu:
         except Exception:
             pass
         self.ACC = self.alloc(0x8000)
-        # map the obj + voice page(s)
+        # map the obj + voice page(s).  Page-by-page (not one bulk mem_map) so a
+        # page the firmware already faulted into this region during boot/derive
+        # (some builds, e.g. Metallica, touch 0x18000000 via on-demand paging)
+        # doesn't make the map fail -- _ensure_page skips already-mapped pages.
         base = self.OBJ_VA & ~0xfff
-        mu.mem_map(base, _algn(self.VOICE_VA + 0x80) - base)
+        for pg in range(base, _algn(self.VOICE_VA + 0x80), PAGE):
+            self._ensure_page(pg)
         self.add_hook(self.PROV, self._at_prov)
         self._decode_ready = True
 
@@ -814,12 +818,15 @@ class Spike2Emu:
         m.reg_write(UC_ARM_REG_PC, m.reg_read(UC_ARM_REG_LR))
 
     def _ensure_body(self, span):
+        # Page-map the grown region via _ensure_page (not one bulk mem_map): on
+        # some builds (e.g. Metallica) the firmware faults a stray page into the
+        # BB region during boot/derive, so a bulk map would fail on the partial
+        # overlap and leave the rest unmapped -- then the body write would hit an
+        # unmapped page.  _ensure_page skips already-mapped pages individually.
+        span = _algn(span)
         if span > self.BBSZ:
-            try:
-                self.mu.mem_map(self.BB + self.BBSZ, _algn(span) - self.BBSZ)
-            except UcError:
-                pass
-            self.BBSZ = _algn(span)
+            self._ensure_range(self.BB + self.BBSZ, span - self.BBSZ)
+            self.BBSZ = span
 
     def _build_obj(self, p):
         # generic builds replay the raw band-build obj verbatim (proven correct
@@ -877,25 +884,34 @@ class Spike2Emu:
         X = np.maximum(X, 1e-9)
         return float(np.exp(np.mean(np.log(X))) / np.mean(X))
 
+    # Per-scale dispatch sub-slots (stride 0x40 = 16 u32 fn pointers per scale)
+    # to probe for the audio codec on a generic build.  The audio fn lives in
+    # one of the low slots, but WHICH one varies by build: the channel->slot
+    # parity is even on some builds (TMNT/Godzilla: mono=slot1, stereo=slot0)
+    # and FLIPPED on others (Avengers/Iron Maiden: mono=slot0, stereo=slot1).
+    # Probing 0..3 in order finds the right slot on every observed build while
+    # picking the identical slot for the builds the old fixed pair already
+    # handled (early-exit stops the instant audio is found).
+    _PROBE_SLOTS = (0, 1, 2, 3)
+
     def _resolve_entry(self, p):
         """Pick the codec function that actually decodes audio for a generic
-        build.  The audio fn lives at the *render* slot on some builds and the
-        *decode* slot on others (both reference PROV/QMUL, so they're
-        indistinguishable statically) -> dereference both slots and probe a
-        short decode, taking the first that yields audio (specflat < 0.45).
-        Cached per (scale, chan); decoding the wrong slot corrupts state, so we
-        stop probing the instant we find the audio slot."""
+        build.  The audio fn lives at a build-specific low dispatch sub-slot
+        (see :data:`_PROBE_SLOTS`); they're indistinguishable statically (all
+        reference PROV/QMUL), so probe the low slots and take the first that
+        yields audio (specflat < 0.45; stereo requires BOTH channels, since a
+        mono codec fed a stereo body can yield an audio-looking L with garbage
+        R).  Cached per (scale, chan); decoding the wrong slot corrupts state,
+        so we stop probing the instant we find the audio slot."""
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
-        sub = 0 if p["chan"] == 2 else 1
         mu = self.mu
-        cands = [
-            _u32(bytes(mu.mem_read(self.DISPATCH + p["scale"] * 0x40 + sub * 4, 4))),
-            _u32(bytes(mu.mem_read(self.DISPATCH + 0x20 + p["scale"] * 0x40 + sub * 4, 4))),
-        ]
+        stereo = (p["chan"] == 2)
         best, bestsf = None, 2.0
-        for fnv in cands:
+        for slot in self._PROBE_SLOTS:
+            fnv = _u32(bytes(mu.mem_read(
+                self.DISPATCH + p["scale"] * 0x40 + slot * 4, 4)))
             if fnv == 0 or self._backing_off(fnv) is None:
                 continue
             try:
@@ -905,6 +921,8 @@ class Spike2Emu:
             if res is None:
                 continue
             sf = self._specflat(res[0])
+            if stereo:
+                sf = max(sf, self._specflat(res[1]))
             if sf < bestsf:
                 bestsf, best = sf, fnv
             if sf < 0.45:

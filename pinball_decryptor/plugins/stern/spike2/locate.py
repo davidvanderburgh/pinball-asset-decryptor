@@ -257,9 +257,11 @@ def _find_internal_pcs(fw, md_start):
     ins = list(_disasm(fw, md_start, end))
     out = {"_end": end}
     # MALLOC: bl preceded by `lsl _,_,#3` (*8) and `add _,r5,r5,lsl#1` (*3) = *24.
+    # Window is 8 (not 6): some builds (e.g. Jurassic Park) put the *3 add 7
+    # instructions ahead of the malloc bl, just outside a tighter window.
     for i, x in enumerate(ins):
         if x.mnemonic == "bl":
-            win = ins[max(0, i - 6):i]
+            win = ins[max(0, i - 8):i]
             if (any(w.mnemonic == "lsl" and w.op_str.endswith("#3") for w in win)
                     and any(w.mnemonic == "add" and "lsl #1" in w.op_str for w in win)
                     and i + 1 < len(ins)):

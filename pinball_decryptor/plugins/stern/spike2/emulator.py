@@ -101,6 +101,7 @@ CHAIN_STUBS = (0x4bda28, 0x4bdad0, 0x348550)  # stubbed to 0 during the chain
 LENGTH_XOR = 0x5572ae9b    # length = this ^ record[16]
 
 VOL = {1: 28, 2: 11}       # mono / stereo mixer volume -> QMUL 22294 / 42905
+RET_SENTINEL = 0xdeadbee0  # even ``call()`` return trap (interwork-safe; see call())
 
 # Byte signatures (ARM function prologues) of the supported firmware build at a
 # few of the hardcoded addresses above.  The codec oracle is pinned to this
@@ -593,9 +594,13 @@ class Spike2Emu:
         for i, a in enumerate(args):
             mu.reg_write([UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                           UC_ARM_REG_R3][i], a)
-        mu.reg_write(UC_ARM_REG_LR, 0xdeadbeef)
+        # EVEN return sentinel: a callee returning via ``bx lr`` (older builds,
+        # e.g. Star Wars) interworks on bit0, so an odd sentinel would land in
+        # Thumb one byte before it and the ``until`` stop never matches; an even
+        # sentinel traps both ``bx lr`` and ``pop {pc}``/``mov pc, lr`` returns.
+        mu.reg_write(UC_ARM_REG_LR, RET_SENTINEL)
         try:
-            mu.emu_start(fn, 0xdeadbeef, count=limit)
+            mu.emu_start(fn, RET_SENTINEL, count=limit)
             return ("ok", mu.reg_read(UC_ARM_REG_R0))
         except UcError as e:
             return ("err", (str(e), hex(mu.reg_read(UC_ARM_REG_PC)), self.faults[-6:]))

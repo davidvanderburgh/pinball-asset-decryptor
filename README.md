@@ -68,6 +68,7 @@ disclose any past modifications. The acceptance is stored in
 | **Jersey Jack Pinball** | 11 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc.) | `.iso` Clonezilla image, or **directly from the game SSD** | Extract, Write, Mod Pack, Replace Audio, Replace Video, **Direct-SSD** (read/write the game's physical SSD without an ISO intermediate — auto-discovers the right partition, content-verifies `/jjpe/gen1`, mirrors writes across A/B slots so the change survives the next firmware boot).  Extract tab exposes per-category **Graphics / Sounds / File System** filters so you can skip categories you don't care about (and the slow full-filesystem dump is opt-in). |
 | **Pinball Brothers** | 4 (ABBA, Alien, Queen, Predator) | `.upd`, `.iso` (Clonezilla) | Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video |
 | **Spooky Pinball** | 14 (Beetlejuice, Evil Dead, R&M, Halloween, Looney Tunes, etc.) | `.pkg`, `.ed`, `.scooby`, `.beetlejuice`, `.looney`, `.iso`, `.zip` | Extract, Write, Mod Pack, Replace Audio, Replace Video (Godot `.ogv`) |
+| **Stern Pinball** (Spike 2) | 26 (Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden, Led Zeppelin, James Bond, etc.) | raw SD-card `.img` / `.bin` / `.raw`, or **directly from the SD card** | Extract, Write, Mod Pack, Replace Audio, Replace Video, Replace Images, **Direct-SD**, Auto-name call-outs (Whisper) + Auto-name music (AcoustID). Spike 2 cards are **unencrypted ext4**: video (H.264 `.asset`) and UI images (`.png`) are loose files that extract and patch in place. **Audio** is the hard part — every sound is packed into `image.bin` and encoded with a per-sample stream cipher whose keystream is produced by the game firmware, so there's **no static key**: the plugin boots the card's own `game_real` firmware in an ARM emulator (unicorn), uses it as an oracle to recover each sound's exact keystream, and inverts it analytically — decode **and** re-encode are bit-exact, mono + stereo, across all 32 codec "scale" variants, with nothing title-specific bundled (a new title works as soon as its card is recognised). Direct-SD reads/writes the physical card through a pure-Python ext4 reader + sector-aligned raw-device I/O. Replacements are **size-neutral** (audio trimmed/padded to the original length; video/images fit to the original byte size). See [docs/architecture/stern.md](docs/architecture/stern.md). |
 | **Williams** (WPC-era) | 41 WPC titles (Attack From Mars, Medieval Madness, Twilight Zone, Theatre of Magic, Fish Tales, etc.) | `.zip` (MAME ROM dumps) | **Static**: DMD scene PNGs, animation MP4s, font strips, and per-track DCS sound-ROM audio decoded from the ROM. **Capture**: per-scene gameplay MP4s with synced DCS audio via libpinmame (scripted playthrough — skill shots, mode starts, multiball, jackpots). Optional **Auto-transcribe** names the extracted audio by its spoken call-outs. |
 
 The full per-game lists with the format-specific quirks live in the plugin
@@ -78,6 +79,7 @@ sources:
 [jjp/games.py](pinball_decryptor/plugins/jjp/games.py),
 [pb/games.py](pinball_decryptor/plugins/pb/games.py),
 [spooky/games.py](pinball_decryptor/plugins/spooky/games.py),
+[stern/games.py](pinball_decryptor/plugins/stern/games.py),
 [williams/games.py](pinball_decryptor/plugins/williams/games.py).
 
 The Williams plugin has two complementary extract paths, independently
@@ -421,6 +423,7 @@ pinball_decryptor/
 │   ├── jjp/                      # Jersey Jack Pinball (+ private Docker)
 │   ├── pb/                       # Pinball Brothers
 │   ├── spooky/                   # Spooky Pinball (+ private Docker)
+│   ├── stern/                    # Stern Spike 2 (ext4 card; image.bin codec via unicorn)
 │   └── williams/                 # WPC-era (static ROM scrape + PinMAME capture)
 ├── app.py                        # controller — wires GUI ↔ plugins
 └── icon.{ico,png}

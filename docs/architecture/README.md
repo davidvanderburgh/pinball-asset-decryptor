@@ -19,6 +19,7 @@ These complement the deeper format reverse-engineering session logs:
 | Barrels of Fun | `bof` | Godot PCK inside GPG `.fun` (May-2026 RSCC/Zstd) | ✅ | — | [bof.md](bof.md) |
 | Jersey Jack | `jjp` | Encrypted ext4 `edata` in ISO (`fl.dat` + CRC32 forgery) | ✅ | ✅ | [jjp.md](jjp.md) |
 | Chicago Gaming | `cgc` | Nested installer `.img` (ext4); JPS `.bnk` audio | ✅ | — | [cgc.md](cgc.md) |
+| Stern Pinball | `stern` | Spike 2 raw SD-card `.img` (ext4); `image.bin` stream-cipher audio | ✅ | ✅ | [stern.md](stern.md) |
 | Williams | `williams` | WPC/DCS MAME ROMs (extract-only; PinMAME capture) | — | — | [williams.md](williams.md) |
 | Dutch Pinball | `dp` | TBL plain-ZIP deltas; AAIW Clonezilla `.img` | ✅¹ | ✅ | [dp.md](dp.md) |
 
@@ -46,4 +47,4 @@ These complement the deeper format reverse-engineering session logs:
 
 - Live in `docs/architecture/`; source links use `../../` to reach the repo root.
 - Cite concrete `file:line`; mark anything not confirmed in code as `(unverified)`.
-- Same section skeleton across all eight, so they're skimmable side by side.
+- Same section skeleton across all nine, so they're skimmable side by side.

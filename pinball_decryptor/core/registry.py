@@ -509,6 +509,30 @@ class Manufacturer(ABC):
         """Optional 'How to install' text shown beneath the Write button."""
         return None
 
+    def write_intro(self) -> str:
+        """Static one-line intro at the top of the Write tab (above the
+        build/direct toggle).  Default describes the ISO-build flow; override
+        for a different medium (e.g. Stern builds/writes an SD card)."""
+        return "Re-pack modified assets into an installable update file."
+
+    def build_write_description(self) -> str:
+        """Description shown above the build-an-image (not direct) Write panel.
+
+        Default is the ISO update-file wording; override for a different output
+        artifact (e.g. Stern builds a patched SD-card image)."""
+        return "Re-pack modified assets into an installable update file."
+
+    def direct_write_description(self) -> str:
+        """Description shown above the Direct-write (write-to-card/SSD) panel.
+
+        Default is the SSD/re-encrypt wording (JJP); it uses
+        :attr:`direct_medium_noun` so the medium reads correctly per plugin.
+        Override when the write mechanics differ (e.g. Stern re-encodes audio
+        and patches video/images in place rather than re-encrypting files)."""
+        return (f"Re-encrypt changed files and write them directly to the game "
+                f"{self.direct_medium_noun}. Audio files are automatically "
+                f"trimmed or padded to match the original duration.")
+
 
 # ---------------------------------------------------------------------------
 # Registry storage

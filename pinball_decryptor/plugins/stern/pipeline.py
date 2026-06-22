@@ -16,19 +16,12 @@ import os
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
 from .formats import detect_game, display_for_key, linux_partitions
+from .rawdevice import RawDeviceFile, is_device_path
 
 try:                                   # engine import is optional during bring-up
     from . import engine
 except Exception:                      # pragma: no cover - engine deps may be absent
     engine = None
-
-
-_DIRECT_PENDING = (
-    "Direct SD read/write is not enabled for Spike 2 yet.\n\n"
-    "For now, image the card to a raw .img file (e.g. with Win32 Disk Imager "
-    "or `dd`) and use the file-based Extract / Write here — those are fully "
-    "supported.  Reading/writing the physical card directly is the next step."
-)
 
 
 def _require_engine():
@@ -76,7 +69,7 @@ class SternExtractPipeline(BasePipeline):
         n = engine.extract_all(
             self.input_path, parts, self.output_dir,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            phase=self._set_phase)
+            phase=self._set_phase, log_line=self._log_line)
 
         self._set_phase(5)  # Checksums
         # Baseline so Write/Mod Pack can tell which assets the user edited (and
@@ -114,6 +107,14 @@ class SternWritePipeline(BasePipeline):
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
+    """Extract straight from the physical SD card (no .img intermediate).
+
+    Identical decode path to :class:`SternExtractPipeline` — the only
+    difference is the disk source: the pure-Python ``Ext4Reader`` is pointed at
+    the raw device (``\\\\.\\PHYSICALDRIVEn`` / ``/dev/sdX``) via a
+    sector-aligned :class:`~.rawdevice.RawDeviceFile` instead of a file path.
+    The GUI gates this on Administrator/root before we're reached."""
+
     def __init__(self, device_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
                  partition_override=None):
@@ -123,11 +124,50 @@ class SternDirectSsdExtractPipeline(BasePipeline):
         self.partition_override = partition_override
 
     def _run(self):
-        self._set_phase(0)
-        raise PipelineError("Direct SD", _DIRECT_PENDING)
+        self._set_phase(0)  # Read SD card
+        self._log("Reading the SD card...", "info")
+        if not is_device_path(self.device_path):
+            raise PipelineError(
+                "Read SD card",
+                "Direct SD needs a physical drive (e.g. \\\\.\\PHYSICALDRIVE2), "
+                "not a file path (got %r). Pick the card from the Game SD "
+                "dropdown." % self.device_path)
+        _require_engine()
+        # Confirm the device is a Spike 2 card and resolve its ext partitions
+        # (raises a clear error on a non-Spike card or when it can't be read,
+        # e.g. without Administrator).
+        parts = engine.device_partitions(
+            self.device_path, self.partition_override, log=self._log)
+        self._log("Spike 2 SD card detected (%d ext partition(s))."
+                  % len(parts), "success")
+        self._check_cancel()
+
+        self._set_phase(1)  # Locate partitions
+        os.makedirs(self.output_dir, exist_ok=True)
+        # extract_all drives phases 2-5 (video / images / audio / checksums);
+        # open_disk points the reader at the raw card.
+        n = engine.extract_all(
+            self.device_path, parts, self.output_dir,
+            log=self._log, progress=self._progress,
+            cancel=lambda: self._cancelled, phase=self._set_phase,
+            open_disk=lambda: RawDeviceFile(self.device_path, writable=False),
+            log_line=self._log_line)
+
+        self._set_phase(5)  # Checksums
+        self._log("Generating checksums...", "info")
+        self._progress(0, 0, "Generating checksums...")
+        generate_checksums(self.output_dir, log_cb=self._log,
+                           progress_cb=self._progress)
+        self._done(True, "Extracted %d Spike 2 sound(s) from the SD card to %s"
+                   % (n, self.output_dir))
 
 
 class SternDirectSsdWritePipeline(BasePipeline):
+    """Write edited assets straight back onto the physical SD card (in place).
+
+    The Direct-SD twin of :class:`SternWritePipeline`: same size-neutral patch
+    set, applied to the card device instead of an image copy."""
+
     def __init__(self, device_path, assets_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
                  partition_override=None):
@@ -137,5 +177,17 @@ class SternDirectSsdWritePipeline(BasePipeline):
         self.partition_override = partition_override
 
     def _run(self):
-        self._set_phase(0)
-        raise PipelineError("Direct SD", _DIRECT_PENDING)
+        self._set_phase(0)  # Scan
+        if not is_device_path(self.device_path):
+            raise PipelineError(
+                "Scan",
+                "Direct SD needs a physical drive (e.g. \\\\.\\PHYSICALDRIVE2), "
+                "not a file path (got %r). Pick the card from the Game SD "
+                "dropdown." % self.device_path)
+        _require_engine()
+        n = engine.write_device(
+            self.device_path, self.assets_dir,
+            log=self._log, progress=self._progress,
+            cancel=lambda: self._cancelled, phase=self._set_phase,
+            partition_override=self.partition_override)
+        self._done(True, "Wrote %d change(s) directly to the SD card." % n)

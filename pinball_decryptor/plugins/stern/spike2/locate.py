@@ -10,10 +10,12 @@ string xrefs and instruction-pattern matching.
 
 Validated: every address here reproduces the TMNT hardcoded constants exactly
 (so the emulator can use this path on TMNT too without drift), and the full set
-drives a bit-exact Godzilla decode.  Builds whose firmware shape this module
-can't fully locate (e.g. the very large Foo Fighters / Led Zeppelin builds,
-whose master-directory decoder isn't found yet) return ``None`` from
-:func:`locate_all`, so the engine skips audio gracefully.
+drives bit-exact decode + re-encode on all 26 shipped Spike 2 titles — including
+the very large Foo Fighters / Led Zeppelin builds (their master-directory
+decoder is found via :func:`_find_masterdir_decode`; they just take longer for
+the one-time params derivation).  Should a *future* build's firmware shape ever
+fail to fully locate, :func:`locate_all` returns ``None`` so the engine skips
+audio gracefully — a safety net no current title hits.
 
 Everything is read straight from the ELF bytes; nothing here boots or needs
 unicorn.  capstone is used only for the few instruction-pattern scans.

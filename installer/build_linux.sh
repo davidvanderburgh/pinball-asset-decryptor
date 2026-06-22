@@ -55,6 +55,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.ext4" \
+    --hidden-import "pinball_decryptor.plugins.stern.rawdevice" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.elf" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.rbtree" \

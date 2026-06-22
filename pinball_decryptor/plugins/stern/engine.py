@@ -63,7 +63,7 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
         except Exception:
             pass
     log("Deriving codec parameters from the firmware (one-time per card, "
-        "~1-2 min)...", "info")
+        "~2-5 min)...", "info")
     if progress:
         progress(0, 0, "Deriving codec parameters...")
     params = emu.derive_params()
@@ -295,9 +295,19 @@ def _write_wav(path, L, R, stereo):
 # public API (called by the pipelines)
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
-                cancel=None, phase=None):
+                cancel=None, phase=None, open_disk=None, log_line=None):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
-    (under ``audio/``) and extract videos (under ``video/``)."""
+    (under ``audio/``) and extract videos (under ``video/``).
+
+    ``open_disk`` (a zero-arg callable returning a fresh seekable byte stream)
+    overrides how the disk is opened — Direct-SD passes one that returns a
+    :class:`.rawdevice.RawDeviceFile` over the physical card; the default opens
+    the image file at ``image_path``.  Everything downstream (game_real +
+    image.bin are streamed to a temp dir, then decoded) is identical either way.
+
+    ``log_line`` (``cb(key, text, level)``) drives the live per-sound decode
+    progress — one in-place-updated line per sound; omitted → no live lines.
+    """
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     phase = phase or (lambda i: None)
@@ -309,7 +319,7 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
 
     work = tempfile.mkdtemp(prefix="spike2_")
     emu = None
-    disk_f = open(image_path, "rb")
+    disk_f = open_disk() if open_disk is not None else open(image_path, "rb")
     try:
         os.makedirs(output_dir, exist_ok=True)
         gr_path, img_path, reader, _fw, _img = _extract_inputs(
@@ -366,7 +376,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             try:
                 log("Decoding %d sounds across %d processes..." % (total, nworkers), "info")
                 ok = _parallel_decode(gr_path, img_path, params, audio_dir,
-                                      log, progress, cancel, nworkers)
+                                      log, progress, cancel, nworkers,
+                                      log_line=log_line)
             except Exception as e:
                 log("Parallel decode unavailable (%s); using a single process."
                     % e, "warning")
@@ -374,7 +385,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         if ok is None:
             emu = Spike2Emu(gr_path, img_path)
             emu.boot()
-            ok = _serial_decode(emu, params, audio_dir, log, progress, cancel)
+            ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
+                                log_line=log_line)
         log("Decoded %d/%d sounds to %s" % (ok, total, audio_dir), "success")
         return ok
     finally:
@@ -384,9 +396,31 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         _rmtree(work)
 
 
-def _serial_decode(emu, params, audio_dir, log, progress, cancel):
+def _serial_progress_cb(p, emit):
+    """Throttled per-block callback that emits a ``prog`` event for a long sound
+    in the single-process path (mirrors the parallel workers, minus the queue).
+    Short sounds never tick (they finish before the threshold)."""
+    import time
+    t0 = time.monotonic()
+    st = {"last": 0.0}
+    length = p.get("length", 0); chan = p.get("chan", 1)
+
+    def cb(cur, nmax):
+        now = time.monotonic()
+        if now - t0 < 2.5 or now - st["last"] < 3.0:
+            return
+        st["last"] = now
+        emit(("prog", p["idx"], cur / max(nmax, 1), length, chan))
+    return cb
+
+
+def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None):
     total = len(params)
     ok = 0
+
+    def emit(msg):
+        _emit_decode(msg, log, log_line)
+
     for i, p in enumerate(params):
         if cancel():
             log("Cancelled after %d sounds." % ok, "info")
@@ -394,8 +428,11 @@ def _serial_decode(emu, params, audio_dir, log, progress, cancel):
         if progress:
             progress(15 + int(i * 85 / max(total, 1)), 100,
                      "Decoding sound %d/%d" % (i + 1, total))
+        length = p.get("length", 0); chan = p.get("chan", 1)
+        emit(("start", p["idx"], length, chan))
         try:
-            r = emu.decode(p, cancel=cancel)
+            r = emu.decode(p, cancel=cancel,
+                           progress=_serial_progress_cb(p, emit))
         except Exception as e:
             log("idx %d: decode failed (%s)" % (p["idx"], e), "warning")
             continue
@@ -403,23 +440,106 @@ def _serial_decode(emu, params, audio_dir, log, progress, cancel):
             continue
         L, R, stereo = r
         _write_wav(os.path.join(audio_dir, "idx%04d.wav" % p["idx"]), L, R, stereo)
+        emit(("done", p["idx"], length, chan))
         ok += 1
     return ok
 
 
+def _dur_str(length, chan):
+    """``(stereo 4:31)`` from a per-channel sample count + channel count."""
+    secs = int(length / 44100.0)
+    return "(%s %d:%02d)" % ("stereo" if chan == 2 else "mono",
+                             secs // 60, secs % 60)
+
+
+def _bar(frac, width=12):
+    n = max(0, min(width, int(round(frac * width))))
+    return "[" + "#" * n + "." * (width - n) + "]"
+
+
+def _decode_line(msg):
+    """``(key, text, level)`` for a worker decode event (start/prog/done).
+
+    The key is per-sound (``dec<idx>``) so the GUI rewrites ONE line per sound
+    in place — the bar animates from start → done instead of spamming a line per
+    tick."""
+    kind = msg[0]
+    if kind == "start":
+        _, idx, length, chan = msg
+        return ("dec%d" % idx,
+                "    idx%04d %s %s   0%%" % (idx, _dur_str(length, chan), _bar(0)),
+                "info")
+    if kind == "prog":
+        _, idx, frac, length, chan = msg
+        return ("dec%d" % idx,
+                "    idx%04d %s %s %3d%%"
+                % (idx, _dur_str(length, chan), _bar(frac), int(frac * 100)),
+                "info")
+    # done
+    _, idx, length, chan = msg
+    return ("dec%d" % idx,
+            "    idx%04d %s decoded" % (idx, _dur_str(length, chan)), "success")
+
+
+def _emit_decode(msg, log, log_line):
+    """Forward a decode event: an in-place keyed line when ``log_line`` is wired
+    (the GUI), else a plain appended line for the ``done`` events only (so a
+    non-GUI caller's log gets one concise line per finished sound, not a tick
+    flood)."""
+    if log_line is not None:
+        key, text, level = _decode_line(msg)
+        log_line(key, text, level)
+    elif msg[0] == "done":
+        _, text, level = _decode_line(msg)
+        log(text, level)
+
+
 def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel,
-                     nworkers):
+                     nworkers, log_line=None):
     """Decode across ``nworkers`` spawned emulator processes (each boots once,
     decodes its share, writes WAVs directly).  Raises on any pool failure so the
-    caller can fall back to a single process."""
+    caller can fall back to a single process.
+
+    A shared queue carries per-sound start/progress/done events from the
+    workers; a daemon thread drains it and forwards each to ``_emit_decode`` so
+    the GUI shows one in-place, animating line per sound (the long music tracks
+    no longer look stalled)."""
     import multiprocessing as mp
+    import threading
 
     from .spike2.parallel import decode_to_wav, init_worker, probe
 
+    # Decode in natural (master-directory) order so the short sounds finish
+    # first and WAVs stream into the output folder right away — the live
+    # per-sound progress below surfaces the long music tracks (which would
+    # otherwise look stalled) without reordering the queue, so we don't trade
+    # away that "files appear as it goes" feedback.
     tasks = [(p, os.path.join(audio_dir, "idx%04d.wav" % p["idx"])) for p in params]
     total = len(tasks)
     ctx = mp.get_context("spawn")
-    pool = ctx.Pool(nworkers, initializer=init_worker, initargs=(gr_path, img_path))
+    # Manager queue: picklable across spawn (a plain mp.Queue isn't), so it can
+    # ride in the pool initargs to every worker.
+    mgr = ctx.Manager()
+    prog_q = mgr.Queue()
+    pool = ctx.Pool(nworkers, initializer=init_worker,
+                    initargs=(gr_path, img_path, prog_q))
+    stop_forward = threading.Event()
+
+    def _forward():
+        while not stop_forward.is_set():
+            try:
+                msg = prog_q.get(timeout=0.3)
+            except Exception:
+                continue
+            if msg is None:
+                break
+            try:
+                _emit_decode(msg, log, log_line)
+            except Exception:
+                pass
+    fwd = threading.Thread(target=_forward, daemon=True)
+    fwd.start()
+
     ok = 0
     try:
         # Confirm a worker actually booted within a generous window; a stalled
@@ -438,8 +558,18 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
                 break
         pool.close()
     finally:
+        stop_forward.set()
+        try:
+            prog_q.put(None)
+        except Exception:
+            pass
+        fwd.join(timeout=1.0)
         pool.terminate()
         pool.join()
+        try:
+            mgr.shutdown()
+        except Exception:
+            pass
     return ok
 
 
@@ -698,17 +828,25 @@ def _prepare_image_patches(reader, image_edits, work_dir, log, cancel):
     return patches, skipped
 
 
-def write_image(original_path, assets_dir, output_path, log=None, progress=None,
-                cancel=None):
-    """Patch a copy of the card image at ``output_path`` with the user's edits
-    (size-neutral, in place): re-encoded audio bodies inside ``image.bin``,
-    replaced LCD videos written over their original ``.asset`` files, and
-    replaced UI images written over their original ``.png`` files.  Any kind of
-    edit may be absent — a video/image-only write skips the firmware emulator
-    entirely."""
-    log = log or (lambda *a, **k: None)
-    cancel = cancel or (lambda: False)
-    import shutil
+def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
+                     phase=None):
+    """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
+    edits, and resolve them to a flat list of absolute on-disk writes
+    ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
+    ``disk_f`` — i.e. of the whole card image / device).
+
+    ``disk_f`` is an already-open seekable byte stream over the card image OR
+    the physical card; the caller owns it (it must stay open for the duration of
+    this call) and closes it afterwards.  This is the shared core of both the
+    file Write (:func:`write_image`) and the Direct-SD Write
+    (:func:`write_device`), so the exact same patch set is produced whether the
+    destination is an image copy or the card itself.
+
+    Returns ``(writes, counts)`` where ``counts`` is ``(n_audio, n_video,
+    n_image)``; returns ``(None, None)`` if cancelled.  Raises
+    ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
+    when nothing could be re-encoded / fit."""
+    phase = phase or (lambda i: None)
 
     import numpy as np
 
@@ -774,19 +912,18 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         if progress:
             progress(int(c * 10 / max(t, 1)), 100, "Reading image.bin")
 
-    parts = _linux_partitions(original_path)
     work = tempfile.mkdtemp(prefix="spike2_")
     emu = None
-    disk_f = open(original_path, "rb")
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         img_node = None
         reader = None
         if audio_edits:
+            phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             gr_path, img_path, reader, _fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
             if cancel():
-                return 0
+                return None, None
             if not audio_decode_supported(gr_path):
                 # This title's audio codec can't be re-encoded.  If the user
                 # only edited video, carry on and write that; otherwise it's a
@@ -814,7 +951,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 gr = sr = None
                 for n, (idx, wav_path) in enumerate(sorted(audio_edits.items())):
                     if cancel():
-                        return 0
+                        return None, None
                     if idx not in byidx:
                         log("idx %d not a known sound; skipping." % idx, "warning")
                         continue
@@ -868,7 +1005,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             video_patches, _vskip = _prepare_video_patches(
                 reader, video_edits, work, log, cancel)
             if cancel():
-                return 0
+                return None, None
 
         image_patches = []     # (inode, payload bytes == inode size)
         if image_edits:
@@ -877,7 +1014,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             image_patches, _iskip = _prepare_image_patches(
                 reader, image_edits, work, log, cancel)
             if cancel():
-                return 0
+                return None, None
 
         if not audio_patches and not video_patches and not image_patches:
             raise RuntimeError(
@@ -885,37 +1022,148 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 "video or image could be fit to its original slot (the card "
                 "image was not modified).")
 
-        # copy the card image, then patch the changed bytes in place
-        log("Copying card image to output...", "info")
-        if progress:
-            progress(0, 0, "Copying image...")
-        shutil.copyfile(original_path, output_path)
-
-        with open(output_path, "r+b") as out:
-            for body_off, body in audio_patches.items():
-                for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
-                    out.seek(disk)
-                    out.write(body[:n])
-                    body = body[n:]
-            for node, payload in video_patches + image_patches:
-                off = 0
-                for disk, n in reader.disk_ranges(node, 0, len(payload)):
-                    out.seek(disk)
-                    out.write(payload[off:off + n])
-                    off += n
-            out.flush()
-            os.fsync(out.fileno())
-        n_written = len(audio_patches) + len(video_patches) + len(image_patches)
-        log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s))."
-            % (output_path, len(audio_patches), len(video_patches),
-               len(image_patches)), "success")
-        return n_written
+        # Flatten every patch to absolute (disk_offset, bytes) writes via the
+        # ext4 file->disk map.  The offsets are relative to the start of the
+        # card image / device, so the same list applies whether we patch an
+        # image copy (write_image) or the card itself (write_device).
+        writes = []
+        for body_off, body in audio_patches.items():
+            for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
+                writes.append((disk, body[:n]))
+                body = body[n:]
+        for node, payload in video_patches + image_patches:
+            off = 0
+            for disk, n in reader.disk_ranges(node, 0, len(payload)):
+                writes.append((disk, payload[off:off + n]))
+                off += n
+        return writes, (len(audio_patches), len(video_patches),
+                        len(image_patches))
     finally:
-        if disk_f is not None:
-            disk_f.close()
         if emu is not None:
             emu.close()
         _rmtree(work)
+
+
+def _apply_writes(out, writes):
+    """Apply ``[(disk_offset, bytes), ...]`` to an open seekable destination
+    (an image copy opened ``r+b``, or a writable :class:`.rawdevice.RawDeviceFile`
+    over the card)."""
+    for disk, b in writes:
+        out.seek(disk)
+        out.write(b)
+
+
+def write_image(original_path, assets_dir, output_path, log=None, progress=None,
+                cancel=None):
+    """Patch a copy of the card image at ``output_path`` with the user's edits
+    (size-neutral, in place): re-encoded audio bodies inside ``image.bin``,
+    replaced LCD videos written over their original ``.asset`` files, and
+    replaced UI images written over their original ``.png`` files.  Any kind of
+    edit may be absent — a video/image-only write skips the firmware emulator
+    entirely."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    import shutil
+
+    parts = _linux_partitions(original_path)
+    disk_f = open(original_path, "rb")
+    try:
+        writes, counts = _compute_patches(
+            disk_f, parts, assets_dir, log, progress, cancel)
+    finally:
+        disk_f.close()
+    if writes is None:                          # cancelled mid-compute
+        return 0
+
+    # copy the card image, then patch the changed bytes in place
+    log("Copying card image to output...", "info")
+    if progress:
+        progress(0, 0, "Copying image...")
+    shutil.copyfile(original_path, output_path)
+    with open(output_path, "r+b") as out:
+        _apply_writes(out, writes)
+        out.flush()
+        os.fsync(out.fileno())
+    n_audio, n_video, n_image = counts
+    log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s))."
+        % (output_path, n_audio, n_video, n_image), "success")
+    return n_audio + n_video + n_image
+
+
+def device_partitions(device_path, partition_override=None, log=None):
+    """Confirm a raw device is a Spike 2 card and return its ext partitions
+    ``[(byte_offset, byte_size), ...]`` (largest first) for ``_locate`` to
+    search — the Direct-SD twin of :func:`formats.linux_partitions`.
+
+    Reads only the device's MBR (sector-aligned).  Honors an optional 1-based
+    MBR partition override.  Raises ``RuntimeError`` if the device can't be read
+    (e.g. without Administrator) or doesn't carry the Spike 2 signature, so we
+    never extract/write the wrong drive."""
+    log = log or (lambda *a, **k: None)
+    from .formats import (is_spike_card_parts, linux_partitions_from_parts,
+                          parse_mbr_partitions_bytes)
+    from .rawdevice import read_mbr
+
+    mbr = read_mbr(device_path)
+    if not mbr:
+        raise RuntimeError(
+            "Couldn't read the selected drive (%s). On Windows, Direct SD needs "
+            "Administrator — re-launch as administrator and try again."
+            % device_path)
+    parts_raw = parse_mbr_partitions_bytes(mbr)
+    if not is_spike_card_parts(parts_raw):
+        raise RuntimeError(
+            "The selected drive isn't a Stern Spike 2 SD card — its partition "
+            "table doesn't match the Spike 2 signature. Double-check the drive "
+            "selection (and that the card was removed from the machine and "
+            "connected to this PC).")
+    if partition_override is not None:
+        match = [(lba * 512, sectors * 512)
+                 for (idx, _t, lba, sectors) in parts_raw
+                 if idx == partition_override - 1]
+        if match:
+            log("Using forced partition #%d." % partition_override, "info")
+            return match
+        log("Forced partition #%d not found on the card; auto-discovering "
+            "instead." % partition_override, "warning")
+    return linux_partitions_from_parts(parts_raw)
+
+
+def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
+                 phase=None, partition_override=None):
+    """Direct-SD twin of :func:`write_image`: patch the user's edits straight
+    onto the physical card (size-neutral, in place) — no intermediate image.
+
+    Verifies the device carries the Spike 2 partition signature first (so we
+    never write to the wrong drive), computes the identical patch set via
+    :func:`_compute_patches`, then writes those exact byte ranges back to the
+    card with a sector-aligned :class:`.rawdevice.RawDeviceFile`.  Needs the
+    Administrator/root handle the GUI already gates the Direct-SD button on."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    phase = phase or (lambda i: None)
+    from .rawdevice import RawDeviceFile
+
+    phase(0)  # Scan
+    parts = device_partitions(device_path, partition_override, log=log)
+
+    with RawDeviceFile(device_path, writable=False) as disk_f:
+        writes, counts = _compute_patches(
+            disk_f, parts, assets_dir, log, progress, cancel, phase=phase)
+    if writes is None:                          # cancelled mid-compute
+        return 0
+
+    phase(2)  # Write to SD card
+    log("Writing changes directly to the SD card (in place)...", "info")
+    if progress:
+        progress(0, 0, "Writing to SD card...")
+    with RawDeviceFile(device_path, writable=True) as out:
+        _apply_writes(out, writes)
+        out.flush()
+    n_audio, n_video, n_image = counts
+    log("Wrote to SD card: %d sound(s), %d video(s), %d image(s)."
+        % (n_audio, n_video, n_image), "success")
+    return n_audio + n_video + n_image
 
 
 # --------------------------------------------------------------------------

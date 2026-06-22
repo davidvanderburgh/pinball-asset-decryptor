@@ -298,11 +298,30 @@ class MusicIdPipeline(BasePipeline):
         extra = ("\nRenamed %d confident match(es)." % renamed
                  if self.rename_after else "")
         self._log("Done.", "success")
+        # A low hit-rate is normal for some titles and is NOT a failure:
+        # AcoustID does exact-recording matching, so it only IDs a clip when the
+        # pin plays the same master that's been fingerprinted in its database.
+        # Pins that use re-masters / re-mixes / game-edited cuts (or original
+        # soundtracks not in any database) just won't match, even for famous
+        # songs — the audio still extracted fine; only the auto-naming is
+        # limited.  Matches per title therefore vary a lot (a band pin using the
+        # commercial remasters can hit most tracks; another can hit only a few).
+        low = conf < max(1, len(rows) // 2)
+        note = (
+            "A low match count is expected for some pins and does NOT mean "
+            "extraction failed — the audio is fine, only the auto-naming is "
+            "limited.\nAcoustID matches the exact commercial recording; pins "
+            "that use non-standard masters / re-mixes / game-edited cuts (or "
+            "original soundtracks) won't match even well-known songs. Unmatched "
+            "clips keep their 'music' tag; you can name those by ear (e.g. "
+            "Shazam)."
+            if low else
+            "No match usually means a non-standard master / game-edited cut or "
+            "an original-soundtrack track not in any fingerprint database.")
         self._done(True,
             "Identified %d of %d music clip(s) (score >= %.2f).%s\n\n"
-            "Output: %s\n\nNo match usually means an original-soundtrack track "
-            "(not in any database) or a heavily edited cut."
-            % (conf, len(rows), self.min_score, extra, out))
+            "Output: %s\n\n%s"
+            % (conf, len(rows), self.min_score, extra, out, note))
 
     def _rename(self, rows):
         n = 0

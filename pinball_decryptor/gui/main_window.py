@@ -125,6 +125,10 @@ class MainWindow:
         # Forward to the same mfr restores their full log history.
         self._log_widgets = {}    # mfr.key -> tk.Text
         self._log_text = None     # alias for the currently-packed widget
+        # Run counter namespacing the in-place keyed log lines (see
+        # update_log_line); bumped on each run start so re-runs don't edit the
+        # previous run's lines.
+        self._log_line_run = 0
 
         # Default size picked so the picker fits all 4 current cards
         # (incl. Spooky's 14-game list) without scrolling on a typical
@@ -921,7 +925,7 @@ class MainWindow:
                  "what's said — e.g. “Super jackpot!”. Also writes "
                  "callouts.csv.",
             font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=560, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
 
         # Music-ID: identify each full music track online via AcoustID +
         # MusicBrainz and rename it by song.  Chained after transcribe.
@@ -937,7 +941,7 @@ class MainWindow:
                  "artist + title — e.g. “Led Zeppelin - Kashmir”. "
                  "Needs internet.",
             font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=560, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
 
         # Decode DMD checkbox -- packed only when the active manufacturer
         # has capabilities.decode_dmd (currently just CGC).  When ON,
@@ -989,10 +993,13 @@ class MainWindow:
         f = self._tab_write
         pad = {"padx": 10, "pady": 4}
 
-        ttk.Label(
+        # Static intro (manufacturer-aware; set in apply_manufacturer).  The
+        # default ISO-build wording is wrong for an SD-card plugin like Stern.
+        self._write_intro_lbl = ttk.Label(
             f,
             text="Re-pack modified assets into an installable update file.",
-            font=(_SANS_FONT, 9, "italic")).pack(anchor=tk.W, **pad)
+            font=(_SANS_FONT, 9, "italic"))
+        self._write_intro_lbl.pack(anchor=tk.W, **pad)
 
         # Write-destination toggle (hidden for plugins without
         # direct_ssd).  Action-oriented language here — writes have
@@ -3833,6 +3840,9 @@ class MainWindow:
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)
 
+        # Per-mfr Write-tab intro (SD-card plugins shouldn't read "update file").
+        self._write_intro_lbl.configure(text=mfr.write_intro())
+
         # Per-mfr prereq indicators - start in "checking" state.  The
         # App's worker thread fills in actual results via
         # set_prereq_result() shortly after.
@@ -4611,6 +4621,11 @@ class MainWindow:
             self._refresh_extract_phases()
             # Re-evaluate the Extract button gate after a source flip.
             self._refresh_ssd_run_buttons()
+            # A source flip changes the tab's content height (the SSD mode adds
+            # the drive row + warning/admin banners); re-size the notebook so
+            # the bottom controls — the auto-name checkboxes — aren't left
+            # clipped by the previously-pinned height.
+            self._notebook.after_idle(self._resize_notebook_to_current_tab)
         else:  # write
             source = self.write_input_source_var.get()
             self._write_upd_row.pack_forget()
@@ -4647,14 +4662,11 @@ class MainWindow:
                     self._write_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
-                # SSD mode: explain in-place encrypt + audio
-                # trim/pad behaviour so users know what to expect
-                # before they click Apply Modifications.
+                # SSD mode: explain in-place write behaviour so users
+                # know what to expect before they click Apply
+                # Modifications.  Per-manufacturer (medium-aware) wording.
                 self._write_desc.configure(
-                    text="Re-encrypt changed files and write them "
-                         "directly to the game SSD. Audio files are "
-                         "automatically trimmed or padded to match "
-                         "the original duration.")
+                    text=self._current_mfr.direct_write_description())
                 self._write_desc.pack(
                     anchor=tk.W, padx=10, pady=(2, 6),
                     before=self._write_filename_lbl)
@@ -4684,8 +4696,7 @@ class MainWindow:
                     anchor=tk.W, padx=26, pady=(0, 2),
                     before=self._write_assets_row())
                 self._write_desc.configure(
-                    text="Re-pack modified assets into an "
-                         "installable update file.")
+                    text=self._current_mfr.build_write_description())
                 self._write_desc.pack(
                     anchor=tk.W, padx=10, pady=(2, 6),
                     before=self._write_assets_row())
@@ -4701,6 +4712,9 @@ class MainWindow:
                     fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
                     before=self._write_filename_lbl)
                 self._scan_write_preview()
+            # The filename/output label is source-dependent (blank in
+            # SD-card mode) — refresh it now that the source flipped.
+            self._update_write_filename()
             # Either branch may have changed the phase indicator
             # shape — refresh both extract and write phases.
             self._refresh_extract_phases()
@@ -4708,6 +4722,9 @@ class MainWindow:
             # button gates: SSD + non-admin disables them so the
             # user can't kick off a doomed run.
             self._refresh_ssd_run_buttons()
+            # Re-size the notebook to the new content height (SSD mode adds the
+            # drive row + warning/preview) so nothing is left clipped.
+            self._notebook.after_idle(self._resize_notebook_to_current_tab)
 
     def _extract_output_row(self):
         """Output Folder row — anchor for ``before=`` repacks."""
@@ -5679,6 +5696,13 @@ class MainWindow:
             self._extract_warn.configure(text="")
 
     def _update_write_filename(self):
+        # Direct-SD write has no output file (the card itself is the
+        # destination) and the file-mode "Original" input row is hidden, so
+        # don't surface its (possibly stale, e.g. a prior session's) filename.
+        if (getattr(self, "write_input_source_var", None) is not None
+                and self.write_input_source_var.get() == "ssd"):
+            self._write_filename_lbl.configure(text="")
+            return
         upd = self.write_upd_var.get().strip()
         out = self.write_output_var.get().strip()
         name = os.path.basename(upd) if upd else ""
@@ -5709,6 +5733,29 @@ class MainWindow:
         self._log_text.insert(tk.END, text + "\n", level)
         self._log_text.configure(state=tk.DISABLED)
         self._log_text.see(tk.END)
+
+    def update_log_line(self, key, text, level="info"):
+        """Create-or-update a single *keyed* log line in place (live per-sound
+        decode progress: one animating line per sound, not a line per tick).
+
+        The first call for a key appends a new line and remembers its span via a
+        per-key tag; later calls rewrite just that span.  Keys are namespaced by
+        a run counter (bumped on each run start) so a re-run never edits the
+        previous run's lines left in the scrollback."""
+        t = self._log_text
+        if t is None:
+            return
+        tag = "ll_%d_%s" % (self._log_line_run, key)
+        t.configure(state=tk.NORMAL)
+        rng = t.tag_ranges(tag)
+        if rng:
+            t.delete(rng[0], rng[1])
+            t.insert(rng[0], text, (tag, level))
+        else:
+            t.insert(tk.END, text, (tag, level))
+            t.insert(tk.END, "\n")
+            t.see(tk.END)
+        t.configure(state=tk.DISABLED)
 
     def append_log_link(self, text, url):
         if self._log_text is None:
@@ -5775,8 +5822,19 @@ class MainWindow:
     # Running state
     # ------------------------------------------------------------------
 
+    def set_cancelling(self):
+        """User clicked Cancel: disable BOTH cancel buttons (one press is
+        enough — the press cancels the running job and every queued follow-up)
+        and show feedback.  The action buttons stay disabled; they're re-enabled
+        only when the job actually stops, via ``set_running(False)``."""
+        self._extract_cancel_btn.configure(state=tk.DISABLED)
+        self._write_cancel_btn.configure(state=tk.DISABLED)
+        self.set_status("Cancelling...")
+
     def set_running(self, running, mode="extract"):
         if running:
+            # New run → new namespace for in-place keyed log lines.
+            self._log_line_run += 1
             self._extract_btn.configure(state=tk.DISABLED)
             self._extract_cancel_btn.configure(state=tk.NORMAL)
             self._write_btn.configure(state=tk.DISABLED)

@@ -10,8 +10,8 @@ from tkinter import filedialog, messagebox
 from . import __version__
 from .core import modpack
 from .core.config import APP_NAME, SETTINGS_FILE
-from .core.messages import (DoneMsg, LinkMsg, LogMsg, PhaseMsg, PrereqMsg,
-                            ProgressMsg)
+from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
+                            PrereqMsg, ProgressMsg)
 from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import check_for_update
@@ -30,6 +30,11 @@ class App:
         self.msg_queue = queue.Queue()
         self.pipeline = None
         self._active_mode = "extract"
+        # Set when the user clicks Cancel; checked by the post-job chain
+        # (transcribe / music-ID / etc.) so ONE press cancels the running job
+        # AND every queued follow-up, instead of one press per chained job.
+        # Reset when a new user-initiated run starts.
+        self._cancel_requested = False
         self._current_mfr = None
 
         self._settings = self._load_settings_file()
@@ -141,6 +146,8 @@ class App:
                 elif isinstance(msg, ProgressMsg):
                     self.window.set_progress(
                         msg.current, msg.total, msg.desc, mode=self._active_mode)
+                elif isinstance(msg, LogLineMsg):
+                    self.window.update_log_line(msg.key, msg.text, msg.level)
                 elif isinstance(msg, DoneMsg):
                     self._on_done(msg.success, msg.summary)
                 elif isinstance(msg, PrereqMsg):
@@ -399,6 +406,11 @@ class App:
         done_cb = lambda s, m: self.msg_queue.put(DoneMsg(s, m))
         return log_cb, phase_cb, progress_cb, done_cb
 
+    def _post_log_line(self, key, text, level="info"):
+        """Thread-safe poster for an in-place keyed log line (live per-sound
+        decode progress).  Set on extract pipelines via ``set_log_line_cb``."""
+        self.msg_queue.put(LogLineMsg(key, text, level))
+
     # ------------------------------------------------------------------
     # Extract
     # ------------------------------------------------------------------
@@ -450,6 +462,7 @@ class App:
             self.window.write_assets_var.set(output_path)
 
         self._active_mode = "extract"
+        self._cancel_requested = False
         self.window.set_running(True, mode="extract")
         self.window.reset_steps(mode="extract")
 
@@ -531,6 +544,9 @@ class App:
                 log_cb, phase_cb, progress_cb, chained_done_cb,
                 **extra_kwargs,
             )
+        # Live per-sound decode progress (Stern) updates keyed log lines in
+        # place; harmless for plugins that never emit them.
+        self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _maybe_wrap_done_for_transcribe(self, original_done_cb, output_path):
@@ -548,7 +564,8 @@ class App:
             return original_done_cb
 
         def wrapped(success, summary):
-            if not success:
+            if self._cancel_requested or not success:
+                # Cancelled or failed → finalize now, don't chain.
                 original_done_cb(success, summary)
                 return
             # Defer the original done_cb until transcribe finishes,
@@ -668,16 +685,26 @@ class App:
 
         self._active_mode = "extract"
         self._current_run_is_direct_ssd = True
+        self._cancel_requested = False
         self.window.set_running(True, mode="extract")
         self.window.reset_steps(mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        # Chain auto-name (transcribe + music-ID) after a successful Direct-SD
+        # extract, exactly like the file Extract path: wrap done_cb inner-first
+        # (music-ID runs AFTER transcribe).  Each wrap is a no-op when its
+        # checkbox is off.
+        chained_done_cb = self._maybe_wrap_done_for_music_id(
+            done_cb, output_path)
+        chained_done_cb = self._maybe_wrap_done_for_transcribe(
+            chained_done_cb, output_path)
         self.pipeline = self._current_mfr.make_direct_ssd_extract_pipeline(
             device_path, output_path,
-            log_cb, phase_cb, progress_cb, done_cb,
+            log_cb, phase_cb, progress_cb, chained_done_cb,
             partition_override=partition_override,
             **self._collect_asset_filter_kwargs(),
         )
+        self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _collect_asset_filter_kwargs(self):
@@ -776,6 +803,7 @@ class App:
         self._save_settings()
 
         self._active_mode = "write"
+        self._cancel_requested = False
         self.window.set_running(True, mode="write")
         self.window.reset_steps(mode="write")
 
@@ -866,6 +894,7 @@ class App:
 
         self._active_mode = "write"
         self._current_run_is_direct_ssd = True
+        self._cancel_requested = False
         self.window.set_running(True, mode="write")
         self.window.reset_steps(mode="write")
 
@@ -896,6 +925,12 @@ class App:
         """
         if not self._current_mfr.capabilities.transcribe:
             return
+        if outer_done_cb is not None:
+            if self._cancel_requested:        # cancelled upstream → don't chain
+                outer_done_cb(False, outer_done_summary or "")
+                return
+        else:
+            self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
                       or self.window.write_assets_var.get().strip())
@@ -958,7 +993,7 @@ class App:
             return original_done_cb
 
         def wrapped(success, summary):
-            if not success:
+            if self._cancel_requested or not success:
                 original_done_cb(success, summary)
                 return
             self.msg_queue.put(LogMsg(
@@ -976,6 +1011,12 @@ class App:
         Extract/transcribe).  Mirrors ``_start_transcribe``."""
         if not self._current_mfr.capabilities.music_id:
             return
+        if outer_done_cb is not None:
+            if self._cancel_requested:        # cancelled upstream → don't chain
+                outer_done_cb(False, outer_done_summary or "")
+                return
+        else:
+            self._cancel_requested = False     # standalone = a fresh run
         assets_dir = (assets_dir_override
                       or self.window.extract_output_var.get().strip()
                       or self.window.write_assets_var.get().strip())
@@ -1261,8 +1302,15 @@ class App:
     # ------------------------------------------------------------------
 
     def _cancel(self):
+        if self._cancel_requested:
+            return                       # one press is enough
+        self._cancel_requested = True
+        self.window.append_log("Cancelling...", "error")
+        # Disable the Cancel button + show feedback so the user knows the press
+        # registered and doesn't have to keep mashing it; the action button is
+        # re-enabled only when the (whole) job actually stops, via set_running.
+        self.window.set_cancelling()
         if self.pipeline:
-            self.window.append_log("Cancelling...", "error")
             self.pipeline.cancel()
 
     def _on_done(self, success, summary):
@@ -1288,7 +1336,13 @@ class App:
             self.window.acknowledge_macos_fda()
         self._current_run_is_direct_ssd = False
         self.window.set_running(False, mode=self._active_mode)
-        if success:
+        if self._cancel_requested:
+            # User cancelled — don't dress it up as a failure with a scary
+            # error modal; just note it and reset.
+            self._cancel_requested = False
+            self.window.set_status("Cancelled")
+            self.window.append_log("Cancelled.", "info")
+        elif success:
             self.window.set_status("Complete!")
             title = "Extract Complete" if is_extract else "Write Complete"
             messagebox.showinfo(title, summary)

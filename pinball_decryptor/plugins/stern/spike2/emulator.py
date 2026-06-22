@@ -818,15 +818,27 @@ class Spike2Emu:
         m.reg_write(UC_ARM_REG_PC, m.reg_read(UC_ARM_REG_LR))
 
     def _ensure_body(self, span):
-        # Page-map the grown region via _ensure_page (not one bulk mem_map): on
-        # some builds (e.g. Metallica) the firmware faults a stray page into the
-        # BB region during boot/derive, so a bulk map would fail on the partial
-        # overlap and leave the rest unmapped -- then the body write would hit an
-        # unmapped page.  _ensure_page skips already-mapped pages individually.
+        # Grow the body buffer with ONE bulk mem_map.  Mapping page-by-page here
+        # is O(pages^2) -- unicorn inserts each region in O(region-count), so a
+        # long sound's huge body (a 12-min stereo track is ~134 MB = ~33k pages)
+        # spends minutes churning in mem_map *before any block decodes*, which
+        # looked like a hang stuck at 0%.  One contiguous region is O(1).
+        # Fallback: if a stray page already faulted into the BB region (e.g.
+        # Metallica's on-demand paging during boot) the bulk map raises on the
+        # overlap, so drop back to the page-by-page path (which skips the
+        # already-mapped pages individually).
         span = _algn(span)
-        if span > self.BBSZ:
-            self._ensure_range(self.BB + self.BBSZ, span - self.BBSZ)
-            self.BBSZ = span
+        if span <= self.BBSZ:
+            return
+        addr = self.BB + self.BBSZ
+        length = span - self.BBSZ
+        try:
+            self.mu.mem_map(addr, length)
+            for pg in range(addr, addr + length, PAGE):
+                self.mapped_pages.add(pg)
+        except UcError:
+            self._ensure_range(addr, length)
+        self.BBSZ = span
 
     def _build_obj(self, p):
         # generic builds replay the raw band-build obj verbatim (proven correct
@@ -873,9 +885,13 @@ class Spike2Emu:
         render_fn, decode_fn = self.codec_fns(p["scale"], p["chan"])
         return render_fn if p["chan"] == 2 else decode_fn
 
-    def decode(self, p, max_secs=None, cancel=None):
+    def decode(self, p, max_secs=None, cancel=None, progress=None):
         """Decode one sound to ``(L, R, stereo)`` int64 arrays (mono consumers
-        use only L).  Returns None if cancelled or no codec entry resolved."""
+        use only L).  Returns None if cancelled or no codec entry resolved.
+
+        ``progress`` (if given) is called ``(cur, nmax)`` once per decoded block
+        (samples-so-far / total) so a caller can surface live per-sound progress
+        for the long music tracks; it's cheap, so the caller throttles."""
         if self._generic:
             entry = self._resolve_entry(p)
             if entry is None:
@@ -883,7 +899,8 @@ class Spike2Emu:
         else:
             render_fn, decode_fn = self.codec_fns(p["scale"], p["chan"])
             entry = render_fn if p["chan"] == 2 else decode_fn
-        return self._decode_with_entry(p, entry, max_secs=max_secs, cancel=cancel)
+        return self._decode_with_entry(p, entry, max_secs=max_secs, cancel=cancel,
+                                       progress=progress)
 
     @staticmethod
     def _specflat(x):
@@ -952,7 +969,8 @@ class Spike2Emu:
                 return off + (va - vaddr)
         return None
 
-    def _decode_with_entry(self, p, entry, max_secs=None, cancel=None):
+    def _decode_with_entry(self, p, entry, max_secs=None, cancel=None,
+                           progress=None):
         """Decode one sound by driving codec ``entry``; see :meth:`decode`."""
         import numpy as np
         self.setup_decode()
@@ -992,6 +1010,8 @@ class Spike2Emu:
             Ls.append(o[0::2][2:202])
             Rs.append(o[1::2][2:202])
             cur += 200
+            if progress is not None:
+                progress(cur, nmax)
         if not Ls:
             return None
         return np.concatenate(Ls), np.concatenate(Rs), stereo

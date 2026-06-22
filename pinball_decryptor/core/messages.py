@@ -31,6 +31,18 @@ class DoneMsg:
         self.summary = summary
 
 
+class LogLineMsg:
+    """Create-or-update a single *keyed* log line in place.
+
+    Unlike :class:`LogMsg` (which always appends), a sequence of these sharing a
+    ``key`` rewrite the same line — so a long decode animates one progress line
+    instead of spamming a new line per tick."""
+    def __init__(self, key, text, level="info"):
+        self.key = key
+        self.text = text
+        self.level = level
+
+
 class PrereqMsg:
     """One prereq probe completed (worker thread → GUI)."""
     def __init__(self, mfr_key, result):

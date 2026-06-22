@@ -5804,6 +5804,18 @@ class MainWindow:
             lbl.configure(text=f"○ {name}", foreground=c["gray"])
         self._progress_bar["value"] = 0
 
+    def show_chained_phases(self, phases):
+        """Swap the Extract phase row to an arbitrary ``phases`` tuple — the
+        chained Auto-transcribe / Music-ID step lists — and reset it to all
+        pending, so each post-extract step shows its OWN chips advancing instead
+        of leaving the extract row (e.g. "Checksums") stuck active.  The next
+        Extract run restores the standard tuple via ``_refresh_extract_phases``.
+        A falsy ``phases`` leaves the row untouched (no empty chip strip)."""
+        if not phases:
+            return
+        self._rebuild_phase_steps(phases, self._write_phases)
+        self.reset_steps(mode="extract")
+
     def set_progress(self, current, total, desc="", mode="extract"):
         if total > 0:
             self._progress_bar.stop()

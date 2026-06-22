@@ -464,6 +464,10 @@ class App:
         self._active_mode = "extract"
         self._cancel_requested = False
         self.window.set_running(True, mode="extract")
+        # A prior run's chained Auto-transcribe / Music-ID may have left the
+        # phase row showing THEIR step list; restore the standard Extract tuple
+        # before resetting it for this run.
+        self.window._refresh_extract_phases()
         self.window.reset_steps(mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
@@ -953,11 +957,14 @@ class App:
         if outer_done_cb is None:
             self.window.set_running(True, mode="extract")
 
-        log_cb, _phase_cb, progress_cb, done_cb = self._make_callbacks()
-        # Don't drive the Extract phase indicator -- transcribe phases
-        # don't line up with Extract's "Detect / Outer / Inner /
-        # Checksums" labels; would just be visual noise.
-        phase_cb = lambda _i: None
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        # Give Auto-transcribe its OWN status block: swap the phase row to the
+        # transcribe step list ("Load model / Transcribe / Rename / Write CSV")
+        # and let phase_cb drive it, instead of leaving the Extract row's last
+        # chip stuck active.  (Runs on the main thread -- chained via root.after,
+        # standalone is a direct call -- so touching Tk here is safe.)
+        self.window.show_chained_phases(
+            getattr(self._current_mfr, "transcribe_phases", ()))
 
         # If we're chained, replace the normal done_cb with one that
         # merges transcribe's summary into the Extract summary and
@@ -1032,8 +1039,12 @@ class App:
         if outer_done_cb is None:
             self.window.set_running(True, mode="extract")
 
-        log_cb, _phase_cb, progress_cb, done_cb = self._make_callbacks()
-        phase_cb = lambda _i: None
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        # Music-ID gets its OWN status block ("Scan / Identify / Write CSV"),
+        # swapping the phase row + driving it with phase_cb (same hand-off rules
+        # as _start_transcribe -- this runs on the main thread).
+        self.window.show_chained_phases(
+            getattr(self._current_mfr, "music_id_phases", ()))
 
         if outer_done_cb is not None:
             head = (outer_done_summary or "").rstrip()

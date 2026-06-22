@@ -430,84 +430,109 @@ def read_category_id(sc_path):
     return int(m.group(1)) if m else None
 
 
-def extract_category_audio(game_real_path, image_path, sc_files, write_wav,
-                           log=None, progress=None, cancel=None):
-    """Decode every per-category bank in ``sc_files`` (``image-scNN.bin`` paths)
-    to WAV via ``write_wav(catid, idx, L, R, stereo)``.
-
-    All params are derived first (the firmware band-build needs the global hook),
-    THEN every sound is decoded (decoding switches the emulator to narrow hooks,
-    one-way).  Returns the count decoded.  Skips gracefully (returns 0, never
-    hangs) when the title's category loader can't be driven — cat-0 audio is
-    unaffected."""
-    log = log or (lambda *a, **k: None)
-    cancel = cancel or (lambda: False)
-    if not sc_files:
-        return 0
+def _find_revalidate(game_real_path, image_path, files, log):
+    """Boot one CatEmu and locate the map-revalidation stub (``rev``) for this
+    title by probing the first bank.  Returns ``rev`` (an int) or ``None`` when
+    the build's category loader can't be driven (→ caller skips, cat-0 audio is
+    unaffected).  Run ONCE per extract — the workers reuse the same ``rev`` so
+    they never re-pay the candidate trial."""
     emu = CatEmu(game_real_path, image_path)
-    emu.boot()
     try:
+        emu.boot()
         if not emu.categories_supported:
             log("Per-category music banks aren't supported for this title's "
-                "firmware build; skipping them (cat-0 audio already extracted).",
-                "warning")
-            return 0
-        files = sorted((c, p) for p in sc_files
-                       if (c := read_category_id(p)) is not None)
-        if not files:
-            return 0
-        rev, rows0 = emu.pick_revalidate(files[0][0], files[0][1])
+                "firmware build; skipping them (cat-0 audio already "
+                "extracted).", "warning")
+            return None
+        rev, _rows0 = emu.pick_revalidate(files[0][0], files[0][1])
         if rev is None:
             log("Couldn't drive this title's category loader; skipping the "
                 "per-song banks (cat-0 audio already extracted).", "warning")
-            return 0
+        return rev
+    finally:
+        emu.close()
 
-        # Phase A — derive every bank's params (global hook).
-        derived = [(files[0][0], files[0][1], rows0)]
-        for catid, p in files[1:]:
-            if cancel():
-                break
-            emu.set_category_file(p)
-            try:
-                rows = emu._derive_cat(catid, rev)
-            except Exception as e:
-                log("Category %d: derive failed (%s); skipped." % (catid, e),
-                    "warning")
-                rows = None
-            derived.append((catid, p, rows or []))
-        total = sum(len(r) for _c, _p, r in derived)
-        log("Derived %d sound(s) across %d category bank(s)."
-            % (total, len(derived)), "info")
-        if not total:
-            return 0
 
-        # Phase B — decode (switches to narrow hooks on the first decode).
+def _derive_decode_bank(game_real_path, image_path, rev, catid, sc_path, sink,
+                        cancel):
+    """Derive + decode ONE bank on a FRESH CatEmu, emitting each decoded sound
+    to ``sink(catid, idx, L, R, stereo)``.  Returns the count decoded.
+
+    A fresh emulator PER BANK is deliberate: deriving several categories on one
+    booted emu accumulates registry state that makes the 3rd-and-later derive's
+    ``MASTERDIR_DECODE`` grind to its instruction cap (minutes per bank).  A
+    fresh emu derives every bank in ~13 s flat, so the whole job parallelises
+    cleanly.  The decode reuses this same emu — decoding is registry-stateless
+    and switches the emulator to the narrow-hook fast path (~1 s per 20 s of
+    audio), so re-deriving it elsewhere would be wasted work."""
+    emu = CatEmu(game_real_path, image_path)
+    try:
+        emu.boot()
+        if not emu.categories_supported:
+            return 0
+        emu.set_category_file(sc_path)
+        try:
+            rows = emu._derive_cat(catid, rev)
+        except Exception:
+            rows = None
+        if not rows:
+            return 0
         ok = 0
-        for catid, p, rows in derived:
+        for r in rows:
             if cancel():
                 break
-            emu.set_category_file(p)
-            for r in rows:
-                if cancel():
-                    break
-                try:
-                    res = emu.decode_cat(r, cancel=cancel)
-                except Exception:
-                    res = None
-                if res is None:
-                    continue
-                L, R, stereo = res
-                write_wav(catid, r["idx"], L, R, stereo)
-                ok += 1
-                if progress:
-                    progress(ok, total)
+            try:
+                res = emu.decode_cat(r, cancel=cancel)
+            except Exception:
+                res = None
+            if res is None:
+                continue
+            L, R, stereo = res
+            sink(catid, r["idx"], L, R, stereo)
+            ok += 1
         return ok
     finally:
         emu.close()
 
 
+def extract_category_audio(game_real_path, image_path, sc_files, write_wav,
+                           log=None, progress=None, cancel=None):
+    """Decode every per-category bank in ``sc_files`` (``image-scNN.bin`` paths)
+    to WAV via ``write_wav(catid, idx, L, R, stereo)``.
+
+    Each bank is derived + decoded on its own fresh emulator (see
+    :func:`_derive_decode_bank` for why), serially.  Returns the count decoded.
+    Skips gracefully (returns 0, never hangs) when the title's category loader
+    can't be driven — cat-0 audio is unaffected.  :func:`extract_category_audio_parallel`
+    is the production path; this serial form backs the tests + the no-pool
+    fallback."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    if not sc_files:
+        return 0
+    files = sorted((c, p) for p in sc_files
+                   if (c := read_category_id(p)) is not None)
+    if not files:
+        return 0
+    rev = _find_revalidate(game_real_path, image_path, files, log)
+    if rev is None:
+        return 0
+    ok = 0
+    for catid, p in files:
+        if cancel():
+            break
+        try:
+            ok += _derive_decode_bank(game_real_path, image_path, rev, catid, p,
+                                      write_wav, cancel)
+        except Exception as e:
+            log("Category %d: failed (%s); skipped." % (catid, e), "warning")
+        if progress:
+            progress(ok, len(files))
+    return ok
+
+
 # --------------------------------------------------------------------------
-# parallel decode (one CatEmu per worker, each handling a subset of banks)
+# parallel decode (one FRESH CatEmu per bank, fanned across spawned processes)
 # --------------------------------------------------------------------------
 def _write_cat_wav(out_dir, catid, idx, L, R, stereo):
     import wave
@@ -527,16 +552,18 @@ def _write_cat_wav(out_dir, catid, idx, L, R, stereo):
     w.close()
 
 
-def _cat_pool_worker(args):
-    """One worker = a fresh CatEmu decoding its assigned banks (derive-all then
-    decode-all, per :func:`extract_category_audio`).  Returns the count decoded.
-    Top-level so it pickles across the spawn boundary."""
-    game_real_path, image_path, subset, out_dir = args
+def _bank_pool_worker(args):
+    """One task = derive + decode a SINGLE bank on a fresh emu, writing its WAVs
+    straight to ``out_dir`` (so only a small count crosses the process boundary).
+    Top-level so it pickles across the spawn boundary; ``rev`` is found once in
+    the parent and passed in."""
+    game_real_path, image_path, rev, catid, sc_path, out_dir = args
     try:
-        return extract_category_audio(
-            game_real_path, image_path, subset,
-            lambda catid, idx, L, R, stereo: _write_cat_wav(
-                out_dir, catid, idx, L, R, stereo))
+        return _derive_decode_bank(
+            game_real_path, image_path, rev, catid, sc_path,
+            lambda c, idx, L, R, stereo: _write_cat_wav(out_dir, c, idx, L, R,
+                                                        stereo),
+            lambda: False)
     except Exception:
         return 0
 
@@ -544,34 +571,48 @@ def _cat_pool_worker(args):
 def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_dir,
                                     nworkers=None, log=None, progress=None,
                                     cancel=None):
-    """Parallel twin of :func:`extract_category_audio` — splits the banks across
-    ``nworkers`` spawned CatEmu processes (each boots once, decodes its subset,
-    writes ``music_catNN_*.wav`` into ``out_dir``).  Falls back to a single
-    in-process run if the pool can't start.  Returns the count decoded."""
+    """Parallel twin of :func:`extract_category_audio` — one task PER BANK, each
+    deriving + decoding on a fresh emulator in its own spawned process (so the
+    per-bank derive can't accumulate the state that grinds a long-lived emu, and
+    the work spreads across cores).  ``rev`` is located once up front and shared.
+    Writes ``music_catNN_*.wav`` into ``out_dir``; falls back to the serial path
+    if the pool can't start.  Returns the count decoded."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     files = sorted((c, p) for p in sc_files
                    if (c := read_category_id(p)) is not None)
     if not files:
         return 0
+    rev = _find_revalidate(game_real_path, image_path, files, log)
+    if rev is None:
+        return 0
     import multiprocessing as mp
 
     nworkers = nworkers or max(1, min((os.cpu_count() or 2) - 2, 8))
     nworkers = max(1, min(nworkers, len(files)))
-    # round-robin so each worker gets a spread of (differently-sized) banks
-    chunks = [[] for _ in range(nworkers)]
-    for i, (_c, p) in enumerate(files):
-        chunks[i % nworkers].append(p)
-    tasks = [(game_real_path, image_path, chunk, out_dir)
-             for chunk in chunks if chunk]
+    # Longest-processing-time-first: the pool pulls tasks greedily, so start the
+    # biggest banks (≈ longest songs ≈ longest decodes) first — otherwise a 9-min
+    # song picked up in the final round becomes pure tail latency.  Bank file
+    # size is a good proxy for decoded length.
+    def _sz(p):
+        try:
+            return os.path.getsize(p)
+        except OSError:
+            return 0
+    ordered = sorted(files, key=lambda cp: _sz(cp[1]), reverse=True)
+    tasks = [(game_real_path, image_path, rev, catid, p, out_dir)
+             for catid, p in ordered]
     log("Decoding %d music bank(s) across %d process(es)..."
-        % (len(files), len(tasks)), "info")
+        % (len(files), nworkers), "info")
     try:
         ctx = mp.get_context("spawn")
         ok = 0
         done = 0
-        with ctx.Pool(len(tasks)) as pool:
-            for n in pool.imap_unordered(_cat_pool_worker, tasks):
+        # maxtasksperchild=1: a fresh process per bank reclaims the large
+        # unicorn mappings a long song's decode allocates, and guarantees the
+        # per-bank emu never inherits another bank's accumulated state.
+        with ctx.Pool(nworkers, maxtasksperchild=1) as pool:
+            for n in pool.imap_unordered(_bank_pool_worker, tasks):
                 ok += n
                 done += 1
                 if progress:
@@ -583,5 +624,12 @@ def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_di
     except Exception as e:
         log("Parallel music decode unavailable (%s); using one process." % e,
             "warning")
-        return _cat_pool_worker((game_real_path, image_path,
-                                 [p for _c, p in files], out_dir))
+        ok = 0
+        for catid, p in files:
+            if cancel():
+                break
+            ok += _bank_pool_worker(
+                (game_real_path, image_path, rev, catid, p, out_dir))
+            if progress:
+                progress(ok, len(files))
+        return ok

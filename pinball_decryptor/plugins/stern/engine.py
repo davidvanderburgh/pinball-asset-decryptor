@@ -296,18 +296,18 @@ def _write_wav(path, L, R, stereo):
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
-                music_banks=False):
+                music_banks=True):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
 
     ``music_banks`` ALSO decodes the per-category ``image-scNN.bin`` banks — the
     licensed songs / extra sound sets the six multi-category titles (Metallica,
-    D&D, Rush, Deadpool, Foo Fighters, John Wick) keep outside cat-0.  It's
-    OFF by default for now because driving the firmware codec per bank is slow
-    (~10-15 min for Metallica's 24 songs even parallelized — see
-    plans/spike2_multicat_handoff.md "perf"); titles without banks are a fast
-    no-op.  The decode is correct; only the speed needs work before it's a safe
-    always-on default.
+    D&D, Rush, Deadpool, Foo Fighters, John Wick) keep outside cat-0.  Each bank
+    is derived + decoded on its own fresh emulator across a process pool (one
+    task per bank — see :func:`spike2.category.extract_category_audio_parallel`),
+    so Metallica's 24 songs finish in ~2 min and titles without banks are a fast
+    no-op.  On by default; the few multi-cat builds the loader can't drive skip
+    their banks gracefully (cat-0 audio is unaffected).
 
     ``open_disk`` (a zero-arg callable returning a fresh seekable byte stream)
     overrides how the disk is opened — Direct-SD passes one that returns a

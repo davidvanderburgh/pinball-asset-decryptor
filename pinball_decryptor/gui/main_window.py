@@ -277,14 +277,16 @@ class MainWindow:
         # Extract tab.  When ON, a successful Extract triggers the
         # transcribe pipeline against the output folder.  Default OFF
         # because the model download (~75 MB) is opt-in.
+        # When ON, the transcribe pass also renames each speech WAV to
+        # "<original> - <transcript>.wav" (Write picks up the renamed files via
+        # prefix-matching in _diff_assets, so the round trip still works).  The
+        # "Auto-name call-outs" checkbox drives both transcribe + rename, so
+        # this just mirrors transcribe_var now (kept so app.py reads one flag).
         self.transcribe_var = tk.BooleanVar(value=False)
-        # Companion toggle: when ON (and transcribe is also ON), the
-        # transcribe pipeline renames each speech WAV to
-        # "<original> - <transcript>.wav".  Write picks up the renamed
-        # files via prefix-matching in _diff_assets so the round trip
-        # still works.  Default OFF -- some users want to cross-check
-        # original names against community sample lists.
-        self.transcribe_rename_var = tk.BooleanVar(value=False)
+        # Music ID (Stern band pins): when ON, a successful Extract chains an
+        # online AcoustID + MusicBrainz lookup of each full music track and
+        # renames it by song title (preferring the pin's band).
+        self.music_id_var = tk.BooleanVar(value=False)
         # Whether the currently-selected extract input is a game whose
         # audio we can export (drives the Auto-transcribe controls +
         # the "Extract audio" phase).  Re-probed on every input change;
@@ -903,26 +905,39 @@ class MainWindow:
         self._manual_press_fn = None
         self._switch_matrix_buttons = []
 
-        # Transcribe checkbox — packed only when the active manufacturer
-        # has capabilities.transcribe (currently just CGC).  When ON,
-        # Extract chains the transcribe pipeline against the output
-        # folder, emitting callouts.csv next to the WAVs.  Mirrors
-        # the capture-mode toggle pattern used by Williams.
+        # Two post-extract "auto-name" options, each one checkbox with a
+        # one-line description below it (only shown for manufacturers that
+        # advertise the matching capability).  "Call-outs" combines transcribe
+        # + rename into a single action; "music" is the AcoustID lookup.
         self._transcribe_frame = ttk.Frame(f)
         self._transcribe_check = ttk.Checkbutton(
             self._transcribe_frame,
-            text="Auto-transcribe samples to callouts.csv",
-            variable=self.transcribe_var,
-            command=self._on_transcribe_toggle)
-        self._transcribe_check.pack(side=tk.LEFT, padx=(24, 8))
-        self._transcribe_rename_check = ttk.Checkbutton(
+            text="Auto-name call-outs",
+            variable=self.transcribe_var)
+        self._transcribe_check.pack(anchor=tk.W, padx=(24, 8))
+        ttk.Label(
             self._transcribe_frame,
-            text="...and rename WAVs using transcripts",
-            variable=self.transcribe_rename_var)
-        self._transcribe_rename_check.pack(side=tk.LEFT, padx=(12, 0))
-        # Greyed-out until the first checkbox is on -- rename only
-        # makes sense as a chained step after the CSV exists.
-        self._transcribe_rename_check.state(["disabled"])
+            text="Transcribe each spoken WAV (faster-whisper) and rename it by "
+                 "what's said — e.g. “Super jackpot!”. Also writes "
+                 "callouts.csv.",
+            font=(_SANS_FONT, 9, "italic"), foreground="#888888",
+            wraplength=560, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
+
+        # Music-ID: identify each full music track online via AcoustID +
+        # MusicBrainz and rename it by song.  Chained after transcribe.
+        self._music_id_frame = ttk.Frame(f)
+        self._music_id_check = ttk.Checkbutton(
+            self._music_id_frame,
+            text="Auto-name music",
+            variable=self.music_id_var)
+        self._music_id_check.pack(anchor=tk.W, padx=(24, 8))
+        ttk.Label(
+            self._music_id_frame,
+            text="Identify each full song online (AcoustID) and rename it by "
+                 "artist + title — e.g. “Led Zeppelin - Kashmir”. "
+                 "Needs internet.",
+            font=(_SANS_FONT, 9, "italic"), foreground="#888888",
+            wraplength=560, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
 
         # Decode DMD checkbox -- packed only when the active manufacturer
         # has capabilities.decode_dmd (currently just CGC).  When ON,
@@ -3946,6 +3961,18 @@ class MainWindow:
                 text=getattr(mfr, "write_iso_label", "Build USB ISO"))
             self._write_ssd_radio.configure(
                 text=getattr(mfr, "write_ssd_label", "Write to SSD"))
+            # Medium-aware red safety banner + admin panel (JJP=SSD/ISO,
+            # Stern=SD card); fall back to the JJP-flavoured defaults.
+            safety = getattr(mfr, "direct_safety_text", None)
+            if safety:
+                self._extract_ssd_warn.configure(text=safety)
+                self._write_ssd_warn.configure(text=safety)
+            admin_body = self._admin_body_text(mfr)
+            for _admin_fr in (self._extract_admin_frame,
+                              self._write_admin_frame):
+                _lbl = getattr(_admin_fr, "body_label", None)
+                if _lbl is not None:
+                    _lbl.configure(text=admin_body)
             self._extract_source_frame.pack(
                 fill=tk.X, padx=10, pady=(6, 0),
                 before=self._extract_input_row)
@@ -4049,6 +4076,7 @@ class MainWindow:
         # static extract emits standalone WAVs, so for capture-capable
         # plugins they sit under "Basic extract" and track it.
         self._update_transcribe_visibility()
+        self._update_music_id_visibility()
         self._update_decode_dmd_visibility()
         self._update_chain_deltas_visibility()
 
@@ -4080,6 +4108,7 @@ class MainWindow:
         self._refresh_extract_phases()
         # Transcribe is only meaningful when the basic extract runs.
         self._update_transcribe_visibility()
+        self._update_music_id_visibility()
 
     def _refresh_extract_phases(self):
         """Rebuild the extract phase indicator for the current extract
@@ -4133,19 +4162,27 @@ class MainWindow:
     # original toggle name.
     _on_capture_toggle = _on_extract_mode_toggle
 
-    def _on_transcribe_toggle(self):
-        """Enable / disable the rename checkbox when transcribe flips.
 
-        The rename pass depends on the transcripts produced by the
-        transcribe pass, so it's only meaningful as a child of the
-        first checkbox.  When transcribe is unticked we also clear
-        the rename flag so a re-tick doesn't carry stale state.
+    def _update_music_id_visibility(self):
+        """Show the music-ID checkbox only when the active manufacturer
+        advertises ``music_id`` and standalone WAVs will exist.
+
+        Mirrors ``_update_transcribe_visibility`` (same audio-supported /
+        basic-extract gating), and sits just below the transcribe frame so
+        the post-extract audio options group together.
         """
-        if self.transcribe_var.get():
-            self._transcribe_rename_check.state(["!disabled"])
-        else:
-            self._transcribe_rename_check.state(["disabled"])
-            self.transcribe_rename_var.set(False)
+        if self._current_mfr is None:
+            return
+        caps = self._current_mfr.capabilities
+        show = (getattr(caps, "music_id", False)
+                and self._extract_audio_supported
+                and (not caps.capture or self.static_extract_var.get()))
+        if not show:
+            self._music_id_frame.pack_forget()
+            self.music_id_var.set(False)
+            return
+        self._music_id_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
+                                  after=self._transcribe_frame)
 
     def _update_transcribe_visibility(self):
         """Show the auto-transcribe checkboxes only when a transcribable
@@ -4172,7 +4209,6 @@ class MainWindow:
             # Hidden means it won't run — don't let a stale tick chain
             # transcribe onto an output that has no WAVs.
             self.transcribe_var.set(False)
-            self.transcribe_rename_var.set(False)
             return
         if caps.capture:
             # Sit directly below the "Basic extract" checkbox.
@@ -4181,8 +4217,6 @@ class MainWindow:
                 after=self._basic_extract_frame)
         else:
             self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
-        # Keep the rename checkbox's enabled state in sync.
-        self._on_transcribe_toggle()
 
     def _update_decode_dmd_visibility(self):
         """Show the "Decode DMD scenes" checkbox only when the active
@@ -4771,8 +4805,10 @@ class MainWindow:
             if reason:
                 self._log_ssd_pick(f"  ({reason})", level="info")
             if confidence != "high":
+                noun = getattr(self._current_mfr,
+                               "direct_medium_noun", "SSD")
                 self._log_ssd_pick(
-                    "  If this isn't the JJP SSD, pick it manually "
+                    f"  If this isn't the {noun}, pick it manually "
                     "from the dropdown.", level="info")
         else:
             # pick_best_game_ssd returned (None, None, None) — should
@@ -4878,6 +4914,25 @@ class MainWindow:
         if not self._fda_acknowledged:
             self._dismiss_macos_fda_banner()
 
+    def _admin_body_text(self, mfr):
+        """Body copy for the "Administrator required" panel.
+
+        Kept to a single short paragraph (steps inline) so it fits the
+        pinned notebook height — the older 2-paragraph + 4-numbered-step
+        version overflowed and got clipped.  Wording is medium-aware: JJP
+        reads from an SSD, Stern Spike from an SD card, so the noun and the
+        source-toggle label come from the manufacturer.
+        """
+        noun = getattr(mfr, "direct_medium_noun", "SSD") if mfr else "SSD"
+        ssd_label = (getattr(mfr, "extract_ssd_label", "From SSD")
+                     if mfr else "From SSD")
+        return (
+            f"Reading directly from the {noun} needs Windows Administrator "
+            "privileges — Windows gates raw disk access behind elevation. "
+            "Close the app, right-click the \"Pinball Asset Decryptor\" "
+            "shortcut, choose \"Run as administrator\", then re-select "
+            f"\"{ssd_label}\" — your drive and output folder are remembered.")
+
     def _build_admin_warning_frame(self, parent):
         """Build the prominent "Administrator required" warning panel.
 
@@ -4885,7 +4940,9 @@ class MainWindow:
         the background colour directly — ttk styling per-widget is
         themable but harder to override locally, and the goal here
         is the opposite of "blend in".  Returns the unpacked frame;
-        ``_on_input_source_change`` decides when to pack it.
+        ``_on_input_source_change`` decides when to pack it.  The body
+        label is stashed on the frame so ``apply_manufacturer`` can swap
+        in medium-aware wording.
         """
         frame = tk.Frame(
             parent, bg="#5a1a1a", padx=12, pady=10,
@@ -4896,25 +4953,15 @@ class MainWindow:
             bg="#5a1a1a", fg="#ffd1d1",
             font=(_SANS_FONT, 11, "bold"),
             anchor=tk.W).pack(fill=tk.X, anchor=tk.W)
-        tk.Label(
+        body = tk.Label(
             frame,
-            text=(
-                "Direct-SSD mode needs Windows Administrator "
-                "privileges.  Both wsl --mount and Set-Disk "
-                "-IsOffline are gated by Windows itself behind "
-                "elevation — there is no workaround at the app "
-                "level.\n\n"
-                "To enable Direct-SSD:\n"
-                "   1.   Close this app.\n"
-                "   2.   Right-click the \"Pinball Asset Decryptor\" "
-                "shortcut (Start menu or desktop).\n"
-                "   3.   Choose \"Run as administrator\".\n"
-                "   4.   Re-select \"From SSD\" — your drive and "
-                "output folder will be remembered."),
+            text=self._admin_body_text(None),
             bg="#5a1a1a", fg="#ffffff",
             font=(_SANS_FONT, 9),
             justify=tk.LEFT, anchor=tk.W,
-            wraplength=720).pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+            wraplength=720)
+        body.pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+        frame.body_label = body
         return frame
 
     def _refresh_ssd_run_buttons(self):
@@ -5477,6 +5524,7 @@ class MainWindow:
         self._extract_audio_supported = supported
         self._refresh_extract_phases()
         self._update_transcribe_visibility()
+        self._update_music_id_visibility()
 
     def _update_write_badge(self, *_):
         self._set_badge(self._write_badge, self.write_upd_var.get(),

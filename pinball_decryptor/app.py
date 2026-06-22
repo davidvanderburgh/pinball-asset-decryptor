@@ -509,8 +509,13 @@ class App:
             # If the transcribe checkbox is on (CGC-only currently),
             # wrap done_cb so a successful Extract chains into the
             # transcribe pipeline against the just-written output dir.
-            chained_done_cb = self._maybe_wrap_done_for_transcribe(
+            # Compose the post-extract chain inner-first: music-ID runs AFTER
+            # transcribe, so wrap music-ID (inner) then transcribe (outer).
+            # Each wrap is a no-op when its checkbox is off.
+            chained_done_cb = self._maybe_wrap_done_for_music_id(
                 done_cb, output_path)
+            chained_done_cb = self._maybe_wrap_done_for_transcribe(
+                chained_done_cb, output_path)
             extra_kwargs = self._collect_asset_filter_kwargs()
             if getattr(
                     self._current_mfr.capabilities, "decode_dmd", False):
@@ -934,13 +939,72 @@ class App:
                 outer_done_cb(True, combined)
             done_cb = merged_done
 
-        rename_after = bool(
-            getattr(self.window, "transcribe_rename_var", None)
-            and self.window.transcribe_rename_var.get())
-
+        # "Auto-name call-outs" is a single action = transcribe + rename, so
+        # always rename (the callouts.csv is still written either way).
         self.pipeline = self._current_mfr.make_transcribe_pipeline(
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
-            rename_after=rename_after)
+            rename_after=True)
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    def _maybe_wrap_done_for_music_id(self, original_done_cb, output_path):
+        """If the music-ID checkbox is on AND the active mfr supports it, wrap
+        done_cb so a successful Extract (then transcribe) chains the online
+        AcoustID lookup.  Otherwise return done_cb unchanged."""
+        if not getattr(self._current_mfr.capabilities, "music_id", False):
+            return original_done_cb
+        if not getattr(self.window, "music_id_var", None):
+            return original_done_cb
+        if not self.window.music_id_var.get():
+            return original_done_cb
+
+        def wrapped(success, summary):
+            if not success:
+                original_done_cb(success, summary)
+                return
+            self.msg_queue.put(LogMsg(
+                "Chaining online music identification...", "info"))
+            self.root.after(0, lambda: self._start_music_id(
+                assets_dir_override=output_path,
+                outer_done_summary=summary,
+                outer_done_cb=original_done_cb,
+            ))
+        return wrapped
+
+    def _start_music_id(self, assets_dir_override=None,
+                        outer_done_summary=None, outer_done_cb=None):
+        """Run the online music-ID pipeline (chained after a successful
+        Extract/transcribe).  Mirrors ``_start_transcribe``."""
+        if not self._current_mfr.capabilities.music_id:
+            return
+        assets_dir = (assets_dir_override
+                      or self.window.extract_output_var.get().strip()
+                      or self.window.write_assets_var.get().strip())
+        if not assets_dir or not os.path.isdir(assets_dir):
+            messagebox.showerror(
+                "Invalid Folder",
+                f"Cannot identify music — folder not found:\n{assets_dir}")
+            if outer_done_cb:
+                outer_done_cb(True, outer_done_summary or "")
+            return
+
+        self._active_mode = "extract"
+        if outer_done_cb is None:
+            self.window.set_running(True, mode="extract")
+
+        log_cb, _phase_cb, progress_cb, done_cb = self._make_callbacks()
+        phase_cb = lambda _i: None
+
+        if outer_done_cb is not None:
+            head = (outer_done_summary or "").rstrip()
+
+            def merged_done(ok, summary):
+                label = "Music ID:" if ok else "Music ID failed:"
+                outer_done_cb(True, f"{head}\n\n{label}\n{summary}")
+            done_cb = merged_done
+
+        self.pipeline = self._current_mfr.make_music_id_pipeline(
+            assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            rename_after=True)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     # ------------------------------------------------------------------

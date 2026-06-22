@@ -16,6 +16,7 @@ normal Write copies verbatim).
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from ...core.transcribe import TranscribePipeline
+from ...core.musicid import MusicIdPipeline
 from .formats import detect_game, display_for_key
 from .games import GAME_DB
 from .pipeline import (SternDirectSsdExtractPipeline,
@@ -63,6 +64,11 @@ class SternManufacturer(Manufacturer):
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
         transcribe=True,
+        # Music ID: the jukebox song->index binding is unrecoverable from the
+        # firmware (it lives in runtime game-rule logic), but band pins play
+        # commercial recordings — so identify each full music track online via
+        # AcoustID + MusicBrainz and name it by song (preferring the pin's band).
+        music_id=True,
     )
     input_spec = InputSpec(
         label="Stern Spike SD-card images",
@@ -72,6 +78,7 @@ class SternManufacturer(Manufacturer):
                       "Extract images", "Decode audio", "Checksums")
     write_phases = ("Detect", "Stage", "Re-encode", "Patch image")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
+    music_id_phases = ("Scan", "Identify", "Write CSV")
     direct_ssd_extract_phases = ("Read SD card", "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
     # The decode/replace engine emulates the ARM game firmware via unicorn.
@@ -105,6 +112,10 @@ class SternManufacturer(Manufacturer):
     extract_ssd_label = "From SD card"
     write_iso_label = "Build SD-card image"
     write_ssd_label = "Write to SD card"
+    direct_medium_noun = "SD card"
+    direct_safety_text = (
+        "⚠ Power off the machine and remove the SD card before connecting "
+        "it to this PC. Always keep a backup image of the original card.")
 
     def audio_length_note(self):
         return ("Replacements are encoded size-neutral: each sound is fit to "
@@ -166,6 +177,13 @@ class SternManufacturer(Manufacturer):
                                  log_cb, phase_cb, progress_cb, done_cb,
                                  rename_after=False):
         return TranscribePipeline(
+            assets_dir, log_cb, phase_cb, progress_cb, done_cb,
+            rename_after=rename_after)
+
+    def make_music_id_pipeline(self, assets_dir,
+                               log_cb, phase_cb, progress_cb, done_cb,
+                               rename_after=False):
+        return MusicIdPipeline(
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             rename_after=rename_after)
 

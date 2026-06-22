@@ -67,6 +67,11 @@ class Capabilities:
     # spoken text (non-speech samples are skipped via VAD).  Used by
     # CGC where samples are numbered by index with no embedded names.
     transcribe: bool = False
+    # Music-ID path: identify the extracted music WAVs online via AcoustID +
+    # MusicBrainz (acoustic fingerprint -> title/artist) and name each by song.
+    # For band pins (e.g. Stern Led Zeppelin) whose song->index binding is
+    # unrecoverable from the firmware but whose music is a commercial recording.
+    music_id: bool = False
     # Direct-SSD path: read from / write to a physically-connected
     # game SSD instead of an ISO/file.  Surfaces a radio toggle on
     # the Extract / Write tabs swapping the file picker for a drive
@@ -241,6 +246,17 @@ class Manufacturer(ABC):
     write_iso_label: str = "Build USB ISO"
     write_ssd_label: str = "Write to SSD"
 
+    # Generic noun for the physical medium in Direct-from-device mode, used
+    # in dynamic prose (drive-pick hint, admin-required panel).  JJP ships on
+    # an SSD; Stern Spike on an SD card.  Override per manufacturer.
+    direct_medium_noun: str = "SSD"
+    # Red safety banner shown in Direct mode.  JJP's wording ("remove the SSD,
+    # keep the ISO backup") is SSD/ISO-specific; override when the medium and
+    # backup artifact differ (Stern reads from an SD-card image).
+    direct_safety_text: str = (
+        "⚠ Remove the SSD from the pinball machine before connecting. "
+        "Always keep the original ISO as a backup.")
+
     @abstractmethod
     def detect(self, path):
         """Return a :class:`Game` if this manufacturer claims *path*, else None."""
@@ -289,6 +305,18 @@ class Manufacturer(ABC):
         """
         raise NotImplementedError(
             f"{self.display} does not implement a Transcribe pipeline.")
+
+    def make_music_id_pipeline(self, assets_dir,
+                               log_cb, phase_cb, progress_cb, done_cb,
+                               rename_after=False):
+        """Build the online music-ID pipeline (AcoustID + MusicBrainz).
+
+        Only meaningful when ``capabilities.music_id`` is True.  Identifies
+        each extracted music WAV under ``assets_dir`` by acoustic fingerprint
+        and emits ``music_titles.csv``.
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a music-ID pipeline.")
 
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,

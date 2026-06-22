@@ -38,6 +38,12 @@ WHISPER_IMPORT_HINT = (
 
 CALLOUTS_CSV = "callouts.csv"
 
+# Non-speech WAVs at least this long are tagged ``music`` (renamed
+# ``<stem> - music.<ext>``) so the music tracks are isolated from the SFX in
+# the same pass — they're exactly the clips a fingerprint match can then title.
+# Songs run minutes; SFX/ambience beds are short.  0 disables the tag.
+DEFAULT_MUSIC_MIN_SECONDS = 20.0
+
 
 class TranscribePipeline(BasePipeline):
     """Walk an extracted assets dir, transcribe speech-bearing WAVs.
@@ -45,7 +51,8 @@ class TranscribePipeline(BasePipeline):
     Phase 0: Locate WAVs + load model.
     Phase 1: Run Whisper+VAD on each WAV.
     Phase 2: Write callouts.csv.
-    Phase 3: (optional) Rename speech WAVs to ``<stem> - <text>.<ext>``.
+    Phase 3: (optional) Rename speech WAVs to ``<stem> - <text>.<ext>`` and
+             long non-speech WAVs to ``<stem> - music.<ext>``.
 
     The rename step keeps the original filename as a prefix so the
     extract -> write round trip still works: the Write pipeline's
@@ -55,11 +62,13 @@ class TranscribePipeline(BasePipeline):
 
     def __init__(self, assets_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 model_size="tiny.en", rename_after=False):
+                 model_size="tiny.en", rename_after=False,
+                 music_min_seconds=DEFAULT_MUSIC_MIN_SECONDS):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.assets_dir = assets_dir
         self.model_size = model_size
         self.rename_after = rename_after
+        self.music_min_seconds = float(music_min_seconds)
 
     def _run(self):
         self._set_phase(0)
@@ -103,6 +112,7 @@ class TranscribePipeline(BasePipeline):
         rows = []
         speech_count = 0
         non_speech_count = 0
+        music_count = 0
         for i, abs_path in enumerate(wavs):
             self._check_cancel()
             rel = os.path.relpath(abs_path, self.assets_dir).replace("\\", "/")
@@ -129,18 +139,27 @@ class TranscribePipeline(BasePipeline):
                 rows.append((rel, "speech", text))
                 speech_count += 1
             else:
-                rows.append((rel, "non-speech", ""))
-                non_speech_count += 1
+                # No speech.  A long non-speech clip is almost always music
+                # (songs run minutes; SFX/ambience beds are short) — tag it so
+                # the music corpus is isolated for fingerprint-titling.
+                dur = float(getattr(info, "duration", 0.0) or 0.0)
+                if self.music_min_seconds and dur >= self.music_min_seconds:
+                    rows.append((rel, "music", ""))
+                    music_count += 1
+                else:
+                    rows.append((rel, "non-speech", ""))
+                    non_speech_count += 1
 
             # Log every file (truncate long transcripts to keep the
             # log readable); progress bar still ticks every file.
             self._progress(i + 1, len(wavs),
-                           f"{speech_count} speech / "
+                           f"{speech_count} speech / {music_count} music / "
                            f"{non_speech_count} skipped")
             display = text if len(text) <= 80 else text[:77] + "..."
+            tag = ("[music]" if rows[-1][1] == "music"
+                   else (display if display else "[no speech]"))
             self._log(
-                f"  [{i + 1}/{len(wavs)}] {rel}: "
-                f"{display if display else '[no speech]'}",
+                f"  [{i + 1}/{len(wavs)}] {rel}: {tag}",
                 "info")
 
         # Optional Phase 3: rename speech files using their transcripts
@@ -150,14 +169,17 @@ class TranscribePipeline(BasePipeline):
         skipped_renames = 0
         if self.rename_after:
             self._set_phase(2)
-            self._log("Renaming speech files using transcripts...", "info")
+            self._log("Renaming speech + music files...", "info")
             new_rows = []
             for rel, kind, text in rows:
                 self._check_cancel()
-                if kind != "speech" or not text:
+                # speech -> spoken text; music -> the literal tag "music".
+                label = text if kind == "speech" else (
+                    "music" if kind == "music" else "")
+                if not label:
                     new_rows.append((rel, kind, text))
                     continue
-                new_rel = _renamed_rel_path(rel, text)
+                new_rel = _renamed_rel_path(rel, label)
                 if new_rel == rel:
                     new_rows.append((rel, kind, text))
                     skipped_renames += 1
@@ -200,15 +222,17 @@ class TranscribePipeline(BasePipeline):
             f"\nRenamed {renamed_count} file(s) using transcripts."
             if self.rename_after else "")
 
+        music_summary = (f" Tagged {music_count} long clip(s) as music."
+                         if music_count else "")
         self._log("Done.", "success")
         self._done(True,
             f"Transcribed {speech_count} speech sample(s); "
-            f"skipped {non_speech_count} non-speech sample(s)."
+            f"skipped {non_speech_count} non-speech sample(s).{music_summary}"
             f"{rename_summary}\n\n"
             f"Output: {out_path}\n\n"
             f"Each row pairs a relative WAV path with its detected "
-            f"English text. Open in Excel / a CSV viewer and search "
-            f"for the callout you want to mod.")
+            f"English text (or 'music'). Open in Excel / a CSV viewer and "
+            f"search for the callout you want to mod.")
 
 
 def _find_wavs(root):

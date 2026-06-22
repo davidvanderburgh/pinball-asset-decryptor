@@ -451,7 +451,11 @@ class Spike2Emu:
             self._ret(0); return
         if nm in ("open", "open64", "openat"):
             self._open(); return
-        if nm in ("__fxstat", "__xstat", "fstat", "stat"):
+        if nm in ("__fxstat", "__xstat", "fstat", "stat",
+                  "__fxstat64", "__xstat64", "fstat64", "stat64"):
+            # 64-bit variants matter for the per-category banks (the loader reads
+            # the fstat size for the mmap length); cat-0 is offset-identity and
+            # doesn't depend on it, but routing them is harmless there.
             self._fstat(); return
         if nm in ("mmap", "mmap64"):
             self._mmap(); return

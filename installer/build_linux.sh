@@ -63,6 +63,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.locate" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.codec" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.parallel" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike2.category" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-submodules "pinball_decryptor.plugins" \

@@ -295,9 +295,16 @@ def _write_wav(path, L, R, stereo):
 # public API (called by the pipelines)
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
-                cancel=None, phase=None, open_disk=None, log_line=None):
+                cancel=None, phase=None, open_disk=None, log_line=None,
+                music_banks=False):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
+
+    ``music_banks`` (opt-in, off by default) ALSO decodes the per-category
+    ``image-scNN.bin`` banks — the licensed songs / extra sound sets the six
+    multi-category titles (Metallica, D&D, Rush, Deadpool, Foo Fighters, John
+    Wick) keep outside cat-0.  It's a lot more audio + decode time, hence opt-in;
+    titles without those banks (or whose build can't be driven) are unaffected.
 
     ``open_disk`` (a zero-arg callable returning a fresh seekable byte stream)
     overrides how the disk is opened — Direct-SD passes one that returns a
@@ -388,12 +395,52 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
                                 log_line=log_line)
         log("Decoded %d/%d sounds to %s" % (ok, total, audio_dir), "success")
+        if music_banks and not cancel():
+            if emu is not None:
+                emu.close(); emu = None    # free the cat-0 emu before booting CatEmu
+            ok += _extract_category_banks(reader, gr_path, img_path, work,
+                                          audio_dir, log, progress, cancel)
         return ok
     finally:
         if emu is not None:
             emu.close()
         disk_f.close()
         _rmtree(work)
+
+
+def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
+                            progress, cancel):
+    """Extract the card's ``image-scNN.bin`` banks to ``work`` and decode each to
+    WAV under ``audio/`` (named ``music_catNN_idx.wav`` so the existing
+    AcoustID auto-naming can title the songs).  Returns the count decoded; 0 (and
+    a clean skip) when there are no banks or the build can't be driven."""
+    from .spike2.category import extract_category_audio
+    sc_paths = []
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            break
+        base = path.rsplit("/", 1)[-1]
+        if base.startswith("image-sc") and base.endswith(".bin"):
+            op = os.path.join(work, base)
+            reader.extract_file(node, op)
+            sc_paths.append(op)
+    if not sc_paths:
+        return 0
+    log("Decoding %d per-category music bank(s) (the songs / extra sounds; this "
+        "is slow)..." % len(sc_paths), "info")
+
+    def _wcb(catid, idx, L, R, stereo):
+        _write_wav(os.path.join(audio_dir, "music_cat%02d_%04d.wav" % (catid, idx)),
+                   L, R, stereo)
+
+    def _prog(c, t):
+        if progress:
+            progress(min(100, int(c * 100 / max(t, 1))), 100,
+                     "Decoding music %d/%d" % (c, t))
+    n = extract_category_audio(gr_path, img_path, sc_paths, _wcb, log=log,
+                               progress=_prog, cancel=cancel)
+    log("Decoded %d per-category music sound(s)." % n, "success")
+    return n
 
 
 def _serial_progress_cb(p, emit):

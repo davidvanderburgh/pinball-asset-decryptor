@@ -300,11 +300,14 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
 
-    ``music_banks`` (opt-in, off by default) ALSO decodes the per-category
-    ``image-scNN.bin`` banks — the licensed songs / extra sound sets the six
-    multi-category titles (Metallica, D&D, Rush, Deadpool, Foo Fighters, John
-    Wick) keep outside cat-0.  It's a lot more audio + decode time, hence opt-in;
-    titles without those banks (or whose build can't be driven) are unaffected.
+    ``music_banks`` ALSO decodes the per-category ``image-scNN.bin`` banks — the
+    licensed songs / extra sound sets the six multi-category titles (Metallica,
+    D&D, Rush, Deadpool, Foo Fighters, John Wick) keep outside cat-0.  It's
+    OFF by default for now because driving the firmware codec per bank is slow
+    (~10-15 min for Metallica's 24 songs even parallelized — see
+    plans/spike2_multicat_handoff.md "perf"); titles without banks are a fast
+    no-op.  The decode is correct; only the speed needs work before it's a safe
+    always-on default.
 
     ``open_disk`` (a zero-arg callable returning a fresh seekable byte stream)
     overrides how the disk is opened — Direct-SD passes one that returns a
@@ -414,7 +417,7 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
     WAV under ``audio/`` (named ``music_catNN_idx.wav`` so the existing
     AcoustID auto-naming can title the songs).  Returns the count decoded; 0 (and
     a clean skip) when there are no banks or the build can't be driven."""
-    from .spike2.category import extract_category_audio
+    from .spike2.category import extract_category_audio_parallel
     sc_paths = []
     for path, _ino, node in reader.iter_regular_files(min_size=1):
         if cancel():
@@ -426,19 +429,15 @@ def _extract_category_banks(reader, gr_path, img_path, work, audio_dir, log,
             sc_paths.append(op)
     if not sc_paths:
         return 0
-    log("Decoding %d per-category music bank(s) (the songs / extra sounds; this "
-        "is slow)..." % len(sc_paths), "info")
-
-    def _wcb(catid, idx, L, R, stereo):
-        _write_wav(os.path.join(audio_dir, "music_cat%02d_%04d.wav" % (catid, idx)),
-                   L, R, stereo)
+    log("Extracting %d per-category music bank(s) — the licensed songs / extra "
+        "sounds outside image.bin." % len(sc_paths), "info")
 
     def _prog(c, t):
         if progress:
             progress(min(100, int(c * 100 / max(t, 1))), 100,
-                     "Decoding music %d/%d" % (c, t))
-    n = extract_category_audio(gr_path, img_path, sc_paths, _wcb, log=log,
-                               progress=_prog, cancel=cancel)
+                     "Decoding music bank %d/%d" % (c, t))
+    n = extract_category_audio_parallel(gr_path, img_path, sc_paths, audio_dir,
+                                        log=log, progress=_prog, cancel=cancel)
     log("Decoded %d per-category music sound(s)." % n, "success")
     return n
 

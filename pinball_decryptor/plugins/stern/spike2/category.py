@@ -504,3 +504,84 @@ def extract_category_audio(game_real_path, image_path, sc_files, write_wav,
         return ok
     finally:
         emu.close()
+
+
+# --------------------------------------------------------------------------
+# parallel decode (one CatEmu per worker, each handling a subset of banks)
+# --------------------------------------------------------------------------
+def _write_cat_wav(out_dir, catid, idx, L, R, stereo):
+    import wave
+
+    import numpy as np
+    chans = [L, R] if stereo else [L]
+    n = len(chans[0])
+    inter = np.empty(n * len(chans), np.int16)
+    for i, c in enumerate(chans):
+        inter[i::len(chans)] = np.clip(c, -32768, 32767).astype(np.int16)
+    path = os.path.join(out_dir, "music_cat%02d_%04d.wav" % (catid, idx))
+    w = wave.open(path, "wb")
+    w.setnchannels(len(chans))
+    w.setsampwidth(2)
+    w.setframerate(44100)
+    w.writeframes(inter.tobytes())
+    w.close()
+
+
+def _cat_pool_worker(args):
+    """One worker = a fresh CatEmu decoding its assigned banks (derive-all then
+    decode-all, per :func:`extract_category_audio`).  Returns the count decoded.
+    Top-level so it pickles across the spawn boundary."""
+    game_real_path, image_path, subset, out_dir = args
+    try:
+        return extract_category_audio(
+            game_real_path, image_path, subset,
+            lambda catid, idx, L, R, stereo: _write_cat_wav(
+                out_dir, catid, idx, L, R, stereo))
+    except Exception:
+        return 0
+
+
+def extract_category_audio_parallel(game_real_path, image_path, sc_files, out_dir,
+                                    nworkers=None, log=None, progress=None,
+                                    cancel=None):
+    """Parallel twin of :func:`extract_category_audio` — splits the banks across
+    ``nworkers`` spawned CatEmu processes (each boots once, decodes its subset,
+    writes ``music_catNN_*.wav`` into ``out_dir``).  Falls back to a single
+    in-process run if the pool can't start.  Returns the count decoded."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    files = sorted((c, p) for p in sc_files
+                   if (c := read_category_id(p)) is not None)
+    if not files:
+        return 0
+    import multiprocessing as mp
+
+    nworkers = nworkers or max(1, min((os.cpu_count() or 2) - 2, 8))
+    nworkers = max(1, min(nworkers, len(files)))
+    # round-robin so each worker gets a spread of (differently-sized) banks
+    chunks = [[] for _ in range(nworkers)]
+    for i, (_c, p) in enumerate(files):
+        chunks[i % nworkers].append(p)
+    tasks = [(game_real_path, image_path, chunk, out_dir)
+             for chunk in chunks if chunk]
+    log("Decoding %d music bank(s) across %d process(es)..."
+        % (len(files), len(tasks)), "info")
+    try:
+        ctx = mp.get_context("spawn")
+        ok = 0
+        done = 0
+        with ctx.Pool(len(tasks)) as pool:
+            for n in pool.imap_unordered(_cat_pool_worker, tasks):
+                ok += n
+                done += 1
+                if progress:
+                    progress(done, len(tasks))
+                if cancel():
+                    pool.terminate()
+                    break
+        return ok
+    except Exception as e:
+        log("Parallel music decode unavailable (%s); using one process." % e,
+            "warning")
+        return _cat_pool_worker((game_real_path, image_path,
+                                 [p for _c, p in files], out_dir))

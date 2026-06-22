@@ -9,6 +9,7 @@ Shape:
   Log
 """
 
+import base64
 import os
 import sys
 import time
@@ -241,6 +242,23 @@ class MainWindow:
             "write", lambda *a: self._refresh_video_list())
         self.video_sort_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
+        # Replace-Image tab state (capabilities.replace_image plugins).
+        # Mirrors the video tab, but the preview is a single static thumbnail
+        # on a canvas — no embedded player / threads / ffmpeg / seek bar.
+        self.image_search_var = tk.StringVar()
+        self.image_sort_var = tk.StringVar(value="Name")
+        self.image_status_var = tk.StringVar(value="")
+        self._image_slots = []           # list[ImageSlot] from last scan
+        self._image_slots_by_rel = {}    # rel_path -> ImageSlot
+        self._image_assignments = {}     # rel_path -> replacement file path
+        self._image_scan_id = 0          # bump-counter to drop stale scans
+        self._image_scan_dir = ""        # folder the current slots came from
+        self._image_preview_img = None   # Tk PhotoImage ref (must stay alive)
+        self._image_current_rel = None   # slot shown in the static preview
+        self.image_search_var.trace_add(
+            "write", lambda *a: self._refresh_image_list())
+        self.image_sort_var.trace_add(
+            "write", lambda *a: self._refresh_image_list())
         # Williams-only: "Use PinMAME runtime capture" toggle on the
         # Extract tab.  When ON, the Extract button kicks off the
         # libpinmame-driven capture pipeline (composed cinematics +
@@ -526,18 +544,21 @@ class MainWindow:
         self._tab_extract = ttk.Frame(self._notebook)
         self._tab_audio = ttk.Frame(self._notebook)
         self._tab_video = ttk.Frame(self._notebook)
+        self._tab_image = ttk.Frame(self._notebook)
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
 
         self._notebook.add(self._tab_extract, text="  Extract  ")
         self._notebook.add(self._tab_audio, text="  Replace Audio  ")
         self._notebook.add(self._tab_video, text="  Replace Video  ")
+        self._notebook.add(self._tab_image, text="  Replace Images  ")
         self._notebook.add(self._tab_write, text="  Write  ")
         self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
 
         self._build_extract_tab()
         self._build_audio_tab()
         self._build_video_tab()
+        self._build_image_tab()
         self._build_write_tab()
         self._build_modpack_tab()
 
@@ -3124,6 +3145,474 @@ class MainWindow:
         return (dict(self._video_slots_by_rel), assignments,
                 bool(self.video_trim_var.get()))
 
+    # ==================================================================
+    # Replace Image tab — mirrors Replace Video, but the preview is a
+    # single static thumbnail (no player / threads / ffmpeg / seek bar).
+    # ==================================================================
+
+    def _build_image_tab(self):
+        """Build the 'Replace Image' tab: a searchable list of the image files
+        in the extracted assets folder, each a slot the user can assign a
+        replacement for, with a static thumbnail preview.  Staging scales each
+        replacement to its slot's pixel dimensions/format and writes it over the
+        original so the normal Write step repacks it."""
+        f = self._tab_image
+        pad = {"padx": 10, "pady": 4}
+
+        ttk.Label(
+            f,
+            text="Swap a game's images without copy-pasting and renaming. Your "
+                 "replacement can be almost any image format — it's auto-scaled "
+                 "to the original image's pixel dimensions and saved in its "
+                 "format for you (transparency is kept where the original has "
+                 "it). Pick your extracted folder, assign an image to a slot, "
+                 "then build the update on the Write tab.",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+
+        # Pillow-missing banner.  Image matching is always a re-encode, so
+        # Pillow is effectively required here.  Pack-managed by
+        # _refresh_image_pillow_warning(); positioned before the assets row.
+        self._image_pillow_warn = ttk.Label(
+            f,
+            text="⚠ Pillow not found — replacing images needs Pillow to scale "
+                 "+ re-encode images. Install it with “Install Missing” above "
+                 "the tabs.",
+            foreground="#d04040", font=(_SANS_FONT, 9),
+            wraplength=720, justify=tk.LEFT)
+
+        # Assets folder row (shared with the Write / Replace Audio/Video tabs).
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        self._image_assets_row = row
+        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(row, text="Browse...",
+                   command=self._browse_write_assets).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Button(row, text="Scan",
+                   command=self._scan_image_slots_async).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(f, text="(the folder Extract produced — shared with the "
+                          "Write tab)",
+                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
+
+        # Search + sort toolbar.
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
+        ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
+            side=tk.LEFT, padx=(4, 12))
+        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
+        ttk.Combobox(tools, textvariable=self.image_sort_var, width=12,
+                     state="readonly",
+                     values=("Name", "Folder")).pack(
+            side=tk.LEFT, padx=(4, 0))
+        self._image_status_lbl = ttk.Label(
+            tools, textvariable=self.image_status_var,
+            font=(_SANS_FONT, 9))
+        self._image_status_lbl.pack(side=tk.RIGHT)
+
+        # Slot list.
+        list_frame = ttk.Frame(f)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        self._image_tree = ttk.Treeview(
+            list_frame, columns=("res", "fmt", "rep"),
+            height=9, selectmode="browse")
+        self._image_tree.heading("#0", text="Original Image", anchor=tk.W)
+        self._image_tree.heading("res", text="Resolution", anchor=tk.W)
+        self._image_tree.heading("fmt", text="Format", anchor=tk.W)
+        self._image_tree.heading("rep", text="Replacement", anchor=tk.W)
+        self._image_tree.column("#0", width=300, minwidth=160)
+        self._image_tree.column("res", width=90, minwidth=70, anchor=tk.W)
+        self._image_tree.column("fmt", width=140, minwidth=80)
+        self._image_tree.column("rep", width=200, minwidth=110)
+        image_scroll = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self._image_tree.yview)
+        self._image_tree.configure(yscrollcommand=image_scroll.set)
+        image_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._image_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._image_tree.bind("<Double-1>", self._image_on_tree_double)
+        self._image_tree.bind("<Button-1>", self._image_on_tree_click, add="+")
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self._image_tree.bind(seq, self._image_on_tree_right)
+        self._image_tree.bind("<<TreeviewSelect>>", self._image_on_tree_select)
+
+        self._image_empty = ttk.Label(
+            list_frame,
+            text="Pick your extracted assets folder above, then click Scan.",
+            foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
+        self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # --- Static preview: a single thumbnail of the selected slot (or its
+        # assigned replacement if one is set).  No seek bar / transport. ---
+        preview = ttk.LabelFrame(f, text=" Preview ")
+        preview.pack(fill=tk.X, padx=10, pady=(4, 2))
+        self._image_canvas = tk.Canvas(
+            preview, width=360, height=240, highlightthickness=1, bd=0,
+            background="#000000")
+        self._image_canvas.pack(padx=6, pady=6)
+
+        self._image_note_lbl = ttk.Label(
+            f, text="", font=(_SANS_FONT, 8, "italic"),
+            foreground="#888888", wraplength=720, justify=tk.LEFT)
+        self._image_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+
+        ttk.Label(
+            f,
+            text="Assigned replacements are applied automatically when you "
+                 "build the update on the Write tab — no extra step.",
+            font=(_SANS_FONT, 9), foreground="#888888",
+            wraplength=720, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(8, 8))
+
+        self._refresh_image_pillow_warning()
+
+    def _refresh_image_pillow_warning(self):
+        """Show the Pillow-missing banner only when Pillow can't be imported.
+        Re-probes on each tab visit so installing Pillow mid-session clears the
+        banner next time the tab is opened."""
+        warn = getattr(self, "_image_pillow_warn", None)
+        if warn is None:
+            return
+        from ..core import image as _image
+        if _image.pil_available():
+            warn.pack_forget()
+        elif not warn.winfo_ismapped():
+            warn.pack(fill=tk.X, padx=12, pady=(0, 4),
+                      before=self._image_assets_row)
+
+    # ---- Replace Image: scanning -------------------------------------
+
+    def _scan_image_slots_async(self):
+        """Scan the assets folder for image slots on a worker thread, then
+        repopulate the list.  Stale scans are dropped via a bump-counter."""
+        import threading
+        from ..core.image_slots import scan_image_slots
+
+        assets_path = (self.write_assets_var.get() or "").strip()
+        self._image_scan_id += 1
+        scan_id = self._image_scan_id
+
+        if not assets_path or not os.path.isdir(assets_path):
+            self._image_slots = []
+            self._image_slots_by_rel = {}
+            self._refresh_image_list()
+            self._image_empty.configure(
+                text="Pick your extracted assets folder above, then click Scan.")
+            self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+
+        self._image_empty.configure(text="Scanning for image files…")
+        self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        mfr = self._current_mfr
+
+        def _work():
+            try:
+                roots = mfr.image_slot_dirs(assets_path) if mfr else None
+            except Exception:
+                roots = None
+            try:
+                exts = mfr.image_slot_exts(assets_path) if mfr else None
+            except Exception:
+                exts = None
+            try:
+                # Fast walk: list slots instantly; Pillow metadata is filled in
+                # afterwards on a background pass.
+                slots = scan_image_slots(assets_path, roots=roots, exts=exts,
+                                         probe=False)
+            except Exception:
+                slots = []
+            if self._image_scan_id != scan_id:
+                return
+            self._tk_root().after(
+                0, self._populate_image_after_scan,
+                slots, scan_id, assets_path)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _populate_image_after_scan(self, slots, scan_id, scan_dir):
+        """Main-thread: store scan results and refresh the list."""
+        if self._image_scan_id != scan_id:
+            return
+        self._image_slots = slots
+        self._image_slots_by_rel = {s.rel_path: s for s in slots}
+        if scan_dir != self._image_scan_dir:
+            self._image_assignments = {}
+        else:
+            self._image_assignments = {
+                rel: rep for rel, rep in self._image_assignments.items()
+                if rel in self._image_slots_by_rel}
+        self._image_scan_dir = scan_dir
+        self._refresh_image_list()
+        # Fill in dimensions / format on a background thread so the list is
+        # usable immediately even with hundreds of images.
+        self._probe_image_metadata_async(scan_id)
+
+    def _probe_image_metadata_async(self, scan_id):
+        """Probe Pillow metadata for the just-scanned slots on a small thread
+        pool, updating each row as its info arrives.  Stale passes (a newer scan
+        started) drop out via the scan-id."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from ..core.image import detect_image_info
+
+        pending = [s for s in self._image_slots if s.info is None]
+        if not pending:
+            return
+
+        def _coordinator():
+            workers = min(8, (os.cpu_count() or 4))
+            try:
+                with ThreadPoolExecutor(max_workers=workers) as ex:
+                    futs = {ex.submit(detect_image_info, s.abs_path): s
+                            for s in pending}
+                    for fut in as_completed(futs):
+                        if self._image_scan_id != scan_id:
+                            for fu in futs:
+                                fu.cancel()
+                            return
+                        slot = futs[fut]
+                        try:
+                            info = fut.result()
+                        except Exception:
+                            info = None
+                        self._tk_root().after(
+                            0, self._apply_image_meta,
+                            scan_id, slot.rel_path, info)
+            except Exception:
+                pass
+
+        threading.Thread(target=_coordinator, daemon=True).start()
+
+    def _apply_image_meta(self, scan_id, rel, info):
+        """Main-thread: store a probed slot's metadata and update its row."""
+        if self._image_scan_id != scan_id:
+            return
+        slot = self._image_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        slot.info = info
+        slot.probed = True
+        tree = getattr(self, "_image_tree", None)
+        if tree is None or not tree.exists(rel):
+            return
+        rep = self._image_assignments.get(rel)
+        rep_disp = os.path.basename(rep) if rep else "Choose…"
+        tree.item(rel, values=(slot.resolution_str(), slot.format_summary(),
+                               rep_disp))
+
+    def _refresh_image_list(self):
+        """Apply the search filter + sort and repopulate the slot tree."""
+        tree = getattr(self, "_image_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+
+        query = (self.image_search_var.get() or "").strip().lower()
+        slots = [s for s in self._image_slots
+                 if not query or query in s.rel_path.lower()]
+        sort = self.image_sort_var.get()
+        if sort == "Folder":
+            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
+        else:
+            slots.sort(key=lambda s: s.rel_path.lower())
+
+        for s in slots:
+            rep = self._image_assignments.get(s.rel_path)
+            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            if s.info is None and not s.probed:
+                res = "…"  # metadata still loading
+            else:
+                res = s.resolution_str()
+            tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
+                        values=(res, s.format_summary(), rep_disp),
+                        tags=("assigned",) if rep else ())
+
+        total = len(self._image_slots)
+        assigned = len(self._image_assignments)
+        if total == 0:
+            self.image_status_var.set("")
+            self._image_empty.configure(
+                text="No replaceable image found in this folder.")
+            self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        else:
+            shown = len(slots)
+            extra = f"  ({shown} shown)" if shown != total else ""
+            self.image_status_var.set(
+                f"{total} images, {assigned} assigned{extra}")
+            self._image_empty.place_forget()
+
+    def _maybe_rescan_image(self):
+        """Auto-scan when the Replace Image tab becomes visible and the folder
+        has changed since the last scan."""
+        if self._current_mfr is None:
+            return
+        if not getattr(self._current_mfr.capabilities, "replace_image", False):
+            return
+        assets_path = (self.write_assets_var.get() or "").strip()
+        if assets_path and assets_path != self._image_scan_dir:
+            self._scan_image_slots_async()
+
+    # ---- Replace Image: per-slot actions -----------------------------
+
+    def _image_selected_rel(self):
+        sel = self._image_tree.selection() if hasattr(self, "_image_tree") else ()
+        return sel[0] if sel else None
+
+    def _image_assign_rel(self, rel):
+        """Open the replacement picker for *rel* and record the assignment."""
+        if not rel or rel not in self._image_slots_by_rel:
+            return
+        from ..core.image import REPLACEMENT_EXTS
+        spec = " ".join(f"*{e}" for e in REPLACEMENT_EXTS)
+        path = filedialog.askopenfilename(
+            title=f"Choose a replacement for {rel}",
+            filetypes=[("Image files", spec), ("All files", "*.*")])
+        if not path:
+            return
+        self._image_assignments[rel] = path
+        self._refresh_image_list()
+        if rel == self._image_current_rel:
+            self._image_render_preview(rel)
+        try:
+            self._image_tree.selection_set(rel)
+            self._image_tree.see(rel)
+        except tk.TclError:
+            pass
+
+    # ---- Replace Image: table interactions ---------------------------
+
+    def _image_on_tree_select(self, _event=None):
+        rel = self._image_selected_rel()
+        if rel is None or rel == self._image_current_rel:
+            return
+        self._image_current_rel = rel
+        self._image_render_preview(rel)
+
+    def _image_on_tree_double(self, _event=None):
+        rel = self._image_selected_rel()
+        if rel is None:
+            messagebox.showinfo("No Slot Selected",
+                                "Select an image to assign.")
+            return
+        self._image_assign_rel(rel)
+
+    def _image_on_tree_click(self, event):
+        tree = self._image_tree
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = tree.identify_row(event.y)
+        col = tree.identify_column(event.x)  # cols=(res,fmt,rep) -> #1..#3
+        if row and col == "#3":
+            tree.selection_set(row)
+            self._image_assign_rel(row)
+
+    def _image_on_tree_right(self, event):
+        tree = self._image_tree
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        menu = tk.Menu(tree, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="Choose replacement…",
+                         command=lambda r=row: self._image_assign_rel(r))
+        if self._image_assignments.get(row):
+            menu.add_separator()
+            menu.add_command(label="Clear replacement",
+                             command=self._image_clear_selected)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _image_clear_selected(self):
+        rel = self._image_selected_rel()
+        if rel is not None and rel in self._image_assignments:
+            del self._image_assignments[rel]
+            self._refresh_image_list()
+            if rel == self._image_current_rel:
+                self._image_render_preview(rel)
+            try:
+                self._image_tree.selection_set(rel)
+            except tk.TclError:
+                pass
+
+    # ---- Replace Image: static preview -------------------------------
+
+    def _image_render_preview(self, rel):
+        """Render a static thumbnail of *rel* (its assigned replacement if one
+        is set, else the original) centered on the preview canvas.  Tolerates a
+        missing Pillow / unreadable image by clearing the canvas."""
+        canvas = getattr(self, "_image_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        self._image_preview_img = None
+        if rel is None:
+            return
+        slot = self._image_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        path = self._image_assignments.get(rel) or slot.abs_path
+        from ..core.image import thumbnail_png
+        try:
+            w = int(canvas.cget("width"))
+            h = int(canvas.cget("height"))
+        except (tk.TclError, ValueError):
+            w, h = 360, 240
+        png = thumbnail_png(path, w - 8, h - 8)
+        if not png:
+            return
+        try:
+            self._image_preview_img = tk.PhotoImage(
+                data=base64.b64encode(png))
+            canvas.create_image(w // 2, h // 2, anchor=tk.CENTER,
+                                image=self._image_preview_img)
+        except tk.TclError:
+            self._image_preview_img = None
+
+    def _image_clear_preview(self):
+        """Reset the static preview entirely (used on manufacturer switch)."""
+        self._image_current_rel = None
+        self._image_preview_img = None
+        if hasattr(self, "_image_canvas"):
+            self._image_canvas.delete("all")
+
+    # ---- Replace Image: pending assignments (applied at Write time) --
+
+    def pending_image_assignments(self, assets_dir):
+        """Return ``(slots_by_rel, assignments)`` of replacements the user
+        assigned for *assets_dir*, or ``None`` when there's nothing to apply.
+        Called by the Write flow to auto-stage edits just before it repacks.
+
+        Guarded so it only fires when the folder being written is the same one
+        the assignments were made against."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(
+                mfr.capabilities, "replace_image", False):
+            return None
+        if not assets_dir:
+            return None
+        scanned = self._image_scan_dir or ""
+        if (os.path.normcase(os.path.normpath(assets_dir))
+                != os.path.normcase(os.path.normpath(scanned))):
+            return None
+        assignments = {rel: rep for rel, rep in self._image_assignments.items()
+                       if rep and rel in self._image_slots_by_rel}
+        if not assignments:
+            return None
+        return (dict(self._image_slots_by_rel), assignments)
+
     def _build_phase_steps(self, parent, phases, mode):
         labels = []
         for name in phases:
@@ -3184,6 +3673,16 @@ class MainWindow:
             self._refresh_video_ffmpeg_warning()
             self._default_assets_from_extract()
             self._maybe_rescan_video()
+        elif text == "Replace Images":
+            # The static preview has no player to stop, but stop any video
+            # playback left running on the way in, and refresh the Pillow
+            # banner / auto-scan the folder.
+            self._video_stop_playback()
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._refresh_image_pillow_warning()
+            self._default_assets_from_extract()
+            self._maybe_rescan_image()
         else:
             # Leaving the video tab: don't let an embedded clip keep playing
             # (decode thread + ffplay) under another tab.
@@ -3342,6 +3841,7 @@ class MainWindow:
         # Show/hide tabs by capability.
         self._configure_tab("Replace Audio", caps.replace_audio)
         self._configure_tab("Replace Video", caps.replace_video)
+        self._configure_tab("Replace Images", caps.replace_image)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
         # New mfr: clear any audio slots/assignments from the previous one
@@ -3381,6 +3881,15 @@ class MainWindow:
         if hasattr(self, "_video_length_note_lbl"):
             self._video_length_note_lbl.configure(
                 text=mfr.video_length_note() or "")
+        # Same clean slate for the image tab.
+        self._image_slots = []
+        self._image_slots_by_rel = {}
+        self._image_assignments = {}
+        self._image_scan_dir = ""
+        self._image_clear_preview()
+        self._refresh_image_list()
+        if hasattr(self, "_image_note_lbl"):
+            self._image_note_lbl.configure(text=mfr.image_note() or "")
 
         # BOF-only Extract callout — pack just below the Extract tab's
         # warning label so users see it before they hit Extract.  Other
@@ -4661,7 +5170,8 @@ class MainWindow:
         n = 0
         for getter, label in (
                 (self.pending_audio_assignments, "Replace Audio"),
-                (self.pending_video_assignments, "Replace Video")):
+                (self.pending_video_assignments, "Replace Video"),
+                (self.pending_image_assignments, "Replace Images")):
             try:
                 pend = getter(assets_path)
             except Exception:
@@ -5559,6 +6069,11 @@ class MainWindow:
                 self._video_play_canvas,
                 "pause" if self._video_preview_playing else "play")
             self._draw_audio_icon(self._video_stop_canvas, "stop")
+
+        if hasattr(self, "_image_tree"):
+            self._image_tree.tag_configure("assigned", foreground=c["success"])
+        if hasattr(self, "_image_canvas"):
+            self._image_canvas.configure(highlightbackground=c["border"])
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

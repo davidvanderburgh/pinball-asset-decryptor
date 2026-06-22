@@ -78,7 +78,7 @@ class SternExtractPipeline(BasePipeline):
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             phase=self._set_phase)
 
-        self._set_phase(4)  # Checksums
+        self._set_phase(5)  # Checksums
         # Baseline so Write/Mod Pack can tell which assets the user edited (and
         # so the Write tab accepts this folder as an Extract output).
         self._log("Generating checksums...", "info")

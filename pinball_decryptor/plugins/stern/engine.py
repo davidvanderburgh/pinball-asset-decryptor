@@ -230,6 +230,55 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
     return len(manifest)
 
 
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga", ".webp")
+
+
+def extract_images(reader, output_dir, log=None, progress=None, cancel=None):
+    """Extract every loose image file from the card's asset tree to
+    ``output_dir/images/``, preserving the card's directory structure (so names
+    stay unique and grouped, e.g. ``images/<game>/assets/.../Login/Avatar.png``).
+
+    Spike 2 stores LCD UI images as plain ``.png`` files on the ext4 filesystem
+    (not packed inside ``.asset``), so they extract — and later patch back — like
+    any loose file.  A ``manifest.txt`` records each output path -> original card
+    path so Write can map an edited image back to its inode."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    log("Scanning for image assets...", "info")
+    imgs = []
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return 0
+        if path.lower().endswith(_IMAGE_EXTS):
+            imgs.append((path, node))
+    if not imgs:
+        log("No image assets found.", "info")
+        return 0
+
+    img_dir = os.path.join(output_dir, "images")
+    os.makedirs(img_dir, exist_ok=True)
+    log("Extracting %d image(s)..." % len(imgs), "info")
+    manifest = []
+    for i, (path, node) in enumerate(imgs):
+        if cancel():
+            break
+        if progress:
+            progress(i, len(imgs), "Extracting image %d/%d" % (i + 1, len(imgs)))
+        rel = path.lstrip("/")                       # card path without leading /
+        out_path = os.path.join(img_dir, *rel.split("/"))
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        reader.extract_file(node, out_path)
+        manifest.append("%s\t%s\t%d" % (rel, path, node["size"]))
+    try:
+        with open(os.path.join(img_dir, "manifest.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write("# output\tcard path\tbytes\n" + "\n".join(manifest) + "\n")
+    except Exception:
+        pass
+    log("Extracted %d image(s) to %s." % (len(manifest), img_dir), "success")
+    return len(manifest)
+
+
 def _write_wav(path, L, R, stereo):
     import numpy as np
     chans = [L, R] if stereo else [L]
@@ -268,26 +317,38 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         if cancel():
             return 0
 
-        # videos first (quick file copies) so they appear before the long decode
+        # videos + images first (quick file copies) so they appear before the
+        # long audio decode
         phase(2)  # Extract video
         try:
             extract_videos(reader, output_dir, log=log,
                            progress=(lambda c, t, d="": progress(
-                               5 + int(c * 10 / max(t, 1)), 100, d)) if progress else None,
+                               5 + int(c * 8 / max(t, 1)), 100, d)) if progress else None,
                            cancel=cancel)
         except Exception as e:
-            log("Video extraction failed (%s); continuing with audio." % e, "warning")
+            log("Video extraction failed (%s); continuing." % e, "warning")
         if cancel():
             return 0
 
-        phase(3)  # Decode audio
+        phase(3)  # Extract images
+        try:
+            extract_images(reader, output_dir, log=log,
+                           progress=(lambda c, t, d="": progress(
+                               13 + int(c * 2 / max(t, 1)), 100, d)) if progress else None,
+                           cancel=cancel)
+        except Exception as e:
+            log("Image extraction failed (%s); continuing." % e, "warning")
+        if cancel():
+            return 0
+
+        phase(4)  # Decode audio
         if not audio_decode_supported(gr_path):
             log("Audio decode isn't supported for this title yet: its game "
                 "firmware uses a Spike 2 codec the engine can't locate a "
                 "single decode path for (e.g. a dual-path codec), so the "
-                "per-sound keystream can't be derived. Video extraction "
-                "completed normally.", "warning")
-            phase(4)  # Checksums
+                "per-sound keystream can't be derived. Video + image "
+                "extraction completed normally.", "warning")
+            phase(5)  # Checksums
             return 0
         log("Booting firmware codec engine...", "info")
         emu = Spike2Emu(gr_path, img_path)
@@ -440,8 +501,9 @@ def _changed_videos(assets_dir, baseline):
     return out
 
 
-def _video_nodes(reader, card_paths, cancel):
-    """One filesystem pass: ``{card_path: inode}`` for the wanted card paths."""
+def _resolve_card_nodes(reader, card_paths, cancel):
+    """One filesystem pass: ``{card_path: inode}`` for the wanted card paths.
+    Shared by the video + image in-place patch paths."""
     want = set(card_paths)
     found = {}
     if not want:
@@ -499,7 +561,8 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
     """Resolve each changed video to its card inode and size-fit its bytes.
     Returns ``([(node, payload), ...], n_skipped)`` where every payload is
     exactly the inode's size, ready for an in-place ``disk_ranges`` write."""
-    nodes = _video_nodes(reader, [cp for (_f, cp, _s) in video_edits], cancel)
+    nodes = _resolve_card_nodes(reader, [cp for (_f, cp, _s) in video_edits],
+                                cancel)
     patches = []
     skipped = 0
     for fname, card_path, staged in video_edits:
@@ -521,13 +584,128 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
     return patches, skipped
 
 
+# --------------------------------------------------------------------------
+# Replace-Image: size-neutral in-place patch of the loose .png files
+# --------------------------------------------------------------------------
+_IMAGE_MANIFEST = "manifest.txt"
+
+
+def _pad_image(data, target):
+    """Pad image bytes up to exactly *target* by appending trailing zero bytes,
+    which image decoders ignore after the data's end marker (PNG ``IEND`` /
+    JPEG ``EOI`` / GIF trailer).  ``len(data)`` must be ``<= target``."""
+    pad = target - len(data)
+    if pad <= 0:
+        return data[:target]
+    return data + b"\x00" * pad
+
+
+def _changed_images(assets_dir, baseline):
+    """Return ``[(output, card_path, staged_path), ...]`` for the images under
+    ``assets_dir/images`` whose current bytes differ from the Extract baseline
+    (``.checksums.md5``).  Empty when there's no ``images/manifest.txt``.
+    *output* is the forward-slash path under ``images/`` (mirrors the card)."""
+    from ...core.checksums import md5_file
+    img_dir = os.path.join(assets_dir, "images")
+    manifest = os.path.join(img_dir, _IMAGE_MANIFEST)
+    if not os.path.isfile(manifest):
+        return []
+    out = []
+    with open(manifest, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < 2:
+                continue
+            output, card_path = cols[0], cols[1]
+            staged = os.path.join(img_dir, *output.split("/"))
+            if not os.path.isfile(staged):
+                continue
+            base = baseline.get("images/" + output)
+            try:
+                if base is not None and md5_file(staged) == base:
+                    continue           # untouched since extract
+            except OSError:
+                pass
+            out.append((output, card_path, staged))
+    return out
+
+
+def _fit_image_payload(staged_path, target, work_dir, log):
+    """Return exactly *target* bytes to overwrite the original ``.png``, or
+    ``None`` if the replacement can't be made to fit.  An image ``<= target``
+    pads up with trailing bytes; a larger one is re-compressed (max deflate,
+    then fewer colours) down to the byte budget first."""
+    with open(staged_path, "rb") as f:
+        data = f.read()
+    name = os.path.basename(staged_path)
+    if len(data) <= target:
+        return _pad_image(data, target)
+
+    from ...core.image import detect_image_info, recompress_image_to_size
+    tmp = os.path.join(work_dir, "fitimg_" + name)
+    info = detect_image_info(staged_path)
+    ok, detail = recompress_image_to_size(staged_path, tmp, target,
+                                          original_info=info)
+    if not ok:
+        log("Image %s is %d bytes but the original slot is only %d and it "
+            "couldn't be shrunk to fit (%s); skipped (left unchanged). Use a "
+            "simpler image." % (name, len(data), target, detail), "warning")
+        return None
+    try:
+        with open(tmp, "rb") as f:
+            shrunk = f.read()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    if len(shrunk) > target:
+        log("Image %s still too large after re-encode; skipped." % name,
+            "warning")
+        return None
+    log("Image %s re-compressed to fit (%d -> %d bytes of %d)."
+        % (name, len(data), len(shrunk), target), "info")
+    return _pad_image(shrunk, target)
+
+
+def _prepare_image_patches(reader, image_edits, work_dir, log, cancel):
+    """Resolve each changed image to its card inode and size-fit its bytes.
+    Returns ``([(node, payload), ...], n_skipped)`` — each payload is exactly
+    the inode's size, ready for an in-place ``disk_ranges`` write."""
+    nodes = _resolve_card_nodes(reader, [cp for (_o, cp, _s) in image_edits],
+                                cancel)
+    patches = []
+    skipped = 0
+    for output, card_path, staged in image_edits:
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Image %s: its original (%s) wasn't found on the card; "
+                "skipped." % (output, card_path), "warning")
+            skipped += 1
+            continue
+        payload = _fit_image_payload(staged, node["size"], work_dir, log)
+        if payload is None:
+            skipped += 1
+            continue
+        patches.append((node, payload))
+        log("Image %s: ready to patch (%d bytes)." % (output, node["size"]),
+            "info")
+    return patches, skipped
+
+
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 cancel=None):
     """Patch a copy of the card image at ``output_path`` with the user's edits
-    (size-neutral, in place): re-encoded audio bodies inside ``image.bin`` and
-    replaced LCD videos written over their original ``.asset`` files.  Either
-    kind of edit may be absent — a video-only write skips the firmware
-    emulator entirely."""
+    (size-neutral, in place): re-encoded audio bodies inside ``image.bin``,
+    replaced LCD videos written over their original ``.asset`` files, and
+    replaced UI images written over their original ``.png`` files.  Any kind of
+    edit may be absent — a video/image-only write skips the firmware emulator
+    entirely."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     import shutil
@@ -572,13 +750,14 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             audio_edits = dict(all_wavs)
 
     video_edits = _changed_videos(assets_dir, baseline)
+    image_edits = _changed_images(assets_dir, baseline)
 
-    if not audio_edits and not video_edits:
+    if not audio_edits and not video_edits and not image_edits:
         raise FileNotFoundError(
             "Nothing to write: every idxNNNN.wav still matches the Extract "
-            "baseline (.checksums.md5) and no replaced videos were found under "
-            "%s. Edit a sound or assign a Replace Video clip first, then Write."
-            % assets_dir)
+            "baseline (.checksums.md5) and no replaced videos or images were "
+            "found under %s. Edit a sound or assign a Replace Video / Replace "
+            "Image asset first, then Write." % assets_dir)
     if audio_edits:
         if base_by_idx:
             log("Found %d edited sound(s) of %d to write."
@@ -588,6 +767,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 % len(audio_edits), "warning")
     if video_edits:
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
+    if image_edits:
+        log("Found %d replaced image(s) to write." % len(image_edits), "info")
 
     def _read_prog(c, t):
         if progress:
@@ -615,9 +796,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     "game firmware uses a Spike 2 codec the engine can't locate "
                     "a single decode path for (e.g. a dual-path codec), so the "
                     "per-sound keystream can't be derived.")
-                if not video_edits:
+                if not video_edits and not image_edits:
                     raise RuntimeError(msg)
-                log(msg + "  Writing only the replaced video(s).", "warning")
+                log(msg + "  Writing only the replaced video(s) / image(s).",
+                    "warning")
                 audio_edits = {}
             else:
                 log("Booting firmware codec engine...", "info")
@@ -667,7 +849,8 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     log("%d sound(s) skipped (re-encode unsupported for their "
                         "codec): %s"
                         % (len(skipped), ", ".join(map(str, skipped))), "warning")
-                if not audio_patches and not video_edits:
+                if (not audio_patches and not video_edits
+                        and not image_edits):
                     raise RuntimeError(
                         "None of the edited sounds could be re-encoded bit-exact "
                         "for this title's codec yet, so nothing was written (the "
@@ -681,17 +864,26 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         video_patches = []     # (inode, payload bytes == inode size)
         if video_edits:
             if progress:
-                progress(88, 100, "Preparing video...")
+                progress(86, 100, "Preparing video...")
             video_patches, _vskip = _prepare_video_patches(
                 reader, video_edits, work, log, cancel)
             if cancel():
                 return 0
 
-        if not audio_patches and not video_patches:
+        image_patches = []     # (inode, payload bytes == inode size)
+        if image_edits:
+            if progress:
+                progress(92, 100, "Preparing images...")
+            image_patches, _iskip = _prepare_image_patches(
+                reader, image_edits, work, log, cancel)
+            if cancel():
+                return 0
+
+        if not audio_patches and not video_patches and not image_patches:
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded and no replaced "
-                "video could be fit to its original slot (the card image was "
-                "not modified).")
+                "video or image could be fit to its original slot (the card "
+                "image was not modified).")
 
         # copy the card image, then patch the changed bytes in place
         log("Copying card image to output...", "info")
@@ -705,7 +897,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     out.seek(disk)
                     out.write(body[:n])
                     body = body[n:]
-            for node, payload in video_patches:
+            for node, payload in video_patches + image_patches:
                 off = 0
                 for disk, n in reader.disk_ranges(node, 0, len(payload)):
                     out.seek(disk)
@@ -713,9 +905,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     off += n
             out.flush()
             os.fsync(out.fileno())
-        n_written = len(audio_patches) + len(video_patches)
-        log("Wrote patched image: %s (%d sound(s), %d video(s))."
-            % (output_path, len(audio_patches), len(video_patches)), "success")
+        n_written = len(audio_patches) + len(video_patches) + len(image_patches)
+        log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s))."
+            % (output_path, len(audio_patches), len(video_patches),
+               len(image_patches)), "success")
         return n_written
     finally:
         if disk_f is not None:

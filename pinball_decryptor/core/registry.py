@@ -134,6 +134,15 @@ class Capabilities:
     # NOT BOF (no .ogv->.ctex encoder yet) and NOT CGC/Williams (real-time
     # render, no video files to swap).
     replace_video: bool = False
+    # Replace-image path: surfaces a "Replace Image" tab that scans the
+    # extracted assets folder for loose image files (.png/.jpg/.bmp/…), lists
+    # them as named slots with a thumbnail preview, and lets the user assign a
+    # replacement per slot.  Assignments are scaled to the original's pixel
+    # dimensions (via Pillow) and staged over the extracted files so the normal
+    # Write pipeline repacks them.  Set True only for plugins whose images are
+    # loose files Write round-trips — e.g. Stern Spike 2 (loose .png on the SD
+    # card, patched in place size-neutral).
+    replace_image: bool = False
 
 
 @dataclass(frozen=True)
@@ -394,6 +403,35 @@ class Manufacturer(ABC):
         return ("Replacements play at their own length — trimming usually "
                 "isn't needed. Tick “Trim / pad” below only if a clip looks "
                 "cut off or mistimed in-game.")
+
+    def image_slot_dirs(self, assets_dir):
+        """Subdirectories of *assets_dir* that hold replaceable image slots.
+
+        Drives the Replace-Image tab's scan when ``capabilities.replace_image``
+        is set.  Return ``None`` (the default) to scan the whole extract for
+        loose images.  Override to keep dead-end images out of the list (e.g.
+        derived/decoded image folders a plugin's Write can't repack).
+        """
+        return None
+
+    def image_slot_exts(self, assets_dir):
+        """Image extensions the Replace-Image tab should surface as slots.
+
+        Return ``None`` (default) to use :data:`core.image.IMAGE_EXTS`.
+        Override to narrow it when only some formats round-trip.
+        """
+        return None
+
+    def image_note(self) -> str:
+        """One-line guidance for the Replace-Image tab.
+
+        Default: replacements are scaled to the original's pixel dimensions.
+        Plugins whose Write constrains the file further (e.g. a size-neutral
+        in-place patch) override this.
+        """
+        return ("Replacements are scaled to the original image's pixel "
+                "dimensions. Pick your extracted folder, assign an image to a "
+                "slot, then build the update on the Write tab.")
 
     def audio_export_supported(self, path) -> bool:
         """Whether extracting *path* yields audio assets the

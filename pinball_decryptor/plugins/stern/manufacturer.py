@@ -55,6 +55,10 @@ class SternManufacturer(Manufacturer):
         # replacement is fit to the original's byte size — padded if smaller,
         # re-encoded down if larger, skipped if it still won't fit).
         replace_video=True,
+        # Images are loose .png files on the card (UI art); the Replace Image
+        # tab stages a replacement scaled to the original's dimensions, and
+        # Write patches it back in place the same size-neutral way as video.
+        replace_image=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -65,7 +69,7 @@ class SternManufacturer(Manufacturer):
         extensions=(".img", ".bin", ".raw"),
     )
     extract_phases = ("Detect", "Locate partitions", "Extract video",
-                      "Decode audio", "Checksums")
+                      "Extract images", "Decode audio", "Checksums")
     write_phases = ("Detect", "Stage", "Re-encode", "Patch image")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     direct_ssd_extract_phases = ("Read SD card", "Decode audio", "Checksums")
@@ -114,6 +118,14 @@ class SternManufacturer(Manufacturer):
                 "re-encoded down to fit, and one that still won't fit is "
                 "skipped (left unchanged) — use a shorter / lower-resolution "
                 "clip. Tick “Trim / pad” to also match the original length.")
+
+    def image_note(self):
+        return ("Each image is scaled to the original's pixel dimensions and "
+                "patched into the SD-card image in place, so it's fit to the "
+                "original's byte size: it drops straight in if it's small "
+                "enough, is re-compressed (fewer colours) to fit if larger, and "
+                "is skipped (left unchanged) if it still won't fit — use a "
+                "simpler image.")
 
     def detect(self, path):
         key = detect_game(path)

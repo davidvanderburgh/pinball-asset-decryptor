@@ -1106,11 +1106,12 @@ class App:
     # ------------------------------------------------------------------
 
     def _run_pipeline_with_audio(self, assets_dir):
-        """Worker-thread entry for a Write run: apply any Replace-Audio and
-        Replace-Video assignments into the assets folder first, then run the
-        pipeline (which repacks the now-changed files)."""
+        """Worker-thread entry for a Write run: apply any Replace-Audio,
+        Replace-Video and Replace-Image assignments into the assets folder
+        first, then run the pipeline (which repacks the now-changed files)."""
         self._stage_pending_audio(assets_dir)
         self._stage_pending_video(assets_dir)
+        self._stage_pending_image(assets_dir)
         self.pipeline.run()
 
     def _stage_pending_audio(self, assets_dir):
@@ -1164,6 +1165,32 @@ class App:
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Video replacement failed: {e}", "error"))
+
+    def _stage_pending_image(self, assets_dir):
+        """Scale + write the user's assigned replacement images over the
+        matching files in *assets_dir* (so the Write pipeline that follows
+        repacks them).  Runs on the write worker thread; logs via the queue.
+        A no-op when nothing is assigned for this folder."""
+        pend = self.window.pending_image_assignments(assets_dir)
+        if not pend:
+            return
+        slots_by_rel, assignments = pend
+        from .core.image_slots import stage_replacements
+        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        self.msg_queue.put(LogMsg(
+            f"Applying {len(assignments)} image replacement(s) before "
+            f"repack...", "info"))
+        try:
+            staged, failures = stage_replacements(
+                slots_by_rel, assignments, log_cb=log_cb)
+            self.msg_queue.put(LogMsg(
+                f"Applied {staged} image replacement(s)."
+                + (f"  {len(failures)} could not be converted (see above)."
+                   if failures else ""),
+                "success" if not failures else "error"))
+        except Exception as e:
+            self.msg_queue.put(LogMsg(
+                f"Image replacement failed: {e}", "error"))
 
     # ------------------------------------------------------------------
     # Cancel / Done

@@ -31,6 +31,12 @@ import wave
 AVAILABLE = True
 
 _WAV_RE = re.compile(r"(?:idx)?0*(\d+)", re.IGNORECASE)
+# Per-song music-bank WAVs (image-scNN.bin banks). EXTRACT-ONLY: Write re-encodes
+# only the cat-0 sounds (idxNNNN.wav) back into image.bin — music_catNN_* live in
+# separate image-scNN.bin banks Write doesn't patch.  The prefix survives an
+# Auto-transcribe / Music-ID rename ("music_cat01_0001 - Battery.wav"), so it's
+# the stable per-song key.
+_MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 
 
 # --------------------------------------------------------------------------
@@ -809,6 +815,38 @@ def _changed_images(assets_dir, baseline):
     return out
 
 
+def _changed_music_banks(assets_dir, baseline):
+    """Per-song music-bank WAVs (``music_catNN_*.wav``) whose bytes differ from
+    the Extract baseline — i.e. the user edited/replaced a song.  These live in
+    the ``image-scNN.bin`` banks that Write can't re-encode yet, so the caller
+    surfaces a clear "skipped" warning instead of silently dropping the edit.
+    The ``music_catNN_MMMM`` prefix survives an Auto-transcribe / Music-ID
+    rename, so it's the stable per-song key.  Empty when there's no baseline."""
+    from ...core.checksums import md5_file
+    base = {}
+    for rel in baseline:
+        mm = _MUSIC_WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
+        if mm:
+            base[mm.group(1).lower()] = baseline[rel]
+    if not base:
+        return []
+    changed = []
+    for root, _dirs, files in os.walk(assets_dir):
+        for fn in files:
+            if not fn.lower().endswith(".wav"):
+                continue
+            mm = _MUSIC_WAV_RE.match(os.path.splitext(fn)[0])
+            if not mm:
+                continue
+            path = os.path.join(root, fn)
+            try:
+                if md5_file(path) != base.get(mm.group(1).lower()):
+                    changed.append(path)
+            except OSError:
+                changed.append(path)
+    return changed
+
+
 def _fit_image_payload(staged_path, target, work_dir, log):
     """Return exactly *target* bytes to overwrite the original ``.png``, or
     ``None`` if the replacement can't be made to fit.  An image ``<= target``
@@ -935,13 +973,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
 
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)
+    # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
+    # back into their image-scNN.bin banks (see _compute_music_patches).
+    music_edits = _changed_music_banks(assets_dir, baseline)
 
-    if not audio_edits and not video_edits and not image_edits:
+    if (not audio_edits and not music_edits and not video_edits
+            and not image_edits):
         raise FileNotFoundError(
-            "Nothing to write: every idxNNNN.wav still matches the Extract "
-            "baseline (.checksums.md5) and no replaced videos or images were "
-            "found under %s. Edit a sound or assign a Replace Video / Replace "
-            "Image asset first, then Write." % assets_dir)
+            "Nothing to write: every sound (idxNNNN.wav / music_catNN_*.wav) "
+            "still matches the Extract baseline (.checksums.md5) and no replaced "
+            "videos or images were found under %s. Edit a sound or assign a "
+            "Replace Video / Replace Image asset first, then Write." % assets_dir)
     if audio_edits:
         if base_by_idx:
             log("Found %d edited sound(s) of %d to write."
@@ -949,6 +991,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         else:
             log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
                 % len(audio_edits), "warning")
+    if music_edits:
+        log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
+            "info")
     if video_edits:
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
@@ -962,9 +1007,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     emu = None
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
+        music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
         img_node = None
         reader = None
-        if audio_edits:
+        gr_path = img_path = None
+        if audio_edits or music_edits:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
             gr_path, img_path, reader, _fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
@@ -972,8 +1019,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 return None, None
             if not audio_decode_supported(gr_path):
                 # This title's audio codec can't be re-encoded.  If the user
-                # only edited video, carry on and write that; otherwise it's a
-                # hard error.
+                # only edited video/images, carry on and write those; otherwise
+                # it's a hard error.
                 msg = (
                     "Audio re-encode isn't supported for this title yet: its "
                     "game firmware uses a Spike 2 codec the engine can't locate "
@@ -984,60 +1031,70 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 log(msg + "  Writing only the replaced video(s) / image(s).",
                     "warning")
                 audio_edits = {}
+                music_edits = []
             else:
-                log("Booting firmware codec engine...", "info")
-                emu = Spike2Emu(gr_path, img_path)
-                emu.boot()
-                params = _load_or_derive_params(emu, gr_path, img_path, log,
-                                                progress)
-                byidx = {p["idx"]: p for p in params}
+                if audio_edits:
+                    log("Booting firmware codec engine...", "info")
+                    emu = Spike2Emu(gr_path, img_path)
+                    emu.boot()
+                    params = _load_or_derive_params(emu, gr_path, img_path, log,
+                                                    progress)
+                    byidx = {p["idx"]: p for p in params}
 
-                # re-encode each edited sound into its body bytes
-                skipped = []
-                gr = sr = None
-                for n, (idx, wav_path) in enumerate(sorted(audio_edits.items())):
+                    # re-encode each edited cat-0 sound into its body bytes
+                    skipped = []
+                    gr = sr = None
+                    for n, (idx, wav_path) in enumerate(sorted(audio_edits.items())):
+                        if cancel():
+                            return None, None
+                        if idx not in byidx:
+                            log("idx %d not a known sound; skipping." % idx, "warning")
+                            continue
+                        p = byidx[idx]
+                        if progress:
+                            progress(10 + int(n * 65 / max(len(audio_edits), 1)), 100,
+                                     "Re-encoding idx %d" % idx)
+                        if p["chan"] == 2:
+                            sr = sr or StereoRecover(emu)
+                        else:
+                            gr = gr or GenRecover(emu)
+                        # Verify the keystream recovery actually round-trips for
+                        # THIS sound before trusting its re-encode -- skip (never
+                        # patch) sounds whose codec variant the analytic encode
+                        # can't yet reproduce bit-exact, so Write can't silently
+                        # corrupt them (see _recovery_valid).
+                        if not _recovery_valid(emu, gr, sr, p, np):
+                            skipped.append(idx)
+                            log("idx %d: re-encode isn't bit-exact for this sound's "
+                                "codec (skipped -- left unchanged in the output)."
+                                % idx, "warning")
+                            continue
+                        if p["chan"] == 2:
+                            body = _encode_stereo(emu, sr, p, wav_path, np)
+                        else:
+                            body = _encode_mono(emu, gr, p, wav_path, np)
+                        audio_patches[p["body_off"]] = body
+                        log("Re-encoded idx %d (%s, %d samples)."
+                            % (idx, "stereo" if p["chan"] == 2 else "mono",
+                               p["length"]), "info")
+                    if skipped:
+                        log("%d sound(s) skipped (re-encode unsupported for their "
+                            "codec): %s"
+                            % (len(skipped), ", ".join(map(str, skipped))), "warning")
+                    # cat-0 emu done; free it before the per-bank music CatEmus.
+                    emu.close()
+                    emu = None
+
+                # Per-song music banks (image-scNN.bin) — re-encode each edited
+                # song back into its bank (own fresh CatEmu per bank).
+                if music_edits:
+                    if progress:
+                        progress(80, 100, "Re-encoding music bank(s)...")
+                    music_patches = _compute_music_patches(
+                        reader, gr_path, img_path, music_edits, work, log,
+                        progress, cancel, np)
                     if cancel():
                         return None, None
-                    if idx not in byidx:
-                        log("idx %d not a known sound; skipping." % idx, "warning")
-                        continue
-                    p = byidx[idx]
-                    if progress:
-                        progress(10 + int(n * 75 / max(len(audio_edits), 1)), 100,
-                                 "Re-encoding idx %d" % idx)
-                    if p["chan"] == 2:
-                        sr = sr or StereoRecover(emu)
-                    else:
-                        gr = gr or GenRecover(emu)
-                    # Verify the keystream recovery actually round-trips for THIS
-                    # sound before trusting its re-encode -- skip (never patch)
-                    # sounds whose codec variant the analytic encode can't yet
-                    # reproduce bit-exact, so Write can't silently corrupt them
-                    # (see _recovery_valid).
-                    if not _recovery_valid(emu, gr, sr, p, np):
-                        skipped.append(idx)
-                        log("idx %d: re-encode isn't bit-exact for this sound's "
-                            "codec (skipped -- left unchanged in the output)."
-                            % idx, "warning")
-                        continue
-                    if p["chan"] == 2:
-                        body = _encode_stereo(emu, sr, p, wav_path, np)
-                    else:
-                        body = _encode_mono(emu, gr, p, wav_path, np)
-                    audio_patches[p["body_off"]] = body
-                    log("Re-encoded idx %d (%s, %d samples)."
-                        % (idx, "stereo" if p["chan"] == 2 else "mono",
-                           p["length"]), "info")
-                if skipped:
-                    log("%d sound(s) skipped (re-encode unsupported for their "
-                        "codec): %s"
-                        % (len(skipped), ", ".join(map(str, skipped))), "warning")
-                if (not audio_patches and not video_edits
-                        and not image_edits):
-                    raise RuntimeError(
-                        "None of the edited sounds could be re-encoded bit-exact "
-                        "for this title's codec yet, so nothing was written (the "
-                        "card image was not modified).")
 
         # A video-only write (or one whose audio turned out unsupported) still
         # needs a reader to resolve the .asset inodes.
@@ -1062,7 +1119,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None
 
-        if not audio_patches and not video_patches and not image_patches:
+        if (not audio_patches and not music_patches and not video_patches
+                and not image_patches):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded and no replaced "
                 "video or image could be fit to its original slot (the card "
@@ -1077,13 +1135,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
                 body = body[n:]
+        # Music songs patch their OWN bank inode (image-scNN.bin), not image.bin.
+        for sc_node, body_off, body in music_patches:
+            for disk, n in reader.disk_ranges(sc_node, body_off, len(body)):
+                writes.append((disk, body[:n]))
+                body = body[n:]
         for node, payload in video_patches + image_patches:
             off = 0
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
-        return writes, (len(audio_patches), len(video_patches),
-                        len(image_patches))
+        return writes, (len(audio_patches) + len(music_patches),
+                        len(video_patches), len(image_patches))
     finally:
         if emu is not None:
             emu.close()
@@ -1102,7 +1165,8 @@ def _apply_writes(out, writes):
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 cancel=None):
     """Patch a copy of the card image at ``output_path`` with the user's edits
-    (size-neutral, in place): re-encoded audio bodies inside ``image.bin``,
+    (size-neutral, in place): re-encoded cat-0 audio bodies inside ``image.bin``,
+    re-encoded per-song music bodies inside their ``image-scNN.bin`` banks,
     replaced LCD videos written over their original ``.asset`` files, and
     replaced UI images written over their original ``.png`` files.  Any kind of
     edit may be absent — a video/image-only write skips the firmware emulator
@@ -1347,6 +1411,111 @@ def _encode_stereo(emu, sr, p, wav_path, np):
     L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), length, np)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), length, np)
     return sr.encode_sound(p, L, R)
+
+
+_MUSIC_NAME_RE = re.compile(r"music_cat(\d+)_(\d+)", re.IGNORECASE)
+
+
+def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
+                           progress, cancel, np):
+    """Re-encode each edited per-song music bank back into its ``image-scNN.bin``
+    (size-neutral) and return ``[(sc_node, body_off, body_bytes), ...]`` for the
+    songs that re-encode bit-exact.
+
+    Mirrors the cat-0 audio re-encode, with two differences forced by where the
+    songs live: each song's body is in a SEPARATE bank file (so every patch
+    carries its own ext4 inode, not ``image.bin``'s), and the params are derived
+    per bank on a fresh :class:`CatEmu` (deriving several banks on one emu
+    accumulates state that grinds the loader — see ``spike2/category.py``).  A
+    song whose re-encode isn't bit-exact (``_recovery_valid``) is skipped with a
+    warning, never written blind.  ``music_edits`` = the edited
+    ``music_catNN_MMMM*.wav`` paths."""
+    from .spike2.category import CatEmu, _find_revalidate, read_category_id
+    from .spike2.codec import GenRecover, StereoRecover
+
+    # group edits by category id; idx = the sound's index within that bank
+    by_cat = {}
+    for wav in music_edits:
+        m = _MUSIC_NAME_RE.match(os.path.basename(wav))
+        if not m:
+            continue
+        by_cat.setdefault(int(m.group(1)), []).append((int(m.group(2)), wav))
+    if not by_cat:
+        return []
+
+    # resolve + extract each needed image-scNN.bin (the body source AND the
+    # inode we patch).
+    sc = {}     # catid -> (sc_node, local_path)
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return []
+        rid = read_category_id(path.rsplit("/", 1)[-1])
+        if rid in by_cat and rid not in sc:
+            local = os.path.join(work, os.path.basename(path))
+            reader.extract_file(node, local)
+            sc[rid] = (node, local)
+    if not sc:
+        log("None of the edited songs' banks (image-scNN.bin) were found on the "
+            "card; left unchanged.", "warning")
+        return []
+
+    rev = _find_revalidate(
+        gr_path, img_path,
+        sorted((cid, local) for cid, (_n, local) in sc.items()), log)
+    if rev is None:
+        log("Couldn't drive the category loader to re-encode the music bank(s); "
+            "the edited song(s) were left unchanged.", "warning")
+        return []
+
+    patches, skipped = [], []
+    for cid in sorted(by_cat):
+        if cid not in sc:
+            log("music_cat%02d: bank not on the card; %d edit(s) skipped."
+                % (cid, len(by_cat[cid])), "warning")
+            continue
+        if cancel():
+            return patches
+        sc_node, local = sc[cid]
+        emu = CatEmu(gr_path, img_path)
+        try:
+            emu.boot()
+            emu.set_category_file(local)
+            rows = emu._derive_cat(cid, rev) or []
+            byidx = {r["idx"]: r for r in rows}
+            emu.mm = emu._mm_cat          # body source = this bank
+            gr = sr = None
+            for idx, wav in sorted(by_cat[cid]):
+                if cancel():
+                    return patches
+                p = byidx.get(idx)
+                if p is None:
+                    log("music_cat%02d_%04d isn't a sound in that bank; skipped."
+                        % (cid, idx), "warning")
+                    continue
+                if p["chan"] == 2:
+                    sr = sr or StereoRecover(emu)
+                else:
+                    gr = gr or GenRecover(emu)
+                if not _recovery_valid(emu, gr, sr, p, np):
+                    skipped.append((cid, idx))
+                    log("music_cat%02d_%04d: re-encode isn't bit-exact for this "
+                        "song's codec (skipped — left unchanged)." % (cid, idx),
+                        "warning")
+                    continue
+                if p["chan"] == 2:
+                    body = _encode_stereo(emu, sr, p, wav, np)
+                else:
+                    body = _encode_mono(emu, gr, p, wav, np)
+                patches.append((sc_node, p["body_off"], body))
+                log("Re-encoded music_cat%02d_%04d (%s, %d samples)."
+                    % (cid, idx, "stereo" if p["chan"] == 2 else "mono",
+                       p["length"]), "info")
+        finally:
+            emu.close()
+    if skipped:
+        log("%d music song(s) skipped (re-encode not bit-exact)." % len(skipped),
+            "warning")
+    return patches
 
 
 # --------------------------------------------------------------------------

@@ -454,12 +454,15 @@ class App:
 
         self._save_settings()
 
-        # If we have a .upd input and the manufacturer supports Write, mirror
-        # the chosen paths into the Write tab so the user doesn't re-pick.
+        # Point the shared assets folder at this extract's output dir so the
+        # Replace Audio/Video/Image, Write, and Mod Pack tabs default to what we
+        # just extracted (extract-then-edit is the common flow — the user
+        # shouldn't have to re-pick the same folder).  A .upd input also mirrors
+        # the input file into the Write tab.
         ext = os.path.splitext(in_path)[1].lower()
+        self.window.write_assets_var.set(output_path)
         if ext in (".upd",) and self._current_mfr.capabilities.write:
             self.window.write_upd_var.set(in_path)
-            self.window.write_assets_var.set(output_path)
 
         self._active_mode = "extract"
         self._cancel_requested = False
@@ -687,10 +690,18 @@ class App:
 
         self._save_settings()
 
+        # Point the shared assets folder at this extract's output dir so the
+        # Replace / Write / Mod Pack tabs default to what we just pulled off the
+        # card (same as the file Extract path).
+        self.window.write_assets_var.set(output_path)
+
         self._active_mode = "extract"
         self._current_run_is_direct_ssd = True
         self._cancel_requested = False
         self.window.set_running(True, mode="extract")
+        # Restore the standard Extract phase tuple (a prior chained
+        # transcribe / Music-ID run may have swapped it) before resetting.
+        self.window._refresh_extract_phases()
         self.window.reset_steps(mode="extract")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()

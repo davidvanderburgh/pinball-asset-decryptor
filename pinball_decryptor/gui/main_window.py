@@ -1491,6 +1491,10 @@ class MainWindow:
             f, text="Trim / pad replacements to the original slot length",
             variable=self.audio_trim_var)
         self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        # Hover tooltip — its text is set per-manufacturer in apply_manufacturer
+        # (esp. WHY it's disabled for size-neutral formats like Spike 2).
+        self._audio_trim_tip = _Tooltip(
+            self._audio_trim_cb, "", lambda: self._current_theme)
         self._audio_length_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
@@ -3890,12 +3894,31 @@ class MainWindow:
             self._audio_length_note_lbl.configure(
                 text=mfr.audio_length_note() or "")
         # Force the Trim/pad checkbox on + disabled for plugins whose Write
-        # always length-matches (e.g. JJP), so the toggle isn't misleading.
+        # always length-matches (e.g. JJP, Spike 2), so the toggle isn't
+        # misleading — and explain WHY via a hover tooltip (the user can't tell a
+        # disabled checkbox's reason otherwise).
         if hasattr(self, "_audio_trim_cb"):
             forces = mfr.audio_forces_length_match()
             self.audio_trim_var.set(True if forces else False)
             self._audio_trim_cb.configure(
                 state=(tk.DISABLED if forces else tk.NORMAL))
+            if hasattr(self, "_audio_trim_tip"):
+                if forces:
+                    note = (mfr.audio_length_note() or "").strip()
+                    self._audio_trim_tip.text = (
+                        "Always on for this format — it can't be turned off.\n\n"
+                        "Write re-encodes each replacement into the original "
+                        "sound's exact slot in place (size-neutral), so every "
+                        "replacement is automatically fit to the original "
+                        "length; a different length would strand every later "
+                        "offset."
+                        + (("\n\n" + note) if note else ""))
+                else:
+                    self._audio_trim_tip.text = (
+                        "When on, a replacement longer or shorter than the "
+                        "original is trimmed or padded to the original slot "
+                        "length before Write. When off, the replacement is used "
+                        "as-is.")
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}

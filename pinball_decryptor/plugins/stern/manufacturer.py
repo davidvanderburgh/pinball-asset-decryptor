@@ -114,8 +114,6 @@ class SternManufacturer(Manufacturer):
                      reason="Auto-transcribe spoken callouts to name the WAVs.",
                      install_hint="pip install faster-whisper"),
     )
-    beta = True
-    badge = "BETA"
     # Spike 2 ships on an SD card (not an ISO/SSD), so the source/destination
     # toggle reads in those terms (see Manufacturer defaults).
     extract_iso_label = "From SD-card image"

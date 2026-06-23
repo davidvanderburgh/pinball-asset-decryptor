@@ -126,6 +126,13 @@ class App:
         self.root.mainloop()
 
     def _on_close(self):
+        # Stop any preview that's still playing -- an ffplay child is a
+        # separate OS process and keeps playing the sound after the window
+        # is gone unless we kill it first.
+        try:
+            self.window.stop_all_preview_playback()
+        except Exception:
+            pass
         self._save_settings()
         self.root.destroy()
 

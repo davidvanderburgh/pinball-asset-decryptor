@@ -3138,6 +3138,23 @@ class MainWindow:
             self._video_tick_job = None
         self._video_set_play_btn(False)
 
+    def stop_all_preview_playback(self):
+        """Stop both preview players (Replace Audio transport + Replace Video
+        embedded clip) and kill their ffplay/ffmpeg children.  Called on every
+        tab change and on app close so a playing song/clip never outlives the
+        tab it was started on -- an ffplay child is a detached OS process that
+        otherwise keeps playing after the window is gone.  Idempotent and safe
+        for plugins that never built either player (the helpers guard on the
+        widgets/handles, all of which default to None in __init__)."""
+        try:
+            self._audio_stop_playback()
+        except Exception:
+            pass
+        try:
+            self._video_stop_playback()
+        except Exception:
+            pass
+
     def _video_clear_preview(self):
         """Reset the preview player entirely (used on manufacturer switch)."""
         self._cancel_video_select_job()
@@ -4149,6 +4166,12 @@ class MainWindow:
         idx = self._notebook.index(self._notebook.select())
         tab_id = self._notebook.tabs()[idx]
         text = self._notebook.tab(tab_id, "text").strip()
+        # Switching tabs means leaving whatever preview was playing.  Each tab
+        # owns its own player (Replace Audio's spectrogram transport, Replace
+        # Video's embedded clip); an ffplay child keeps the sound going under
+        # the new tab -- or after the app exits -- unless it's killed here.
+        # Entering a tab never auto-plays, so stopping both is always safe.
+        self.stop_all_preview_playback()
         if text == "Write":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack(fill=tk.X, before=self._progress_bar)
@@ -4172,27 +4195,23 @@ class MainWindow:
             self._default_assets_from_extract()
             self._maybe_rescan_video()
         elif text == "Replace Images":
-            # The static preview has no player to stop, but stop any video
-            # playback left running on the way in, and refresh the Pillow
-            # banner / auto-scan the folder.
-            self._video_stop_playback()
+            # The static preview has no player of its own; just refresh the
+            # Pillow banner / auto-scan the folder (playback stopped above).
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._refresh_image_pillow_warning()
             self._default_assets_from_extract()
             self._maybe_rescan_image()
         elif text == "Replace Text":
-            # No player / preview to manage — just stop any video left running,
-            # default the folder, and (re)load the strings manifest.
-            self._video_stop_playback()
+            # No player / preview to manage -- just default the folder and
+            # (re)load the strings manifest (playback stopped above).
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._default_assets_from_extract()
             self._maybe_rescan_text()
         else:
-            # Leaving the video tab: don't let an embedded clip keep playing
-            # (decode thread + ffplay) under another tab.
-            self._video_stop_playback()
+            # Extract / Capture etc. -- no preview player of their own
+            # (any audio/video playback was stopped above).
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
@@ -4223,6 +4242,10 @@ class MainWindow:
 
     def show_picker(self):
         """Display the manufacturer picker and hide the working view."""
+        # Leaving the working view (Back button) must also stop any preview
+        # still playing -- the notebook tab isn't changing, so _on_tab_changed
+        # won't fire to catch it.  No-op on the initial startup call.
+        self.stop_all_preview_playback()
         # The scrollable wrapper, not the inner frame, is what's
         # actually packed into the window — un-pack the wrapper so
         # both the canvas and its (sometimes-packed) scrollbar

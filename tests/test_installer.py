@@ -301,6 +301,59 @@ def test_stern_lazy_engine_hidden_imports(script):
             f"the Spike 2 engine loads at runtime).")
 
 
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_pyinstaller_build_installs_runtime_deps(script):
+    """Regression guard — frozen-build missing-deps bug (Stern DOA on macOS).
+
+    The build scripts --collect-all unicorn/capstone (guarded above) and rely
+    on PyInstaller's import analysis to bundle numpy/zstandard/etc.  But
+    --collect-all and import analysis can only collect what is INSTALLED in the
+    build environment.  The v0.15.0 macOS DMG shipped with all four Stern
+    prerequisites missing because the build installed a hardcoded list
+    (UnityPy/fsb5/pyogg/Pillow) that omitted the requirements.txt deps
+    (unicorn/capstone/numpy) entirely — and a frozen bundle cannot be
+    pip-fixed by the user, so the whole Stern audio feature was dead.
+
+    The build MUST install the runtime deps from requirements.txt (the single
+    source of truth) so the collect step actually has something to collect.
+    """
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    assert "requirements.txt" in src, (
+        f"{script.name} must `pip install -r requirements.txt` so the frozen "
+        f"bundle includes the declared runtime deps (unicorn/capstone/numpy/"
+        f"zstandard/...).  Installing a hardcoded subset is exactly what shipped "
+        f"the v0.15.0 macOS DMG with every Stern prerequisite missing.")
+
+
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_pyinstaller_bundles_whisper_stack(script):
+    """faster-whisper (Auto-name call-outs) must be bundled into the frozen
+    Mac/Linux apps.
+
+    A frozen bundle can't pip-install faster-whisper after the fact, so if it
+    isn't collected at build time the feature is unusable there with no user
+    workaround.  Installing the package is necessary but not sufficient: its
+    native deps (ctranslate2 / onnxruntime / PyAV) need an explicit
+    --collect-all to pull their shared libraries into the bundle — import
+    analysis alone misses them.
+    """
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    assert "faster-whisper" in src or "faster_whisper" in src, (
+        f"{script.name} must install + collect faster-whisper so Auto-name "
+        f"call-outs works in the frozen app (it can't be added post-install).")
+    for pkg in ("faster_whisper", "ctranslate2", "onnxruntime", "av"):
+        assert (f'--collect-all "{pkg}"' in src
+                or f"--collect-all '{pkg}'" in src
+                or f"--collect-all {pkg}" in src), (
+            f"{script.name} must --collect-all {pkg} — faster-whisper's native "
+            f"runtime libraries aren't bundled by PyInstaller import analysis "
+            f"alone.")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

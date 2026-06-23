@@ -24,7 +24,17 @@ iconutil -c icns "$ICONSET" -o "$SCRIPT_DIR/build/icon.icns"
 # --- PyInstaller build --------------------------------------------------
 echo "Running PyInstaller..."
 cd "$ROOT_DIR"
-pip3 install --quiet pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow 2>/dev/null || true
+# Install the FULL runtime dep set (requirements.txt: unicorn / capstone /
+# numpy / zstandard / pycryptodome / Pillow) PLUS the build-only extras
+# (pyinstaller, the UnityPy/fsb5/pyogg Godot-asset libs) and faster-whisper.
+# This MUST stay in sync with requirements.txt -- if a runtime dep isn't
+# installed here, PyInstaller's --collect-all / import analysis below collects
+# nothing and the frozen .app silently ships without it.  Stern audio was
+# dead-on-arrival on macOS for exactly this reason: the build installed
+# UnityPy/fsb5/pyogg but never unicorn/capstone/numpy, so all 4 Stern prereqs
+# showed missing in a bundle that pip can't fix.  No `|| true` -- a failed dep
+# install must abort the build, not silently ship a broken bundle.
+pip3 install -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg faster-whisper
 
 # --add-data lines bundle the per-plugin Dockerfiles so the macOS
 # DockerExecutor in spooky / jjp can find them at runtime.
@@ -85,6 +95,13 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.category" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
+    --collect-all "numpy" \
+    --collect-all "faster_whisper" \
+    --collect-all "ctranslate2" \
+    --collect-all "onnxruntime" \
+    --collect-all "av" \
+    --collect-all "tokenizers" \
+    --collect-all "huggingface_hub" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

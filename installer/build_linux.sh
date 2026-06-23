@@ -18,7 +18,15 @@ mkdir -p "$BUILD_DIR" "$APPDIR"
 
 # --- PyInstaller build --------------------------------------------------
 echo "Installing build deps..."
-pip3 install --quiet --user pyinstaller pycryptodome UnityPy fsb5 pyogg Pillow
+# Install the FULL runtime dep set (requirements.txt: unicorn / capstone /
+# numpy / zstandard / pycryptodome / Pillow) PLUS the build-only extras
+# (pyinstaller, the UnityPy/fsb5/pyogg Godot-asset libs) and faster-whisper.
+# Must stay in sync with requirements.txt -- a runtime dep missing here means
+# PyInstaller's --collect-all / import analysis collects nothing and the
+# AppImage silently ships without it (this is how Stern's unicorn/capstone/
+# numpy went missing on the frozen builds).  Absolute path: this runs before
+# the `cd "$ROOT_DIR"` below.
+pip3 install --user -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg faster-whisper
 
 echo "Running PyInstaller..."
 cd "$ROOT_DIR"
@@ -68,6 +76,13 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.category" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
+    --collect-all "numpy" \
+    --collect-all "faster_whisper" \
+    --collect-all "ctranslate2" \
+    --collect-all "onnxruntime" \
+    --collect-all "av" \
+    --collect-all "tokenizers" \
+    --collect-all "huggingface_hub" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

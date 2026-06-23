@@ -148,6 +148,15 @@ class Capabilities:
     # loose files Write round-trips — e.g. Stern Spike 2 (loose .png on the SD
     # card, patched in place size-neutral).
     replace_image: bool = False
+    # Replace-text path: surfaces a "Replace Text" tab that loads the editable
+    # on-screen-text manifest Extract produced (``<assets>/text/strings.tsv`` —
+    # see core.text_manifest) and lets the user edit each player-facing display
+    # string in place.  Edits are saved straight back to the manifest, and the
+    # plugin engine patches every matching string size-neutral at Write time
+    # (each replacement must fit its original's byte length).  Set True only for
+    # plugins whose Extract writes that manifest — e.g. Stern Spike 2 (LCD text
+    # in .radium scene files).
+    replace_text: bool = False
 
 
 @dataclass(frozen=True)

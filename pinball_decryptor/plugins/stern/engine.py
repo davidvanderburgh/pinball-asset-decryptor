@@ -285,6 +285,102 @@ def extract_images(reader, output_dir, log=None, progress=None, cancel=None):
     return len(manifest)
 
 
+# --------------------------------------------------------------------------
+# display-text extract: editable LCD strings inside the .radium scene files
+# --------------------------------------------------------------------------
+_RADIUM_EXT = ".radium"
+# The editable strings manifest format (text/strings.tsv) lives in the core
+# text_manifest module so the Replace Text GUI tab and this engine -- which read
+# and write the same file -- can't drift apart.
+
+
+def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None):
+    """Extract every editable LCD display-text string from the card's
+    ``.radium`` scene files into an editable manifest under
+    ``output_dir/text/``.
+
+    Spike 2 stores on-screen UI text inside ``*.radium`` scene files on the
+    ext4 data partition.  For each radium we enumerate its ``display-text``
+    strings (see :mod:`.radium`), dedupe by value (the same string repeats many
+    times -- once per keyframe of the parent ``Sprite`` timeline), and write a
+    human-editable TSV ``text/strings.tsv`` with columns
+    ``radium_card_path``, ``original``, ``replacement`` (replacement left blank;
+    the user fills in only the strings to change).  Radiums with no display text are
+    skipped.  Write later re-enumerates the unchanged on-card radium to find the
+    authoritative offsets, so only the (path, original) key is load-bearing.
+
+    Returns the number of unique (radium, string) rows written."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    from . import radium as _radium
+
+    log("Scanning .radium scene files for display text...", "info")
+    rads = []
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return 0
+        if path.lower().endswith(_RADIUM_EXT):
+            rads.append((path, node))
+    if not rads:
+        log("No .radium scene files found.", "info")
+        return 0
+
+    rows = []                    # (card_path, original)
+    manifest = []                # (card_path, n_unique, n_occurrences)
+    for i, (path, node) in enumerate(rads):
+        if cancel():
+            break
+        if progress:
+            progress(i, len(rads), "Scanning radium %d/%d" % (i + 1, len(rads)))
+        try:
+            data = reader.read_file_bytes(node)
+        except Exception as e:
+            log("Couldn't read %s (%s); skipped." % (path, e), "warning")
+            continue
+        dts = _radium.display_texts(data)
+        if not dts:
+            continue
+        seen = set()
+        n_occ = 0
+        for e in dts:
+            n_occ += 1
+            text = e["text"]
+            if text in seen:
+                continue
+            seen.add(text)
+            rows.append((path, text))
+        manifest.append((path, len(seen), n_occ))
+
+    if not rows:
+        log("No editable display text found in %d .radium file(s)."
+            % len(rads), "info")
+        return 0
+
+    from ...core import text_manifest
+    text_dir = os.path.join(output_dir, text_manifest.RELDIR)
+    try:
+        # replacement column left BLANK -- the user fills in only the strings
+        # they want to change (blank = leave unchanged), so the manifest never
+        # looks like every row is already duplicated.
+        text_manifest.save(output_dir, [
+            {"path": card_path, "original": original, "replacement": ""}
+            for card_path, original in rows])
+    except Exception as e:
+        log("Couldn't write display-text manifest (%s)." % e, "warning")
+        return 0
+    try:
+        with open(os.path.join(text_dir, "manifest.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write("# radium card path\tunique strings\toccurrences\n")
+            for card_path, nuniq, nocc in manifest:
+                f.write("%s\t%d\t%d\n" % (card_path, nuniq, nocc))
+    except Exception:
+        pass
+    log("Extracted %d editable display-text string(s) from %d radium scene(s) "
+        "to %s." % (len(rows), len(manifest), text_dir), "success")
+    return len(rows)
+
+
 def _write_wav(path, L, R, stereo):
     import numpy as np
     chans = [L, R] if stereo else [L]
@@ -364,6 +460,15 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                            cancel=cancel)
         except Exception as e:
             log("Image extraction failed (%s); continuing." % e, "warning")
+        if cancel():
+            return 0
+
+        # editable LCD display text (.radium scenes) -> text/strings.tsv
+        try:
+            extract_radium_text(reader, output_dir, log=log, cancel=cancel)
+        except Exception as e:
+            log("Display-text extraction failed (%s); continuing." % e,
+                "warning")
         if cancel():
             return 0
 
@@ -847,6 +952,87 @@ def _changed_music_banks(assets_dir, baseline):
     return changed
 
 
+# --------------------------------------------------------------------------
+# Replace display text: size-neutral in-place patch of the .radium strings
+# --------------------------------------------------------------------------
+def _changed_radium_text(assets_dir):
+    """Parse ``text/strings.tsv`` and return the user's edits grouped by radium:
+    ``{radium_card_path: [(original, replacement), ...]}`` for every row whose
+    ``replacement`` differs from ``original``.
+
+    The first two columns (card path, original) are the stable key (the on-card
+    radium is unchanged, so its offsets are re-derived at Write time); only rows
+    that were actually edited are returned.  Empty when there's no manifest."""
+    from ...core import text_manifest
+    return text_manifest.changed(assets_dir)
+
+
+def _radium_text_writes(reader, assets_dir, log, cancel):
+    """Resolve the user's display-text edits to a flat list of in-place writes
+    ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
+
+    For each changed radium: resolve its inode, read it back, **re-enumerate**
+    the unchanged on-card bytes for the authoritative offsets, and for every
+    edit ``(original -> replacement)`` patch **all** display-text occurrences
+    whose value equals ``original``.  A replacement is rejected (skipped with a
+    warning, the radium left unchanged) unless it fits the original's byte
+    budget; it is space-padded to the exact original length so the file size and
+    every other offset stay byte-identical.
+
+    Returns ``(writes, n_strings)`` where ``n_strings`` is the number of unique
+    (radium, original) strings actually patched."""
+    from . import radium as _radium
+
+    edits = _changed_radium_text(assets_dir)
+    if not edits:
+        return [], 0
+    nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
+
+    writes = []
+    n_strings = 0
+    for card_path, pairs in edits.items():
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Display text: radium %s wasn't found on the card; %d edit(s) "
+                "skipped." % (card_path, len(pairs)), "warning")
+            continue
+        data = reader.read_file_bytes(node)
+        occ_by_text = {}
+        for e in _radium.enumerate_strings(data):
+            if e["kind"] == "display-text":
+                occ_by_text.setdefault(e["text"], []).append(e)
+        for original, replacement in pairs:
+            orig_bytes = original.encode("latin1", "replace")
+            new_bytes = replacement.encode("latin1", "replace")
+            orig_len = len(orig_bytes)
+            if len(new_bytes) > orig_len:
+                log("Display text in %s: \"%s\" -> \"%s\" is %d bytes but the "
+                    "original is only %d; skipped (left unchanged). Use a "
+                    "shorter replacement." % (card_path, original, replacement,
+                                              len(new_bytes), orig_len),
+                    "warning")
+                continue
+            occs = occ_by_text.get(original)
+            if not occs:
+                log("Display text in %s: \"%s\" wasn't found in the current "
+                    "radium; skipped." % (card_path, original), "warning")
+                continue
+            payload = new_bytes.ljust(orig_len, b" ")
+            for e in occs:
+                if e["length"] != orig_len:
+                    continue                       # paranoia: length must match
+                for disk, n in reader.disk_ranges(node, e["offset"], orig_len):
+                    writes.append((disk, payload[:n]))
+                    payload = payload[n:]
+                payload = new_bytes.ljust(orig_len, b" ")   # reset for next occ
+            n_strings += 1
+            log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s))."
+                % (card_path, original, replacement, len(occs)), "info")
+    return writes, n_strings
+
+
 def _fit_image_payload(staged_path, target, work_dir, log):
     """Return exactly *target* bytes to overwrite the original ``.png``, or
     ``None`` if the replacement can't be made to fit.  An image ``<= target``
@@ -927,7 +1113,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     destination is an image copy or the card itself.
 
     Returns ``(writes, counts)`` where ``counts`` is ``(n_audio, n_video,
-    n_image)``; returns ``(None, None)`` if cancelled.  Raises
+    n_image, n_text)``; returns ``(None, None)`` if cancelled.  Raises
     ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
     when nothing could be re-encoded / fit."""
     phase = phase or (lambda i: None)
@@ -976,13 +1162,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
     # back into their image-scNN.bin banks (see _compute_music_patches).
     music_edits = _changed_music_banks(assets_dir, baseline)
+    # Edited LCD display strings (text/strings.tsv rows where replacement !=
+    # original) — patched size-neutral, in place, into their .radium scenes.
+    text_edits = _changed_radium_text(assets_dir)
 
     if (not audio_edits and not music_edits and not video_edits
-            and not image_edits):
+            and not image_edits and not text_edits):
         raise FileNotFoundError(
             "Nothing to write: every sound (idxNNNN.wav / music_catNN_*.wav) "
             "still matches the Extract baseline (.checksums.md5) and no replaced "
-            "videos or images were found under %s. Edit a sound or assign a "
+            "videos or images and no edited display text (text/strings.tsv) were "
+            "found under %s. Edit a sound, change a display string, or assign a "
             "Replace Video / Replace Image asset first, then Write." % assets_dir)
     if audio_edits:
         if base_by_idx:
@@ -998,6 +1188,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
         log("Found %d replaced image(s) to write." % len(image_edits), "info")
+    if text_edits:
+        log("Found edited display text in %d radium scene(s) to write."
+            % len(text_edits), "info")
 
     def _read_prog(c, t):
         if progress:
@@ -1096,10 +1289,21 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if cancel():
                         return None, None
 
-        # A video-only write (or one whose audio turned out unsupported) still
-        # needs a reader to resolve the .asset inodes.
+        # A video / image / text-only write (or one whose audio turned out
+        # unsupported) still needs a reader to resolve the loose-file inodes.
         if reader is None:
             reader, _fw_node, _img_node = _locate(disk_f, parts)
+
+        # Edited LCD display text -> already-flat (disk_offset, bytes) writes.
+        text_writes = []
+        n_text = 0
+        if text_edits:
+            if progress:
+                progress(95, 100, "Preparing display text...")
+            text_writes, n_text = _radium_text_writes(
+                reader, assets_dir, log, cancel)
+            if cancel():
+                return None, None
 
         video_patches = []     # (inode, payload bytes == inode size)
         if video_edits:
@@ -1120,17 +1324,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 return None, None
 
         if (not audio_patches and not music_patches and not video_patches
-                and not image_patches):
+                and not image_patches and not text_writes):
             raise RuntimeError(
-                "Nothing could be written: no sound re-encoded and no replaced "
-                "video or image could be fit to its original slot (the card "
-                "image was not modified).")
+                "Nothing could be written: no sound re-encoded, no replaced "
+                "video or image could be fit to its original slot, and no "
+                "display-text edit fit its original string (the card image was "
+                "not modified).")
 
         # Flatten every patch to absolute (disk_offset, bytes) writes via the
         # ext4 file->disk map.  The offsets are relative to the start of the
         # card image / device, so the same list applies whether we patch an
         # image copy (write_image) or the card itself (write_device).
-        writes = []
+        # Display-text writes are already (disk_offset, bytes) (the radium-text
+        # helper resolved them through disk_ranges itself).
+        writes = list(text_writes)
         for body_off, body in audio_patches.items():
             for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
@@ -1146,7 +1353,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 writes.append((disk, payload[off:off + n]))
                 off += n
         return writes, (len(audio_patches) + len(music_patches),
-                        len(video_patches), len(image_patches))
+                        len(video_patches), len(image_patches), n_text)
     finally:
         if emu is not None:
             emu.close()
@@ -1194,10 +1401,11 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         _apply_writes(out, writes)
         out.flush()
         os.fsync(out.fileno())
-    n_audio, n_video, n_image = counts
-    log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s))."
-        % (output_path, n_audio, n_video, n_image), "success")
-    return n_audio + n_video + n_image
+    n_audio, n_video, n_image, n_text = counts
+    log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
+        "%d display string(s))."
+        % (output_path, n_audio, n_video, n_image, n_text), "success")
+    return n_audio + n_video + n_image + n_text
 
 
 def device_partitions(device_path, partition_override=None, log=None):
@@ -1270,10 +1478,11 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     with RawDeviceFile(device_path, writable=True) as out:
         _apply_writes(out, writes)
         out.flush()
-    n_audio, n_video, n_image = counts
-    log("Wrote to SD card: %d sound(s), %d video(s), %d image(s)."
-        % (n_audio, n_video, n_image), "success")
-    return n_audio + n_video + n_image
+    n_audio, n_video, n_image, n_text = counts
+    log("Wrote to SD card: %d sound(s), %d video(s), %d image(s), "
+        "%d display string(s)."
+        % (n_audio, n_video, n_image, n_text), "success")
+    return n_audio + n_video + n_image + n_text
 
 
 # --------------------------------------------------------------------------

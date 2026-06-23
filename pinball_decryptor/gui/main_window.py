@@ -263,6 +263,24 @@ class MainWindow:
             "write", lambda *a: self._refresh_image_list())
         self.image_sort_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
+        # Replace-Text tab state (capabilities.replace_text plugins).  Unlike the
+        # audio/video/image tabs (which hold in-memory assignments staged at
+        # build), text edits persist straight back to text/strings.tsv, so the
+        # model here IS the manifest: each row is {path, original, replacement}
+        # ('' replacement = unchanged), saved on every Apply.
+        self.text_search_var = tk.StringVar()
+        self.text_status_var = tk.StringVar(value="")
+        self.text_new_var = tk.StringVar()      # edit-panel "New text" entry
+        self.text_budget_var = tk.StringVar(value="")   # "N / M bytes"
+        self.text_apply_all_var = tk.BooleanVar(value=False)
+        self._text_rows = []             # list[{path, original, replacement}]
+        self._text_scan_dir = ""         # folder the rows were loaded from
+        self._text_scan_id = 0           # bump-counter (parity w/ other tabs)
+        self._text_current_iid = None    # selected row iid (str(index))
+        self.text_search_var.trace_add(
+            "write", lambda *a: self._refresh_text_list())
+        self.text_new_var.trace_add(
+            "write", lambda *a: self._text_update_budget())
         # Williams-only: "Use PinMAME runtime capture" toggle on the
         # Extract tab.  When ON, the Extract button kicks off the
         # libpinmame-driven capture pipeline (composed cinematics +
@@ -551,6 +569,7 @@ class MainWindow:
         self._tab_audio = ttk.Frame(self._notebook)
         self._tab_video = ttk.Frame(self._notebook)
         self._tab_image = ttk.Frame(self._notebook)
+        self._tab_text = ttk.Frame(self._notebook)
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
 
@@ -558,6 +577,7 @@ class MainWindow:
         self._notebook.add(self._tab_audio, text="  Replace Audio  ")
         self._notebook.add(self._tab_video, text="  Replace Video  ")
         self._notebook.add(self._tab_image, text="  Replace Images  ")
+        self._notebook.add(self._tab_text, text="  Replace Text  ")
         self._notebook.add(self._tab_write, text="  Write  ")
         self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
 
@@ -565,6 +585,7 @@ class MainWindow:
         self._build_audio_tab()
         self._build_video_tab()
         self._build_image_tab()
+        self._build_text_tab()
         self._build_write_tab()
         self._build_modpack_tab()
 
@@ -3639,6 +3660,457 @@ class MainWindow:
             return None
         return (dict(self._image_slots_by_rel), assignments)
 
+    # ==================================================================
+    # Replace Text tab — edit the player-facing on-screen strings Extract
+    # pulled out to text/strings.tsv.  Unlike the audio/video/image tabs,
+    # there are no in-memory "pending assignments": edits are written
+    # straight back to the manifest, and Write re-reads it to patch every
+    # matching string in place (size-neutral).
+    # ==================================================================
+
+    def _build_text_tab(self):
+        """Build the 'Replace Text' tab: a searchable list of the editable
+        on-screen strings from ``text/strings.tsv``, each with an in-place
+        editor below.  Edits are saved straight to the manifest so the Write
+        step patches them into their scene files (size-neutral)."""
+        f = self._tab_text
+        pad = {"padx": 10, "pady": 4}
+
+        ttk.Label(
+            f,
+            text="Edit the words shown on the machine's display — high scores, "
+                 "menu labels, status text. Pick your extracted folder, click a "
+                 "string, type the new text, and Apply. Each replacement must "
+                 "fit the original's length (it's space-padded for you), so "
+                 "shorter-or-equal works and longer is rejected. Build the "
+                 "update on the Write tab when you're done.",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+
+        # Assets folder row (shared with the Write / other Replace tabs).
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        self._text_assets_row = row
+        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(row, text="Browse...",
+                   command=self._browse_write_assets).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Button(row, text="Scan",
+                   command=self._scan_text_strings).pack(
+            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(f, text="(the folder Extract produced — shared with the "
+                          "Write tab)",
+                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
+
+        # Search + status toolbar.
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
+        ttk.Entry(tools, textvariable=self.text_search_var, width=24).pack(
+            side=tk.LEFT, padx=(4, 12))
+        ttk.Button(tools, text="Clear all edits",
+                   command=self._text_clear_all).pack(side=tk.LEFT)
+        self._text_status_lbl = ttk.Label(
+            tools, textvariable=self.text_status_var, font=(_SANS_FONT, 9))
+        self._text_status_lbl.pack(side=tk.RIGHT)
+
+        # String list.
+        list_frame = ttk.Frame(f)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        self._text_tree = ttk.Treeview(
+            list_frame, columns=("new", "max", "scene"),
+            height=8, selectmode="browse")
+        self._text_tree.heading("#0", text="On-Screen Text", anchor=tk.W)
+        self._text_tree.heading("new", text="New Text", anchor=tk.W)
+        self._text_tree.heading("max", text="Max", anchor=tk.W)
+        self._text_tree.heading("scene", text="Scene", anchor=tk.W)
+        self._text_tree.column("#0", width=300, minwidth=160)
+        self._text_tree.column("new", width=230, minwidth=120)
+        self._text_tree.column("max", width=50, minwidth=40, anchor=tk.E)
+        self._text_tree.column("scene", width=150, minwidth=80)
+        text_scroll = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self._text_tree.yview)
+        self._text_tree.configure(yscrollcommand=text_scroll.set)
+        text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._text_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._text_tree.bind("<<TreeviewSelect>>", self._text_on_tree_select)
+        self._text_tree.bind("<Double-1>", self._text_on_tree_double)
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self._text_tree.bind(seq, self._text_on_tree_right)
+
+        self._text_empty = ttk.Label(
+            list_frame,
+            text="Pick your extracted assets folder above, then click Scan.",
+            foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
+        self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        # --- In-place editor for the selected string. ---
+        edit = ttk.LabelFrame(f, text=" Edit selected string ")
+        edit.pack(fill=tk.X, padx=10, pady=(4, 2))
+
+        orow = ttk.Frame(edit); orow.pack(fill=tk.X, padx=6, pady=(6, 2))
+        ttk.Label(orow, text="Original:", width=10, anchor=tk.W).pack(
+            side=tk.LEFT)
+        self._text_orig_var = tk.StringVar(value="")
+        self._text_orig_entry = ttk.Entry(
+            orow, textvariable=self._text_orig_var, state="readonly")
+        self._text_orig_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        nrow = ttk.Frame(edit); nrow.pack(fill=tk.X, padx=6, pady=2)
+        ttk.Label(nrow, text="New text:", width=10, anchor=tk.W).pack(
+            side=tk.LEFT)
+        self._text_new_entry = ttk.Entry(
+            nrow, textvariable=self.text_new_var, state=tk.DISABLED)
+        self._text_new_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._text_new_entry.bind("<Return>", self._text_apply_edit)
+
+        brow = ttk.Frame(edit); brow.pack(fill=tk.X, padx=6, pady=(2, 6))
+        self._text_budget_lbl = ttk.Label(
+            brow, textvariable=self.text_budget_var, font=(_SANS_FONT, 8))
+        self._text_budget_lbl.pack(side=tk.LEFT)
+        self._text_apply_all_chk = ttk.Checkbutton(
+            brow, text="Apply to every scene with this text",
+            variable=self.text_apply_all_var)
+        self._text_apply_all_chk.pack(side=tk.LEFT, padx=(12, 0))
+        self._text_apply_btn = ttk.Button(
+            brow, text="Apply", state=tk.DISABLED,
+            command=self._text_apply_edit)
+        self._text_apply_btn.pack(side=tk.RIGHT)
+        self._text_revert_btn = ttk.Button(
+            brow, text="Revert", state=tk.DISABLED,
+            command=self._text_clear_selected)
+        self._text_revert_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._text_scene_full_var = tk.StringVar(value="")
+        ttk.Label(edit, textvariable=self._text_scene_full_var,
+                  font=(_SANS_FONT, 8, "italic"), foreground="#888888",
+                  wraplength=700, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=8, pady=(0, 4))
+
+        ttk.Label(
+            f,
+            text="Your edits are saved to text/strings.tsv as you Apply them "
+                 "and are written to the card automatically when you build the "
+                 "update on the Write tab — no extra step.",
+            font=(_SANS_FONT, 9), foreground="#888888",
+            wraplength=720, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(6, 8))
+
+    # ---- Replace Text: helpers ---------------------------------------
+
+    @staticmethod
+    def _text_scene_label(path):
+        """A compact, distinguishing label for a scene path (the full path is
+        shown in the editor on select).  Spike 2 scenes are all named
+        ``scene.radium`` under an opaque hash dir, so show ``…hash/scene.radium``.
+        """
+        parts = [p for p in path.replace("\\", "/").split("/") if p]
+        if not parts:
+            return path
+        name = parts[-1]
+        parent = parts[-2] if len(parts) >= 2 else ""
+        if len(parent) > 14:
+            parent = parent[:5] + "…" + parent[-4:]
+        return parent + "/" + name if parent else name
+
+    @staticmethod
+    def _text_byte_len(s):
+        """Byte length of *s* as the engine measures it for the size budget."""
+        return len(s.encode("latin1", "replace"))
+
+    def _text_is_edited(self, r):
+        return bool(r["replacement"]) and r["replacement"] != r["original"]
+
+    # ---- Replace Text: scanning / list -------------------------------
+
+    def _scan_text_strings(self):
+        """Load ``text/strings.tsv`` from the assets folder into the list.  A
+        replacement equal to its original is normalised to '' (unchanged) so the
+        New-Text column reads blank for everything the user hasn't touched."""
+        from ..core import text_manifest
+        assets_path = (self.write_assets_var.get() or "").strip()
+        self._text_scan_id += 1
+
+        if not assets_path or not os.path.isdir(assets_path):
+            self._text_rows = []
+            self._text_scan_dir = ""
+            self._text_clear_edit_panel()
+            self._refresh_text_list()
+            self._text_empty.configure(
+                text="Pick your extracted assets folder above, then click Scan.")
+            self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+
+        try:
+            loaded = text_manifest.load(assets_path)
+        except Exception as e:
+            loaded = []
+            messagebox.showerror(
+                "Couldn't read text",
+                "Couldn't read the on-screen-text manifest:\n%s" % e)
+        rows = []
+        for r in loaded:
+            rep = r["replacement"]
+            if rep == r["original"]:
+                rep = ""                     # rep == orig => unchanged
+            rows.append({"path": r["path"], "original": r["original"],
+                         "replacement": rep})
+        self._text_rows = rows
+        self._text_scan_dir = assets_path
+        self._text_clear_edit_panel()
+        self._refresh_text_list()
+        if not rows:
+            self._text_empty.configure(
+                text="No editable on-screen text found in this folder.\n"
+                     "Run Extract on a Spike 2 card first — it writes "
+                     "text/strings.tsv.")
+            self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+    def _maybe_rescan_text(self):
+        """Auto-load when the Replace Text tab becomes visible and the folder
+        has changed since the last scan."""
+        if self._current_mfr is None:
+            return
+        if not getattr(self._current_mfr.capabilities, "replace_text", False):
+            return
+        assets_path = (self.write_assets_var.get() or "").strip()
+        if assets_path and assets_path != self._text_scan_dir:
+            self._scan_text_strings()
+
+    def _refresh_text_list(self):
+        """Apply the search filter and repopulate the string tree."""
+        tree = getattr(self, "_text_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+
+        query = (self.text_search_var.get() or "").strip().lower()
+        total = len(self._text_rows)
+        edited = 0
+        shown = 0
+        for i, r in enumerate(self._text_rows):
+            is_edited = self._text_is_edited(r)
+            if is_edited:
+                edited += 1
+            if query and query not in r["original"].lower() and (
+                    not r["replacement"]
+                    or query not in r["replacement"].lower()):
+                continue
+            shown += 1
+            tree.insert(
+                "", tk.END, iid=str(i), text=r["original"],
+                values=(r["replacement"], self._text_byte_len(r["original"]),
+                        self._text_scene_label(r["path"])),
+                tags=("assigned",) if is_edited else ())
+
+        if total == 0:
+            self.text_status_var.set("")
+            self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        else:
+            try:
+                self._text_empty.place_forget()
+            except tk.TclError:
+                pass
+            extra = "  (%d shown)" % shown if shown != total else ""
+            self.text_status_var.set(
+                "%d string(s), %d edited%s" % (total, edited, extra))
+
+    # ---- Replace Text: editor ----------------------------------------
+
+    def _text_on_tree_select(self, _event=None):
+        sel = self._text_tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        try:
+            r = self._text_rows[int(iid)]
+        except (ValueError, IndexError):
+            return
+        self._text_current_iid = iid
+        self._text_orig_var.set(r["original"])
+        self._text_scene_full_var.set("Scene: " + r["path"])
+        # Pre-fill the entry with the current effective text (the edit, or the
+        # original if untouched) so the user edits from what's shown today.
+        self.text_new_var.set(r["replacement"] or r["original"])
+        self._text_enable_edit(True)
+        self._text_update_budget()
+
+    def _text_on_tree_double(self, _event=None):
+        if self._text_current_iid is not None:
+            self._text_new_entry.focus_set()
+
+    def _text_on_tree_right(self, event):
+        tree = self._text_tree
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        tree.selection_set(row)
+        menu = tk.Menu(tree, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="Edit…",
+                         command=lambda: self._text_new_entry.focus_set())
+        try:
+            edited = self._text_is_edited(self._text_rows[int(row)])
+        except (ValueError, IndexError):
+            edited = False
+        if edited:
+            menu.add_separator()
+            menu.add_command(label="Revert this string",
+                             command=self._text_clear_selected)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _text_enable_edit(self, on):
+        state = tk.NORMAL if on else tk.DISABLED
+        for w in (getattr(self, "_text_new_entry", None),
+                  getattr(self, "_text_apply_btn", None),
+                  getattr(self, "_text_revert_btn", None)):
+            if w is not None:
+                try:
+                    w.configure(state=state)
+                except tk.TclError:
+                    pass
+
+    def _text_clear_edit_panel(self):
+        self._text_current_iid = None
+        if hasattr(self, "_text_orig_var"):
+            self._text_orig_var.set("")
+            self._text_scene_full_var.set("")
+        self.text_new_var.set("")
+        self.text_budget_var.set("")
+        self._text_enable_edit(False)
+
+    def _text_update_budget(self, *_a):
+        """Refresh the 'N / M bytes' budget readout + Apply enable for the
+        current edit (red + disabled when the replacement is too long)."""
+        lbl = getattr(self, "_text_budget_lbl", None)
+        if lbl is None:
+            return
+        iid = self._text_current_iid
+        if iid is None:
+            self.text_budget_var.set("")
+            return
+        try:
+            r = self._text_rows[int(iid)]
+        except (ValueError, IndexError):
+            return
+        orig_len = self._text_byte_len(r["original"])
+        new_len = self._text_byte_len(self.text_new_var.get())
+        over = new_len > orig_len
+        self.text_budget_var.set(
+            "%d / %d bytes%s" % (new_len, orig_len,
+                                 "  — too long" if over else ""))
+        c = THEMES.get(self._current_theme, {})
+        lbl.configure(foreground="#d04040" if over else c.get("fg", "#888888"))
+        if hasattr(self, "_text_apply_btn"):
+            self._text_apply_btn.configure(
+                state=tk.DISABLED if over else tk.NORMAL)
+
+    def _text_apply_edit(self, _event=None):
+        iid = self._text_current_iid
+        if iid is None:
+            return
+        try:
+            r = self._text_rows[int(iid)]
+        except (ValueError, IndexError):
+            return
+        orig = r["original"]
+        new = self.text_new_var.get()
+        if self._text_byte_len(new) > self._text_byte_len(orig):
+            messagebox.showwarning(
+                "Replacement too long",
+                "“%s” is %d bytes but the original is only %d. On-screen text "
+                "is patched in place, so a replacement has to fit the "
+                "original's length — use a shorter string."
+                % (new, self._text_byte_len(new), self._text_byte_len(orig)))
+            return
+        eff = "" if new == orig else new       # new == orig => unchanged
+        if self.text_apply_all_var.get():
+            targets = [rr for rr in self._text_rows if rr["original"] == orig]
+        else:
+            targets = [r]
+        for rr in targets:
+            rr["replacement"] = eff
+        self._save_text_manifest()
+        self._refresh_text_list()
+        try:
+            self._text_tree.selection_set(iid)
+            self._text_tree.see(iid)
+        except tk.TclError:
+            pass
+        self._text_update_budget()
+
+    def _text_clear_selected(self):
+        """Revert the selected string (and same-text siblings if 'apply to all'
+        is ticked) back to its original."""
+        iid = self._text_current_iid
+        if iid is None:
+            return
+        try:
+            r = self._text_rows[int(iid)]
+        except (ValueError, IndexError):
+            return
+        orig = r["original"]
+        if self.text_apply_all_var.get():
+            targets = [rr for rr in self._text_rows if rr["original"] == orig]
+        else:
+            targets = [r]
+        for rr in targets:
+            rr["replacement"] = ""
+        self._save_text_manifest()
+        self.text_new_var.set(orig)
+        self._refresh_text_list()
+        try:
+            self._text_tree.selection_set(iid)
+            self._text_tree.see(iid)
+        except tk.TclError:
+            pass
+        self._text_update_budget()
+
+    def _text_clear_all(self):
+        if not any(r["replacement"] for r in self._text_rows):
+            return
+        if not messagebox.askyesno(
+                "Clear all edits",
+                "Remove every on-screen-text edit and restore the originals?"):
+            return
+        for r in self._text_rows:
+            r["replacement"] = ""
+        self._save_text_manifest()
+        self._refresh_text_list()
+        if self._text_current_iid is not None:
+            try:
+                r = self._text_rows[int(self._text_current_iid)]
+                self.text_new_var.set(r["original"])
+            except (ValueError, IndexError):
+                pass
+        self._text_update_budget()
+
+    def _save_text_manifest(self):
+        """Persist the full row set back to text/strings.tsv (the manifest is the
+        model — Write re-reads it).  Returns the edited-string count."""
+        from ..core import text_manifest
+        if not self._text_scan_dir:
+            return 0
+        try:
+            text_manifest.save(self._text_scan_dir, self._text_rows)
+        except Exception as e:
+            messagebox.showerror(
+                "Couldn't save",
+                "Couldn't write the on-screen-text manifest:\n%s" % e)
+            return 0
+        return sum(1 for r in self._text_rows if self._text_is_edited(r))
+
     def _build_phase_steps(self, parent, phases, mode):
         labels = []
         for name in phases:
@@ -3709,6 +4181,14 @@ class MainWindow:
             self._refresh_image_pillow_warning()
             self._default_assets_from_extract()
             self._maybe_rescan_image()
+        elif text == "Replace Text":
+            # No player / preview to manage — just stop any video left running,
+            # default the folder, and (re)load the strings manifest.
+            self._video_stop_playback()
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._default_assets_from_extract()
+            self._maybe_rescan_text()
         else:
             # Leaving the video tab: don't let an embedded clip keep playing
             # (decode thread + ffplay) under another tab.
@@ -3871,8 +4351,16 @@ class MainWindow:
         self._configure_tab("Replace Audio", caps.replace_audio)
         self._configure_tab("Replace Video", caps.replace_video)
         self._configure_tab("Replace Images", caps.replace_image)
+        self._configure_tab("Replace Text", caps.replace_text)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
+        # New mfr: drop any text rows loaded for the previous one so a stale
+        # manifest can't leak across a manufacturer switch.
+        self._text_rows = []
+        self._text_scan_dir = ""
+        if hasattr(self, "_text_tree"):
+            self._text_clear_edit_panel()
+            self._refresh_text_list()
         # New mfr: clear any audio slots/assignments from the previous one
         # so a stale list can't leak across a manufacturer switch.
         self._audio_slots = []
@@ -5271,6 +5759,23 @@ class MainWindow:
                 self._add_write_preview_row(
                     rel, ext, f"Pending ({label})", scan_id, tag="pending")
                 n += 1
+        # Edited on-screen text persists straight to text/strings.tsv (no
+        # in-memory assignment), so read the edits back from the manifest and
+        # list each changed string as a pending "original → new" row.
+        mfr = self._current_mfr
+        if mfr is not None and getattr(
+                mfr.capabilities, "replace_text", False):
+            try:
+                from ..core import text_manifest
+                changed = text_manifest.changed(assets_path)
+            except Exception:
+                changed = {}
+            for _path, pairs in changed.items():
+                for original, repl in pairs:
+                    self._add_write_preview_row(
+                        f"{original}  →  {repl}", "text",
+                        "Pending (Replace Text)", scan_id, tag="pending")
+                    n += 1
         return n
 
     def _add_write_preview_row(self, rel, ext, status, scan_id, tag="modified"):
@@ -5385,6 +5890,8 @@ class MainWindow:
             self._scan_video_slots_async()
         elif text == "Replace Audio":
             self._scan_audio_slots_async()
+        elif text == "Replace Text":
+            self._scan_text_strings()
         elif text == "Write":
             self._maybe_rescan_write_preview()
 
@@ -6215,6 +6722,11 @@ class MainWindow:
             self._image_tree.tag_configure("assigned", foreground=c["success"])
         if hasattr(self, "_image_canvas"):
             self._image_canvas.configure(highlightbackground=c["border"])
+
+        if hasattr(self, "_text_tree"):
+            self._text_tree.tag_configure("assigned", foreground=c["success"])
+            # Refresh the byte-budget readout's normal colour for the new theme.
+            self._text_update_budget()
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

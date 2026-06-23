@@ -255,10 +255,23 @@ def test_pyinstaller_explicit_plugin_hidden_imports(script):
 # can't go stale the way the v0.7.x per-plugin list did).
 _STERN = REPO / "pinball_decryptor" / "plugins" / "stern"
 
+# Top-level stern modules reachable the *normal* way (the `stern` package
+# hidden-import pulls in __init__ -> manufacturer -> pipeline/games/formats, all
+# top-level imports), so they don't need their own --hidden-import.  Everything
+# else at the top level (engine, ext4, rawdevice, radium, ...) is imported
+# function-locally by engine.py / pipeline.py and so must be listed explicitly.
+_STERN_PKG_REACHABLE = {"__init__", "manufacturer", "pipeline", "games",
+                        "formats"}
+
 
 def _stern_lazy_modules():
-    mods = ["pinball_decryptor.plugins.stern.ext4",
-            "pinball_decryptor.plugins.stern.spike2"]
+    """Glob-derived (top level + spike2/) so a newly-added lazily-imported
+    stern engine module becomes required in the build scripts automatically —
+    it can't go stale the way a hardcoded list would."""
+    mods = ["pinball_decryptor.plugins.stern.spike2"]
+    for p in sorted(_STERN.glob("*.py")):
+        if p.stem not in _STERN_PKG_REACHABLE:
+            mods.append("pinball_decryptor.plugins.stern." + p.stem)
     for p in sorted((_STERN / "spike2").glob("*.py")):
         if p.stem != "__init__":
             mods.append("pinball_decryptor.plugins.stern.spike2." + p.stem)

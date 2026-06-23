@@ -60,6 +60,12 @@ class SternManufacturer(Manufacturer):
         # tab stages a replacement scaled to the original's dimensions, and
         # Write patches it back in place the same size-neutral way as video.
         replace_image=True,
+        # On-screen LCD text lives in the .radium scene files; Extract pulls the
+        # editable display strings out to text/strings.tsv, the Replace Text tab
+        # lets the user edit them, and Write patches every matching occurrence
+        # back into its radium in place (size-neutral: a replacement is padded
+        # to the original's byte length, and one that's longer is rejected).
+        replace_text=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.

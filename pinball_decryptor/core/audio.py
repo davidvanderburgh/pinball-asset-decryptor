@@ -32,6 +32,21 @@ _ffmpeg_path = None
 _ffprobe_path = None
 
 
+def _imageio_ffmpeg_exe():
+    """Path to the ffmpeg binary bundled by the imageio-ffmpeg wheel, or
+    None if that package isn't installed or has no usable binary.
+
+    This is how the frozen macOS / Linux apps ship a working ffmpeg without a
+    system install: imageio-ffmpeg is pip-installed and collected into the
+    bundle, and exposes its binary's path here."""
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+    return exe if exe and os.path.isfile(exe) else None
+
+
 def find_ffmpeg():
     """Find the ffmpeg executable."""
     global _ffmpeg_path
@@ -58,6 +73,15 @@ def find_ffmpeg():
         if os.path.isfile(c):
             _ffmpeg_path = c
             return c
+
+    # Last resort: the ffmpeg bundled via imageio-ffmpeg (shipped inside the
+    # frozen macOS/Linux apps so the audio tab works without a system ffmpeg).
+    # A pure fallback -- a real ffmpeg on PATH or in the brew/Program Files
+    # locations above always wins, so this never shadows a fuller system build.
+    bundled = _imageio_ffmpeg_exe()
+    if bundled:
+        _ffmpeg_path = bundled
+        return bundled
 
     _ffmpeg_path = ""
     return None
@@ -971,31 +995,68 @@ def find_ffplay():
 
 
 def play_audio_file(path, start=0.0):
-    """Start playing *path* via ffplay in the background, no window.
+    """Start playing *path* in the background, no window.
 
-    *start* seeks to that offset (seconds) before playback — used by the
-    Replace-Audio preview's seek bar.  Returns the ``subprocess.Popen``
-    handle (so the caller can stop it) or ``None`` if ffplay is unavailable
-    or the file is missing.  The caller terminates a previous handle before
-    starting a new one.
+    Prefers ffplay, which honors the *start* seek offset (seconds) used by
+    the Replace-Audio preview's seek bar.  When ffplay isn't available -- the
+    frozen macOS/Linux apps bundle ffmpeg but not ffplay -- falls back to the
+    OS-native player (afplay / aplay / paplay), which plays from the start and
+    ignores *start* (no seek).  Returns the ``subprocess.Popen`` handle (so
+    the caller can stop it) or ``None`` if nothing can play the file.  The
+    caller terminates a previous handle before starting a new one.
     """
+    if not path or not os.path.isfile(path):
+        return None
     ffplay = find_ffplay()
-    if not ffplay or not path or not os.path.isfile(path):
-        return None
-    cmd = [ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
-    if start and start > 0.05:
-        # -ss before -i: fast input seek, accurate enough for audio preview.
-        cmd += ["-ss", f"{start:.3f}"]
-    cmd.append(path)
-    try:
-        return subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_CREATE_FLAGS)
-    except OSError:
-        return None
+    if ffplay:
+        cmd = [ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
+        if start and start > 0.05:
+            # -ss before -i: fast input seek, accurate enough for audio preview.
+            cmd += ["-ss", f"{start:.3f}"]
+        cmd.append(path)
+        try:
+            return subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_CREATE_FLAGS)
+        except OSError:
+            pass
+    # No ffplay (the frozen macOS/Linux apps bundle ffmpeg but not ffplay --
+    # static ffplay builds are unreliable) -> fall back to the OS-native
+    # player.  These don't seek, so playback starts from the beginning; the
+    # *start* offset is ignored.
+    native = _native_audio_player(path)
+    if native:
+        try:
+            return subprocess.Popen(
+                native,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_CREATE_FLAGS)
+        except OSError:
+            return None
+    return None
+
+
+def _native_audio_player(path):
+    """Command list for the OS built-in audio player, or None.
+
+    The preview fallback when ffplay isn't available.  macOS always ships
+    ``afplay``; most Linux desktops have ``paplay`` or ``aplay``.  None of
+    these seek, so playback always starts from the beginning."""
+    if sys.platform == "darwin":
+        for cand in (shutil.which("afplay"), "/usr/bin/afplay"):
+            if cand and os.path.isfile(cand):
+                return [cand, path]
+    elif sys.platform.startswith("linux"):
+        for name in ("paplay", "aplay"):
+            exe = shutil.which(name)
+            if exe:
+                return [exe, path]
+    return None
 
 
 def probe_duration(path):

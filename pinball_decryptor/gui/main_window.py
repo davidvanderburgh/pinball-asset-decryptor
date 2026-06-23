@@ -548,18 +548,25 @@ class MainWindow:
         self._prereqs_inner = ttk.Frame(self._prereqs_frame)
         self._prereqs_inner.pack(side=tk.LEFT, fill=tk.X, expand=True,
                                  padx=4, pady=4)
-        prereq_btns = ttk.Frame(self._prereqs_frame)
-        prereq_btns.pack(side=tk.RIGHT, padx=4, pady=4)
-        ttk.Button(
-            prereq_btns, text="Re-check",
-            command=lambda: (self._on_recheck_prereqs()
-                             if self._on_recheck_prereqs else None)
-        ).pack(side=tk.TOP, fill=tk.X)
-        ttk.Button(
-            prereq_btns, text="Install Missing",
-            command=lambda: (self._on_install_prereqs()
-                             if self._on_install_prereqs else None)
-        ).pack(side=tk.TOP, fill=tk.X, pady=(2, 0))
+        # The Re-check / Install Missing buttons are Windows/Linux-only.  On
+        # the frozen macOS app there's nothing to install -- every Python dep
+        # plus ffmpeg (via imageio-ffmpeg) is bundled, and a frozen .app can't
+        # pip-install anything anyway, so macOS "Install Missing" only ever
+        # popped a dead-end Docker/Homebrew dialog.  Drop both buttons there;
+        # the prerequisite indicators still show (and should all be green).
+        if sys.platform != "darwin":
+            prereq_btns = ttk.Frame(self._prereqs_frame)
+            prereq_btns.pack(side=tk.RIGHT, padx=4, pady=4)
+            ttk.Button(
+                prereq_btns, text="Re-check",
+                command=lambda: (self._on_recheck_prereqs()
+                                 if self._on_recheck_prereqs else None)
+            ).pack(side=tk.TOP, fill=tk.X)
+            ttk.Button(
+                prereq_btns, text="Install Missing",
+                command=lambda: (self._on_install_prereqs()
+                                 if self._on_install_prereqs else None)
+            ).pack(side=tk.TOP, fill=tk.X, pady=(2, 0))
 
         # Tabs
         self._notebook = ttk.Notebook(mv)

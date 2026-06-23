@@ -354,6 +354,32 @@ def test_pyinstaller_bundles_whisper_stack(script):
             f"alone.")
 
 
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_pyinstaller_bundles_ffmpeg(script):
+    """The frozen Mac/Linux apps must bundle an ffmpeg binary (via the
+    imageio-ffmpeg wheel) so the Replace Audio/Video tabs work without a
+    system ffmpeg.
+
+    The apps are frozen, so the user can't install ffmpeg into them, and a Mac
+    .app launched from Finder doesn't even inherit a shell PATH to locate a
+    brew install.  core/audio.find_ffmpeg() falls back to imageio_ffmpeg's
+    bundled binary -- which only exists in the app if the package is both
+    installed in the build env AND collected by PyInstaller.
+    """
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    assert "imageio-ffmpeg" in src, (
+        f"{script.name} must install imageio-ffmpeg so the frozen app ships a "
+        f"working ffmpeg (Replace Audio/Video need it, and a frozen app can't "
+        f"have one added later).")
+    assert ('--collect-all "imageio_ffmpeg"' in src
+            or "--collect-all 'imageio_ffmpeg'" in src
+            or "--collect-all imageio_ffmpeg" in src), (
+        f"{script.name} must --collect-all imageio_ffmpeg so its bundled "
+        f"ffmpeg binary actually lands in the frozen app.")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

@@ -30,6 +30,7 @@ _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 _ffmpeg_path = None
 _ffprobe_path = None
+_ffmpeg_shimmed = False
 
 
 def _imageio_ffmpeg_exe():
@@ -47,8 +48,51 @@ def _imageio_ffmpeg_exe():
     return exe if exe and os.path.isfile(exe) else None
 
 
+def _ffmpeg_candidates(name):
+    """Common install locations for an ffmpeg-family binary (*name* is
+    ``"ffmpeg"`` or ``"ffprobe"``), searched after PATH and before the
+    bundled-imageio fallback.
+
+    Merged from the per-plugin finders so this stays the single source of
+    truth.  A Finder-launched macOS .app inherits no shell PATH, so the
+    explicit brew paths matter; Windows users install via winget / scoop /
+    choco / manual unzip, so we probe all of those."""
+    import glob as _glob
+    if sys.platform == "win32":
+        exe = f"{name}.exe"
+        cands = []
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            for d in _glob.glob(os.path.join(
+                    local_app, "Microsoft", "WinGet", "Packages",
+                    "*ffmpeg*", "*", "bin")):
+                cands.append(os.path.join(d, exe))
+            cands.append(os.path.join(
+                local_app, "Microsoft", "WinGet", "Links", exe))
+            cands.append(os.path.join(local_app, "ffmpeg", "bin", exe))
+        userprofile = os.environ.get("USERPROFILE", "")
+        if userprofile:
+            cands.append(os.path.join(userprofile, "scoop", "shims", exe))
+        choco = os.environ.get("ChocolateyInstall",
+                               r"C:\ProgramData\chocolatey")
+        cands.append(os.path.join(choco, "bin", exe))
+        for base in (os.environ.get("ProgramFiles", ""),
+                     os.environ.get("ProgramFiles(x86)", "")):
+            if base:
+                cands.append(os.path.join(base, "ffmpeg", "bin", exe))
+        cands.append(rf"C:\ffmpeg\bin\{exe}")
+        return cands
+    if sys.platform == "darwin":
+        return [f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}"]
+    return [f"/usr/bin/{name}", f"/usr/local/bin/{name}"]
+
+
 def find_ffmpeg():
-    """Find the ffmpeg executable."""
+    """Find the ffmpeg executable -- the single source of truth for the whole
+    app (every plugin's finder delegates here).  Checks PATH, the OS's common
+    install locations, then the ffmpeg bundled via imageio-ffmpeg (shipped in
+    the frozen macOS/Linux apps so ffmpeg features work with no system
+    install)."""
     global _ffmpeg_path
     if _ffmpeg_path is not None:
         return _ffmpeg_path if _ffmpeg_path else None
@@ -58,18 +102,7 @@ def find_ffmpeg():
         _ffmpeg_path = path
         return path
 
-    # Common install locations
-    candidates = []
-    if sys.platform == "win32":
-        for base in [os.environ.get("LOCALAPPDATA", ""),
-                     os.environ.get("ProgramFiles", ""),
-                     os.environ.get("ProgramFiles(x86)", "")]:
-            if base:
-                candidates.append(os.path.join(base, "ffmpeg", "bin", "ffmpeg.exe"))
-    elif sys.platform == "darwin":
-        candidates = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
-
-    for c in candidates:
+    for c in _ffmpeg_candidates("ffmpeg"):
         if os.path.isfile(c):
             _ffmpeg_path = c
             return c
@@ -98,6 +131,11 @@ def find_ffprobe():
         _ffprobe_path = path
         return path
 
+    for c in _ffmpeg_candidates("ffprobe"):
+        if os.path.isfile(c):
+            _ffprobe_path = c
+            return c
+
     # Try same directory as ffmpeg
     ffmpeg = find_ffmpeg()
     if ffmpeg:
@@ -110,6 +148,46 @@ def find_ffprobe():
 
     _ffprobe_path = ""
     return None
+
+
+def ensure_bundled_ffmpeg_on_path():
+    """Expose the imageio-bundled ffmpeg under the plain name ``ffmpeg`` on
+    PATH, so EVERY ffmpeg consumer can find it -- not just this module.
+
+    The frozen macOS/Linux apps bundle ffmpeg via imageio-ffmpeg, but its
+    binary has a version-stamped name (e.g. ``ffmpeg-osx-arm64-v7.0``), so
+    ``shutil.which("ffmpeg")`` and bare ``ffmpeg -version`` probes can't see
+    it.  Several plugins ship their own verbatim-upstream ffmpeg finders we
+    must not edit, and the per-manufacturer prerequisite checks shell out to
+    ``ffmpeg -version`` -- all of which look for an ``ffmpeg`` on PATH.  So we
+    symlink (or copy) the bundled binary to a temp dir as ``ffmpeg`` and
+    prepend that dir to PATH; they then all resolve it with no system install.
+
+    Idempotent; call once at startup.  A real ffmpeg already on PATH always
+    wins (early return), and when imageio isn't bundled (source runs, the
+    Windows build) this is a no-op."""
+    global _ffmpeg_shimmed
+    if _ffmpeg_shimmed:
+        return
+    _ffmpeg_shimmed = True
+    if shutil.which("ffmpeg"):
+        return  # a real ffmpeg is already discoverable
+    exe = _imageio_ffmpeg_exe()
+    if not exe:
+        return
+    import tempfile
+    name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    link_dir = tempfile.mkdtemp(prefix="pad-ffmpeg-")
+    link = os.path.join(link_dir, name)
+    try:
+        os.symlink(exe, link)
+    except (OSError, NotImplementedError, AttributeError):
+        # Symlinks may be unavailable (Windows without privilege); copy.
+        try:
+            shutil.copy2(exe, link)
+        except OSError:
+            return
+    os.environ["PATH"] = link_dir + os.pathsep + os.environ.get("PATH", "")
 
 
 # ---------------------------------------------------------------------------

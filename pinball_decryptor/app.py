@@ -20,6 +20,14 @@ from .gui.main_window import MainWindow
 
 class App:
     def __init__(self):
+        # Expose the bundled ffmpeg (imageio-ffmpeg, in the frozen Mac/Linux
+        # apps) under the plain name "ffmpeg" on PATH before anything probes
+        # for it -- so the per-plugin ffmpeg finders (some verbatim-upstream,
+        # uneditable) and the `ffmpeg -version` prerequisite checks all resolve
+        # it without a system install.  No-op when a real ffmpeg is on PATH.
+        from .core.audio import ensure_bundled_ffmpeg_on_path
+        ensure_bundled_ffmpeg_on_path()
+
         load_plugins()
         self._manufacturers = all_manufacturers()
         if not self._manufacturers:

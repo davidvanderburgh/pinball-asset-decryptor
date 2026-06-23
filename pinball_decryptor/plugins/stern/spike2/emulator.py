@@ -922,46 +922,89 @@ class Spike2Emu:
     # Per-scale dispatch sub-slots (stride 0x40 = 16 u32 fn pointers per scale)
     # to probe for the audio codec on a generic build.  The audio fn lives in
     # one of the low slots, but WHICH one varies by build: the channel->slot
-    # parity is even on some builds (TMNT/Godzilla: mono=slot1, stereo=slot0)
-    # and FLIPPED on others (Avengers/Iron Maiden: mono=slot0, stereo=slot1).
-    # Probing 0..3 in order finds the right slot on every observed build while
-    # picking the identical slot for the builds the old fixed pair already
-    # handled (early-exit stops the instant audio is found).
+    # parity is even on some builds (TMNT/Godzilla/Led Zeppelin: mono=slot1,
+    # stereo=slot0) and FLIPPED on others (Avengers/Iron Maiden: mono=slot0,
+    # stereo=slot1).  Probing 0..3 in order finds the right slot on every
+    # observed build (slots 0/2 and 1/3 alias the two real codecs).
     _PROBE_SLOTS = (0, 1, 2, 3)
+
+    # The WRONG codec for a sound (a mono codec fed a stereo body, or vice
+    # versa) decodes to near-white noise at roughly a third of full scale --
+    # measured stable across every build at specflat ~0.85 / rms ~12.4k
+    # (stereo) and ~0.66 / rms ~6.4k (mono).  Real audio tops out around
+    # specflat 0.6 even when loud, and a CORRECT codec on a quiet passage is
+    # flat but quiet.  So a slot that is BOTH very flat AND loud is the wrong
+    # codec -- never the right one.  This lets a correct-but-quiet slot
+    # (silence, rms~0) beat the wrong loud-noise slot, which a bare "lowest
+    # specflat wins" cannot (silence reads flatter than noise).  That bare rule
+    # on a 0.5s probe window is exactly why music tracks with a silent intro
+    # used to decode to static.
+    _NOISE_SF = 0.70
+    _NOISE_RMS = 7000.0
+
+    def _slot_metrics(self, p, fnv, secs):
+        """``(specflat, rms)`` of decoding ``p`` with codec ``fnv`` over the
+        first ``secs`` -- or None if it doesn't decode.  Stereo takes the WORSE
+        channel of each, since a mono codec fed a stereo body can yield an
+        audio-looking L with a garbage R."""
+        import numpy as np
+        try:
+            res = self._decode_with_entry(p, fnv, max_secs=secs)
+        except Exception:
+            return None
+        if res is None:
+            return None
+        sf = self._specflat(res[0])
+        rms = float(np.sqrt(np.mean(np.asarray(res[0], float) ** 2)))
+        if p["chan"] == 2:
+            sf = max(sf, self._specflat(res[1]))
+            rms = max(rms, float(np.sqrt(np.mean(np.asarray(res[1], float) ** 2))))
+        return sf, rms
 
     def _resolve_entry(self, p):
         """Pick the codec function that actually decodes audio for a generic
-        build.  The audio fn lives at a build-specific low dispatch sub-slot
-        (see :data:`_PROBE_SLOTS`); they're indistinguishable statically (all
-        reference PROV/QMUL), so probe the low slots and take the first that
-        yields audio (specflat < 0.45; stereo requires BOTH channels, since a
-        mono codec fed a stereo body can yield an audio-looking L with garbage
-        R).  Cached per (scale, chan); decoding the wrong slot corrupts state,
-        so we stop probing the instant we find the audio slot."""
+        build.  The audio fn lives at a build-specific dispatch sub-slot (see
+        :data:`_PROBE_SLOTS`); they're indistinguishable statically (all
+        reference PROV/QMUL), so probe and measure.  Cached per (scale, chan).
+
+        Two passes.  Pass 1 (cheap, 0.6s): take the first slot that's clearly
+        audio (specflat < 0.45) -- the common case, loud sounds resolve
+        instantly.  Pass 2 (only if none was clearly audio -- a quiet/silent
+        intro): re-probe over a longer window and pick the lowest-specflat slot
+        that ISN'T the wrong loud-noise codec (see :data:`_NOISE_RMS`), so a
+        correct-but-quiet slot beats the noise codec instead of losing to it.
+        The noise rejection makes resolution robust no matter which sound first
+        seeds a given (scale, chan) -- even a short, silent one."""
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
         mu = self.mu
-        stereo = (p["chan"] == 2)
-        best, bestsf = None, 2.0
+        cands = []
         for slot in self._PROBE_SLOTS:
             fnv = _u32(bytes(mu.mem_read(
                 self.DISPATCH + p["scale"] * 0x40 + slot * 4, 4)))
-            if fnv == 0 or self._backing_off(fnv) is None:
-                continue
-            try:
-                res = self._decode_with_entry(p, fnv, max_secs=0.5)
-            except Exception:
-                res = None
-            if res is None:
-                continue
-            sf = self._specflat(res[0])
-            if stereo:
-                sf = max(sf, self._specflat(res[1]))
-            if sf < bestsf:
-                bestsf, best = sf, fnv
-            if sf < 0.45:
+            if fnv and self._backing_off(fnv) is not None and fnv not in cands:
+                cands.append(fnv)
+        # Pass 1: a short window resolves loud sounds immediately.
+        best = None
+        for fnv in cands:
+            m = self._slot_metrics(p, fnv, 0.6)
+            if m is not None and m[0] < 0.45:
+                best = fnv
                 break
+        # Pass 2: nothing was clearly audio -- the sound has a quiet/silent
+        # intro.  Re-probe longer, reject the loud-noise codec, take lowest sf.
+        if best is None:
+            scored = []
+            for fnv in cands:
+                m = self._slot_metrics(p, fnv, 3.5)
+                if m is not None:
+                    scored.append((fnv, m[0], m[1]))
+            survivors = [(f, sf) for f, sf, rms in scored
+                         if not (sf > self._NOISE_SF and rms > self._NOISE_RMS)]
+            pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
+            if pool:
+                best = min(pool, key=lambda t: t[1])[0]
         self._slot_cache[key] = best
         return best
 

@@ -20,7 +20,7 @@ def md5_file(path):
 
 
 def generate_checksums(folder, log_cb=None, progress_cb=None,
-                       exclude_dirs=None):
+                       exclude_dirs=None, cancel=None):
     """Walk *folder* and write ``.checksums.md5``.  Returns file count.
 
     Symlinks and unreadable files (broken targets, locked files, OneDrive
@@ -31,7 +31,13 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     CGC plugin to keep the derived ``dmd/`` extraction folder out of
     the modding baseline -- those files don't correspond to anything
     inside the eMMC's ext4 partition.
+
+    *cancel* is an optional zero-arg predicate; when it returns True the hashing
+    loop stops promptly and returns the partial count, so a cancelled extract
+    doesn't grind through hashing a large output before the pipeline notices
+    (the caller re-checks cancel afterwards to report the cancellation).
     """
+    cancel = cancel or (lambda: False)
     excluded = {d.replace("\\", "/").strip("/")
                 for d in (exclude_dirs or ())}
     files = []
@@ -58,6 +64,8 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     written = 0
     with open(out_path, "w", encoding="utf-8") as out:
         for i, (rel_path, abs_path) in enumerate(files):
+            if cancel():
+                break
             try:
                 md5 = md5_file(abs_path)
             except OSError as e:

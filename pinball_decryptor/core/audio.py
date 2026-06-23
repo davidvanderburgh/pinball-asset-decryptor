@@ -151,34 +151,46 @@ def find_ffprobe():
 
 
 def ensure_bundled_ffmpeg_on_path():
-    """Expose the imageio-bundled ffmpeg under the plain name ``ffmpeg`` on
-    PATH, so EVERY ffmpeg consumer can find it -- not just this module.
+    """Expose the ffmpeg :func:`find_ffmpeg` resolves under the plain name
+    ``ffmpeg`` on PATH, so EVERY ffmpeg consumer can find it -- not just this
+    module.
 
-    The frozen macOS/Linux apps bundle ffmpeg via imageio-ffmpeg, but its
-    binary has a version-stamped name (e.g. ``ffmpeg-osx-arm64-v7.0``), so
-    ``shutil.which("ffmpeg")`` and bare ``ffmpeg -version`` probes can't see
-    it.  Several plugins ship their own verbatim-upstream ffmpeg finders we
-    must not edit, and the per-manufacturer prerequisite checks shell out to
-    ``ffmpeg -version`` -- all of which look for an ``ffmpeg`` on PATH.  So we
-    symlink (or copy) the bundled binary to a temp dir as ``ffmpeg`` and
-    prepend that dir to PATH; they then all resolve it with no system install.
+    Two consumers can't use :func:`find_ffmpeg`'s smart lookup and only see
+    PATH: the per-manufacturer prerequisite checks shell out to bare
+    ``ffmpeg -version``, and several plugins ship their own verbatim-upstream
+    ffmpeg finders we must not edit.  Those would report "ffmpeg missing" even
+    when :func:`find_ffmpeg` locates one -- e.g. the macOS/Linux apps bundle
+    ffmpeg via imageio-ffmpeg under a version-stamped name
+    (``ffmpeg-osx-arm64-v7.0``), and on Windows ffmpeg often lives in a
+    winget / scoop / Program Files directory that isn't on the running app's
+    PATH.  So resolve it once with the full finder and put it on PATH for
+    everyone: prepend its real directory when it's a normally-named binary, or
+    symlink/copy a version-stamped one into a temp dir as ``ffmpeg``.
 
     Idempotent; call once at startup.  A real ffmpeg already on PATH always
-    wins (early return), and when imageio isn't bundled (source runs, the
-    Windows build) this is a no-op."""
+    wins (early return), and when nothing is found this is a no-op."""
     global _ffmpeg_shimmed
     if _ffmpeg_shimmed:
         return
     _ffmpeg_shimmed = True
     if shutil.which("ffmpeg"):
         return  # a real ffmpeg is already discoverable
-    exe = _imageio_ffmpeg_exe()
+    exe = find_ffmpeg()
     if not exe:
         return
+    plain = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    # A normally-named binary in a real directory (a winget/scoop/Program Files
+    # install, or a system ffmpeg): just put that directory on PATH -- bare
+    # ``ffmpeg`` probes resolve it and ffprobe sits alongside it.
+    if os.path.basename(exe).lower() == plain:
+        os.environ["PATH"] = (os.path.dirname(exe) + os.pathsep
+                              + os.environ.get("PATH", ""))
+        return
+    # A version-stamped imageio binary: symlink (or copy) it to a temp dir as
+    # ``ffmpeg`` and prepend that dir, so the plain name resolves.
     import tempfile
-    name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
     link_dir = tempfile.mkdtemp(prefix="pad-ffmpeg-")
-    link = os.path.join(link_dir, name)
+    link = os.path.join(link_dir, plain)
     try:
         os.symlink(exe, link)
     except (OSError, NotImplementedError, AttributeError):

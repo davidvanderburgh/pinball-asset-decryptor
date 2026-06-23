@@ -70,6 +70,10 @@ class SternExtractPipeline(BasePipeline):
             self.input_path, parts, self.output_dir,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             phase=self._set_phase, log_line=self._log_line)
+        # extract_all returns promptly on cancel (it checks between every phase
+        # and per decoded sound).  Stop here instead of grinding through the
+        # checksum pass and reporting success on a run the user aborted.
+        self._check_cancel()
 
         self._set_phase(5)  # Checksums
         # Baseline so Write/Mod Pack can tell which assets the user edited (and
@@ -77,7 +81,9 @@ class SternExtractPipeline(BasePipeline):
         self._log("Generating checksums...", "info")
         self._progress(0, 0, "Generating checksums...")
         generate_checksums(self.output_dir, log_cb=self._log,
-                           progress_cb=self._progress)
+                           progress_cb=self._progress,
+                           cancel=lambda: self._cancelled)
+        self._check_cancel()
         self._done(True, "Extracted %d Spike 2 sound(s) to %s" % (n, self.output_dir))
 
 
@@ -152,12 +158,15 @@ class SternDirectSsdExtractPipeline(BasePipeline):
             cancel=lambda: self._cancelled, phase=self._set_phase,
             open_disk=lambda: RawDeviceFile(self.device_path, writable=False),
             log_line=self._log_line)
+        self._check_cancel()   # don't run checksums on a cancelled extract
 
         self._set_phase(5)  # Checksums
         self._log("Generating checksums...", "info")
         self._progress(0, 0, "Generating checksums...")
         generate_checksums(self.output_dir, log_cb=self._log,
-                           progress_cb=self._progress)
+                           progress_cb=self._progress,
+                           cancel=lambda: self._cancelled)
+        self._check_cancel()
         self._done(True, "Extracted %d Spike 2 sound(s) from the SD card to %s"
                    % (n, self.output_dir))
 

@@ -403,6 +403,27 @@ def test_windows_build_installs_runtime_deps():
         "Stern's deps out and pushed users to a wrong-interpreter manual pip.")
 
 
+def test_windows_build_bundles_ffmpeg():
+    """Regression guard — "ffmpeg not found" on a fresh Windows install
+    (monkeybug).
+
+    The Replace Audio/Video tabs convert non-native formats + resample via
+    ffmpeg.  On Windows the app's isolated embeddable Python can't fall back to
+    a system ffmpeg the user installs into their own interpreter, and a fresh
+    box often has none on PATH at all -- so build.ps1 must pip-install
+    imageio-ffmpeg into the bundle (it ships a real ffmpeg.exe).
+    core/audio.find_ffmpeg() + ensure_bundled_ffmpeg_on_path() then expose it,
+    the same way the Mac/Linux frozen apps already do.
+    """
+    if not WINDOWS_BUILD.exists():
+        pytest.skip("build.ps1 not present in this checkout")
+    src = WINDOWS_BUILD.read_text(encoding="utf-8", errors="replace")
+    assert "imageio-ffmpeg" in src, (
+        "build.ps1 must install imageio-ffmpeg into the bundled Python so a "
+        "fresh Windows install ships a working ffmpeg -- otherwise Replace "
+        "Audio/Video show 'ffmpeg not found' and can't convert/resample.")
+
+
 def test_windows_installer_offers_every_stern_pip_dep():
     """Regression guard — Stern absent from Install Missing (monkeybug).
 

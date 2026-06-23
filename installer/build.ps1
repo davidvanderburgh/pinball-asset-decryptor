@@ -151,12 +151,18 @@ $sitePackages = Join-Path $PythonDir "Lib\site-packages"
 # fresh-install user whose system pip reported "already satisfied" while the
 # app still showed the Stern deps (unicorn/capstone/numpy) missing.  The extras
 # below aren't in requirements.txt: UnityPy/fsb5/pyogg power Spooky's Unity
-# asset extraction.  faster-whisper (Auto-name call-outs) stays an on-demand
-# "Install Missing" item on Windows -- it works there (bundled Python + a
-# functional elevated installer), so it's kept out of the base installer for
-# size; Mac/Linux bundle it because their frozen apps can't install it later.
+# asset extraction; imageio-ffmpeg bundles a real ffmpeg.exe so Replace
+# Audio/Video format conversion + resampling work out of the box, with no
+# system install or PATH hunting -- find_ffmpeg() falls back to it and
+# ensure_bundled_ffmpeg_on_path() shims it onto PATH at startup (the same way
+# the Mac/Linux builds already bundle it; this closes the "ffmpeg not found"
+# warning on the Stern/other tabs on a fresh Windows install).  faster-whisper
+# (Auto-name call-outs) stays an on-demand "Install Missing" item on Windows --
+# it works there (bundled Python + a functional elevated installer), so it's
+# kept out of the base installer for size; Mac/Linux bundle it because their
+# frozen apps can't install it later.
 $reqFile = Join-Path $ProjectDir "requirements.txt"
-$pipExtras = @("UnityPy", "fsb5", "pyogg")
+$pipExtras = @("UnityPy", "fsb5", "pyogg", "imageio-ffmpeg")
 Write-Host "  Installing deps from requirements.txt + extras ($($pipExtras -join ', '))..."
 $ErrorActionPreference = "Continue"
 & $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile @pipExtras 2>&1 | ForEach-Object { Write-Host "    $_" }
@@ -194,6 +200,15 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  $testDeps" -ForegroundColor Green
 } else {
     Write-Warning "Dependency smoke test failed: $testDeps"
+}
+
+# imageio-ffmpeg must ship a real ffmpeg binary, not just the package (the app
+# relies on it for Replace Audio/Video conversion with no system install).
+$testFfmpeg = & $pythonExe -c "import imageio_ffmpeg, os; p = imageio_ffmpeg.get_ffmpeg_exe(); print('ffmpeg bundled:', p) if os.path.isfile(p) else (_ for _ in ()).throw(SystemExit('no ffmpeg binary'))" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  $testFfmpeg" -ForegroundColor Green
+} else {
+    Write-Warning "Bundled ffmpeg smoke test failed: $testFfmpeg"
 }
 
 Remove-Item Env:\TCL_LIBRARY -ErrorAction SilentlyContinue

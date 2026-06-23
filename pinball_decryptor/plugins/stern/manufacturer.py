@@ -113,6 +113,20 @@ class SternManufacturer(Manufacturer):
                      probe="python:faster_whisper",
                      reason="Auto-transcribe spoken callouts to name the WAVs.",
                      install_hint="pip install faster-whisper"),
+        # Optional — Replace Audio/Video swap files already in the game's
+        # format (wav/ogg) without it; ffmpeg is only needed to convert other
+        # formats (mp3/flac/m4a/mp4...) or match the original's sample rate.
+        # The Windows build bundles it (imageio-ffmpeg) and startup puts it on
+        # PATH, so this normally shows green out of the box; on Mac/Linux the
+        # frozen bundle does too.
+        Prerequisite(name="ffmpeg", where="host",
+                     probe="ffmpeg -version",
+                     reason="Convert replacement audio/video to the game's "
+                            "format + match sample rate (optional).",
+                     install_hint=(
+                         "winget install Gyan.FFmpeg  (Windows)\n"
+                         "brew install ffmpeg          (macOS)\n"
+                         "apt-get install ffmpeg       (Linux)")),
     )
     # Spike 2 ships on an SD card (not an ISO/SSD), so the source/destination
     # toggle reads in those terms (see Manufacturer defaults).

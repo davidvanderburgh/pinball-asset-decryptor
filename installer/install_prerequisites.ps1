@@ -158,6 +158,25 @@ $ManufacturerPrereqs = [ordered]@{
         )
         HostPackages = @()
     }
+
+    "Stern Pinball" = @{
+        Description  = "Spike 2: Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden + more (SD-card images)"
+        WslPackages  = @()
+        HostPackages = @(
+            @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }
+        )
+        # The Spike 2 audio engine is pure-Python (no WSL) but needs these pip
+        # packages.  As of v0.15.x the installer bundles them into the app's
+        # Python already, so on a fresh install these usually report [OK]; this
+        # entry is what lets an EXISTING install pick them up via Install
+        # Missing (previously there was no Spike 2 option at all).
+        PipPackages  = @(
+            @{ probe="unicorn";        pkg="unicorn";        label="unicorn";        reason="ARM emulator that drives the card's firmware to recover the audio codec keystream" }
+            @{ probe="capstone";       pkg="capstone";       label="capstone";       reason="Locates the codec's companding point when re-encoding replaced audio" }
+            @{ probe="numpy";          pkg="numpy";          label="numpy";          reason="Audio sample array math in the decode / re-encode pipeline" }
+            @{ probe="faster_whisper"; pkg="faster-whisper"; label="faster-whisper"; reason="Auto-name call-outs: transcribe spoken voice clips to name the WAVs" }
+        )
+    }
 }
 
 # =========================================================================

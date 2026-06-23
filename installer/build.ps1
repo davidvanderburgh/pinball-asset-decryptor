@@ -142,16 +142,24 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip"; exit 1 }
 $sitePackages = Join-Path $PythonDir "Lib\site-packages"
 & $pythonExe -m pip install --no-warn-script-location --target $sitePackages setuptools wheel 2>&1 | ForEach-Object { Write-Host "    $_" }
 
-# Runtime deps shared across plugins.  PB/JJP/BOF use only stdlib + subprocess
-# at runtime (their heavy lifting is shelled out to gpg/tar/partclone in WSL),
-# so the only host-side deps come from Spooky:
-#   pycryptodome — AES-256-CBC for .pkg files
-#   UnityPy + fsb5 + pyogg — Unity asset extraction (Beetlejuice, Halloween, etc.)
-#   Pillow — P3 VID-to-MP4 frame rendering + icon regen
-$pipDeps = @("pycryptodome", "UnityPy", "fsb5", "pyogg", "Pillow")
-Write-Host "  Installing dependencies: $($pipDeps -join ', ')..."
+# Runtime deps bundled into the app's isolated embeddable Python.  This MUST
+# install the FULL runtime set from requirements.txt (Pillow / zstandard /
+# pycryptodome / numpy / unicorn / capstone) -- the app uses ONLY this bundled
+# interpreter (its ._pth sandboxes it from any system Python), so anything
+# missing here is missing for the user with no fix: a manual `pip install` into
+# their own Python is invisible to the app.  That's exactly what bit a
+# fresh-install user whose system pip reported "already satisfied" while the
+# app still showed the Stern deps (unicorn/capstone/numpy) missing.  The extras
+# below aren't in requirements.txt: UnityPy/fsb5/pyogg power Spooky's Unity
+# asset extraction.  faster-whisper (Auto-name call-outs) stays an on-demand
+# "Install Missing" item on Windows -- it works there (bundled Python + a
+# functional elevated installer), so it's kept out of the base installer for
+# size; Mac/Linux bundle it because their frozen apps can't install it later.
+$reqFile = Join-Path $ProjectDir "requirements.txt"
+$pipExtras = @("UnityPy", "fsb5", "pyogg")
+Write-Host "  Installing deps from requirements.txt + extras ($($pipExtras -join ', '))..."
 $ErrorActionPreference = "Continue"
-& $pythonExe -m pip install --no-warn-script-location --target $sitePackages @pipDeps 2>&1 | ForEach-Object { Write-Host "    $_" }
+& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile @pipExtras 2>&1 | ForEach-Object { Write-Host "    $_" }
 $ErrorActionPreference = "Stop"
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
 Write-Host "  Dependencies installed successfully" -ForegroundColor Green
@@ -181,7 +189,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Warning "tkinter smoke test failed: $testTk"
 }
 
-$testDeps = & $pythonExe -c "import Crypto; import UnityPy; import PIL; print('deps OK')" 2>&1
+$testDeps = & $pythonExe -c "import Crypto, UnityPy, PIL, numpy, unicorn, capstone; print('deps OK')" 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  $testDeps" -ForegroundColor Green
 } else {

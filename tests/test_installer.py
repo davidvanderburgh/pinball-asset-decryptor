@@ -54,6 +54,7 @@ PYINSTALLER_BUILD_SCRIPTS = [
     INSTALLER / "build_macos.sh",
     INSTALLER / "build_linux.sh",
 ]
+WINDOWS_BUILD = INSTALLER / "build.ps1"
 
 
 def test_installer_layout():
@@ -378,6 +379,55 @@ def test_pyinstaller_bundles_ffmpeg(script):
             or "--collect-all imageio_ffmpeg" in src), (
         f"{script.name} must --collect-all imageio_ffmpeg so its bundled "
         f"ffmpeg binary actually lands in the frozen app.")
+
+
+def test_windows_build_installs_runtime_deps():
+    """Regression guard — Windows fresh-install missing Stern deps (monkeybug).
+
+    The Windows app ships an isolated embeddable Python under {app}\\python;
+    its bundled site-packages is the ONLY interpreter the app uses (the ._pth
+    sandboxes it from any system Python).  build.ps1 must pre-install the
+    runtime deps from requirements.txt into that bundle -- otherwise a fresh
+    install has no unicorn/capstone/numpy and Stern audio fails, and a user's
+    manual `pip install` into their system Python can't help (wrong
+    interpreter: pip reports "already satisfied" while the app still can't
+    import them).
+    """
+    if not WINDOWS_BUILD.exists():
+        pytest.skip("build.ps1 not present in this checkout")
+    src = WINDOWS_BUILD.read_text(encoding="utf-8", errors="replace")
+    assert "requirements.txt" in src, (
+        "build.ps1 must `pip install -r requirements.txt` into the bundled "
+        "Python so a fresh Windows install ships the runtime deps "
+        "(unicorn/capstone/numpy/zstandard).  A hardcoded subset is what left "
+        "Stern's deps out and pushed users to a wrong-interpreter manual pip.")
+
+
+def test_windows_installer_offers_every_stern_pip_dep():
+    """Regression guard — Stern absent from Install Missing (monkeybug).
+
+    install_prerequisites.ps1 (what the GUI's "Install Missing" runs) had no
+    Stern Pinball entry, so its manufacturer picker showed no Spike 2 option
+    and a Windows user could not install unicorn/capstone through the app at
+    all.  Derive Stern's pip-probe prerequisites from the registry and require
+    each to appear in the installer, so a newly-added Stern pip dep can't go
+    stale here the way the original omission did.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "Stern Pinball" in ps1, (
+        "install_prerequisites.ps1 has no 'Stern Pinball' entry -- the GUI's "
+        "Install Missing then offers no Spike 2 option, so Windows users can't "
+        "install unicorn/capstone through the app.")
+    from pinball_decryptor.core.registry import load_plugins, get_manufacturer
+    load_plugins()
+    stern = get_manufacturer("stern")
+    pip_prereqs = [p for p in stern.prerequisites
+                   if p.probe.startswith("python:")]
+    missing = [p.name for p in pip_prereqs
+               if p.name not in ps1 and p.name.replace("-", "_") not in ps1]
+    assert not missing, (
+        f"install_prerequisites.ps1's Stern entry is missing pip prereq(s): "
+        f"{', '.join(missing)} -- Install Missing won't install them on Windows.")
 
 
 def test_iss_repairs_python_permissions():

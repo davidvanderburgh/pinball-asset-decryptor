@@ -118,27 +118,41 @@ def show_disclaimer_dialog(parent, theme_name="light"):
         accepted["value"] = False
         dlg.destroy()
 
+    # macOS renders tk.Button with a native (light) Aqua face and ignores
+    # ``bg``, so a dark-theme button with light ``fg`` text was unreadable
+    # there (light text on a light face).  Build the buttons from tk.Label
+    # instead -- Labels honor bg/fg on every platform (the same faux-button
+    # pattern the manufacturer picker uses) -- with a click binding and a
+    # hover swap for affordance.
+    def _make_button(text, command, *, bg, fg, hover_bg, bold=False):
+        lbl = tk.Label(
+            btn_row, text=text, bg=bg, fg=fg,
+            font=(sans_font, 10, "bold" if bold else "normal"),
+            padx=20 if bold else 18, pady=7, cursor="hand2",
+        )
+        lbl.bind("<Button-1>", lambda _e: command())
+        lbl.bind("<Enter>", lambda _e: lbl.configure(bg=hover_bg))
+        lbl.bind("<Leave>", lambda _e: lbl.configure(bg=bg))
+        return lbl
+
     # Quit on the right, primary action ("I Agree") to its right so it's
-    # the rightmost button — matches the OK-on-right Windows/Linux
-    # convention.  (On macOS the convention is reversed, but Tk's button
-    # styling doesn't differ enough to be worth special-casing here.)
-    tk.Button(
-        btn_row, text="Quit", command=_decline,
-        bg=theme["button"], fg=theme["fg"],
-        relief="flat", padx=18, pady=6,
-        activebackground=theme["border"], activeforeground=theme["fg"],
-        cursor="hand2", borderwidth=0, highlightthickness=0,
+    # the rightmost button — matches the OK-on-right Windows/Linux convention.
+    _make_button(
+        "Quit", _decline,
+        bg=theme["button"], fg=theme["fg"], hover_bg=theme["border"],
     ).pack(side="right", padx=(8, 0))
 
-    accept_btn = tk.Button(
-        btn_row, text="I Agree", command=_accept,
-        bg=theme["accent"], fg="#ffffff",
-        relief="flat", padx=20, pady=6,
-        activebackground=theme["select_bg"], activeforeground="#ffffff",
-        cursor="hand2", font=(sans_font, 10, "bold"),
-        borderwidth=0, highlightthickness=0,
+    accept_btn = _make_button(
+        "I Agree", _accept,
+        bg=theme["accent"], fg="#ffffff", hover_bg=theme["select_bg"],
+        bold=True,
     )
     accept_btn.pack(side="right")
+
+    # Keyboard: Enter accepts, Esc declines.  tk.Label doesn't inherit the
+    # focused-button Return behavior tk.Button had, so bind it on the dialog.
+    dlg.bind("<Return>", lambda _e: _accept())
+    dlg.bind("<Escape>", lambda _e: _decline())
 
     # Closing the X = decline.
     dlg.protocol("WM_DELETE_WINDOW", _decline)

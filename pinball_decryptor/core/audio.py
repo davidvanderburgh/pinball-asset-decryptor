@@ -175,7 +175,18 @@ def ensure_bundled_ffmpeg_on_path():
     _ffmpeg_shimmed = True
     if shutil.which("ffmpeg"):
         return  # a real ffmpeg is already discoverable
-    exe = find_ffmpeg()
+    # Resolve the same way find_ffmpeg() does -- the OS install locations
+    # (winget/scoop/Program Files on Windows, brew on macOS) then the bundled
+    # imageio binary -- but WITHOUT find_ffmpeg()'s module-level cache, which an
+    # earlier no-ffmpeg lookup can have already pinned to "not found" before we
+    # run at startup.
+    exe = None
+    for c in _ffmpeg_candidates("ffmpeg"):
+        if os.path.isfile(c):
+            exe = c
+            break
+    if exe is None:
+        exe = _imageio_ffmpeg_exe()
     if not exe:
         return
     plain = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"

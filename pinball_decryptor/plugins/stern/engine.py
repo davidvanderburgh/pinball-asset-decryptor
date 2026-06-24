@@ -293,6 +293,7 @@ def extract_images(reader, output_dir, log=None, progress=None, cancel=None):
 _TEXTURE_MANIFEST = "manifest.txt"
 _TEXTURE_DIR = ("images", "scene_textures")
 _DXT5_FORMAT = 5            # the radium texture-descriptor format enum for BC3
+_DXT1_FORMAT = 4            # the radium texture-descriptor format enum for BC1
 
 
 def parse_texture_descriptor(radium, ref):
@@ -318,12 +319,13 @@ def parse_texture_descriptor(radium, ref):
 
 def extract_scene_textures(reader, output_dir, log=None, progress=None,
                            cancel=None):
-    """Decode every BC3/DXT5 scene texture to ``output_dir/images/scene_textures/``
-    as RGBA PNG.
+    """Decode every BC3/DXT5 or BC1/DXT1 scene texture to
+    ``output_dir/images/scene_textures/`` as RGBA PNG.
 
     These are the single (non-nested, non-``ftyp``) ``scene.assets/<N>.asset``
-    files — raw BC3 block data whose width/height/format are read from the
-    co-located ``scene.radium`` (:func:`parse_texture_descriptor`).  A
+    files — raw BC3 (``format==5``) or BC1 (``format==4``) block data whose
+    width/height/format are read from the co-located ``scene.radium``
+    (:func:`parse_texture_descriptor`).  A
     ``manifest.txt`` records ``output -> card path, bytes, w, h, format`` so Write
     can re-encode an edited PNG back to the exact original slot."""
     log = log or (lambda *a, **k: None)
@@ -387,13 +389,20 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
             continue
         w, h, fmt = desc
         size = node["size"]
-        # Only BC3/DXT5 (1 byte/pixel) is supported so far; the size guard also
-        # rejects a descriptor that didn't really belong to this asset.
-        if fmt != _DXT5_FORMAT or w * h != size:
+        # BC3/DXT5 (16 B/4×4 block) and BC1/DXT1 (8 B/4×4 block) are supported.
+        # The block-padded size is the exact, dimension-correct law (a texture
+        # whose W/H aren't multiples of 4 still occupies whole 4×4 blocks); it
+        # doubles as a guard that the descriptor really belongs to this asset.
+        nblk = ((w + 3) // 4) * ((h + 3) // 4)
+        if fmt == _DXT5_FORMAT and size == nblk * 16:
+            decode = _dds.decode_bc3
+        elif fmt == _DXT1_FORMAT and size == nblk * 8:
+            decode = _dds.decode_bc1
+        else:
             n_skip += 1
             continue
         try:
-            rgba = _dds.decode_bc3(reader.read_file_bytes(node), w, h)
+            rgba = decode(reader.read_file_bytes(node), w, h)
             im = Image.fromarray(rgba, "RGBA")
         except Exception as e:
             log("Texture %s: decode failed (%s); skipped." % (ref, e), "warning")
@@ -464,43 +473,49 @@ def _nearest_element_name(data, before_off, window=512):
 
 
 def parse_radium_images(data):
-    """Find every inline BC3/DXT5 image in a ``scene.radium``.
+    """Find every inline BC3/DXT5 or BC1/DXT1 image in a ``scene.radium``.
 
     Each image is serialized as
-    ``[dispW u32][dispH u32][handle u32][texW u32][texH u32][format u32=5]
-    [0 u32][0 u32][length u32][BC3 data]`` where
-    ``length == padded4(texW) * padded4(texH)`` (BC3 = 1 byte/pixel).  We anchor
-    on the ``format=5, 0, 0`` triplet and validate that the length matches the
-    block-padded dimensions and that the data fits — a signature specific enough
-    to have no false positives.
+    ``[dispW u32][dispH u32][handle u32][texW u32][texH u32][format u32]
+    [0 u32][0 u32][length u32][block data]`` where
+    ``length == padded4(texW) * padded4(texH)`` for BC3 (``format==5``,
+    1 byte/pixel) or half that for BC1 (``format==4``, 1/2 byte/pixel).  We anchor
+    on the ``format, 0, 0`` triplet and validate that the length matches the
+    block-padded dimensions for that format and that the data fits — a signature
+    specific enough to have no false positives.
 
-    Returns ``[{data_off, length, tex_w, tex_h, pad_w, pad_h, disp_w, disp_h}]``
-    where decoding uses ``pad_w x pad_h`` (the full BC3 grid)."""
+    Returns ``[{data_off, length, fmt, tex_w, tex_h, pad_w, pad_h, disp_w,
+    disp_h}]`` where decoding uses ``pad_w x pad_h`` (the full block grid)."""
     out = []
     n = len(data)
-    sig = b"\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"   # fmt=5, 0, 0
-    i = data.find(sig)
-    while i >= 0:
-        m = i
-        i = data.find(sig, i + 1)
-        if m < 8 or m + 16 > n:
-            continue
-        tex_w = struct.unpack_from("<I", data, m - 8)[0]
-        tex_h = struct.unpack_from("<I", data, m - 4)[0]
-        if not (0 < tex_w <= 8192 and 0 < tex_h <= 8192):
-            continue
-        length = struct.unpack_from("<I", data, m + 12)[0]
-        pad_w, pad_h = _padded4(tex_w), _padded4(tex_h)
-        if length != pad_w * pad_h or m + 16 + length > n:
-            continue
-        disp_w = struct.unpack_from("<I", data, m - 20)[0] if m >= 20 else tex_w
-        disp_h = struct.unpack_from("<I", data, m - 16)[0] if m >= 20 else tex_h
-        if not (0 < disp_w <= pad_w):
-            disp_w = tex_w
-        if not (0 < disp_h <= pad_h):
-            disp_h = tex_h
-        out.append(dict(data_off=m + 16, length=length, tex_w=tex_w, tex_h=tex_h,
-                        pad_w=pad_w, pad_h=pad_h, disp_w=disp_w, disp_h=disp_h))
+    # fmt enum byte, then "0,0" (the two trailing u32s) -> 12-byte anchor
+    sigs = ((_DXT5_FORMAT, b"\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"),
+            (_DXT1_FORMAT, b"\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"))
+    for fmt, sig in sigs:
+        i = data.find(sig)
+        while i >= 0:
+            m = i
+            i = data.find(sig, i + 1)
+            if m < 8 or m + 16 > n:
+                continue
+            tex_w = struct.unpack_from("<I", data, m - 8)[0]
+            tex_h = struct.unpack_from("<I", data, m - 4)[0]
+            if not (0 < tex_w <= 8192 and 0 < tex_h <= 8192):
+                continue
+            length = struct.unpack_from("<I", data, m + 12)[0]
+            pad_w, pad_h = _padded4(tex_w), _padded4(tex_h)
+            want = pad_w * pad_h if fmt == _DXT5_FORMAT else pad_w * pad_h // 2
+            if length != want or m + 16 + length > n:
+                continue
+            disp_w = struct.unpack_from("<I", data, m - 20)[0] if m >= 20 else tex_w
+            disp_h = struct.unpack_from("<I", data, m - 16)[0] if m >= 20 else tex_h
+            if not (0 < disp_w <= pad_w):
+                disp_w = tex_w
+            if not (0 < disp_h <= pad_h):
+                disp_h = tex_h
+            out.append(dict(data_off=m + 16, length=length, fmt=fmt,
+                            tex_w=tex_w, tex_h=tex_h, pad_w=pad_w, pad_h=pad_h,
+                            disp_w=disp_w, disp_h=disp_h))
     return out
 
 
@@ -558,7 +573,9 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
             out_rel = by_hash.get(h)
             if out_rel is None:
                 try:
-                    rgba = _dds.decode_bc3(raw, im["pad_w"], im["pad_h"])
+                    decode = (_dds.decode_bc1 if im["fmt"] == _DXT1_FORMAT
+                              else _dds.decode_bc3)
+                    rgba = decode(raw, im["pad_w"], im["pad_h"])
                     pic = Image.fromarray(rgba, "RGBA")
                 except Exception as e:
                     log("Radium image %s: decode failed (%s); skipped."
@@ -578,16 +595,16 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 pic.save(os.path.join(output_dir, "images", *out_rel.split("/")))
                 by_hash[h] = out_rel
                 n_unique += 1
-            manifest.append("%s\t%s\t%d\t%d\t%d\t%d"
+            manifest.append("%s\t%s\t%d\t%d\t%d\t%d\t%d"
                             % (out_rel, path, im["data_off"], im["length"],
-                               im["pad_w"], im["pad_h"]))
+                               im["pad_w"], im["pad_h"], im["fmt"]))
             n_occ += 1
     if not manifest:
         return 0
     try:
         with open(os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST), "w",
                   encoding="utf-8") as f:
-            f.write("# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\n"
+            f.write("# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
                     + "\n".join(manifest) + "\n")
     except Exception:
         pass
@@ -833,6 +850,20 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             except Exception as e:
                 log("Radium-image extraction failed (%s); continuing." % e,
                     "warning")
+            if cancel():
+                return 0
+            # Spine skeletons embedded verbatim in scene.radium (the 2D
+            # skeletal-animation rigs) -> spine/*.json — own try/except so a
+            # skeleton hiccup never blocks the other media or audio.
+            try:
+                from . import spine as _spine
+                _spine.extract_spine(
+                    reader, output_dir, log=log,
+                    progress=(lambda c, t, d="": progress(
+                        15, 100, d)) if progress else None,
+                    cancel=cancel)
+            except Exception as e:
+                log("Spine extraction failed (%s); continuing." % e, "warning")
         if cancel():
             return 0
 
@@ -1608,7 +1639,9 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
                 "warning")
             skipped += 1
             continue
-        payload = _dds.encode_bc3(np.asarray(im, dtype=np.uint8))
+        arr = np.asarray(im, dtype=np.uint8)
+        payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                   else _dds.encode_bc3(arr))
         if len(payload) != node["size"]:
             log("Texture %s: re-encoded to %d bytes but the slot is %d; skipped."
                 % (output, len(payload), node["size"]), "warning")
@@ -1622,8 +1655,9 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
 
 def _changed_radium_images(assets_dir, baseline):
     """Return ``[(output, radium_card_path, staged, data_off, length, pad_w,
-    pad_h), ...]`` for the radium-embedded images whose PNG differs from the
-    Extract baseline.  Empty when there's no ``radium_images.txt`` manifest."""
+    pad_h, fmt), ...]`` for the radium-embedded images whose PNG differs from the
+    Extract baseline.  Empty when there's no ``radium_images.txt`` manifest.
+    ``fmt`` defaults to BC3/DXT5 for manifests written before the BC1 column."""
     from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
@@ -1642,6 +1676,7 @@ def _changed_radium_images(assets_dir, baseline):
             try:
                 data_off, length = int(cols[2]), int(cols[3])
                 pad_w, pad_h = int(cols[4]), int(cols[5])
+                fmt = int(cols[6]) if len(cols) > 6 else _DXT5_FORMAT
             except ValueError:
                 continue
             staged = os.path.join(assets_dir, "images", *output.split("/"))
@@ -1654,17 +1689,18 @@ def _changed_radium_images(assets_dir, baseline):
             except OSError:
                 pass
             out.append((output, radium_path, staged, data_off, length,
-                        pad_w, pad_h))
+                        pad_w, pad_h, fmt))
     return out
 
 
 def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
-    """Re-encode each edited radium-embedded image to BC3 and resolve it to a
-    flat ``[(disk_offset, bytes), ...]`` list patching the bytes in place inside
-    the ``scene.radium`` inode (same form ``_compute_patches`` collects, like the
-    display-text writes).  Returns ``(writes, n_images)``.
+    """Re-encode each edited radium-embedded image to its format (BC3/DXT5 or
+    BC1/DXT1) and resolve it to a flat ``[(disk_offset, bytes), ...]`` list
+    patching the bytes in place inside the ``scene.radium`` inode (same form
+    ``_compute_patches`` collects, like the display-text writes).  Returns
+    ``(writes, n_images)``.
 
-    Size-neutral by construction: the PNG is the full padded BC3 grid, so
+    Size-neutral by construction: the PNG is the full padded block grid, so
     re-encoding yields exactly ``length`` bytes at ``data_offset``."""
     edits = _changed_radium_images(assets_dir, baseline)
     if not edits:
@@ -1680,9 +1716,9 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     nodes = _resolve_card_nodes(
         reader, list({rp for (_o, rp, *_r) in edits}), cancel)
     writes = []
-    encoded = {}                   # staged PNG path -> BC3 bytes (one PNG, many occurrences)
+    encoded = {}                   # staged PNG path -> block bytes (one PNG, many occurrences)
     patched_outputs = set()
-    for output, radium_path, staged, data_off, length, pad_w, pad_h in edits:
+    for output, radium_path, staged, data_off, length, pad_w, pad_h, fmt in edits:
         if cancel():
             break
         node = nodes.get(radium_path)
@@ -1703,7 +1739,9 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                     "(don't resize — edit in place)."
                     % (output, im.size[0], im.size[1], pad_w, pad_h), "warning")
                 continue
-            payload = _dds.encode_bc3(np.asarray(im, dtype=np.uint8))
+            arr = np.asarray(im, dtype=np.uint8)
+            payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                       else _dds.encode_bc3(arr))
             encoded[staged] = payload
         if len(payload) != length:
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "

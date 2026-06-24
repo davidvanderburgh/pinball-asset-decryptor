@@ -552,6 +552,7 @@ class App:
             chained_done_cb = self._maybe_wrap_done_for_transcribe(
                 chained_done_cb, output_path)
             extra_kwargs = self._collect_asset_filter_kwargs()
+            extra_kwargs.update(self._collect_extract_category_kwargs())
             if getattr(
                     self._current_mfr.capabilities, "decode_dmd", False):
                 extra_kwargs["decode_dmd"] = bool(
@@ -733,6 +734,7 @@ class App:
             log_cb, phase_cb, progress_cb, chained_done_cb,
             partition_override=partition_override,
             **self._collect_asset_filter_kwargs(),
+            **self._collect_extract_category_kwargs(),
         )
         self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
@@ -761,6 +763,22 @@ class App:
             "full_dump": bool(
                 self.window.extract_filesystem_var.get()),
         }
+
+    def _collect_extract_category_kwargs(self):
+        """Build the ``extract_categories={key: bool}`` kwarg for the extract
+        factory from the per-type checkboxes (capabilities.extract_categories).
+
+        Empty dict for plugins without the capability (keeps their factory
+        signature unchanged).  Used by Stern (Audio / Video / Images / Text)."""
+        if (self._current_mfr is None
+                or not getattr(self._current_mfr.capabilities,
+                               "extract_categories", ())):
+            return {}
+        vars_ = getattr(self.window, "_extract_category_vars", {}) or {}
+        if not vars_:
+            return {}
+        return {"extract_categories":
+                {key: bool(var.get()) for key, var in vars_.items()}}
 
     # ------------------------------------------------------------------
     # Write

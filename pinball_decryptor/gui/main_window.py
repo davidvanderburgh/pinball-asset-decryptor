@@ -342,6 +342,13 @@ class MainWindow:
         self.extract_sounds_var = tk.BooleanVar(value=True)
         self.extract_filesystem_var = tk.BooleanVar(value=False)
 
+        # Generic per-type Extract selection (capabilities.extract_categories):
+        # one default-on checkbox per (key, label) the plugin advertises, built
+        # dynamically in apply_manufacturer().  Stern uses Audio/Video/Images/
+        # Text; app.py reads these and passes extract_categories={key: bool} to
+        # the extract factory.  key -> BooleanVar.
+        self._extract_category_vars = {}
+
         # JJP-only (capabilities.direct_ssd): "From ISO / From SSD"
         # radio toggles between the file picker and the physical-drive
         # picker.  Default "iso" so plugins without direct_ssd see no
@@ -824,6 +831,11 @@ class MainWindow:
             variable=self.extract_filesystem_var,
         ).pack(side=tk.LEFT, padx=(0, 12))
 
+        # Generic per-type Extract checkboxes (capabilities.extract_categories).
+        # Children are (re)built per-plugin in apply_manufacturer(); built empty
+        # here and pack-managed there.  Stern: Audio / Video / Images / Text.
+        self._extract_categories_frame = ttk.Frame(f)
+
         # Williams-only: extract-mode checkboxes.  Both hidden in
         # apply_manufacturer() for manufacturers without
         # capabilities.capture (other plugins always run their
@@ -947,13 +959,14 @@ class MainWindow:
             text="Auto-name call-outs",
             variable=self.transcribe_var)
         self._transcribe_check.pack(anchor=tk.W, padx=(24, 8))
-        ttk.Label(
+        self._transcribe_desc = ttk.Label(
             self._transcribe_frame,
             text="Transcribe each spoken WAV (faster-whisper) and rename it by "
                  "what's said — e.g. “Super jackpot!”. Also writes "
                  "callouts.csv.",
             font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
+            wraplength=720, justify=tk.LEFT)
+        self._transcribe_desc.pack(anchor=tk.W, padx=(44, 0))
 
         # Music-ID: identify each full music track online via AcoustID +
         # MusicBrainz and rename it by song.  Chained after transcribe.
@@ -963,13 +976,14 @@ class MainWindow:
             text="Auto-name music",
             variable=self.music_id_var)
         self._music_id_check.pack(anchor=tk.W, padx=(24, 8))
-        ttk.Label(
+        self._music_id_desc = ttk.Label(
             self._music_id_frame,
             text="Identify each full song online (AcoustID) and rename it by "
                  "artist + title — e.g. “Led Zeppelin - Kashmir”. "
                  "Needs internet.",
             font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, padx=(44, 0))
+            wraplength=720, justify=tk.LEFT)
+        self._music_id_desc.pack(anchor=tk.W, padx=(44, 0))
 
         # Decode DMD checkbox -- packed only when the active manufacturer
         # has capabilities.decode_dmd (currently just CGC).  When ON,
@@ -4606,6 +4620,29 @@ class MainWindow:
         else:
             self._asset_filters_frame.pack_forget()
 
+        # Generic per-type Extract checkboxes (capabilities.extract_categories).
+        # Rebuilt each time so the labels match the active plugin; default all on.
+        for child in self._extract_categories_frame.winfo_children():
+            child.destroy()
+        self._extract_category_vars = {}
+        cats = tuple(getattr(caps, "extract_categories", ()) or ())
+        if cats:
+            ttk.Label(self._extract_categories_frame, text="Extract:",
+                      font=(_SANS_FONT, 9)).pack(side=tk.LEFT, padx=(10, 8))
+            for key, label in cats:
+                var = tk.BooleanVar(value=True)
+                self._extract_category_vars[key] = var
+                ttk.Checkbutton(
+                    self._extract_categories_frame, text=label, variable=var,
+                    command=self._update_autoname_state).pack(
+                        side=tk.LEFT, padx=(0, 12))
+            self._extract_categories_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+        else:
+            self._extract_categories_frame.pack_forget()
+        # The auto-name (transcribe / music-ID) options operate on extracted
+        # audio, so gray them out when Audio is unchecked.
+        self._update_autoname_state()
+
         # Show/hide the Williams capture toggles on the Extract tab.
         if caps.capture:
             self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
@@ -4659,6 +4696,31 @@ class MainWindow:
         # If we're entering a direct_ssd plugin in SSD mode without
         # admin, make sure the Extract / Apply buttons are disabled.
         self._refresh_ssd_run_buttons()
+
+    def _update_autoname_state(self):
+        """Gray out the Auto-name call-outs / music options when the Audio
+        Extract category is unchecked — they rename extracted audio, so there's
+        nothing for them to do without it.  No-op for plugins that don't expose
+        an Audio category (the options stay enabled)."""
+        audio_var = self._extract_category_vars.get("audio")
+        enabled = audio_var is None or bool(audio_var.get())
+        flag = "!disabled" if enabled else "disabled"
+        for chk in (getattr(self, "_transcribe_check", None),
+                    getattr(self, "_music_id_check", None)):
+            if chk is not None:
+                try:
+                    chk.state([flag])
+                except tk.TclError:
+                    pass
+        # Dim the italic descriptions to match (darker gray when disabled).
+        fg = "#888888" if enabled else "#555555"
+        for lbl in (getattr(self, "_transcribe_desc", None),
+                    getattr(self, "_music_id_desc", None)):
+            if lbl is not None:
+                try:
+                    lbl.configure(foreground=fg)
+                except tk.TclError:
+                    pass
 
     def _on_extract_mode_toggle(self):
         """Either Basic-extract or Capture checkbox toggled."""

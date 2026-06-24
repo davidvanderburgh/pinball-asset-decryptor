@@ -23,6 +23,7 @@ import hashlib
 import os
 import pickle
 import re
+import struct
 import tempfile
 import wave
 
@@ -286,6 +287,316 @@ def extract_images(reader, output_dir, log=None, progress=None, cancel=None):
 
 
 # --------------------------------------------------------------------------
+# Scene-texture extract: the BC3/DXT5 "DDS" glyph/sprite atlases packed as the
+# non-ftyp scene.assets/<N>.asset files (their dims live in the scene.radium).
+# --------------------------------------------------------------------------
+_TEXTURE_MANIFEST = "manifest.txt"
+_TEXTURE_DIR = ("images", "scene_textures")
+_DXT5_FORMAT = 5            # the radium texture-descriptor format enum for BC3
+
+
+def parse_texture_descriptor(radium, ref):
+    """Read ``(width, height, format)`` for a ``<N>.asset`` scene texture from its
+    inline descriptor in the co-located ``scene.radium``, or ``None``.
+
+    Each texture reference is serialized as
+    ``[handle u32 (top byte 0x80)][width u32][height u32][format u32]
+    [next-handle u32][len u64][name ascii]`` — so the 16 bytes before the name's
+    8-byte length prefix are ``width, height, format, handle``.  We key off the
+    handle's ``0x80`` top byte (the same framing :mod:`.radium` uses for named
+    handles) to avoid matching a stray ``N.asset`` substring."""
+    key = struct.pack("<Q", len(ref)) + ref.encode("latin1")
+    i = radium.find(key)
+    while i >= 0:
+        if i >= 16 and radium[i - 1] == 0x80:
+            w, h, fmt = struct.unpack_from("<III", radium, i - 16)
+            if 0 < w <= 8192 and 0 < h <= 8192:
+                return w, h, fmt
+        i = radium.find(key, i + 1)
+    return None
+
+
+def extract_scene_textures(reader, output_dir, log=None, progress=None,
+                           cancel=None):
+    """Decode every BC3/DXT5 scene texture to ``output_dir/images/scene_textures/``
+    as RGBA PNG.
+
+    These are the single (non-nested, non-``ftyp``) ``scene.assets/<N>.asset``
+    files — raw BC3 block data whose width/height/format are read from the
+    co-located ``scene.radium`` (:func:`parse_texture_descriptor`).  A
+    ``manifest.txt`` records ``output -> card path, bytes, w, h, format`` so Write
+    can re-encode an edited PNG back to the exact original slot."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    from . import dds as _dds
+    try:
+        from PIL import Image
+    except Exception:
+        log("Pillow not available; scene-texture extraction skipped.", "warning")
+        return 0
+    log("Scanning for scene textures...", "info")
+    textures = []                  # (card_path, node, ref)
+    radiums = {}                   # scene_dir -> scene.radium node
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return 0
+        if path.endswith("/scene.radium"):
+            radiums[path[:-len("/scene.radium")]] = node
+        elif "/scene.assets/" in path and path.endswith(".asset"):
+            ref = path.rsplit("/scene.assets/", 1)[1]
+            if "/" in ref or node["size"] < 16:
+                continue           # nested N.asset/M.asset = video, not a texture
+            b = reader.peek(node, 8)
+            if len(b) >= 8 and b[4:8] == b"ftyp":
+                continue
+            textures.append((path, node, ref))
+    if not textures:
+        log("No scene textures found.", "info")
+        return 0
+
+    tex_dir = os.path.join(output_dir, *_TEXTURE_DIR)
+    os.makedirs(tex_dir, exist_ok=True)
+    radium_cache = {}
+
+    def _descriptor(path, ref):
+        scene_dir = path.rsplit("/scene.assets/", 1)[0]
+        rn = radiums.get(scene_dir)
+        if rn is None:
+            return None
+        if scene_dir not in radium_cache:
+            try:
+                radium_cache[scene_dir] = (reader.read_file_bytes(rn)
+                                           if rn["size"] <= 0x4000000 else b"")
+            except Exception:
+                radium_cache[scene_dir] = b""
+        return parse_texture_descriptor(radium_cache[scene_dir], ref)
+
+    log("Extracting %d scene texture(s)..." % len(textures), "info")
+    manifest = []
+    used = {}
+    n_ok = n_skip = 0
+    for i, (path, node, ref) in enumerate(textures):
+        if cancel():
+            break
+        if progress:
+            progress(i, len(textures),
+                     "Texture %d/%d" % (i + 1, len(textures)))
+        desc = _descriptor(path, ref)
+        if desc is None:
+            n_skip += 1
+            continue
+        w, h, fmt = desc
+        size = node["size"]
+        # Only BC3/DXT5 (1 byte/pixel) is supported so far; the size guard also
+        # rejects a descriptor that didn't really belong to this asset.
+        if fmt != _DXT5_FORMAT or w * h != size:
+            n_skip += 1
+            continue
+        try:
+            rgba = _dds.decode_bc3(reader.read_file_bytes(node), w, h)
+            im = Image.fromarray(rgba, "RGBA")
+        except Exception as e:
+            log("Texture %s: decode failed (%s); skipped." % (ref, e), "warning")
+            n_skip += 1
+            continue
+        scene8 = path.rsplit("/scene.assets/", 1)[0].rsplit("/", 1)[1][:8]
+        base = "%s_%s" % (scene8, os.path.splitext(ref)[0])
+        k = used.get(base, 0)
+        used[base] = k + 1
+        name = base if k == 0 else "%s_%d" % (base, k + 1)
+        out_rel = "scene_textures/%s.png" % name
+        im.save(os.path.join(output_dir, "images", *out_rel.split("/")))
+        manifest.append("%s\t%s\t%d\t%d\t%d\t%d"
+                        % (out_rel, path, size, w, h, fmt))
+        n_ok += 1
+    try:
+        with open(os.path.join(tex_dir, _TEXTURE_MANIFEST), "w",
+                  encoding="utf-8") as f:
+            f.write("# output\tcard path\tbytes\twidth\theight\tformat\n"
+                    + "\n".join(manifest) + "\n")
+    except Exception:
+        pass
+    log("Extracted %d scene texture(s) to %s (%d skipped)."
+        % (n_ok, tex_dir, n_skip), "success")
+    return n_ok
+
+
+# --------------------------------------------------------------------------
+# Radium-embedded images: the BC3/DXT5 "display-system" bitmaps stored INLINE
+# in a scene.radium (the song-title text glyphs like "ROCK AND ROLL" PB shows
+# under a scene) — not a scene.assets file.  Same codec, patched in place.
+# --------------------------------------------------------------------------
+_RADIUM_IMAGE_MANIFEST = "radium_images.txt"
+
+# Scene-graph element-TYPE keywords — skipped when naming an image after its
+# nearest scene element (we want the instance id like "Song_Progress", not the
+# generic type tag that precedes it).
+_RADIUM_ELEM_TYPES = {"Bitmap", "Sprite", "Animation", "Font", "Pattern",
+                      "Group", "Node", "Scene", "Mask", "Particle", "Text",
+                      "Video", "VideoSurface", "Material", "Shader"}
+_IDENT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]+$")
+
+
+def _padded4(x):
+    return ((x + 3) // 4) * 4
+
+
+def _nearest_element_name(data, before_off, window=512):
+    """The nearest scene-element instance id (e.g. ``Song_Progress``,
+    ``unnamed_instance_4``) appearing as a length-prefixed string just before
+    *before_off*, skipping element-TYPE keywords.  ``""`` when none — used to
+    give each radium image an organizing name rather than a bare hash."""
+    lo = max(0, before_off - window)
+    best = ""
+    i = lo
+    while i + 8 <= before_off:
+        ln = struct.unpack_from("<Q", data, i)[0]
+        if 1 <= ln <= 64 and i + 8 + ln <= before_off:
+            body = data[i + 8:i + 8 + ln]
+            if all(32 <= b < 127 for b in body):
+                s = body.decode("latin1")
+                if s not in _RADIUM_ELEM_TYPES and _IDENT_RE.match(s):
+                    best = s            # keep the last (nearest) match
+                i += 8 + ln
+                continue
+        i += 1
+    return best
+
+
+def parse_radium_images(data):
+    """Find every inline BC3/DXT5 image in a ``scene.radium``.
+
+    Each image is serialized as
+    ``[dispW u32][dispH u32][handle u32][texW u32][texH u32][format u32=5]
+    [0 u32][0 u32][length u32][BC3 data]`` where
+    ``length == padded4(texW) * padded4(texH)`` (BC3 = 1 byte/pixel).  We anchor
+    on the ``format=5, 0, 0`` triplet and validate that the length matches the
+    block-padded dimensions and that the data fits — a signature specific enough
+    to have no false positives.
+
+    Returns ``[{data_off, length, tex_w, tex_h, pad_w, pad_h, disp_w, disp_h}]``
+    where decoding uses ``pad_w x pad_h`` (the full BC3 grid)."""
+    out = []
+    n = len(data)
+    sig = b"\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"   # fmt=5, 0, 0
+    i = data.find(sig)
+    while i >= 0:
+        m = i
+        i = data.find(sig, i + 1)
+        if m < 8 or m + 16 > n:
+            continue
+        tex_w = struct.unpack_from("<I", data, m - 8)[0]
+        tex_h = struct.unpack_from("<I", data, m - 4)[0]
+        if not (0 < tex_w <= 8192 and 0 < tex_h <= 8192):
+            continue
+        length = struct.unpack_from("<I", data, m + 12)[0]
+        pad_w, pad_h = _padded4(tex_w), _padded4(tex_h)
+        if length != pad_w * pad_h or m + 16 + length > n:
+            continue
+        disp_w = struct.unpack_from("<I", data, m - 20)[0] if m >= 20 else tex_w
+        disp_h = struct.unpack_from("<I", data, m - 16)[0] if m >= 20 else tex_h
+        if not (0 < disp_w <= pad_w):
+            disp_w = tex_w
+        if not (0 < disp_h <= pad_h):
+            disp_h = tex_h
+        out.append(dict(data_off=m + 16, length=length, tex_w=tex_w, tex_h=tex_h,
+                        pad_w=pad_w, pad_h=pad_h, disp_w=disp_w, disp_h=disp_h))
+    return out
+
+
+def extract_radium_images(reader, output_dir, log=None, progress=None,
+                          cancel=None):
+    """Decode every inline DXT5 image from the card's ``scene.radium`` files to
+    ``output_dir/images/scene_textures/`` as RGBA PNG (full padded grid, so a
+    re-encode is byte-for-byte size-neutral).
+
+    The SAME image is drawn from many scenes/keyframes, so images are
+    **deduplicated by content** — one PNG per unique image — while the
+    ``radium_images.txt`` manifest records **every** on-card occurrence (a row
+    per ``radium card path + data offset``).  Editing one PNG therefore patches
+    all of its occurrences at Write, so the change shows everywhere in-game (the
+    same all-occurrences rule the display-text replace uses)."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    from . import dds as _dds
+    from ...core.checksums import md5_file  # noqa: F401  (kept for parity)
+    import hashlib
+    try:
+        from PIL import Image
+    except Exception:
+        log("Pillow not available; radium-image extraction skipped.", "warning")
+        return 0
+    log("Scanning radium scenes for embedded images...", "info")
+    radiums = []
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return 0
+        if path.endswith(_RADIUM_EXT) and node["size"] >= 32:
+            radiums.append((path, node))
+    if not radiums:
+        return 0
+
+    tex_dir = os.path.join(output_dir, *_TEXTURE_DIR)
+    os.makedirs(tex_dir, exist_ok=True)
+    manifest = []                 # one row per occurrence
+    by_hash = {}                  # content hash -> output rel path (PNG written once)
+    n_unique = n_occ = 0
+    for ri, (path, node) in enumerate(radiums):
+        if cancel():
+            break
+        if progress:
+            progress(ri, len(radiums),
+                     "Radium %d/%d" % (ri + 1, len(radiums)))
+        try:
+            data = reader.read_file_bytes(node)
+        except Exception:
+            continue
+        imgs = parse_radium_images(data)
+        for im in imgs:
+            raw = data[im["data_off"]:im["data_off"] + im["length"]]
+            h = hashlib.md5(raw).hexdigest()
+            out_rel = by_hash.get(h)
+            if out_rel is None:
+                try:
+                    rgba = _dds.decode_bc3(raw, im["pad_w"], im["pad_h"])
+                    pic = Image.fromarray(rgba, "RGBA")
+                except Exception as e:
+                    log("Radium image %s: decode failed (%s); skipped."
+                        % (h[:8], e), "warning")
+                    continue
+                # Name by nearest scene-element id + dimensions + a short content
+                # hash: the element id (e.g. "Song_Progress") organizes the slot
+                # list, the dims separate text banners (462x66) from atlases
+                # (512x512), and the hash dedupes identical glyphs.
+                elem = _nearest_element_name(data, im["data_off"] - 36)
+                bits = ["radimg"]
+                if elem:
+                    bits.append(_sanitize_title(elem, 40))
+                bits.append("%dx%d" % (im["tex_w"], im["tex_h"]))
+                bits.append(h[:8])
+                out_rel = "scene_textures/%s.png" % "_".join(bits)
+                pic.save(os.path.join(output_dir, "images", *out_rel.split("/")))
+                by_hash[h] = out_rel
+                n_unique += 1
+            manifest.append("%s\t%s\t%d\t%d\t%d\t%d"
+                            % (out_rel, path, im["data_off"], im["length"],
+                               im["pad_w"], im["pad_h"]))
+            n_occ += 1
+    if not manifest:
+        return 0
+    try:
+        with open(os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST), "w",
+                  encoding="utf-8") as f:
+            f.write("# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\n"
+                    + "\n".join(manifest) + "\n")
+    except Exception:
+        pass
+    log("Extracted %d unique embedded radium image(s) (%d on-card occurrence(s)) "
+        "to %s." % (n_unique, n_occ, tex_dir), "success")
+    return n_unique
+
+
+# --------------------------------------------------------------------------
 # display-text extract: editable LCD strings inside the .radium scene files
 # --------------------------------------------------------------------------
 _RADIUM_EXT = ".radium"
@@ -398,7 +709,8 @@ def _write_wav(path, L, R, stereo):
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
-                music_banks=True):
+                music_banks=True, do_audio=True, do_video=True,
+                do_images=True, do_text=True):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
 
@@ -442,37 +754,69 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # videos + images first (quick file copies) so they appear before the
         # long audio decode
         phase(2)  # Extract video
-        try:
-            extract_videos(reader, output_dir, log=log,
-                           progress=(lambda c, t, d="": progress(
-                               5 + int(c * 8 / max(t, 1)), 100, d)) if progress else None,
-                           cancel=cancel)
-        except Exception as e:
-            log("Video extraction failed (%s); continuing." % e, "warning")
+        if do_video:
+            try:
+                extract_videos(reader, output_dir, log=log,
+                               progress=(lambda c, t, d="": progress(
+                                   5 + int(c * 8 / max(t, 1)), 100, d)) if progress else None,
+                               cancel=cancel)
+            except Exception as e:
+                log("Video extraction failed (%s); continuing." % e, "warning")
         if cancel():
             return 0
 
         phase(3)  # Extract images
-        try:
-            extract_images(reader, output_dir, log=log,
-                           progress=(lambda c, t, d="": progress(
-                               13 + int(c * 2 / max(t, 1)), 100, d)) if progress else None,
-                           cancel=cancel)
-        except Exception as e:
-            log("Image extraction failed (%s); continuing." % e, "warning")
+        if do_images:
+            try:
+                extract_images(reader, output_dir, log=log,
+                               progress=(lambda c, t, d="": progress(
+                                   13 + int(c * 2 / max(t, 1)), 100, d)) if progress else None,
+                               cancel=cancel)
+            except Exception as e:
+                log("Image extraction failed (%s); continuing." % e, "warning")
+            if cancel():
+                return 0
+            # Scene textures (BC3/DXT5 glyph/sprite atlases inside scene.assets)
+            # — decoded to editable PNGs; an own try/except so a texture hiccup
+            # never blocks the loose-PNG or audio extraction.
+            try:
+                extract_scene_textures(reader, output_dir, log=log,
+                                       progress=(lambda c, t, d="": progress(
+                                           15, 100, d)) if progress else None,
+                                       cancel=cancel)
+            except Exception as e:
+                log("Scene-texture extraction failed (%s); continuing." % e,
+                    "warning")
+            if cancel():
+                return 0
+            # DXT5 images embedded inline in the radium scenes (the song-title
+            # text glyphs like "ROCK AND ROLL") — same codec, patched in place.
+            try:
+                extract_radium_images(reader, output_dir, log=log,
+                                      progress=(lambda c, t, d="": progress(
+                                          15, 100, d)) if progress else None,
+                                      cancel=cancel)
+            except Exception as e:
+                log("Radium-image extraction failed (%s); continuing." % e,
+                    "warning")
         if cancel():
             return 0
 
         # editable LCD display text (.radium scenes) -> text/strings.tsv
-        try:
-            extract_radium_text(reader, output_dir, log=log, cancel=cancel)
-        except Exception as e:
-            log("Display-text extraction failed (%s); continuing." % e,
-                "warning")
-        if cancel():
-            return 0
+        if do_text:
+            try:
+                extract_radium_text(reader, output_dir, log=log, cancel=cancel)
+            except Exception as e:
+                log("Display-text extraction failed (%s); continuing." % e,
+                    "warning")
+            if cancel():
+                return 0
 
         phase(4)  # Decode audio
+        if not do_audio:
+            log("Audio extraction skipped (unchecked).", "info")
+            phase(5)  # Checksums
+            return 0
         if not audio_decode_supported(gr_path):
             log("Audio decode isn't supported for this title yet: its game "
                 "firmware uses a Spike 2 codec the engine can't locate a "
@@ -1098,8 +1442,198 @@ def _prepare_image_patches(reader, image_edits, work_dir, log, cancel):
     return patches, skipped
 
 
-def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None):
+# --------------------------------------------------------------------------
+# Replace scene textures: re-encode an edited PNG back to BC3 and patch the
+# original scene.assets/<N>.asset in place (size-neutral by construction).
+# --------------------------------------------------------------------------
+def _changed_scene_textures(assets_dir, baseline):
+    """Return ``[(output, card_path, staged_png, w, h, fmt), ...]`` for the scene
+    textures under ``images/scene_textures`` whose PNG bytes differ from the
+    Extract baseline.  Empty when there's no texture manifest."""
+    from ...core.checksums import md5_file
+    tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
+    manifest = os.path.join(tex_dir, _TEXTURE_MANIFEST)
+    if not os.path.isfile(manifest):
+        return []
+    out = []
+    with open(manifest, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < 6:
+                continue
+            output, card_path = cols[0], cols[1]
+            try:
+                w, h, fmt = int(cols[3]), int(cols[4]), int(cols[5])
+            except ValueError:
+                continue
+            staged = os.path.join(assets_dir, "images", *output.split("/"))
+            if not os.path.isfile(staged):
+                continue
+            base = baseline.get("images/" + output)
+            try:
+                if base is not None and md5_file(staged) == base:
+                    continue                   # untouched since extract
+            except OSError:
+                pass
+            out.append((output, card_path, staged, w, h, fmt))
+    return out
+
+
+def _prepare_texture_patches(reader, texture_edits, log, cancel):
+    """Re-encode each edited PNG to BC3 at its original dimensions and resolve it
+    to its card inode.  Returns ``([(node, payload), ...], n_skipped)`` — each
+    payload is exactly the inode's size (same W×H + DXT5 ⇒ identical byte
+    length), ready for an in-place ``disk_ranges`` write."""
+    from . import dds as _dds
+    try:
+        from PIL import Image
+        import numpy as np
+    except Exception as e:
+        if texture_edits:
+            log("Pillow/numpy unavailable (%s); scene-texture edits skipped." % e,
+                "warning")
+        return [], len(texture_edits)
+    nodes = _resolve_card_nodes(
+        reader, [cp for (_o, cp, _s, _w, _h, _f) in texture_edits], cancel)
+    patches = []
+    skipped = 0
+    for output, card_path, staged, w, h, fmt in texture_edits:
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Texture %s: its original (%s) wasn't found on the card; "
+                "skipped." % (output, card_path), "warning")
+            skipped += 1
+            continue
+        try:
+            im = Image.open(staged).convert("RGBA")
+        except Exception as e:
+            log("Texture %s: can't read PNG (%s); skipped." % (output, e),
+                "warning")
+            skipped += 1
+            continue
+        if im.size != (w, h):
+            log("Texture %s is %dx%d but the original is %dx%d; skipped "
+                "(scene textures must keep their exact dimensions). Resize your "
+                "image to %dx%d." % (output, im.size[0], im.size[1], w, h, w, h),
+                "warning")
+            skipped += 1
+            continue
+        payload = _dds.encode_bc3(np.asarray(im, dtype=np.uint8))
+        if len(payload) != node["size"]:
+            log("Texture %s: re-encoded to %d bytes but the slot is %d; skipped."
+                % (output, len(payload), node["size"]), "warning")
+            skipped += 1
+            continue
+        patches.append((node, payload))
+        log("Texture %s: ready to patch (%dx%d, %d bytes)."
+            % (output, w, h, node["size"]), "info")
+    return patches, skipped
+
+
+def _changed_radium_images(assets_dir, baseline):
+    """Return ``[(output, radium_card_path, staged, data_off, length, pad_w,
+    pad_h), ...]`` for the radium-embedded images whose PNG differs from the
+    Extract baseline.  Empty when there's no ``radium_images.txt`` manifest."""
+    from ...core.checksums import md5_file
+    tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
+    manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
+    if not os.path.isfile(manifest):
+        return []
+    out = []
+    with open(manifest, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < 6:
+                continue
+            output, radium_path = cols[0], cols[1]
+            try:
+                data_off, length = int(cols[2]), int(cols[3])
+                pad_w, pad_h = int(cols[4]), int(cols[5])
+            except ValueError:
+                continue
+            staged = os.path.join(assets_dir, "images", *output.split("/"))
+            if not os.path.isfile(staged):
+                continue
+            base = baseline.get("images/" + output)
+            try:
+                if base is not None and md5_file(staged) == base:
+                    continue                   # untouched since extract
+            except OSError:
+                pass
+            out.append((output, radium_path, staged, data_off, length,
+                        pad_w, pad_h))
+    return out
+
+
+def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
+    """Re-encode each edited radium-embedded image to BC3 and resolve it to a
+    flat ``[(disk_offset, bytes), ...]`` list patching the bytes in place inside
+    the ``scene.radium`` inode (same form ``_compute_patches`` collects, like the
+    display-text writes).  Returns ``(writes, n_images)``.
+
+    Size-neutral by construction: the PNG is the full padded BC3 grid, so
+    re-encoding yields exactly ``length`` bytes at ``data_offset``."""
+    edits = _changed_radium_images(assets_dir, baseline)
+    if not edits:
+        return [], 0
+    from . import dds as _dds
+    try:
+        from PIL import Image
+        import numpy as np
+    except Exception as e:
+        log("Pillow/numpy unavailable (%s); radium-image edits skipped." % e,
+            "warning")
+        return [], 0
+    nodes = _resolve_card_nodes(
+        reader, list({rp for (_o, rp, *_r) in edits}), cancel)
+    writes = []
+    encoded = {}                   # staged PNG path -> BC3 bytes (one PNG, many occurrences)
+    patched_outputs = set()
+    for output, radium_path, staged, data_off, length, pad_w, pad_h in edits:
+        if cancel():
+            break
+        node = nodes.get(radium_path)
+        if node is None:
+            log("Radium image %s: its scene (%s) wasn't found on the card; "
+                "skipped." % (output, radium_path), "warning")
+            continue
+        payload = encoded.get(staged)
+        if payload is None:
+            try:
+                im = Image.open(staged).convert("RGBA")
+            except Exception as e:
+                log("Radium image %s: can't read PNG (%s); skipped."
+                    % (output, e), "warning")
+                continue
+            if im.size != (pad_w, pad_h):
+                log("Radium image %s is %dx%d but must stay %dx%d; skipped "
+                    "(don't resize — edit in place)."
+                    % (output, im.size[0], im.size[1], pad_w, pad_h), "warning")
+                continue
+            payload = _dds.encode_bc3(np.asarray(im, dtype=np.uint8))
+            encoded[staged] = payload
+        if len(payload) != length:
+            log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
+                "skipped." % (output, len(payload), length), "warning")
+            continue
+        rest = payload
+        for disk, cnt in reader.disk_ranges(node, data_off, length):
+            writes.append((disk, rest[:cnt]))
+            rest = rest[cnt:]
+        patched_outputs.add(output)
+    n = len(patched_outputs)
+    if n:
+        log("Patching %d edited radium image(s) across %d on-card occurrence(s)."
+            % (n, len({(o, ro, do) for (o, ro, _s, do, *_r) in edits})), "info")
+    return writes, n
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -1159,6 +1693,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
 
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)
+    texture_edits = _changed_scene_textures(assets_dir, baseline)
+    radimg_edits = _changed_radium_images(assets_dir, baseline)
     # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
     # back into their image-scNN.bin banks (see _compute_music_patches).
     music_edits = _changed_music_banks(assets_dir, baseline)
@@ -1167,7 +1703,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     text_edits = _changed_radium_text(assets_dir)
 
     if (not audio_edits and not music_edits and not video_edits
-            and not image_edits and not text_edits):
+            and not image_edits and not texture_edits and not radimg_edits
+            and not text_edits):
         raise FileNotFoundError(
             "Nothing to write: every sound (idxNNNN.wav / music_catNN_*.wav) "
             "still matches the Extract baseline (.checksums.md5) and no replaced "
@@ -1188,6 +1725,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
         log("Found %d replaced image(s) to write." % len(image_edits), "info")
+    if texture_edits:
+        log("Found %d edited scene texture(s) to write." % len(texture_edits),
+            "info")
+    if radimg_edits:
+        log("Found %d edited radium image(s) to write." % len(radimg_edits),
+            "info")
     if text_edits:
         log("Found edited display text in %d radium scene(s) to write."
             % len(text_edits), "info")
@@ -1305,6 +1848,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None
 
+        # Edited radium-embedded DXT5 images -> also already-flat (disk_offset,
+        # bytes) writes (patched in place inside the scene.radium inode).
+        radimg_writes = []
+        n_radimg = 0
+        if radimg_edits:
+            if progress:
+                progress(96, 100, "Preparing radium images...")
+            radimg_writes, n_radimg = _radium_image_writes(
+                reader, assets_dir, baseline, log, cancel)
+            if cancel():
+                return None, None
+
         video_patches = []     # (inode, payload bytes == inode size)
         if video_edits:
             if progress:
@@ -1323,8 +1878,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None
 
+        texture_patches = []   # (inode, payload bytes == inode size)
+        if texture_edits:
+            if progress:
+                progress(94, 100, "Preparing scene textures...")
+            texture_patches, _tskip = _prepare_texture_patches(
+                reader, texture_edits, log, cancel)
+            if cancel():
+                return None, None
+
         if (not audio_patches and not music_patches and not video_patches
-                and not image_patches and not text_writes):
+                and not image_patches and not texture_patches
+                and not radimg_writes and not text_writes):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
@@ -1337,7 +1902,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # image copy (write_image) or the card itself (write_device).
         # Display-text writes are already (disk_offset, bytes) (the radium-text
         # helper resolved them through disk_ranges itself).
-        writes = list(text_writes)
+        writes = list(text_writes) + list(radimg_writes)
         for body_off, body in audio_patches.items():
             for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
@@ -1347,13 +1912,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(sc_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
                 body = body[n:]
-        for node, payload in video_patches + image_patches:
+        for node, payload in video_patches + image_patches + texture_patches:
             off = 0
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
+        # Scene textures + radium-embedded images fold into the image count
+        # (they ARE images) so the (audio, video, image, text) summary tuple
+        # stays the same shape.
         return writes, (len(audio_patches) + len(music_patches),
-                        len(video_patches), len(image_patches), n_text)
+                        len(video_patches),
+                        len(image_patches) + len(texture_patches) + n_radimg,
+                        n_text)
     finally:
         if emu is not None:
             emu.close()

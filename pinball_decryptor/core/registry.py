@@ -84,6 +84,12 @@ class Capabilities:
     # passes ``extract_graphics`` / ``extract_sounds`` / ``full_dump``
     # kwargs to the manufacturer's extract factories.
     asset_filters: bool = False
+    # Per-type Extract selection: a tuple of ``(key, label)`` pairs the plugin's
+    # Extract supports (e.g. ``(("audio","Audio"),("video","Video"),...)``).  When
+    # non-empty the Extract tab shows a default-all-on checkbox per entry, and
+    # app.py passes ``extract_categories={key: bool}`` to the extract factories so
+    # the user can skip slow/unwanted categories.  Empty -> no checkboxes.
+    extract_categories: tuple = ()
     # Update-version date field: surfaces an "Update version date" control
     # on the Write tab (an Auto checkbox + an editable YYYY.MM.DD entry).
     # Used by BOF, whose game only applies a .fun whose embedded version

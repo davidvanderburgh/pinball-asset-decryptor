@@ -75,6 +75,11 @@ class SternManufacturer(Manufacturer):
         # commercial recordings — so identify each full music track online via
         # AcoustID + MusicBrainz and name it by song (preferring the pin's band).
         music_id=True,
+        # Per-type Extract checkboxes (default all on): audio decode is the slow
+        # part (~minutes) and images now include hundreds of scene textures, so
+        # let the user skip categories they don't need for a faster extract.
+        extract_categories=(("audio", "Audio"), ("video", "Video"),
+                            ("images", "Images"), ("text", "Text")),
     )
     input_spec = InputSpec(
         label="Stern Spike SD-card images",
@@ -181,7 +186,10 @@ class SternManufacturer(Manufacturer):
                 "original's byte size: it drops straight in if it's small "
                 "enough, is re-compressed (fewer colours) to fit if larger, and "
                 "is skipped (left unchanged) if it still won't fit — use a "
-                "simpler image.")
+                "simpler image.  Slots under scene_textures/ are the in-scene "
+                "glyph/sprite atlases (BC3/DXT5); a replacement is auto-scaled to "
+                "the atlas's exact dimensions, keeps its transparency, and is "
+                "re-encoded losslessly to the slot — no byte-size limit.")
 
     def detect(self, path):
         key = detect_game(path)
@@ -192,9 +200,11 @@ class SternManufacturer(Manufacturer):
                     notes="Spike 2 card image")
 
     def make_extract_pipeline(self, input_path, output_dir,
-                              log_cb, phase_cb, progress_cb, done_cb):
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              extract_categories=None):
         return SternExtractPipeline(
-            input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb)
+            input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
+            extract_categories=extract_categories)
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb):
@@ -205,10 +215,11 @@ class SternManufacturer(Manufacturer):
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
-            partition_override=None):
+            partition_override=None, extract_categories=None):
         return SternDirectSsdExtractPipeline(
             device_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
-            partition_override=partition_override)
+            partition_override=partition_override,
+            extract_categories=extract_categories)
 
     def make_direct_ssd_write_pipeline(
             self, device_path, assets_dir,

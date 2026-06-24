@@ -32,14 +32,29 @@ def _require_engine():
             "(pip install unicorn capstone numpy) and try again.")
 
 
+def _category_flags(cats):
+    """Map the GUI's ``{category: bool}`` selection to ``extract_all``'s
+    ``do_audio`` / ``do_video`` / ``do_images`` / ``do_text`` kwargs.  Missing or
+    ``None`` -> everything on (the default extract)."""
+    cats = cats or {}
+    return dict(
+        do_audio=bool(cats.get("audio", True)),
+        do_video=bool(cats.get("video", True)),
+        do_images=bool(cats.get("images", True)),
+        do_text=bool(cats.get("text", True)),
+    )
+
+
 class SternExtractPipeline(BasePipeline):
     """Decode every packed sound in a Spike 2 card image to a per-sound WAV."""
 
     def __init__(self, input_path, output_dir,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 extract_categories=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.input_path = input_path
         self.output_dir = output_dir
+        self.extract_categories = extract_categories
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -66,10 +81,11 @@ class SternExtractPipeline(BasePipeline):
         _require_engine()
         os.makedirs(self.output_dir, exist_ok=True)
         # extract_all drives phases 2 (Extract video) and 3 (Decode audio).
+        flags = _category_flags(self.extract_categories)
         n = engine.extract_all(
             self.input_path, parts, self.output_dir,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            phase=self._set_phase, log_line=self._log_line)
+            phase=self._set_phase, log_line=self._log_line, **flags)
         # extract_all returns promptly on cancel (it checks between every phase
         # and per decoded sound).  Stop here instead of grinding through the
         # checksum pass and reporting success on a run the user aborted.
@@ -84,7 +100,11 @@ class SternExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
-        self._done(True, "Extracted %d Spike 2 sound(s) to %s" % (n, self.output_dir))
+        if flags["do_audio"]:
+            self._done(True, "Extracted %d Spike 2 sound(s) to %s"
+                       % (n, self.output_dir))
+        else:
+            self._done(True, "Extraction complete -> %s" % self.output_dir)
 
 
 class SternWritePipeline(BasePipeline):
@@ -123,11 +143,12 @@ class SternDirectSsdExtractPipeline(BasePipeline):
 
     def __init__(self, device_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 partition_override=None):
+                 partition_override=None, extract_categories=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.device_path = device_path
         self.output_dir = output_dir
         self.partition_override = partition_override
+        self.extract_categories = extract_categories
 
     def _run(self):
         self._set_phase(0)  # Read SD card
@@ -157,7 +178,7 @@ class SternDirectSsdExtractPipeline(BasePipeline):
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             open_disk=lambda: RawDeviceFile(self.device_path, writable=False),
-            log_line=self._log_line)
+            log_line=self._log_line, **_category_flags(self.extract_categories))
         self._check_cancel()   # don't run checksums on a cancelled extract
 
         self._set_phase(5)  # Checksums

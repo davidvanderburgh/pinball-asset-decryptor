@@ -706,6 +706,40 @@ def _write_wav(path, L, R, stereo):
 
 # --------------------------------------------------------------------------
 # public API (called by the pipelines)
+# Auto-transcribe / Music-ID *renamed* decode WAVs — "idx0001 - music.wav",
+# "music_cat01_0001 - Battery.wav".  The bare "idx0001.wav" the decode writes is
+# deliberately NOT matched (it's overwritten in place); only the renamed copies
+# a prior extract left behind are.
+_RENAMED_AUDIO_RE = re.compile(
+    r"^(?:idx\d+|music_cat\d+_\d+) - .*\.wav$", re.IGNORECASE)
+
+
+def _remove_renamed_audio_twins(audio_dir, log=None):
+    """Delete stale auto-named decode WAVs left in *audio_dir* by a prior run.
+
+    Re-extracting writes fresh bare ``idxNNNN.wav`` but the previous run's
+    Auto-transcribe/Music-ID *renamed* copies (``idx0001 - music.wav``) have
+    different names, so they survive — leaving two files per sound: clutter the
+    GUI shows as duplicates and a hazard for the leading-index Write key.  The
+    fresh decode regenerates every sound, so those renamed leftovers are always
+    stale.  Removing them (the bare files are overwritten anyway) keeps one file
+    per sound.  No-op on a first extract into an empty folder.
+    """
+    if not os.path.isdir(audio_dir):
+        return
+    removed = 0
+    for fn in os.listdir(audio_dir):
+        if _RENAMED_AUDIO_RE.match(fn):
+            try:
+                os.remove(os.path.join(audio_dir, fn))
+                removed += 1
+            except OSError:
+                pass
+    if removed and log:
+        log("Removed %d stale auto-named audio file(s) from a previous extract "
+            "(re-naming will run again if enabled)." % removed, "info")
+
+
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
@@ -834,6 +868,9 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
 
         audio_dir = os.path.join(output_dir, "audio")
         os.makedirs(audio_dir, exist_ok=True)
+        # Drop a previous extract's auto-named twins so re-extracting doesn't
+        # accumulate "idx0001.wav" + "idx0001 - music.wav" duplicates.
+        _remove_renamed_audio_twins(audio_dir, log)
         total = len(params)
         ok = None
         nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
@@ -1296,6 +1333,54 @@ def _changed_music_banks(assets_dir, baseline):
     return changed
 
 
+def _select_changed_idx_wavs(assets_dir, baseline):
+    """Map ``idx -> path`` for every changed ``idxNNNN.wav`` under *assets_dir*.
+
+    Several files can share one idx: re-extracting into a folder that still
+    holds the prior run's Auto-transcribe / Music-ID *renamed* copies leaves
+    both ``idx0001.wav`` and ``idx0001 - music.wav`` (identical content, same
+    leading index).  Both map to ONE on-card sound at Write, so when the user
+    edits one twin we must pick the EDITED file: a plain ``dict[idx] = path``
+    keyed by os.walk order silently dropped the edit whenever the *unedited*
+    twin was walked last.  Here we group by idx and choose the twin whose bytes
+    differ from the ``.checksums.md5`` baseline; an idx with no differing twin
+    is unchanged and skipped.
+    """
+    from ...core.checksums import md5_file
+    by_idx = {}  # idx -> [path, ...]
+    for root, _dirs, files in os.walk(assets_dir):
+        for fn in files:
+            if not fn.lower().endswith(".wav"):
+                continue
+            m = _WAV_RE.match(os.path.splitext(fn)[0])
+            if m:
+                by_idx.setdefault(int(m.group(1)), []).append(
+                    os.path.join(root, fn))
+    base_by_idx = {}
+    for rel in baseline:
+        mm = _WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
+        if mm:
+            base_by_idx[int(mm.group(1))] = baseline[rel]
+
+    edits = {}
+    for idx, paths in by_idx.items():
+        base = base_by_idx.get(idx)
+        if base is None:
+            # No baseline for this idx (no .checksums.md5, or a brand-new
+            # file) — treat it as an edit; one representative path is enough.
+            edits[idx] = paths[-1]
+            continue
+        for path in paths:
+            try:
+                changed = md5_file(path) != base
+            except OSError:
+                changed = True
+            if changed:
+                edits[idx] = path
+                break
+    return edits
+
+
 # --------------------------------------------------------------------------
 # Replace display text: size-neutral in-place patch of the .radium strings
 # --------------------------------------------------------------------------
@@ -1654,42 +1739,18 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
 
     import numpy as np
 
-    from ...core.checksums import md5_file, read_checksums
+    from ...core.checksums import read_checksums
     from .spike2.codec import GenRecover, StereoRecover
     from .spike2.emulator import Spike2Emu, audio_decode_supported
 
-    # Every idxNNNN.wav under assets_dir (the leading index survives an
-    # Auto-transcribe rename, e.g. "idx0651 - text.wav"); scan recursively so the
-    # user can point Write at the extract root or its audio/ subdir.
-    all_wavs = {}
-    for root, _dirs, files in os.walk(assets_dir):
-        for fn in files:
-            if not fn.lower().endswith(".wav"):
-                continue
-            m = _WAV_RE.match(os.path.splitext(fn)[0])
-            if m:
-                all_wavs[int(m.group(1))] = os.path.join(root, fn)
     # Only re-encode/patch what the user actually changed.  The folder is
-    # normally the whole Extract output (thousands of WAVs + the LCD videos);
-    # diff each asset against the Extract baseline (.checksums.md5) so an
-    # untouched (or merely Auto-transcribe-renamed) sound/clip is skipped.
+    # normally the whole Extract output (thousands of idxNNNN.wav + the LCD
+    # videos); diff each asset against the Extract baseline (.checksums.md5) so
+    # an untouched (or merely Auto-transcribe-renamed) sound/clip is skipped.
+    # The leading index survives a rename ("idx0651 - text.wav"); the walk is
+    # recursive so Write works from the extract root or its audio/ subdir.
     baseline = read_checksums(assets_dir)
-    base_by_idx = {}
-    for rel in baseline:
-        mm = _WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
-        if mm:
-            base_by_idx[int(mm.group(1))] = baseline[rel]
-    audio_edits = {}
-    if all_wavs:
-        if base_by_idx:
-            for idx, path in all_wavs.items():
-                try:
-                    if md5_file(path) != base_by_idx.get(idx):
-                        audio_edits[idx] = path
-                except OSError:
-                    audio_edits[idx] = path
-        else:
-            audio_edits = dict(all_wavs)
+    audio_edits = _select_changed_idx_wavs(assets_dir, baseline)
 
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)

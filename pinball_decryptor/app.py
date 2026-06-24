@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox
 from . import __version__
 from .core import modpack
 from .core.config import APP_NAME, SETTINGS_FILE
+from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
                             PrereqMsg, ProgressMsg)
 from .core.prereqs import check_prerequisite
@@ -116,6 +117,10 @@ class App:
         # actually working — that's a more reliable signal than the
         # TCC.db, which is SIP-protected and can't be queried).
         self._current_run_is_direct_ssd = False
+        # (input_path, output_dir) of the extract in flight, so a successful
+        # run can stamp the output folder with the source image's identity
+        # (see core.extract_source / the stale-source banner).
+        self._last_extract_io = None
 
         # Start at the manufacturer picker.  Even if the user has a
         # last_manufacturer saved, the explicit pick step makes "which
@@ -481,6 +486,7 @@ class App:
 
         self._active_mode = "extract"
         self._cancel_requested = False
+        self._last_extract_io = (in_path, output_path)
         self.window.set_running(True, mode="extract")
         # A prior run's chained Auto-transcribe / Music-ID may have left the
         # phase row showing THEIR step list; restore the standard Extract tuple
@@ -1390,6 +1396,14 @@ class App:
                 and _sys.platform == "darwin"):
             self.window.acknowledge_macos_fda()
         self._current_run_is_direct_ssd = False
+        # Stamp the output folder with the source image's identity so the
+        # Replace/Write tabs can warn if that image is later swapped/reverted
+        # on disk while these assets are still being edited.  File inputs only;
+        # write_extract_source no-ops on device paths.
+        if is_extract and success and self._last_extract_io:
+            in_path, out_path = self._last_extract_io
+            write_extract_source(out_path, in_path)
+        self._last_extract_io = None
         self.window.set_running(False, mode=self._active_mode)
         if self._cancel_requested:
             # User cancelled — don't dress it up as a failure with a scary

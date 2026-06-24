@@ -18,6 +18,7 @@ from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
+from ..core.extract_source import stale_source_message
 from .theme import THEMES, detect_system_theme, platform_font
 
 # PIL lazy-imported on demand for the live DMD preview — keeping the
@@ -176,7 +177,9 @@ class MainWindow:
         # user assign a replacement track per slot; staging writes the
         # converted replacements over the originals so Write repacks them.
         self.audio_search_var = tk.StringVar()
-        self.audio_sort_var = tk.StringVar(value="Name")
+        # Click-header sort state: (column_id, descending).  Defaults to the
+        # name column ascending — matches the old "Name" dropdown default.
+        self._audio_sort = ("#0", False)
         # Off by default: most users replacing *music* want their whole
         # track, not one clipped to the original slot's length.  Games that
         # require exact-length slots (JJP/Spooky) already trim/pad in their
@@ -205,14 +208,12 @@ class MainWindow:
         self._audio_current_rel = None   # the slot loaded in the preview player
         self.audio_search_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
-        self.audio_sort_var.trace_add(
-            "write", lambda *a: self._refresh_audio_list())
         # Replace-Video tab state (capabilities.replace_video plugins).
         # Mirrors the audio tab, but the preview is an embedded player: a
         # decode thread streams raw frames from ffmpeg to a canvas while
         # ffplay carries the sound, both seeked together.
         self.video_search_var = tk.StringVar()
-        self.video_sort_var = tk.StringVar(value="Name")
+        self._video_sort = ("#0", False)  # (column_id, descending)
         self.video_trim_var = tk.BooleanVar(value=False)
         self.video_status_var = tk.StringVar(value="")
         self._video_slots = []           # list[VideoSlot] from last scan
@@ -244,13 +245,11 @@ class MainWindow:
         self._video_current_rel = None   # slot loaded in the preview player
         self.video_search_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
-        self.video_sort_var.trace_add(
-            "write", lambda *a: self._refresh_video_list())
         # Replace-Image tab state (capabilities.replace_image plugins).
         # Mirrors the video tab, but the preview is a single static thumbnail
         # on a canvas — no embedded player / threads / ffmpeg / seek bar.
         self.image_search_var = tk.StringVar()
-        self.image_sort_var = tk.StringVar(value="Name")
+        self._image_sort = ("#0", False)  # (column_id, descending)
         self.image_status_var = tk.StringVar(value="")
         self._image_slots = []           # list[ImageSlot] from last scan
         self._image_slots_by_rel = {}    # rel_path -> ImageSlot
@@ -260,8 +259,6 @@ class MainWindow:
         self._image_preview_img = None   # Tk PhotoImage ref (must stay alive)
         self._image_current_rel = None   # slot shown in the static preview
         self.image_search_var.trace_add(
-            "write", lambda *a: self._refresh_image_list())
-        self.image_sort_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
         # Replace-Text tab state (capabilities.replace_text plugins).  Unlike the
         # audio/video/image tabs (which hold in-memory assignments staged at
@@ -277,6 +274,7 @@ class MainWindow:
         self._text_scan_dir = ""         # folder the rows were loaded from
         self._text_scan_id = 0           # bump-counter (parity w/ other tabs)
         self._text_current_iid = None    # selected row iid (str(index))
+        self._text_sort = ("#0", False)  # (column_id, descending)
         self.text_search_var.trace_add(
             "write", lambda *a: self._refresh_text_list())
         self.text_new_var.trace_add(
@@ -417,6 +415,11 @@ class MainWindow:
         # Dismissible per-session via the × button; reappears on
         # next launch if still applicable.
         self._build_update_banner(root)
+        # Amber "source image changed" banner — shown on entry to a Replace /
+        # Write tab when the assets folder's recorded source image no longer
+        # matches what's on disk (e.g. the user reverted the .raw).  Created
+        # here, packed on demand by _refresh_stale_source_banner().
+        self._build_stale_source_banner(root)
 
         # ---- Top bar: Back, title, theme toggle ----------------------
         top = ttk.Frame(root)
@@ -1410,11 +1413,8 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.audio_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
-        ttk.Combobox(tools, textvariable=self.audio_sort_var, width=12,
-                     state="readonly",
-                     values=("Name", "Longest first", "Folder")).pack(
-            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(tools, text="(click a column header to sort)",
+                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
         self._audio_status_lbl = ttk.Label(
             tools, textvariable=self.audio_status_var,
             font=(_SANS_FONT, 9))
@@ -1448,6 +1448,15 @@ class MainWindow:
         self._audio_tree.column("rep", width=150, minwidth=110, stretch=True)
         self._audio_tree.column("loop", width=44, minwidth=40, anchor=tk.CENTER,
                                 stretch=False)
+        # Click-header sort: (col_id, base heading text, default-descending).
+        # Numeric columns default to descending (longest/looped first) the way
+        # the old "Longest first" option did; text columns ascending.
+        self._audio_sort_cfg = [
+            ("#0", "Original Track", False), ("len", "Length", True),
+            ("fmt", "Format", False), ("rep", "Replacement", False),
+            ("loop", "Loop", True)]
+        self._wire_sort_headings(self._audio_tree, self._audio_sort_cfg,
+                                 "_audio_sort", self._refresh_audio_list)
         audio_scroll = ttk.Scrollbar(
             list_frame, orient=tk.VERTICAL, command=self._audio_tree.yview)
         self._audio_tree.configure(yscrollcommand=audio_scroll.set)
@@ -1646,6 +1655,38 @@ class MainWindow:
         self._audio_scan_dir = scan_dir
         self._refresh_audio_list()
 
+    # ---- Replace tabs: click-header sorting (shared) -----------------
+
+    def _sort_click(self, state_attr, col, default_desc, refresh_fn):
+        """Header-click handler: toggle direction when already sorting by
+        *col*, otherwise switch to *col* at its default direction, then
+        re-sort + rebuild via *refresh_fn*."""
+        cur = getattr(self, state_attr, None)
+        desc = (not cur[1]) if (cur and cur[0] == col) else default_desc
+        setattr(self, state_attr, (col, desc))
+        refresh_fn()
+
+    def _wire_sort_headings(self, tree, config, state_attr, refresh_fn):
+        """Attach a click-to-sort command to each header in *config*
+        (list of ``(col_id, base_text, default_desc)``).  Only the command is
+        set — the heading's existing text/anchor is left intact; the ▲/▼
+        arrow is applied per-refresh by :meth:`_show_sort_arrows`."""
+        for col_id, _base, default_desc in config:
+            tree.heading(
+                col_id,
+                command=lambda c=col_id, d=default_desc:
+                    self._sort_click(state_attr, c, d, refresh_fn))
+
+    @staticmethod
+    def _show_sort_arrows(tree, config, active):
+        """Render a ▲/▼ suffix on the active sort column's header (plain text
+        on the others).  Setting only ``text`` preserves each column's anchor.
+        """
+        col, desc = active
+        arrow = "  ▼" if desc else "  ▲"
+        for col_id, base, _d in config:
+            tree.heading(col_id, text=(base + arrow) if col_id == col else base)
+
     def _refresh_audio_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
         tree = getattr(self, "_audio_tree", None)
@@ -1656,13 +1697,24 @@ class MainWindow:
         query = (self.audio_search_var.get() or "").strip().lower()
         slots = [s for s in self._audio_slots
                  if not query or query in s.rel_path.lower()]
-        sort = self.audio_sort_var.get()
-        if sort == "Longest first":
-            slots.sort(key=lambda s: s.duration, reverse=True)
-        elif sort == "Folder":
-            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
-        else:
-            slots.sort(key=lambda s: s.rel_path.lower())
+        col, desc = self._audio_sort
+
+        def _key(s):
+            if col == "len":
+                return (s.duration,)
+            if col == "fmt":
+                return (s.format_summary().lower(), s.rel_path.lower())
+            if col == "rep":
+                rep = self._audio_assignments.get(s.rel_path)
+                # Assigned rows group together (by replacement name); the rest
+                # fall to the bottom (ascending) regardless of direction-flip.
+                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+            if col == "loop":
+                return (1 if self._audio_loop_flags.get(s.rel_path) else 0,)
+            return (s.rel_path.lower(),)  # "#0" name/path
+
+        slots.sort(key=_key, reverse=desc)
+        self._show_sort_arrows(tree, self._audio_sort_cfg, self._audio_sort)
 
         for s in slots:
             rep = self._audio_assignments.get(s.rel_path)
@@ -2302,11 +2354,8 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.video_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
-        ttk.Combobox(tools, textvariable=self.video_sort_var, width=12,
-                     state="readonly",
-                     values=("Name", "Longest first", "Folder")).pack(
-            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(tools, text="(click a column header to sort)",
+                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
         self._video_status_lbl = ttk.Label(
             tools, textvariable=self.video_status_var,
             font=(_SANS_FONT, 9))
@@ -2328,6 +2377,12 @@ class MainWindow:
         self._video_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._video_tree.column("fmt", width=140, minwidth=80)
         self._video_tree.column("rep", width=200, minwidth=110)
+        self._video_sort_cfg = [
+            ("#0", "Original Video", False), ("len", "Length", True),
+            ("res", "Resolution", True), ("fmt", "Format", False),
+            ("rep", "Replacement", False)]
+        self._wire_sort_headings(self._video_tree, self._video_sort_cfg,
+                                 "_video_sort", self._refresh_video_list)
         video_scroll = ttk.Scrollbar(
             list_frame, orient=tk.VERTICAL, command=self._video_tree.yview)
         self._video_tree.configure(yscrollcommand=video_scroll.set)
@@ -2563,13 +2618,23 @@ class MainWindow:
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in self._video_slots
                  if not query or query in s.rel_path.lower()]
-        sort = self.video_sort_var.get()
-        if sort == "Longest first":
-            slots.sort(key=lambda s: s.duration, reverse=True)
-        elif sort == "Folder":
-            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
-        else:
-            slots.sort(key=lambda s: s.rel_path.lower())
+        col, desc = self._video_sort
+
+        def _key(s):
+            if col == "len":
+                return (s.duration,)
+            if col == "res":
+                wh = (s.info.width * s.info.height) if s.info else -1
+                return (wh,)
+            if col == "fmt":
+                return (s.format_summary().lower(), s.rel_path.lower())
+            if col == "rep":
+                rep = self._video_assignments.get(s.rel_path)
+                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+            return (s.rel_path.lower(),)  # "#0" name/path
+
+        slots.sort(key=_key, reverse=desc)
+        self._show_sort_arrows(tree, self._video_sort_cfg, self._video_sort)
 
         for s in slots:
             rep = self._video_assignments.get(s.rel_path)
@@ -3289,11 +3354,8 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        ttk.Label(tools, text="Sort:").pack(side=tk.LEFT)
-        ttk.Combobox(tools, textvariable=self.image_sort_var, width=12,
-                     state="readonly",
-                     values=("Name", "Folder")).pack(
-            side=tk.LEFT, padx=(4, 0))
+        ttk.Label(tools, text="(click a column header to sort)",
+                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
         self._image_status_lbl = ttk.Label(
             tools, textvariable=self.image_status_var,
             font=(_SANS_FONT, 9))
@@ -3313,6 +3375,11 @@ class MainWindow:
         self._image_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._image_tree.column("fmt", width=140, minwidth=80)
         self._image_tree.column("rep", width=200, minwidth=110)
+        self._image_sort_cfg = [
+            ("#0", "Original Image", False), ("res", "Resolution", True),
+            ("fmt", "Format", False), ("rep", "Replacement", False)]
+        self._wire_sort_headings(self._image_tree, self._image_sort_cfg,
+                                 "_image_sort", self._refresh_image_list)
         image_scroll = ttk.Scrollbar(
             list_frame, orient=tk.VERTICAL, command=self._image_tree.yview)
         self._image_tree.configure(yscrollcommand=image_scroll.set)
@@ -3499,11 +3566,21 @@ class MainWindow:
         query = (self.image_search_var.get() or "").strip().lower()
         slots = [s for s in self._image_slots
                  if not query or query in s.rel_path.lower()]
-        sort = self.image_sort_var.get()
-        if sort == "Folder":
-            slots.sort(key=lambda s: (s.folder.lower(), s.rel_path.lower()))
-        else:
-            slots.sort(key=lambda s: s.rel_path.lower())
+        col, desc = self._image_sort
+
+        def _key(s):
+            if col == "res":
+                wh = (s.info.width * s.info.height) if s.info else -1
+                return (wh,)
+            if col == "fmt":
+                return (s.format_summary().lower(), s.rel_path.lower())
+            if col == "rep":
+                rep = self._image_assignments.get(s.rel_path)
+                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+            return (s.rel_path.lower(),)  # "#0" name/path
+
+        slots.sort(key=_key, reverse=desc)
+        self._show_sort_arrows(tree, self._image_sort_cfg, self._image_sort)
 
         for s in slots:
             rep = self._image_assignments.get(s.rel_path)
@@ -3768,6 +3845,11 @@ class MainWindow:
         self._text_tree.column("new", width=230, minwidth=120)
         self._text_tree.column("max", width=50, minwidth=40, anchor=tk.E)
         self._text_tree.column("scene", width=150, minwidth=80)
+        self._text_sort_cfg = [
+            ("#0", "On-Screen Text", False), ("new", "New Text", False),
+            ("max", "Max", True), ("scene", "Scene", False)]
+        self._wire_sort_headings(self._text_tree, self._text_sort_cfg,
+                                 "_text_sort", self._refresh_text_list)
         text_scroll = ttk.Scrollbar(
             list_frame, orient=tk.VERTICAL, command=self._text_tree.yview)
         self._text_tree.configure(yscrollcommand=text_scroll.set)
@@ -3809,9 +3891,19 @@ class MainWindow:
             brow, textvariable=self.text_budget_var, font=(_SANS_FONT, 8))
         self._text_budget_lbl.pack(side=tk.LEFT)
         self._text_apply_all_chk = ttk.Checkbutton(
-            brow, text="Apply to every scene with this text",
+            brow, text="Apply to every scene with the same original text",
             variable=self.text_apply_all_var)
         self._text_apply_all_chk.pack(side=tk.LEFT, padx=(12, 0))
+        # Clarify the matching rule: it keys on the *original* (as-extracted)
+        # text, not the current/edited value — so a row you already renamed to
+        # coincidentally match another's text is NOT swept up by this.
+        _Tooltip(
+            self._text_apply_all_chk,
+            "Matches scenes by the selected row's ORIGINAL (as-extracted) "
+            "text, not its current edited value. Rows you've already changed "
+            "to read the same thing keep their own original and aren't "
+            "affected.",
+            lambda: self._current_theme)
         self._text_apply_btn = ttk.Button(
             brow, text="Apply", state=tk.DISABLED,
             command=self._text_apply_edit)
@@ -3926,22 +4018,37 @@ class MainWindow:
 
         query = (self.text_search_var.get() or "").strip().lower()
         total = len(self._text_rows)
-        edited = 0
-        shown = 0
-        for i, r in enumerate(self._text_rows):
-            is_edited = self._text_is_edited(r)
-            if is_edited:
-                edited += 1
-            if query and query not in r["original"].lower() and (
-                    not r["replacement"]
-                    or query not in r["replacement"].lower()):
-                continue
-            shown += 1
+        edited = sum(1 for r in self._text_rows if self._text_is_edited(r))
+        col, desc = self._text_sort
+
+        def _key(pair):
+            _i, r = pair
+            if col == "new":
+                return ((r["replacement"] or "").lower(), r["original"].lower())
+            if col == "max":
+                return (self._text_byte_len(r["original"]),)
+            if col == "scene":
+                return (self._text_scene_label(r["path"]).lower(),
+                        r["original"].lower())
+            return (r["original"].lower(),)  # "#0" on-screen text
+
+        # Filter first, then sort — but keep each row's ORIGINAL index as its
+        # iid (other handlers map the iid back via self._text_rows[int(iid)]),
+        # so sorting only changes display order, never identity.
+        visible = [
+            (i, r) for i, r in enumerate(self._text_rows)
+            if not (query and query not in r["original"].lower()
+                    and (not r["replacement"]
+                         or query not in r["replacement"].lower()))]
+        visible.sort(key=_key, reverse=desc)
+        self._show_sort_arrows(tree, self._text_sort_cfg, self._text_sort)
+        shown = len(visible)
+        for i, r in visible:
             tree.insert(
                 "", tk.END, iid=str(i), text=r["original"],
                 values=(r["replacement"], self._text_byte_len(r["original"]),
                         self._text_scene_label(r["path"])),
-                tags=("assigned",) if is_edited else ())
+                tags=("assigned",) if self._text_is_edited(r) else ())
 
         if total == 0:
             self.text_status_var.set("")
@@ -4243,6 +4350,12 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._extract_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
+
+        # Warn (amber top banner) if the source image these assets came from
+        # has since changed on disk — only on the asset-editing tabs.
+        self._refresh_stale_source_banner(
+            on_asset_tab=text in ("Write", "Replace Audio", "Replace Video",
+                                  "Replace Images", "Replace Text"))
 
         # Size the notebook to the tab now showing so a short tab (e.g.
         # Extract) doesn't reserve the tallest tab's height -- the freed
@@ -6640,6 +6753,84 @@ class MainWindow:
             return
         import webbrowser
         webbrowser.open(self._update_banner_url)
+
+    # ------------------------------------------------------------------
+    # "Source image changed" banner
+    # ------------------------------------------------------------------
+
+    def _build_stale_source_banner(self, parent):
+        """Build the persistent amber 'source image changed' banner.
+
+        Created but not packed.  :meth:`_refresh_stale_source_banner` packs it
+        ``before=self._top_bar`` (same anchor as the update banner) when the
+        current assets folder's recorded source image no longer matches disk.
+        Raw ``tk`` widgets so the amber colours stick across themes.
+        """
+        self._stale_source_banner = tk.Frame(
+            parent, bg="#5a4416",
+            highlightbackground="#e0a836", highlightthickness=1)
+        tk.Label(
+            self._stale_source_banner, text="⚠",
+            bg="#5a4416", fg="#ffd966",
+            font=(_SANS_FONT, 14, "bold")
+        ).pack(side=tk.LEFT, padx=(10, 6), pady=4)
+        self._stale_source_banner_text = tk.Label(
+            self._stale_source_banner, text="",
+            bg="#5a4416", fg="#ffe9b0",
+            font=(_SANS_FONT, 10),
+            anchor=tk.W, justify=tk.LEFT, wraplength=820)
+        self._stale_source_banner_text.pack(
+            side=tk.LEFT, padx=0, pady=4, fill=tk.X, expand=True)
+        tk.Button(
+            self._stale_source_banner, text="✕",
+            bg="#5a4416", fg="#ffffff",
+            activebackground="#6a5426", activeforeground="#ffffff",
+            relief="flat", padx=6, pady=2, borderwidth=0,
+            cursor="hand2",
+            command=self._dismiss_stale_source_banner,
+        ).pack(side=tk.LEFT, padx=(0, 6), pady=4)
+        # The warning text the user dismissed; suppresses re-show until the
+        # staleness clears (re-Extract) and recurs.
+        self._stale_source_dismissed_msg = None
+
+    def _refresh_stale_source_banner(self, *, on_asset_tab=True):
+        """Show/hide the source-changed banner against current disk state.
+
+        Called on entry to the Write / Replace tabs.  ``on_asset_tab=False``
+        (Extract/other tabs) always hides it — the warning is about editing
+        stale assets, which only applies on the asset-editing tabs.
+        """
+        banner = getattr(self, "_stale_source_banner", None)
+        if banner is None:
+            return
+        path = (self.write_assets_var.get() or "").strip()
+        stale = None
+        if path:
+            try:
+                stale = stale_source_message(path)
+            except Exception:
+                stale = None
+        if stale is None:
+            # Source matches (or no sidecar) — clear any prior dismissal so a
+            # later swap re-surfaces the warning.
+            self._stale_source_dismissed_msg = None
+        show = bool(on_asset_tab and stale
+                    and stale != self._stale_source_dismissed_msg)
+        if show:
+            self._stale_source_banner_text.configure(text=stale)
+            if not banner.winfo_ismapped():
+                try:
+                    banner.pack(fill=tk.X, side=tk.TOP, before=self._top_bar)
+                except tk.TclError:
+                    banner.pack(fill=tk.X, side=tk.TOP)
+        elif banner.winfo_ismapped():
+            banner.pack_forget()
+
+    def _dismiss_stale_source_banner(self):
+        """Hide the banner for this session (until the staleness recurs)."""
+        self._stale_source_dismissed_msg = (
+            self._stale_source_banner_text.cget("text"))
+        self._stale_source_banner.pack_forget()
 
     def _handle_check_updates(self):
         """Manual 'Check for updates' button click."""

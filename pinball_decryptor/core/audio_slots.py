@@ -70,8 +70,13 @@ class AudioSlot:
         d = self.duration
         if d <= 0:
             return "—"
-        m, s = divmod(int(round(d)), 60)
-        return f"{m}:{s:02d}"
+        # Show milliseconds (m:ss.mmm).  Users who trim tracks to an exact
+        # length rely on the ms to line a replacement back up if the title
+        # later moves the slot around.
+        total_ms = int(round(d * 1000))
+        m, rem = divmod(total_ms, 60000)
+        s, ms = divmod(rem, 1000)
+        return f"{m}:{s:02d}.{ms:03d}"
 
 
 def scan_audio_slots(assets_dir: str, roots=None, exts=None) -> List[AudioSlot]:

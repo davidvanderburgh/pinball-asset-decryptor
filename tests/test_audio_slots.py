@@ -62,6 +62,22 @@ def test_duration_property_handles_missing_info():
     assert slot.duration_str() == "—"
 
 
+def test_duration_str_shows_milliseconds():
+    from pinball_decryptor.core.audio import AudioInfo
+
+    def mk(dur):
+        return AudioSlot(rel_path="a.wav", abs_path="a.wav", ext=".wav",
+                         info=AudioInfo("a.wav", channels=2, sample_rate=44100,
+                                        bit_depth=16, duration=dur), size=0)
+
+    assert mk(45.379).duration_str() == "0:45.379"
+    assert mk(147.0).duration_str() == "2:27.000"
+    assert mk(0.5).duration_str() == "0:00.500"
+    # Rounds to the nearest millisecond rather than truncating.
+    assert mk(1.2341).duration_str() == "0:01.234"
+    assert mk(1.2349).duration_str() == "0:01.235"
+
+
 def test_scan_roots_restricts_walk(tmp_path):
     _make_wav(str(tmp_path / "editable" / "keep.wav"))
     _make_wav(str(tmp_path / "elsewhere" / "drop.wav"))

@@ -1427,7 +1427,8 @@ class MainWindow:
         # Replacement columns stretch to absorb extra width; the rest are fixed
         # and compact so Loop is always on-screen at any app width.
         self._audio_tree.column("#0", width=150, minwidth=80, stretch=True)
-        self._audio_tree.column("len", width=46, minwidth=42, anchor=tk.W,
+        # Wide enough for the m:ss.mmm length (e.g. "12:34.567").
+        self._audio_tree.column("len", width=80, minwidth=66, anchor=tk.W,
                                 stretch=False)
         self._audio_tree.column("fmt", width=124, minwidth=104, stretch=False)
         self._audio_tree.column("rep", width=150, minwidth=110, stretch=True)
@@ -4187,6 +4188,12 @@ class MainWindow:
             # looks at it.  _maybe_rescan_write_preview() applies the correct
             # per-plugin gating and is a no-op when the folder isn't set yet.
             self._maybe_rescan_write_preview()
+            # Re-evaluate the ".checksums.md5 missing" warning against the
+            # current disk state.  Extract points the assets var at its output
+            # dir *before* it writes .checksums.md5, so the trace-driven warning
+            # is stale (shows "missing" even though Extract has since created
+            # it).  The var never changes again, so refresh it on tab entry.
+            self._refresh_write_assets_warning()
         elif text == "Replace Audio":
             # The phase indicators don't apply to the audio tab — staging is
             # a single quick step, not a multi-phase pipeline.

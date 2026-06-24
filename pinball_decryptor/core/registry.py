@@ -27,6 +27,7 @@ _PLUGIN_MODULES = [
     "pinball_decryptor.plugins.jjp",
     "pinball_decryptor.plugins.cgc",
     "pinball_decryptor.plugins.williams",
+    "pinball_decryptor.plugins.pinmame_classic",
     "pinball_decryptor.plugins.dp",
     "pinball_decryptor.plugins.stern",
 ]

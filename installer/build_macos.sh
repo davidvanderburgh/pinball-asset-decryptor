@@ -79,6 +79,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.jjp" \
     --hidden-import "pinball_decryptor.plugins.cgc" \
     --hidden-import "pinball_decryptor.plugins.williams" \
+    --hidden-import "pinball_decryptor.plugins.pinmame_classic" \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \

@@ -186,6 +186,56 @@ def test_parse_radium_images_none_in_plain_data():
     assert engine.parse_radium_images(b"\x00" * 4096) == []
 
 
+# ---- fmt == 4 (BC1/DXT1): descriptor, block-size law, inline image ----------
+
+def test_parse_texture_descriptor_reads_fmt4():
+    data = _radium_with("31.asset", 256, 128, 4)
+    assert engine.parse_texture_descriptor(data, "31.asset") == (256, 128, 4)
+
+
+def _embed_radium_image_bc1(tex_w, tex_h, fill=(20, 200, 90, 255), junk=8):
+    """Build a radium fragment with one inline BC1/DXT1 image (fmt == 4).
+
+    The length law is half of BC3: padded(W)*padded(H) // 2."""
+    from pinball_decryptor.plugins.stern import dds
+    import struct
+    pw = ((tex_w + 3) // 4) * 4
+    ph = ((tex_h + 3) // 4) * 4
+    img = np.empty((ph, pw, 4), dtype=np.uint8)
+    img[:] = fill
+    raw = dds.encode_bc1(img)
+    assert len(raw) == pw * ph // 2
+    blob = (b"\x7f" * junk
+            + struct.pack("<II", tex_w, tex_h)          # dispW, dispH
+            + struct.pack("<I", 0x80000003)             # handle
+            + struct.pack("<II", tex_w, tex_h)          # texW, texH
+            + struct.pack("<I", 4)                      # format = DXT1/BC1
+            + struct.pack("<II", 0, 0)
+            + struct.pack("<I", len(raw))               # length
+            + raw)
+    data_off = junk + 4 * 9
+    return blob, data_off, len(raw), pw, ph
+
+
+def test_parse_radium_images_finds_embedded_dxt1():
+    blob, data_off, length, pw, ph = _embed_radium_image_bc1(462, 66)
+    imgs = engine.parse_radium_images(blob)
+    assert len(imgs) == 1
+    im = imgs[0]
+    assert (im["data_off"], im["length"], im["pad_w"], im["pad_h"]) == (
+        data_off, length, pw, ph)
+    assert (im["tex_w"], im["tex_h"]) == (462, 66)
+    assert im["fmt"] == 4                                # BC1 detected
+
+
+def test_parse_radium_images_dxt1_rejects_bad_length():
+    blob, data_off, length, pw, ph = _embed_radium_image_bc1(16, 16)
+    bad = bytearray(blob)
+    import struct
+    struct.pack_into("<I", bad, data_off - 4, length + 4)
+    assert engine.parse_radium_images(bytes(bad)) == []
+
+
 # ---- radium-image replace: diff + size-neutral in-place writes --------------
 
 class _FakeRadiumReader:

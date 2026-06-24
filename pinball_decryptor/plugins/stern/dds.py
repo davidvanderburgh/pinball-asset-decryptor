@@ -17,6 +17,13 @@ BC3 layout (16 bytes / 4×4 block): bytes 0-7 = alpha block (a0, a1, then 16×
 3-bit indices, LSB-first); bytes 8-15 = colour block (RGB565 c0, c1, then 16×
 2-bit indices).  BC3's colour block is **always** decoded in 4-colour mode
 regardless of the c0/c1 ordering (unlike BC1).
+
+Spike 2 also ships some textures as **BC1/DXT1** (the radium descriptor's
+``format`` enum ``4``): 8 bytes / 4×4 block, half the size of BC3.  BC1's colour
+block is mode-switched on the c0/c1 ordering — ``c0 > c1`` ⇒ 4-colour opaque,
+``c0 <= c1`` ⇒ 3-colour + 1-bit punch-through alpha (index 3 = transparent
+black).  :func:`decode_bc1` / :func:`encode_bc1` handle both modes and are
+size-neutral by construction just like the BC3 pair.
 """
 
 import struct
@@ -110,6 +117,60 @@ def decode_bc3(raw, width, height):
     return img[:height, :width].copy()
 
 
+def decode_bc1(raw, width, height):
+    """Decode raw BC1/DXT1 block bytes to an ``(height, width, 4)`` uint8 RGBA
+    array.  ``len(raw)`` must be ``ceil(w/4)*ceil(h/4)*8``.
+
+    Mode is per-block: ``c0 > c1`` ⇒ 4-colour opaque palette; ``c0 <= c1`` ⇒
+    3-colour palette + index 3 = transparent black (1-bit punch-through alpha)."""
+    bx = (width + 3) // 4
+    by = (height + 3) // 4
+    nb = bx * by
+    need = nb * 8
+    if len(raw) < need:
+        raise ValueError("BC1 data too short: have %d, need %d (%dx%d)"
+                         % (len(raw), need, width, height))
+    d = np.frombuffer(raw[:need], dtype=np.uint8).reshape(nb, 8).astype(np.int32)
+
+    c0 = (d[:, 0] | (d[:, 1] << 8)).astype(np.uint16)
+    c1 = (d[:, 2] | (d[:, 3] << 8)).astype(np.uint16)
+    r0, g0, b0 = _unpack565(c0)
+    r1, g1, b1 = _unpack565(c1)
+    four = (c0 > c1)[:, None]                                   # 4-colour mode
+    # palette entry 2/3 differ per mode; 0/1 are the endpoints either way
+    cR = np.stack([r0, r1,
+                   np.where(four[:, 0], (2 * r0 + r1) // 3, (r0 + r1) // 2),
+                   np.where(four[:, 0], (r0 + 2 * r1) // 3, 0)], axis=1)
+    cG = np.stack([g0, g1,
+                   np.where(four[:, 0], (2 * g0 + g1) // 3, (g0 + g1) // 2),
+                   np.where(four[:, 0], (g0 + 2 * g1) // 3, 0)], axis=1)
+    cB = np.stack([b0, b1,
+                   np.where(four[:, 0], (2 * b0 + b1) // 3, (b0 + b1) // 2),
+                   np.where(four[:, 0], (b0 + 2 * b1) // 3, 0)], axis=1)
+    # alpha palette: opaque for 0/1/2; index 3 transparent only in 3-colour mode
+    aP = np.where(four, np.uint16(255), np.uint16(255)).repeat(4, axis=1).astype(np.int32)
+    aP[:, 3] = np.where(four[:, 0], 255, 0)
+
+    cbits = (d[:, 4] | (d[:, 5] << 8)
+             | (d[:, 6] << 16) | (d[:, 7] << 24)).astype(np.uint32)
+    c_ind = np.empty((nb, 16), dtype=np.int64)
+    for t in range(16):
+        c_ind[:, t] = (cbits >> np.uint32(2 * t)) & np.uint32(3)
+    R = np.take_along_axis(cR, c_ind, axis=1)
+    G = np.take_along_axis(cG, c_ind, axis=1)
+    B = np.take_along_axis(cB, c_ind, axis=1)
+    A = np.take_along_axis(aP, c_ind, axis=1)
+
+    px = np.empty((nb, 16, 4), dtype=np.uint8)
+    px[:, :, 0] = R
+    px[:, :, 1] = G
+    px[:, :, 2] = B
+    px[:, :, 3] = A.astype(np.uint8)
+    block = px.reshape(by, bx, 4, 4, 4)
+    img = block.transpose(0, 2, 1, 3, 4).reshape(by * 4, bx * 4, 4)
+    return img[:height, :width].copy()
+
+
 # --------------------------------------------------------------------------
 # Encode (range-fit: simple, correct, fast)
 # --------------------------------------------------------------------------
@@ -191,6 +252,80 @@ def encode_bc3(rgba):
     for i in range(4):
         out[:, 12 + i] = ((cbits >> np.uint32(8 * i)) & np.uint32(0xFF)).astype(np.uint8)
 
+    return out.tobytes()
+
+
+def encode_bc1(rgba):
+    """Encode an ``(h, w, 4)`` uint8 RGBA array to raw BC1/DXT1 block bytes.
+
+    Per block: if every texel is opaque (alpha >= 128) it uses the 4-colour
+    opaque mode (``c0 > c1``); otherwise it uses the 3-colour punch-through mode
+    (``c0 <= c1``) with transparent texels (alpha < 128) mapped to index 3.
+    Bounding-box endpoints, nearest-palette indices — deterministic, not
+    rate-distortion optimal.  Output length is exactly ``ceil(w/4)*ceil(h/4)*8``
+    (half of BC3), the size-neutral property the in-place patcher relies on."""
+    rgba = np.asarray(rgba, dtype=np.uint8)
+    h, w, ch = rgba.shape
+    if ch != 4:
+        raise ValueError("encode_bc1 needs RGBA (h,w,4)")
+    bx = (w + 3) // 4
+    by = (h + 3) // 4
+    ph, pw = by * 4, bx * 4
+    if (ph, pw) != (h, w):
+        pad = np.zeros((ph, pw, 4), dtype=np.uint8)
+        pad[:h, :w] = rgba
+        if pw > w:
+            pad[:h, w:] = rgba[:, w - 1:w]
+        if ph > h:
+            pad[h:, :] = pad[h - 1:h, :]
+        rgba = pad
+    blocks = rgba.reshape(by, 4, bx, 4, 4).transpose(0, 2, 1, 3, 4)
+    nb = by * bx
+    blocks = blocks.reshape(nb, 16, 4).astype(np.int32)
+    R = blocks[:, :, 0]
+    G = blocks[:, :, 1]
+    B = blocks[:, :, 2]
+    A = blocks[:, :, 3]
+    out = np.zeros((nb, 8), dtype=np.uint8)
+
+    transp = A < 128                                   # (nb,16) punch-through
+    has_alpha = transp.any(axis=1)                     # (nb,) -> 3-colour mode
+    # bounding box over RGB (max corner packs >= min corner, monotone per field)
+    hi = _pack565(R.max(axis=1), G.max(axis=1), B.max(axis=1))
+    lo = _pack565(R.min(axis=1), G.min(axis=1), B.min(axis=1))
+    # 4-colour opaque wants c0 > c1 (= hi, lo); 3-colour wants c0 <= c1 (= lo, hi)
+    c0 = np.where(has_alpha, lo, hi).astype(np.uint16)
+    c1 = np.where(has_alpha, hi, lo).astype(np.uint16)
+    four = (c0 > c1)                                    # matches decoder's test
+    r0, g0, b0 = _unpack565(c0)
+    r1, g1, b1 = _unpack565(c1)
+    f = four[:, None]
+    cR = np.stack([r0, r1,
+                   np.where(four, (2 * r0 + r1) // 3, (r0 + r1) // 2),
+                   np.where(four, (r0 + 2 * r1) // 3, 0)], axis=1)
+    cG = np.stack([g0, g1,
+                   np.where(four, (2 * g0 + g1) // 3, (g0 + g1) // 2),
+                   np.where(four, (g0 + 2 * g1) // 3, 0)], axis=1)
+    cB = np.stack([b0, b1,
+                   np.where(four, (2 * b0 + b1) // 3, (b0 + b1) // 2),
+                   np.where(four, (b0 + 2 * b1) // 3, 0)], axis=1)
+    dist = ((R[:, :, None] - cR[:, None, :]) ** 2
+            + (G[:, :, None] - cG[:, None, :]) ** 2
+            + (B[:, :, None] - cB[:, None, :]) ** 2).astype(np.int64)
+    # in 3-colour blocks index 3 is transparent: forbid it for opaque texels
+    forbid3 = (~f) & (~transp)                          # (nb,16)
+    dist[:, :, 3] = np.where(forbid3, np.int64(1) << 40, dist[:, :, 3])
+    c_ind = dist.argmin(axis=2).astype(np.uint32)
+    c_ind = np.where(transp, np.uint32(3), c_ind)       # transparent -> index 3
+    cbits = np.zeros(nb, dtype=np.uint32)
+    for t in range(16):
+        cbits |= (c_ind[:, t] & np.uint32(3)) << np.uint32(2 * t)
+    out[:, 0] = (c0 & 0xFF).astype(np.uint8)
+    out[:, 1] = (c0 >> 8).astype(np.uint8)
+    out[:, 2] = (c1 & 0xFF).astype(np.uint8)
+    out[:, 3] = (c1 >> 8).astype(np.uint8)
+    for i in range(4):
+        out[:, 4 + i] = ((cbits >> np.uint32(8 * i)) & np.uint32(0xFF)).astype(np.uint8)
     return out.tobytes()
 
 

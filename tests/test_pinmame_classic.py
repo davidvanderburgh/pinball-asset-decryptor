@@ -93,6 +93,44 @@ def test_data_east_rejects_non_zip(manufacturers_by_key, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Sega (Whitestar + the Sega-on-DE-hardware titles)
+# ---------------------------------------------------------------------------
+
+_SEGA_KEYS = ["apollo_13", "goldeneye", "twister", "x_files", "godzilla",
+              "star_wars_trilogy_special_edition", "south_park",
+              "maverick_the_movie"]
+
+
+def test_sega_registered_capture_primary(manufacturers_by_key):
+    sega = manufacturers_by_key["sega"]
+    assert sega.display == "Sega"
+    assert sega.capabilities.capture and not sega.capabilities.extract
+    assert sega.games and all(g.manufacturer_key == "sega" for g in sega.games)
+
+
+def test_sega_and_data_east_are_disjoint(manufacturers_by_key):
+    de_keys = {g.key for g in manufacturers_by_key["data_east"].games}
+    sega_keys = {g.key for g in manufacturers_by_key["sega"].games}
+    assert de_keys and sega_keys
+    assert not (de_keys & sega_keys)
+    # Stern-Whitestar titles are catalogued but NOT exposed by either brand.
+    assert any(v["manufacturer"] == "Stern" for v in GAME_DB.values())
+
+
+@pytest.mark.parametrize("game_key", _SEGA_KEYS)
+def test_sega_detect_full_romset(manufacturers_by_key, tmp_path, game_key):
+    sega = manufacturers_by_key["sega"]
+    info = GAME_DB[game_key]
+    z = _make_rom_zip(tmp_path / f"{info['family']}.zip",
+                      info["game_roms"], info["sound_roms"],
+                      dmd_roms=info["dmd_roms"])
+    game = sega.detect(str(z))
+    assert game is not None, f"detect failed for {game_key}"
+    assert game.key == game_key
+    assert game.manufacturer_key == "sega"
+
+
+# ---------------------------------------------------------------------------
 # Capture-primary shape + pipeline construction (a real run needs
 # libpinmame + ROMs; verified in the GUI).
 # ---------------------------------------------------------------------------

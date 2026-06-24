@@ -55,9 +55,11 @@ _MFR_VISUALS = {
     # name label disambiguates.
     "stern":    {"color": "#d9001c", "letter": "S"},
     # Data East — classic-DMD era (PinMAME).  A distinct teal keeps it clear
-    # of the several reds/blues already in use; the upcoming Sega and
-    # Stern (Whitestar/SAM) entries will take their own codes/colours.
+    # of the several reds/blues already in use.
     "data_east": {"color": "#00838f", "letter": "DE"},
+    # Sega Pinball (classic Whitestar DMD, 1995-1999) — a bright Sega blue,
+    # distinct from BOF's darker blue and AP's navy.
+    "sega": {"color": "#0089cf", "letter": "SEGA"},
 }
 
 
@@ -214,9 +216,10 @@ class ManufacturerPicker(ttk.Frame):
         logo_box = tk.Frame(card, background=v["color"], width=44, height=38)
         logo_box.pack(side=tk.LEFT, padx=(0, 12))
         logo_box.pack_propagate(False)
+        _logo_pt = 20 if len(letter) <= 2 else 14 if len(letter) == 3 else 11
         logo = tk.Label(
             logo_box, text=letter,
-            font=(_SANS_FONT, 20 if len(letter) <= 2 else 14, "bold"),
+            font=(_SANS_FONT, _logo_pt, "bold"),
             foreground="#ffffff", background=v["color"])
         # All-caps codes have no descenders, so centring the font's
         # line-box leaves them looking a hair top-heavy; a 1px downward

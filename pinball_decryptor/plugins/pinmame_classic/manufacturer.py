@@ -80,13 +80,12 @@ class _ClassicManufacturer(Manufacturer):
             capture_ready_cb=None)
 
     def extract_input_help(self):
-        return ("Pick a MAME-format ROM zip for a Data East / Sega DMD "
-                "game — e.g. `lw3_208.zip` (Lethal Weapon 3), "
-                "`jupk_513.zip` (Jurassic Park), `tftc_303.zip` (Tales "
-                "from the Crypt).  Extract runs the game in attract mode "
-                "(libpinmame) and records the DMD animations + audio as "
-                "the firmware renders them — the only way to get these "
-                "games' compressed DMD animations.")
+        return (f"Pick a MAME-format ROM zip for a {self.display} DMD "
+                "game (named by its romset, e.g. `apollo13.zip`, "
+                "`gldneye.zip`, `lw3_208.zip`).  Extract runs the game in "
+                "attract mode (libpinmame) and records the DMD animations "
+                "+ audio as the firmware renders them — the only way to "
+                "get these games' compressed DMD animations.")
 
 
 class DataEastManufacturer(_ClassicManufacturer):
@@ -97,5 +96,14 @@ class DataEastManufacturer(_ClassicManufacturer):
         label="Data East MAME ROM zips", extensions=(".zip",))
 
 
+class SegaManufacturer(_ClassicManufacturer):
+    key = "sega"
+    display = "Sega"
+    brand = "Sega"
+    input_spec = InputSpec(
+        label="Sega MAME ROM zips", extensions=(".zip",))
+
+
 def register():
     register_manufacturer(DataEastManufacturer())
+    register_manufacturer(SegaManufacturer())

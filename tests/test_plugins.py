@@ -12,7 +12,7 @@ from pinball_decryptor.core.registry import (Capabilities, Game, InputSpec,
 
 
 EXPECTED_KEYS = {"ap", "pb", "spooky", "bof", "jjp", "cgc", "williams", "dp",
-                 "stern", "data_east"}
+                 "stern", "data_east", "sega"}
 
 
 def test_all_expected_manufacturers_loaded(manufacturers_by_key):

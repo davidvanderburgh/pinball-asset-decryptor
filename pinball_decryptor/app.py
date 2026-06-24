@@ -1422,8 +1422,13 @@ class App:
             self.window.append_log("Cancelled.", "info")
         elif success:
             self.window.set_status("Complete!")
-            title = "Extract Complete" if is_extract else "Write Complete"
-            messagebox.showinfo(title, summary)
+            if is_extract:
+                # No modal for extraction — the per-asset progress already
+                # scrolls by in the log, so a blocking popup just gets in the
+                # way of dismissing it.  Drop the summary into the log instead.
+                self.window.append_log(summary, "success")
+            else:
+                messagebox.showinfo("Write Complete", summary)
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"

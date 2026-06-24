@@ -45,6 +45,32 @@ def _category_flags(cats):
     )
 
 
+def _extract_summary(n, output_dir, flags, *, source=""):
+    """Build the end-of-extract summary line.
+
+    ``extract_all`` only returns the decoded-sound count, but a default run also
+    pulls video / images / text -- so a bare "Extracted N sound(s)" misreports a
+    full extraction as audio-only.  Name the other categories that were on so the
+    summary matches what actually landed on disk.  ``source`` is an optional
+    qualifier (e.g. " from the SD card") inserted before the destination."""
+    extra = [name for name, on in (("video", flags["do_video"]),
+                                   ("images", flags["do_images"]),
+                                   ("text", flags["do_text"])) if on]
+    if flags["do_audio"]:
+        lead = "Extracted %d Spike 2 sound(s)" % n
+        if extra:
+            if len(extra) == 1:
+                lead += " plus %s" % extra[0]
+            else:
+                lead += " plus " + ", ".join(extra[:-1]) + " and " + extra[-1]
+    elif extra:
+        lead = "Extracted " + (", ".join(extra[:-1]) + " and " + extra[-1]
+                               if len(extra) > 1 else extra[0])
+    else:
+        lead = "Extraction complete"
+    return "%s%s -> %s" % (lead, source, output_dir)
+
+
 class SternExtractPipeline(BasePipeline):
     """Decode every packed sound in a Spike 2 card image to a per-sound WAV."""
 
@@ -100,11 +126,7 @@ class SternExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
-        if flags["do_audio"]:
-            self._done(True, "Extracted %d Spike 2 sound(s) to %s"
-                       % (n, self.output_dir))
-        else:
-            self._done(True, "Extraction complete -> %s" % self.output_dir)
+        self._done(True, _extract_summary(n, self.output_dir, flags))
 
 
 class SternWritePipeline(BasePipeline):
@@ -173,12 +195,13 @@ class SternDirectSsdExtractPipeline(BasePipeline):
         os.makedirs(self.output_dir, exist_ok=True)
         # extract_all drives phases 2-5 (video / images / audio / checksums);
         # open_disk points the reader at the raw card.
+        flags = _category_flags(self.extract_categories)
         n = engine.extract_all(
             self.device_path, parts, self.output_dir,
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             open_disk=lambda: RawDeviceFile(self.device_path, writable=False),
-            log_line=self._log_line, **_category_flags(self.extract_categories))
+            log_line=self._log_line, **flags)
         self._check_cancel()   # don't run checksums on a cancelled extract
 
         self._set_phase(5)  # Checksums
@@ -188,8 +211,8 @@ class SternDirectSsdExtractPipeline(BasePipeline):
                            progress_cb=self._progress,
                            cancel=lambda: self._cancelled)
         self._check_cancel()
-        self._done(True, "Extracted %d Spike 2 sound(s) from the SD card to %s"
-                   % (n, self.output_dir))
+        self._done(True, _extract_summary(n, self.output_dir, flags,
+                                          source=" from the SD card"))
 
 
 class SternDirectSsdWritePipeline(BasePipeline):

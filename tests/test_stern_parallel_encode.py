@@ -67,6 +67,11 @@ def test_cat0_parallel_failure_falls_back_to_serial(monkeypatch):
         calls.append("p")
         raise RuntimeError("no pool")
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", False)
+    # Pin the core count so the parallel branch is actually attempted — on a
+    # 1-2 core runner nworkers collapses to 1 and the dispatcher correctly skips
+    # straight to serial (the intended low-core behaviour, but not what this
+    # fallback test is exercising).
+    monkeypatch.setattr(E.os, "cpu_count", lambda: 8)
     monkeypatch.setattr(E, "_encode_cat0_parallel", boom)
     monkeypatch.setattr(E, "_encode_cat0_serial",
                         lambda *a, **k: calls.append("s") or ({0: b"x"}, []))

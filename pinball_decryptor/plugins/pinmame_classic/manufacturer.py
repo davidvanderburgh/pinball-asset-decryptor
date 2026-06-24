@@ -9,10 +9,10 @@ early Sega-on-DE-hardware titles; each brand entry exposes only its own
 """
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
-                               register_manufacturer)
+                               Prerequisite, register_manufacturer)
+from . import capture as _capture
 from .formats import detect_game
 from .games import GAME_DB
-from .pipeline import PHASES, ExtractPipeline
 
 
 def _slice(brand):
@@ -21,13 +21,32 @@ def _slice(brand):
 
 
 class _ClassicManufacturer(Manufacturer):
-    """Shared behaviour for the PinMAME classic-DMD brand entries."""
+    """Shared behaviour for the PinMAME classic-DMD brand entries.
+
+    These games store their DMD animations *compressed* in the DMD ROM
+    (decodable only by the emulated firmware, see ``docs/DE_DMD_RE.md``),
+    so extraction is **capture-only**: libpinmame runs the game in attract
+    mode and records the decoded 4-shade DMD animations + audio.  There is
+    no static-decode path (raw ROM bytes hit the compressed regions and
+    decode to static), so this is a capture-primary plugin (``extract``
+    is False) and the GUI hides the "Basic extract" toggle.
+    """
 
     brand = ""               # the GAME_DB ``manufacturer`` value to expose
-    badge = "EXTRACT ONLY"
+    badge = "EXTRACT ONLY"   # consistent with Williams (the other PinMAME plugin)
     beta = True
-    capabilities = Capabilities(extract=True)
-    extract_phases = PHASES
+    capabilities = Capabilities(extract=False, capture=True)
+    extract_phases = _capture.PHASES
+    capture_phases = _capture.PHASES
+    prerequisites = (
+        Prerequisite(
+            name="ffmpeg", where="host", probe="ffmpeg -version",
+            reason="Rendering the captured DMD animations into MP4s.",
+            install_hint=(
+                "winget install Gyan.FFmpeg  (Windows)\n"
+                "brew install ffmpeg          (macOS)\n"
+                "apt-get install ffmpeg       (Linux)")),
+    )
 
     def __init__(self):
         self._game_db = _slice(self.brand)
@@ -46,20 +65,28 @@ class _ClassicManufacturer(Manufacturer):
             key=key, display=info["display"], manufacturer_key=self.key,
             notes=f"{info['manufacturer']} {info['year']}, {info['dmd']} DMD")
 
-    def make_extract_pipeline(self, input_path, output_dir,
+    def make_capture_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               **kwargs):
-        return ExtractPipeline(
+        return _capture.CapturePipeline(
             input_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
-            game_db=self._game_db)
+            game_db=self._game_db,
+            duration_seconds=kwargs.get("duration_seconds", 180.0),
+            frame_cb=kwargs.get("frame_cb"),
+            # No switch-matrix diagnostic: these games are captured in
+            # attract mode only (no WPC-style switch poking), so the
+            # "Generic WPC" matrix would just be confusing.
+            capture_ready_cb=None)
 
     def extract_input_help(self):
         return ("Pick a MAME-format ROM zip for a Data East / Sega DMD "
                 "game — e.g. `lw3_208.zip` (Lethal Weapon 3), "
                 "`jupk_513.zip` (Jurassic Park), `tftc_303.zip` (Tales "
-                "from the Crypt).  Extract identifies the game and unpacks "
-                "its ROM set; DMD-animation + audio extraction are coming.")
+                "from the Crypt).  Extract runs the game in attract mode "
+                "(libpinmame) and records the DMD animations + audio as "
+                "the firmware renders them — the only way to get these "
+                "games' compressed DMD animations.")
 
 
 class DataEastManufacturer(_ClassicManufacturer):

@@ -386,6 +386,9 @@ class PinmameCapture:
         self._start_monotonic: float = 0.0
         self._running_event = threading.Event()
         self._stopped_event = threading.Event()
+        # Set by request_stop() (from the GUI Cancel button) to end the
+        # capture early — checked in both the boot wait and the main loop.
+        self._stop_requested = threading.Event()
         self._log: list = []
         self._log_cb: Optional[Callable[[str, str], None]] = None
         self._state: int = 0
@@ -407,6 +410,14 @@ class PinmameCapture:
         self._frame_cb: Optional[Callable] = None
         self._frame_cb_interval_ms: int = 50
         self._last_frame_cb_ms: int = 0
+
+    def request_stop(self):
+        """Ask an in-progress capture to end early (GUI Cancel button).
+
+        Thread-safe: just sets an event the boot wait + capture loop poll,
+        so the next iteration breaks out and PinMAME is stopped cleanly.
+        """
+        self._stop_requested.set()
 
     # ------------------------------------------------------------------
     # Library loading + function-signature setup
@@ -1234,6 +1245,7 @@ class PinmameCapture:
         self._log = []
         self._running_event.clear()
         self._stopped_event.clear()
+        self._stop_requested.clear()
         self._state = 0
         self._last_frame_data = None
         self._last_layout_w = 0
@@ -1369,6 +1381,13 @@ class PinmameCapture:
         # (e.g. ROM load failure).
         wait_deadline = time.monotonic() + 15.0
         while not self._running_event.is_set():
+            if self._stop_requested.is_set():
+                try:
+                    self._lib.PinmameStop()
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "Capture cancelled before the game finished booting.")
             if self._stopped_event.is_set():
                 raise RuntimeError(
                     "PinMAME stopped before reaching running state. "
@@ -1410,6 +1429,10 @@ class PinmameCapture:
             while True:
                 elapsed = time.monotonic() - start
                 if elapsed >= config.duration_seconds:
+                    break
+                if self._stop_requested.is_set():
+                    self._emit_log(
+                        "Cancelled — stopping PinMAME capture.", "warning")
                     break
                 if self._stopped_event.is_set():
                     self._emit_log(

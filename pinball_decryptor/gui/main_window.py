@@ -609,6 +609,9 @@ class MainWindow:
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
+        # Kept as an anchor so the live DMD preview can be packed directly
+        # above it (the preview lives in mv, not the notebook tab).
+        self._status_frame = status_frame
         status_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
 
         self._extract_phases_frame = ttk.Frame(status_frame)
@@ -884,7 +887,10 @@ class MainWindow:
         # in attract, stuck on ball-search, or actually playing?"
         # diagnostics.  The image label is created here but kept
         # hidden until ``on_dmd_frame`` receives the first frame.
-        self._dmd_preview_frame = ttk.Frame(f)
+        # Parented to the manufacturer view (NOT the Extract tab) so the
+        # full-height preview isn't clipped by the fixed-size notebook;
+        # it's packed in just above the phase indicators during capture.
+        self._dmd_preview_frame = ttk.Frame(self._mfr_view)
         self._dmd_preview_label = tk.Label(
             self._dmd_preview_frame,
             background="#000000",
@@ -1935,6 +1941,12 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Clear replacement",
                              command=self._audio_clear_selected)
+        slot = self._audio_slots_by_rel.get(row)
+        if slot is not None:
+            menu.add_separator()
+            menu.add_command(
+                label=self._reveal_menu_label(),
+                command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -2684,6 +2696,45 @@ class MainWindow:
         self._image_scan_dir = ""
         self._text_scan_dir = ""
 
+    def _reveal_menu_label(self):
+        """OS-appropriate wording for the 'show this file in the file manager'
+        context-menu item."""
+        if sys.platform == "darwin":
+            return "Reveal in Finder"
+        if sys.platform == "win32":
+            return "Show in File Explorer"
+        return "Show in File Manager"
+
+    def _reveal_in_file_manager(self, path):
+        """Open the native file manager with *path* selected so the user can
+        grab the original extracted asset and edit it in another tool.  Selects
+        the file on Windows (Explorer) and macOS (Finder); Linux file managers
+        have no portable 'select a file' verb, so we open its containing folder.
+        Falls back to the folder when the file is missing, and never lets an
+        error escape into the Tk callback."""
+        import subprocess
+        if not path:
+            return
+        path = os.path.abspath(path)
+        folder = path if os.path.isdir(path) else os.path.dirname(path)
+        try:
+            if sys.platform == "win32":
+                if os.path.isfile(path):
+                    subprocess.Popen(
+                        'explorer /select,"%s"' % os.path.normpath(path))
+                else:
+                    os.startfile(folder)            # Windows-only; folder view
+            elif sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", "-R", path] if os.path.isfile(path)
+                    else ["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as e:
+            messagebox.showwarning(
+                "Couldn't open file manager",
+                "Couldn't reveal this file:\n%s\n\n%s" % (path, e))
+
     def _maybe_rescan_video(self):
         """Auto-scan when the Replace Video tab becomes visible and the folder
         has changed since the last scan."""
@@ -2788,6 +2839,12 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Clear replacement",
                              command=self._video_clear_selected)
+        slot = self._video_slots_by_rel.get(row)
+        if slot is not None:
+            menu.add_separator()
+            menu.add_command(
+                label=self._reveal_menu_label(),
+                command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -3706,6 +3763,12 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Clear replacement",
                              command=self._image_clear_selected)
+        slot = self._image_slots_by_rel.get(row)
+        if slot is not None:
+            menu.add_separator()
+            menu.add_command(
+                label=self._reveal_menu_label(),
+                command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -4455,7 +4518,7 @@ class MainWindow:
         if bundle is None:
             text = tk.Text(self._log_frame, wrap=tk.WORD,
                            font=(_MONO_FONT, 9), state=tk.DISABLED,
-                           height=12)
+                           height=8)
             scroll = ttk.Scrollbar(self._log_frame, command=text.yview)
             text.configure(yscrollcommand=scroll.set)
             self._apply_log_theme(text)
@@ -4769,14 +4832,31 @@ class MainWindow:
         # audio, so gray them out when Audio is unchecked.
         self._update_autoname_state()
 
-        # Show/hide the Williams capture toggles on the Extract tab.
+        # Show/hide the capture toggles on the Extract tab.
         if caps.capture:
-            self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
+            # Capture-primary plugins (capture but NO static extract, e.g.
+            # Data East — their DMD animations are compressed and only
+            # render under emulation): hide the "Basic extract" toggle and
+            # the gameplay-sim checkbox, and default capture on, since
+            # capture is their only path.
+            capture_primary = not caps.extract
+            if capture_primary:
+                self._basic_extract_frame.pack_forget()
+                self.static_extract_var.set(False)
+                self.capture_mode_var.set(True)
+                self._capture_gameplay_check.pack_forget()
+            else:
+                self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
+                self._capture_gameplay_check.pack(side=tk.LEFT, padx=(12, 0))
             self._capture_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
             self._update_capture_help_text()
-            # Mount the DMD preview placeholder so it's ready to
-            # surface as soon as PinMAME emits the first frame.
-            self._dmd_preview_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+            # Mount the DMD preview (in the mfr view, just above the phase
+            # indicators) so it's ready to surface on the first frame and
+            # has full room — the notebook tab would clip its height.
+            self._dmd_preview_frame.pack(
+                fill=tk.X, padx=10, pady=(4, 0),
+                before=self._status_frame)
+            self.root.after_idle(self._refresh_mfr_scrollregion)
             # Switch matrix is mounted on capture_ready (after the
             # active script is known).
         else:
@@ -4791,6 +4871,7 @@ class MainWindow:
             self._stop_dmd_preview_pump()
             self._switch_matrix_frame.pack_forget()
             self._manual_press_fn = None
+            self.root.after_idle(self._refresh_mfr_scrollregion)
 
         # Show/hide the auto-transcribe checkboxes.  They build a
         # callouts.csv from the extracted WAVs — and only the basic/
@@ -4988,6 +5069,17 @@ class MainWindow:
     def _update_capture_help_text(self):
         basic = self.static_extract_var.get()
         capture = self.capture_mode_var.get()
+        caps = self._current_mfr.capabilities if self._current_mfr else None
+        if caps is not None and caps.capture and not caps.extract:
+            # Capture-primary plugins (Data East): there is no static path.
+            self._capture_help.configure(
+                text=("Runs the game in attract mode under PinMAME and "
+                      "records the DMD animations + audio as the firmware "
+                      "renders them.  These games' animations are "
+                      "compressed and only appear at runtime, so capture "
+                      "is the extraction method.  Requires libpinmame."),
+                foreground="#888888")
+            return
         if basic and capture:
             self._capture_help.configure(text=(
                 "Combined: runs the basic ROM asset extract (sprites, "
@@ -5027,10 +5119,10 @@ class MainWindow:
     # Live DMD preview (Williams capture mode)
     # ------------------------------------------------------------------
 
-    # WPC DMDs are 128x32 — too tiny to read on a modern display.  This
-    # is the per-dot scale we render at.  4 = ~512x128 image, big
-    # enough to read 5-pixel-tall font glyphs.
-    _DMD_PREVIEW_SCALE = 4
+    # WPC / DE DMDs are 128x32 — too tiny to read on a modern display.
+    # This is the per-dot scale we render the live preview at.  7 =
+    # ~896x224, large enough to clearly read the animation as it plays.
+    _DMD_PREVIEW_SCALE = 7
     _DMD_AMBER = (255, 130, 0)   # match the orange we use elsewhere
 
     def on_dmd_frame(self, data, width, height, depth):
@@ -5043,6 +5135,27 @@ class MainWindow:
         # Tuple assignment is atomic in CPython, so concurrent reader
         # always sees a coherent slot.
         self._dmd_latest = (data, width, height, depth)
+
+    def _refresh_mfr_scrollregion(self):
+        """Re-apply the scrollable mfr-view geometry after a tall widget
+        (the live DMD preview) is packed/unpacked, so it isn't clipped and
+        the scrollbar appears only when content overflows."""
+        try:
+            c = self._mfr_view_canvas
+            c.update_idletasks()
+            bbox = c.bbox("all")
+            if not bbox:
+                return
+            c.configure(scrollregion=bbox)
+            inner_h = self._mfr_view.winfo_reqheight()
+            ch = c.winfo_height()
+            c.itemconfig(self._mfr_view_id, height=max(ch, inner_h))
+            if (bbox[3] - bbox[1]) > ch + 2:
+                self._mfr_view_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            else:
+                self._mfr_view_scroll.pack_forget()
+        except Exception:
+            pass
 
     def reset_dmd_preview(self):
         """Forget the previous capture's last frame + start the pump.

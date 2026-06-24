@@ -10,6 +10,7 @@ off to the main extract/write view.  Forcing this up-front choice
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from .theme import THEMES, platform_font
@@ -30,10 +31,10 @@ _SANS_FONT, _MONO_FONT = platform_font()
 # typically covers third-party tools like this, but a "not affiliated"
 # README disclaimer is the standard hedge).
 _MFR_VISUALS = {
-    "pb":       {"color": "#d4a017", "letter": "P"},
+    "pb":       {"color": "#d4a017", "letter": "PB"},
     "spooky":   {"color": "#e64a19", "letter": "S"},
-    "bof":      {"color": "#1565c0", "letter": "B"},
-    "jjp":      {"color": "#c62828", "letter": "J"},
+    "bof":      {"color": "#1565c0", "letter": "BoF"},
+    "jjp":      {"color": "#c62828", "letter": "JJP"},
     # Williams classic logo is the cursive red "Williams" script; a
     # deep red mirrors that without colliding with JJP's slightly
     # brighter red.
@@ -44,15 +45,19 @@ _MFR_VISUALS = {
     # American Pinball's brand leans on a flag-inspired navy/red/silver
     # palette; deep navy reads patriotic without clashing with BOF's
     # brighter blue.
-    "ap":       {"color": "#1a237e", "letter": "A"},
+    "ap":       {"color": "#1a237e", "letter": "AP"},
     # Dutch Pinball's logo is a tulip-orange on black; a warm amber-orange
     # evokes the Dutch national colour and stays distinct from Spooky's
     # redder Halloween orange.
-    "dp":       {"color": "#ff6f00", "letter": "D"},
+    "dp":       {"color": "#ff6f00", "letter": "DP"},
     # Stern Pinball's brand red (the "STERN" wordmark).  Shares the letter "S"
     # with Spooky but is a saturated true-red vs Spooky's orange, and the card's
     # name label disambiguates.
     "stern":    {"color": "#d9001c", "letter": "S"},
+    # Data East — classic-DMD era (PinMAME).  A distinct teal keeps it clear
+    # of the several reds/blues already in use; the upcoming Sega and
+    # Stern (Whitestar/SAM) entries will take their own codes/colours.
+    "data_east": {"color": "#00838f", "letter": "DE"},
 }
 
 
@@ -202,12 +207,21 @@ class ManufacturerPicker(ttk.Frame):
         )
 
         # ----- Letter logo (left), centred against the 2-line text ----
+        # Fixed-size colour chip so 1-, 2- and 3-character codes (e.g. "S",
+        # "DE", "JJP", "BoF") stay a uniform square down the list; the glyph
+        # font scales down for longer codes so they fit without overflowing.
+        letter = v["letter"]
+        logo_box = tk.Frame(card, background=v["color"], width=44, height=38)
+        logo_box.pack(side=tk.LEFT, padx=(0, 12))
+        logo_box.pack_propagate(False)
         logo = tk.Label(
-            card, text=v["letter"],
-            font=(_SANS_FONT, 20, "bold"),
-            foreground="#ffffff", background=v["color"],
-            width=2, height=1, padx=6, pady=4)
-        logo.pack(side=tk.LEFT, padx=(0, 12))
+            logo_box, text=letter,
+            font=(_SANS_FONT, 20 if len(letter) <= 2 else 14, "bold"),
+            foreground="#ffffff", background=v["color"])
+        # All-caps codes have no descenders, so centring the font's
+        # line-box leaves them looking a hair top-heavy; a 1px downward
+        # nudge optically centres the glyphs (more overshoots low).
+        logo.place(relx=0.5, rely=0.5, anchor="center", y=1)
 
         text_block = tk.Frame(card, background=c["button"])
         text_block.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -262,7 +276,8 @@ class ManufacturerPicker(ttk.Frame):
 
         # The whole row is the hot zone — click + hover bindings go on
         # every widget so there are no dead spots between the labels.
-        all_widgets = [card, logo, text_block, top, name, subtitle, peek]
+        all_widgets = [card, logo_box, logo, text_block, top, name,
+                       subtitle, peek]
         if badge_widget is not None:
             all_widgets.append(badge_widget)
 

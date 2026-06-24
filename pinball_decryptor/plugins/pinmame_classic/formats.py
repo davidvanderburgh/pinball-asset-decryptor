@@ -29,7 +29,9 @@ def _zip_names(path):
 
 
 def _rom_set(info):
-    return {n.lower() for n in info["game_roms"] + info["sound_roms"]}
+    return {n.lower() for n in (info["game_roms"]
+                               + info.get("dmd_roms", [])
+                               + info["sound_roms"])}
 
 
 def is_classic_zip(path, game_db):

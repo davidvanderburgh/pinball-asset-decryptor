@@ -1740,8 +1740,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     import numpy as np
 
     from ...core.checksums import read_checksums
-    from .spike2.codec import GenRecover, StereoRecover
-    from .spike2.emulator import Spike2Emu, audio_decode_supported
+    from .spike2.emulator import audio_decode_supported
 
     # Only re-encode/patch what the user actually changed.  The folder is
     # normally the whole Extract output (thousands of idxNNNN.wav + the LCD
@@ -1801,7 +1800,6 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
             progress(int(c * 10 / max(t, 1)), 100, "Reading image.bin")
 
     work = tempfile.mkdtemp(prefix="spike2_")
-    emu = None
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
@@ -1831,56 +1829,16 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                 music_edits = []
             else:
                 if audio_edits:
-                    log("Booting firmware codec engine...", "info")
-                    emu = Spike2Emu(gr_path, img_path)
-                    emu.boot()
-                    params = _load_or_derive_params(emu, gr_path, img_path, log,
-                                                    progress)
-                    byidx = {p["idx"]: p for p in params}
-
-                    # re-encode each edited cat-0 sound into its body bytes
-                    skipped = []
-                    gr = sr = None
-                    for n, (idx, wav_path) in enumerate(sorted(audio_edits.items())):
-                        if cancel():
-                            return None, None
-                        if idx not in byidx:
-                            log("idx %d not a known sound; skipping." % idx, "warning")
-                            continue
-                        p = byidx[idx]
-                        if progress:
-                            progress(10 + int(n * 65 / max(len(audio_edits), 1)), 100,
-                                     "Re-encoding idx %d" % idx)
-                        if p["chan"] == 2:
-                            sr = sr or StereoRecover(emu)
-                        else:
-                            gr = gr or GenRecover(emu)
-                        # Verify the keystream recovery actually round-trips for
-                        # THIS sound before trusting its re-encode -- skip (never
-                        # patch) sounds whose codec variant the analytic encode
-                        # can't yet reproduce bit-exact, so Write can't silently
-                        # corrupt them (see _recovery_valid).
-                        if not _recovery_valid(emu, gr, sr, p, np):
-                            skipped.append(idx)
-                            log("idx %d: re-encode isn't bit-exact for this sound's "
-                                "codec (skipped -- left unchanged in the output)."
-                                % idx, "warning")
-                            continue
-                        if p["chan"] == 2:
-                            body = _encode_stereo(emu, sr, p, wav_path, np)
-                        else:
-                            body = _encode_mono(emu, gr, p, wav_path, np)
-                        audio_patches[p["body_off"]] = body
-                        log("Re-encoded idx %d (%s, %d samples)."
-                            % (idx, "stereo" if p["chan"] == 2 else "mono",
-                               p["length"]), "info")
-                    if skipped:
-                        log("%d sound(s) skipped (re-encode unsupported for their "
-                            "codec): %s"
-                            % (len(skipped), ", ".join(map(str, skipped))), "warning")
-                    # cat-0 emu done; free it before the per-bank music CatEmus.
-                    emu.close()
-                    emu = None
+                    # Re-encode every edited cat-0 sound to its body bytes — fans
+                    # across worker processes (each boots its own emulator), with
+                    # a single-process fallback.  Params come from the
+                    # Extract-time cache; only a cold cache boots an emulator here.
+                    params = _params_for(gr_path, img_path, log, progress)
+                    audio_patches, _askip = _encode_cat0_sounds(
+                        gr_path, img_path, params, audio_edits, np, log,
+                        progress, cancel)
+                    if audio_patches is None:
+                        return None, None
 
                 # Per-song music banks (image-scNN.bin) — re-encode each edited
                 # song back into its bank (own fresh CatEmu per bank).
@@ -1986,8 +1944,6 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                         len(image_patches) + len(texture_patches) + n_radimg,
                         n_text)
     finally:
-        if emu is not None:
-            emu.close()
         _rmtree(work)
 
 
@@ -2253,7 +2209,260 @@ def _encode_stereo(emu, sr, p, wav_path, np):
     return sr.encode_sound(p, L, R)
 
 
+# --------------------------------------------------------------------------
+# Parallel re-encode (Write) — the cat-0 audio re-encode is the dominant cost of
+# building an update when many sounds changed.  It's a pure-CPU emulation loop,
+# so it fans across processes exactly like the decode path (_parallel_decode):
+# each worker boots one emulator and re-encodes its share.  Per-sound encode is
+# independent of order, so a parallel Write is byte-identical to a serial one;
+# any pool failure falls back to a single in-process emulator.  Set
+# PAD_STERN_SERIAL_ENCODE=1 to force the serial path (A/B verification).
+# --------------------------------------------------------------------------
+_FORCE_SERIAL_ENCODE = os.environ.get("PAD_STERN_SERIAL_ENCODE") == "1"
+
+
+def _params_for(gr_path, img_path, log, progress):
+    """Codec params for the card — from the Extract-time cache, or derived on a
+    throwaway emulator if the cache is cold (rare for Write, which follows an
+    Extract that already cached them).  Avoids booting an emulator on the common
+    cache-hit path (the workers boot their own)."""
+    fp = _fingerprint(gr_path, img_path)
+    cache = _cache_path(fp)
+    if os.path.exists(cache):
+        try:
+            params = pickle.load(open(cache, "rb"))
+            log("Loaded cached codec parameters (%d sounds)." % len(params),
+                "info")
+            return params
+        except Exception:
+            pass
+    from .spike2.emulator import Spike2Emu
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        return _load_or_derive_params(emu, gr_path, img_path, log, progress)
+    finally:
+        emu.close()
+
+
+def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
+                        cancel):
+    """Single-process cat-0 re-encode (the fallback + correctness reference)."""
+    from .spike2.codec import GenRecover, StereoRecover
+    from .spike2.emulator import Spike2Emu
+    log("Booting firmware codec engine...", "info")
+    emu = Spike2Emu(gr_path, img_path)
+    emu.boot()
+    patches, skipped = {}, []
+    gr = sr = None
+    try:
+        for n, (idx, wav) in enumerate(edits):
+            if cancel():
+                return None, None
+            p = byidx[idx]
+            if progress:
+                progress(10 + int(n * 65 / max(len(edits), 1)), 100,
+                         "Re-encoding idx %d" % idx)
+            if p["chan"] == 2:
+                sr = sr or StereoRecover(emu)
+            else:
+                gr = gr or GenRecover(emu)
+            if not _recovery_valid(emu, gr, sr, p, np):
+                skipped.append(idx)
+                log("idx %d: re-encode isn't bit-exact for this sound's codec "
+                    "(skipped -- left unchanged in the output)." % idx, "warning")
+                continue
+            body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
+                    else _encode_mono(emu, gr, p, wav, np))
+            patches[p["body_off"]] = body
+            log("Re-encoded idx %d (%s, %d samples)."
+                % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),
+                "info")
+    finally:
+        emu.close()
+    return patches, sorted(skipped)
+
+
+def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
+                          log, progress, cancel):
+    """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
+    Raises on any pool failure so the caller can fall back to a single process."""
+    import multiprocessing as mp
+
+    from .spike2.parallel import encode_one, encode_probe, init_encode_worker
+    log("Re-encoding %d sound(s) across %d process(es)..."
+        % (len(edits), nworkers), "info")
+    ctx = mp.get_context("spawn")
+    pool = ctx.Pool(nworkers, initializer=init_encode_worker,
+                    initargs=(gr_path, img_path, needed_params))
+    patches, skipped = {}, []
+    try:
+        # Confirm a worker actually booted (a stalled/unguarded pool raises here
+        # and the caller falls back to the serial path).
+        pool.apply_async(encode_probe).get(timeout=300)
+        done = 0
+        for idx, body_off, body, valid in pool.imap_unordered(
+                encode_one, edits, chunksize=4):
+            done += 1
+            if valid and body is not None:
+                patches[body_off] = body
+                log("Re-encoded idx %d." % idx, "info")
+            elif body_off is not None:
+                skipped.append(idx)
+                log("idx %d: re-encode isn't bit-exact for this sound's codec "
+                    "(skipped -- left unchanged)." % idx, "warning")
+            if progress and (done % 4 == 0 or done == len(edits)):
+                progress(10 + int(done * 65 / max(len(edits), 1)), 100,
+                         "Re-encoding %d/%d" % (done, len(edits)))
+            if cancel():
+                pool.terminate()
+                return None, None
+        pool.close()
+    finally:
+        pool.join()
+    return patches, sorted(skipped)
+
+
+def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
+                        progress, cancel):
+    """Re-encode every edited cat-0 sound to its body bytes — parallel across
+    processes with a single-process fallback.  Returns ``({body_off: body},
+    [skipped_idx])`` or ``(None, None)`` if cancelled."""
+    byidx = {p["idx"]: p for p in params}
+    for idx in sorted(set(audio_edits) - set(byidx)):
+        log("idx %d not a known sound; skipping." % idx, "warning")
+    edits = sorted((idx, wav) for idx, wav in audio_edits.items()
+                   if idx in byidx)
+    if not edits:
+        return {}, []
+
+    nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
+    nworkers = max(1, min(nworkers, len(edits)))
+    if not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
+        try:
+            needed = [byidx[idx] for idx, _ in edits]
+            patches, skipped = _encode_cat0_parallel(
+                gr_path, img_path, needed, edits, nworkers, np, log, progress,
+                cancel)
+            if patches is None:
+                return None, None
+            if skipped:
+                log("%d sound(s) skipped (re-encode unsupported for their "
+                    "codec): %s" % (len(skipped), ", ".join(map(str, skipped))),
+                    "warning")
+            return patches, skipped
+        except Exception as e:
+            log("Parallel re-encode unavailable (%s); using a single process."
+                % e, "warning")
+    patches, skipped = _encode_cat0_serial(
+        gr_path, img_path, byidx, edits, np, log, progress, cancel)
+    if patches is not None and skipped:
+        log("%d sound(s) skipped (re-encode unsupported for their codec): %s"
+            % (len(skipped), ", ".join(map(str, skipped))), "warning")
+    return patches, skipped
+
+
 _MUSIC_NAME_RE = re.compile(r"music_cat(\d+)_(\d+)", re.IGNORECASE)
+
+
+def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
+    """Re-encode one bank's edited songs on a FRESH CatEmu (deriving several
+    banks on one emu grinds the loader — see ``spike2/category.py``).  *edits* =
+    ``[(idx, wav_path), ...]`` for this bank.  Returns ``(patches, skipped)``
+    where ``patches`` = ``[(cid, idx, body_off, body), ...]`` (the parent maps
+    cid back to its ext4 inode) and ``skipped`` = ``[(cid, idx), ...]``.
+    Bit-identical to the serial inner loop, just per-bank so it parallelises."""
+    from .spike2.category import CatEmu
+    from .spike2.codec import GenRecover, StereoRecover
+    patches, skipped = [], []
+    emu = CatEmu(gr_path, img_path)
+    try:
+        emu.boot()
+        emu.set_category_file(sc_path)
+        rows = emu._derive_cat(cid, rev) or []
+        byidx = {r["idx"]: r for r in rows}
+        emu.mm = emu._mm_cat          # body source = this bank
+        gr = sr = None
+        for idx, wav in sorted(edits):
+            p = byidx.get(idx)
+            if p is None:                 # not a sound in that bank
+                skipped.append((cid, idx))
+                continue
+            if p["chan"] == 2:
+                sr = sr or StereoRecover(emu)
+            else:
+                gr = gr or GenRecover(emu)
+            if not _recovery_valid(emu, gr, sr, p, np):
+                skipped.append((cid, idx))
+                continue
+            body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
+                    else _encode_mono(emu, gr, p, wav, np))
+            patches.append((cid, idx, p["body_off"], bytes(body)))
+    finally:
+        emu.close()
+    return patches, skipped
+
+
+def _bank_encode_worker(args):
+    """One task = re-encode a single bank's edited songs on a fresh emu.
+    Top-level so it pickles across the spawn boundary."""
+    gr_path, img_path, rev, cid, sc_path, edits = args
+    import numpy as np
+    try:
+        return _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits,
+                                   np)
+    except Exception:
+        return ([], [(cid, idx) for idx, _ in edits])
+
+
+def _run_bank_encode(tasks, log, progress, cancel):
+    """Run the per-bank encode *tasks* — one process per bank (fresh emu each)
+    with a single-process fallback.  Returns ``[(patches, skipped), ...]`` per
+    bank, or ``None`` if cancelled."""
+    nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
+    nworkers = max(1, min(nworkers, len(tasks)))
+    if (not _FORCE_SERIAL_ENCODE and nworkers > 1 and len(tasks) > 1
+            and not cancel()):
+        try:
+            import multiprocessing as mp
+            log("Re-encoding %d music bank(s) across %d process(es)..."
+                % (len(tasks), nworkers), "info")
+            ctx = mp.get_context("spawn")
+            out, done = [], 0
+            # maxtasksperchild=1: a fresh process per bank reclaims the large
+            # unicorn mappings and never inherits another bank's state.
+            with ctx.Pool(nworkers, maxtasksperchild=1) as pool:
+                for res in pool.imap_unordered(_bank_encode_worker, tasks):
+                    out.append(res)
+                    done += 1
+                    if progress:
+                        progress(80 + int(done * 15 / max(len(tasks), 1)), 100,
+                                 "Re-encoding music bank %d/%d"
+                                 % (done, len(tasks)))
+                    if cancel():
+                        pool.terminate()
+                        return None
+            return out
+        except Exception as e:
+            log("Parallel music re-encode unavailable (%s); using a single "
+                "process." % e, "warning")
+    import numpy as np
+    out = []
+    for n, t in enumerate(tasks):
+        if cancel():
+            return None
+        if progress:
+            progress(80 + int(n * 15 / max(len(tasks), 1)), 100,
+                     "Re-encoding music bank %d/%d" % (n + 1, len(tasks)))
+        gr_path, img_path, rev, cid, sc_path, edits = t
+        try:
+            out.append(_derive_encode_bank(gr_path, img_path, rev, cid, sc_path,
+                                           edits, np))
+        except Exception as e:
+            log("music_cat%02d: re-encode failed (%s); skipped." % (cid, e),
+                "warning")
+            out.append(([], [(cid, idx) for idx, _ in edits]))
+    return out
 
 
 def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
@@ -2262,16 +2471,14 @@ def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
     (size-neutral) and return ``[(sc_node, body_off, body_bytes), ...]`` for the
     songs that re-encode bit-exact.
 
-    Mirrors the cat-0 audio re-encode, with two differences forced by where the
-    songs live: each song's body is in a SEPARATE bank file (so every patch
-    carries its own ext4 inode, not ``image.bin``'s), and the params are derived
-    per bank on a fresh :class:`CatEmu` (deriving several banks on one emu
-    accumulates state that grinds the loader — see ``spike2/category.py``).  A
-    song whose re-encode isn't bit-exact (``_recovery_valid``) is skipped with a
-    warning, never written blind.  ``music_edits`` = the edited
-    ``music_catNN_MMMM*.wav`` paths."""
-    from .spike2.category import CatEmu, _find_revalidate, read_category_id
-    from .spike2.codec import GenRecover, StereoRecover
+    Each song's body lives in a SEPARATE bank file (so every patch carries its
+    own ext4 inode, not ``image.bin``'s), and each bank is derived on its own
+    fresh :class:`CatEmu` (deriving several banks on one emu accumulates state
+    that grinds the loader).  Because a fresh emu per bank is required anyway,
+    the banks fan across processes — one task per bank — for a big speedup when
+    many songs changed (Metallica = 24 banks).  A song whose re-encode isn't
+    bit-exact (``_recovery_valid``) is skipped, never written blind."""
+    from .spike2.category import _find_revalidate, read_category_id
 
     # group edits by category id; idx = the sound's index within that bank
     by_cat = {}
@@ -2294,6 +2501,9 @@ def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
             local = os.path.join(work, os.path.basename(path))
             reader.extract_file(node, local)
             sc[rid] = (node, local)
+    for cid in sorted(set(by_cat) - set(sc)):
+        log("music_cat%02d: bank not on the card; %d edit(s) skipped."
+            % (cid, len(by_cat[cid])), "warning")
     if not sc:
         log("None of the edited songs' banks (image-scNN.bin) were found on the "
             "card; left unchanged.", "warning")
@@ -2307,54 +2517,27 @@ def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
             "the edited song(s) were left unchanged.", "warning")
         return []
 
+    # one task per bank; biggest banks first so a long song isn't pure tail
+    # latency (bank file size ≈ decoded length).
+    cids = sorted(
+        (c for c in by_cat if c in sc),
+        key=lambda c: (os.path.getsize(sc[c][1])
+                       if os.path.exists(sc[c][1]) else 0),
+        reverse=True)
+    tasks = [(gr_path, img_path, rev, c, sc[c][1], by_cat[c]) for c in cids]
+    results = _run_bank_encode(tasks, log, progress, cancel)
+    if results is None:
+        return []
+
     patches, skipped = [], []
-    for cid in sorted(by_cat):
-        if cid not in sc:
-            log("music_cat%02d: bank not on the card; %d edit(s) skipped."
-                % (cid, len(by_cat[cid])), "warning")
-            continue
-        if cancel():
-            return patches
-        sc_node, local = sc[cid]
-        emu = CatEmu(gr_path, img_path)
-        try:
-            emu.boot()
-            emu.set_category_file(local)
-            rows = emu._derive_cat(cid, rev) or []
-            byidx = {r["idx"]: r for r in rows}
-            emu.mm = emu._mm_cat          # body source = this bank
-            gr = sr = None
-            for idx, wav in sorted(by_cat[cid]):
-                if cancel():
-                    return patches
-                p = byidx.get(idx)
-                if p is None:
-                    log("music_cat%02d_%04d isn't a sound in that bank; skipped."
-                        % (cid, idx), "warning")
-                    continue
-                if p["chan"] == 2:
-                    sr = sr or StereoRecover(emu)
-                else:
-                    gr = gr or GenRecover(emu)
-                if not _recovery_valid(emu, gr, sr, p, np):
-                    skipped.append((cid, idx))
-                    log("music_cat%02d_%04d: re-encode isn't bit-exact for this "
-                        "song's codec (skipped — left unchanged)." % (cid, idx),
-                        "warning")
-                    continue
-                if p["chan"] == 2:
-                    body = _encode_stereo(emu, sr, p, wav, np)
-                else:
-                    body = _encode_mono(emu, gr, p, wav, np)
-                patches.append((sc_node, p["body_off"], body))
-                log("Re-encoded music_cat%02d_%04d (%s, %d samples)."
-                    % (cid, idx, "stereo" if p["chan"] == 2 else "mono",
-                       p["length"]), "info")
-        finally:
-            emu.close()
+    for bank_patches, bank_skipped in results:
+        for (cid, idx, body_off, body) in bank_patches:
+            patches.append((sc[cid][0], body_off, body))
+            log("Re-encoded music_cat%02d_%04d." % (cid, idx), "info")
+        skipped.extend(bank_skipped)
     if skipped:
-        log("%d music song(s) skipped (re-encode not bit-exact)." % len(skipped),
-            "warning")
+        log("%d music song(s) skipped (re-encode not bit-exact or not in the "
+            "bank)." % len(skipped), "warning")
     return patches
 
 

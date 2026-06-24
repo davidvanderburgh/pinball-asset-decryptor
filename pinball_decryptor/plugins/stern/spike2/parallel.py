@@ -75,6 +75,61 @@ def _make_progress_cb(idx, length, chan):
     return cb
 
 
+# ---------------------------------------------------------------------------
+# Encode workers (Write) — re-encode edited cat-0 sounds back into body bytes.
+# Mirrors the decode workers: each process boots one emulator (init_encode_worker)
+# and re-encodes its share, returning only small (idx, body_off, body) tuples.
+# The per-sound work calls the SAME engine primitives the serial path does, so a
+# parallel Write is bit-identical to a serial one (each sound's encode is
+# independent of order — the emu's body overlay resets to passthrough between
+# sounds).
+# ---------------------------------------------------------------------------
+_ENC_EMU = None
+_ENC_BYIDX = None
+_ENC_GR = None
+_ENC_SR = None
+
+
+def init_encode_worker(game_real_path, image_path, params):
+    global _ENC_EMU, _ENC_BYIDX, _ENC_GR, _ENC_SR
+    from .emulator import Spike2Emu
+    _ENC_EMU = Spike2Emu(game_real_path, image_path)
+    _ENC_EMU.boot()
+    _ENC_BYIDX = {p["idx"]: p for p in params}
+    _ENC_GR = _ENC_SR = None
+
+
+def encode_probe():
+    """Confirm an encode worker booted (cf. :func:`probe`)."""
+    return _ENC_EMU is not None
+
+
+def encode_one(task):
+    """task = idx (int).  Returns ``(idx, body_off, body_bytes_or_None, valid)``:
+    ``valid`` False (body None) means the sound's codec variant can't re-encode
+    bit-exact and must be left unchanged — exactly the serial path's skip."""
+    global _ENC_GR, _ENC_SR
+    import numpy as np
+
+    from ..engine import _encode_mono, _encode_stereo, _recovery_valid
+    from .codec import GenRecover, StereoRecover
+    idx, wav_path = task
+    p = _ENC_BYIDX.get(idx)
+    if p is None:
+        return (idx, None, None, False)
+    if p["chan"] == 2:
+        _ENC_SR = _ENC_SR or StereoRecover(_ENC_EMU)
+    else:
+        _ENC_GR = _ENC_GR or GenRecover(_ENC_EMU)
+    if not _recovery_valid(_ENC_EMU, _ENC_GR, _ENC_SR, p, np):
+        return (idx, p["body_off"], None, False)
+    if p["chan"] == 2:
+        body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np)
+    else:
+        body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np)
+    return (idx, p["body_off"], bytes(body), True)
+
+
 def decode_to_wav(task):
     """task = (param_dict, out_wav_path).  Returns (idx, ok)."""
     p, out_path = task

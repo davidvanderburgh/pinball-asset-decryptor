@@ -12,16 +12,29 @@ class _Tooltip:
     """Minimal hover tooltip — shown below the widget while the mouse
     is over it.  Theme-aware via the ``theme_fn`` callable."""
 
-    def __init__(self, widget, text, theme_fn):
+    def __init__(self, widget, text, theme_fn, bind=True):
         self._widget = widget
         self.text = text
         self._theme_fn = theme_fn
         self._tip = None
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
+        # ``bind=False`` lets a caller drive show()/hide() itself — used by the
+        # picker rows, which manage one shared tooltip across several child
+        # widgets so the cursor can move between them without flicker.
+        if bind:
+            widget.bind("<Enter>", self._show)
+            widget.bind("<Leave>", self._hide)
+
+    # Public aliases for caller-driven use.
+    def show(self, _event=None):
+        self._show()
+
+    def hide(self, _event=None):
+        self._hide()
 
     def _show(self, _event=None):
-        if not self.text:
+        # Guard against a double-show leaking the prior Toplevel (caller-driven
+        # callers may fire show() more than once before a hide()).
+        if not self.text or self._tip is not None:
             return
         c = THEMES[self._theme_fn()]
         x = self._widget.winfo_rootx() + self._widget.winfo_width() // 2

@@ -10,6 +10,12 @@ import os
 
 CHECKSUMS_FILE = ".checksums.md5"
 
+# Auto-name output sidecars (callouts.csv / music_titles.csv).  These are
+# derived tracking metadata — they have no destination inside the card/ISO
+# binary and must never be diffed as a "modified asset".  Excluded both from
+# the baseline written here and from the Write "Modified Files Preview".
+TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
+
 
 def md5_file(path):
     h = hashlib.md5()
@@ -52,6 +58,8 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
         ]
         for fn in filenames:
             if fn.startswith("."):
+                continue
+            if fn in TRACKING_SIDECARS:
                 continue
             abs_path = os.path.join(dirpath, fn)
             if os.path.islink(abs_path):

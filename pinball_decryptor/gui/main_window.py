@@ -17,6 +17,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
+from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import stale_source_message
 from .theme import THEMES, detect_system_theme, platform_font
@@ -5263,6 +5264,16 @@ class MainWindow:
         """Re-run game-specific Extract control visibility when the input
         path changes (e.g. switching between a TBL .zip and an AAIW .img
         within the Dutch Pinball plugin)."""
+        # Default the Write tab's "Original" file to whatever was just picked
+        # for Extract (Write rebuilds a copy of the file you extracted from).
+        # Only when it's still empty, so a path set by hand on the Write tab is
+        # never clobbered; a full extract re-syncs it outright (see
+        # PinballDecryptorApp._start_extract).
+        if (self._current_mfr is not None
+                and getattr(self._current_mfr.capabilities, "write", False)
+                and getattr(self, "write_upd_var", None) is not None
+                and not self.write_upd_var.get().strip()):
+            self.write_upd_var.set(self.extract_input_var.get().strip())
         if self._current_mfr is None or not hasattr(self, "_decode_dmd_frame"):
             return
         self._update_decode_dmd_visibility()
@@ -5914,7 +5925,12 @@ class MainWindow:
                 for name in files:
                     if (name.startswith(".")
                             or name == "fl_decrypted.dat"
-                            or name.endswith(".img")):
+                            or name.endswith(".img")
+                            or name in TRACKING_SIDECARS):
+                        # Skip dotfiles, the decrypted-blob scratch file, raw
+                        # images, and the auto-name tracking sidecars
+                        # (callouts.csv / music_titles.csv) — none are card
+                        # assets the user can act on here.
                         continue
                     full = os.path.join(root_dir, name)
                     rel = os.path.relpath(

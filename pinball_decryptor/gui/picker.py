@@ -1,10 +1,12 @@
 """Manufacturer picker — the entry screen.
 
-Renders a 2x2 grid of manufacturer cards.  Clicking a card commits the
-user to that manufacturer and hands off to the main extract/write view.
-Forcing this up-front choice (instead of a dropdown that's silently
-pre-selected) also prevents the "I started Spooky, switched to JJP
-mid-run" class of confusion.
+Renders a vertical list of compact manufacturer rows — one logo-height
+each, with a one-line peek of the games and the full list on hover — so
+every manufacturer fits on screen without scrolling even as the catalog
+grows.  Clicking a row commits the user to that manufacturer and hands
+off to the main extract/write view.  Forcing this up-front choice
+(instead of a dropdown that's silently pre-selected) also prevents the
+"I started Spooky, switched to JJP mid-run" class of confusion.
 """
 
 import tkinter as tk
@@ -55,9 +57,9 @@ _MFR_VISUALS = {
 
 
 class ManufacturerPicker(ttk.Frame):
-    """A grid of cards, one per registered manufacturer.
+    """A vertical list of compact rows, one per registered manufacturer.
 
-    Clicking any card fires ``on_select(mfr)`` and the parent shell is
+    Clicking any row fires ``on_select(mfr)`` and the parent shell is
     expected to swap to that manufacturer's working view.
     """
 
@@ -148,14 +150,47 @@ class ManufacturerPicker(ttk.Frame):
 
         for mfr in self._manufacturers:
             card = self._build_card(stack, mfr)
-            card.pack(fill=tk.X, padx=0, pady=6)
+            card.pack(fill=tk.X, padx=0, pady=4)
             self._cards.append(card)
+
+    @staticmethod
+    def _peek_text(games, budget=72):
+        """One-line comma-joined game names that fit within *budget* chars,
+        with a "+N more" tail for the remainder.  Always shows at least the
+        first name even if it alone exceeds the budget."""
+        names = [g.display for g in games]
+        shown, used = [], 0
+        for nm in names:
+            sep = 2 if shown else 0
+            if shown and used + sep + len(nm) > budget:
+                break
+            shown.append(nm)
+            used += sep + len(nm)
+        text = ", ".join(shown)
+        leftover = len(names) - len(shown)
+        if leftover:
+            text += f", +{leftover} more"
+        return text
+
+    @staticmethod
+    def _tooltip_text(mfr):
+        """Full game list for the hover tooltip — supported games marked
+        with "+", unsupported with "✕" plus the reason when known."""
+        lines = [mfr.display, ""]
+        for g in mfr.games:
+            if g.supported:
+                lines.append(f"  +  {g.display}")
+            else:
+                reason = (f"  —  {g.unsupported_reason}"
+                          if g.unsupported_reason else "")
+                lines.append(f"  ✕  {g.display}{reason}")
+        return "\n".join(lines)
 
     def _build_card(self, parent, mfr):
         c = THEMES[self._theme_fn()]
         v = _MFR_VISUALS.get(mfr.key, {"color": c["accent"], "letter": "?"})
 
-        # Card container: a tk.Frame so we can use highlightthickness for
+        # Row container: a tk.Frame so we can use highlightthickness for
         # the hover ring (ttk.Frame doesn't expose those options reliably).
         card = tk.Frame(
             parent,
@@ -163,28 +198,43 @@ class ManufacturerPicker(ttk.Frame):
             highlightthickness=2,
             highlightbackground=c["border"],
             cursor="hand2",
-            padx=18, pady=14,
+            padx=14, pady=10,
         )
 
-        # ----- Header row: letter logo + name/subtitle stacked --------
-        header = tk.Frame(card, background=c["button"])
-        header.pack(side=tk.TOP, fill=tk.X, anchor="w")
-
+        # ----- Letter logo (left), centred against the 2-line text ----
         logo = tk.Label(
-            header, text=v["letter"],
-            font=(_SANS_FONT, 22, "bold"),
+            card, text=v["letter"],
+            font=(_SANS_FONT, 20, "bold"),
             foreground="#ffffff", background=v["color"],
-            width=2, height=1, padx=6, pady=2)
-        logo.pack(side=tk.LEFT, anchor="n")
+            width=2, height=1, padx=6, pady=4)
+        logo.pack(side=tk.LEFT, padx=(0, 12))
 
-        title_block = tk.Frame(header, background=c["button"])
-        title_block.pack(side=tk.LEFT, padx=(10, 0), anchor="n")
+        text_block = tk.Frame(card, background=c["button"])
+        text_block.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        name_row = tk.Frame(title_block, background=c["button"])
-        name_row.pack(anchor="w")
+        # ----- Top line: name + badge (left)  ·  stats (right) --------
+        top = tk.Frame(text_block, background=c["button"])
+        top.pack(fill=tk.X, anchor="w")
+
+        n_games = len(mfr.games)
+        n_unsup = sum(1 for g in mfr.games if not g.supported)
+        exts = list(mfr.input_spec.extensions)
+        ext_text = ", ".join(exts[:3])
+        if len(exts) > 3:
+            ext_text += ", …"
+        subtitle_parts = [f"{n_games} game{'s' if n_games != 1 else ''}",
+                          ext_text]
+        if n_unsup:
+            subtitle_parts.append(f"{n_unsup} unsupported")
+        # Stats pinned right so the names left-align in a clean column.
+        subtitle = tk.Label(
+            top, text="  ·  ".join(subtitle_parts),
+            font=(_SANS_FONT, 9),
+            background=c["button"], foreground=c["gray"])
+        subtitle.pack(side=tk.RIGHT)
 
         name = tk.Label(
-            name_row, text=mfr.display,
+            top, text=mfr.display,
             font=(_SANS_FONT, 13, "bold"),
             background=c["button"], foreground=c["fg"])
         name.pack(side=tk.LEFT)
@@ -197,89 +247,59 @@ class ManufacturerPicker(ttk.Frame):
         if badge_text:
             badge_color = "#e6a700" if badge_text == "BETA" else "#546e7a"
             badge_widget = tk.Label(
-                name_row, text=badge_text,
+                top, text=badge_text,
                 font=(_SANS_FONT, 8, "bold"),
                 foreground="#ffffff", background=badge_color,
                 padx=5, pady=0)
             badge_widget.pack(side=tk.LEFT, padx=(8, 0))
 
-        n_games = len(mfr.games)
-        n_unsup = sum(1 for g in mfr.games if not g.supported)
-        exts = list(mfr.input_spec.extensions)
-        ext_text = ", ".join(exts[:4])
-        if len(exts) > 4:
-            ext_text += ", ..."
-        subtitle_parts = [
-            f"{n_games} game{'s' if n_games != 1 else ''}",
-            ext_text,
-        ]
-        if n_unsup:
-            subtitle_parts.append(f"{n_unsup} unsupported")
-        subtitle = tk.Label(
-            title_block, text="  ·  ".join(subtitle_parts),
-            font=(_SANS_FONT, 9),
+        # ----- Peek line: one truncated row of game names -------------
+        peek = tk.Label(
+            text_block, text=self._peek_text(mfr.games),
+            font=(_SANS_FONT, 9), anchor="w", justify=tk.LEFT,
             background=c["button"], foreground=c["gray"])
-        subtitle.pack(anchor="w")
+        peek.pack(fill=tk.X, anchor="w", pady=(3, 0))
 
-        # ----- Game list (2-column grid) -----------------------------
-        games_box = tk.Frame(card, background=c["button"])
-        games_box.pack(side=tk.TOP, fill=tk.X, anchor="w", pady=(10, 0))
-
-        # Track every widget on the card so the click + hover bindings
-        # can be applied to all of them (the whole card surface is the
-        # hot zone).
-        all_widgets = [card, header, logo, title_block, name_row, name,
-                       subtitle, games_box]
+        # The whole row is the hot zone — click + hover bindings go on
+        # every widget so there are no dead spots between the labels.
+        all_widgets = [card, logo, text_block, top, name, subtitle, peek]
         if badge_widget is not None:
             all_widgets.append(badge_widget)
-        game_labels = []
 
-        # 3-column layout — wide enough to fit most game names while
-        # cutting the row count of bigger lists by 1/3 vs. 2 cols.
-        cols = 3
-        for col in range(cols):
-            games_box.columnconfigure(col, weight=1, uniform="games")
+        # One shared tooltip (full game list) for the whole row.  We drive
+        # show/hide ourselves (bind=False) with a short hide-debounce so the
+        # cursor crossing between the row's children doesn't flicker or tear
+        # down the tip; a re-enter within the window cancels the pending hide.
+        tip = _Tooltip(card, self._tooltip_text(mfr),
+                       lambda: self._theme_fn(), bind=False)
+        hide_job = [None]
 
-        for i, game in enumerate(mfr.games):
-            row, col = divmod(i, cols)
-            row_frame = tk.Frame(games_box, background=c["button"])
-            row_frame.grid(row=row, column=col, sticky="w",
-                           padx=(0, 14), pady=1)
-            all_widgets.append(row_frame)
+        def _cancel_hide():
+            if hide_job[0] is not None:
+                card.after_cancel(hide_job[0])
+                hide_job[0] = None
 
-            if game.supported:
-                marker = "+"
-                fg = c["fg"]
-                font = (_SANS_FONT, 9)
-            else:
-                marker = "x"
-                fg = c["gray"]
-                font = (_SANS_FONT, 9, "overstrike")
-
-            game_lbl = tk.Label(
-                row_frame, text=f"{marker} {game.display}",
-                font=font, foreground=fg, background=c["button"])
-            game_lbl.pack(side=tk.LEFT, anchor="w")
-            game_labels.append((game_lbl, game))
-            all_widgets.append(game_lbl)
-
-            # Hover tooltip on unsupported games explaining why.
-            if not game.supported and game.unsupported_reason:
-                _Tooltip(game_lbl,
-                         f"{game.display}\n\nUnsupported: "
-                         f"{game.unsupported_reason}",
-                         lambda: self._theme_fn())
-
-        # ----- Click + card-level hover -----------------------------
         def _on_click(_e=None):
+            _cancel_hide()
+            tip.hide()
             if self._on_select:
                 self._on_select(mfr)
 
         def _on_enter(_e=None):
+            _cancel_hide()
             card.configure(highlightbackground=c["accent"])
+            tip.show()
 
         def _on_leave(_e=None):
-            card.configure(highlightbackground=c["border"])
+            _cancel_hide()
+
+            def _do_hide():
+                hide_job[0] = None
+                if not card.winfo_exists():
+                    return
+                card.configure(highlightbackground=c["border"])
+                tip.hide()
+            hide_job[0] = card.after(50, _do_hide)
 
         for w in all_widgets:
             w.bind("<Button-1>", _on_click)

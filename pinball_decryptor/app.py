@@ -477,11 +477,14 @@ class App:
         # Point the shared assets folder at this extract's output dir so the
         # Replace Audio/Video/Image, Write, and Mod Pack tabs default to what we
         # just extracted (extract-then-edit is the common flow — the user
-        # shouldn't have to re-pick the same folder).  A .upd input also mirrors
-        # the input file into the Write tab.
-        ext = os.path.splitext(in_path)[1].lower()
+        # shouldn't have to re-pick the same folder).
         self.window.write_assets_var.set(output_path)
-        if ext in (".upd",) and self._current_mfr.capabilities.write:
+        # The Write tab's "Original" file is the same file you extracted from —
+        # both pickers share the plugin's input filetypes, and Write rebuilds a
+        # copy of that original (Stern's card .img/.raw, JJP's .iso/.upd, etc.).
+        # Default it to this extract's input so the user doesn't re-pick it.  A
+        # fresh extract means a fresh workflow, so overwrite any prior value.
+        if self._current_mfr.capabilities.write:
             self.window.write_upd_var.set(in_path)
 
         self._active_mode = "extract"

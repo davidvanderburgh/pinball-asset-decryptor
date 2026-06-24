@@ -1719,6 +1719,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
         log("Patching %d edited radium image(s) across %d on-card occurrence(s)."
             % (n, len({(o, ro, do) for (o, ro, _s, do, *_r) in edits})), "info")
     return writes, n
+
+
+def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
+                     phase=None):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -1772,9 +1776,8 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
             "found under %s. Edit a sound, change a display string, or assign a "
             "Replace Video / Replace Image asset first, then Write." % assets_dir)
     if audio_edits:
-        if base_by_idx:
-            log("Found %d edited sound(s) of %d to write."
-                % (len(audio_edits), len(all_wavs)), "info")
+        if baseline:
+            log("Found %d edited sound(s) to write." % len(audio_edits), "info")
         else:
             log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
                 % len(audio_edits), "warning")

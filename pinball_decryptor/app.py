@@ -1406,6 +1406,12 @@ class App:
         if is_extract and success and self._last_extract_io:
             in_path, out_path = self._last_extract_io
             write_extract_source(out_path, in_path)
+            # The assets folder was pointed at this output dir at extract START
+            # (before it held any files), so any Replace-tab scan triggered in
+            # the meantime stamped a stale/empty cache for this exact path.
+            # Clear the stamps so the next tab visit re-scans the now-populated
+            # folder instead of trusting the path-keyed short-circuit.
+            self.window.invalidate_asset_scans()
         self._last_extract_io = None
         self.window.set_running(False, mode=self._active_mode)
         if self._cancel_requested:

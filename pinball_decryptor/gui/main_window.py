@@ -2672,6 +2672,18 @@ class MainWindow:
         if out and os.path.isdir(out):
             self.write_assets_var.set(out)
 
+    def invalidate_asset_scans(self):
+        """Force the Replace tabs to re-scan on their next visit, even when the
+        assets-folder path is unchanged.  The per-tab auto-scan is keyed on the
+        folder path (``assets_path != self._*_scan_dir``), so a fresh extract
+        that repopulates a folder the tab already scanned would otherwise show
+        stale (often empty) results until the user manually re-browses.  Clearing
+        the stamps makes the next ``_maybe_rescan_*`` behave like a Browse."""
+        self._audio_scan_dir = ""
+        self._video_scan_dir = ""
+        self._image_scan_dir = ""
+        self._text_scan_dir = ""
+
     def _maybe_rescan_video(self):
         """Auto-scan when the Replace Video tab becomes visible and the folder
         has changed since the last scan."""

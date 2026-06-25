@@ -24,7 +24,7 @@ from .formats import detect_game, display_for_key
 from .games import GAME_DB
 from .pipeline import (SternDirectSsdExtractPipeline,
                        SternDirectSsdWritePipeline, SternExtractPipeline,
-                       SternWritePipeline)
+                       SternFlashImagePipeline, SternWritePipeline)
 
 # Stern handles two hardware eras under one picker entry:
 #   * "spike2"    — the modern SD-card games (image.bin audio + ext4 assets),
@@ -96,6 +96,11 @@ class SternManufacturer(Manufacturer):
         # tab stages a replacement scaled to the original's dimensions, and
         # Write patches it back in place the same size-neutral way as video.
         replace_image=True,
+        # Flash a pre-built SD-card image (.img/.raw) straight onto a card from
+        # the GUI — a dd-style whole-image write, so users no longer need a
+        # separate imaging tool (and the built-in size guard refuses an image
+        # too big for the card, the failure monkeybug hit externally).
+        flash_image=True,
         # On-screen LCD text lives in the .radium scene files; Extract pulls the
         # editable display strings out to text/strings.tsv, the Replace Text tab
         # lets the user edit them, and Write patches every matching occurrence
@@ -134,6 +139,7 @@ class SternManufacturer(Manufacturer):
                                  "Extract video", "Extract images",
                                  "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
+    flash_phases = ("Check card", "Write image", "Flush")
     # The decode/replace engine emulates the ARM game firmware via unicorn.
     _SPIKE2_PREREQS = (
         Prerequisite(name="unicorn", where="host",
@@ -328,6 +334,11 @@ class SternManufacturer(Manufacturer):
         return SternDirectSsdWritePipeline(
             device_path, assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override)
+
+    def make_flash_pipeline(self, image_path, device_path,
+                            log_cb, phase_cb, progress_cb, done_cb):
+        return SternFlashImagePipeline(
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,

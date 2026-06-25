@@ -16,7 +16,8 @@ import os
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
 from .formats import detect_game, display_for_key, linux_partitions
-from .rawdevice import RawDeviceFile, is_device_path
+from .rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
+                       flash_image_to_device, format_size, is_device_path)
 
 try:                                   # engine import is optional during bring-up
     from . import engine
@@ -244,3 +245,55 @@ class SternDirectSsdWritePipeline(BasePipeline):
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
         self._done(True, "Wrote %d change(s) directly to the SD card." % n)
+
+
+class SternFlashImagePipeline(BasePipeline):
+    """Flash a pre-built SD-card image (.img/.raw) onto a physical card.
+
+    A dd-style raw block copy — distinct from the asset-modifying Write paths:
+    it writes the *whole* image verbatim, so it needs neither the codec engine
+    nor a Spike-card check (the image being flashed may be any image the user
+    built or backed up).  Refuses an image larger than the target card and
+    streams with progress + cancel.  The GUI gates this on Administrator/root
+    and confirms the destructive write before reaching here."""
+
+    def __init__(self, image_path, device_path,
+                 log_cb, phase_cb, progress_cb, done_cb):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.image_path = image_path
+        self.device_path = device_path
+
+    def _run(self):
+        self._set_phase(0)  # Check card
+        if not is_device_path(self.device_path):
+            raise PipelineError(
+                "Check card",
+                "Flashing needs a physical drive (e.g. \\\\.\\PHYSICALDRIVE2), "
+                "not a file path (got %r). Pick the card from the dropdown."
+                % self.device_path)
+        if not self.image_path or not os.path.isfile(self.image_path):
+            raise PipelineError(
+                "Check card",
+                "Image file not found: %r" % self.image_path)
+        self._check_cancel()
+
+        self._set_phase(1)  # Write image
+        try:
+            written = flash_image_to_device(
+                self.image_path, self.device_path,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except FlashCancelled:
+            # The card is now partially written — surface it as a cancel, but
+            # make clear the card is no longer usable until re-flashed.
+            self._log("Flash cancelled — the card is incomplete and must be "
+                      "re-flashed before use.", "error")
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            return
+        except FlashError as e:
+            raise PipelineError("Write image", str(e))
+        self._check_cancel()
+
+        self._set_phase(2)  # Flush
+        self._done(True, "Flashed %s onto the SD card (%s)."
+                   % (format_size(written), self.device_path))

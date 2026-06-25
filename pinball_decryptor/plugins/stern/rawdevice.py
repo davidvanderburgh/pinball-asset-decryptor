@@ -20,14 +20,30 @@ Reading a physical drive always needs Administrator (Windows) / root (POSIX);
 the GUI gates the Direct-SD buttons on that before these are reached.
 """
 
+import contextlib
 import os
+import re
+import struct
+import subprocess
 import sys
+import time
 
 # Open block devices in binary mode; O_BINARY only exists on Windows.
 _O_BINARY = getattr(os, "O_BINARY", 0)
 # Cap each underlying device read/write at 8 MB (a sector multiple) so a single
 # os.read/os.write stays well within driver limits while still streaming fast.
 _IO_CHUNK = 8 << 20
+# Bulk-flash read buffer (a sector multiple).  16 MB keeps the syscall count low
+# on multi-GB card images without holding much memory.
+_FLASH_CHUNK = 16 << 20
+
+
+class FlashError(Exception):
+    """A flash cannot proceed (e.g. the image is larger than the target card)."""
+
+
+class FlashCancelled(Exception):
+    """The user cancelled a flash mid-write (the card is now incomplete)."""
 
 
 def is_device_path(path):
@@ -43,6 +59,207 @@ def is_device_path(path):
     return p.startswith("/dev/")
 
 
+# ---------------------------------------------------------------------------
+# Low-level byte-stream backends.
+#
+# POSIX (and any *file* path on Windows) uses plain ``os`` fd I/O.  But writing
+# to a Windows *physical drive* (``\\.\PHYSICALDRIVEn``) through the C-runtime fd
+# that ``os.open(O_RDWR)`` hands back fails — ``os.write`` returns ``[Errno 9]
+# Bad file descriptor`` even on a handle whose reads succeed, because the CRT fd
+# layer doesn't properly support write I/O to raw device handles.  Real imaging
+# tools (Win32DiskImager, Rufus, dd) go straight to the Win32 API; so do we for
+# the writable device path.  Reads of a card (Extract) keep using the fd backend
+# (verified working on hardware), so this change only touches the write path.
+# ---------------------------------------------------------------------------
+
+
+class _FdIO:
+    """``os``-level fd backend: POSIX always, and every *file* path on Windows."""
+
+    def __init__(self, path, writable):
+        self.path = path
+        flags = (os.O_RDWR if writable else os.O_RDONLY) | _O_BINARY
+        self.fd = os.open(path, flags)
+
+    def seek(self, pos):
+        os.lseek(self.fd, pos, os.SEEK_SET)
+
+    def read(self, n):
+        return os.read(self.fd, n)
+
+    def write(self, data):
+        return os.write(self.fd, data)
+
+    def size(self):
+        try:
+            end = os.lseek(self.fd, 0, os.SEEK_END)
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            return end if end and end > 0 else None
+        except OSError:
+            return None
+
+    def fsync(self):
+        try:
+            os.fsync(self.fd)
+        except OSError:
+            pass
+
+    def fileno(self):
+        return self.fd
+
+    def close(self):
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            finally:
+                self.fd = None
+
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    _GENERIC_READ = 0x80000000
+    _GENERIC_WRITE = 0x40000000
+    _FILE_SHARE_READ = 0x00000001
+    _FILE_SHARE_WRITE = 0x00000002
+    _OPEN_EXISTING = 3
+    _FILE_ATTRIBUTE_NORMAL = 0x00000080
+    _FILE_BEGIN = 0
+    _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    # IOCTL_DISK_GET_LENGTH_INFO — the only reliable way to get a physical
+    # drive's byte length (SEEK_END reports 0 on a raw device handle).
+    _IOCTL_DISK_GET_LENGTH_INFO = 0x0007405C
+    # Volume lock/dismount — a whole-disk flash overwrites the mounted FAT boot
+    # partition's sectors, which Windows blocks (ERROR_ACCESS_DENIED) until the
+    # volume is locked + dismounted (Set-Disk -IsOffline is unreliable on
+    # removable SD cards, so we do it the way imaging tools do).
+    _IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x002D1080
+    _FSCTL_LOCK_VOLUME = 0x00090018
+    _FSCTL_UNLOCK_VOLUME = 0x0009001C
+    _FSCTL_DISMOUNT_VOLUME = 0x00090020
+
+    _CreateFileW = _kernel32.CreateFileW
+    _CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                             wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                             wintypes.HANDLE]
+    _CreateFileW.restype = wintypes.HANDLE
+
+    _ReadFile = _kernel32.ReadFile
+    _ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                          ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    _ReadFile.restype = wintypes.BOOL
+
+    _WriteFile = _kernel32.WriteFile
+    _WriteFile.argtypes = [wintypes.HANDLE, wintypes.LPCVOID, wintypes.DWORD,
+                           ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    _WriteFile.restype = wintypes.BOOL
+
+    _SetFilePointerEx = _kernel32.SetFilePointerEx
+    _SetFilePointerEx.argtypes = [wintypes.HANDLE, ctypes.c_longlong,
+                                  ctypes.POINTER(ctypes.c_longlong),
+                                  wintypes.DWORD]
+    _SetFilePointerEx.restype = wintypes.BOOL
+
+    _DeviceIoControl = _kernel32.DeviceIoControl
+    _DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                 wintypes.LPVOID, wintypes.DWORD,
+                                 wintypes.LPVOID, wintypes.DWORD,
+                                 ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    _DeviceIoControl.restype = wintypes.BOOL
+
+    _FlushFileBuffers = _kernel32.FlushFileBuffers
+    _FlushFileBuffers.argtypes = [wintypes.HANDLE]
+    _FlushFileBuffers.restype = wintypes.BOOL
+
+    _CloseHandle = _kernel32.CloseHandle
+    _CloseHandle.argtypes = [wintypes.HANDLE]
+    _CloseHandle.restype = wintypes.BOOL
+
+    class _Win32IO:
+        """Win32 ``CreateFileW``/``ReadFile``/``WriteFile`` backend for raw
+        physical-drive I/O (used for *writable* device opens on Windows)."""
+
+        def __init__(self, path, writable):
+            self.path = path
+            access = _GENERIC_READ | (_GENERIC_WRITE if writable else 0)
+            share = _FILE_SHARE_READ | _FILE_SHARE_WRITE
+            handle = _CreateFileW(path, access, share, None, _OPEN_EXISTING,
+                                  _FILE_ATTRIBUTE_NORMAL, None)
+            if handle is None or handle == _INVALID_HANDLE_VALUE:
+                err = ctypes.get_last_error()
+                raise OSError(
+                    0, "Couldn't open %s for %s (WinError %d). Direct-SD writes "
+                    "need Administrator." % (
+                        path, "read/write" if writable else "read", err), path,
+                    err)
+            self._h = handle
+
+        def seek(self, pos):
+            newpos = ctypes.c_longlong(0)
+            if not _SetFilePointerEx(self._h, ctypes.c_longlong(pos),
+                                     ctypes.byref(newpos), _FILE_BEGIN):
+                raise OSError(0, "SetFilePointerEx(%s) failed (WinError %d)"
+                              % (self.path, ctypes.get_last_error()))
+
+        def read(self, n):
+            if n <= 0:
+                return b""
+            buf = ctypes.create_string_buffer(n)
+            got = wintypes.DWORD(0)
+            if not _ReadFile(self._h, buf, n, ctypes.byref(got), None):
+                raise OSError(0, "ReadFile(%s) failed (WinError %d)"
+                              % (self.path, ctypes.get_last_error()))
+            return buf.raw[:got.value]
+
+        def write(self, data):
+            mv = memoryview(data)
+            n = mv.nbytes
+            if n == 0:
+                return 0
+            cbuf = (ctypes.c_char * n).from_buffer_copy(mv)
+            wrote = wintypes.DWORD(0)
+            if not _WriteFile(self._h, cbuf, n, ctypes.byref(wrote), None):
+                raise OSError(0, "WriteFile(%s) failed (WinError %d)"
+                              % (self.path, ctypes.get_last_error()))
+            return wrote.value
+
+        def size(self):
+            buf = ctypes.create_string_buffer(8)
+            ret = wintypes.DWORD(0)
+            if _DeviceIoControl(self._h, _IOCTL_DISK_GET_LENGTH_INFO, None, 0,
+                                buf, 8, ctypes.byref(ret), None):
+                (length,) = struct.unpack("<q", buf.raw[:8])
+                return length if length > 0 else None
+            return None
+
+        def fsync(self):
+            _FlushFileBuffers(self._h)
+
+        def fileno(self):
+            return -1
+
+        def close(self):
+            if self._h is not None:
+                _CloseHandle(self._h)
+                self._h = None
+
+
+def _open_backend(path, writable):
+    r"""Pick the byte-stream backend for *path*.
+
+    The Win32 backend is used only where the fd path is known to break: a
+    *writable* open of a real ``\\.\PHYSICALDRIVE`` on Windows.  Everything else
+    — POSIX, file paths, and read-only card opens (the verified Extract path) —
+    stays on plain ``os`` fd I/O.
+    """
+    if (sys.platform == "win32" and writable and is_device_path(path)):
+        return _Win32IO(path, writable)
+    return _FdIO(path, writable)
+
+
 class RawDeviceFile:
     """A seekable byte stream over a raw block device with aligned underlying I/O.
 
@@ -54,15 +271,19 @@ class RawDeviceFile:
     def __init__(self, path, writable=False, sector=None):
         self.path = path
         self.writable = writable
-        flags = (os.O_RDWR if writable else os.O_RDONLY) | _O_BINARY
-        self.fd = os.open(path, flags)
+        self._io = _open_backend(path, writable)
         try:
             self.sector = sector or self._probe_sector()
-            self._size = self._probe_size()
+            self._size = self._io.size()
         except Exception:
-            os.close(self.fd)
+            self._io.close()
             raise
         self._pos = 0
+
+    @property
+    def size(self):
+        """Total device byte length, or ``None`` if it couldn't be probed."""
+        return self._size
 
     # ---- probing -----------------------------------------------------------
     def _probe_sector(self):
@@ -73,21 +294,12 @@ class RawDeviceFile:
         512; otherwise 4096.  (Regular files accept any length → 512.)"""
         for s in (512, 4096):
             try:
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                if len(os.read(self.fd, s)) == s:
+                self._io.seek(0)
+                if len(self._io.read(s)) == s:
                     return s
             except OSError:
                 continue
         return 512
-
-    def _probe_size(self):
-        """Device byte length (a sector multiple), or ``None`` if unknown."""
-        try:
-            end = os.lseek(self.fd, 0, os.SEEK_END)
-            os.lseek(self.fd, 0, os.SEEK_SET)
-            return end if end and end > 0 else None
-        except OSError:
-            return None
 
     # ---- stream interface --------------------------------------------------
     def seek(self, pos, whence=os.SEEK_SET):
@@ -118,11 +330,11 @@ class RawDeviceFile:
             a_end = min(a_end, self._size)
         if a_end <= a_start:
             return b""
-        os.lseek(self.fd, a_start, os.SEEK_SET)
+        self._io.seek(a_start)
         buf = bytearray()
         want = a_end - a_start
         while len(buf) < want:
-            chunk = os.read(self.fd, min(_IO_CHUNK, want - len(buf)))
+            chunk = self._io.read(min(_IO_CHUNK, want - len(buf)))
             if not chunk:
                 break
             buf += chunk
@@ -161,29 +373,77 @@ class RawDeviceFile:
             region += bytes((a_end - a_start) - len(region))
         lo = start - a_start
         region[lo:lo + length] = data
-        os.lseek(self.fd, a_start, os.SEEK_SET)
+        self._io.seek(a_start)
         mv = memoryview(region)
         off = 0
         while off < len(region):
-            off += os.write(self.fd, mv[off:off + min(_IO_CHUNK, len(region) - off)])
+            off += self._io.write(mv[off:off + min(_IO_CHUNK, len(region) - off)])
         self._pos += length
         return length
 
+    def copy_image_onto(self, src, total, *, progress=None, cancel=None,
+                        chunk=_FLASH_CHUNK):
+        """Bulk-copy ``total`` bytes from file object *src* onto this device,
+        starting at offset 0 (a dd-style flash).
+
+        Whole-sector chunks are written straight through the fd (no
+        read-modify-write — a flash overwrites every sector, so the RMW
+        pre-read :meth:`write` does would be pure wasted I/O).  Only the final
+        partial sector — rare, since disk images are almost always a sector
+        multiple — falls back to RMW so the bytes past the image end are
+        preserved.
+
+        ``progress(done, total, desc)`` is called as bytes land; ``cancel()``
+        (if given) is polled between chunks and a True return raises
+        :class:`FlashCancelled` (a partial flash leaves the card unbootable —
+        the caller is expected to surface that).  Returns the bytes written.
+        """
+        if not self.writable:
+            raise OSError("device opened read-only")
+        sec = self.sector
+        # Round the read buffer down to a whole number of sectors so every
+        # bulk write is sector-aligned; never let it collapse to zero.
+        step = max((chunk // sec) * sec, sec)
+        written = 0
+        self._io.seek(0)
+        while written < total:
+            if cancel is not None and cancel():
+                raise FlashCancelled(
+                    "Flash cancelled after %d of %d bytes." % (written, total))
+            want = min(step, total - written)
+            buf = src.read(want)
+            if not buf:
+                break
+            if len(buf) % sec == 0:
+                # Aligned fast path: write directly, capped per write syscall.
+                self._io.seek(written)
+                mv = memoryview(buf)
+                off = 0
+                while off < len(buf):
+                    off += self._io.write(
+                        mv[off:off + min(_IO_CHUNK, len(buf) - off)])
+            else:
+                # Final sub-sector tail: RMW the trailing sector(s) so we don't
+                # disturb whatever lies past the image's last byte.
+                self.seek(written)
+                self.write(buf)
+            written += len(buf)
+            if progress is not None:
+                progress(written, total, "Writing image to SD card…")
+        return written
+
     def flush(self):
-        try:
-            os.fsync(self.fd)
-        except OSError:
-            pass
+        self._io.fsync()
 
     def fileno(self):
-        return self.fd
+        return self._io.fileno()
 
     def close(self):
-        if self.fd is not None:
+        if self._io is not None:
             try:
-                os.close(self.fd)
+                self._io.close()
             finally:
-                self.fd = None
+                self._io = None
 
     def __enter__(self):
         return self
@@ -203,3 +463,237 @@ def read_mbr(device_path):
             return f.read(512)
     except OSError:
         return b""
+
+
+def device_size(device_path):
+    """Total byte length of a raw device, or ``None`` if it can't be probed.
+
+    Used by the flasher's preflight to compare the card's capacity against the
+    image size before any write (so a too-big image is refused, not truncated).
+    On Windows a physical drive's size is read via IOCTL — ``SEEK_END`` reports
+    0 on a raw-device fd, which is why the GUI used to say "couldn't read size".
+    """
+    if sys.platform == "win32" and is_device_path(device_path):
+        try:
+            io = _Win32IO(device_path, writable=False)
+        except OSError:
+            return None
+        try:
+            return io.size()
+        finally:
+            io.close()
+    try:
+        with RawDeviceFile(device_path, writable=False) as f:
+            return f.size
+    except OSError:
+        return None
+
+
+def format_size(n):
+    """Human-readable size string (``7.83 GB``) for the flash UI / logs.
+
+    ``None`` -> ``"unknown"``.  Uses decimal GB/MB (10^9 / 10^6) to match how
+    card capacities are advertised, so a "16 GB" card reads ~14.9 GB nowhere
+    and the comparison the user sees lines up with the packaging.
+    """
+    if n is None:
+        return "unknown"
+    if n >= 10 ** 9:
+        return "%.2f GB" % (n / 10 ** 9)
+    if n >= 10 ** 6:
+        return "%.1f MB" % (n / 10 ** 6)
+    if n >= 10 ** 3:
+        return "%.0f KB" % (n / 10 ** 3)
+    return "%d bytes" % n
+
+
+def flash_preflight(image_path, device_path):
+    """Return ``(image_size, card_size_or_None)`` for the flash confirm UI.
+
+    Pure inspection (no writes): lets the GUI show "Image 7.8 GB -> Card 14.9 GB"
+    and decide whether the image fits before the user commits.
+    """
+    img = os.path.getsize(image_path)
+    return img, device_size(device_path)
+
+
+def _physicaldrive_number(device_path):
+    r"""Extract N from ``\\.\PHYSICALDRIVEn`` (Windows), else ``None``."""
+    m = re.search(r"PHYSICALDRIVE(\d+)", device_path or "", re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+@contextlib.contextmanager
+def _disk_offline_for_write(device_path, log=None):
+    r"""Take the target disk offline (+ writable) for a whole-disk flash, then
+    bring it back online.
+
+    A flash overwrites the *entire* disk, including the FAT boot partition that
+    Windows mounts as a drive letter — and Windows blocks raw writes to sectors
+    belonging to a *mounted* volume.  ``Set-Disk -IsOffline`` dismounts every
+    volume on the disk so an Administrator handle can write all of it, the same
+    thing dd/imaging tools do under the hood.  Best-effort: a failure here is
+    logged and we proceed (the write itself then surfaces any access error).
+
+    No-op on non-Windows and for non-``PHYSICALDRIVE`` paths (e.g. a backing
+    file in tests) — POSIX users unmount the card's auto-mounted partitions
+    themselves; we log a hint.
+    """
+    if sys.platform != "win32":
+        if log is not None and (device_path or "").startswith("/dev/"):
+            log("If the write fails as busy, unmount the card's partitions "
+                "first (they may have been auto-mounted).", "info")
+        yield
+        return
+    n = _physicaldrive_number(device_path)
+    if n is None:                          # a file path (tests) — nothing to do
+        yield
+        return
+
+    def _ps(cmd):
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                capture_output=True, text=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError) as e:
+            if log is not None:
+                log("Disk offline/online step failed (%s) — continuing." % e,
+                    "warning")
+
+    if log is not None:
+        log("Taking disk %d offline so the whole card can be written…" % n,
+            "info")
+    _ps("Set-Disk -Number %d -IsReadOnly $false; "
+        "Set-Disk -Number %d -IsOffline $true" % (n, n))
+    try:
+        yield
+    finally:
+        if log is not None:
+            log("Bringing disk %d back online." % n, "info")
+        _ps("Set-Disk -Number %d -IsOffline $false" % n)
+
+
+def _volume_disk_number(letter):
+    """Windows: the physical-disk number backing drive ``letter`` (e.g. ``E``),
+    or ``None`` if the letter isn't a single-disk volume we can query."""
+    path = "\\\\.\\%s:" % letter
+    handle = _CreateFileW(path, 0, _FILE_SHARE_READ | _FILE_SHARE_WRITE, None,
+                          _OPEN_EXISTING, 0, None)
+    if handle is None or handle == _INVALID_HANDLE_VALUE:
+        return None
+    try:
+        buf = ctypes.create_string_buffer(12)   # STORAGE_DEVICE_NUMBER (3 DWORD)
+        ret = wintypes.DWORD(0)
+        if _DeviceIoControl(handle, _IOCTL_STORAGE_GET_DEVICE_NUMBER, None, 0,
+                            buf, 12, ctypes.byref(ret), None):
+            _devtype, devnum, _part = struct.unpack("<III", buf.raw[:12])
+            return devnum
+        return None
+    finally:
+        _CloseHandle(handle)
+
+
+@contextlib.contextmanager
+def _locked_volumes(device_path, log=None):
+    r"""Lock + dismount every mounted volume on the target disk so a whole-disk
+    flash isn't blocked, then unlock on exit (Windows; no-op elsewhere).
+
+    A flash overwrites the card's FAT boot partition, whose sectors Windows
+    refuses raw writes to while it's mounted (``ERROR_ACCESS_DENIED`` /
+    ``WinError 5``).  ``Set-Disk -IsOffline`` is unreliable on removable SD
+    cards, so — exactly as Win32DiskImager/Rufus do — we open each drive letter
+    on the target disk, ``FSCTL_LOCK_VOLUME`` + ``FSCTL_DISMOUNT_VOLUME`` it, and
+    hold the handle open for the whole write (the lock lapses when it closes, so
+    the volume remounts on exit).  Only FAT volumes have letters; the ext data
+    partitions Windows can't mount don't block writes.  Best-effort: a volume we
+    can't lock is logged and we press on (the write surfaces any real block).
+    """
+    if sys.platform != "win32" or _physicaldrive_number(device_path) is None:
+        yield
+        return
+    n = _physicaldrive_number(device_path)
+    handles = []
+    try:
+        for i in range(26):
+            letter = chr(ord("A") + i)
+            if _volume_disk_number(letter) != n:
+                continue
+            handle = _CreateFileW(
+                "\\\\.\\%s:" % letter, _GENERIC_READ | _GENERIC_WRITE,
+                _FILE_SHARE_READ | _FILE_SHARE_WRITE, None, _OPEN_EXISTING, 0,
+                None)
+            if handle is None or handle == _INVALID_HANDLE_VALUE:
+                continue
+            ret = wintypes.DWORD(0)
+            locked = False
+            for _attempt in range(10):           # files may be transiently open
+                if _DeviceIoControl(handle, _FSCTL_LOCK_VOLUME, None, 0, None, 0,
+                                    ctypes.byref(ret), None):
+                    locked = True
+                    break
+                time.sleep(0.2)
+            # Dismount regardless: forces the FS to release the sectors even if
+            # the lock didn't take (the held handle keeps it dismounted).
+            _DeviceIoControl(handle, _FSCTL_DISMOUNT_VOLUME, None, 0, None, 0,
+                             ctypes.byref(ret), None)
+            handles.append(handle)
+            if log is not None:
+                log("Dismounted volume %s: on disk %d (locked=%s)."
+                    % (letter, n, "yes" if locked else "no"),
+                    "info" if locked else "warning")
+        yield
+    finally:
+        for handle in handles:
+            ret = wintypes.DWORD(0)
+            _DeviceIoControl(handle, _FSCTL_UNLOCK_VOLUME, None, 0, None, 0,
+                             ctypes.byref(ret), None)
+            _CloseHandle(handle)
+
+
+def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
+                          cancel=None):
+    """dd-style raw copy of *image_path* onto the physical *device_path*.
+
+    Refuses (``FlashError``) when the image is larger than the target card — a
+    too-big image would be truncated and produce an unbootable card (the failure
+    monkeybug hit with an external imaging tool).  When the card size can't be
+    probed it proceeds with a logged warning rather than blocking.  Reports
+    progress and honours ``cancel`` (a True return raises :class:`FlashCancelled`
+    mid-write).  Returns the number of bytes written.
+
+    On Windows the disk is taken offline and its mounted volumes are
+    locked + dismounted for the duration (a flash overwrites the mounted FAT
+    boot partition too); see :func:`_disk_offline_for_write` and
+    :func:`_locked_volumes`.
+    """
+    img_size = os.path.getsize(image_path)
+    # Probe the capacity read-only and guard BEFORE taking the disk offline, so a
+    # too-big image is rejected without disturbing the card's mount state.
+    dev_size = device_size(device_path)
+    if log is not None:
+        log("Image: %s (%s)" % (os.path.basename(image_path),
+                                format_size(img_size)), "info")
+        log("Target card: %s (%s)" % (device_path, format_size(dev_size)),
+            "info")
+    if dev_size is not None and img_size > dev_size:
+        raise FlashError(
+            "The image (%s) is larger than the card (%s). Use a larger "
+            "SD card." % (format_size(img_size), format_size(dev_size)))
+    if dev_size is None and log is not None:
+        log("Could not read the card's size — proceeding without a capacity "
+            "check. Make sure the card is at least %s." % format_size(img_size),
+            "warning")
+
+    with _disk_offline_for_write(device_path, log), \
+            _locked_volumes(device_path, log):
+        with RawDeviceFile(device_path, writable=True) as dev:
+            with open(image_path, "rb") as src:
+                written = dev.copy_image_onto(
+                    src, img_size, progress=progress, cancel=cancel)
+            dev.flush()
+    if progress is not None:
+        progress(img_size, img_size, "Flash complete")
+    if log is not None:
+        log("Wrote %s to %s." % (format_size(written), device_path), "success")
+    return written

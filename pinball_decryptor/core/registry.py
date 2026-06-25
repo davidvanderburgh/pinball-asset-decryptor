@@ -170,6 +170,14 @@ class Capabilities:
     # plugins whose Extract writes that manifest — e.g. Stern Spike 2 (LCD text
     # in .radium scene files).
     replace_text: bool = False
+    # Flash-image path: surfaces a "Flash image to SD card" action (a button on
+    # the Write tab that opens a small dialog) for raw-copying a pre-built
+    # ``.img``/``.raw`` onto a physical card — a dd-style whole-image write,
+    # distinct from the asset-modifying Write/Direct-SD paths.  Set True only
+    # for plugins whose medium is a flashable removable card the app can write
+    # directly (Stern Spike 2's SD card via core.drives + RawDeviceFile).  When
+    # True, the GUI calls ``make_flash_pipeline``; needs Administrator/root.
+    flash_image: bool = False
 
 
 @dataclass(frozen=True)
@@ -221,6 +229,10 @@ class Manufacturer(ABC):
     # the standalone jjp-decryptor used.
     direct_ssd_extract_phases: Tuple[str, ...] = ()
     direct_ssd_write_phases: Tuple[str, ...] = ()
+    # Phase labels for the flash-image path (only meaningful when
+    # ``capabilities.flash_image`` is True) — a dd-style raw copy of a
+    # pre-built image onto a card.
+    flash_phases: Tuple[str, ...] = ()
 
     # Runtime tools this plugin needs.  Probed on a worker thread when
     # the user picks this manufacturer in the GUI; results render as
@@ -383,6 +395,17 @@ class Manufacturer(ABC):
         raise NotImplementedError(
             f"{self.display} does not implement a Direct-SSD "
             f"write pipeline.")
+
+    def make_flash_pipeline(self, image_path, device_path,
+                            log_cb, phase_cb, progress_cb, done_cb):
+        """Build the flash-image pipeline (raw-copy a pre-built image onto a card).
+
+        Only meaningful when ``capabilities.flash_image`` is True.
+        ``image_path`` is the source ``.img``/``.raw``; ``device_path`` is an
+        OS-native physical-disk path (``\\\\.\\PHYSICALDRIVEn`` / ``/dev/sdX``).
+        """
+        raise NotImplementedError(
+            f"{self.display} does not implement a flash-image pipeline.")
 
     def audio_slot_dirs(self, assets_dir):
         """Subdirectories of *assets_dir* that hold replaceable audio slots.

@@ -99,6 +99,7 @@ class App:
             on_write=self._start_write,
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
+            on_flash_image=self._start_flash_image,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -797,6 +798,11 @@ class App:
         if not self._current_mfr.capabilities.write:
             return
 
+        # Restore the standard write phase row in case a prior flash-image run
+        # left it showing the Check/Write/Flush steps (set_write_phases swaps
+        # it; this picks the correct build/direct tuple back).
+        self.window._refresh_extract_phases()
+
         # Direct-SSD write branch (see _start_extract for the
         # symmetric extract version).  In SSD mode there is no
         # original ISO and no output folder — the SSD itself is the
@@ -964,6 +970,34 @@ class App:
         threading.Thread(
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
+
+    def _start_flash_image(self, image_path, device_path):
+        """Flash a pre-built image onto a card (dd-style whole-image write).
+
+        The image + target card were collected and confirmed by the flash
+        dialog (``gui.flash_dialog.FlashImageDialog``); this just runs the
+        manufacturer's flash pipeline through the normal status area.  Admin and
+        the destructive-write confirmation are enforced in the dialog before we
+        get here."""
+        mfr = self._current_mfr
+        if mfr is None or not mfr.capabilities.flash_image:
+            return
+
+        self._save_settings()
+        self._active_mode = "write"
+        # A flash is a raw-device write — mark it so a success auto-dismisses
+        # the macOS Full Disk Access banner (proof FDA works), same as Direct-SD.
+        self._current_run_is_direct_ssd = True
+        self._cancel_requested = False
+        # Show the flash-specific phase row (Check card / Write image / Flush).
+        self.window.set_write_phases(getattr(mfr, "flash_phases", ()))
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = mfr.make_flash_pipeline(
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Transcribe (CGC opt-in, faster-whisper)

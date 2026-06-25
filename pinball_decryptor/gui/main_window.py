@@ -87,6 +87,7 @@ class MainWindow:
                  on_write, on_write_cancel,
                  on_export, on_import,
                  on_apply_delta=None,
+                 on_flash_image=None,
                  on_recheck_prereqs=None, on_install_prereqs=None,
                  on_back=None,
                  on_theme_change=None, initial_theme=None,
@@ -101,6 +102,7 @@ class MainWindow:
         self._on_write = on_write
         self._on_write_cancel = on_write_cancel
         self._on_apply_delta = on_apply_delta
+        self._on_flash_image = on_flash_image
         self._on_recheck_prereqs = on_recheck_prereqs
         self._on_install_prereqs = on_install_prereqs
         self._on_back = on_back
@@ -1339,6 +1341,28 @@ class MainWindow:
             justify=tk.LEFT, wraplength=600)
         self._install_lbl.pack(anchor=tk.W, padx=8, pady=6)
 
+        # Flash-image — gated by capabilities.flash_image in
+        # apply_manufacturer().  A dd-style whole-image write so users can put a
+        # pre-built (or backed-up) card image straight onto a card without a
+        # separate imaging tool.  Distinct from Build/Write above: those modify
+        # assets; this replaces the entire card.  Opens a small modal that
+        # collects the image + target card and confirms before the write runs
+        # through the normal status area.
+        self._flash_frame = ttk.LabelFrame(f, text="Flash Image to SD Card")
+        ttk.Label(
+            self._flash_frame,
+            text=("Write a complete, pre-built SD-card image (.img / .raw) "
+                  "directly onto a card — handy after Build SD-card image, or "
+                  "to restore a backup. The whole card is erased and replaced, "
+                  "and the built-in size check refuses an image too big for the "
+                  "card. Requires Administrator."),
+            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=600).pack(
+            anchor=tk.W, padx=8, pady=(4, 2))
+        self._flash_btn = ttk.Button(
+            self._flash_frame, text="Flash image to SD card…",
+            command=self._open_flash_dialog)
+        self._flash_btn.pack(anchor=tk.W, padx=8, pady=(2, 6))
+
     def _build_modpack_tab(self):
         f = self._tab_modpack
         pad = {"padx": 10, "pady": 6}
@@ -1566,7 +1590,7 @@ class MainWindow:
         # apply_manufacturer.
         self._audio_trim_cb = ttk.Checkbutton(
             f, text="Trim / pad replacements to the original slot length",
-            variable=self.audio_trim_var)
+            variable=self.audio_trim_var, command=self._save_staged_changes)
         self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
         # Hover tooltip — its text is set per-manufacturer in apply_manufacturer
         # (esp. WHY it's disabled for size-neutral formats like Spike 2).
@@ -1663,19 +1687,33 @@ class MainWindow:
             return
         self._audio_slots = slots
         self._audio_slots_by_rel = {s.rel_path: s for s in slots}
-        # A new folder invalidates any assignments aimed at the old one;
-        # keep assignments whose slot still exists (re-scan of same folder).
+        # A new folder invalidates any in-memory assignments aimed at the old
+        # one — but the new folder may carry assignments persisted from a prior
+        # session (its .staged_changes.json sidecar), so restore those.  A
+        # re-scan of the SAME folder keeps the live in-memory assignments (newer
+        # than the sidecar) and just prunes vanished slots.
+        from ..core import staged_changes
+        saved_loops = {}
         if scan_dir != self._audio_scan_dir:
-            self._audio_assignments = {}
+            staged = self._load_staged_changes(scan_dir)
+            self._audio_assignments = staged_changes.live_assignments(
+                staged.get("audio"), self._audio_slots_by_rel)
+            saved_loops = staged.get("audio_loop") or {}
+            if "audio_trim" in staged and not self._audio_trim_forced():
+                self.audio_trim_var.set(bool(staged["audio_trim"]))
         else:
             self._audio_assignments = {
                 rel: rep for rel, rep in self._audio_assignments.items()
                 if rel in self._audio_slots_by_rel}
-        # Per-slot Loop flag (BOF): default ON for "LOOP"-named tracks; keep
-        # any flag the user already toggled for a slot that still exists.
+        # Per-slot Loop flag (BOF): a persisted flag (restored above) wins;
+        # otherwise keep any flag the user already toggled, else default ON for
+        # "LOOP"-named tracks.
         self._audio_loop_flags = {
-            s.rel_path: self._audio_loop_flags.get(
-                s.rel_path, "loop" in os.path.basename(s.rel_path).lower())
+            s.rel_path: (bool(saved_loops[s.rel_path])
+                         if s.rel_path in saved_loops
+                         else self._audio_loop_flags.get(
+                             s.rel_path,
+                             "loop" in os.path.basename(s.rel_path).lower()))
             for s in slots}
         self._audio_scan_dir = scan_dir
         self._refresh_audio_list()
@@ -1803,6 +1841,7 @@ class MainWindow:
         if not path:
             return
         self._audio_assignments[rel] = path
+        self._save_staged_changes()
         self._refresh_audio_list()
         if rel == self._audio_current_rel:
             self._audio_update_source_radio()  # enable the Replacement toggle
@@ -1866,6 +1905,7 @@ class MainWindow:
             return
         new = not self._audio_loop_flags.get(rel, False)
         self._audio_loop_flags[rel] = new
+        self._save_staged_changes()
         try:
             vals = list(self._audio_tree.item(rel, "values"))
             if len(vals) >= 4:
@@ -1974,6 +2014,7 @@ class MainWindow:
         rel = self._audio_selected_rel()
         if rel is not None and rel in self._audio_assignments:
             del self._audio_assignments[rel]
+            self._save_staged_changes()
             self._refresh_audio_list()
             if rel == self._audio_current_rel:
                 self._audio_update_source_radio()
@@ -2481,7 +2522,9 @@ class MainWindow:
 
         ttk.Checkbutton(
             f, text="Trim / pad replacements to the original clip length",
-            variable=self.video_trim_var).pack(anchor=tk.W, padx=12, pady=(6, 0))
+            variable=self.video_trim_var,
+            command=self._save_staged_changes).pack(
+                anchor=tk.W, padx=12, pady=(6, 0))
         self._video_length_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
@@ -2572,8 +2615,15 @@ class MainWindow:
             return
         self._video_slots = slots
         self._video_slots_by_rel = {s.rel_path: s for s in slots}
+        # Restore assignments persisted for a freshly-scanned folder; a re-scan
+        # of the same folder keeps the live in-memory ones (see audio above).
+        from ..core import staged_changes
         if scan_dir != self._video_scan_dir:
-            self._video_assignments = {}
+            staged = self._load_staged_changes(scan_dir)
+            self._video_assignments = staged_changes.live_assignments(
+                staged.get("video"), self._video_slots_by_rel)
+            if "video_trim" in staged:
+                self.video_trim_var.set(bool(staged["video_trim"]))
         else:
             self._video_assignments = {
                 rel: rep for rel, rep in self._video_assignments.items()
@@ -2783,6 +2833,7 @@ class MainWindow:
         if not path:
             return
         self._video_assignments[rel] = path
+        self._save_staged_changes()
         self._refresh_video_list()
         if rel == self._video_current_rel:
             self._video_update_source_radio()
@@ -2872,6 +2923,7 @@ class MainWindow:
         rel = self._video_selected_rel()
         if rel is not None and rel in self._video_assignments:
             del self._video_assignments[rel]
+            self._save_staged_changes()
             self._refresh_video_list()
             if rel == self._video_current_rel:
                 self._video_update_source_radio()
@@ -3579,8 +3631,13 @@ class MainWindow:
             return
         self._image_slots = slots
         self._image_slots_by_rel = {s.rel_path: s for s in slots}
+        # Restore assignments persisted for a freshly-scanned folder; a re-scan
+        # of the same folder keeps the live in-memory ones (see audio above).
+        from ..core import staged_changes
         if scan_dir != self._image_scan_dir:
-            self._image_assignments = {}
+            staged = self._load_staged_changes(scan_dir)
+            self._image_assignments = staged_changes.live_assignments(
+                staged.get("image"), self._image_slots_by_rel)
         else:
             self._image_assignments = {
                 rel: rep for rel, rep in self._image_assignments.items()
@@ -3724,6 +3781,7 @@ class MainWindow:
         if not path:
             return
         self._image_assignments[rel] = path
+        self._save_staged_changes()
         self._refresh_image_list()
         if rel == self._image_current_rel:
             self._image_render_preview(rel)
@@ -3796,6 +3854,7 @@ class MainWindow:
         rel = self._image_selected_rel()
         if rel is not None and rel in self._image_assignments:
             del self._image_assignments[rel]
+            self._save_staged_changes()
             self._refresh_image_list()
             if rel == self._image_current_rel:
                 self._image_render_preview(rel)
@@ -3869,6 +3928,56 @@ class MainWindow:
         if not assignments:
             return None
         return (dict(self._image_slots_by_rel), assignments)
+
+    # ---- Staged-changes persistence (survives quit / relaunch) -------
+    # The Replace tabs keep each assignment in memory and apply it at Write;
+    # this mirrors the whole set into a .staged_changes.json sidecar in the
+    # assets folder so closing the app no longer loses pending edits.  See
+    # core.staged_changes.
+
+    def _load_staged_changes(self, assets_dir):
+        """Read the staged-changes sidecar for *assets_dir* (``{}`` if none)."""
+        from ..core import staged_changes
+        return staged_changes.load(assets_dir)
+
+    def _audio_trim_forced(self):
+        """True when the Trim/pad checkbox is force-disabled for this plugin
+        (size-neutral formats like Spike 2) — so a restore must not flip it."""
+        cb = getattr(self, "_audio_trim_cb", None)
+        try:
+            return cb is not None and str(cb.cget("state")) == "disabled"
+        except tk.TclError:
+            return False
+
+    def _save_staged_changes(self):
+        """Persist the current Replace assignments for the active assets folder.
+
+        Writes the audio/video/image sections for whichever tabs are currently
+        live for that folder (their scan matches it); sections for tabs not yet
+        scanned for this folder are preserved from the existing sidecar so one
+        tab's save never wipes another's pending edits.  Best-effort — any I/O
+        failure is swallowed by core.staged_changes.save."""
+        from ..core import staged_changes
+        assets_dir = (self.write_assets_var.get() or "").strip()
+        if not assets_dir or not os.path.isdir(assets_dir):
+            return
+
+        def _live(scan_dir):
+            return bool(scan_dir) and (
+                os.path.normcase(os.path.normpath(scan_dir))
+                == os.path.normcase(os.path.normpath(assets_dir)))
+
+        data = staged_changes.load(assets_dir)
+        if _live(self._audio_scan_dir):
+            data["audio"] = dict(self._audio_assignments)
+            data["audio_loop"] = dict(self._audio_loop_flags)
+            data["audio_trim"] = bool(self.audio_trim_var.get())
+        if _live(self._video_scan_dir):
+            data["video"] = dict(self._video_assignments)
+            data["video_trim"] = bool(self.video_trim_var.get())
+        if _live(self._image_scan_dir):
+            data["image"] = dict(self._image_assignments)
+        staged_changes.save(assets_dir, data)
 
     # ==================================================================
     # Replace Text tab — edit the player-facing on-screen strings Extract
@@ -4923,6 +5032,13 @@ class MainWindow:
             self._install_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
         else:
             self._install_frame.pack_forget()
+
+        # Flash-image action (Stern Spike 2) — write a whole pre-built image
+        # onto a card.  Independent of the Build/Write destination toggle.
+        if caps.flash_image:
+            self._flash_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+        else:
+            self._flash_frame.pack_forget()
 
         # Refresh detect badges (file might already be selected from
         # the previous manufacturer's settings — unusual but possible).
@@ -6376,6 +6492,31 @@ class MainWindow:
                 label.pack_forget()
 
     # ------------------------------------------------------------------
+    # Flash-image dialog (caps.flash_image plugins, e.g. Stern Spike 2)
+    # ------------------------------------------------------------------
+
+    def _open_flash_dialog(self):
+        """Open the modal that collects (image, target card) for a flash.
+
+        The dialog hands the choice to the app's ``on_flash_image`` callback,
+        which runs the flash through the normal status area.  Refuses while a
+        run is in flight (the status area is busy)."""
+        if self._on_flash_image is None:
+            return
+        if self._is_running():
+            messagebox.showinfo(
+                "Busy",
+                "Finish or cancel the current operation before flashing a "
+                "card.")
+            return
+        from .flash_dialog import FlashImageDialog
+        FlashImageDialog(
+            self._tk_root(),
+            manufacturer=self._current_mfr,
+            theme_name=self._current_theme,
+            on_flash=self._on_flash_image)
+
+    # ------------------------------------------------------------------
     # BOF update-version date field
     # ------------------------------------------------------------------
 
@@ -6774,6 +6915,17 @@ class MainWindow:
         for lbl, name in zip(labels, phases):
             lbl.configure(text=f"○ {name}", foreground=c["gray"])
         self._progress_bar["value"] = 0
+
+    def set_write_phases(self, phases):
+        """Swap the Write phase row to an arbitrary ``phases`` tuple and reset
+        it to all-pending — used for the flash-image run, whose Check/Write/
+        Flush steps differ from the standard Build/Direct-SD write phases.  The
+        next manufacturer or source change restores the standard tuple via
+        ``apply_manufacturer`` / ``_refresh_extract_phases``."""
+        if not phases:
+            return
+        self._rebuild_phase_steps(self._extract_phases, phases)
+        self.reset_steps(mode="write")
 
     def show_chained_phases(self, phases):
         """Swap the Extract phase row to an arbitrary ``phases`` tuple — the

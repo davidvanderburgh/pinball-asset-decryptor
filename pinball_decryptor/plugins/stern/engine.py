@@ -1440,16 +1440,20 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
     budget; it is space-padded to the exact original length so the file size and
     every other offset stay byte-identical.
 
-    Returns ``(writes, n_strings)`` where ``n_strings`` is the number of unique
-    (radium, original) strings actually patched."""
+    Returns ``(writes, n_strings, overlays)`` where ``n_strings`` is the number
+    of unique (radium, original) strings actually patched and ``overlays`` is
+    ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
+    inode, so the caller can recompute its ``.sidx`` digest from the patched
+    content."""
     from . import radium as _radium
 
     edits = _changed_radium_text(assets_dir)
     if not edits:
-        return [], 0
+        return [], 0, {}
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
 
     writes = []
+    overlays = {}   # i_block -> (node, {file_off: bytes})
     n_strings = 0
     for card_path, pairs in edits.items():
         if cancel():
@@ -1459,6 +1463,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
             log("Display text: radium %s wasn't found on the card; %d edit(s) "
                 "skipped." % (card_path, len(pairs)), "warning")
             continue
+        ib = bytes(node["i_block"])
         data = reader.read_file_bytes(node)
         occ_by_text = {}
         for e in _radium.enumerate_strings(data):
@@ -1480,18 +1485,19 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
                 log("Display text in %s: \"%s\" wasn't found in the current "
                     "radium; skipped." % (card_path, original), "warning")
                 continue
-            payload = new_bytes.ljust(orig_len, b" ")
+            full = new_bytes.ljust(orig_len, b" ")
             for e in occs:
                 if e["length"] != orig_len:
                     continue                       # paranoia: length must match
+                payload = full
                 for disk, n in reader.disk_ranges(node, e["offset"], orig_len):
                     writes.append((disk, payload[:n]))
                     payload = payload[n:]
-                payload = new_bytes.ljust(orig_len, b" ")   # reset for next occ
+                overlays.setdefault(ib, (node, {}))[1][e["offset"]] = full
             n_strings += 1
             log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s))."
                 % (card_path, original, replacement, len(occs)), "info")
-    return writes, n_strings
+    return writes, n_strings, overlays
 
 
 def _fit_image_payload(staged_path, target, work_dir, log):
@@ -1702,10 +1708,14 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     ``(writes, n_images)``.
 
     Size-neutral by construction: the PNG is the full padded block grid, so
-    re-encoding yields exactly ``length`` bytes at ``data_offset``."""
+    re-encoding yields exactly ``length`` bytes at ``data_offset``.
+
+    Returns ``(writes, n_images, overlays)`` where ``overlays`` is
+    ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
+    inode, so the caller can recompute its ``.sidx`` digest."""
     edits = _changed_radium_images(assets_dir, baseline)
     if not edits:
-        return [], 0
+        return [], 0, {}
     from . import dds as _dds
     try:
         from PIL import Image
@@ -1713,10 +1723,11 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     except Exception as e:
         log("Pillow/numpy unavailable (%s); radium-image edits skipped." % e,
             "warning")
-        return [], 0
+        return [], 0, {}
     nodes = _resolve_card_nodes(
         reader, list({rp for (_o, rp, *_r) in edits}), cancel)
     writes = []
+    overlays = {}                  # i_block -> (node, {file_off: bytes})
     encoded = {}                   # staged PNG path -> block bytes (one PNG, many occurrences)
     patched_outputs = set()
     for output, radium_path, staged, data_off, length, pad_w, pad_h, fmt in edits:
@@ -1752,12 +1763,13 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
         for disk, cnt in reader.disk_ranges(node, data_off, length):
             writes.append((disk, rest[:cnt]))
             rest = rest[cnt:]
+        overlays.setdefault(bytes(node["i_block"]), (node, {}))[1][data_off] = payload
         patched_outputs.add(output)
     n = len(patched_outputs)
     if n:
         log("Patching %d edited radium image(s) across %d on-card occurrence(s)."
             % (n, len({(o, ro, do) for (o, ro, _s, do, *_r) in edits})), "info")
-    return writes, n
+    return writes, n, overlays
 
 
 def _overlay_digests(reader, disk, node, overlays):
@@ -1789,15 +1801,27 @@ def _overlay_digests(reader, disk, node, overlays):
     return h.digest(), m.digest()
 
 
+def _merge_radium_overlays(dst, src):
+    """Merge ``{i_block: (node, {file_off: bytes})}`` *src* into *dst* in place.
+
+    A single ``scene.radium`` may receive both display-text and embedded-image
+    edits; combining their file-relative overlays under one inode key lets the
+    ``.sidx`` refresh recompute that radium's digest from the fully-patched
+    content in one pass."""
+    for ib, (node, ov) in src.items():
+        slot = dst.setdefault(ib, (node, {}))
+        slot[1].update(ov)
+
+
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
-                         full_repl, has_radium_text, log):
+                         full_repl, radium_overlays, log):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
     Covers ``image.bin`` (cat-0 audio), the per-song ``image-scNN.bin`` banks,
-    and full-replacement assets (video / image / texture).  Radium text / radium-
-    image edits aren't manifest-updated yet — surfaced as a warning so the user
-    knows those specific cards still need re-validation."""
+    full-replacement assets (video / image / texture), and in-place ``scene.radium``
+    edits (display text + embedded images) via their file-relative
+    ``radium_overlays`` (``{i_block: (node, {file_off: bytes})}``)."""
     from . import sidx
     sidx_path, sidx_node = sidx.find_sidx(reader)
     if sidx_node is None:
@@ -1805,7 +1829,7 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
             "refresh (card may report a validation error).", "warning")
         return []
     sdata = reader.read_file_bytes(sidx_node)
-    recs, _hdr_crc = sidx.parse_records(sdata)
+    recs, _hdr_crc, sidx_fmt = sidx.parse_records(sdata)
     if not recs:
         log("Unrecognised .sidx manifest format — skipping SD-validation refresh.",
             "warning")
@@ -1835,6 +1859,12 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         p = ipath.get(bytes(node["i_block"]))
         if p:
             modified[p] = sidx.digests(bytes(payload))
+    # In-place scene.radium edits (display text + embedded images): recompute the
+    # digest by streaming each patched inode with its file-relative overlays.
+    for ib, (node, ov) in (radium_overlays or {}).items():
+        p = ipath.get(ib)
+        if p:
+            modified[p] = _overlay_digests(reader, disk_f, node, ov)
 
     out = []
     n_ok = 0
@@ -1843,17 +1873,21 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         if po is None:
             log("  .sidx has no record for %s — left stale." % path, "warning")
             continue
-        for foff, b in sidx.record_field_writes(po, hm, md):
+        for foff, b in sidx.record_field_writes(po, hm, md, sidx_fmt):
             for d, n in reader.disk_ranges(sidx_node, foff, len(b)):
                 out.append((d, b[:n]))
                 b = b[n:]
         n_ok += 1
     if n_ok:
-        log("Refreshed %d SD-validation manifest record(s) (HMAC-SHA1 + MD5)."
-            % n_ok, "success")
-    if has_radium_text:
-        log("Note: replaced display-text / radium images are not yet manifest-"
-            "updated — that specific card may still need re-validation.", "warning")
+        log("Refreshed %d %s SD-validation manifest record(s) (HMAC-SHA1 + MD5)."
+            % (n_ok, sidx_fmt), "success")
+        # NOTE: the manifest header word @0x34 (live on FINF cards, 0xffffffff on
+        # FI64) is deliberately left as-is.  Firmware RE (2026-06-25) disassembled
+        # both on-card .sidx parsers (/usr/local/bin/spk and spike_menu/game) and
+        # the firmware ELF: none of them read offset 0x34, and a hardware test that
+        # forced @0x34 -> 0xffffffff still failed — so @0x34 is not an enforced
+        # integrity word.  The per-file HMAC-SHA1+MD5 records refreshed above are
+        # the actual validated digests.
     return out
 
 
@@ -1978,6 +2012,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         progress, cancel)
                     if audio_patches is None:
                         return None, None
+                    # Keep the firmware's master-directory forward-chain intact:
+                    # restore the bytes its decode consumes, then verify every
+                    # sound still derives valid codec params (else abort — the
+                    # card would reboot on audio).  See _restore_masterdir_consumed.
+                    if audio_patches and os.environ.get(
+                            "PAD_STERN_SKIP_MASTERDIR_FIX") != "1":
+                        audio_patches = _restore_masterdir_consumed(
+                            gr_path, img_path, audio_patches, log, progress,
+                            cancel)
+                        if audio_patches is None:
+                            return None, None
+                        _assert_param_integrity(gr_path, img_path, audio_patches,
+                                                params, np, log, work)
 
                 # Per-song music banks (image-scNN.bin) — re-encode each edited
                 # song back into its bank (own fresh CatEmu per bank).
@@ -1995,14 +2042,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if reader is None:
             reader, _fw_node, _img_node = _locate(disk_f, parts)
 
+        # Radium edits patch the scene.radium inode in place; collect per-inode
+        # file-relative overlays alongside the flat disk writes so the .sidx
+        # refresh below can recompute each patched radium's digest.
+        radium_overlays = {}   # i_block -> (node, {file_off: bytes})
+
         # Edited LCD display text -> already-flat (disk_offset, bytes) writes.
         text_writes = []
         n_text = 0
         if text_edits:
             if progress:
                 progress(95, 100, "Preparing display text...")
-            text_writes, n_text = _radium_text_writes(
+            text_writes, n_text, _t_ov = _radium_text_writes(
                 reader, assets_dir, log, cancel)
+            _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None
 
@@ -2013,8 +2066,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if radimg_edits:
             if progress:
                 progress(96, 100, "Preparing radium images...")
-            radimg_writes, n_radimg = _radium_image_writes(
+            radimg_writes, n_radimg, _i_ov = _radium_image_writes(
                 reader, assets_dir, baseline, log, cancel)
+            _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
                 return None, None
 
@@ -2084,7 +2138,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         try:
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_patches, music_patches,
-                full_repl, bool(text_writes or radimg_writes), log)
+                full_repl, radium_overlays, log)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
@@ -2476,6 +2530,118 @@ def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
     return patches, sorted(skipped)
 
 
+def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
+                                cancel=None):
+    """Keep each re-encoded body byte-identical to stock in the bytes the
+    firmware's master-directory decode CONSUMES.
+
+    ``MASTERDIR_DECODE`` is one continuous, forward-chained pass over every cat-0
+    sound: it reads ~1 KB out of each sound's body into a running accumulator that
+    sets the codec scale / predictor of that **and every later** sound.  The codec
+    is many-to-one, so a re-encode that decodes bit-exact still produces *different*
+    body bytes; those changed bytes desync the chain, so every later sound is then
+    decoded with the wrong codec and plays as garbage — the machine reboots the
+    instant any audio plays.  (Reverse-engineered + proven offline: restoring the
+    consumed bytes drops downstream codec-param shifts from ~all sounds to zero.)
+
+    Fix: after encoding, capture the exact body offsets the decode pass reads (via
+    a memory-read hook over each modded sound's extent) and overwrite them with the
+    original bytes, so the chain reads identical input.  The consumed bytes overlap
+    real audio, so that scattered sub-window of the replaced sound reverts toward
+    the original — acceptable for a call-out swap.  Mutates and returns *patches*
+    (``{body_off: body}``); returns ``None`` if cancelled.
+    """
+    if not patches:
+        return patches
+    from unicorn import UC_HOOK_MEM_READ
+
+    from .spike2 import emulator as EM
+    from .spike2.emulator import Spike2Emu
+    if cancel and cancel():
+        return None
+    if progress:
+        progress(76, 100, "Preserving master-directory integrity...")
+    log("Preserving master-directory forward-chain integrity "
+        "(re-encode keeps the firmware's per-sound decode params valid)...",
+        "info")
+    reads = {off: set() for off in patches}     # body_off -> consumed file offsets
+
+    def _mk(b0, e0, acc):
+        def on_read(mu, access, addr, size, value, ud):
+            o = addr - EM.DESC_BASE
+            for k in range(size):
+                if b0 <= o + k < e0:
+                    acc.add(o + k)
+        return on_read
+
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        for off, body in patches.items():
+            end = off + len(body)
+            emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
+                            begin=(EM.DESC_BASE + off) & ~0xfff,
+                            end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
+        emu.derive_params()         # the real MASTERDIR_DECODE pass
+        for off, body in patches.items():
+            stock = bytes(emu.mm[off:off + len(body)])
+            b = bytearray(body)
+            for fo in reads[off]:
+                rel = fo - off
+                if 0 <= rel < len(b):
+                    b[rel] = stock[rel]
+            patches[off] = bytes(b)
+            log("  idx@0x%x: preserved %d master-directory byte(s)."
+                % (off, len(reads[off])), "info")
+    finally:
+        emu.close()
+    return patches
+
+
+def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
+                            work_dir):
+    """Write-time safety net: apply *patches* to a temp ``image.bin`` and confirm
+    the firmware's master-directory decode derives the **same** codec scale /
+    predictor for every sound as the stock card.  A non-empty shift list means the
+    forward chain is still broken (a card that would reboot on audio), so we raise
+    rather than ship it.  Set ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1`` to skip."""
+    if not patches or os.environ.get("PAD_STERN_SKIP_MASTERDIR_VERIFY") == "1":
+        return
+    import shutil
+
+    from .spike2.emulator import Spike2Emu
+    tmp = os.path.join(work_dir, "image_verify.bin")
+    shutil.copyfile(img_path, tmp)
+    try:
+        with open(tmp, "r+b") as f:
+            for off, body in patches.items():
+                f.seek(off)
+                f.write(body)
+        emu = Spike2Emu(gr_path, tmp)
+        try:
+            emu.boot()
+            rows = emu.derive_params()
+        finally:
+            emu.close()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    stock = {p["idx"]: (p["scale"], p["pred16"]) for p in params}
+    cur = {r["idx"]: (r["scale"], r["pred16"]) for r in rows}
+    shifted = [i for i in stock if i in cur and stock[i] != cur[i]]
+    if shifted:
+        raise RuntimeError(
+            "Master-directory integrity check FAILED: %d of %d sounds would "
+            "decode with the wrong codec parameters (the card would reboot on "
+            "audio). The re-encode could not preserve the firmware's "
+            "forward-chain; aborting the write rather than producing a broken "
+            "card." % (len(shifted), len(stock)))
+    log("Master-directory integrity verified: all %d sounds keep valid decode "
+        "parameters." % len(stock), "success")
+
+
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel):
     """Re-encode every edited cat-0 sound to its body bytes — parallel across
@@ -2529,6 +2695,7 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
     from .spike2.codec import GenRecover, StereoRecover
     patches, skipped = [], []
     emu = CatEmu(gr_path, img_path)
+    rows = []
     try:
         emu.boot()
         emu.set_category_file(sc_path)
@@ -2553,7 +2720,101 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
             patches.append((cid, idx, p["body_off"], bytes(body)))
     finally:
         emu.close()
+    # The bank's MASTERDIR_DECODE is the same forward-chained pass as cat-0
+    # (just over the bank file), so a re-encoded song desyncs the codec params
+    # of later songs IN THAT BANK.  Restore the masterdir-consumed bytes and
+    # verify the chain stays intact (else the music would reboot the machine).
+    if patches and os.environ.get("PAD_STERN_SKIP_MASTERDIR_FIX") != "1":
+        patches = _restore_bank_consumed(gr_path, img_path, rev, cid, sc_path,
+                                         patches)
+        _assert_bank_integrity(gr_path, img_path, rev, cid, sc_path, patches,
+                               rows)
     return patches, skipped
+
+
+def _restore_bank_consumed(gr_path, img_path, rev, cid, sc_path, patches):
+    """Bank twin of :func:`_restore_masterdir_consumed`: keep each re-encoded
+    song's masterdir-consumed bytes identical to stock so the bank's forward
+    chain reads the same input.  *patches* = ``[(cid, idx, body_off, body), ...]``;
+    returns the same with each body's consumed bytes restored."""
+    from unicorn import UC_HOOK_MEM_READ
+
+    from .spike2.category import DESC2, CatEmu
+    reads = {bo: set() for (_c, _i, bo, _b) in patches}
+
+    def _mk(b0, e0, acc):
+        def on_read(mu, access, addr, size, value, ud):
+            o = addr - DESC2
+            for k in range(size):
+                if b0 <= o + k < e0:
+                    acc.add(o + k)
+        return on_read
+
+    emu = CatEmu(gr_path, img_path)
+    try:
+        emu.boot()
+        emu.set_category_file(sc_path)
+        for (_c, _i, bo, body) in patches:
+            emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(bo, bo + len(body), reads[bo]),
+                            begin=(DESC2 + bo) & ~0xfff,
+                            end=((DESC2 + bo + len(body)) + 0xfff) & ~0xfff)
+        emu._derive_cat(cid, rev)
+        out = []
+        for (c, idx, bo, body) in patches:
+            stock = bytes(emu._mm_cat[bo:bo + len(body)])
+            b = bytearray(body)
+            for fo in reads[bo]:
+                rel = fo - bo
+                if 0 <= rel < len(b):
+                    b[rel] = stock[rel]
+            out.append((c, idx, bo, bytes(b)))
+        return out
+    finally:
+        emu.close()
+
+
+def _assert_bank_integrity(gr_path, img_path, rev, cid, sc_path, patches,
+                           stock_rows):
+    """Bank twin of :func:`_assert_param_integrity`: apply *patches* to a temp
+    copy of the bank and confirm every song still derives the same codec params,
+    else raise (a card that would reboot on that bank's music).  Skipped by
+    ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1``."""
+    if not patches or os.environ.get("PAD_STERN_SKIP_MASTERDIR_VERIFY") == "1":
+        return
+    import shutil
+
+    from .spike2.category import CatEmu
+    fd, tmp = tempfile.mkstemp(suffix=".scbin")
+    os.close(fd)
+    try:
+        shutil.copyfile(sc_path, tmp)
+        with open(tmp, "r+b") as f:
+            for (_c, _i, bo, body) in patches:
+                f.seek(bo)
+                f.write(body)
+        emu = CatEmu(gr_path, img_path)
+        try:
+            emu.boot()
+            emu.set_category_file(tmp)
+            rows = emu._derive_cat(cid, rev) or []
+        finally:
+            emu.close()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+    def _key(r):
+        return (r["scale"], bytes(r["_rawobj"][0x14:0x1e]))
+    stock = {r["idx"]: _key(r) for r in stock_rows}
+    cur = {r["idx"]: _key(r) for r in rows}
+    shifted = [i for i in stock if i in cur and stock[i] != cur[i]]
+    if shifted:
+        raise RuntimeError(
+            "Music bank %d integrity check FAILED: %d of %d songs would decode "
+            "with the wrong codec parameters (the card would reboot on that "
+            "bank's music); aborting the write." % (cid, len(shifted), len(stock)))
 
 
 def _bank_encode_worker(args):

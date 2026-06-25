@@ -198,3 +198,135 @@ def test_version_field_manual_override_and_validation(
     # Garbage is rejected.
     w.write_version_date_var.set("not-a-date")
     assert w.write_version_validation_error() is not None
+
+
+# ---------------------------------------------------------------------------
+# Flash-image action (capabilities.flash_image — Stern Spike 2)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Staged-changes persistence (.staged_changes.json — pending Replace
+# assignments survive quitting + re-opening the app)
+# ---------------------------------------------------------------------------
+
+def _seed_audio_assets(tmp_path):
+    """An assets folder with two .wav slots + a .checksums.md5 baseline."""
+    (tmp_path / "audio").mkdir()
+    (tmp_path / "audio" / "idx0001.wav").write_bytes(b"RIFF\x00\x00\x00\x00")
+    (tmp_path / "audio" / "idx0002.wav").write_bytes(b"RIFF\x00\x00\x00\x00")
+    (tmp_path / ".checksums.md5").write_text("", encoding="utf-8")
+    return str(tmp_path)
+
+
+def _scan_audio(window, assets_dir):
+    """Synchronously scan + populate the audio tab for *assets_dir* (bypasses
+    the worker thread so the test is deterministic)."""
+    from pinball_decryptor.core.audio_slots import scan_audio_slots
+    slots = scan_audio_slots(assets_dir)
+    window._audio_scan_id += 1
+    window._populate_audio_after_scan(slots, window._audio_scan_id, assets_dir)
+    return slots
+
+
+def test_audio_assignment_persists_across_relaunch(
+        app, manufacturers_by_key, tmp_path):
+    """Assigning a replacement writes the sidecar, and a fresh scan of the same
+    folder (simulating a quit + re-open) restores the assignment."""
+    from pinball_decryptor.core import staged_changes
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_audio_assets(tmp_path)
+    rep = tmp_path / "new_song.wav"
+    rep.write_bytes(b"RIFF\x00\x00\x00\x00")
+
+    w.write_assets_var.set(assets)
+    _scan_audio(w, assets)
+    # Assign as the GUI handler does, then persist.
+    w._audio_assignments["audio/idx0001.wav"] = str(rep)
+    w._save_staged_changes()
+
+    saved = staged_changes.load(assets)
+    assert saved["audio"]["audio/idx0001.wav"] == str(rep)
+
+    # Simulate a relaunch: blow away in-memory state, re-scan the folder.
+    w._audio_assignments = {}
+    w._audio_scan_dir = ""
+    _scan_audio(w, assets)
+    assert w._audio_assignments == {"audio/idx0001.wav": str(rep)}
+
+
+def test_missing_replacement_not_restored(
+        app, manufacturers_by_key, tmp_path):
+    """A persisted replacement whose source file was deleted is dropped on
+    restore (not surfaced as a broken assignment)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_audio_assets(tmp_path)
+    rep = tmp_path / "gone.wav"
+    rep.write_bytes(b"RIFF\x00\x00\x00\x00")
+    w.write_assets_var.set(assets)
+    _scan_audio(w, assets)
+    w._audio_assignments["audio/idx0001.wav"] = str(rep)
+    w._save_staged_changes()
+
+    rep.unlink()                      # user deleted the replacement file
+    w._audio_assignments = {}
+    w._audio_scan_dir = ""
+    _scan_audio(w, assets)
+    assert w._audio_assignments == {}
+
+
+def test_save_preserves_other_tabs_sections(
+        app, manufacturers_by_key, tmp_path):
+    """Saving from the audio tab must not clobber a video section persisted
+    while the video tab was scanned for the same folder."""
+    from pinball_decryptor.core import staged_changes
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_audio_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    # Pre-seed a video section (as if the video tab had saved earlier).
+    staged_changes.save(assets, {"video": {"video/intro.mov": "C:/x.mp4"}})
+
+    _scan_audio(w, assets)            # only the audio tab is live for this folder
+    w._audio_assignments["audio/idx0002.wav"] = str(tmp_path / "audio"
+                                                     / "idx0001.wav")
+    w._save_staged_changes()
+
+    saved = staged_changes.load(assets)
+    assert saved["video"] == {"video/intro.mov": "C:/x.mp4"}   # untouched
+    assert "audio/idx0002.wav" in saved["audio"]
+
+
+def test_flash_frame_shown_for_stern_hidden_otherwise(
+        app, manufacturers_by_key):
+    # winfo_manager() == "pack" means the Flash-image frame is laid out on the
+    # Write tab (winfo_ismapped() reads 0 unless that tab is raised).
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    # Pin the Spike 2 era: a saved Whitestar MAME-zip Extract input would flip
+    # the era during the badge refresh (flashing is a Spike-2-only capability,
+    # correctly hidden for the capture-only Whitestar era — see below).  Clear
+    # the input + force the era so the assertion is deterministic.
+    app.window.extract_input_var.set("")
+    stern.set_era("spike2")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    assert app.window._flash_frame.winfo_manager() == "pack"
+
+    # Whitestar (MAME capture) era has no flash capability → frame hidden.
+    stern.set_era("whitestar")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    assert app.window._flash_frame.winfo_manager() == ""
+
+    app._on_back_to_picker()
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assert app.window._flash_frame.winfo_manager() == ""

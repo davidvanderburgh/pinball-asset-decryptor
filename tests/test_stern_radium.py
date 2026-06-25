@@ -61,10 +61,11 @@ class _FakeReader:
         # files: {card_path: bytes}
         self._files = files
 
-    def iter_regular_files(self, min_size=1):
+    def iter_regular_files(self, min_size=1, max_depth=None):
         for i, (path, data) in enumerate(self._files.items()):
             if len(data) >= min_size:
-                yield path, i + 11, {"size": len(data), "_path": path}
+                yield path, i + 11, {"size": len(data), "_path": path,
+                                     "i_block": path.encode()}
 
     def read_file_bytes(self, node):
         return self._files[node["_path"]]
@@ -173,7 +174,7 @@ def test_replace_patches_all_occurrences_size_neutral(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
 
-    writes, n = engine._radium_text_writes(
+    writes, n, _ov = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     # one write per occurrence (4), each exactly the original byte length
@@ -195,7 +196,7 @@ def test_replace_rejects_over_length(tmp_path):
     _write_tsv(tmp_path, [("/g/a.radium", original, "EXTRA BALL LIT")])  # longer
 
     msgs = []
-    writes, n = engine._radium_text_writes(
+    writes, n, _ov = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == []
@@ -211,7 +212,7 @@ def test_replace_round_trip_reenumerate_reads_new_value(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "SHOOT RIGHT")])
 
-    writes, n = engine._radium_text_writes(
+    writes, n, _ov = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     patched = _apply(buf, writes)
@@ -229,8 +230,82 @@ def test_replace_skips_missing_radium(tmp_path):
     reader = _FakeReader({"/g/present.radium": _make_radium("HELLO WORLD", 1)})
     _write_tsv(tmp_path, [("/g/missing.radium", "HELLO WORLD", "BYE WORLD")])
     msgs = []
-    writes, n = engine._radium_text_writes(
+    writes, n, _ov = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == [] and n == 0
     assert any(lvl == "warning" for lvl, _m in msgs)
+
+
+def test_radium_text_writes_emit_digest_overlays(tmp_path):
+    """The overlays a text edit returns carry the file-relative new bytes the
+    .sidx refresh needs to recompute the radium's digest."""
+    original = "CLOCK NOT SET"
+    buf = _make_radium(original, 3)
+    reader = _FakeReader({"/g/a.radium": buf})
+    _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
+    writes, n, ov = engine._radium_text_writes(
+        reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
+    assert n == 1
+    # one overlay entry per patched inode (i_block keyed), with one file-offset
+    # entry per occurrence — and applying them reproduces the flat disk writes
+    # (identity offset map in the fake reader).
+    assert set(ov) == {b"/g/a.radium"}
+    _node, off_map = ov[b"/g/a.radium"]
+    assert len(off_map) == 3
+    expect = "OK".encode().ljust(len(original), b" ")
+    assert all(v == expect for v in off_map.values())
+    assert {off for off, _b in writes} == set(off_map)
+
+
+def test_compute_sidx_writes_refreshes_radium_record():
+    """End-to-end: a scene.radium overlay rewrites that file's .sidx record with
+    the HMAC-SHA1 + MD5 of the PATCHED content (covers the radium gap + FINF)."""
+    import io
+    from pinball_decryptor.plugins.stern import sidx
+
+    radium_content = b"RADIUM-ORIGINAL-CONTENT-" + b"\x00" * 100
+    radium_ib, sidx_ib = b"radium-ib", b"sidx-ib"
+
+    # Minimal FINF .sidx: one record for "g/scene.radium".
+    paths = b"g/scene.radium\x00"
+    body = b"STRS" + struct.pack("<I", len(paths)) + paths
+    body += b"FINF" + struct.pack("<I", 60) + bytes(60)
+    hdr = bytearray(0x48); hdr[0:4] = b"SIDX"
+    struct.pack_into("<I", hdr, 0x34, 0xffffffff)
+    sidx_content = bytes(hdr) + body
+
+    R, X = 0, 0x10000                       # disk layout: radium @0, sidx @64K
+    disk = io.BytesIO(b"\x00" * (X + len(sidx_content) + 16))
+    disk.seek(R); disk.write(radium_content)
+    disk.seek(X); disk.write(sidx_content)
+    radium_node = {"size": len(radium_content), "i_block": radium_ib, "_b": R}
+    sidx_node = {"size": len(sidx_content), "i_block": sidx_ib, "_b": X}
+
+    class FakeReader:
+        def iter_regular_files(self, min_size=1, max_depth=None):
+            yield "/g/scene.radium", 11, radium_node
+            yield "/spk/index/title.sidx", 12, sidx_node
+        def read_file_bytes(self, node):
+            return disk.getvalue()[node["_b"]:node["_b"] + node["size"]]
+        def disk_ranges(self, node, off, length):
+            return [(node["_b"] + off, length)]
+
+    new = b"PATCHED!"
+    overlay = {radium_ib: (radium_node, {0: new})}
+    writes = engine._compute_sidx_writes(
+        FakeReader(), disk, None, {}, [], [], overlay, lambda *a, **k: None)
+    assert writes, "expected the radium record to be refreshed"
+
+    # Apply the writes and confirm the record now holds the PATCHED digest.
+    patched = bytearray(radium_content); patched[0:len(new)] = new
+    exp_h, exp_m = sidx.digests(bytes(patched))
+    recs, _crc, fmt = sidx.parse_records(sidx_content)
+    po = recs["g/scene.radium"]
+    buf = bytearray(disk.getvalue())
+    for d, b in writes:
+        buf[d:d + len(b)] = b
+    rec = bytes(buf[X + po:X + po + 60])
+    assert fmt == "FINF"
+    assert rec[21:41] == exp_h
+    assert rec[41:57] == exp_m

@@ -275,7 +275,7 @@ def test_changed_and_writes_radium_images_size_neutral(tmp_path):
     assert len(edits) == 1 and edits[0][3:7] == (data_off, length, pw, ph)
 
     reader = _FakeRadiumReader("/lz/x/scene.radium", size=data_off + length)
-    writes, n = engine._radium_image_writes(
+    writes, n, _ov = engine._radium_image_writes(
         reader, str(tmp_path), baseline, lambda *a, **k: None, lambda: False)
     assert n == 1
     assert sum(len(b) for _, b in writes) == length      # size-neutral

@@ -40,7 +40,14 @@ class PhysicalDrive:
     device_path: str   # exact OS-native path the pipeline accepts
     model: str         # human-readable model (e.g. "Samsung SSD 970")
     size_bytes: int    # 0 if unknown
-    bus_type: str = "" # "USB" / "SATA" / "NVMe" / "" if unknown
+    bus_type: str = "" # "USB" / "SATA" / "NVMe" / "SD" / "" if unknown
+    # Human-recognisable mount hint for the picker — Windows drive
+    # letters ("E:" / "E: F:") for whatever partitions of this disk are
+    # mounted.  Empty when none are lettered (e.g. an all-ext4 Spike card
+    # whose data partitions Windows can't read) or on platforms where
+    # letters don't apply.  Surfaced in display so users who think in
+    # drive letters can still spot their card.
+    mount_label: str = ""
 
     @property
     def location(self):
@@ -62,7 +69,8 @@ class PhysicalDrive:
         """Single-line label shown in the drive-picker dropdown."""
         size = (f"{self.size_bytes / 1e9:.1f} GB"
                 if self.size_bytes else "size ?")
-        return (f"{self.model} ({size}, {self.location}) "
+        letters = f" [{self.mount_label}]" if self.mount_label else ""
+        return (f"{self.model} ({size}, {self.location}){letters} "
                 f"— {self.device_path}")
 
 
@@ -72,13 +80,15 @@ class PhysicalDrive:
 # ----------------------------------------------------------------------
 
 def _parse_windows_get_disk(raw_output):
-    """Parse ``num|model|size|bustype`` lines from Get-Disk into drives.
+    """Parse ``num|model|size|bustype[|letters]`` lines into drives.
 
     PowerShell BusType values are integers wrapped in the
     Microsoft.Management.Infrastructure name table; calling .ToString()
-    gives them as ``USB``, ``SATA``, ``NVMe``, etc.  Junk lines and
-    blanks are skipped silently — a broken Get-Disk shouldn't take
-    down the picker.
+    gives them as ``USB``, ``SATA``, ``NVMe``, etc.  The optional fifth
+    field is a comma-joined list of mounted drive letters for the disk
+    (e.g. ``E,F``) — older callers emit only four fields, so it's
+    treated as optional.  Junk lines and blanks are skipped silently —
+    a broken Get-Disk shouldn't take down the picker.
     """
     out = []
     if not raw_output:
@@ -87,7 +97,7 @@ def _parse_windows_get_disk(raw_output):
         line = line.strip()
         if not line or "|" not in line:
             continue
-        fields = line.split("|", 3)
+        fields = line.split("|", 4)
         if len(fields) < 4:
             continue
         try:
@@ -97,9 +107,14 @@ def _parse_windows_get_disk(raw_output):
             continue
         model = fields[1].strip() or "(unknown model)"
         bus = fields[3].strip()
+        letters_raw = fields[4].strip() if len(fields) >= 5 else ""
+        # "E,F" → "E: F:"; tolerate stray whitespace/empties.
+        mount = " ".join(f"{c.strip()}:" for c in letters_raw.split(",")
+                         if c.strip())
         out.append(PhysicalDrive(
             device_path=f"\\\\.\\PHYSICALDRIVE{num}",
-            model=model, size_bytes=size, bus_type=bus))
+            model=model, size_bytes=size, bus_type=bus,
+            mount_label=mount))
     return out
 
 
@@ -212,8 +227,14 @@ def _list_physical_drives_windows():
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "Get-Disk | ForEach-Object { "
-             "'{0}|{1}|{2}|{3}' -f $_.Number, $_.FriendlyName, "
-             "$_.Size, $_.BusType }"],
+             "$n = $_.Number; $dl = ''; "
+             "try { $dl = ((Get-Partition -DiskNumber $n "
+             "-ErrorAction SilentlyContinue | "
+             "Where-Object { $_.DriveLetter -match '[A-Za-z]' } | "
+             "Select-Object -ExpandProperty DriveLetter) -join ',') } "
+             "catch { }; "
+             "'{0}|{1}|{2}|{3}|{4}' -f $n, $_.FriendlyName, "
+             "$_.Size, $_.BusType, $dl }"],
             capture_output=True, text=True, timeout=15,
             creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
@@ -283,15 +304,93 @@ def list_physical_drives():
     return _list_physical_drives_linux()
 
 
-def pick_best_game_ssd(drives):
-    """Return the drive most likely to be the JJP game SSD, or None.
+# Above this size an external drive is almost certainly a backup
+# SSD/HDD, not a game SD card — Spike 2 cards top out well under this.
+# Used by the SD-card picker so a multi-TB Sabrent never gets auto-
+# selected as the write target just because it's the biggest external.
+_SD_CARD_MAX_BYTES = 128 * 1024 ** 3  # 128 GB
 
-    JJP game SSDs are removable — users pull the SSD out of the
-    machine and plug it into their PC over USB.  So the heuristic
-    is: prefer USB/external drives; if exactly one external is
-    present, that's our answer with high confidence.  If multiple
-    externals are present we still pick the largest one but flag
-    the ambiguity to the caller so it can mention it in the log.
+# Model-string hints that a drive is a memory-card reader.  ``CRW`` =
+# "card reader/writer" (e.g. "Generic- USB3.0 CRW -SD"); the trailing
+# "-SD" matches the bare ``sd`` token.  ``\bsd\b`` will NOT match inside
+# "SSD" (no word boundary), so backup SSDs don't trip this.
+_CARD_READER_RE = re.compile(
+    r'\b(micro\s*sd|sdhc|sdxc|sdcard|sd|mmc|crw|card\s*reader|'
+    r'card\s*writer|cardreader)\b',
+    re.IGNORECASE)
+
+
+def _looks_like_card_reader(d):
+    """True if *d* is plausibly a memory-card reader / SD card."""
+    if d.bus_type.upper() in ("SD", "MMC"):
+        return True
+    return bool(_CARD_READER_RE.search(d.model or ""))
+
+
+def _pick_sd_card(drives, externals):
+    """Auto-pick heuristic for plugins whose medium is a small SD card.
+
+    Spike 2 (Stern) ships on an SD card — small removable media, often
+    in a USB card reader sitting alongside large backup SSDs.  Picking
+    the *largest* external (the JJP heuristic) is actively dangerous
+    here: it'll default the write target to a 4 TB backup drive.  So:
+
+      * exactly one card-reader-looking drive → high confidence
+      * the smallest SD-card-sized external   → low confidence
+      * nothing card-sized                     → low confidence, and a
+        loud "connect the card and Refresh" so we never auto-trust a
+        big drive as the write target.
+    """
+    readers = [d for d in externals if _looks_like_card_reader(d)]
+    if len(readers) == 1:
+        d = readers[0]
+        return (d, "high",
+                f"detected an SD-card reader — using {d.device_path}")
+    if len(readers) > 1:
+        best = min(readers, key=lambda d: d.size_bytes or 1 << 62)
+        others = [d.device_path for d in readers if d is not best]
+        return (best, "low",
+                f"multiple card readers connected — picked the smallest "
+                f"({best.device_path}); also seen: {', '.join(others)}")
+
+    # No obvious reader.  An SD card is small, so prefer the smallest
+    # external under the card-size ceiling — never the biggest.
+    small = [d for d in externals
+             if d.size_bytes and d.size_bytes <= _SD_CARD_MAX_BYTES]
+    if small:
+        best = min(small, key=lambda d: d.size_bytes)
+        only_one = len(small) == 1 and len(externals) == 1
+        if only_one:
+            return (best, "high",
+                    f"only one SD-card-sized drive is connected — "
+                    f"using {best.device_path}")
+        return (best, "low",
+                f"picked the smallest external ({best.device_path}, "
+                f"{best.size_bytes / 1e9:.1f} GB) as the likely SD card — "
+                f"confirm it's the card before writing")
+
+    # Every external is large (or sizeless): almost certainly NOT the
+    # card.  Tentatively select the smallest, but be loud about it so
+    # the user plugs the card in rather than writing to a backup drive.
+    pool = externals or drives
+    best = min(pool, key=lambda d: d.size_bytes or 1 << 62)
+    return (best, "low",
+            f"no SD-card-sized drive found — connect the SD card (or its "
+            f"reader) and click Refresh. Tentatively selected the smallest "
+            f"drive ({best.device_path}); verify before writing.")
+
+
+def pick_best_game_ssd(drives, prefer="ssd"):
+    """Return the drive most likely to be the game medium, or None.
+
+    Game media are removable — users pull the SSD/SD out of the machine
+    and plug it into their PC.  The heuristic depends on *prefer*:
+
+      * ``"ssd"`` (default, JJP) — a large removable SSD; prefer USB
+        external and, among several, the largest.
+      * ``"sd_card"`` (Stern Spike 2) — a small SD card in a reader;
+        prefer a card reader / the smallest external, and never high-
+        confidence-select a multi-TB drive.  See :func:`_pick_sd_card`.
 
     Returns ``(drive, confidence, reason)`` where ``confidence`` is
     "high" / "low" and ``reason`` is one short sentence suitable
@@ -301,8 +400,12 @@ def pick_best_game_ssd(drives):
     if not drives:
         return None, None, None
 
+    # Card readers can present as bus type SD/MMC, not just USB.
     externals = [d for d in drives
-                 if d.bus_type.upper() in ("USB",)]
+                 if d.bus_type.upper() in ("USB", "SD", "MMC")]
+    if prefer == "sd_card":
+        return _pick_sd_card(drives, externals)
+
     if len(externals) == 1:
         d = externals[0]
         return (d, "high",

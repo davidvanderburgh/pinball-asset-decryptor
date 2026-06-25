@@ -20,6 +20,7 @@ them — a missing dep is reported by the manufacturer's prerequisite probe.
 """
 
 import hashlib
+import hmac
 import os
 import pickle
 import re
@@ -1759,6 +1760,103 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     return writes, n
 
 
+def _overlay_digests(reader, disk, node, overlays):
+    """Stream *node*'s bytes (from *disk* via the ext4 map), applying *overlays*
+    (``{file_offset: bytes}``) in place, and return ``(HMAC-SHA1(K), MD5)`` of the
+    resulting patched file — the exact digests its ``.sidx`` record should carry,
+    computed without re-reading the patched output."""
+    from . import sidx
+    h = hmac.new(sidx.SIDX_KEY, digestmod=hashlib.sha1)
+    m = hashlib.md5()
+    ov = sorted(overlays.items())
+    pos = 0
+    for d, n in reader.disk_ranges(node, 0, node["size"]):
+        disk.seek(d)
+        rem = n
+        while rem:
+            take = min(rem, 1 << 20)
+            chunk = bytearray(disk.read(take))
+            for off, b in ov:
+                if off + len(b) <= pos or off >= pos + take:
+                    continue
+                lo = max(off, pos)
+                hi = min(off + len(b), pos + take)
+                chunk[lo - pos:hi - pos] = b[lo - off:hi - off]
+            h.update(chunk)
+            m.update(chunk)
+            pos += take
+            rem -= take
+    return h.digest(), m.digest()
+
+
+def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
+                         full_repl, has_radium_text, log):
+    """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
+    every file this Write changed, so the card passes Stern SD validation.
+
+    Covers ``image.bin`` (cat-0 audio), the per-song ``image-scNN.bin`` banks,
+    and full-replacement assets (video / image / texture).  Radium text / radium-
+    image edits aren't manifest-updated yet — surfaced as a warning so the user
+    knows those specific cards still need re-validation."""
+    from . import sidx
+    sidx_path, sidx_node = sidx.find_sidx(reader)
+    if sidx_node is None:
+        log("No /spk/index/*.sidx manifest on the card — skipping SD-validation "
+            "refresh (card may report a validation error).", "warning")
+        return []
+    sdata = reader.read_file_bytes(sidx_node)
+    recs, _hdr_crc = sidx.parse_records(sdata)
+    if not recs:
+        log("Unrecognised .sidx manifest format — skipping SD-validation refresh.",
+            "warning")
+        return []
+
+    # Map each file's unique extent block (i_block) -> manifest path so we can
+    # resolve modified inodes to their records.
+    ipath = {bytes(node["i_block"]): path.lstrip("/")
+             for path, _ino, node in reader.iter_regular_files(
+                 min_size=1, max_depth=20)}
+
+    modified = {}   # manifest path -> (hmac, md5) of the patched file
+    if audio_patches and img_node is not None:
+        p = ipath.get(bytes(img_node["i_block"]))
+        if p:
+            modified[p] = _overlay_digests(reader, disk_f, img_node, audio_patches)
+    if music_patches:
+        banks = {}
+        for sc_node, body_off, body in music_patches:
+            ib = bytes(sc_node["i_block"])
+            banks.setdefault(ib, [sc_node, {}])[1][body_off] = body
+        for ib, (sc_node, ov) in banks.items():
+            p = ipath.get(ib)
+            if p:
+                modified[p] = _overlay_digests(reader, disk_f, sc_node, ov)
+    for node, payload in full_repl:
+        p = ipath.get(bytes(node["i_block"]))
+        if p:
+            modified[p] = sidx.digests(bytes(payload))
+
+    out = []
+    n_ok = 0
+    for path, (hm, md) in modified.items():
+        po = recs.get(path)
+        if po is None:
+            log("  .sidx has no record for %s — left stale." % path, "warning")
+            continue
+        for foff, b in sidx.record_field_writes(po, hm, md):
+            for d, n in reader.disk_ranges(sidx_node, foff, len(b)):
+                out.append((d, b[:n]))
+                b = b[n:]
+        n_ok += 1
+    if n_ok:
+        log("Refreshed %d SD-validation manifest record(s) (HMAC-SHA1 + MD5)."
+            % n_ok, "success")
+    if has_radium_text:
+        log("Note: replaced display-text / radium images are not yet manifest-"
+            "updated — that specific card may still need re-validation.", "warning")
+    return out
+
+
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
@@ -1977,6 +2075,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
+        # Regenerate the .sidx manifest records for the changed files so the
+        # card passes Stern's SD validation (recompute HMAC-SHA1 + MD5 with the
+        # manifest's global validation key).  Best-effort: a missing /
+        # unrecognised manifest never fails the Write — it just leaves the card
+        # needing re-validation, exactly as before this step existed.
+        full_repl = list(video_patches) + list(image_patches) + list(texture_patches)
+        try:
+            writes += _compute_sidx_writes(
+                reader, disk_f, img_node, audio_patches, music_patches,
+                full_repl, bool(text_writes or radimg_writes), log)
+        except Exception as e:
+            log("SD-validation manifest update failed (%s); the card may report "
+                "a validation error until re-validated." % e, "warning")
+
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
         # stays the same shape.

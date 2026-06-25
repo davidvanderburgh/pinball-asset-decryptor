@@ -66,6 +66,22 @@ class TestParseWindowsGetDisk:
             r"\\.\PHYSICALDRIVE1",
         ]
 
+    def test_drive_letters_optional_fifth_field(self):
+        # New 5-field form carries comma-joined mounted drive letters;
+        # the parser turns them into an "E: F:" mount label and the
+        # 4-field form (older command) stays letterless.
+        out = (
+            "0|Samsung SSD|1000000000000|NVMe|C\n"
+            "3|Generic- USB3.0 CRW -SD|7700000000|USB|E,F\n"
+            "4|No Letters Disk|500000000000|SATA\n"
+        )
+        drives = _parse_windows_get_disk(out)
+        assert drives[0].mount_label == "C:"
+        assert drives[1].mount_label == "E: F:"
+        assert drives[2].mount_label == ""
+        # The mount label surfaces in the dropdown display.
+        assert "[E: F:]" in drives[1].display
+
 
 # ----------------------------------------------------------------------
 # macOS
@@ -178,6 +194,18 @@ class TestPhysicalDriveDisplay:
         assert d.location == "Internal"
         assert "Internal" in d.display
 
+    def test_mount_label_shown_when_present(self):
+        d = PhysicalDrive(
+            device_path=r"\\.\PHYSICALDRIVE3",
+            model="Generic- USB3.0 CRW -SD", size_bytes=7_700_000_000,
+            bus_type="USB", mount_label="E:")
+        assert "[E:]" in d.display
+        # Letterless drives don't get an empty bracket.
+        bare = PhysicalDrive(
+            device_path=r"\\.\PHYSICALDRIVE3", model="x",
+            size_bytes=1, bus_type="USB")
+        assert "[" not in bare.display
+
 
 # ----------------------------------------------------------------------
 # Auto-pick logic — choose the most-likely-JJP drive without prompting
@@ -262,3 +290,105 @@ class TestPickBestGameSsd:
         assert conf == "low"
         # Reason nudges the user to plug in the SSD.
         assert "USB" in reason or "Connect" in reason
+
+
+class TestPickBestSdCard:
+    """Stern Spike ships on a small SD card, so prefer="sd_card" must
+    never default to a big backup drive just because it's the largest
+    external — the bug monkeybug hit (a 4 TB Sabrent auto-selected as
+    the write target over the 7.7 GB card reader).
+    """
+
+    def _sabrent(self, num, size):
+        return PhysicalDrive(
+            device_path=rf"\\.\PHYSICALDRIVE{num}",
+            model="Sabrent Dual SATA Bridge", size_bytes=size,
+            bus_type="USB")
+
+    def _card_reader(self, num, size=7_700_000_000):
+        return PhysicalDrive(
+            device_path=rf"\\.\PHYSICALDRIVE{num}",
+            model="Generic- USB3.0 CRW -SD", size_bytes=size,
+            bus_type="USB")
+
+    def test_monkeybug_scenario_prefers_card_reader_over_4tb(self):
+        # Exactly the reported layout: several multi-TB Sabrents plus
+        # the SD card in a USB reader.  The reader must win, not the
+        # biggest drive.
+        drives = [
+            self._sabrent(1, 4_000_800_000_000),
+            self._sabrent(2, 4_000_800_000_000),
+            self._card_reader(3),
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE4",
+                          model="SABRENT", size_bytes=3_000_600_000_000,
+                          bus_type="USB"),
+        ]
+        best, conf, reason = pick_best_game_ssd(drives, prefer="sd_card")
+        assert best.device_path == r"\\.\PHYSICALDRIVE3"
+        assert conf == "high"
+        assert "reader" in reason.lower()
+
+    def test_sd_bus_type_counts_as_card(self):
+        drives = [
+            self._sabrent(1, 4_000_000_000_000),
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE2",
+                          model="Built-in card slot", size_bytes=32_000_000_000,
+                          bus_type="SD"),
+        ]
+        best, conf, _ = pick_best_game_ssd(drives, prefer="sd_card")
+        assert best.device_path == r"\\.\PHYSICALDRIVE2"
+        assert conf == "high"
+
+    def test_no_reader_picks_smallest_external_not_largest(self):
+        # No card-reader hint in any model string — fall back to the
+        # smallest SD-card-sized external, low confidence.
+        drives = [
+            self._sabrent(1, 4_000_000_000_000),
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE2",
+                          model="Kingston DataTraveler",
+                          size_bytes=16_000_000_000, bus_type="USB"),
+        ]
+        best, conf, reason = pick_best_game_ssd(drives, prefer="sd_card")
+        assert best.device_path == r"\\.\PHYSICALDRIVE2"
+        assert conf == "low"
+        assert "confirm" in reason.lower()
+
+    def test_all_externals_large_warns_to_connect_card(self):
+        # Every external is way over the SD-card ceiling — don't trust
+        # any of them; pick the smallest but tell the user to connect.
+        drives = [
+            self._sabrent(1, 4_000_000_000_000),
+            self._sabrent(2, 2_000_000_000_000),
+        ]
+        best, conf, reason = pick_best_game_ssd(drives, prefer="sd_card")
+        assert best.device_path == r"\\.\PHYSICALDRIVE2"  # smallest
+        assert conf == "low"
+        assert "connect" in reason.lower()
+
+    def test_single_sd_sized_external_high_confidence(self):
+        drives = [
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE0",
+                          model="System NVMe", size_bytes=1_000_000_000_000,
+                          bus_type="NVMe"),
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE2",
+                          model="Lexar USB", size_bytes=32_000_000_000,
+                          bus_type="USB"),
+        ]
+        best, conf, _ = pick_best_game_ssd(drives, prefer="sd_card")
+        assert best.device_path == r"\\.\PHYSICALDRIVE2"
+        assert conf == "high"
+
+    def test_ssd_default_unchanged_by_new_param(self):
+        # The default prefer="ssd" must keep the old largest-external
+        # behaviour for JJP.
+        drives = [
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE2",
+                          model="USB Thumb", size_bytes=16_000_000_000,
+                          bus_type="USB"),
+            PhysicalDrive(device_path=r"\\.\PHYSICALDRIVE3",
+                          model="JMicron Tech", size_bytes=120_000_000_000,
+                          bus_type="USB"),
+        ]
+        best, conf, _ = pick_best_game_ssd(drives)  # default prefer
+        assert best.device_path == r"\\.\PHYSICALDRIVE3"  # largest
+        assert conf == "low"

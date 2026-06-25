@@ -43,6 +43,12 @@ class Game:
     display: str           # "Alien", "Halloween", ...
     manufacturer_key: str  # "pb", "spooky", ...
     notes: str = ""        # optional UI-visible hint shown in detect badge
+    # Optional sub-format/era discriminator for manufacturers that handle
+    # multiple hardware generations under one picker entry (e.g. Stern:
+    # "spike2" SD-card images vs "whitestar"/"sam" MAME ROM zips).  The GUI
+    # re-applies the capability-dependent layout when the detected era
+    # differs from the manufacturer's current era.  Empty = single-era.
+    era: str = ""
     # Whether decryption/extraction is currently possible at all.
     # Set False for games whose encryption key isn't known or whose
     # format isn't (yet) implemented — picker shows them greyed out
@@ -262,10 +268,22 @@ class Manufacturer(ABC):
     write_iso_label: str = "Build USB ISO"
     write_ssd_label: str = "Write to SSD"
 
+    # Action-button captions on the Write tab, one per destination mode, so
+    # the button restates the chosen action instead of a generic "Apply".
+    # Defaults match JJP's historical wording (mirrors the standalone JJP
+    # decryptor); override per manufacturer to track the destination radio.
+    write_build_button: str = "Build update"        # build-image / ISO mode
+    write_direct_button: str = "Apply Modifications"  # write-to-medium mode
+
     # Generic noun for the physical medium in Direct-from-device mode, used
     # in dynamic prose (drive-pick hint, admin-required panel).  JJP ships on
     # an SSD; Stern Spike on an SD card.  Override per manufacturer.
     direct_medium_noun: str = "SSD"
+    # Drive-picker bias for Direct mode: "ssd" prefers the largest external
+    # (a removable game SSD, JJP); "sd_card" prefers a card reader / the
+    # smallest external and never auto-trusts a multi-TB drive (Stern Spike's
+    # small SD card).  Consumed by core.drives.pick_best_game_ssd.
+    direct_target_kind: str = "ssd"
     # Red safety banner shown in Direct mode.  JJP's wording ("remove the SSD,
     # keep the ISO backup") is SSD/ISO-specific; override when the medium and
     # backup artifact differ (Stern reads from an SD-card image).

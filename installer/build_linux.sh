@@ -64,6 +64,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
+    --hidden-import "pinball_decryptor.plugins.stern.sidx" \
     --hidden-import "pinball_decryptor.plugins.stern.ext4" \
     --hidden-import "pinball_decryptor.plugins.stern.rawdevice" \
     --hidden-import "pinball_decryptor.plugins.stern.radium" \

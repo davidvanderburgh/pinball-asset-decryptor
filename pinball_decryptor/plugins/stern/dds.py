@@ -2,8 +2,8 @@
 
 Spike 2 stores its LCD scene textures (font-glyph atlases, sprite art) as the
 non-``ftyp`` ``scene.assets/<N>.asset`` files: **raw BC3/DXT5 block data with no
-container header**.  Pinball Browser calls them "DDS" because BC3 *is* the DDS
-DXT5 format — PB simply adds/strips the 128-byte DDS header on export/import.
+container header**.  They're commonly called "DDS" because BC3 *is* the DDS DXT5
+format — exporting/importing is just adding/stripping the 128-byte DDS header.
 Each texture's width/height/format live inline in the co-located
 ``scene.radium`` (see :func:`.engine.parse_texture_descriptors`); the ``.asset``
 is pure block data, 1 byte per pixel (``len == width * height``).

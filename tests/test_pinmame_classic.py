@@ -21,6 +21,17 @@ def _make_rom_zip(out_path, game_roms, sound_roms, dmd_roms=()):
     return out_path
 
 
+@pytest.fixture(autouse=True)
+def _reset_stern_era(manufacturers_by_key):
+    """Stern's era is mutable instance state on a session-shared object; reset
+    it after each test so a whitestar-era test can't leak into the Spike-2
+    capability tests (especially under test randomisation)."""
+    yield
+    s = manufacturers_by_key.get("stern")
+    if s is not None and hasattr(s, "set_era"):
+        s.set_era("")
+
+
 # ---------------------------------------------------------------------------
 # Registration / catalogue
 # ---------------------------------------------------------------------------
@@ -154,3 +165,59 @@ def test_data_east_capture_pipeline_constructs(manufacturers_by_key, tmp_path):
     assert pipe is not None
     # Attract-mode is forced (no WPC switch maps for DE).
     assert pipe.simulate_gameplay is False
+
+
+# ---------------------------------------------------------------------------
+# Stern era-switching: one picker entry, two eras (Spike 2 SD-card vs
+# Whitestar MAME capture).  The era reset fixture above keeps the shared
+# instance's mutable era from leaking.
+# ---------------------------------------------------------------------------
+
+def _a_whitestar_key():
+    return next(k for k, v in GAME_DB.items() if v["manufacturer"] == "Stern")
+
+
+def test_stern_default_era_is_spike2(manufacturers_by_key):
+    s = manufacturers_by_key["stern"]
+    s.set_era("")                       # default
+    assert s._era == "spike2"
+    # Full Spike-2 surface by default — the shipped flow is unchanged.
+    assert s.capabilities.extract and s.capabilities.write
+    assert not s.capabilities.capture
+    # Both input families are accepted.
+    assert ".zip" in s.input_spec.extensions
+    assert ".img" in s.input_spec.extensions
+
+
+def test_stern_detects_whitestar_zip_with_era(manufacturers_by_key, tmp_path):
+    s = manufacturers_by_key["stern"]
+    info = GAME_DB[_a_whitestar_key()]
+    z = _make_rom_zip(tmp_path / f"{info['family']}.zip",
+                      info["game_roms"], info["sound_roms"],
+                      dmd_roms=info["dmd_roms"])
+    game = s.detect(str(z))
+    assert game is not None
+    assert game.manufacturer_key == "stern"
+    assert game.era == "whitestar"
+
+
+def test_stern_era_switch_flips_capabilities(manufacturers_by_key):
+    s = manufacturers_by_key["stern"]
+    s.set_era("whitestar")
+    # Whitestar = capture-only (no write/replace/Direct-SD on a MAME ROM).
+    assert s.capabilities.capture
+    assert not s.capabilities.extract and not s.capabilities.write
+    assert s.extract_phases == s.capture_phases
+    s.set_era("")
+    assert s.capabilities.write          # back to Spike 2
+
+
+def test_stern_whitestar_capture_pipeline_constructs(manufacturers_by_key,
+                                                     tmp_path):
+    s = manufacturers_by_key["stern"]
+    pipe = s.make_capture_pipeline(
+        str(tmp_path / "monopoly.zip"), str(tmp_path),
+        lambda *a, **k: None, lambda *a: None,
+        lambda *a, **k: None, lambda *a: None,
+        duration_seconds=30)
+    assert pipe is not None and pipe.simulate_gameplay is False

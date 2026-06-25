@@ -1168,6 +1168,24 @@ class MainWindow:
             font=(_SANS_FONT, 9),
             wraplength=720, justify=tk.LEFT)
 
+        # Admin/UNC hint — Windows hides a user's mapped network drives
+        # (e.g. W:) from an elevated process, so when the app is relaunched
+        # "as administrator" to write straight to the card, those letters
+        # vanish from both the Browse dialog and any saved path, silently
+        # leaving the Modified Files Preview empty.  Spell out the UNC
+        # workaround.  Pack-managed by _on_input_source_change (win32 + admin
+        # + SD-card mode only).
+        self._write_admin_unc_hint = ttk.Label(
+            f,
+            text=("Running as administrator: Windows hides mapped network "
+                  "drive letters (e.g. W:) from elevated apps. If your "
+                  "modified assets live on a network share, paste the full "
+                  "\\\\server\\share path into the field above instead of "
+                  "browsing to a drive letter."),
+            foreground="#c08a3e",
+            font=(_SANS_FONT, 9, "italic"),
+            wraplength=720, justify=tk.LEFT)
+
         # Editable-folder hint — appears as a subtle italic line below
         # the Modified Assets row.  For BOF May code the Extract step
         # creates a pck/_EDITABLE ASSETS/ folder with WAV / WEBP / OGV
@@ -4544,9 +4562,17 @@ class MainWindow:
     # Manufacturer switching
     # ------------------------------------------------------------------
 
-    def apply_manufacturer(self, mfr):
-        """Reconfigure the UI for *mfr*.  Called on initial load + on switch."""
+    def apply_manufacturer(self, mfr, reset_era=True):
+        """Reconfigure the UI for *mfr*.  Called on initial load + on switch.
+
+        ``reset_era`` (default True) resets an era-switching manufacturer
+        (Stern) to its default era so a fresh switch shows the default
+        layout; the era-driven re-apply in ``_set_badge`` passes False so it
+        keeps the just-detected era.
+        """
         self._current_mfr = mfr
+        if reset_era and hasattr(mfr, "set_era"):
+            mfr.set_era("")          # "" => the manufacturer's default era
         caps = mfr.capabilities
         # Reset audio-export support to the optimistic default; the
         # extract-badge refresh later in this method re-probes it for
@@ -4758,6 +4784,7 @@ class MainWindow:
             self._write_drive_row.pack_forget()
             self._write_ssd_warn.pack_forget()
             self._write_admin_frame.pack_forget()
+            self._write_admin_unc_hint.pack_forget()
             self._write_macos_fda_frame.pack_forget()
             # The per-mode description is JJP-specific; hide it for
             # plugins whose Write tab is the ISO-build flow.
@@ -4777,8 +4804,10 @@ class MainWindow:
                 self._scan_write_preview()
             else:
                 self._write_preview_frame.pack_forget()
-            # Restore the default "Build update" button label too.
-            self._write_btn.configure(text="Build update")
+            # Restore the build-mode button label (plugins without a
+            # destination toggle only ever build an update).
+            self._write_btn.configure(
+                text=getattr(mfr, "write_build_button", "Build update"))
             # Make sure the ISO rows are visible — _on_input_source_change
             # would unpack/repack them, but a non-direct_ssd plugin may
             # have inherited an unpacked state from a prior switch.
@@ -5491,6 +5520,7 @@ class MainWindow:
             self._write_drive_row.pack_forget()
             self._write_ssd_warn.pack_forget()
             self._write_admin_frame.pack_forget()
+            self._write_admin_unc_hint.pack_forget()
             self._write_macos_fda_frame.pack_forget()
             self._write_badge.pack_forget()
             self._write_desc.pack_forget()
@@ -5521,6 +5551,14 @@ class MainWindow:
                     self._write_macos_fda_frame.pack(
                         fill=tk.X, padx=10, pady=(4, 8),
                         before=self._write_filename_lbl)
+                # When we ARE elevated (the state writing to a card requires),
+                # warn that mapped network-drive letters won't be visible —
+                # this is what silently emptied monkeybug's preview after a
+                # relaunch-as-admin.
+                if sys.platform == "win32" and is_admin():
+                    self._write_admin_unc_hint.pack(
+                        anchor=tk.W, padx=10, pady=(0, 4),
+                        before=self._write_filename_lbl)
                 # SSD mode: explain in-place write behaviour so users
                 # know what to expect before they click Apply
                 # Modifications.  Per-manufacturer (medium-aware) wording.
@@ -5534,7 +5572,9 @@ class MainWindow:
                 self._write_preview_frame.pack(
                     fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
                     before=self._write_filename_lbl)
-                self._write_btn.configure(text="Apply Modifications")
+                self._write_btn.configure(
+                    text=getattr(self._current_mfr, "write_direct_button",
+                                 "Apply Modifications"))
                 self._refresh_drives_async("write")
                 # SSD-write doesn't produce an output file — the SSD
                 # IS the output.  Hide the Output Folder row.
@@ -5559,7 +5599,9 @@ class MainWindow:
                 self._write_desc.pack(
                     anchor=tk.W, padx=10, pady=(2, 6),
                     before=self._write_assets_row())
-                self._write_btn.configure(text="Build update")
+                self._write_btn.configure(
+                    text=getattr(self._current_mfr, "write_build_button",
+                                 "Build update"))
                 if hasattr(self, "_write_output_row_ref"):
                     self._write_output_row_ref.pack(
                         fill=tk.X, padx=10, pady=4,
@@ -5617,13 +5659,17 @@ class MainWindow:
                        else self.write_drive_display_var)
         combo["values"] = ["Detecting drives…"]
         display_var.set("Detecting drives…")
+        # Bias the auto-pick toward the active plugin's medium (a small SD
+        # card for Stern, a large game SSD for JJP).  Read on the main
+        # thread before the worker starts.
+        prefer = getattr(self._current_mfr, "direct_target_kind", "ssd")
 
         def _worker():
             try:
                 from ..core.drives import (list_physical_drives,
                                            pick_best_game_ssd)
                 drives = list_physical_drives()
-                pick = pick_best_game_ssd(drives)
+                pick = pick_best_game_ssd(drives, prefer=prefer)
             except Exception:
                 drives, pick = [], (None, None, None)
             # Hop back to the main thread before touching Tk widgets.
@@ -5971,7 +6017,11 @@ class MainWindow:
         # nothing's changed).
         pending_n = self._add_pending_preview_rows(assets_path, scan_id)
 
+        # We just superseded any in-flight scan (its finish is now guarded
+        # out), so nothing else will restore the button — idle it on every
+        # path that returns without launching the worker.
         if not assets_path or not os.path.isdir(assets_path):
+            self._set_preview_scanning(False)
             if not pending_n:
                 self._write_preview_empty.configure(
                     text="Select your modified assets folder above to preview "
@@ -5981,6 +6031,7 @@ class MainWindow:
             return
         checksums_file = os.path.join(assets_path, ".checksums.md5")
         if not os.path.isfile(checksums_file):
+            self._set_preview_scanning(False)
             if not pending_n:
                 self._write_preview_empty.configure(
                     text=("Pick a folder produced by Extract first "
@@ -6026,6 +6077,9 @@ class MainWindow:
                             fp = fp[2:]
                         saved[fp.replace("\\", "/")] = md5_val
             except OSError:
+                # Couldn't read the baseline after all — restore the button.
+                self._tk_root().after(
+                    0, self._finish_write_preview_scan, 0, scan_id)
                 return
 
             # BOF only: hide the imported-cache subtree from the
@@ -6088,6 +6142,11 @@ class MainWindow:
                     0, self._finish_write_preview_scan,
                     len(changed), scan_id)
 
+        # Flip the Refresh button to a disabled "Scanning…" state so the
+        # walk is visibly in progress — over a network share the per-file
+        # MD5 trickles rows in slowly, which without this looks frozen
+        # (monkeybug saw rows appear with no indication anything was running).
+        self._set_preview_scanning(True)
         threading.Thread(target=_scan, daemon=True).start()
 
     def _add_pending_preview_rows(self, assets_path, scan_id):
@@ -6146,10 +6205,27 @@ class MainWindow:
         # Tag colour is set in _apply_theme so it tracks dark/light
         # mode; nothing per-row here.
 
+    def _set_preview_scanning(self, active):
+        """Toggle the preview Refresh button between idle and a disabled
+        "Scanning…" state so a slow (e.g. network-share) scan is visibly
+        in progress.  Tolerant of layouts where the button doesn't exist."""
+        btn = getattr(self, "_write_preview_refresh_btn", None)
+        if btn is None:
+            return
+        try:
+            if active:
+                btn.configure(text="⏳  Scanning…", state=tk.DISABLED)
+            else:
+                btn.configure(text="🔄  Refresh", state=tk.NORMAL)
+        except tk.TclError:
+            pass
+
     def _finish_write_preview_scan(self, n_changed, scan_id):
         """End-of-scan housekeeping (main-thread only)."""
         if self._write_preview_scan_id != scan_id:
             return
+        # Latest scan finished — restore the Refresh button.
+        self._set_preview_scanning(False)
         # Base the empty state on the actual tree contents — pending
         # Replace-Audio/Video rows count too, so "No modified files" only
         # shows when truly nothing (on disk or staged) is going to change.
@@ -6445,6 +6521,18 @@ class MainWindow:
         except Exception:
             game = None
         if game:
+            # Era-switching manufacturers (Stern: Spike 2 SD-card vs Whitestar
+            # MAME zip): when the loaded file's era differs from the current
+            # one, re-apply the capability-dependent layout for it.  The era
+            # now matches, so apply_manufacturer's own badge refresh won't
+            # recurse.  Only the Extract input drives the layout.
+            era = getattr(game, "era", "")
+            mfr = self._current_mfr
+            if (mode == "extract" and era and hasattr(mfr, "set_era")
+                    and getattr(mfr, "_era", "") != era):
+                mfr.set_era(era)
+                self.apply_manufacturer(mfr, reset_era=False)
+                return
             extra = f" — {game.notes}" if game.notes else ""
             label.configure(text=f"Detected: {game.display}{extra}")
             return

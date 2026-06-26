@@ -285,6 +285,7 @@ class StereoRecover:
         self._cap = []
         self._hooked = set()
         self._calib = {}   # (scale, chan) -> body_frame_delta
+        self._comps = {}   # render_fn -> [(mul_addr, S_reg), ...] (capstone cache)
 
     def _hook(self, addr, reg):
         key = (addr, reg)
@@ -315,12 +316,23 @@ class StereoRecover:
         R = np.array([x for a, x in cap if a == Raddr], dtype=np.int64)
         return L, R
 
+    def _comps_for(self, render_fn):
+        """Companding sites for ``render_fn``, cached.  The disassembly is
+        identical every block (the firmware code never changes), so caching it
+        avoids re-running capstone over 3 KB of code 3x per 200-sample block --
+        which is ~70% of stereo re-encode time on a full-length song."""
+        comps = self._comps.get(render_fn)
+        if comps is None:
+            comps = _find_companding_all(self.mu, render_fn, n=0xC00)
+            if len(comps) < 2:
+                raise RuntimeError("stereo render_fn must have >=2 companding pts")
+            self._comps[render_fn] = comps
+        return comps
+
     def _drive(self, p, cursor, body_bytes):
         emu = self.emu; mu = self.mu
         render_fn = emu.recover_entry(p)   # resolved audio slot (generic) / render_fn (validated)
-        comps = _find_companding_all(mu, render_fn, n=0xC00)
-        if len(comps) < 2:
-            raise RuntimeError("stereo render_fn must have >=2 companding pts")
+        comps = self._comps_for(render_fn)
         for a, reg in comps:
             self._hook(a, reg)
         OBJ = emu._build_obj(p); VOICE = emu._voice(2)

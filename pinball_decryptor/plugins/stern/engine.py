@@ -2493,7 +2493,15 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
 def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
                           log, progress, cancel):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
-    Raises on any pool failure so the caller can fall back to a single process."""
+
+    Returns ``(patches, skipped, remaining)``: ``remaining`` is the list of edits
+    that did NOT complete (empty on full success).  A pool that never boots a
+    worker raises (so the caller does a full single-process pass).  But a pool
+    that dies *part way* (e.g. a worker is killed) does NOT raise -- it returns
+    what already finished plus the leftover edits, so the caller can finish just
+    those in a single process instead of throwing away all the parallel work and
+    re-encoding everything serially (the failure that turned a ~minutes job into
+    hours).  Returns ``(None, None, None)`` if cancelled."""
     import multiprocessing as mp
 
     from .spike2.parallel import encode_one, encode_probe, init_encode_worker
@@ -2502,15 +2510,34 @@ def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
     ctx = mp.get_context("spawn")
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
                     initargs=(gr_path, img_path, needed_params))
-    patches, skipped = {}, []
+    patches, skipped, done_idx = {}, [], set()
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
         # and the caller falls back to the serial path).
         pool.apply_async(encode_probe).get(timeout=300)
         done = 0
-        for idx, body_off, body, valid in pool.imap_unordered(
-                encode_one, edits, chunksize=4):
+        # chunksize=1: tasks vary by >1000x in cost (sub-second SFX to 8-minute
+        # songs), so hand them out one at a time -- batching would strand several
+        # long songs on one worker while others idle.  edits arrive longest-first
+        # (see _encode_cat0_sounds), so the big tracks start immediately.
+        it = pool.imap_unordered(encode_one, edits, chunksize=1)
+        while True:
+            try:
+                idx, body_off, body, valid = next(it)
+            except StopIteration:
+                break
+            except Exception as e:
+                # A worker died mid-run.  Keep everything finished so far and let
+                # the caller re-encode only the leftovers in a single process.
+                remaining = [(i, w) for (i, w) in edits if i not in done_idx]
+                log("Parallel re-encode interrupted (%s); %d of %d sound(s) "
+                    "already done, finishing the remaining %d in a single "
+                    "process." % (e, len(done_idx), len(edits), len(remaining)),
+                    "warning")
+                pool.terminate()
+                return patches, sorted(skipped), remaining
             done += 1
+            done_idx.add(idx)
             if valid and body is not None:
                 patches[body_off] = body
                 log("Re-encoded idx %d." % idx, "info")
@@ -2523,11 +2550,11 @@ def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
                          "Re-encoding %d/%d" % (done, len(edits)))
             if cancel():
                 pool.terminate()
-                return None, None
+                return None, None, None
         pool.close()
     finally:
         pool.join()
-    return patches, sorted(skipped)
+    return patches, sorted(skipped), []
 
 
 def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
@@ -2650,32 +2677,47 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     byidx = {p["idx"]: p for p in params}
     for idx in sorted(set(audio_edits) - set(byidx)):
         log("idx %d not a known sound; skipping." % idx, "warning")
-    edits = sorted((idx, wav) for idx, wav in audio_edits.items()
-                   if idx in byidx)
+    # Longest sound first: re-encode time is ~linear in length and the songs
+    # range from a fraction of a second to >8 minutes, so a long track is an
+    # irreducible tail on a single worker.  Scheduling it first (with chunksize=1
+    # below) keeps every worker busy and makes the wall-clock ≈ the longest
+    # single song rather than worst-case load imbalance.  Tie-break on idx for a
+    # deterministic order.
+    edits = sorted(((idx, wav) for idx, wav in audio_edits.items()
+                    if idx in byidx),
+                   key=lambda iw: (-byidx[iw[0]].get("length", 0), iw[0]))
     if not edits:
         return {}, []
 
     nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
     nworkers = max(1, min(nworkers, len(edits)))
+    patches, skipped, remaining = {}, [], edits
     if not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
         try:
             needed = [byidx[idx] for idx, _ in edits]
-            patches, skipped = _encode_cat0_parallel(
+            patches, skipped, remaining = _encode_cat0_parallel(
                 gr_path, img_path, needed, edits, nworkers, np, log, progress,
                 cancel)
             if patches is None:
                 return None, None
-            if skipped:
-                log("%d sound(s) skipped (re-encode unsupported for their "
-                    "codec): %s" % (len(skipped), ", ".join(map(str, skipped))),
-                    "warning")
-            return patches, skipped
         except Exception as e:
+            # The pool never started -- fall back to a full single-process pass.
             log("Parallel re-encode unavailable (%s); using a single process."
                 % e, "warning")
-    patches, skipped = _encode_cat0_serial(
-        gr_path, img_path, byidx, edits, np, log, progress, cancel)
-    if patches is not None and skipped:
+            patches, skipped, remaining = {}, [], edits
+    # Finish any edits the parallel path didn't complete (all of them if it was
+    # skipped/unavailable; just the leftovers if a worker died mid-run).  Keeping
+    # the parallel results avoids re-encoding everything serially on a partial
+    # failure -- the slow path that made a quick job take hours.
+    if remaining:
+        sp, sk = _encode_cat0_serial(
+            gr_path, img_path, byidx, remaining, np, log, progress, cancel)
+        if sp is None:
+            return None, None
+        patches.update(sp)
+        skipped.extend(sk)
+    skipped = sorted(set(skipped))
+    if skipped:
         log("%d sound(s) skipped (re-encode unsupported for their codec): %s"
             % (len(skipped), ", ".join(map(str, skipped))), "warning")
     return patches, skipped

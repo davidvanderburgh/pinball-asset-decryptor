@@ -26,7 +26,7 @@ def test_cat0_empty_edits_is_noop(monkeypatch):
     monkeypatch.setattr(E, "_encode_cat0_serial",
                         lambda *a, **k: called.append("s") or ({}, []))
     monkeypatch.setattr(E, "_encode_cat0_parallel",
-                        lambda *a, **k: called.append("p") or ({}, []))
+                        lambda *a, **k: called.append("p") or ({}, [], []))
     patches, skipped = E._encode_cat0_sounds(
         "g", "i", _params(1, 2), {}, None, _noop, None, lambda: False)
     assert patches == {} and skipped == []
@@ -53,7 +53,7 @@ def test_cat0_force_serial_skips_pool(monkeypatch):
     monkeypatch.setattr(E, "_encode_cat0_serial",
                         lambda *a, **k: calls.append("s") or ({0: b"x"}, []))
     monkeypatch.setattr(E, "_encode_cat0_parallel",
-                        lambda *a, **k: calls.append("p") or ({}, []))
+                        lambda *a, **k: calls.append("p") or ({}, [], []))
     E._encode_cat0_sounds("g", "i", _params(1, 2, 3),
                           {1: "a", 2: "b", 3: "c"}, None, _noop, None,
                           lambda: False)
@@ -79,6 +79,33 @@ def test_cat0_parallel_failure_falls_back_to_serial(monkeypatch):
         "g", "i", _params(1, 2), {1: "a", 2: "b"}, None, _noop, None,
         lambda: False)
     assert calls == ["p", "s"] and patches == {0: b"x"}
+
+
+def test_cat0_parallel_partial_resume_keeps_done_work(monkeypatch):
+    """A pool that dies mid-run returns its finished patches + the leftovers; the
+    serial pass must re-encode ONLY the leftovers (not everything), and the
+    results merge.  This is the fix for the slow path that re-did all the work
+    serially on a partial failure."""
+    monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", False)
+    monkeypatch.setattr(E.os, "cpu_count", lambda: 8)
+
+    # idx 1 finished in parallel; idx 2 + 3 were left over.
+    def partial(gr, img, needed, edits, nworkers, np, log, progress, cancel):
+        return ({1000: b"one"}, [], [(2, "b"), (3, "c")])
+    seen = {}
+
+    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel):
+        seen["edits"] = [idx for idx, _ in edits]
+        return ({2000: b"two", 3000: b"three"}, [])
+    monkeypatch.setattr(E, "_encode_cat0_parallel", partial)
+    monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
+    patches, skipped = E._encode_cat0_sounds(
+        "g", "i", _params(1, 2, 3), {1: "a", 2: "b", 3: "c"}, None, _noop,
+        None, lambda: False)
+    # serial only re-did the leftovers, and both sets merged.
+    assert seen["edits"] == [2, 3]
+    assert patches == {1000: b"one", 2000: b"two", 3000: b"three"}
+    assert skipped == []
 
 
 # ---- music-bank runner ---------------------------------------------------

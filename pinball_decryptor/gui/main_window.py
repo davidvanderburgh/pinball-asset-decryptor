@@ -4880,6 +4880,11 @@ class MainWindow:
             scroll = ttk.Scrollbar(self._log_frame, command=text.yview)
             text.configure(yscrollcommand=scroll.set)
             self._apply_log_theme(text)
+            # Right-click → Copy / Save As… / Clear (Button-2 + Control-Click
+            # cover the Mac trackpad / one-button conventions, matching the
+            # Replace trees above).
+            for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+                text.bind(seq, self._log_context_menu)
             bundle = {"text": text, "scroll": scroll}
             self._log_widgets[mfr.key] = bundle
 
@@ -7076,6 +7081,60 @@ class MainWindow:
     # ------------------------------------------------------------------
     # Log
     # ------------------------------------------------------------------
+
+    def _log_context_menu(self, event):
+        """Right-click menu on the log pane: Copy / Save As… / Clear."""
+        widget = event.widget
+        menu = tk.Menu(widget, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        has_sel = bool(widget.tag_ranges("sel"))
+        menu.add_command(label="Copy" if has_sel else "Copy all",
+                         command=lambda w=widget: self._log_copy(w))
+        menu.add_command(label="Save As…",
+                         command=lambda w=widget: self._log_save_as(w))
+        menu.add_separator()
+        menu.add_command(label="Clear",
+                         command=lambda w=widget: self._log_clear(w))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    def _log_copy(self, widget):
+        """Copy the selection (or the whole log if nothing is selected)."""
+        try:
+            text = widget.get("sel.first", "sel.last")
+        except tk.TclError:
+            text = widget.get("1.0", "end-1c")
+        if not text:
+            return
+        widget.clipboard_clear()
+        widget.clipboard_append(text)
+
+    def _log_save_as(self, widget):
+        path = filedialog.asksaveasfilename(
+            title="Save log as…", defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(widget.get("1.0", "end-1c"))
+        except OSError as exc:
+            messagebox.showerror("Save log", "Couldn't save the log:\n%s" % exc)
+
+    def _log_clear(self, widget):
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.configure(state=tk.DISABLED)
 
     def append_log(self, text, level="info"):
         # Calls before any mfr is selected (e.g. update-check on startup

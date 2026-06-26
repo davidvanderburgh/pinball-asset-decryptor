@@ -1336,10 +1336,11 @@ def _changed_images(assets_dir, baseline):
 def _changed_music_banks(assets_dir, baseline):
     """Per-song music-bank WAVs (``music_catNN_*.wav``) whose bytes differ from
     the Extract baseline — i.e. the user edited/replaced a song.  These live in
-    the ``image-scNN.bin`` banks that Write can't re-encode yet, so the caller
-    surfaces a clear "skipped" warning instead of silently dropping the edit.
-    The ``music_catNN_MMMM`` prefix survives an Auto-transcribe / Music-ID
-    rename, so it's the stable per-song key.  Empty when there's no baseline."""
+    the ``image-scNN.bin`` banks, which Write re-encodes in place (size-neutral)
+    via :func:`_compute_music_patches`; a song whose re-encode isn't bit-exact is
+    skipped there with a warning rather than written blind.  The
+    ``music_catNN_MMMM`` prefix survives an Auto-transcribe / Music-ID rename, so
+    it's the stable per-song key.  Empty when there's no baseline."""
     from ...core.checksums import md5_file
     base = {}
     for rel in baseline:

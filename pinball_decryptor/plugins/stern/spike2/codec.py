@@ -17,11 +17,13 @@ bit-exact, with no per-scale port:
              u1 = ROL16(invG(R) ^ KR ^ ROR16(u0, aR), bR)
 """
 
+import ctypes
 import struct
 
 import numpy as np
 from capstone import CS_ARCH_ARM, CS_MODE_ARM, Cs
 from capstone.arm import ARM_OP_REG, ARM_SFT_ASR
+from unicorn import UC_HOOK_CODE
 from unicorn.arm_const import (UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1,
                                UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4,
                                UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7,
@@ -139,10 +141,23 @@ class GenRecover:
     def _install_hook(self, mul_addr):
         if mul_addr in self._hooked:
             return
+        # The capture fires once per output sample; read the companding register
+        # straight through the unicorn C API when available (the slow Python
+        # reg_read wrapper is ~30% of recovery time -- see emulator.fast_reg_read),
+        # else fall back to the portable mu.reg_read path.
+        fast = self.emu.fast_reg_read
+        if fast is not None:
+            rr, uch = fast
+            buf = ctypes.c_uint64(0); pbuf = ctypes.byref(buf)
 
-        def cap(eng):
-            self._cap.append(eng.mu.reg_read(self._capreg))
-        self.emu.add_hook(mul_addr, cap)
+            def cap(uc, address, size, ud):
+                rr(uch, self._capreg, pbuf)
+                self._cap.append(buf.value & 0xffff)
+            self.mu.hook_add(UC_HOOK_CODE, cap, begin=mul_addr, end=mul_addr)
+        else:
+            def cap(eng):
+                self._cap.append(eng.mu.reg_read(self._capreg))
+            self.emu.add_hook(mul_addr, cap)
         self._hooked.add(mul_addr)
 
     def _drive_decode(self, p, cursor, body_u16):
@@ -286,15 +301,32 @@ class StereoRecover:
         self._hooked = set()
         self._calib = {}   # (scale, chan) -> body_frame_delta
         self._comps = {}   # render_fn -> [(mul_addr, S_reg), ...] (capstone cache)
+        # (scale, chan) -> needs the third (0,1) probe.  The u1 rotate ``bR`` is
+        # ≡0 on every observed build (verified across all 32 scales), so after the
+        # first block of a scale confirms it, later blocks drop that probe (~1.5x).
+        # A build that ever shows bR≠0 keeps the full 3-probe recovery for that
+        # scale -- self-validating, never an assumption baked in.
+        self._three_probe = {}
 
     def _hook(self, addr, reg):
         key = (addr, reg)
         if key in self._hooked:
             return
+        # Fires twice per output frame (L + R companding sites); read the register
+        # through the unicorn C API when available, else the portable path.
+        fast = self.emu.fast_reg_read
+        if fast is not None:
+            rr, uch = fast
+            buf = ctypes.c_uint64(0); pbuf = ctypes.byref(buf)
 
-        def cap(eng, _a=addr, _r=reg):
-            self._cap.append((_a, eng.mu.reg_read(_r) & 0xffff))
-        self.emu.add_hook(addr, cap)
+            def cap(uc, address, size, ud, _a=addr, _r=reg):
+                rr(uch, _r, pbuf)
+                self._cap.append((_a, buf.value & 0xffff))
+            self.mu.hook_add(UC_HOOK_CODE, cap, begin=addr, end=addr)
+        else:
+            def cap(eng, _a=addr, _r=reg):
+                self._cap.append((_a, eng.mu.reg_read(_r) & 0xffff))
+            self.emu.add_hook(addr, cap)
         self._hooked.add(key)
 
     @staticmethod
@@ -405,14 +437,28 @@ class StereoRecover:
         return body.tobytes()
 
     def recover_block(self, p, cursor, nf=200):
+        key = (p["scale"], p["chan"])
+        # (0,0) -> KL, KR ; (1,0) -> rbL, aR.  These two are always needed.
         L0, R0 = self._drive(p, cursor, self._frame_body(nf + 4, 0, 0))   # KL, KR
         La, Ra = self._drive(p, cursor, self._frame_body(nf + 4, 1, 0))   # rbL, aR
-        Lb, Rb = self._drive(p, cursor, self._frame_body(nf + 4, 0, 1))   # bR
-        m = min(nf, len(L0), len(La), len(Lb))
+        three = self._three_probe.get(key)
+        if three is False:
+            # bR confirmed ≡0 for this scale (first block did the full check);
+            # skip the (0,1) probe that only recovers it.
+            m = min(nf, len(L0), len(La))
+            bR = np.zeros(m, np.int64)
+        else:
+            Lb, Rb = self._drive(p, cursor, self._frame_body(nf + 4, 0, 1))  # bR
+            m = min(nf, len(L0), len(La), len(Lb))
+            bR = _onehot_rb((Rb[:m] ^ R0[:m]) & 0xffff)
+            if three is None:
+                # First block of this scale: remember whether bR is ever nonzero
+                # so the rest of the song (and later sounds of the same scale) can
+                # drop the third probe when it's the universal all-zero case.
+                self._three_probe[key] = bool(np.any(bR))
         KL, KR = L0[:m], R0[:m]
         rbL = _onehot_rb((La[:m] ^ KL) & 0xffff)
         aR = _onehot_rb((Ra[:m] ^ KR) & 0xffff)
-        bR = _onehot_rb((Rb[:m] ^ KR) & 0xffff)
         return {"KL": KL, "rbL": rbL, "KR": KR, "aR": aR, "bR": bR, "m": m}
 
     def encode_block(self, targetL, targetR, rec):

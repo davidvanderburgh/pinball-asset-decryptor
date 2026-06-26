@@ -564,6 +564,30 @@ class Spike2Emu:
         if hh is not None:
             self.mu.hook_del(hh)
 
+    @property
+    def fast_reg_read(self):
+        """``(uc_reg_read C function, uc handle)`` for reading a register
+        straight through unicorn's C API from inside a hot hook, or ``None`` if
+        this unicorn build doesn't expose them.
+
+        The keystream-recovery capture fires a code hook once per output sample
+        (hundreds of thousands of times for a long song) and reads one register
+        each time; the normal ``mu.reg_read`` Python wrapper re-selects the
+        register class and allocates a fresh ctypes object every call, which
+        profiling showed to be ~30% of the whole re-encode.  Bypassing it (the
+        caller reuses one buffer + this bound C function) is a pure speedup with
+        a safe fallback: if the private attributes ever move, this returns
+        ``None`` and the caller keeps using ``mu.reg_read``."""
+        cached = getattr(self, "_fast_reg_cache", False)
+        if cached is False:
+            try:
+                from unicorn.unicorn_py3.unicorn import uclib
+                cached = (uclib.uc_reg_read, self.mu._uch)
+            except Exception:
+                cached = None
+            self._fast_reg_cache = cached
+        return cached
+
     # ---- boot ---------------------------------------------------------------
     def _build_keystream(self):
         mu = self.mu

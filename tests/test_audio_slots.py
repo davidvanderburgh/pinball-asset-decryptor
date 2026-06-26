@@ -105,6 +105,52 @@ def test_stage_matches_format_keeps_length_by_default(tmp_path):
     assert after.info.duration > 1.5           # full replacement length kept
 
 
+def test_staging_snapshots_original_and_revert_restores(tmp_path):
+    # Staging with assets_dir set must back the pristine original up under
+    # .orig/ before overwriting, so the edit can be reverted instantly.
+    from pinball_decryptor.core import staged_originals
+    from pinball_decryptor.core.checksums import generate_checksums, md5_file
+
+    assets = str(tmp_path)
+    orig = str(tmp_path / "audio" / "idx0001.wav")
+    _make_wav(orig, seconds=1.0, rate=22050, channels=1)
+    generate_checksums(assets)                 # baseline (needed for snapshot)
+    pristine_md5 = md5_file(orig)
+
+    rep = str(tmp_path / "replacement.wav")
+    _make_wav(rep, seconds=2.0, rate=22050, channels=2)
+
+    slots = {s.rel_path: s for s in scan_audio_slots(assets)}
+    rel = "audio/idx0001.wav"
+    staged, failures = stage_replacements(
+        {rel: slots[rel]}, {rel: rep}, trim_to_length=False, assets_dir=assets)
+    assert staged == 1 and failures == []
+
+    # Snapshot captured + the on-disk file actually changed.
+    assert staged_originals.has_snapshot(assets, rel)
+    assert md5_file(orig) != pristine_md5
+
+    # Reverting restores the exact original bytes and drops the snapshot.
+    assert staged_originals.revert(assets, rel) is True
+    assert md5_file(orig) == pristine_md5
+    assert not staged_originals.has_snapshot(assets, rel)
+
+
+def test_staging_without_assets_dir_takes_no_snapshot(tmp_path):
+    # Back-compat: callers that don't pass assets_dir behave exactly as before
+    # (no .orig dir created).
+    from pinball_decryptor.core.staged_originals import ORIG_DIR
+
+    orig = str(tmp_path / "audio" / "idx0001.wav")
+    _make_wav(orig, seconds=1.0, rate=22050, channels=1)
+    rep = str(tmp_path / "replacement.wav")
+    _make_wav(rep, seconds=1.0, rate=22050, channels=1)
+    slots = {s.rel_path: s for s in scan_audio_slots(str(tmp_path))}
+    rel = "audio/idx0001.wav"
+    stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert not os.path.isdir(os.path.join(str(tmp_path), ORIG_DIR))
+
+
 def test_scan_exts_restricts_to_wav(tmp_path):
     _make_wav(str(tmp_path / "keep.wav"))
     # an .ogg present but excluded when exts is restricted

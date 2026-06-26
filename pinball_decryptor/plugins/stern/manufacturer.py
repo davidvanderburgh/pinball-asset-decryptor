@@ -24,7 +24,8 @@ from .formats import detect_game, display_for_key
 from .games import GAME_DB
 from .pipeline import (SternDirectSsdExtractPipeline,
                        SternDirectSsdWritePipeline, SternExtractPipeline,
-                       SternFlashImagePipeline, SternWritePipeline)
+                       SternFlashImagePipeline, SternRevertPipeline,
+                       SternWritePipeline)
 
 # Stern handles two hardware eras under one picker entry:
 #   * "spike2"    — the modern SD-card games (image.bin audio + ext4 assets),
@@ -140,6 +141,9 @@ class SternManufacturer(Manufacturer):
                                  "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
     flash_phases = ("Check card", "Write image", "Flush")
+    # "Revert all changes" fallback: re-derive originals with no .orig snapshot
+    # straight from the source card.
+    revert_phases = ("Read source", "Restore")
     # The decode/replace engine emulates the ARM game firmware via unicorn.
     _SPIKE2_PREREQS = (
         Prerequisite(name="unicorn", where="host",
@@ -339,6 +343,16 @@ class SternManufacturer(Manufacturer):
                             log_cb, phase_cb, progress_cb, done_cb):
         return SternFlashImagePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+
+    def make_revert_pipeline(self, source, assets_dir, rels,
+                             log_cb, phase_cb, progress_cb, done_cb,
+                             is_device=False, partition_override=None):
+        """Build the fallback pipeline that re-derives pre-snapshot originals
+        from the source card (the GUI calls this only for changed files with no
+        ``.orig`` snapshot)."""
+        return SternRevertPipeline(
+            source, assets_dir, rels, log_cb, phase_cb, progress_cb, done_cb,
+            is_device=is_device, partition_override=partition_override)
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,

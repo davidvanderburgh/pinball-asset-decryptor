@@ -104,3 +104,15 @@ def changed(assets_dir):
 def count_changed(assets_dir):
     """Total number of edited strings across all assets (for status / preview)."""
     return sum(len(v) for v in changed(assets_dir).values())
+
+
+def revert_all(assets_dir):
+    """Blank every replacement so the manifest records no edits (text reverts to
+    the originals on the next build).  Returns the number of edits cleared."""
+    rows = load(assets_dir)
+    n = sum(1 for r in rows if r.get("replacement"))
+    if n:
+        for r in rows:
+            r["replacement"] = ""
+        save(assets_dir, rows)
+    return n

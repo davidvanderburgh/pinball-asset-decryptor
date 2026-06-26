@@ -14,6 +14,27 @@ def test_load_missing_is_empty(tmp_path):
     assert tm.count_changed(str(tmp_path)) == 0
 
 
+def test_revert_all_blanks_every_edit(tmp_path):
+    rows = [
+        {"path": "/g/a.radium", "original": "AWARD INFO", "replacement": ""},
+        {"path": "/g/a.radium", "original": "REPLAY AT", "replacement": "BONUS AT"},
+        {"path": "/g/b.radium", "original": "TILT", "replacement": "OOPS"},
+    ]
+    tm.save(str(tmp_path), rows)
+    assert tm.count_changed(str(tmp_path)) == 2
+    cleared = tm.revert_all(str(tmp_path))
+    assert cleared == 2
+    assert tm.count_changed(str(tmp_path)) == 0
+    # Originals (and their rows) are preserved — only the replacement is blanked.
+    back = tm.load(str(tmp_path))
+    assert [r["original"] for r in back] == ["AWARD INFO", "REPLAY AT", "TILT"]
+    assert all(r["replacement"] == "" for r in back)
+
+
+def test_revert_all_noop_when_no_edits(tmp_path):
+    assert tm.revert_all(str(tmp_path)) == 0
+
+
 def test_save_then_load_round_trips_dicts(tmp_path):
     rows = [
         {"path": "/g/a.radium", "original": "AWARD INFO", "replacement": ""},

@@ -346,7 +346,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    folder, and an output folder; click *Build update*. You get an
    installable file that's ready for a USB drive. Any Replace
    Audio / Video assignments are applied automatically here — no extra
-   step.
+   step. The assets folder *is* your project: your picks and built
+   changes persist there across app restarts, so you extract once and
+   keep iterating (no re-extract per edit). Each Replace tab marks slots
+   already changed by an earlier build, and **Revert all changes…**
+   (plus a per-slot *Revert to original*) puts files back to their
+   extracted originals — instantly from a per-edit backup, without
+   re-extracting.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder.
 9. **< Back** in the top bar returns to the picker. Each manufacturer

@@ -1381,6 +1381,10 @@ def _select_changed_idx_wavs(assets_dir, baseline):
     from ...core.checksums import md5_file
     by_idx = {}  # idx -> [path, ...]
     for root, _dirs, files in os.walk(assets_dir):
+        # Never walk the .orig snapshot mirror — it holds pristine copies of
+        # edited sounds (== baseline), which would otherwise register as extra
+        # twins for their idx (harmless, but wasteful to hash).
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue
@@ -2200,6 +2204,138 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
     return n_audio + n_video + n_image + n_text
+
+
+def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
+                  cancel=None, open_disk=None, partitions=None):
+    """Re-derive the pristine bytes of *rels* from the source card and write them
+    over the matching files in *assets_dir*.
+
+    The fallback for "Revert" when a file has no ``.orig`` snapshot (edited
+    before snapshots existed, or hand-edited so it never matched the baseline).
+    *rels* are ``/``-separated asset paths.  Audio (``audio/idxNNNN.wav`` and its
+    auto-named twins) is re-decoded from the firmware codec; loose videos /
+    images are re-extracted.  Anything else (e.g. per-category music banks) is
+    reported as un-revertable so the caller can tell the user to re-extract.
+
+    ``open_disk`` (zero-arg → seekable stream) and ``partitions`` override how the
+    card is opened / where its ext partitions are — Direct-SD passes a
+    ``RawDeviceFile`` + ``device_partitions``; the default reads ``source_path``.
+
+    Returns ``(reverted, failed)`` — two lists of rel paths.
+    """
+    import shutil
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+
+    # Bucket the requested rels by how each is recovered.
+    audio_idx = {}            # idx -> rel (target to overwrite)
+    media_rels = []           # video/* + images/* loose files
+    failed = []
+    for rel in rels:
+        top = rel.split("/", 1)[0]
+        base = os.path.splitext(os.path.basename(rel))[0]
+        if top == "audio":
+            if _MUSIC_WAV_RE.search(base):
+                failed.append(rel)           # music-bank revert not supported here
+                continue
+            m = _WAV_RE.match(base)
+            if m:
+                audio_idx[int(m.group(1))] = rel
+            else:
+                failed.append(rel)
+        elif top in ("video", "images"):
+            media_rels.append(rel)
+        else:
+            failed.append(rel)
+
+    if not audio_idx and not media_rels:
+        return [], failed
+
+    reverted = []
+    work = tempfile.mkdtemp(prefix="spike2_revert_")
+    emu = None
+    disk_f = open_disk() if open_disk is not None else open(source_path, "rb")
+    try:
+        parts = partitions if partitions is not None else _linux_partitions(
+            source_path)
+        gr_path, img_path, reader, _fw, _img = _extract_inputs(
+            disk_f, parts, work, log)
+        if cancel():
+            return reverted, failed
+
+        if audio_idx:
+            from .spike2.emulator import Spike2Emu, audio_decode_supported
+            if not audio_decode_supported(gr_path):
+                log("This title's audio can't be re-decoded for revert; "
+                    "re-extract to reset those sounds.", "warning")
+                failed.extend(audio_idx.values())
+            else:
+                log("Re-decoding %d original sound(s) from the card..."
+                    % len(audio_idx), "info")
+                emu = Spike2Emu(gr_path, img_path)
+                emu.boot()
+                params = _load_or_derive_params(
+                    emu, gr_path, img_path, log, progress)
+                want = set(audio_idx)
+                selected = [p for p in params if p["idx"] in want]
+                total = len(selected)
+                for i, p in enumerate(selected):
+                    if cancel():
+                        break
+                    if progress:
+                        progress(i, total, "Reverting sound %d/%d" % (i + 1, total))
+                    rel = audio_idx[p["idx"]]
+                    try:
+                        r = emu.decode(p, cancel=cancel)
+                    except Exception as e:
+                        log("idx %d: revert decode failed (%s)" % (p["idx"], e),
+                            "warning")
+                        failed.append(rel)
+                        continue
+                    if r is None:
+                        failed.append(rel)
+                        continue
+                    L, R, stereo = r
+                    _write_wav(os.path.join(assets_dir, *rel.split("/")),
+                               L, R, stereo)
+                    reverted.append(rel)
+                # idx the firmware didn't list at all can't be recovered here.
+                got = {audio_idx[p["idx"]] for p in selected}
+                failed.extend(r for r in audio_idx.values()
+                              if r not in got and r not in failed)
+                emu.close(); emu = None
+
+        if media_rels and not cancel():
+            log("Re-extracting %d original media file(s) from the card..."
+                % len(media_rels), "info")
+            want_video = any(r.startswith("video/") for r in media_rels)
+            want_images = any(r.startswith("images/") for r in media_rels)
+            try:
+                if want_video:
+                    extract_videos(reader, work, log=log, cancel=cancel)
+                if want_images:
+                    extract_images(reader, work, log=log, cancel=cancel)
+            except Exception as e:
+                log("Media re-extract failed (%s)." % e, "warning")
+            for rel in media_rels:
+                src = os.path.join(work, *rel.split("/"))
+                dst = os.path.join(assets_dir, *rel.split("/"))
+                if os.path.isfile(src):
+                    try:
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(src, dst)
+                        reverted.append(rel)
+                    except OSError:
+                        failed.append(rel)
+                else:
+                    failed.append(rel)
+        return reverted, failed
+    finally:
+        if emu is not None:
+            emu.close()
+        disk_f.close()
+        _rmtree(work)
 
 
 def device_partitions(device_path, partition_override=None, log=None):

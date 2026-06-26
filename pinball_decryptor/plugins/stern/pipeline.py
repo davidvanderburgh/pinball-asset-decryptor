@@ -15,6 +15,7 @@ import os
 
 from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
+from ...core.staged_originals import discard as discard_snapshots
 from .formats import detect_game, display_for_key, linux_partitions
 from .rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
                        flash_image_to_device, format_size, is_device_path)
@@ -119,6 +120,9 @@ class SternExtractPipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(5)  # Checksums
+        # A fresh decode rewrites every asset pristine, so any .orig snapshots
+        # from a prior session now describe stale content — drop them.
+        discard_snapshots(self.output_dir)
         # Baseline so Write/Mod Pack can tell which assets the user edited (and
         # so the Write tab accepts this folder as an Extract output).
         self._log("Generating checksums...", "info")
@@ -206,6 +210,9 @@ class SternDirectSsdExtractPipeline(BasePipeline):
         self._check_cancel()   # don't run checksums on a cancelled extract
 
         self._set_phase(5)  # Checksums
+        # A fresh decode rewrites every asset pristine, so any .orig snapshots
+        # from a prior session now describe stale content — drop them.
+        discard_snapshots(self.output_dir)
         self._log("Generating checksums...", "info")
         self._progress(0, 0, "Generating checksums...")
         generate_checksums(self.output_dir, log_cb=self._log,
@@ -245,6 +252,59 @@ class SternDirectSsdWritePipeline(BasePipeline):
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
         self._done(True, "Wrote %d change(s) directly to the SD card." % n)
+
+
+class SternRevertPipeline(BasePipeline):
+    """Re-derive the pristine bytes of specific assets from the source card and
+    write them back over the edited copies in the assets folder.
+
+    The fallback for "Revert" when an edit has no ``.orig`` snapshot (changed
+    before snapshots existed, or hand-edited).  Audio idx are re-decoded from the
+    firmware codec; loose videos/images are re-extracted.  *source* is the
+    original image path, or — when ``is_device`` — the physical card device."""
+
+    def __init__(self, source, assets_dir, rels,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 is_device=False, partition_override=None):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.source = source
+        self.assets_dir = assets_dir
+        self.rels = list(rels)
+        self.is_device = is_device
+        self.partition_override = partition_override
+
+    def _run(self):
+        self._set_phase(0)  # Read source
+        _require_engine()
+        if not self.rels:
+            self._done(True, "Nothing to restore from the source card.")
+            return
+        if self.is_device:
+            parts = engine.device_partitions(
+                self.source, self.partition_override, log=self._log)
+            reverted, failed = engine.revert_assets(
+                self.source, self.assets_dir, self.rels,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled,
+                open_disk=lambda: RawDeviceFile(self.source, writable=False),
+                partitions=parts)
+        else:
+            if detect_game(self.source) is None:
+                raise PipelineError(
+                    "Read source",
+                    "The Original .img isn't a Spike card image, so the "
+                    "pre-snapshot edits can't be restored from it. Re-extract "
+                    "to reset those files.")
+            reverted, failed = engine.revert_assets(
+                self.source, self.assets_dir, self.rels,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+        self._set_phase(1)  # Done
+        msg = "Restored %d original file(s) from the card." % len(reverted)
+        if failed:
+            msg += (" %d could not be restored (re-extract to reset those)."
+                    % len(failed))
+        self._done(True, msg)
 
 
 class SternFlashImagePipeline(BasePipeline):

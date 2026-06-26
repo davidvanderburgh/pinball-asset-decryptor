@@ -99,6 +99,7 @@ class App:
             on_write=self._start_write,
             on_write_cancel=self._cancel,
             on_apply_delta=self._start_apply_delta,
+            on_revert_all=self._start_revert_all,
             on_flash_image=self._start_flash_image,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
@@ -1333,7 +1334,8 @@ class App:
             f"repack...", "info"))
         try:
             staged, failures = stage_replacements(
-                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb)
+                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb,
+                assets_dir=assets_dir)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} audio replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -1359,7 +1361,8 @@ class App:
             f"repack...", "info"))
         try:
             staged, failures = stage_replacements(
-                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb)
+                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb,
+                assets_dir=assets_dir)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -1385,7 +1388,7 @@ class App:
             f"repack...", "info"))
         try:
             staged, failures = stage_replacements(
-                slots_by_rel, assignments, log_cb=log_cb)
+                slots_by_rel, assignments, log_cb=log_cb, assets_dir=assets_dir)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} image replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -1394,6 +1397,140 @@ class App:
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
+
+    # ------------------------------------------------------------------
+    # Revert all changes
+    # ------------------------------------------------------------------
+
+    def _start_revert_all(self, assets_dir):
+        """Revert every staged edit in *assets_dir* back to the extracted
+        originals.  The fast path is instant (restore from the per-edit ``.orig``
+        snapshots); any edit made before snapshots existed is re-derived from the
+        source card by a per-plugin fallback pipeline."""
+        from .core import staged_changes, staged_originals, text_manifest
+
+        if not assets_dir or not os.path.isdir(assets_dir):
+            messagebox.showwarning(
+                "No assets folder",
+                "Pick your modified assets folder first.")
+            return
+        if not os.path.isfile(os.path.join(assets_dir, ".checksums.md5")):
+            messagebox.showwarning(
+                "Not an Extract folder",
+                "This folder has no .checksums.md5 baseline, so there's nothing "
+                "to compare against. Point at the folder Extract produced.")
+            return
+        # Spell out exactly what's about to happen (which files, and what's NOT
+        # touched) — "revert all" was too vague about its scope.
+        sc = staged_changes.load(assets_dir)
+        n_assign = sum(len(sc.get(k) or {})
+                       for k in ("audio", "video", "image"))
+        n_text = text_manifest.count_changed(assets_dir)
+        bullets = []
+        cleared = []
+        if n_assign:
+            cleared.append("%d staged replacement(s)" % n_assign)
+        if n_text:
+            cleared.append("%d text edit(s)" % n_text)
+        if cleared:
+            bullets.append("  •  clears " + " and ".join(cleared))
+        bullets.append("  •  restores every modified file to the original "
+                       "version from your Extract")
+        bullets.append("  •  leaves your Extract baseline and the source card "
+                       "untouched")
+        if not messagebox.askyesno(
+                "Revert all changes",
+                "Revert all changes in:\n\n  %s\n\nThis:\n%s\n\nIt can't be "
+                "undone." % (assets_dir, "\n".join(bullets))):
+            return
+
+        # 1) Clear the in-memory + on-disk assignment state and text edits.
+        self.window.clear_replace_assignments(assets_dir)
+        try:
+            text_manifest.revert_all(assets_dir)
+        except Exception:
+            pass
+        # 2) Instant snapshot restores (the common, going-forward case).
+        try:
+            instant = len(staged_originals.revert_all(assets_dir))
+        except Exception:
+            instant = 0
+
+        self._active_mode = "write"
+        self._revert_active = True
+        self._cancel_requested = False
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        self.window.set_status("Reverting…")
+        threading.Thread(
+            target=self._run_revert, args=(assets_dir, instant),
+            daemon=True).start()
+
+    def _run_revert(self, assets_dir, instant_count):
+        """Worker: find edits with no snapshot (legacy / hand-edited) and, if a
+        source card + a plugin fallback are available, re-derive them; otherwise
+        report them as needing a re-extract.  Posts a DoneMsg either way."""
+        from .core.checksums import all_changed
+
+        log = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        prog = lambda c, t, d="": self.msg_queue.put(ProgressMsg(c, t, d))
+        try:
+            log("Checking for edits made before snapshots existed…", "info")
+            remaining = sorted(all_changed(
+                assets_dir,
+                progress=lambda c, t: prog(c, t, "Checking files…"),
+                cancel=lambda: self._cancel_requested))
+        except Exception as e:
+            log("Change scan failed (%s); restored snapshots only." % e,
+                "warning")
+            remaining = []
+        if self._cancel_requested:
+            self.msg_queue.put(DoneMsg(False, "Revert cancelled."))
+            return
+        if not remaining:
+            self.msg_queue.put(DoneMsg(
+                True, "Reverted %d change(s) to the extracted originals."
+                % instant_count))
+            return
+
+        mfr = self._current_mfr
+        make = getattr(mfr, "make_revert_pipeline", None)
+        source, is_device, override = self._revert_source()
+        if make is None or not source:
+            log("%d file(s) were changed before per-edit backups existed and "
+                "need the source card (or a re-extract) to reset." % len(remaining),
+                "warning")
+            self.msg_queue.put(DoneMsg(
+                True,
+                "Reverted %d change(s). %d file(s) predate the per-edit backups "
+                "— re-extract the card to reset those." % (instant_count,
+                                                           len(remaining))))
+            return
+
+        log("Restoring %d file(s) from the source card…" % len(remaining),
+            "info")
+        log_cb, _phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = make(
+            source, assets_dir, remaining,
+            log_cb, lambda _i: None, progress_cb, done_cb,
+            is_device=is_device, partition_override=override)
+        self.pipeline.run()   # posts the final DoneMsg via done_cb
+
+    def _revert_source(self):
+        """``(source, is_device, partition_override)`` for the revert fallback,
+        read from the Write tab's current source selection — the original image
+        in Build mode, or the physical card in Direct-SD mode."""
+        w = self.window
+        if (self._current_mfr is not None
+                and self._current_mfr.capabilities.direct_ssd
+                and getattr(w, "write_input_source_var", None) is not None
+                and w.write_input_source_var.get() == "ssd"):
+            dev = (w.write_drive_var.get() or "").strip()
+            raw = (w.write_partition_override_var.get() or "").strip()
+            override = int(raw) if raw.isdigit() else None
+            return (dev, True, override) if dev else ("", True, None)
+        src = (w.write_upd_var.get() or "").strip()
+        return (src if os.path.isfile(src) else "", False, None)
 
     # ------------------------------------------------------------------
     # Cancel / Done
@@ -1412,6 +1549,25 @@ class App:
             self.pipeline.cancel()
 
     def _on_done(self, success, summary):
+        # Revert runs reuse the write run-state but have their own messaging +
+        # a post-run rescan (on-disk asset bytes changed under the tabs).
+        if getattr(self, "_revert_active", False):
+            self._revert_active = False
+            self.window.set_running(False, mode="write")
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Cancelled")
+                self.window.append_log("Revert cancelled.", "info")
+            elif success:
+                self.window.set_status("Reverted")
+                self.window.append_log(summary, "success")
+                messagebox.showinfo("Revert Complete", summary)
+            else:
+                self.window.set_status("Failed")
+                messagebox.showerror("Revert Failed", summary)
+            self.window.refresh_after_revert()
+            return
+
         is_extract = self._active_mode == "extract"
         # On success, advance the phase indicator past the last phase
         # so every step shows green instead of leaving the final

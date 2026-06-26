@@ -134,17 +134,25 @@ def stage_replacement(slot: ImageSlot, replacement_path: str):
 
 def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
                        assignments: Dict[str, str],
-                       log_cb=None, progress_cb=None):
+                       log_cb=None, progress_cb=None, assets_dir=None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their ImageSlot.  Returns
     ``(staged, failures)`` where *failures* is a list of ``(rel_path, error)``.
+
+    *assets_dir*, when given, snapshots each slot's pristine bytes under
+    ``.orig/`` before the first overwrite so the edit can be reverted without a
+    full re-extract (see :mod:`core.staged_originals`).
     """
+    from .checksums import read_baseline_any
+    from . import staged_originals
+
     items = [(rel, rep) for rel, rep in assignments.items()
              if rep and rel in slots_by_rel]
     total = len(items)
     staged = 0
     failures: List = []
+    baseline = read_baseline_any(assets_dir) if assets_dir else {}
 
     for i, (rel, rep) in enumerate(items):
         slot = slots_by_rel[rel]
@@ -152,6 +160,8 @@ def stage_replacements(slots_by_rel: Dict[str, ImageSlot],
             progress_cb(i, total, rel)
         if log_cb:
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
+        if assets_dir:
+            staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         ok, detail = stage_replacement(slot, rep)
         if ok:
             staged += 1

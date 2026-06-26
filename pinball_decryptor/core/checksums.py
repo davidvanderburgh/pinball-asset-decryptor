@@ -7,8 +7,12 @@ mod-pack export use :func:`read_checksums` to diff against the baseline.
 
 import hashlib
 import os
+import re
 
 CHECKSUMS_FILE = ".checksums.md5"
+
+# A ``.checksums.md5`` line in md5sum form: "<md5>  <path>" (optionally "*path").
+_MD5SUM_LINE = re.compile(r'^([a-f0-9]{32})\s+\*?(.+)$')
 
 # Auto-name output sidecars (callouts.csv / music_titles.csv).  These are
 # derived tracking metadata — they have no destination inside the card/ISO
@@ -44,8 +48,13 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     (the caller re-checks cancel afterwards to report the cancellation).
     """
     cancel = cancel or (lambda: False)
+    # Always exclude the .orig snapshot mirror (core.staged_originals) — it is a
+    # backup of edited assets, not part of the card, and must never enter the
+    # baseline (else a re-extract would record the snapshots as real files).
+    from .staged_originals import ORIG_DIR
     excluded = {d.replace("\\", "/").strip("/")
                 for d in (exclude_dirs or ())}
+    excluded.add(ORIG_DIR)
     files = []
     for dirpath, dirnames, filenames in os.walk(folder):
         rel_dir = os.path.relpath(dirpath, folder).replace("\\", "/")
@@ -111,3 +120,98 @@ def read_checksums(folder):
                 rel, md5 = line.rsplit("\t", 1)
                 baseline[rel] = md5
     return baseline
+
+
+def read_baseline_any(folder):
+    """Read ``.checksums.md5`` in *either* on-disk flavour → ``{rel: md5}``.
+
+    Two plugins write the baseline differently:
+      * JJP / md5sum style — ``"<md5>  <path>"`` (md5 first);
+      * BOF / Stern style  — ``"<path>\\t<md5>"``  (path first).
+    :func:`read_checksums` only parses the tab form; this robust superset
+    detects per-line, so a single helper can diff any plugin's folder.  Paths
+    are normalised to forward slashes with any leading ``./`` stripped.
+    """
+    path = os.path.join(folder, CHECKSUMS_FILE)
+    baseline = {}
+    if not os.path.isfile(path):
+        return baseline
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            m = _MD5SUM_LINE.match(line)
+            if m:
+                md5_val, rel = m.group(1), m.group(2)
+            elif "\t" in line:
+                rel, md5_val = line.rsplit("\t", 1)
+                md5_val = md5_val.strip()
+                if not re.fullmatch(r'[a-f0-9]{32}', md5_val):
+                    continue
+            else:
+                continue
+            if rel.startswith("./"):
+                rel = rel[2:]
+            baseline[rel.replace("\\", "/")] = md5_val
+    return baseline
+
+
+def changed_rels(folder, rels, baseline=None):
+    """Return the subset of *rels* whose current bytes differ from the baseline.
+
+    *rels* is an iterable of ``/``-separated paths relative to *folder* (e.g. the
+    Replace tab's slot paths).  A rel that's missing from the baseline is treated
+    as changed (a brand-new / un-baselined file).  Unreadable files are reported
+    as changed rather than silently clean.  *baseline* defaults to
+    :func:`read_baseline_any`.
+    """
+    if baseline is None:
+        baseline = read_baseline_any(folder)
+    out = set()
+    for rel in rels:
+        abs_path = os.path.join(folder, *rel.split("/"))
+        base = baseline.get(rel)
+        try:
+            cur = md5_file(abs_path)
+        except OSError:
+            out.add(rel)
+            continue
+        if base is None or cur != base:
+            out.add(rel)
+    return out
+
+
+def all_changed(folder, baseline=None, progress=None, cancel=None):
+    """Every *baselined* rel under *folder* whose bytes now differ — the set the
+    Write build repacks, and so the set "Revert all changes" restores.
+
+    Only files present in the baseline are checked (a brand-new file has no
+    original to revert to), and the ``.orig`` snapshot mirror is excluded.
+    *progress(current, total)* and *cancel()* (stop early) are optional — the
+    walk hashes potentially many files, so callers run it off the UI thread.
+    """
+    if baseline is None:
+        baseline = read_baseline_any(folder)
+    cancel = cancel or (lambda: False)
+    # ".orig/" is the snapshot mirror (core.staged_originals); never in a fresh
+    # baseline, but filter defensively so a stale entry can't sneak in.
+    rels = [r for r in baseline if not r.startswith(".orig/")]
+    out = set()
+    total = len(rels)
+    for i, rel in enumerate(rels):
+        if cancel():
+            break
+        if progress:
+            progress(i, total)
+        abs_path = os.path.join(folder, *rel.split("/"))
+        try:
+            if md5_file(abs_path) != baseline[rel]:
+                out.add(rel)
+        except OSError:
+            # Missing/unreadable now but present at extract — treat as changed so
+            # the caller can try to restore it.
+            out.add(rel)
+    if progress:
+        progress(total, total)
+    return out

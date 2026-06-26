@@ -20,6 +20,7 @@ import webbrowser
 from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import stale_source_message
+from ..core.staged_originals import ORIG_DIR
 from .theme import THEMES, detect_system_theme, platform_font
 
 # PIL lazy-imported on demand for the live DMD preview — keeping the
@@ -87,6 +88,7 @@ class MainWindow:
                  on_write, on_write_cancel,
                  on_export, on_import,
                  on_apply_delta=None,
+                 on_revert_all=None,
                  on_flash_image=None,
                  on_recheck_prereqs=None, on_install_prereqs=None,
                  on_back=None,
@@ -102,6 +104,7 @@ class MainWindow:
         self._on_write = on_write
         self._on_write_cancel = on_write_cancel
         self._on_apply_delta = on_apply_delta
+        self._on_revert_all = on_revert_all
         self._on_flash_image = on_flash_image
         self._on_recheck_prereqs = on_recheck_prereqs
         self._on_install_prereqs = on_install_prereqs
@@ -196,6 +199,16 @@ class MainWindow:
         self._audio_loop_tip = None      # Loop-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
+        # Slots whose on-disk bytes differ from the Extract baseline even though
+        # the user hasn't assigned a replacement *this* session — i.e. edits
+        # already staged by a previous build (or hand-edited).  The Write step
+        # repacks these, so the Replace tabs surface + count them too (computed
+        # by a background diff so the slot list still appears instantly).  Keyed
+        # the same as the slot maps; shared across the three Replace tabs.
+        self._audio_changed_on_disk = set()
+        self._video_changed_on_disk = set()
+        self._image_changed_on_disk = set()
+        self._change_scan_id = 0         # bump-counter for the background diff
         self._audio_play_proc = None     # ffplay preview handle, if any
         # Preview strip (seekable spectrogram) state.
         self._audio_preview_path = None  # file currently loaded in the strip
@@ -1319,6 +1332,13 @@ class MainWindow:
                                             command=self._on_write_cancel,
                                             state=tk.DISABLED)
         self._write_cancel_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # Revert all the staged edits in the assets folder back to the extracted
+        # originals — instant from the per-edit snapshots, no full re-extract.
+        # Gated to plugins with a Replace surface in apply_manufacturer().
+        self._revert_all_btn = ttk.Button(
+            btn_row, text="Revert all changes…",
+            command=self._revert_all_clicked)
+        self._revert_all_btn.pack(side=tk.RIGHT)
 
         # Apply-delta — gated by capability flag in apply_manufacturer().
         self._delta_frame = ttk.LabelFrame(
@@ -1716,7 +1736,71 @@ class MainWindow:
                              "loop" in os.path.basename(s.rel_path).lower()))
             for s in slots}
         self._audio_scan_dir = scan_dir
+        # Drop the previous folder's diff until this folder's background scan
+        # repopulates it (avoids a flash of stale "changed" markers).
+        self._audio_changed_on_disk = set()
         self._refresh_audio_list()
+        self._start_change_scan("audio")
+
+    # ---- Replace tabs: on-disk change diff (shared) ------------------
+
+    def _start_change_scan(self, kind):
+        """Background-diff the *kind* (audio/video/image) slots against the
+        Extract baseline so the tab can flag + count slots already changed on
+        disk by a previous build, matching the Write tab and the actual build.
+
+        Runs off the UI thread (the slot list is already shown), then updates
+        ``self._<kind>_changed_on_disk`` and refreshes the list.  Snapshotted
+        slots are known-changed and skipped from hashing; the rest are MD5'd."""
+        import threading
+        from ..core import checksums, staged_originals
+
+        assets_path = (self.write_assets_var.get() or "").strip()
+        slots = getattr(self, "_%s_slots" % kind, [])
+        rels = [s.rel_path for s in slots]
+        refresh = {"audio": self._refresh_audio_list,
+                   "video": self._refresh_video_list,
+                   "image": self._refresh_image_list}.get(kind)
+        self._change_scan_id += 1
+        scan_id = self._change_scan_id
+        if not assets_path or not os.path.isdir(assets_path) or not rels:
+            setattr(self, "_%s_changed_on_disk" % kind, set())
+            return
+        root = self.root
+
+        def _work():
+            try:
+                baseline = checksums.read_baseline_any(assets_path)
+                rel_set = set(rels)
+                snaps = {r for r in staged_originals.snapshot_rels(assets_path)
+                         if r in rel_set}
+                to_hash = [r for r in rels if r not in snaps]
+                changed = snaps | checksums.changed_rels(
+                    assets_path, to_hash, baseline=baseline)
+            except Exception:
+                changed = set()
+
+            def _apply():
+                if self._change_scan_id != scan_id:
+                    return            # superseded by a newer scan
+                setattr(self, "_%s_changed_on_disk" % kind, changed)
+                if refresh:
+                    refresh()
+            try:
+                root.after(0, _apply)
+            except (tk.TclError, RuntimeError):
+                pass              # window torn down before the scan finished
+
+        # Spawn through the event loop (after-idle) rather than synchronously, so
+        # a caller that builds + tears down the window without running the loop
+        # (the GUI tests) never leaks a worker thread that would race Tcl during
+        # teardown — the fixture's pending-after cancel sweeps this away.
+        def _spawn():
+            threading.Thread(target=_work, daemon=True).start()
+        try:
+            root.after(0, _spawn)
+        except (tk.TclError, RuntimeError):
+            pass
 
     # ---- Replace tabs: click-header sorting (shared) -----------------
 
@@ -1762,6 +1846,8 @@ class MainWindow:
                  if not query or query in s.rel_path.lower()]
         col, desc = self._audio_sort
 
+        changed = self._audio_changed_on_disk
+
         def _key(s):
             if col == "len":
                 return (s.duration,)
@@ -1769,9 +1855,13 @@ class MainWindow:
                 return (s.format_summary().lower(), s.rel_path.lower())
             if col == "rep":
                 rep = self._audio_assignments.get(s.rel_path)
-                # Assigned rows group together (by replacement name); the rest
-                # fall to the bottom (ascending) regardless of direction-flip.
-                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+                # Assigned (and already-changed-on-disk) rows group together; the
+                # rest fall to the bottom (ascending) regardless of direction.
+                if rep:
+                    return (0, os.path.basename(rep).lower())
+                if s.rel_path in changed:
+                    return (1, "")
+                return (2, "")
             if col == "loop":
                 return (1 if self._audio_loop_flags.get(s.rel_path) else 0,)
             return (s.rel_path.lower(),)  # "#0" name/path
@@ -1781,15 +1871,31 @@ class MainWindow:
 
         for s in slots:
             rep = self._audio_assignments.get(s.rel_path)
-            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            is_changed = s.rel_path in changed
+            if rep:
+                # green = staged (a pick not built yet); blue = already built
+                # into the working copy.  Same colours as the Write tab.
+                rep_disp = os.path.basename(rep)
+                tag = "changed" if is_changed else "assigned"
+            elif is_changed:
+                # Changed on disk by an earlier build but not reassigned this
+                # session — it WILL still be in the next build (Write repacks
+                # anything that differs from the baseline).  Surface it so the
+                # count matches the Write tab; right-click → Revert to undo it.
+                rep_disp, tag = "✓ changed (earlier build)", "changed"
+            else:
+                rep_disp, tag = "Choose…", ""
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp),
-                        tags=("assigned",) if rep else ())
+                        tags=(tag,) if tag else ())
 
         total = len(self._audio_slots)
-        assigned = len(self._audio_assignments)
+        # Count what the build will actually change: assignments made this
+        # session PLUS files already changed on disk (earlier builds / hand
+        # edits).  This is what the Write tab and the build apply.
+        changed_total = len(set(self._audio_assignments) | changed)
         if total == 0:
             self.audio_status_var.set("")
             self._audio_empty.configure(
@@ -1799,7 +1905,7 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.audio_status_var.set(
-                f"{assigned} of {total} slots assigned{extra}")
+                f"{changed_total} of {total} slots changed{extra}")
             self._audio_empty.place_forget()
 
     def _maybe_rescan_audio(self):
@@ -1993,11 +2099,23 @@ class MainWindow:
                          command=self._audio_play_original)
         menu.add_command(label="Choose replacement…",
                          command=lambda r=row: self._audio_assign_rel(r))
-        if self._audio_assignments.get(row):
+        has_assignment = bool(self._audio_assignments.get(row))
+        is_built = row in self._audio_changed_on_disk
+        if has_assignment:
             menu.add_command(label="▶  Play replacement",
                              command=self._audio_play_replacement)
+        # One undo action, by state — never both (they confused users):
+        #   * built into the working copy → "Revert to original" restores the
+        #     file on disk (and drops any pick);
+        #   * a pick not built yet → "Remove replacement" just drops the pick
+        #     (there's nothing on disk to restore).
+        if is_built:
             menu.add_separator()
-            menu.add_command(label="Clear replacement",
+            menu.add_command(label="↺  Revert to original",
+                             command=self._audio_revert_selected)
+        elif has_assignment:
+            menu.add_separator()
+            menu.add_command(label="Remove replacement",
                              command=self._audio_clear_selected)
         slot = self._audio_slots_by_rel.get(row)
         if slot is not None:
@@ -2022,6 +2140,44 @@ class MainWindow:
                 self._audio_tree.selection_set(rel)
             except tk.TclError:
                 pass
+
+    def _audio_revert_selected(self):
+        """Revert the selected slot to its extracted original.
+
+        Clears any assignment made this session, then — if the file was already
+        staged to disk — restores it from its ``.orig`` snapshot (instant).  A
+        file changed before snapshots existed has no backup here, so we point the
+        user at 'Revert all changes' on the Write tab (which can re-derive it
+        from the source card) rather than failing silently."""
+        from ..core import staged_originals
+        rel = self._audio_selected_rel()
+        if rel is None:
+            return
+        assets_dir = (self.write_assets_var.get() or "").strip()
+        had_assignment = rel in self._audio_assignments
+        if had_assignment:
+            del self._audio_assignments[rel]
+        restored = False
+        on_disk = rel in self._audio_changed_on_disk
+        if on_disk and assets_dir:
+            restored = staged_originals.revert(assets_dir, rel)
+        if restored:
+            self._audio_changed_on_disk.discard(rel)
+        self._save_staged_changes()
+        self._refresh_audio_list()
+        if rel == self._audio_current_rel:
+            self._audio_update_source_radio()
+        try:
+            self._audio_tree.selection_set(rel)
+        except tk.TclError:
+            pass
+        if on_disk and not restored:
+            messagebox.showinfo(
+                "No saved original",
+                "This track was changed before the app started keeping per-edit "
+                "backups, so there's no saved original to restore here.\n\n"
+                "Use “Revert all changes…” on the Write tab to rebuild it from "
+                "the source card, or re-extract the card.")
 
     def _audio_play_original(self):
         rel = self._audio_selected_rel()
@@ -2629,7 +2785,9 @@ class MainWindow:
                 rel: rep for rel, rep in self._video_assignments.items()
                 if rel in self._video_slots_by_rel}
         self._video_scan_dir = scan_dir
+        self._video_changed_on_disk = set()
         self._refresh_video_list()
+        self._start_change_scan("video")
         # Now fill in duration / resolution / codec on a background thread so
         # the list is usable immediately even with hundreds of clips.
         self._probe_video_metadata_async(scan_id)
@@ -2701,6 +2859,8 @@ class MainWindow:
                  if not query or query in s.rel_path.lower()]
         col, desc = self._video_sort
 
+        changed = self._video_changed_on_disk
+
         def _key(s):
             if col == "len":
                 return (s.duration,)
@@ -2711,7 +2871,9 @@ class MainWindow:
                 return (s.format_summary().lower(), s.rel_path.lower())
             if col == "rep":
                 rep = self._video_assignments.get(s.rel_path)
-                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+                if rep:
+                    return (0, os.path.basename(rep).lower())
+                return (1, "") if s.rel_path in changed else (2, "")
             return (s.rel_path.lower(),)  # "#0" name/path
 
         slots.sort(key=_key, reverse=desc)
@@ -2719,17 +2881,24 @@ class MainWindow:
 
         for s in slots:
             rep = self._video_assignments.get(s.rel_path)
-            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            is_changed = s.rel_path in changed
+            if rep:
+                rep_disp = os.path.basename(rep)
+                tag = "changed" if is_changed else "assigned"
+            elif is_changed:
+                rep_disp, tag = "✓ changed (earlier build)", "changed"
+            else:
+                rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
                 length, res = "…", "…"  # metadata still loading
             else:
                 length, res = s.duration_str(), s.resolution_str()
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(length, res, s.format_summary(), rep_disp),
-                        tags=("assigned",) if rep else ())
+                        tags=(tag,) if tag else ())
 
         total = len(self._video_slots)
-        assigned = len(self._video_assignments)
+        changed_total = len(set(self._video_assignments) | changed)
         if total == 0:
             self.video_status_var.set("")
             self._video_empty.configure(
@@ -2739,7 +2908,7 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.video_status_var.set(
-                f"{assigned} of {total} slots assigned{extra}")
+                f"{changed_total} of {total} slots changed{extra}")
             self._video_empty.place_forget()
 
     def _default_assets_from_extract(self):
@@ -2763,6 +2932,53 @@ class MainWindow:
         self._video_scan_dir = ""
         self._image_scan_dir = ""
         self._text_scan_dir = ""
+
+    # ---- Revert all changes (Write tab button -> app callback) -------
+
+    def _revert_all_clicked(self):
+        """Hand the current assets folder to the app's revert orchestration."""
+        if self._on_revert_all is None:
+            return
+        assets_dir = (self.write_assets_var.get() or "").strip()
+        self._on_revert_all(assets_dir)
+
+    def clear_replace_assignments(self, assets_dir):
+        """Drop every in-memory Replace-Audio/Video/Image assignment and wipe the
+        staged-changes sidecar, so a revert leaves no assignment that would
+        re-apply on the next build.  Called by the app's revert flow."""
+        from ..core import staged_changes
+        self._audio_assignments = {}
+        self._video_assignments = {}
+        self._image_assignments = {}
+        staged_changes.save(assets_dir, {})
+
+    def refresh_after_revert(self):
+        """Re-sync the Replace tabs + Write preview after a revert changed the
+        on-disk asset bytes (and cleared every assignment)."""
+        self._audio_changed_on_disk = set()
+        self._video_changed_on_disk = set()
+        self._image_changed_on_disk = set()
+        for fn in (getattr(self, "_refresh_audio_list", None),
+                   getattr(self, "_refresh_video_list", None),
+                   getattr(self, "_refresh_image_list", None)):
+            if fn:
+                try:
+                    fn()
+                except tk.TclError:
+                    pass
+        # Re-diff the still-loaded slots (their bytes changed) + re-scan the
+        # Write preview so both reflect the reverted state.
+        for kind in ("audio", "video", "image"):
+            if getattr(self, "_%s_slots" % kind, None):
+                self._start_change_scan(kind)
+        if hasattr(self, "_write_preview_tree"):
+            try:
+                self._scan_write_preview()
+            except tk.TclError:
+                pass
+        # The Replace Text tab reads straight from the manifest; reload it.
+        if getattr(self, "_text_scan_dir", ""):
+            self._text_scan_dir = ""
 
     def _reveal_menu_label(self):
         """OS-appropriate wording for the 'show this file in the file manager'
@@ -3643,7 +3859,9 @@ class MainWindow:
                 rel: rep for rel, rep in self._image_assignments.items()
                 if rel in self._image_slots_by_rel}
         self._image_scan_dir = scan_dir
+        self._image_changed_on_disk = set()
         self._refresh_image_list()
+        self._start_change_scan("image")
         # Fill in dimensions / format on a background thread so the list is
         # usable immediately even with hundreds of images.
         self._probe_image_metadata_async(scan_id)
@@ -3713,6 +3931,8 @@ class MainWindow:
                  if not query or query in s.rel_path.lower()]
         col, desc = self._image_sort
 
+        changed = self._image_changed_on_disk
+
         def _key(s):
             if col == "res":
                 wh = (s.info.width * s.info.height) if s.info else -1
@@ -3721,7 +3941,9 @@ class MainWindow:
                 return (s.format_summary().lower(), s.rel_path.lower())
             if col == "rep":
                 rep = self._image_assignments.get(s.rel_path)
-                return (0, os.path.basename(rep).lower()) if rep else (1, "")
+                if rep:
+                    return (0, os.path.basename(rep).lower())
+                return (1, "") if s.rel_path in changed else (2, "")
             return (s.rel_path.lower(),)  # "#0" name/path
 
         slots.sort(key=_key, reverse=desc)
@@ -3729,17 +3951,24 @@ class MainWindow:
 
         for s in slots:
             rep = self._image_assignments.get(s.rel_path)
-            rep_disp = os.path.basename(rep) if rep else "Choose…"
+            is_changed = s.rel_path in changed
+            if rep:
+                rep_disp = os.path.basename(rep)
+                tag = "changed" if is_changed else "assigned"
+            elif is_changed:
+                rep_disp, tag = "✓ changed (earlier build)", "changed"
+            else:
+                rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
                 res = "…"  # metadata still loading
             else:
                 res = s.resolution_str()
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(res, s.format_summary(), rep_disp),
-                        tags=("assigned",) if rep else ())
+                        tags=(tag,) if tag else ())
 
         total = len(self._image_slots)
-        assigned = len(self._image_assignments)
+        changed_total = len(set(self._image_assignments) | changed)
         if total == 0:
             self.image_status_var.set("")
             self._image_empty.configure(
@@ -3749,7 +3978,7 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.image_status_var.set(
-                f"{total} images, {assigned} assigned{extra}")
+                f"{total} images, {changed_total} changed{extra}")
             self._image_empty.place_forget()
 
     def _maybe_rescan_image(self):
@@ -5040,6 +5269,15 @@ class MainWindow:
         else:
             self._flash_frame.pack_forget()
 
+        # "Revert all changes…" — only meaningful when this plugin has a Replace
+        # surface (the assets folder is where staged edits live).
+        has_replace = (caps.replace_audio or caps.replace_video
+                       or caps.replace_image or caps.replace_text)
+        if has_replace and self._on_revert_all is not None:
+            self._revert_all_btn.pack(side=tk.RIGHT)
+        else:
+            self._revert_all_btn.pack_forget()
+
         # Refresh detect badges (file might already be selected from
         # the previous manufacturer's settings — unusual but possible).
         self._update_extract_badge()
@@ -6216,7 +6454,11 @@ class MainWindow:
                 current_mfr is not None and current_mfr.key == "bof")
 
             changed = []
-            for root_dir, _dirs, files in os.walk(assets_path):
+            for root_dir, dirs, files in os.walk(assets_path):
+                # Skip the .orig snapshot mirror (core.staged_originals): its
+                # files aren't in the baseline anyway, but pruning avoids
+                # hashing a backup copy of every edited asset.
+                dirs[:] = [d for d in dirs if d != ORIG_DIR]
                 for name in files:
                     if (name.startswith(".")
                             or name == "fl_decrypted.dat"
@@ -6974,6 +7216,8 @@ class MainWindow:
             self._extract_cancel_btn.configure(state=tk.NORMAL)
             self._write_btn.configure(state=tk.DISABLED)
             self._write_cancel_btn.configure(state=tk.NORMAL)
+            if hasattr(self, "_revert_all_btn"):
+                self._revert_all_btn.configure(state=tk.DISABLED)
             # Lock the Back button while work is in flight - we don't want
             # the user navigating away from a running pipeline.
             self.set_back_enabled(False)
@@ -7001,6 +7245,8 @@ class MainWindow:
             self._extract_cancel_btn.configure(state=tk.DISABLED)
             self._write_btn.configure(state=tk.NORMAL)
             self._write_cancel_btn.configure(state=tk.DISABLED)
+            if hasattr(self, "_revert_all_btn"):
+                self._revert_all_btn.configure(state=tk.NORMAL)
             self.set_back_enabled(True)
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")
@@ -7363,6 +7609,9 @@ class MainWindow:
                 "pending", foreground=c["success"])
         if hasattr(self, "_audio_tree"):
             self._audio_tree.tag_configure("assigned", foreground=c["success"])
+            # Already changed on disk by an earlier build — same hue as the
+            # Write tab's "Modified" rows so the two views read as one truth.
+            self._audio_tree.tag_configure("changed", foreground=c["link"])
         if hasattr(self, "_audio_spec_canvas"):
             self._audio_spec_canvas.configure(
                 background=c["field_bg"], highlightbackground=c["border"])
@@ -7376,6 +7625,7 @@ class MainWindow:
 
         if hasattr(self, "_video_tree"):
             self._video_tree.tag_configure("assigned", foreground=c["success"])
+            self._video_tree.tag_configure("changed", foreground=c["link"])
         if hasattr(self, "_video_seek_canvas"):
             self._video_seek_canvas.configure(highlightbackground=c["border"])
             self._video_draw_playhead()
@@ -7391,6 +7641,7 @@ class MainWindow:
 
         if hasattr(self, "_image_tree"):
             self._image_tree.tag_configure("assigned", foreground=c["success"])
+            self._image_tree.tag_configure("changed", foreground=c["link"])
         if hasattr(self, "_image_canvas"):
             self._image_canvas.configure(highlightbackground=c["border"])
 

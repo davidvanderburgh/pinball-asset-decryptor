@@ -60,6 +60,61 @@ def _cache_path(fp):
     return os.path.join(d, fp[:32] + ".pkl")
 
 
+def _consumed_cache_path(fp):
+    """Sibling of the params cache: the master-directory **consumed** body
+    offsets (the bytes the firmware's forward-chain decode reads to set each
+    sound's codec params).  These are deterministic for a card, so capturing them
+    once at Extract lets a later Write's :func:`_restore_masterdir_consumed` skip
+    its own full ~2 min re-derive (the integrity assert still runs)."""
+    return os.path.join(os.path.dirname(_cache_path(fp)), fp[:32] + ".consumed.npy")
+
+
+def _install_consumed_hook(emu):
+    """Install a read-only whole-body ``MEM_READ`` hook that records every
+    master-directory-consumed body offset during a ``derive_params`` pass.
+    Returns ``(reads_set, hook_handle)``; the caller must ``mu.hook_del`` the
+    handle after the derive so it doesn't slow a later decode.  Read hooks don't
+    change emulation and profiling showed ~0 added derive time.  Records each
+    byte of a multi-byte read (matching :func:`_restore_masterdir_consumed`)."""
+    from unicorn import UC_HOOK_MEM_READ
+
+    from .spike2 import emulator as EM
+    base = EM.DESC_BASE
+    size = emu.imgsize
+    reads = set()
+
+    def on_read(mu, access, addr, sz, value, ud):
+        o = addr - base
+        for k in range(sz):
+            oo = o + k
+            if 0 <= oo < size:
+                reads.add(oo)
+    hh = emu.mu.hook_add(UC_HOOK_MEM_READ, on_read, begin=base, end=base + size)
+    return reads, hh
+
+
+def _save_consumed(fp, reads):
+    """Persist the consumed-offset set as a sorted int64 array (np.save)."""
+    try:
+        import numpy as np
+        np.save(_consumed_cache_path(fp),
+                np.array(sorted(reads), dtype=np.int64))
+    except Exception:
+        pass
+
+
+def _load_consumed(game_real_path, image_path):
+    """Sorted consumed-offset array for this card, or ``None`` if not cached."""
+    path = _consumed_cache_path(_fingerprint(game_real_path, image_path))
+    if not os.path.exists(path):
+        return None
+    try:
+        import numpy as np
+        return np.load(path)
+    except Exception:
+        return None
+
+
 def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     fp = _fingerprint(game_real_path, image_path)
     cache = _cache_path(fp)
@@ -74,11 +129,26 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
         "~2-5 min)...", "info")
     if progress:
         progress(0, 0, "Deriving codec parameters...")
+    # Capture the master-directory consumed body offsets in the SAME derive
+    # (free: a read-only hook, ~0 added time) so a later Write's
+    # _restore_masterdir_consumed can skip its own full re-derive.
+    reads = hh = None
+    try:
+        reads, hh = _install_consumed_hook(emu)
+    except Exception:
+        reads = hh = None
     params = emu.derive_params()
+    if hh is not None:
+        try:
+            emu.mu.hook_del(hh)
+        except Exception:
+            pass
     try:
         pickle.dump(params, open(cache, "wb"))
     except Exception:
         pass
+    if reads:
+        _save_consumed(fp, reads)
     log("Derived parameters for %d sounds." % len(params), "success")
     return params
 
@@ -2728,6 +2798,36 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
     log("Preserving master-directory forward-chain integrity "
         "(re-encode keeps the firmware's per-sound decode params valid)...",
         "info")
+
+    # Fast path: the consumed offsets are deterministic for a card and were
+    # captured (free) during the Extract derive.  Restore each modded body's
+    # consumed bytes to stock WITHOUT a full ~2 min re-derive — identical result
+    # to the derive path below (both read the same un-patched stock image), and
+    # the _assert_param_integrity that follows still re-derives the patched image,
+    # so a stale/incomplete cache can only abort the Write, never ship a bad card.
+    cached = _load_consumed(gr_path, img_path)
+    if cached is not None and len(cached):
+        import numpy as np
+        with open(img_path, "rb") as f:
+            for off, body in patches.items():
+                lo = int(np.searchsorted(cached, off, "left"))
+                hi = int(np.searchsorted(cached, off + len(body), "left"))
+                if lo >= hi:
+                    continue
+                f.seek(off)
+                stock = f.read(len(body))
+                b = bytearray(body)
+                n = 0
+                for fo in cached[lo:hi]:
+                    rel = int(fo) - off
+                    if 0 <= rel < len(b):
+                        b[rel] = stock[rel]
+                        n += 1
+                patches[off] = bytes(b)
+                log("  idx@0x%x: preserved %d master-directory byte(s) (cached)."
+                    % (off, n), "info")
+        return patches
+
     reads = {off: set() for off in patches}     # body_off -> consumed file offsets
 
     def _mk(b0, e0, acc):

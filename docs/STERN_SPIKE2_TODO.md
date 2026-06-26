@@ -61,7 +61,31 @@ Combined: **~2× on stereo re-encode** (e.g. a ~5-min stereo song's recovery
 ≈ halved) on top of v0.24.1, output byte-for-byte identical. **Re-confirm on
 monkeybug's next build.**
 
+**After-encode derive passes (cat-0 restore — DONE 2026-06-26).** A cat-0 audio
+Write paid TWO full ~2-min param re-derives after encode:
+`_restore_masterdir_consumed` (capture the masterdir-consumed body bytes to
+restore) + `_assert_param_integrity` (re-derive the patched image to confirm no
+codec param shifted). Measured: derive = 120 s (88% in the sequential, NON-
+parallelizable per-record band-build chain), so restore + assert = ~240 s FIXED
+per Write regardless of how few sounds changed. **Fix:** the consumed offsets are
+deterministic for a card, so capture them (free — a read-only hook, ~0 added time)
+during the Extract derive and cache them (`_consumed_cache_path`); the Write's
+restore then replays them with NO re-derive. Validated byte-identical to the old
+derive-based restore (low/mid/high idx) and the assert still passes. **Restore
+118 s → 0.01 s; cat-0 Write fixed cost ~240 s → ~120 s.** The integrity assert is
+deliberately left UNCHANGED as the hardware backstop, so a stale/incomplete cache
+can only abort a Write, never ship a bad card.
+
 **Remaining levers (not yet done):**
+- **The integrity assert (~120 s).** Now the dominant post-encode fixed cost on a
+  cat-0 Write. It re-derives the *patched* image (edit-specific, can't be cached).
+  Safe option not yet taken: run it concurrently with the image copy / SD write
+  (CPU-bound assert ∥ I/O-bound copy), joining + aborting on failure.
+- **Music-bank derive passes.** Each edited bank still derives 3× (`_derive_cat`
+  for encode + `_restore_bank_consumed` + `_assert_bank_integrity`), but a bank
+  holds only 1–2 songs so each derive is seconds, not minutes — minor vs the
+  (now-2×-faster) long-song encode. Could fold the restore-capture into the
+  encode derive like cat-0, but low value.
 - **Analytic keystream (moonshot).** If the per-sample keystream `K` could be
   computed directly instead of recovered by emulation, the per-block emulation
   disappears entirely (100×+). Probed offline: `K` is *not* a trivial slice of the
@@ -70,7 +94,3 @@ monkeybug's next build.**
 - **Within-song parallelism.** A single very long song is an irreducible serial
   tail (one worker); its blocks are independent and could fan across workers.
   Marginal when there are already more songs than cores; helps the last-song tail.
-- **After-encode derive passes.** A cat-0 Write re-derives params twice
-  (`_restore_masterdir_consumed` + `_assert_param_integrity`); each music bank
-  three times. Correctness-critical (masterdir chain) so handle carefully, but
-  they're a fixed cost worth trimming.

@@ -28,69 +28,68 @@ preserved. Plan:
    sha1-identical round-trip).
 
 
-### 2. Build-time perf — keystream-recovery speedup (codec)
+### 2. Codec slot-resolution NONDETERMINISM (generic builds) — CONFIRMED, fix deferred
 
-The long-song re-encode that took monkeybug **~2 h** in v0.23.0
-(https://pastebin.com/Ty8XZsHB) was substantially addressed in **v0.24.1**
-(capstone disasm cache 3.7× + longest-first/chunksize-1 scheduling + parallel
-fan-out across cores).
+`Spike2Emu._resolve_entry` ([spike2/emulator.py](../pinball_decryptor/plugins/stern/spike2/emulator.py))
+caches the audio codec slot **per `(scale, chan)`, seeded by whichever sound
+first hits that key**.  A loud sound seeds via pass-1 (0.6 s, specflat<0.45); a
+quiet-intro sound seeds via pass-2 (3.5 s, noise-reject + lowest specflat).  When
+the two passes would pick **different** slots for a key, the result depends on
+decode ORDER — so the parallel extract (per-worker `_slot_cache`,
+`imap_unordered`) and the single-emu revert/Write disagree, and even two extracts
+can disagree.
 
-**Further codec-side speedup (2026-06-26, offline bit-exact, in `codec.py`).**
-Profiling the re-encode (`c:\tmp\spike2_perf\`) showed the cost is **not** the
-ARM emulation itself (~28%) but the **per-output-sample capture hook** that drives
-the firmware codec to recover the keystream — it fires once per sample per probe
-(hundreds of thousands of times for a long song) and the unicorn `mu.reg_read`
-Python wrapper was ~30% of the whole job. Two changes, both validated
-byte-identical (mono + stereo, all 32 TMNT scales + a generic build, fast path ==
-fallback path, 0 mismatches):
-- **Fast capture hook** — read the companding register straight through unicorn's
-  C API (reused ctypes buffer, hook registered directly) instead of the slow
-  per-call wrapper. Safe fallback (`emulator.fast_reg_read` → `None`) keeps the
-  portable path if a future unicorn moves the internals. **~1.3× mono, ~1.4×
-  stereo.**
-- **Stereo 3→2 probes** — the per-block keystream recovery drove the codec three
-  times (probe bodies `(0,0)`,`(1,0)`,`(0,1)`); the third only recovers the `u1`
-  rotate `bR`, which is **≡0** (verified across all 32 scales and 18 k positions
-  spanning the eight longest songs). `recover_block` now self-validates per scale:
-  the first block does the full 3-probe check and, only if `bR` is all-zero, later
-  blocks (and later sounds of that scale) drop the third probe. A build that ever
-  shows `bR`≠0 keeps the full recovery — no assumption baked in, and
-  `_recovery_valid` still guards every sound. **~1.5× stereo** (songs are stereo).
+**Reproduced on the bundled `led_zeppelin_le-1_20_0` image** (`c:\tmp\sidx_re\repro_revert_mismatch.py`):
+extract-decode vs single-emu re-decode differ for **13 of 535** cat-0 sounds
+(all stock-sounding, non-silent) — including **idx0439, idx0459, idx0231, idx0220,
+idx0343, idx0352, idx0408, idx0422, idx0436, idx0443, idx0448, idx0503, idx0512**.
+The first three are **exactly** the files monkeybug saw stuck as "Modified" in the
+Write preview after a Revert (his card = this title).  Root cause of his report:
+Revert re-decodes (no `.orig` snapshot for pre-v0.25.0 edits) and the re-decode
+picks a different-but-valid-sounding slot than the extract baseline → byte-diff →
+"Modified".
 
-Combined: **~2× on stereo re-encode** (e.g. a ~5-min stereo song's recovery
-≈ halved) on top of v0.24.1, output byte-for-byte identical. **Re-confirm on
-monkeybug's next build.**
+**Why this is delicate, not a quick fix:** ENCODE also goes through this path —
+`codec.py` `GenRecover`/`StereoRecover` call `emu.recover_entry(p)` which returns
+`_resolve_entry(p)` for generic builds.  So a determinism change touches the
+bit-exact, hardware-verified re-encode round-trip.  For the ~13 ambiguous LZ
+sounds our chosen slot may not even match the **firmware's** actual slot, which
+would mean editing one of those sounds could ship bad hardware audio — so the fix
+must be validated offline bit-exact across titles AND ideally hardware-verified.
 
-**After-encode derive passes (cat-0 restore — DONE 2026-06-26).** A cat-0 audio
-Write paid TWO full ~2-min param re-derives after encode:
-`_restore_masterdir_consumed` (capture the masterdir-consumed body bytes to
-restore) + `_assert_param_integrity` (re-derive the patched image to confirm no
-codec param shifted). Measured: derive = 120 s (88% in the sequential, NON-
-parallelizable per-record band-build chain), so restore + assert = ~240 s FIXED
-per Write regardless of how few sounds changed. **Fix:** the consumed offsets are
-deterministic for a card, so capture them (free — a read-only hook, ~0 added time)
-during the Extract derive and cache them (`_consumed_cache_path`); the Write's
-restore then replays them with NO re-derive. Validated byte-identical to the old
-derive-based restore (low/mid/high idx) and the assert still passes. **Restore
-118 s → 0.01 s; cat-0 Write fixed cost ~240 s → ~120 s.** The integrity assert is
-deliberately left UNCHANGED as the hardware backstop, so a stale/incomplete cache
-can only abort a Write, never ship a bad card.
+**Mitigation already in place:** going-forward edits get a byte-exact `.orig`
+snapshot, so Revert restores them exactly (no re-decode, no false "Modified").
+The nondeterminism only bites the legacy pre-snapshot re-decode fallback and
+re-extraction.
 
-**Remaining levers (not yet done):**
-- **The integrity assert (~120 s).** Now the dominant post-encode fixed cost on a
-  cat-0 Write. It re-derives the *patched* image (edit-specific, can't be cached).
-  Safe option not yet taken: run it concurrently with the image copy / SD write
-  (CPU-bound assert ∥ I/O-bound copy), joining + aborting on failure.
-- **Music-bank derive passes.** Each edited bank still derives 3× (`_derive_cat`
-  for encode + `_restore_bank_consumed` + `_assert_bank_integrity`), but a bank
-  holds only 1–2 songs so each derive is seconds, not minutes — minor vs the
-  (now-2×-faster) long-song encode. Could fold the restore-capture into the
-  encode derive like cat-0, but low value.
-- **Analytic keystream (moonshot).** If the per-sample keystream `K` could be
-  computed directly instead of recovered by emulation, the per-block emulation
-  disappears entirely (100×+). Probed offline: `K` is *not* a trivial slice of the
-  VF2 keystream table (0/200 match), so this needs real RE of the keystream
-  generator — a research project, not a quick win.
-- **Within-song parallelism.** A single very long song is an irreducible serial
-  tail (one worker); its blocks are independent and could fan across workers.
-  Marginal when there are already more songs than cores; helps the last-song tail.
+**Proposed fix (deferred):** resolve the full `(scale,chan)→slot` map **once,
+deterministically** during the params derive (pick a stable representative per
+key — e.g. the longest-bodied sound — instead of "first to seed"), persist it in
+the per-card params cache (`%TEMP%/pinball_spike2_params`), and load it into
+**every** decode path (parallel workers, revert, AND encode) so all agree.  Then:
+(a) re-run the repro → expect 0/535 differ; (b) re-confirm offline bit-exact
+encode on aero/bat/godzilla/TMNT + LZ; (c) hardware-verify a replaced LZ sound
+before shipping.
+
+
+### 3. Build-time perf — remaining levers (the big wins already shipped)
+
+The long-song re-encode (2 h in v0.23.0) was brought down by v0.24.1
+(capstone-cache + scheduling + parallel) and the v0.26.0 codec speedups (fast
+capture hook + stereo 3→2 probes + cached masterdir-consumed restore), all
+byte-identical.  What's left is optional and lower-value:
+
+- **The integrity assert (~120 s).** The dominant post-encode fixed cost on a
+  cat-0 Write — it re-derives the *patched* image (edit-specific, can't be
+  cached). Safe option not yet taken: run it concurrently with the image copy /
+  SD write (CPU-bound assert ∥ I/O-bound copy), joining + aborting on failure.
+- **Music-bank derive passes.** Each edited bank still derives 3× but a bank
+  holds only 1–2 songs (seconds each) — minor. Could fold the restore-capture
+  into the encode derive like cat-0, but low value.
+- **Analytic keystream (moonshot).** Computing the per-sample keystream `K`
+  directly would remove per-block emulation entirely (100×+). Probed offline:
+  `K` is *not* a trivial slice of the VF2 keystream table (0/200 match), so this
+  needs real RE of the keystream generator — a research project.
+- **Within-song parallelism.** A single very long song is a serial tail (one
+  worker); its independent blocks could fan across workers. Marginal when there
+  are already more songs than cores.

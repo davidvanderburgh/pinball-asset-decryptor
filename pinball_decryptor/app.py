@@ -3,6 +3,7 @@
 import json
 import os
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -123,6 +124,12 @@ class App:
         # run can stamp the output folder with the source image's identity
         # (see core.extract_source / the stale-source banner).
         self._last_extract_io = None
+
+        # Restore the user's last window size + position over MainWindow's
+        # default (monkeybug: the app "does not remember my preferred sizing
+        # and position").  Clamped to the current screen so a geometry saved on
+        # a since-disconnected monitor can't open off-screen.
+        self._restore_window_geometry()
 
         # Start at the manufacturer picker.  Even if the user has a
         # last_manufacturer saved, the explicit pick step makes "which
@@ -1479,7 +1486,8 @@ class App:
             remaining = sorted(all_changed(
                 assets_dir,
                 progress=lambda c, t: prog(c, t, "Checking files…"),
-                cancel=lambda: self._cancel_requested))
+                cancel=lambda: self._cancel_requested,
+                quick=True))
         except Exception as e:
             log("Change scan failed (%s); restored snapshots only." % e,
                 "warning")
@@ -1700,11 +1708,48 @@ class App:
             pass
         return {}
 
+    def _restore_window_geometry(self):
+        """Re-apply the saved window geometry ("WxH+X+Y"), clamped to the
+        current screen.  No-op when there's no saved geometry (first launch)."""
+        geo = self._settings.get("window_geometry")
+        if not isinstance(geo, str):
+            return
+        m = re.fullmatch(r"\s*(\d+)x(\d+)([+-]\d+)([+-]\d+)\s*", geo)
+        if not m:
+            return
+        w, h, x, y = (int(m.group(1)), int(m.group(2)),
+                      int(m.group(3)), int(m.group(4)))
+        try:
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+        except tk.TclError:
+            return
+        # Clamp size to the screen, and position so a good chunk of the window
+        # (incl. the titlebar) stays on-screen and reachable.
+        w = max(720, min(w, sw))
+        h = max(700, min(h, sh))
+        x = max(-(w - 120), min(x, sw - 120))
+        y = max(0, min(y, sh - 120))
+        try:
+            self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        except tk.TclError:
+            pass
+
     def _save_settings(self):
         if self._current_mfr is not None:
             self._save_manufacturer_paths(self._current_mfr.key)
             self._settings["last_manufacturer"] = self._current_mfr.key
         self._settings["theme"] = self.window._current_theme
+        # Remember the window size + position for next launch.  Skip odd/tiny
+        # geometries (e.g. the 1x1 pre-dialog footprint) so we never persist a
+        # window the user can't see.
+        try:
+            geo = self.root.winfo_geometry()
+            gm = re.match(r"(\d+)x(\d+)", geo)
+            if gm and int(gm.group(1)) >= 400 and int(gm.group(2)) >= 400:
+                self._settings["window_geometry"] = geo
+        except tk.TclError:
+            pass
         try:
             os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:

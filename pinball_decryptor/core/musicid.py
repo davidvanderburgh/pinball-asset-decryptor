@@ -325,6 +325,7 @@ class MusicIdPipeline(BasePipeline):
 
     def _rename(self, rows):
         n = 0
+        renames = {}            # old_rel -> new_rel, to re-point the baseline
         for k, (rel, title, artist, score) in enumerate(rows):
             if not title or score < self.min_score:
                 continue
@@ -342,8 +343,16 @@ class MusicIdPipeline(BasePipeline):
                 continue
             try:
                 os.replace(src, dst)
-                rows[k] = (new_rel.replace("\\", "/"), title, artist, score)
+                new_rel_fs = new_rel.replace("\\", "/")
+                rows[k] = (new_rel_fs, title, artist, score)
+                renames[rel.replace("\\", "/")] = new_rel_fs
                 n += 1
             except OSError as e:
                 self._log("  rename failed %s: %s" % (rel, e), "error")
+        # The rename moves the WAV after Extract wrote .checksums.md5, so
+        # re-point the baseline to the new names (bytes unchanged) — else the
+        # Replace-Audio tab flags every auto-named track as "changed on disk".
+        if renames:
+            from .checksums import rename_in_baseline
+            rename_in_baseline(self.assets_dir, renames)
         return n

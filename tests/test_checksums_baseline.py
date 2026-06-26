@@ -88,3 +88,82 @@ def test_all_changed_progress_and_cancel(tmp_path):
     # Cancel short-circuits.
     out = checksums.all_changed(assets, cancel=lambda: True)
     assert out == set()
+
+
+def test_all_changed_quick_skips_by_mtime(tmp_path):
+    """quick=True skips files whose mtime is <= the baseline file's mtime
+    (pristine by construction — checksums is written last), and still catches
+    files modified after extract."""
+    assets = str(tmp_path)
+    _w(os.path.join(assets, "audio", "old.wav"), b"A")
+    _w(os.path.join(assets, "audio", "new.wav"), b"B")
+    checksums.generate_checksums(assets)
+    base_m = os.path.getmtime(os.path.join(assets, CHECKSUMS_FILE))
+    # Change BOTH files' content, but control their mtimes.
+    _w(os.path.join(assets, "audio", "old.wav"), b"A-CHANGED")
+    _w(os.path.join(assets, "audio", "new.wav"), b"B-CHANGED")
+    os.utime(os.path.join(assets, "audio", "old.wav"),
+             (base_m - 10, base_m - 10))   # looks untouched since extract
+    os.utime(os.path.join(assets, "audio", "new.wav"),
+             (base_m + 10, base_m + 10))   # touched after extract
+
+    # quick skips old.wav (old mtime) despite its bytes differing; catches new.wav.
+    assert checksums.all_changed(assets, quick=True) == {"audio/new.wav"}
+    # The full byte scan catches both — quick is a deliberate revert-only opt-in.
+    assert checksums.all_changed(assets, quick=False) == {
+        "audio/old.wav", "audio/new.wav"}
+
+
+def test_rename_in_baseline_moves_key(tmp_path):
+    assets = str(tmp_path)
+    _w(os.path.join(assets, "audio", "idx0001.wav"), b"DATA")
+    checksums.generate_checksums(assets)
+    md5 = checksums.read_baseline_any(assets)["audio/idx0001.wav"]
+    moved = checksums.rename_in_baseline(
+        assets, {"audio/idx0001.wav": "audio/idx0001 - Cowabunga.wav"})
+    assert moved == 1
+    base = checksums.read_baseline_any(assets)
+    assert "audio/idx0001.wav" not in base
+    assert base["audio/idx0001 - Cowabunga.wav"] == md5   # md5 carried over
+
+
+def test_rename_in_baseline_noops(tmp_path):
+    assets = str(tmp_path)
+    # No baseline file → 0.
+    assert checksums.rename_in_baseline(assets, {"a": "b"}) == 0
+    _w(os.path.join(assets, "audio", "idx0001.wav"), b"DATA")
+    checksums.generate_checksums(assets)
+    # Empty renames, unknown key, and identity rename all → 0 (no file rewrite).
+    assert checksums.rename_in_baseline(assets, {}) == 0
+    assert checksums.rename_in_baseline(assets, {"audio/nope.wav": "x.wav"}) == 0
+    assert checksums.rename_in_baseline(
+        assets, {"audio/idx0001.wav": "audio/idx0001.wav"}) == 0
+
+
+def test_autoname_rename_then_baseline_repoint_is_clean(tmp_path):
+    """The bug monkeybug hit: Auto-name MOVES the WAV after the baseline was
+    written, so without re-pointing the renamed file reads as "changed on disk".
+    With rename_in_baseline applied, the renamed-but-unedited file is clean."""
+    assets = str(tmp_path)
+    _w(os.path.join(assets, "audio", "idx0001.wav"), b"SPEECH")
+    _w(os.path.join(assets, "audio", "music_cat01_0001.wav"), b"SONG")
+    _w(os.path.join(assets, "audio", "idx0002.wav"), b"UNTOUCHED")
+    checksums.generate_checksums(assets)
+
+    # Simulate the transcribe / music-ID rename (os.replace == move).
+    renames = {"audio/idx0001.wav": "audio/idx0001 - Cowabunga.wav",
+               "audio/music_cat01_0001.wav":
+                   "audio/music_cat01_0001 - Kashmir.wav"}
+    for old_rel, new_rel in renames.items():
+        os.replace(os.path.join(assets, *old_rel.split("/")),
+                   os.path.join(assets, *new_rel.split("/")))
+
+    new_names = list(renames.values()) + ["audio/idx0002.wav"]
+
+    # BEFORE the fix: every renamed file reads as changed (absent from baseline).
+    pre = checksums.changed_rels(assets, new_names)
+    assert pre == set(renames.values())
+
+    # AFTER re-pointing: nothing reads as changed (nothing was actually edited).
+    checksums.rename_in_baseline(assets, renames)
+    assert checksums.changed_rels(assets, new_names) == set()

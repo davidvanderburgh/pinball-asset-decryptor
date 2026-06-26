@@ -157,6 +157,43 @@ def read_baseline_any(folder):
     return baseline
 
 
+def rename_in_baseline(folder, renames):
+    """Re-point baseline entries for files that were *moved* (not edited).
+
+    *renames* maps ``old_rel -> new_rel`` (``/``-separated).  A rename preserves
+    the bytes, so the md5 carries over unchanged — we just move the key.  Used by
+    the Auto-name step (transcribe / music-ID), which renames
+    ``audio/idxNNNN.wav`` to ``audio/idxNNNN - Title.wav`` *after* the Extract
+    baseline was written (the rename pipeline is chained after the Extract that
+    emits ``.checksums.md5``).  Without this re-point the renamed file's new path
+    is absent from the baseline, so the Replace-tab change-scan flags every
+    auto-named track as "changed on disk" even though nothing was edited.
+
+    Returns the number of entries moved.  No-op (returns 0) when there's no
+    baseline file or none of the *old_rel* keys are present.
+    """
+    if not renames:
+        return 0
+    path = os.path.join(folder, CHECKSUMS_FILE)
+    if not os.path.isfile(path):
+        return 0
+    baseline = read_baseline_any(folder)
+    moved = 0
+    for old_rel, new_rel in renames.items():
+        old_rel = old_rel.replace("\\", "/")
+        new_rel = new_rel.replace("\\", "/")
+        if old_rel == new_rel or old_rel not in baseline:
+            continue
+        baseline[new_rel] = baseline.pop(old_rel)
+        moved += 1
+    if not moved:
+        return 0
+    with open(path, "w", encoding="utf-8") as out:
+        for rel, md5 in baseline.items():
+            out.write(f"{rel}\t{md5}\n")
+    return moved
+
+
 def changed_rels(folder, rels, baseline=None):
     """Return the subset of *rels* whose current bytes differ from the baseline.
 
@@ -182,7 +219,7 @@ def changed_rels(folder, rels, baseline=None):
     return out
 
 
-def all_changed(folder, baseline=None, progress=None, cancel=None):
+def all_changed(folder, baseline=None, progress=None, cancel=None, quick=False):
     """Every *baselined* rel under *folder* whose bytes now differ — the set the
     Write build repacks, and so the set "Revert all changes" restores.
 
@@ -190,10 +227,25 @@ def all_changed(folder, baseline=None, progress=None, cancel=None):
     original to revert to), and the ``.orig`` snapshot mirror is excluded.
     *progress(current, total)* and *cancel()* (stop early) are optional — the
     walk hashes potentially many files, so callers run it off the UI thread.
+
+    *quick* enables an mtime fast-path for the revert "anything left to restore?"
+    scan: :func:`generate_checksums` writes ``.checksums.md5`` LAST, so a pristine
+    extracted asset always has ``mtime <= checksums-file mtime``.  Any file at or
+    below that mtime is taken as unchanged and skipped without hashing — turning a
+    multi-GB re-hash (slow over a network share) into cheap ``stat`` calls.  A
+    real post-extract edit always bumps the file's mtime past the baseline, so the
+    fast-path can't miss one; only files modified after extract get hashed.  Off by
+    default (the Write build keeps the exact byte-for-byte scan).
     """
     if baseline is None:
         baseline = read_baseline_any(folder)
     cancel = cancel or (lambda: False)
+    skip_mtime = None
+    if quick:
+        try:
+            skip_mtime = int(os.path.getmtime(os.path.join(folder, CHECKSUMS_FILE)))
+        except OSError:
+            skip_mtime = None        # no baseline file → fall back to full hash
     # ".orig/" is the snapshot mirror (core.staged_originals); never in a fresh
     # baseline, but filter defensively so a stale entry can't sneak in.
     rels = [r for r in baseline if not r.startswith(".orig/")]
@@ -206,6 +258,8 @@ def all_changed(folder, baseline=None, progress=None, cancel=None):
             progress(i, total)
         abs_path = os.path.join(folder, *rel.split("/"))
         try:
+            if skip_mtime is not None and int(os.path.getmtime(abs_path)) <= skip_mtime:
+                continue             # untouched since extract — pristine, skip hash
             if md5_file(abs_path) != baseline[rel]:
                 out.add(rel)
         except OSError:

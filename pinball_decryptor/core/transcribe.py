@@ -124,6 +124,7 @@ class TranscribePipeline(BasePipeline):
             self._set_phase(2)
             self._log("Renaming speech + music files...", "info")
             new_rows = []
+            renames = {}            # old_rel -> new_rel, to re-point the baseline
             for rel, kind, text in rows:
                 self._check_cancel()
                 # speech -> spoken text; music -> the literal tag "music".
@@ -155,8 +156,15 @@ class TranscribePipeline(BasePipeline):
                     skipped_renames += 1
                     continue
                 new_rows.append((new_rel, kind, text))
+                renames[rel] = new_rel
                 renamed_count += 1
             rows = new_rows
+            # The rename moves the WAV after Extract wrote .checksums.md5, so
+            # re-point the baseline to the new names (bytes unchanged) — else the
+            # Replace-Audio tab flags every auto-named track as "changed on disk".
+            if renames:
+                from .checksums import rename_in_baseline
+                rename_in_baseline(self.assets_dir, renames)
             self._log(
                 f"  Renamed {renamed_count} file(s); "
                 f"{skipped_renames} skipped.",

@@ -146,7 +146,15 @@ class MainWindow:
         # without the mfr-view scrollbar.  minsize stays small — when the
         # window is shorter, the scrollable mfr-view lets the user reach
         # everything anyway.
-        root.geometry("820x1200")
+        # First-launch default height.  1080 fits the working view (tabs + log)
+        # comfortably without the old 1200 that stretched to ~100% vertical on a
+        # 1080p screen.  Clamped to the screen workarea so it still fits a
+        # shorter display, and the tab body scrolls if a little taller than the
+        # window.  Only matters on the very first launch — the app restores the
+        # user's saved size + position on every subsequent launch
+        # (App._restore_window_geometry).
+        default_h = min(1080, max(700, root.winfo_screenheight() - 80))
+        root.geometry("820x%d" % default_h)
         root.minsize(720, 700)
 
         if sys.platform == "win32":
@@ -2944,6 +2952,27 @@ class MainWindow:
         assets_dir = (self.write_assets_var.get() or "").strip()
         self._on_revert_all(assets_dir)
 
+    def _update_revert_btn_state(self):
+        """Enable 'Revert all changes…' only when there's something to revert.
+
+        The Write preview tree (Modified + Pending rows) is the change-count
+        signal: an empty tree means nothing to revert, so the button greys out
+        (monkeybug's request — it tells the user it isn't relevant).  When the
+        preview tree isn't shown for this plugin, leave the button enabled (we
+        have no count to gate on).  Never overrides the running-state disable."""
+        btn = getattr(self, "_revert_all_btn", None)
+        if btn is None or self._is_running():
+            return
+        tree = getattr(self, "_write_preview_tree", None)
+        try:
+            if tree is not None and tree.winfo_ismapped():
+                state = tk.NORMAL if tree.get_children() else tk.DISABLED
+            else:
+                state = tk.NORMAL
+            btn.configure(state=state)
+        except tk.TclError:
+            pass
+
     def clear_replace_assignments(self, assets_dir):
         """Drop every in-memory Replace-Audio/Video/Image assignment and wipe the
         staged-changes sidecar, so a revert leaves no assignment that would
@@ -4810,6 +4839,13 @@ class MainWindow:
         h = cur.winfo_reqheight()
         if h > 1:
             self._notebook.configure(height=h)
+            # Switching to a taller tab (e.g. Write) grows the mfr-view content,
+            # but the canvas <Configure> that shows the scrollbar only fires on a
+            # manual window resize — so without this the Write tab's lower
+            # controls stay clipped with no scrollbar until the user drags the
+            # window. Re-apply the scroll geometry now (matches monkeybug's
+            # "controls off the bottom until I resize again").
+            self.root.after_idle(self._refresh_mfr_scrollregion)
 
     # ------------------------------------------------------------------
     # View navigation (picker <-> manufacturer working view)
@@ -6569,6 +6605,9 @@ class MainWindow:
             tags=(tag,))
         # Tag colour is set in _apply_theme so it tracks dark/light
         # mode; nothing per-row here.
+        # A row means there's something to revert — light the button up now
+        # (don't wait for the scan to finish).
+        self._update_revert_btn_state()
 
     def _set_preview_scanning(self, active):
         """Toggle the preview Refresh button between idle and a disabled
@@ -6604,6 +6643,8 @@ class MainWindow:
                 text="No modified files detected.")
             self._write_preview_empty.place(
                 relx=0.5, rely=0.5, anchor=tk.CENTER)
+        # Authoritative end-of-scan state for the Revert button.
+        self._update_revert_btn_state()
 
     def _maybe_rescan_write_preview(self):
         """Re-scan only when the Write tab is the active view AND the
@@ -7306,8 +7347,9 @@ class MainWindow:
             self._extract_cancel_btn.configure(state=tk.DISABLED)
             self._write_btn.configure(state=tk.NORMAL)
             self._write_cancel_btn.configure(state=tk.DISABLED)
-            if hasattr(self, "_revert_all_btn"):
-                self._revert_all_btn.configure(state=tk.NORMAL)
+            # Revert button tracks the change count, not a blanket re-enable —
+            # disabled when there's nothing to revert (see _update_revert_btn_state).
+            self._update_revert_btn_state()
             self.set_back_enabled(True)
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")

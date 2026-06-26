@@ -1878,11 +1878,12 @@ class MainWindow:
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
             elif is_changed:
-                # Changed on disk by an earlier build but not reassigned this
-                # session — it WILL still be in the next build (Write repacks
-                # anything that differs from the baseline).  Surface it so the
-                # count matches the Write tab; right-click → Revert to undo it.
-                rep_disp, tag = "✓ changed (earlier build)", "changed"
+                # Differs from the Extract baseline but wasn't reassigned this
+                # session — a previous build OR a hand-edit in the folder.  It
+                # WILL still be in the next build (Write repacks anything that
+                # differs from the baseline), so surface it: the count matches
+                # the Write tab; right-click → Revert to undo it.
+                rep_disp, tag = "✓ changed on disk", "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
@@ -2174,8 +2175,9 @@ class MainWindow:
         if on_disk and not restored:
             messagebox.showinfo(
                 "No saved original",
-                "This track was changed before the app started keeping per-edit "
-                "backups, so there's no saved original to restore here.\n\n"
+                "This track was changed on disk without a per-edit backup — "
+                "edited outside the app, or before this version started keeping "
+                "backups — so there's no saved original to restore here.\n\n"
                 "Use “Revert all changes…” on the Write tab to rebuild it from "
                 "the source card, or re-extract the card.")
 
@@ -2886,7 +2888,7 @@ class MainWindow:
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
             elif is_changed:
-                rep_disp, tag = "✓ changed (earlier build)", "changed"
+                rep_disp, tag = "✓ changed on disk", "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
@@ -3956,7 +3958,7 @@ class MainWindow:
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
             elif is_changed:
-                rep_disp, tag = "✓ changed (earlier build)", "changed"
+                rep_disp, tag = "✓ changed on disk", "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:

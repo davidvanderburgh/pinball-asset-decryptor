@@ -21,6 +21,7 @@ Linux, Docker on macOS) since Python has no in-tree ext4 writer.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -194,7 +195,7 @@ class ExtractPipeline(BasePipeline):
             self.executor.run(f"mkdir -p {stage} && rm -f {p3_exec}",
                               timeout=30)
             self.executor.run(
-                f"dd if={img_exec} of={p3_exec} "
+                f"dd if={shlex.quote(img_exec)} of={shlex.quote(p3_exec)} "
                 f"bs=1M skip={data_part['start_bytes'] // (1024 ** 2)} "
                 f"count={data_part['size_bytes'] // (1024 ** 2)} status=none",
                 timeout=900,
@@ -233,7 +234,7 @@ class ExtractPipeline(BasePipeline):
             self._log("Extracting inner game partition...", "info")
             self._progress(0, 100, "dd inner")
             self.executor.run(
-                f"dd if={emmc_exec} of={inner_exec} "
+                f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
                 f"bs=1M skip={inner_part['start_bytes'] // (1024 ** 2)} "
                 f"count={inner_part['size_bytes'] // (1024 ** 2)} status=none",
                 timeout=900,
@@ -747,7 +748,7 @@ class WritePipeline(BasePipeline):
 
             self._log("Extracting installer P3 from output .img...", "info")
             self.executor.run(
-                f"dd if={out_exec} of={p3_exec} "
+                f"dd if={shlex.quote(out_exec)} of={shlex.quote(p3_exec)} "
                 f"bs=1M skip={data_part['start_bytes'] // (1024 ** 2)} "
                 f"count={data_part['size_bytes'] // (1024 ** 2)} status=none",
                 timeout=900,
@@ -759,7 +760,7 @@ class WritePipeline(BasePipeline):
                 f"xxd -s 446 -l 64 -c 64 -p {emmc_exec}", timeout=10).strip()
             inner_part = _parse_mbr_for_linux(mbr_hex)
             self.executor.run(
-                f"dd if={emmc_exec} of={inner_exec} "
+                f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
                 f"bs=1M skip={inner_part['start_bytes'] // (1024 ** 2)} "
                 f"count={inner_part['size_bytes'] // (1024 ** 2)} status=none",
                 timeout=900,
@@ -774,7 +775,7 @@ class WritePipeline(BasePipeline):
 
             self._log("Re-packing emmc.img (inner P2 -> emmc.img)...", "info")
             self.executor.run(
-                f"dd if={inner_exec} of={emmc_exec} "
+                f"dd if={shlex.quote(inner_exec)} of={shlex.quote(emmc_exec)} "
                 f"bs=1M seek={inner_part['start_bytes'] // (1024 ** 2)} "
                 f"count={inner_part['size_bytes'] // (1024 ** 2)} "
                 f"conv=notrunc status=none", timeout=900)
@@ -789,7 +790,7 @@ class WritePipeline(BasePipeline):
 
             self._log("Re-packing installer .img (P3 into output)...", "info")
             self.executor.run(
-                f"dd if={p3_exec} of={out_exec} "
+                f"dd if={shlex.quote(p3_exec)} of={shlex.quote(out_exec)} "
                 f"bs=1M seek={data_part['start_bytes'] // (1024 ** 2)} "
                 f"count={data_part['size_bytes'] // (1024 ** 2)} "
                 f"conv=notrunc status=none", timeout=1800)
@@ -805,9 +806,12 @@ class WritePipeline(BasePipeline):
             f"{info['display']} installer rebuilt with "
             f"{len(changed)} modification(s).\n\n"
             f"Output: {self.output_img}\n\n"
-            f"Flash to a USB drive with Rufus / Etcher / dd, plug it into "
-            f"the machine's USB port, and follow CGC's on-screen installer "
-            f"prompt.")
+            f"Flash the whole image to your machine's installer medium with "
+            f"Rufus / Etcher / dd -- a USB drive or a microSD card, depending "
+            f"on the unit (some CGC machines install from a microSD master "
+            f"card, not USB). Insert it with the machine powered off, power "
+            f"on, and follow CGC's on-screen installer prompt. Keep a backup "
+            f"of the untouched card/drive first.")
 
     def _write_modified_files(self, inner_exec, changed,
                               inner_root_to_assets_root):

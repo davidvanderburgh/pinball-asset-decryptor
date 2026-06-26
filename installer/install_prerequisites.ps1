@@ -140,7 +140,14 @@ $ManufacturerPrereqs = [ordered]@{
             @{ probe="debugfs"; pkg="e2fsprogs"; label="e2fsprogs/debugfs"; reason="ext4 read/write on installer P3 + emmc.img P2" }
             @{ probe="xxd";     pkg="xxd";       label="xxd";              reason="Reading the inner emmc.img MBR partition table" }
         )
-        HostPackages = @()
+        HostPackages = @(
+            # Gyan.FFmpeg is the FULL build (bundles ffplay.exe) -- the
+            # "essentials" build omits ffplay, which breaks Replace-Audio
+            # preview.  ffmpeg also does the Replace-Audio format-match
+            # (resample / channel / bit-depth) at Write time and the
+            # optional DMD-scene MP4 assembly.
+            @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/ (pick the *full* build, not essentials)"; reason="Replace Audio: format-match replacements on Write + ffplay preview" }
+        )
         PipPackages  = @(
             @{ probe="faster_whisper"; pkg="faster-whisper"; label="faster-whisper"; reason="Auto-transcribe samples to callouts.csv (Whisper tiny.en on CPU)" }
         )

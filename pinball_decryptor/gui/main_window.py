@@ -2377,8 +2377,16 @@ class MainWindow:
             self._audio_set_play_btn(False)
             messagebox.showwarning(
                 "Can't Preview",
-                "Audio preview needs ffplay (part of ffmpeg) on your PATH.\n\n"
-                "Install ffmpeg to hear tracks before staging.")
+                "Audio preview needs ffplay, which ships with the FULL ffmpeg "
+                "build but NOT the \"essentials\" build.\n\n"
+                "Fix it one of these ways:\n"
+                "  • Use \"Install Missing\" above the tabs (installs the full "
+                "build), then restart this app, or\n"
+                "  • Download the full ffmpeg build and drop ffplay.exe in the "
+                "same folder as ffmpeg.exe (run `where ffmpeg` to find it), "
+                "then restart.\n\n"
+                "Preview is optional -- it doesn't affect building the update; "
+                "your replacements still get staged and written.")
             return
         self._audio_play_proc = proc
         self._audio_preview_start_pos = pos

@@ -105,3 +105,60 @@ def test_write_dd_commands_quote_spaced_paths(tmp_path, monkeypatch):
     assert " " in out_exec
     assert any(f"if={out_exec}" in shlex.split(c) for c in dd_cmds)
     assert any(f"of={out_exec}" in shlex.split(c) for c in dd_cmds)
+
+
+def test_write_modified_files_handles_apostrophe(tmp_path):
+    """A callout filename with an apostrophe (transcribe-named, e.g.
+    "S0315_C6 We'll blow ... Martians.wav") must not break the debugfs -w
+    commands -- the old ``-R 'rm "...We'll..."'`` closed the outer quote early
+    ("unexpected EOF while looking for matching '")."""
+    rec = _RecordingExecutor()
+    wp = WritePipeline.__new__(WritePipeline)
+    wp.executor = rec
+    wp._check_cancel = lambda: None
+    wp._progress = lambda *a, **k: None
+    wp._log = lambda *a, **k: None
+
+    rel = "afmdata/samples/vol_25perc/S0315_C6 We'll blow the Martians.wav"
+    host = str(tmp_path / "edited.wav")
+    wp._write_modified_files("/tmp/inner.img", {rel: host}, "/home/debian/emumm")
+
+    dbg = [c for c in rec.commands if c.startswith("debugfs -w -R")]
+    assert dbg, "expected debugfs -w commands"
+    for cmd in dbg:
+        # shlex.split raises ValueError on unbalanced quotes -- the whole point.
+        toks = shlex.split(cmd)
+        ri = toks.index("-R")
+        # The -R argument is ONE token carrying the full debugfs command with
+        # the apostrophe filename intact.
+        assert "We'll blow the Martians.wav" in toks[ri + 1], toks[ri + 1]
+    # Both an rm and a write were issued for the file.
+    assert any(shlex.split(c)[shlex.split(c).index("-R") + 1].startswith("rm ")
+               for c in dbg)
+    assert any(shlex.split(c)[shlex.split(c).index("-R") + 1].startswith("write ")
+               for c in dbg)
+
+
+def test_diff_excludes_orig_snapshots(tmp_path):
+    """The ``.orig/`` pristine-snapshot store (core.staged_originals) must
+    never be diffed as a game asset -- otherwise its files get written into
+    the eMMC (and a snapshot of an apostrophe-named callout crashes debugfs)."""
+    from pinball_decryptor.core.staged_originals import ORIG_DIR
+
+    assets = tmp_path
+    real = assets / "afmdata" / "samples" / "vol_25perc" / "S0001.wav"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"edited bytes")
+
+    snap = (assets / ORIG_DIR / "afmdata" / "samples" / "vol_25perc"
+            / "S0315_C6 We'll blow the Martians.wav")
+    snap.parent.mkdir(parents=True)
+    snap.write_bytes(b"pristine original")
+
+    # Baseline md5 differs from the on-disk real file -> it's "changed".
+    baseline = {"afmdata/samples/vol_25perc/S0001.wav": "deadbeef"}
+    changed, _missing = cgc_pipeline._diff_assets(str(assets), baseline)
+
+    assert "afmdata/samples/vol_25perc/S0001.wav" in changed
+    assert not any(ORIG_DIR in k.split("/") for k in changed), \
+        f".orig snapshots leaked into the write set: {list(changed)}"

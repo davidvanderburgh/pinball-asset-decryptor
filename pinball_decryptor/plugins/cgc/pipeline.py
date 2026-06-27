@@ -32,6 +32,7 @@ from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
                                md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
+from ...core.staged_originals import ORIG_DIR
 from ...core.transcribe import CALLOUTS_CSV
 from ..williams import wpc_extract
 from .formats import (detect_game, find_data_partition, find_game_partition,
@@ -835,15 +836,26 @@ class WritePipeline(BasePipeline):
             # We still want rm to be best-effort (a brand-new file under
             # an existing dir is allowed), so the failure-tolerant pass
             # is the rm; the write is the must-succeed step.
+            #
+            # shlex.quote the WHOLE debugfs command (and the image path) for
+            # the shell.  ``_quote_dbg`` double-quotes the inner path so
+            # debugfs groups spaces, but the command itself still has to reach
+            # the shell as one token -- and a filename with an apostrophe
+            # (e.g. "S0315_C6 We'll blow ... Martians.wav", common in
+            # transcribe-named callouts) would otherwise close a naive outer
+            # 'rm "..."' early ("unexpected EOF while looking for matching '").
+            img_q = shlex.quote(inner_exec)
+            rm_cmd = shlex.quote(f"rm {_quote_dbg(inner_path)}")
             self.executor.run(
-                f"debugfs -w -R 'rm {_quote_dbg(inner_path)}' "
-                f"{inner_exec} 2>&1 | grep -vE '^debugfs |^$' || true",
+                f"debugfs -w -R {rm_cmd} {img_q} "
+                f"2>&1 | grep -vE '^debugfs |^$' || true",
                 timeout=120,
             )
             try:
+                write_cmd = shlex.quote(
+                    f"write {_quote_dbg(src_exec)} {_quote_dbg(inner_path)}")
                 out = self.executor.run(
-                    f"debugfs -w -R 'write {_quote_dbg(src_exec)} "
-                    f"{_quote_dbg(inner_path)}' {inner_exec} 2>&1 "
+                    f"debugfs -w -R {write_cmd} {img_q} 2>&1 "
                     f"| grep -vE '^debugfs |^$' || true",
                     timeout=600,
                 )
@@ -960,10 +972,17 @@ def _diff_assets(assets_dir, baseline):
     # plugin-derived (decoded from the WPC ROM by the Extract step) and
     # doesn't correspond to anything inside the inner ext4 -- skip it
     # at the top of os.walk so we don't even hash the thousand+ PNGs.
+    #
+    # ``.orig/`` is the Replace-tabs' pristine-original snapshot store
+    # (core.staged_originals) -- internal revert state, never game data.  It's
+    # a dotfolder, but we only skip dot-*files* below (``fn.startswith(".")``),
+    # so the dot-*directory* has to be pruned here or its snapshots get written
+    # into the eMMC (and a snapshot of an apostrophe-named callout crashes the
+    # debugfs write).
+    _skip_top = set(_DERIVED_SUBDIRS) | {ORIG_DIR}
     for dirpath, dirnames, filenames in os.walk(assets_dir):
         if os.path.relpath(dirpath, assets_dir).replace("\\", "/") == ".":
-            dirnames[:] = [d for d in dirnames
-                           if d not in _DERIVED_SUBDIRS]
+            dirnames[:] = [d for d in dirnames if d not in _skip_top]
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
                     or fn == CALLOUTS_CSV

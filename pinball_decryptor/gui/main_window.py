@@ -2543,6 +2543,37 @@ class MainWindow:
             if rep and rel in self._audio_slots_by_rel
             and self._audio_loop_flags.get(rel))
 
+    def replacement_folder_mismatches(self, assets_dir):
+        """Return ``[(label, count, scanned_dir), ...]`` for each Replace
+        surface that has live in-memory assignments made against a folder
+        OTHER than *assets_dir*.
+
+        The Write flow only stages assignments whose scan folder matches the
+        folder being built (the ``pending_*_assignments`` guard).  If the user
+        assigned replacements and then re-pointed the assets folder, those
+        assignments are silently dropped and the build is an unmodified image.
+        The Write controller calls this up front to warn instead.  Empty list
+        when everything lines up (or nothing is assigned)."""
+        if not assets_dir:
+            return []
+        target = os.path.normcase(os.path.normpath(assets_dir))
+        out = []
+        for label, assigns, slots, scanned in (
+                ("audio", self._audio_assignments,
+                 self._audio_slots_by_rel, self._audio_scan_dir),
+                ("video", self._video_assignments,
+                 self._video_slots_by_rel, self._video_scan_dir),
+                ("image", self._image_assignments,
+                 self._image_slots_by_rel, self._image_scan_dir)):
+            live = [rel for rel, rep in (assigns or {}).items()
+                    if rep and rel in (slots or {})]
+            if not live:
+                continue
+            scanned_norm = os.path.normcase(os.path.normpath(scanned or ""))
+            if scanned_norm != target:
+                out.append((label, len(live), scanned or "(unknown)"))
+        return out
+
     # ==================================================================
     # Replace Video tab
     # ==================================================================

@@ -46,6 +46,10 @@ class App:
         # Reset when a new user-initiated run starts.
         self._cancel_requested = False
         self._current_mfr = None
+        # Replacement-staging failures from the most recent Write run
+        # (list of (label, error)); drives the post-build "some replacements
+        # were skipped" warning so a partial no-op isn't silent.
+        self._staging_failures = []
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
@@ -863,6 +867,27 @@ class App:
                 "Choose a different output folder.")
             return
 
+        # Catch the silent "assigned replacements for one folder, then pointed
+        # Build at another" trap: the Write flow's folder-match guard would
+        # drop those assignments and quietly build an unmodified image.  Warn
+        # before we do all the work.
+        mismatches = self.window.replacement_folder_mismatches(assets_dir)
+        if mismatches:
+            lines = "\n".join(
+                f"  • {n} {label} replacement(s) — assigned for:\n        {folder}"
+                for label, n, folder in mismatches)
+            if not messagebox.askyesno(
+                "Replacements won't be applied",
+                "You assigned replacement(s) on the Replace tab(s), but they "
+                "were made against a different folder than the \"Modified "
+                "assets folder\" you're building:\n\n"
+                f"{lines}\n\n"
+                f"Building now produces an image WITHOUT those changes.  To "
+                f"apply them, point the assets folder at the path above (or "
+                f"re-assign for this folder).\n\n"
+                "Build anyway?"):
+                return
+
         # Validate a manual update-version date (BOF, Auto unchecked).
         if getattr(self._current_mfr.capabilities,
                    "write_version_date", False):
@@ -1319,20 +1344,57 @@ class App:
     def _run_pipeline_with_audio(self, assets_dir):
         """Worker-thread entry for a Write run: apply any Replace-Audio,
         Replace-Video and Replace-Image assignments into the assets folder
-        first, then run the pipeline (which repacks the now-changed files)."""
-        self._stage_pending_audio(assets_dir)
-        self._stage_pending_video(assets_dir)
-        self._stage_pending_image(assets_dir)
+        first, then run the pipeline (which repacks the now-changed files).
+
+        Guards against a *silent no-op build*: if the user assigned
+        replacements but NONE could be staged (e.g. ffmpeg missing, so every
+        convert failed), building would copy the original image unchanged and
+        report success — the user flashes it and sees none of their edits.
+        We stop loudly instead.  Partial failures are remembered so the
+        success dialog can flag which replacements were skipped."""
+        pend_a = self._stage_pending_audio(assets_dir)
+        pend_v = self._stage_pending_video(assets_dir)
+        pend_i = self._stage_pending_image(assets_dir)
+        pending = pend_a[0] + pend_v[0] + pend_i[0]
+        staged = pend_a[1] + pend_v[1] + pend_i[1]
+        failures = pend_a[2] + pend_v[2] + pend_i[2]
+        self._staging_failures = failures
+
+        if pending and not staged:
+            detail = "\n".join(f"  • {rel}: {err}"
+                               for rel, err in failures[:20])
+            if len(failures) > 20:
+                detail += f"\n  • ... and {len(failures) - 20} more"
+            msg = (
+                f"None of your {pending} assigned replacement(s) could be "
+                f"applied, so the update was NOT built — the output would have "
+                f"been an unmodified copy of the original image (it boots fine "
+                f"but shows none of your changes).\n\n"
+                f"{detail}\n\n"
+                f"This is almost always a missing/!unfound ffmpeg (every "
+                f"replacement is re-encoded to the game's exact audio format, "
+                f"which needs it).  Click \"Install Missing\" above the tabs, "
+                f"restart, and try again.")
+            self.msg_queue.put(LogMsg(
+                "Aborting build: none of the assigned replacements could be "
+                "applied, so the output would be unmodified.", "error"))
+            self.msg_queue.put(DoneMsg(False, msg))
+            return
+
         self.pipeline.run()
 
     def _stage_pending_audio(self, assets_dir):
         """Convert + write the user's assigned replacement tracks over the
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
-        A no-op when nothing is assigned for this folder."""
+
+        Returns ``(pending, staged, failures)`` — *pending* is how many
+        replacements were assigned for this folder, *staged* how many landed on
+        disk, *failures* a list of ``(label, error)``.  ``(0, 0, [])`` when
+        nothing is assigned for this folder."""
         pend = self.window.pending_audio_assignments(assets_dir)
         if not pend:
-            return
+            return (0, 0, [])
         slots_by_rel, assignments, trim = pend
         from .core.audio_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
@@ -1348,18 +1410,21 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            return (len(assignments), staged,
+                    [(f"audio: {rel}", err) for rel, err in failures])
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Audio replacement failed: {e}", "error"))
+            return (len(assignments), 0, [("audio replacements", str(e))])
 
     def _stage_pending_video(self, assets_dir):
         """Re-encode + write the user's assigned replacement clips over the
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
-        A no-op when nothing is assigned for this folder."""
+        Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
         pend = self.window.pending_video_assignments(assets_dir)
         if not pend:
-            return
+            return (0, 0, [])
         slots_by_rel, assignments, trim = pend
         from .core.video_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
@@ -1375,18 +1440,21 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            return (len(assignments), staged,
+                    [(f"video: {rel}", err) for rel, err in failures])
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Video replacement failed: {e}", "error"))
+            return (len(assignments), 0, [("video replacements", str(e))])
 
     def _stage_pending_image(self, assets_dir):
         """Scale + write the user's assigned replacement images over the
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
-        A no-op when nothing is assigned for this folder."""
+        Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
         pend = self.window.pending_image_assignments(assets_dir)
         if not pend:
-            return
+            return (0, 0, [])
         slots_by_rel, assignments = pend
         from .core.image_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
@@ -1401,9 +1469,12 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            return (len(assignments), staged,
+                    [(f"image: {rel}", err) for rel, err in failures])
         except Exception as e:
             self.msg_queue.put(LogMsg(
                 f"Image replacement failed: {e}", "error"))
+            return (len(assignments), 0, [("image replacements", str(e))])
 
     # ------------------------------------------------------------------
     # Revert all changes
@@ -1626,11 +1697,32 @@ class App:
                 # way of dismissing it.  Drop the summary into the log instead.
                 self.window.append_log(summary, "success")
             else:
-                messagebox.showinfo("Write Complete", summary)
+                fails = self._staging_failures
+                if fails:
+                    # The build succeeded but some assigned replacements
+                    # couldn't be applied — surface them so the user knows
+                    # those slots still play their original asset (instead of
+                    # quietly shipping a partially-unmodified image).
+                    detail = "\n".join(f"  • {rel}: {err}"
+                                       for rel, err in fails[:20])
+                    if len(fails) > 20:
+                        detail += f"\n  • ... and {len(fails) - 20} more"
+                    messagebox.showwarning(
+                        "Update built — some replacements were skipped",
+                        f"{summary}\n\n"
+                        f"⚠ {len(fails)} assigned replacement(s) could NOT be "
+                        f"applied and were left unchanged (those slots will "
+                        f"play/show their original asset):\n\n{detail}\n\n"
+                        f"This is usually a missing ffmpeg — install it (the "
+                        f"\"Install Missing\" button), then rebuild.")
+                else:
+                    messagebox.showinfo("Write Complete", summary)
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
             messagebox.showerror(title, summary)
+        # Clear staging-failure state so it never leaks into a later run.
+        self._staging_failures = []
 
     # ------------------------------------------------------------------
     # Update check

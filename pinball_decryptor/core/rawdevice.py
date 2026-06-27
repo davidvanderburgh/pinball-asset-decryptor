@@ -1,4 +1,12 @@
-r"""Sector-aligned raw-device I/O for the Spike 2 Direct-SD path.
+r"""Sector-aligned raw-device I/O and whole-image flashing (manufacturer-agnostic).
+
+Two consumers share this, which is why it lives in ``core`` rather than under a
+plugin (a plugin importing another plugin's package — e.g. ``stern`` — would drag
+in that plugin's heavy engine deps):
+  * Stern Spike 2's Direct-SD path points the pure-Python ext4 reader /
+    size-neutral patcher at the **physical card** instead of a card *image*.
+  * Any plugin with ``capabilities.flash_image`` (Stern, CGC) raw-copies a
+    pre-built ``.img``/``.raw`` onto a card via :func:`flash_image_to_device`.
 
 The file-based Extract/Write open the card *image* with ``open(path, "rb")``;
 Direct-SD instead points the same pure-Python ext4 reader / size-neutral patcher

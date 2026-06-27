@@ -23,8 +23,8 @@ import struct
 import pytest
 
 from pinball_decryptor.plugins.stern import engine, formats
-from pinball_decryptor.plugins.stern.rawdevice import (RawDeviceFile,
-                                                       is_device_path, read_mbr)
+from pinball_decryptor.core.rawdevice import (RawDeviceFile,
+                                              is_device_path, read_mbr)
 
 
 # ---- synthetic MBRs --------------------------------------------------------
@@ -178,28 +178,28 @@ def test_read_mbr_bad_path_returns_empty():
 # ---- engine.device_partitions ---------------------------------------------
 
 def test_device_partitions_accepts_spike_card(monkeypatch):
-    import pinball_decryptor.plugins.stern.rawdevice as rawdevice
+    import pinball_decryptor.core.rawdevice as rawdevice
     monkeypatch.setattr(rawdevice, "read_mbr", lambda _p: _spike_mbr())
     parts = engine.device_partitions(r"\\.\PHYSICALDRIVE9")
     assert parts == [(24576 * 512, 4096000 * 512)]
 
 
 def test_device_partitions_rejects_non_spike(monkeypatch):
-    import pinball_decryptor.plugins.stern.rawdevice as rawdevice
+    import pinball_decryptor.core.rawdevice as rawdevice
     monkeypatch.setattr(rawdevice, "read_mbr", lambda _p: _generic_mbr())
     with pytest.raises(RuntimeError, match="isn't a Stern Spike 2 SD card"):
         engine.device_partitions(r"\\.\PHYSICALDRIVE9")
 
 
 def test_device_partitions_unreadable_device_mentions_admin(monkeypatch):
-    import pinball_decryptor.plugins.stern.rawdevice as rawdevice
+    import pinball_decryptor.core.rawdevice as rawdevice
     monkeypatch.setattr(rawdevice, "read_mbr", lambda _p: b"")
     with pytest.raises(RuntimeError, match="Administrator"):
         engine.device_partitions(r"\\.\PHYSICALDRIVE9")
 
 
 def test_device_partitions_honours_partition_override(monkeypatch):
-    import pinball_decryptor.plugins.stern.rawdevice as rawdevice
+    import pinball_decryptor.core.rawdevice as rawdevice
     monkeypatch.setattr(rawdevice, "read_mbr", lambda _p: _spike_mbr())
     # Force partition #1 (the FAT boot) — 1-based; returns just that entry.
     parts = engine.device_partitions(r"\\.\PHYSICALDRIVE9", partition_override=1)

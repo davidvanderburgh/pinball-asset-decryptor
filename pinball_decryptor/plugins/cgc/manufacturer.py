@@ -5,7 +5,7 @@ from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
 from .formats import detect_game
 from .games import GAME_DB
 from ...core.transcribe import TranscribePipeline
-from .pipeline import ExtractPipeline, WritePipeline
+from .pipeline import ExtractPipeline, FlashImagePipeline, WritePipeline
 
 
 _GAMES = tuple(sorted(
@@ -34,6 +34,11 @@ class CGCManufacturer(Manufacturer):
         # write straight back.  Default whole-tree scan is correct (the
         # extract-only dmd/ render holds no audio).
         replace_audio=True,
+        # Flash a built installer .img straight onto the card / USB drive from
+        # the GUI -- a dd-style whole-image write, so users don't need a
+        # separate imaging tool (Etcher / Rufus / Win32DiskImager).  Same
+        # generic core.rawdevice path Stern uses, with a size guard.
+        flash_image=True,
     )
     input_spec = InputSpec(
         label="CGC installer images",
@@ -42,7 +47,17 @@ class CGCManufacturer(Manufacturer):
     extract_phases = ("Detect", "Outer image", "Inner image",
                       "Decode game data", "Checksums")
     write_phases = ("Detect", "Copy original", "Stage partitions", "Patch")
+    flash_phases = ("Check card", "Write image", "Flush")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
+    # Flash-dialog wording.  CGC installs from a microSD card or a USB drive
+    # (depends on the cabinet), so the noun covers both; the picker still
+    # biases toward small removable media.
+    direct_medium_noun = "SD card or USB drive"
+    direct_target_kind = "sd_card"
+    direct_safety_text = (
+        "⚠ This writes the WHOLE drive — pick the right one, it is erased "
+        "completely. Power the machine off and keep a backup of the original "
+        "card/drive before flashing.")
     # CGC's nested-disk-image extraction needs ext4 read/write tooling.
     # All work runs in the executor (WSL on Windows, native on Linux,
     # Docker on macOS) -- same model as JJP.
@@ -112,6 +127,11 @@ class CGCManufacturer(Manufacturer):
         return WritePipeline(
             original_path, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb)
+
+    def make_flash_pipeline(self, image_path, device_path,
+                            log_cb, phase_cb, progress_cb, done_cb):
+        return FlashImagePipeline(
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,

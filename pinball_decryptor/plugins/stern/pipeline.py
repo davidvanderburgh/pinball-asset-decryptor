@@ -17,8 +17,9 @@ from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.staged_originals import discard as discard_snapshots
 from .formats import detect_game, display_for_key, linux_partitions
-from .rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
-                       flash_image_to_device, format_size, is_device_path)
+from ...core.rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
+                              flash_image_to_device, format_size,
+                              is_device_path)
 
 try:                                   # engine import is optional during bring-up
     from . import engine

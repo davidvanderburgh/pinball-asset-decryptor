@@ -2421,7 +2421,7 @@ def device_partitions(device_path, partition_override=None, log=None):
     log = log or (lambda *a, **k: None)
     from .formats import (is_spike_card_parts, linux_partitions_from_parts,
                           parse_mbr_partitions_bytes)
-    from .rawdevice import read_mbr
+    from ...core.rawdevice import read_mbr
 
     mbr = read_mbr(device_path)
     if not mbr:
@@ -2461,7 +2461,7 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     phase = phase or (lambda i: None)
-    from .rawdevice import RawDeviceFile
+    from ...core.rawdevice import RawDeviceFile
 
     phase(0)  # Scan
     parts = device_partitions(device_path, partition_override, log=log)

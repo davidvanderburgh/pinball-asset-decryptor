@@ -20,10 +20,10 @@ card + a backup) — see docs/STERN_SPIKE2_TODO.md.
 import pytest
 
 from pinball_decryptor.core.pipeline_base import PipelineError
-from pinball_decryptor.plugins.stern import rawdevice as rd
+from pinball_decryptor.core import rawdevice as rd
 from pinball_decryptor.plugins.stern.pipeline import SternFlashImagePipeline
-from pinball_decryptor.plugins.stern.rawdevice import (FlashCancelled,
-                                                      FlashError, RawDeviceFile)
+from pinball_decryptor.core.rawdevice import (FlashCancelled,
+                                             FlashError, RawDeviceFile)
 
 
 def _pattern(n):

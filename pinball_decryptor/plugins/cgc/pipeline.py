@@ -32,6 +32,9 @@ from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
                                md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
+from ...core.rawdevice import (FlashCancelled, FlashError,
+                              flash_image_to_device, format_size,
+                              is_device_path)
 from ...core.staged_originals import ORIG_DIR
 from ...core.transcribe import CALLOUTS_CSV
 from ..williams import wpc_extract
@@ -807,12 +810,15 @@ class WritePipeline(BasePipeline):
             f"{info['display']} installer rebuilt with "
             f"{len(changed)} modification(s).\n\n"
             f"Output: {self.output_img}\n\n"
-            f"Flash the whole image to your machine's installer medium with "
-            f"Rufus / Etcher / dd -- a USB drive or a microSD card, depending "
-            f"on the unit (some CGC machines install from a microSD master "
-            f"card, not USB). Insert it with the machine powered off, power "
-            f"on, and follow CGC's on-screen installer prompt. Keep a backup "
-            f"of the untouched card/drive first.")
+            f"Flash the whole image to your machine's installer medium -- a "
+            f"USB drive or a microSD card, depending on the unit (some CGC "
+            f"machines install from a microSD master card, not USB). Easiest: "
+            f"use the \"Flash image to SD card or USB drive...\" button on this "
+            f"Write tab (run the app as Administrator). You can also use "
+            f"Etcher / Rufus (DD mode) / Win32DiskImager. Insert it with the "
+            f"machine powered off, power on, and follow CGC's on-screen "
+            f"installer prompt. Keep a backup of the untouched card/drive "
+            f"first.")
 
     def _write_modified_files(self, inner_exec, changed,
                               inner_root_to_assets_root):
@@ -867,6 +873,59 @@ class WritePipeline(BasePipeline):
                 # but informative; surface as info-level.
                 self._log(f"    {out.strip()}", "info")
         self._progress(total, total, "")
+
+
+# ---------------------------------------------------------------------------
+# Flash-image pipeline
+# ---------------------------------------------------------------------------
+
+class FlashImagePipeline(BasePipeline):
+    """Flash a built CGC installer ``.img`` straight onto a card / USB drive.
+
+    A dd-style raw block copy (via :func:`core.rawdevice.flash_image_to_device`)
+    so users don't need Etcher / Rufus -- the same whole-image write, with a
+    built-in "does it fit?" guard, run through the normal status area.  This is
+    NOT the nested-ext4 Write above: it writes the *whole* image verbatim, so it
+    works for any image the user built or backed up.  The GUI gates it on
+    Administrator/root and confirms the destructive write before reaching here."""
+
+    def __init__(self, image_path, device_path,
+                 log_cb, phase_cb, progress_cb, done_cb):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.image_path = image_path
+        self.device_path = device_path
+
+    def _run(self):
+        self._set_phase(0)  # Check card
+        if not is_device_path(self.device_path):
+            raise PipelineError(
+                "Check card",
+                "Flashing needs a physical drive (e.g. \\\\.\\PHYSICALDRIVE2), "
+                "not a file path (got %r). Pick the card from the dropdown."
+                % self.device_path)
+        if not self.image_path or not os.path.isfile(self.image_path):
+            raise PipelineError(
+                "Check card", "Image file not found: %r" % self.image_path)
+        self._check_cancel()
+
+        self._set_phase(1)  # Write image
+        try:
+            written = flash_image_to_device(
+                self.image_path, self.device_path,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except FlashCancelled:
+            self._log("Flash cancelled -- the card is incomplete and must be "
+                      "re-flashed before use.", "error")
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            return
+        except FlashError as e:
+            raise PipelineError("Write image", str(e))
+        self._check_cancel()
+
+        self._set_phase(2)  # Flush
+        self._done(True, "Flashed %s onto the card (%s)."
+                   % (format_size(written), self.device_path))
 
 
 # ---------------------------------------------------------------------------

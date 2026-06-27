@@ -7,6 +7,7 @@ it reported success -- they flashed it and saw none of their changes.  The
 guard in ``App._run_pipeline_with_audio`` turns that into a loud failure
 (when NOTHING staged) or a post-build warning (when SOME staged).
 """
+import os
 import queue
 
 import pytest
@@ -119,26 +120,31 @@ def _make_window(scan_dir, assignments, slots):
     return w
 
 
+_DIR_A = os.path.join("x", "extract", "A")
+_DIR_B = os.path.join("x", "extract", "B")
+
+
 def test_folder_mismatch_flagged():
-    w = _make_window(r"C:\extract\A", {"snd/x.wav": r"C:\rep.wav"},
+    w = _make_window(_DIR_A, {"snd/x.wav": "rep.wav"},
                      {"snd/x.wav": object()})
-    out = w.replacement_folder_mismatches(r"C:\extract\B")
-    assert out == [("audio", 1, r"C:\extract\A")]
+    out = w.replacement_folder_mismatches(_DIR_B)
+    assert out == [("audio", 1, _DIR_A)]
 
 
 def test_same_folder_not_flagged():
-    # Path differs only by case/separators -> normcase/normpath must match.
-    w = _make_window(r"C:\extract\A", {"snd/x.wav": r"C:\rep.wav"},
-                     {"snd/x.wav": object()})
-    assert w.replacement_folder_mismatches("c:/extract/A") == []
+    # The same folder expressed with a redundant '.' segment must still match
+    # (os.path.normpath collapses it on every OS — POSIX and Windows).
+    redundant = os.path.join("x", "extract", ".", "A")
+    w = _make_window(_DIR_A, {"snd/x.wav": "rep.wav"}, {"snd/x.wav": object()})
+    assert w.replacement_folder_mismatches(redundant) == []
 
 
 def test_no_assignments_not_flagged():
-    w = _make_window(r"C:\extract\A", {}, {})
-    assert w.replacement_folder_mismatches(r"C:\extract\B") == []
+    w = _make_window(_DIR_A, {}, {})
+    assert w.replacement_folder_mismatches(_DIR_B) == []
 
 
 def test_assignment_without_matching_slot_not_flagged():
     # A stale assignment whose rel isn't in the current slots isn't "live".
-    w = _make_window(r"C:\extract\A", {"snd/gone.wav": r"C:\rep.wav"}, {})
-    assert w.replacement_folder_mismatches(r"C:\extract\B") == []
+    w = _make_window(_DIR_A, {"snd/gone.wav": "rep.wav"}, {})
+    assert w.replacement_folder_mismatches(_DIR_B) == []

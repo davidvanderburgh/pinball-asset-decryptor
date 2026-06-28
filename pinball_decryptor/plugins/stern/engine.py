@@ -2268,22 +2268,54 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     import shutil
+    import threading
+
+    # Copy the (unpatched) card image to the output in a BACKGROUND THREAD while
+    # we compute the patches.  Computing them is CPU-bound -- the parallel cat-0
+    # re-encode and the in-process master-directory integrity assert -- and both
+    # yield the GIL often enough (the assert's emulator fires a per-instruction
+    # Python hook; the re-encode blocks on its worker pool) that the copy's I/O
+    # runs concurrently and disappears under it (measured: a 7.9 GB card copy
+    # hides fully under the ~120 s assert).  The copy only writes output_path and
+    # only reads original_path (which _compute_patches reads through a separate
+    # handle), so they're independent; join()ing before any patch byte is written
+    # keeps it purely opportunistic -- it shaves the copy off the wall-clock but
+    # never reorders or corrupts the write.
+    copy_err = []
+
+    def _bg_copy():
+        try:
+            shutil.copyfile(original_path, output_path)
+        except BaseException as e:          # surfaced to the caller after join
+            copy_err.append(e)
+
+    log("Copying card image to output (in parallel with computing edits)...",
+        "info")
+    copier = threading.Thread(target=_bg_copy, name="spike2-image-copy",
+                              daemon=True)
+    copier.start()
 
     parts = _linux_partitions(original_path)
     disk_f = open(original_path, "rb")
     try:
         writes, counts = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel)
+    except BaseException:
+        copier.join()                       # let the copy finish before unlinking
+        _safe_remove(output_path)
+        raise
     finally:
         disk_f.close()
-    if writes is None:                          # cancelled mid-compute
+
+    copier.join()
+    if copy_err:                            # the background copy itself failed
+        _safe_remove(output_path)
+        raise copy_err[0]
+    if writes is None:                      # cancelled mid-compute
+        _safe_remove(output_path)
         return 0
 
-    # copy the card image, then patch the changed bytes in place
-    log("Copying card image to output...", "info")
-    if progress:
-        progress(0, 0, "Copying image...")
-    shutil.copyfile(original_path, output_path)
+    # the copy is already on disk; patch the changed bytes in place
     with open(output_path, "r+b") as out:
         _apply_writes(out, writes)
         out.flush()
@@ -3269,4 +3301,13 @@ def _rmtree(path):
     try:
         shutil.rmtree(path, ignore_errors=True)
     except Exception:
+        pass
+
+
+def _safe_remove(path):
+    """Best-effort unlink (used to discard a half-prepared output on a
+    cancelled / failed write)."""
+    try:
+        os.remove(path)
+    except OSError:
         pass

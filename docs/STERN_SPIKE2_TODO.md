@@ -94,8 +94,16 @@ byte-identical.  What's left is optional and lower-value:
 
 - **The integrity assert (~120 s).** The dominant post-encode fixed cost on a
   cat-0 Write — it re-derives the *patched* image (edit-specific, can't be
-  cached). Safe option not yet taken: run it concurrently with the image copy /
-  SD write (CPU-bound assert ∥ I/O-bound copy), joining + aborting on failure.
+  cached) and can't itself be shortened. **Done (v0.29.2):** the file-output
+  `write_image` now copies the unpatched card to the output in a background
+  *thread* that runs concurrently with the whole patch computation, joining
+  before any patch byte is written. The compute yields the GIL enough (the
+  assert's emulator fires a per-instruction Python hook; the re-encode blocks on
+  its worker pool) that the copy fully overlaps — measured: a 7.9 GB card copy
+  hides under the ~120 s assert (3.6 s on NVMe; more on slower disks, where the
+  win is bigger). A *subprocess* was considered and found unnecessary (the thread
+  overlaps). Direct-SD `write_device` is unchanged: it has no big copy, and its
+  device write must follow the assert (a card write can't be un-done).
 - **Music-bank derive passes.** Each edited bank still derives 3× but a bank
   holds only 1–2 songs (seconds each) — minor. Could fold the restore-capture
   into the encode derive like cat-0, but low value.

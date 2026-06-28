@@ -304,6 +304,76 @@ def test_save_preserves_other_tabs_sections(
     assert "audio/idx0002.wav" in saved["audio"]
 
 
+# ---------------------------------------------------------------------------
+# monkeybug UI batch: Scan/Browse busy state, column-width persistence,
+# responsive intro-text wrapping
+# ---------------------------------------------------------------------------
+
+def test_scan_buttons_built_for_every_replace_tab(app):
+    # All four Replace tabs are built at construction, so their Scan/Browse
+    # buttons register up front (independent of the selected manufacturer).
+    for key in ("audio", "video", "image", "text"):
+        assert key in app.window._scan_buttons
+        assert key in app.window._browse_buttons
+
+
+def test_set_tab_scanning_toggles_button_state(app):
+    w = app.window
+    scan = w._scan_buttons["audio"]
+    browse = w._browse_buttons["audio"]
+
+    w._set_tab_scanning("audio", True)
+    assert "Scanning" in scan.cget("text")
+    assert str(scan.cget("state")) == "disabled"
+    assert str(browse.cget("state")) == "disabled"
+
+    w._set_tab_scanning("audio", False)
+    assert scan.cget("text") == "Scan"
+    assert str(scan.cget("state")) == "normal"
+    assert str(browse.cget("state")) == "normal"
+
+
+def test_set_tab_scanning_tolerates_unknown_tab(app):
+    app.window._set_tab_scanning("nope", True)   # no raise
+
+
+def test_column_width_change_persists_and_is_idempotent(app):
+    w = app.window
+    captured = []
+    w._on_column_widths_change = lambda widths: captured.append(widths)
+    cols = ("#0", "len", "fmt", "rep", "loop")
+
+    w._audio_tree.column("fmt", width=137)
+    w._save_tree_columns(w._audio_tree, "audio", cols)
+    assert captured and captured[-1]["audio"]["fmt"] == 137
+
+    # No real change → no second callback.
+    n = len(captured)
+    w._save_tree_columns(w._audio_tree, "audio", cols)
+    assert len(captured) == n
+
+
+def test_saved_column_widths_restored_on_persist(app):
+    w = app.window
+    w._saved_column_widths["video"] = {"res": 222}
+    w._persist_tree_columns(
+        w._video_tree, "video", ("#0", "len", "res", "fmt", "rep"))
+    assert int(w._video_tree.column("res", "width")) == 222
+
+
+def test_register_responsive_wrap_applies_current_width(app):
+    import tkinter as tk
+    w = app.window
+    app.root.update()
+    lbl = tk.Label(app.root, text="x", wraplength=50)
+    w._register_responsive_wrap(lbl, margin=40, minimum=100)
+    cw = w._mfr_view_canvas.winfo_width()
+    if cw > 1:                                    # canvas has been laid out
+        assert int(str(lbl.cget("wraplength"))) == max(100, cw - 40)
+    # The four Replace-tab intros are registered.
+    assert len(w._responsive_wrap_labels) >= 4
+
+
 def test_flash_frame_shown_for_stern_hidden_otherwise(
         app, manufacturers_by_key):
     # winfo_manager() == "pack" means the Flash-image frame is laid out on the

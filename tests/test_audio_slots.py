@@ -12,7 +12,8 @@ import wave
 
 import pytest
 
-from pinball_decryptor.core.audio_slots import (AudioSlot, scan_audio_slots,
+from pinball_decryptor.core.audio_slots import (AudioSlot, replace_with_retry,
+                                                scan_audio_slots,
                                                 stage_replacements)
 
 
@@ -229,3 +230,73 @@ def test_stage_reports_failures_for_missing_replacement(tmp_path):
         slots, {"track.wav": str(tmp_path / "nope.wav")})
     assert staged == 0
     assert failures and failures[0][0] == "track.wav"
+
+
+# --- replace_with_retry: hardens staging against transient SMB/AV locks -----
+
+def test_replace_with_retry_plain_success(tmp_path):
+    src = tmp_path / "a.stage.wav"
+    dst = tmp_path / "a.wav"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+    replace_with_retry(str(src), str(dst))
+    assert dst.read_bytes() == b"new"
+    assert not src.exists()             # temp consumed by the rename
+
+
+def test_replace_with_retry_recovers_after_transient_lock(tmp_path, monkeypatch):
+    src = tmp_path / "a.stage.wav"
+    dst = tmp_path / "a.wav"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky(s, d):
+        calls["n"] += 1
+        if calls["n"] < 3:              # first two attempts "Access is denied"
+            raise PermissionError(5, "Access is denied")
+        return real_replace(s, d)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr("pinball_decryptor.core.audio_slots.time.sleep",
+                        lambda *_a: None)
+    replace_with_retry(str(src), str(dst))
+    assert calls["n"] == 3
+    assert dst.read_bytes() == b"new"
+
+
+def test_replace_with_retry_falls_back_to_content_overwrite(tmp_path, monkeypatch):
+    src = tmp_path / "a.stage.wav"
+    dst = tmp_path / "a.wav"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+
+    def always_denied(_s, _d):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(os, "replace", always_denied)
+    monkeypatch.setattr("pinball_decryptor.core.audio_slots.time.sleep",
+                        lambda *_a: None)
+    # os.replace never succeeds, but copyfile-over-write does — no exception.
+    replace_with_retry(str(src), str(dst), attempts=3)
+    assert dst.read_bytes() == b"new"
+
+
+def test_replace_with_retry_reraises_when_everything_fails(tmp_path, monkeypatch):
+    src = tmp_path / "a.stage.wav"
+    dst = tmp_path / "a.wav"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+
+    def always_denied(*_a):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(os, "replace", always_denied)
+    monkeypatch.setattr("pinball_decryptor.core.audio_slots.shutil.copyfile",
+                        always_denied)
+    monkeypatch.setattr("pinball_decryptor.core.audio_slots.time.sleep",
+                        lambda *_a: None)
+    with pytest.raises(PermissionError):
+        replace_with_retry(str(src), str(dst), attempts=2)

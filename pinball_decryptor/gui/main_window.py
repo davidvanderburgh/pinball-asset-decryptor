@@ -95,7 +95,9 @@ class MainWindow:
                  on_theme_change=None, initial_theme=None,
                  on_check_updates=None,
                  initial_fda_acknowledged=False,
-                 on_fda_acknowledge=None):
+                 on_fda_acknowledge=None,
+                 initial_column_widths=None,
+                 on_column_widths_change=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -113,6 +115,10 @@ class MainWindow:
         self._on_import = on_import
         self._on_theme_change = on_theme_change
         self._on_check_updates = on_check_updates
+        # Per-tree column widths the user dragged, persisted across restarts via
+        # ``on_column_widths_change`` (settings.json).  ``{tree_key: {col: px}}``.
+        self._saved_column_widths = dict(initial_column_widths or {})
+        self._on_column_widths_change = on_column_widths_change
         # macOS FDA banner state.  Persisted in settings.json via
         # ``on_fda_acknowledge`` so the dismissal survives restarts —
         # the previous "always show" behaviour was out of sync with
@@ -402,6 +408,17 @@ class MainWindow:
         # Rebuilt by reset_prereqs() each time the manufacturer changes.
         self._prereq_indicators = {}
 
+        # Replace-tab Scan/Browse buttons (tab_key -> ttk.Button), registered
+        # as each tab is built so _set_tab_scanning() can disable + relabel them
+        # while a (possibly slow, network-share) scan runs.
+        self._scan_buttons = {}
+        self._browse_buttons = {}
+
+        # Intro/description labels whose wraplength tracks the window width so
+        # they reflow wider instead of leaving dead space when the window grows
+        # (each entry: (label, margin, minimum)).
+        self._responsive_wrap_labels = []
+
         self._build_ui()
         self._init_phase_steps()
         self._apply_theme(self._current_theme)
@@ -537,6 +554,14 @@ class MainWindow:
             self._mfr_view_canvas.itemconfig(
                 self._mfr_view_id, width=e.width,
                 height=max(e.height, inner_h))
+            # Reflow the registered intro/description labels to the new width so
+            # the per-tab help text uses the full window instead of leaving a
+            # dead band on the right when widened (monkeybug).
+            for lbl, margin, minimum in self._responsive_wrap_labels:
+                try:
+                    lbl.configure(wraplength=max(minimum, e.width - margin))
+                except tk.TclError:
+                    pass
             _update_mfr_scroll()
 
         self._mfr_view_canvas.bind("<Configure>", _resize_mfr_view)
@@ -591,16 +616,18 @@ class MainWindow:
         if sys.platform != "darwin":
             prereq_btns = ttk.Frame(self._prereqs_frame)
             prereq_btns.pack(side=tk.RIGHT, padx=4, pady=4)
+            # Side by side (not stacked) so the Prerequisites frame is one row
+            # shorter — that height goes to the log below (monkeybug's ask).
             ttk.Button(
                 prereq_btns, text="Re-check",
                 command=lambda: (self._on_recheck_prereqs()
                                  if self._on_recheck_prereqs else None)
-            ).pack(side=tk.TOP, fill=tk.X)
+            ).pack(side=tk.LEFT)
             ttk.Button(
                 prereq_btns, text="Install Missing",
                 command=lambda: (self._on_install_prereqs()
                                  if self._on_install_prereqs else None)
-            ).pack(side=tk.TOP, fill=tk.X, pady=(2, 0))
+            ).pack(side=tk.LEFT, padx=(4, 0))
 
         # Tabs
         self._notebook = ttk.Notebook(mv)
@@ -1308,6 +1335,9 @@ class MainWindow:
             "type", width=60, minwidth=40)
         self._write_preview_tree.column(
             "status", width=200, minwidth=100)
+        self._persist_tree_columns(
+            self._write_preview_tree, "write_preview",
+            ("#0", "type", "status"))
         preview_scroll = ttk.Scrollbar(
             preview_inner, orient=tk.VERTICAL,
             command=self._write_preview_tree.yview)
@@ -1444,7 +1474,7 @@ class MainWindow:
         f = self._tab_audio
         pad = {"padx": 10, "pady": 4}
 
-        ttk.Label(
+        _audio_desc = ttk.Label(
             f,
             text="Swap a game's music / sound files without copy-pasting and "
                  "renaming. Your replacement can be almost any audio format "
@@ -1453,7 +1483,9 @@ class MainWindow:
                  "for you. Pick your extracted folder, assign a track to a slot, "
                  "then build the update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+            wraplength=720, justify=tk.LEFT)
+        _audio_desc.pack(anchor=tk.W, **pad)
+        self._register_responsive_wrap(_audio_desc)
 
         # ffmpeg-missing banner.  Same-format swaps (.wav→.wav) work without
         # ffmpeg, but converting other formats / matching sample-rate needs
@@ -1475,12 +1507,8 @@ class MainWindow:
             side=tk.LEFT)
         ttk.Entry(row, textvariable=self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
-        ttk.Button(row, text="Scan",
-                   command=self._scan_audio_slots_async).pack(
-            side=tk.LEFT, padx=(4, 0))
+        self._make_assets_scan_buttons(row, "audio",
+                                       self._scan_audio_slots_async)
         ttk.Label(f, text="(the folder Extract produced — shared with the "
                           "Write tab)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
@@ -1525,6 +1553,8 @@ class MainWindow:
         self._audio_tree.column("rep", width=150, minwidth=110, stretch=True)
         self._audio_tree.column("loop", width=44, minwidth=40, anchor=tk.CENTER,
                                 stretch=False)
+        self._persist_tree_columns(
+            self._audio_tree, "audio", ("#0", "len", "fmt", "rep", "loop"))
         # Click-header sort: (col_id, base heading text, default-descending).
         # Numeric columns default to descending (longest/looped first) the way
         # the old "Longest first" option did; text columns ascending.
@@ -1678,6 +1708,7 @@ class MainWindow:
             self._audio_empty.configure(
                 text="Pick your extracted assets folder above, then click Scan.")
             self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            self._set_tab_scanning("audio", False)
             return
 
         self._audio_empty.configure(text="Scanning for audio files…")
@@ -1707,12 +1738,14 @@ class MainWindow:
                 0, self._populate_audio_after_scan,
                 slots, scan_id, assets_path)
 
+        self._set_tab_scanning("audio", True)
         threading.Thread(target=_work, daemon=True).start()
 
     def _populate_audio_after_scan(self, slots, scan_id, scan_dir):
         """Main-thread: store scan results and refresh the list."""
         if self._audio_scan_id != scan_id:
             return
+        self._set_tab_scanning("audio", False)
         self._audio_slots = slots
         self._audio_slots_by_rel = {s.rel_path: s for s in slots}
         # A new folder invalidates any in-memory assignments aimed at the old
@@ -2587,7 +2620,7 @@ class MainWindow:
         f = self._tab_video
         pad = {"padx": 10, "pady": 4}
 
-        ttk.Label(
+        _video_desc = ttk.Label(
             f,
             text="Swap a game's videos without copy-pasting and renaming. Your "
                  "replacement can be almost any video format — it's auto-"
@@ -2596,7 +2629,9 @@ class MainWindow:
                  "has it). Pick your extracted folder, assign a clip to a slot, "
                  "then build the update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+            wraplength=720, justify=tk.LEFT)
+        _video_desc.pack(anchor=tk.W, **pad)
+        self._register_responsive_wrap(_video_desc)
 
         # ffmpeg-missing banner.  Video matching is always a re-encode, so
         # ffmpeg is effectively required here.  Pack-managed by
@@ -2616,12 +2651,8 @@ class MainWindow:
             side=tk.LEFT)
         ttk.Entry(row, textvariable=self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
-        ttk.Button(row, text="Scan",
-                   command=self._scan_video_slots_async).pack(
-            side=tk.LEFT, padx=(4, 0))
+        self._make_assets_scan_buttons(row, "video",
+                                       self._scan_video_slots_async)
         ttk.Label(f, text="(the folder Extract produced — shared with the "
                           "Write tab)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
@@ -2654,6 +2685,8 @@ class MainWindow:
         self._video_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._video_tree.column("fmt", width=140, minwidth=80)
         self._video_tree.column("rep", width=200, minwidth=110)
+        self._persist_tree_columns(
+            self._video_tree, "video", ("#0", "len", "res", "fmt", "rep"))
         self._video_sort_cfg = [
             ("#0", "Original Video", False), ("len", "Length", True),
             ("res", "Resolution", True), ("fmt", "Format", False),
@@ -2782,6 +2815,7 @@ class MainWindow:
             self._video_empty.configure(
                 text="Pick your extracted assets folder above, then click Scan.")
             self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            self._set_tab_scanning("video", False)
             return
 
         self._video_empty.configure(text="Scanning for video files…")
@@ -2812,12 +2846,14 @@ class MainWindow:
                 0, self._populate_video_after_scan,
                 slots, scan_id, assets_path)
 
+        self._set_tab_scanning("video", True)
         threading.Thread(target=_work, daemon=True).start()
 
     def _populate_video_after_scan(self, slots, scan_id, scan_dir):
         """Main-thread: store scan results and refresh the list."""
         if self._video_scan_id != scan_id:
             return
+        self._set_tab_scanning("video", False)
         self._video_slots = slots
         self._video_slots_by_rel = {s.rel_path: s for s in slots}
         # Restore assignments persisted for a freshly-scanned folder; a re-scan
@@ -3736,7 +3772,7 @@ class MainWindow:
         f = self._tab_image
         pad = {"padx": 10, "pady": 4}
 
-        ttk.Label(
+        _image_desc = ttk.Label(
             f,
             text="Swap a game's images without copy-pasting and renaming. Your "
                  "replacement can be almost any image format — it's auto-scaled "
@@ -3745,7 +3781,9 @@ class MainWindow:
                  "it). Pick your extracted folder, assign an image to a slot, "
                  "then build the update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+            wraplength=720, justify=tk.LEFT)
+        _image_desc.pack(anchor=tk.W, **pad)
+        self._register_responsive_wrap(_image_desc)
 
         # Pillow-missing banner.  Image matching is always a re-encode, so
         # Pillow is effectively required here.  Pack-managed by
@@ -3765,12 +3803,8 @@ class MainWindow:
             side=tk.LEFT)
         ttk.Entry(row, textvariable=self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
-        ttk.Button(row, text="Scan",
-                   command=self._scan_image_slots_async).pack(
-            side=tk.LEFT, padx=(4, 0))
+        self._make_assets_scan_buttons(row, "image",
+                                       self._scan_image_slots_async)
         ttk.Label(f, text="(the folder Extract produced — shared with the "
                           "Write tab)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
@@ -3801,6 +3835,8 @@ class MainWindow:
         self._image_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._image_tree.column("fmt", width=140, minwidth=80)
         self._image_tree.column("rep", width=200, minwidth=110)
+        self._persist_tree_columns(
+            self._image_tree, "image", ("#0", "res", "fmt", "rep"))
         self._image_sort_cfg = [
             ("#0", "Original Image", False), ("res", "Resolution", True),
             ("fmt", "Format", False), ("rep", "Replacement", False)]
@@ -3880,6 +3916,7 @@ class MainWindow:
             self._image_empty.configure(
                 text="Pick your extracted assets folder above, then click Scan.")
             self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            self._set_tab_scanning("image", False)
             return
 
         self._image_empty.configure(text="Scanning for image files…")
@@ -3909,12 +3946,14 @@ class MainWindow:
                 0, self._populate_image_after_scan,
                 slots, scan_id, assets_path)
 
+        self._set_tab_scanning("image", True)
         threading.Thread(target=_work, daemon=True).start()
 
     def _populate_image_after_scan(self, slots, scan_id, scan_dir):
         """Main-thread: store scan results and refresh the list."""
         if self._image_scan_id != scan_id:
             return
+        self._set_tab_scanning("image", False)
         self._image_slots = slots
         self._image_slots_by_rel = {s.rel_path: s for s in slots}
         # Restore assignments persisted for a freshly-scanned folder; a re-scan
@@ -4294,7 +4333,7 @@ class MainWindow:
         f = self._tab_text
         pad = {"padx": 10, "pady": 4}
 
-        ttk.Label(
+        _text_desc = ttk.Label(
             f,
             text="Edit the words shown on the machine's display — high scores, "
                  "menu labels, status text. Pick your extracted folder, click a "
@@ -4303,7 +4342,9 @@ class MainWindow:
                  "shorter-or-equal works and longer is rejected. Build the "
                  "update on the Write tab when you're done.",
             font=(_SANS_FONT, 9, "italic"),
-            wraplength=720, justify=tk.LEFT).pack(anchor=tk.W, **pad)
+            wraplength=720, justify=tk.LEFT)
+        _text_desc.pack(anchor=tk.W, **pad)
+        self._register_responsive_wrap(_text_desc)
 
         # Assets folder row (shared with the Write / other Replace tabs).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
@@ -4312,12 +4353,7 @@ class MainWindow:
             side=tk.LEFT)
         ttk.Entry(row, textvariable=self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
-        ttk.Button(row, text="Scan",
-                   command=self._scan_text_strings).pack(
-            side=tk.LEFT, padx=(4, 0))
+        self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
         ttk.Label(f, text="(the folder Extract produced — shared with the "
                           "Write tab)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
@@ -4347,6 +4383,8 @@ class MainWindow:
         self._text_tree.column("new", width=230, minwidth=120)
         self._text_tree.column("max", width=50, minwidth=40, anchor=tk.E)
         self._text_tree.column("scene", width=150, minwidth=80)
+        self._persist_tree_columns(
+            self._text_tree, "text", ("#0", "new", "max", "scene"))
         self._text_sort_cfg = [
             ("#0", "On-Screen Text", False), ("new", "New Text", False),
             ("max", "Max", True), ("scene", "Scene", False)]
@@ -6647,6 +6685,85 @@ class MainWindow:
         # A row means there's something to revert — light the button up now
         # (don't wait for the scan to finish).
         self._update_revert_btn_state()
+
+    def _persist_tree_columns(self, tree, tree_key, col_ids):
+        """Restore *tree*'s saved column widths and keep them saved as the user
+        drags them — so a layout the user tuned survives a restart (monkeybug:
+        "persist column resizes").  *col_ids* lists the column ids including
+        ``"#0"``.  Idempotent + tolerant of a tree that's since been destroyed.
+        """
+        saved = self._saved_column_widths.get(tree_key) or {}
+        for col in col_ids:
+            w = saved.get(col)
+            if isinstance(w, int) and w > 0:
+                try:
+                    tree.column(col, width=w)
+                except tk.TclError:
+                    pass
+        # ButtonRelease fires on any click; we only write when a width actually
+        # changed (a separator drag), so row-selection clicks are free.
+        tree.bind("<ButtonRelease-1>",
+                  lambda _e: self._save_tree_columns(tree, tree_key, col_ids),
+                  add="+")
+
+    def _save_tree_columns(self, tree, tree_key, col_ids):
+        """Snapshot *tree*'s current column widths; if they differ from what's
+        stored, update + persist via the settings callback."""
+        try:
+            widths = {col: int(tree.column(col, "width")) for col in col_ids}
+        except tk.TclError:
+            return
+        if self._saved_column_widths.get(tree_key) == widths:
+            return
+        self._saved_column_widths[tree_key] = widths
+        if self._on_column_widths_change:
+            try:
+                self._on_column_widths_change(dict(self._saved_column_widths))
+            except Exception:
+                pass
+
+    def _register_responsive_wrap(self, label, margin=44, minimum=420):
+        """Track *label* so :meth:`_resize_mfr_view` keeps its ``wraplength`` in
+        step with the content width — a fixed wraplength left a dead band to the
+        right of the per-tab intro text when the window was widened (monkeybug).
+        Applies the current width immediately (best-effort)."""
+        self._responsive_wrap_labels.append((label, margin, minimum))
+        try:
+            w = self._mfr_view_canvas.winfo_width()
+            if w > 1:
+                label.configure(wraplength=max(minimum, w - margin))
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _make_assets_scan_buttons(self, row, tab_key, scan_cmd):
+        """Build the shared *Browse… / Scan* pair for a Replace tab's assets
+        row and register them under *tab_key* so :meth:`_set_tab_scanning` can
+        disable + relabel them while a scan runs.  All four Replace tabs share
+        the same two buttons (Browse is always the folder picker); only the
+        Scan command differs."""
+        browse = ttk.Button(row, text="Browse...",
+                            command=self._browse_write_assets)
+        browse.pack(side=tk.LEFT, padx=(4, 0))
+        scan = ttk.Button(row, text="Scan", command=scan_cmd)
+        scan.pack(side=tk.LEFT, padx=(4, 0))
+        self._browse_buttons[tab_key] = browse
+        self._scan_buttons[tab_key] = scan
+
+    def _set_tab_scanning(self, tab_key, active):
+        """Disable + relabel a Replace tab's Scan/Browse buttons while its scan
+        runs (mirrors the Write-preview Refresh button) so a slow scan over a
+        network share can't look idle — the very glitch monkeybug hit.  Tolerant
+        of tabs/layouts where a button doesn't exist."""
+        scan = self._scan_buttons.get(tab_key)
+        browse = self._browse_buttons.get(tab_key)
+        try:
+            if scan is not None:
+                scan.configure(text="⏳  Scanning…" if active else "Scan",
+                               state=tk.DISABLED if active else tk.NORMAL)
+            if browse is not None:
+                browse.configure(state=tk.DISABLED if active else tk.NORMAL)
+        except tk.TclError:
+            pass
 
     def _set_preview_scanning(self, active):
         """Toggle the preview Refresh button between idle and a disabled

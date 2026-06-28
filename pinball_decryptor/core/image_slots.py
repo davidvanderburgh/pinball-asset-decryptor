@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from .audio_slots import replace_with_retry
 from .image import (IMAGE_EXTS, ImageInfo, detect_image_info, pil_available,
                     transcode_image_to)
 
@@ -121,7 +122,7 @@ def stage_replacement(slot: ImageSlot, replacement_path: str):
                 except OSError:
                     pass
             return False, detail
-        os.replace(tmp, slot.abs_path)
+        replace_with_retry(tmp, slot.abs_path)
         return True, detail
     except (OSError, ValueError) as e:
         if os.path.exists(tmp):

@@ -1488,6 +1488,22 @@ def _select_changed_idx_wavs(assets_dir, baseline):
     return edits
 
 
+def _fmt_idx_list(idxs, cap=80):
+    """``idx0006, idx0021, …`` for a collection of integer sound indices,
+    sorted ascending and truncated to *cap* entries (``… and N more``).
+
+    The Write log enumerates exactly which sounds it's about to re-encode so a
+    count that's larger than the user expects is never a mystery: a sound that
+    was edited/replaced in an *earlier* session is still on disk (differs from
+    the Extract baseline), so it's correctly carried into this build — seeing
+    its idx in the list makes that obvious instead of an unexplained +N."""
+    idxs = sorted(idxs)
+    shown = ", ".join("idx%04d" % i for i in idxs[:cap])
+    if len(idxs) > cap:
+        shown += ", … and %d more" % (len(idxs) - cap)
+    return shown
+
+
 # --------------------------------------------------------------------------
 # Replace display text: size-neutral in-place patch of the .radium strings
 # --------------------------------------------------------------------------
@@ -2021,11 +2037,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             "found under %s. Edit a sound, change a display string, or assign a "
             "Replace Video / Replace Image asset first, then Write." % assets_dir)
     if audio_edits:
+        listing = _fmt_idx_list(audio_edits)
         if baseline:
-            log("Found %d edited sound(s) to write." % len(audio_edits), "info")
+            log("Found %d edited sound(s) to write: %s."
+                % (len(audio_edits), listing), "info")
         else:
-            log("No .checksums.md5 baseline found; re-encoding all %d sound(s)."
-                % len(audio_edits), "warning")
+            log("No .checksums.md5 baseline found; re-encoding all %d sound(s): "
+                "%s." % (len(audio_edits), listing), "warning")
     if music_edits:
         log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
             "info")

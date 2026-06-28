@@ -117,6 +117,8 @@ class App:
             initial_fda_acknowledged=bool(
                 self._settings.get("macos_fda_acknowledged", False)),
             on_fda_acknowledge=self._on_fda_acknowledge,
+            initial_column_widths=self._settings.get("column_widths", {}),
+            on_column_widths_change=self._on_column_widths_change,
         )
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
@@ -1860,4 +1862,10 @@ class App:
         self._save_settings()
 
     def _on_theme_change(self, _theme):
+        self._save_settings()
+
+    def _on_column_widths_change(self, widths):
+        """Persist the Replace-tree column widths the user dragged so the layout
+        survives a restart (monkeybug).  *widths* is ``{tree_key: {col: px}}``."""
+        self._settings["column_widths"] = widths
         self._save_settings()

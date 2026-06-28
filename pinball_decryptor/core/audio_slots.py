@@ -17,6 +17,7 @@ Brothers, Dutch Pinball).
 
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -25,6 +26,42 @@ from .audio import (AudioInfo, detect_audio_info, find_ffmpeg,
 
 # Audio containers we treat as replaceable slots.
 AUDIO_EXTS = (".wav", ".ogg")
+
+
+def replace_with_retry(src, dst, attempts=6, base_delay=0.1):
+    """``os.replace(src, dst)`` hardened against transient Windows sharing
+    locks.  Shared by the audio / video / image slot stagers (see
+    :mod:`core.video_slots`, :mod:`core.image_slots`).
+
+    On network shares (SMB / NAS — e.g. ``//server/...``) and machines with
+    antivirus, the Search indexer, or a media preview holding the destination,
+    the atomic rename can fail with ``PermissionError`` ([WinError 5] Access is
+    denied, or [WinError 32] the file is in use) even when nothing is durably
+    wrong: the lock clears in a fraction of a second.  Retry a few times with a
+    short exponential backoff; if it still won't rename, fall back to
+    overwriting the destination's *contents* in place (copy + unlink the temp),
+    which doesn't have to delete the destination first and so survives a
+    lingering reader.  Re-raises the last error only if every path fails."""
+    last = None
+    for i in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as e:               # WinError 5 / 32 -> PermissionError
+            last = e
+            time.sleep(base_delay * (2 ** i))
+    # Last resort: overwrite contents (no destination unlink, so a held read
+    # handle on the original no longer blocks us).
+    try:
+        shutil.copyfile(src, dst)
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+        return
+    except OSError:
+        pass
+    raise last
 
 # Replacement inputs the user may drop in (we transcode the rest via ffmpeg).
 REPLACEMENT_EXTS = (".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac",
@@ -163,7 +200,7 @@ def stage_replacement(slot: AudioSlot, replacement_path: str,
             actions.extend(process_modified_audio(
                 tmp, slot.info, keep_original_length=not trim_to_length))
 
-        os.replace(tmp, slot.abs_path)
+        replace_with_retry(tmp, slot.abs_path)
         return True, ", ".join(actions)
     except (OSError, ValueError) as e:
         if os.path.exists(tmp):

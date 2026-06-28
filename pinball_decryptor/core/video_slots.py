@@ -27,6 +27,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from .audio_slots import replace_with_retry
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
                     encode_replacement, find_ffmpeg, transcode_video_to)
 
@@ -199,7 +200,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                 f"need ffmpeg to convert {rep_ext or 'this file'} "
                 f"→ {slot.ext}")
 
-        os.replace(tmp, slot.abs_path)
+        replace_with_retry(tmp, slot.abs_path)
         return True, detail
     except (OSError, ValueError) as e:
         if os.path.exists(tmp):

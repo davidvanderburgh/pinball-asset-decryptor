@@ -12,7 +12,7 @@ import hashlib
 import os
 
 from pinball_decryptor.plugins.stern.engine import (
-    _remove_renamed_audio_twins, _select_changed_idx_wavs)
+    _fmt_idx_list, _remove_renamed_audio_twins, _select_changed_idx_wavs)
 
 
 def _wav(path, data):
@@ -126,3 +126,22 @@ def test_cleanup_is_noop_on_empty_or_missing(tmp_path):
     _remove_renamed_audio_twins(str(tmp_path / "does_not_exist"))  # no raise
     _remove_renamed_audio_twins(str(tmp_path))                     # empty dir
     assert os.listdir(tmp_path) == []
+
+
+# --- _fmt_idx_list: the Write log spells out which sounds it will re-encode --
+
+def test_fmt_idx_list_sorts_and_zero_pads():
+    # The "Found N edited sound(s) to write" log enumerates the idx so a count
+    # larger than just-staged (e.g. an earlier session's edit still on disk)
+    # is self-explaining rather than an unexplained +N.
+    assert _fmt_idx_list({41, 6, 472}) == "idx0006, idx0041, idx0472"
+
+
+def test_fmt_idx_list_accepts_a_dict_keyed_by_idx():
+    # _select_changed_idx_wavs returns {idx: path}; the log passes it straight in.
+    assert _fmt_idx_list({6: "a", 41: "b"}) == "idx0006, idx0041"
+
+
+def test_fmt_idx_list_truncates_huge_sets():
+    out = _fmt_idx_list(range(200), cap=3)
+    assert out == "idx0000, idx0001, idx0002, … and 197 more"

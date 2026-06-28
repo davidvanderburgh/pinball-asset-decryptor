@@ -2625,19 +2625,25 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
 
 
 def _encode_mono(emu, gr, p, wav_path, np):
-    length = p["length"]
+    # Fit to the codec's TRUE emitted sample count (length - BLOCK), not the raw
+    # header length: encode_sound only writes that many samples, so fitting to
+    # the full length would silently drop the user's last ~200 samples (a click
+    # at the loop point of looping music).
+    from .spike2.emulator import emitted_length
+    n = emitted_length(p["length"])
     s = _load_wav(wav_path, False, np)
     s = _amplitude_fit(s, _MONO_RANGE, np)
-    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), length, np)
+    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np)
     return gr.encode_sound(p, tgt)
 
 
 def _encode_stereo(emu, sr, p, wav_path, np):
-    length = p["length"]
+    from .spike2.emulator import emitted_length
+    n = emitted_length(p["length"])
     a = _load_wav(wav_path, True, np)
     a = _amplitude_fit(a, _STEREO_RANGE, np)
-    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), length, np)
-    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), length, np)
+    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np)
+    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np)
     return sr.encode_sound(p, L, R)
 
 

@@ -103,6 +103,21 @@ LENGTH_XOR = 0x5572ae9b    # length = this ^ record[16]
 VOL = {1: 28, 2: 11}       # mono / stereo mixer volume -> QMUL 22294 / 42905
 RET_SENTINEL = 0xdeadbee0  # even ``call()`` return trap (interwork-safe; see call())
 
+# The codec emits in 200-sample blocks driven from a cursor that starts at 200,
+# and within the block at cursor C it emits sample i only while ``C + i < length``
+# (measured register-level on mono+stereo, validated + generic builds).  So a
+# sound's true decoded output is exactly ``length - BLOCK`` samples — the first
+# block is a cursor lead-in — and any block past that emits nothing (the decode
+# scratch stays zero).  Decoding/encoding the full ``length`` would tack on (or
+# silently drop) up to ~200 trailing zero samples, which is inaudible on a
+# one-shot SFX but clicks at the loop point of looping music.
+BLOCK = 200
+
+
+def emitted_length(length):
+    """True decoded sample count for a sound of header ``length`` (see BLOCK)."""
+    return max(0, int(length) - BLOCK)
+
 # Byte signatures (ARM function prologues) of the supported firmware build at a
 # few of the hardcoded addresses above.  The codec oracle is pinned to this
 # exact build; a card whose ``game`` ELF doesn't match is a *different* Spike 2
@@ -1085,7 +1100,13 @@ class Spike2Emu:
                 progress(cur, nmax)
         if not Ls:
             return None
-        return np.concatenate(Ls), np.concatenate(Rs), stereo
+        L = np.concatenate(Ls); R = np.concatenate(Rs)
+        # Trim the trailing decode-scratch padding: the codec only ever emits
+        # ``length - BLOCK`` real samples (see emitted_length); the last decoded
+        # block(s) carry zero padding past that.  A capped (max_secs) run keeps
+        # everything it decoded (it never reaches the padding).
+        n = min(len(L), emitted_length(length))
+        return L[:n], R[:n], stereo
 
     def close(self):
         try:

@@ -2,30 +2,43 @@
 
 ## Open work (priority order)
 
-### 1. Re-encode tail bug (~5 ms lost at the end of every replaced sound)
+### 1. Re-encode tail bug (~5 ms at the end of every sound) — ★RESOLVED
 
-`GenRecover.encode_sound` / `StereoRecover.encode_sound`
-([codec.py](../pinball_decryptor/plugins/stern/spike2/codec.py)) leave the
-**final output block** un-encoded: the per-block keystream recovery for the last
-block uses cursor `200*(k+1)`, which reads body frames past the sound's end, so
-`recover_block` returns fewer samples (`m`) than the segment and the tail
-`body[lo+m:]` stays `np.zeros` → decodes to silence/garbage for the last ≤200
-samples. Confirmed on LZ for mono (idx-dependent) and stereo (every short slot
-tested). Cosmetic for one-shot SFX; **audible as a click at the loop point of
-looping music** (the crown-jewel use case now that audio plays on hardware).
+**Root cause (register-level, mono+stereo, validated TMNT + generic LZ builds):**
+the codec emits in 200-sample blocks driven from a cursor that starts at 200, and
+within the block at cursor `C` it emits sample `i` **only while `C + i < length`**.
+So a sound's true decoded output is exactly **`length - 200`** samples (the first
+block is a cursor lead-in); any block past that emits nothing. Two consequences,
+both now fixed:
 
-**This is the top remaining engineering item, but it's delicate** — the codec
-calibration is easy to destabilize and the bit-exact round-trip (the thing that
-makes audio boot+play on a real machine, hardware-verified in v0.24.0) MUST be
-preserved. Plan:
-1. First add a **full-length self-round-trip test** (encode → decode → assert
-   bit-exact over the WHOLE sound, including the tail) against a bundled card
-   image under [images/Stern/spike2/](../images/Stern/spike2/). This both
-   characterizes the failure and guards the fix.
-2. Then recover the last block's keystream without reading past the body end
-   (e.g. extend the probe margin / clamp the cursor), and verify the new test
-   passes for mono + stereo with no regression elsewhere (`pytest`, TMNT
-   sha1-identical round-trip).
+* **Extract:** `decode()` returned `floor(length/200)*200` samples — up to ~200
+  trailing **padding zeros** past `length-200`. Inaudible on a one-shot SFX but a
+  click at the loop point when a looping-music WAV is played on a loop.
+* **Re-encode:** the engine fit the user's replacement to the raw `length`
+  (`_encode_mono`/`_encode_stereo` → `_fit(..., length)`); `encode_sound`'s
+  per-block clamp then silently **dropped the last ~200 samples** of the user's
+  audio, so a replaced loop landed ~200 samples early → the loop misaligned.
+
+The original hypothesis ("`recover_block` returns short for the last block →
+`body[lo+m:]` stays zero → garbage") was a *misdiagnosis*: those tail body words
+are **dead** (never emitted by the firmware), so leaving them zero is correct, and
+`encode_sound` was already bit-exact on every emitted sample.
+
+**Fix (committed):** one canonical emitted length everywhere —
+`emulator.emitted_length(length) = max(0, length-200)`.
+* `Spike2Emu._decode_with_entry` trims its output to `emitted_length` (clean
+  extract; capped `max_secs` runs keep all they decoded).
+* `_encode_mono`/`_encode_stereo` fit the target to `emitted_length` (the whole
+  replacement is encoded; nothing dropped).
+The re-encoded body bytes are **byte-identical** for the unmodified round-trip
+(the dropped samples were padding either way), so the hardware-verified Write
+(v0.24.0) and the TMNT bit-exact round-trip are preserved.
+
+**Guarded by** [tests/test_stern_audio_tail.py](../tests/test_stern_audio_tail.py):
+fast unit tests for the `emitted_length` contract + encoder wiring (always run),
+and a `@pytest.mark.slow`, image-gated round-trip that boots the firmware and
+proves a forced-loud final partial block round-trips bit-exact on **turtles**
+(validated) **and led_zeppelin** (generic — the build the bug was reported on).
 
 
 ### 2. Codec slot-resolution NONDETERMINISM (generic builds) — CONFIRMED, fix deferred

@@ -14,7 +14,7 @@ Hardware-free coverage of the flasher core + pipeline wiring:
   * capability + factory wiring (era-aware ``flash_image``, ``flash_phases``).
 
 The actual on-card flash still needs the hardware test (Administrator + a real
-card + a backup) — see docs/STERN_SPIKE2_TODO.md.
+card + a backup).
 """
 
 import pytest

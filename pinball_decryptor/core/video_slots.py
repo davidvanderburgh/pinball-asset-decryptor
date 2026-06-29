@@ -17,9 +17,10 @@ files the Write step repacks (JJP loose containers, Dutch Pinball AAIW
 Pinball TBL .cdmd, BoF .ctex with no inverse encoder yet) don't enable the
 ``replace_video`` capability, so their dead-end files never surface here.
 
-This mirrors :mod:`core.audio_slots`; the video equivalent always needs
-ffmpeg (matching resolution / codec is a re-encode), whereas audio could copy
-same-format files through.
+This mirrors :mod:`core.audio_slots`.  A replacement that already matches the
+slot's container / codec / resolution / frame rate / alpha is copied through
+verbatim (no conversion); otherwise matching it is a re-encode and needs
+ffmpeg.
 """
 
 import os
@@ -146,19 +147,62 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
     return slots
 
 
+def _already_matches(slot: VideoSlot, replacement_path: str, rep_ext: str,
+                     match_length: bool = False, fps_tol: float = 0.05) -> bool:
+    """True when *replacement_path* is already in the slot's exact container,
+    codec, resolution, frame rate and alpha (and, when *match_length*, also its
+    duration) — so it can be copied through verbatim rather than re-encoded.
+
+    Deliberately strict: any unknown/ambiguous field returns False so we fall
+    back to a (lossy but correct) re-encode rather than copying through a file
+    that might not drop cleanly into the slot.  Pixel-format/profile nuances
+    aren't compared, so a hardware decoder *could* still object — but the user
+    supplied a byte-for-byte-format-matching clip, which is exactly the
+    "no conversion" path they asked for.
+    """
+    if rep_ext != slot.ext:
+        return False
+    si = slot.info
+    if si is None or not si.width or not si.height:
+        return False                      # can't prove a match → re-encode
+    ri = detect_video_info(replacement_path)
+    if ri is None:
+        return False
+    if (ri.width, ri.height) != (si.width, si.height):
+        return False
+    if (ri.vcodec or "").lower() != (si.vcodec or "").lower():
+        return False
+    if si.fps > 0 and abs(ri.fps - si.fps) > fps_tol:
+        return False
+    if bool(ri.has_alpha) != bool(si.has_alpha):
+        return False
+    if match_length and si.duration > 0 and abs(ri.duration - si.duration) > 0.05:
+        return False
+    return True
+
+
 def stage_replacement(slot: VideoSlot, replacement_path: str,
-                      trim_to_length: bool = False):
+                      trim_to_length: bool = False, no_conversion: bool = False):
     """Stage a single replacement over *slot*.
 
-    The replacement is re-encoded into the slot's container / codec, scaled to
-    the slot's resolution (preserving alpha for formats that carry it), and
-    written atomically over ``slot.abs_path``.  Slots in a custom-backend
-    format (``.cdmd``) are routed to that backend's encoder instead.  When
-    ffmpeg is unavailable a same-extension replacement is copied as-is (best
-    effort, no conversion); any other case fails with a clear message.
+    With *no_conversion* set, the replacement is copied through verbatim and
+    must already be in the slot's container (no re-encode at all — the user
+    vouches it's playable); a different container is rejected, and a custom
+    backend format (``.cdmd``) can't be copied as-is so it's rejected too.
+
+    Otherwise: when the replacement is *already* in the slot's exact container /
+    codec / resolution / frame rate / alpha (see :func:`_already_matches`) it's
+    copied through verbatim — no re-encode, no generation loss.  Failing that
+    it's re-encoded into the slot's container / codec, scaled to the slot's
+    resolution (preserving alpha for formats that carry it), and written
+    atomically over ``slot.abs_path``.  Slots in a custom-backend format
+    (``.cdmd``) are routed to that backend's encoder instead.  When ffmpeg is
+    unavailable a same-extension replacement is copied as-is (best effort, no
+    conversion); any other case fails with a clear message.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
-    applied (may be empty); on failure it's an error message.
+    applied (may be empty, or note a copy-through); on failure it's an error
+    message.
     """
     if not os.path.isfile(replacement_path):
         return False, "replacement file not found"
@@ -168,7 +212,21 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     has_backend = backend_for(slot.abs_path) is not None
 
     try:
-        if has_backend:
+        if no_conversion:
+            # User forced 'use my file as-is'.  Only a verbatim copy is allowed,
+            # so the container must match and custom formats (which *require* an
+            # encode) are refused with a clear reason.
+            if has_backend:
+                return False, (
+                    f"'no conversion' can't be used for {slot.ext} (a custom "
+                    f"format that must be re-encoded) — uncheck it for this clip")
+            if rep_ext != slot.ext:
+                return False, (
+                    f"'no conversion' needs a {slot.ext} file (got "
+                    f"{rep_ext or 'this file'}) — uncheck it to convert")
+            shutil.copy2(replacement_path, tmp)
+            detail = "copied as-is (no conversion)"
+        elif has_backend:
             ok, detail = encode_replacement(
                 replacement_path, tmp, slot.info, slot.abs_path,
                 match_length=trim_to_length)
@@ -179,6 +237,15 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                     except OSError:
                         pass
                 return False, detail
+        elif _already_matches(slot, replacement_path, rep_ext,
+                              match_length=trim_to_length):
+            # No conversion needed — the clip already matches the slot's
+            # container/codec/resolution/fps/alpha, so copy it through verbatim
+            # (no quality loss, and far faster than a re-encode).  Tried before
+            # the re-encode branch; the probe it relies on needs ffprobe, so
+            # without ffmpeg this is False and the same-ext copy below applies.
+            shutil.copy2(replacement_path, tmp)
+            detail = "copied through (already matches — no re-encode)"
         elif find_ffmpeg():
             ok, detail = transcode_video_to(
                 replacement_path, tmp, slot.info,
@@ -214,6 +281,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
 def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
+                       no_conversion: bool = False,
                        log_cb=None, progress_cb=None, assets_dir=None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
@@ -244,7 +312,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
-        ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length)
+        ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
+                                       no_conversion=no_conversion)
         if ok:
             staged += 1
             if log_cb:

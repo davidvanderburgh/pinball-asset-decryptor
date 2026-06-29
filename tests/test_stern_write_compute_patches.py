@@ -34,7 +34,8 @@ def test_compute_patches_is_defined_with_expected_signature():
     assert callable(getattr(engine, "_compute_patches", None))
     params = list(inspect.signature(engine._compute_patches).parameters)
     assert params == [
-        "disk_f", "parts", "assets_dir", "log", "progress", "cancel", "phase"]
+        "disk_f", "parts", "assets_dir", "log", "progress", "cancel", "phase",
+        "label"]
 
 
 def test_empty_assets_dir_raises_filenotfound_not_nameerror(tmp_path):
@@ -85,7 +86,8 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
 
-    def fake_compute(disk_f, parts, assets_dir, log, progress, cancel, phase=None):
+    def fake_compute(disk_f, parts, assets_dir, log, progress, cancel,
+                     phase=None, label=None):
         return ({19: b"PATCHED!"}, (3, 0, 0, 0))   # 3 sounds, off 19
     monkeypatch.setattr(engine, "_compute_patches", fake_compute)
 

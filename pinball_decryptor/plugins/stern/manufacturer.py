@@ -187,6 +187,16 @@ class SternManufacturer(Manufacturer):
     extract_ssd_label = "From SD card"
     write_iso_label = "Build SD-card image"
     write_ssd_label = "Write to SD card"
+    # ``extract_input_label`` is an era-aware @property below (Spike 2 = raw
+    # SD-card image, Whitestar = MAME ROM zip), so the input-field label isn't
+    # hardcoded to either medium.
+    # No picker-card corner badge: the card spans multiple eras (Spike 2 +
+    # Whitestar), so a single "SPIKE 2" pill there would misrepresent it — the
+    # working-view header era switcher shows the eras instead.
+    # Hardware eras, surfaced as a segmented pill switcher in the working-view
+    # header so the user picks the era explicitly (which makes the input field
+    # single-mode per era — Card image vs ROM zip — instead of multi-modal).
+    eras = (("spike2", "SPIKE 2"), ("whitestar", "WHITESTAR"))
     # Mirror the destination radio so the action button names what it does
     # (the generic "Build update" / "Apply Modifications" don't connect to
     # the SD-card wording above them).
@@ -213,6 +223,10 @@ class SternManufacturer(Manufacturer):
         self._era = "whitestar" if era == "whitestar" else "spike2"
 
     @property
+    def current_era(self):
+        return self._era
+
+    @property
     def capabilities(self):
         return _WHITESTAR_CAPS if self._era == "whitestar" else self._SPIKE2_CAPS
 
@@ -229,6 +243,14 @@ class SternManufacturer(Manufacturer):
     @property
     def capture_phases(self):
         return _wscapture.PHASES
+
+    @property
+    def extract_input_label(self):
+        # The input medium differs by era, so the field label can't say
+        # "Card image" universally: Spike 2 loads a raw SD-card image, Whitestar
+        # loads a MAME ROM zip.  Reads better than the bare ".img:"/".zip:" the
+        # raw extension would otherwise produce.
+        return "ROM zip" if self._era == "whitestar" else "Card image"
 
     def write_intro(self):
         return ("Re-pack your modified assets back onto the card — build a new "

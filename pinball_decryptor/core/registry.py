@@ -270,6 +270,18 @@ class Manufacturer(ABC):
     # that ``beta = True`` produces.
     badge: str = ""
 
+    # Hardware-generation eras this plugin handles under one picker entry, as
+    # ``((key, "LABEL"), ...)``.  When more than one is listed the working-view
+    # header shows a segmented pill switcher (the active era highlighted) so the
+    # user picks the era explicitly instead of relying on input auto-detection.
+    # The plugin must accept ``set_era(key)`` and expose ``current_era``.  Empty
+    # / single-entry → no switcher (the common single-era plugins).
+    eras: tuple = ()
+
+    # Active era key for an era-switching plugin (mirrors the last ``set_era``);
+    # "" for single-era plugins.  Read by the GUI to light the right pill.
+    current_era: str = ""
+
     # Labels for the Extract/Write source-vs-destination toggle (shown only
     # when ``capabilities.direct_ssd`` is True).  Defaults match JJP's "ISO file
     # vs physical SSD" wording; override per manufacturer when the medium is
@@ -279,6 +291,12 @@ class Manufacturer(ABC):
     extract_ssd_label: str = "From SSD"
     write_iso_label: str = "Build USB ISO"
     write_ssd_label: str = "Write to SSD"
+
+    # Human noun for the Extract input field label (and the Write "Original …"
+    # label), shown in place of the raw primary extension.  ``None`` falls back
+    # to "<.ext>:" (e.g. ".img:") or "Input:".  Stern sets "Card image" so the
+    # field reads "Card image:" instead of the jargony ".img:".
+    extract_input_label = None
 
     # Action-button captions on the Write tab, one per destination mode, so
     # the button restates the chosen action instead of a generic "Apply".

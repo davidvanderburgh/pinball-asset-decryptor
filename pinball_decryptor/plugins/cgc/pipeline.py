@@ -104,8 +104,16 @@ EMMC_INNER_PATH = "/emmc.img"
 # Lives on the executor side (in WSL: /tmp/cgc_stage_<pid>/).
 
 
-def _stage_dir_for(executor, run_id):
-    """Return an executor-side staging path; safe for parallel runs."""
+def _stage_dir_for(run_id, game_key=None):
+    """Return an executor-side staging path; safe for parallel runs.
+
+    The game key is folded into the name (``cgc_stage_<game>_<pid>``) so a
+    crashed run's leftover staging is attributable per-game in the WSL
+    disk-management view (:mod:`core.wsl_disk`).  Omitted -> legacy
+    ``cgc_stage_<pid>`` form, still recognised by the scanner.
+    """
+    if game_key:
+        return f"/tmp/cgc_stage_{game_key}_{run_id}"
     return f"/tmp/cgc_stage_{run_id}"
 
 
@@ -188,7 +196,7 @@ class ExtractPipeline(BasePipeline):
 
         self._set_phase(1)
         run_id = os.getpid()
-        stage = _stage_dir_for(self.executor, run_id)
+        stage = _stage_dir_for(run_id, game_key)
         img_exec = self.executor.to_exec_path(self.img_path)
         p3_exec = f"{stage}/p3.img"
         emmc_exec = f"{stage}/emmc.img"
@@ -216,6 +224,13 @@ class ExtractPipeline(BasePipeline):
             self._log(
                 f"  emmc.img: {emmc_size / (1024 ** 3):.2f} GiB",
                 "info")
+            # p3.img is fully consumed now (emmc.img has been dumped out
+            # of it) -- free it before staging inner.img so the peak
+            # footprint is emmc.img+inner.img, not p3.img+emmc.img+inner.img.
+            # P3 is the largest layer (3-9 GiB), so dropping it here is what
+            # keeps the WSL /tmp filesystem from filling on the bigger titles
+            # (Pulp Fiction).
+            self.executor.run(f"rm -f {p3_exec}", timeout=30)
             self._progress(100, 100, "")
             self._check_cancel()
 
@@ -243,6 +258,10 @@ class ExtractPipeline(BasePipeline):
                 f"count={inner_part['size_bytes'] // (1024 ** 2)} status=none",
                 timeout=900,
             )
+            # emmc.img is consumed too now -- the rest of Extract only reads
+            # inner.img (rdump of the asset subtree).  Free it so the rdump
+            # staging peak is inner.img+assets, not emmc.img+inner.img+assets.
+            self.executor.run(f"rm -f {emmc_exec}", timeout=30)
             self._progress(50, 100, "rdump assets")
             self._log(
                 f"Dumping {info['asset_subtree']!r} to staging...",
@@ -740,7 +759,7 @@ class WritePipeline(BasePipeline):
         self._set_phase(2)
         data_part = find_data_partition(self.output_img)
         run_id = os.getpid()
-        stage = _stage_dir_for(self.executor, run_id)
+        stage = _stage_dir_for(run_id, game_key)
         out_exec = self.executor.to_exec_path(self.output_img)
         p3_exec = f"{stage}/p3.img"
         emmc_exec = f"{stage}/emmc.img"

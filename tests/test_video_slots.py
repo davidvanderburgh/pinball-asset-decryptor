@@ -165,6 +165,107 @@ def test_stage_reencodes_to_slot_format_and_resolution(tmp_path):
     assert after.duration > 1.5                        # full length kept
 
 
+def test_stage_copies_through_when_already_matching(tmp_path):
+    # A replacement that already matches the slot's container/codec/resolution/
+    # fps is copied through verbatim — no re-encode, so the staged bytes equal
+    # the source bytes exactly (a re-encode would differ).
+    from pinball_decryptor.core.video import find_ffmpeg, find_ffprobe
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "intro.mp4")
+    if not _make_testsrc(slot, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "src" / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     roots=[str(tmp_path / "clips")],
+                                                     exts=(".mp4",))}
+    rel = "clips/intro.mp4"
+    with open(rep, "rb") as fh:
+        rep_bytes = fh.read()
+
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert staged == 1 and failures == []
+    with open(slot, "rb") as fh:
+        assert fh.read() == rep_bytes  # copied through, not re-encoded
+
+
+def test_stage_reencodes_when_resolution_differs(tmp_path):
+    # The negative of the copy-through case: a same-container clip whose
+    # resolution differs is still re-encoded (bytes change, dims match slot).
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "intro.mp4")
+    if not _make_testsrc(slot, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "src" / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=320, height=240, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     roots=[str(tmp_path / "clips")],
+                                                     exts=(".mp4",))}
+    rel = "clips/intro.mp4"
+    with open(rep, "rb") as fh:
+        rep_bytes = fh.read()
+
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert staged == 1 and failures == []
+    with open(slot, "rb") as fh:
+        assert fh.read() != rep_bytes  # re-encoded (not copied through)
+    after = detect_video_info(slot)
+    assert after is not None and after.width == 160 and after.height == 120
+
+
+def test_no_conversion_copies_through_same_container(tmp_path):
+    # "No conversion" copies the file in verbatim (no re-encode) even when the
+    # resolution differs from the slot — the user vouches it's game-ready, and
+    # it shouldn't even need ffprobe.
+    from pinball_decryptor.core.video import find_ffmpeg
+    if not find_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    slot = str(tmp_path / "clips" / "intro.mp4")
+    if not _make_testsrc(slot, width=160, height=120, ext="mp4"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "src" / "rep.mp4")
+    if not _make_testsrc(rep, width=320, height=240, ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+    slots = {s.rel_path: s for s in scan_video_slots(
+        str(tmp_path), roots=[str(tmp_path / "clips")], exts=(".mp4",),
+        probe=False)}
+    rel = "clips/intro.mp4"
+    with open(rep, "rb") as fh:
+        rep_bytes = fh.read()
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep},
+                                          no_conversion=True)
+    assert staged == 1 and failures == []
+    with open(slot, "rb") as fh:
+        assert fh.read() == rep_bytes  # verbatim, despite the size mismatch
+
+
+def test_no_conversion_rejects_different_container(tmp_path):
+    # A different container can't be copied through as-is — clear failure.
+    from pinball_decryptor.core.video_slots import stage_replacement
+    (tmp_path / "intro.mp4").write_bytes(b"\x00")
+    (tmp_path / "rep.webm").write_bytes(b"\x00")
+    slot = VideoSlot(rel_path="intro.mp4", abs_path=str(tmp_path / "intro.mp4"),
+                     ext=".mp4", info=None, size=1)
+    ok, detail = stage_replacement(slot, str(tmp_path / "rep.webm"),
+                                   no_conversion=True)
+    assert ok is False
+    assert ".mp4" in detail and "no conversion" in detail.lower()
+
+
 def test_stage_reports_failure_for_missing_replacement(tmp_path):
     (tmp_path / "a.mp4").write_bytes(b"\x00")
     slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path))}

@@ -114,7 +114,8 @@ class SternExtractPipeline(BasePipeline):
         n = engine.extract_all(
             self.input_path, parts, self.output_dir,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
-            phase=self._set_phase, log_line=self._log_line, **flags)
+            phase=self._set_phase, log_line=self._log_line,
+            label=display_for_key(key, self.input_path), **flags)
         # extract_all returns promptly on cancel (it checks between every phase
         # and per decoded sound).  Stop here instead of grinding through the
         # checksum pass and reporting success on a run the user aborted.
@@ -147,7 +148,8 @@ class SternWritePipeline(BasePipeline):
 
     def _run(self):
         self._set_phase(0)  # Detect
-        if detect_game(self.original_path) is None:
+        key = detect_game(self.original_path)
+        if key is None:
             raise PipelineError("Detect", "Original is not a Spike card image.")
         self._check_cancel()
         self._set_phase(1)  # Stage
@@ -155,7 +157,8 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
         n = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
-            log=self._log, progress=self._progress, cancel=lambda: self._cancelled)
+            log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
+            label=display_for_key(key, self.original_path))
         self._set_phase(3)  # Patch image
         self._done(True, "Wrote %d replaced sound(s) to %s" % (n, self.output_path))
 
@@ -290,7 +293,8 @@ class SternRevertPipeline(BasePipeline):
                 open_disk=lambda: RawDeviceFile(self.source, writable=False),
                 partitions=parts)
         else:
-            if detect_game(self.source) is None:
+            key = detect_game(self.source)
+            if key is None:
                 raise PipelineError(
                     "Read source",
                     "The Original .img isn't a Spike card image, so the "
@@ -299,7 +303,8 @@ class SternRevertPipeline(BasePipeline):
             reverted, failed = engine.revert_assets(
                 self.source, self.assets_dir, self.rels,
                 log=self._log, progress=self._progress,
-                cancel=lambda: self._cancelled)
+                cancel=lambda: self._cancelled,
+                label=display_for_key(key, self.source))
         self._set_phase(1)  # Done
         msg = "Restored %d original file(s) from the card." % len(reverted)
         if failed:

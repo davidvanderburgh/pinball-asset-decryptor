@@ -73,8 +73,17 @@ class App:
         # modal that nobody can dismiss on a headless runner.
         skip_disclaimer = (os.environ.get("PINBALL_SKIP_DISCLAIMER")
                            or "PYTEST_CURRENT_TEST" in os.environ)
-        if not skip_disclaimer and not self._settings.get(
-                "disclaimer_accepted"):
+        need_disclaimer = (not skip_disclaimer
+                           and not self._settings.get("disclaimer_accepted"))
+        # Keep the window hidden until it's positioned + populated, so the user
+        # never sees a flash of the default-geometry empty white box before the
+        # saved placement lands (it's revealed with deiconify() at the end of
+        # __init__).  The first-launch disclaimer modal can't run over a
+        # withdrawn parent — on Windows pythonw a transient over a withdrawn
+        # root never maps — so that path withdraws only after the modal closes.
+        if not need_disclaimer:
+            self.root.withdraw()
+        if need_disclaimer:
             from .gui.disclaimer import show_disclaimer_dialog
             self.root.title(APP_NAME)
             self.root.geometry("1x1+0+0")  # minimal pre-dialog footprint
@@ -93,6 +102,9 @@ class App:
                     json.dump(self._settings, f, indent=2)
             except OSError:
                 pass
+            # Modal dismissed — hide the tiny pre-dialog root now, before we
+            # build + position the real window, so it reveals cleanly too.
+            self.root.withdraw()
 
         self.window = MainWindow(
             self.root,
@@ -119,6 +131,10 @@ class App:
             on_fda_acknowledge=self._on_fda_acknowledge,
             initial_column_widths=self._settings.get("column_widths", {}),
             on_column_widths_change=self._on_column_widths_change,
+            initial_admin_warning_collapsed=bool(
+                self._settings.get("admin_warning_collapsed", False)),
+            on_admin_warning_collapsed_change=(
+                self._on_admin_warning_collapsed_change),
         )
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
@@ -142,6 +158,12 @@ class App:
         # mfr am I about to work on" unambiguous and prevents the
         # accidental mid-session mfr switch class of bug.
         self.window.show_picker()
+
+        # Reveal the window now that it's at its saved geometry and the picker
+        # is laid out — the first thing the user sees is the real UI, not a
+        # default-size empty frame flashing into its saved position.
+        self.root.update_idletasks()
+        self.root.deiconify()
 
         self._poll_queue()
 
@@ -1427,7 +1449,7 @@ class App:
         pend = self.window.pending_video_assignments(assets_dir)
         if not pend:
             return (0, 0, [])
-        slots_by_rel, assignments, trim = pend
+        slots_by_rel, assignments, trim, no_conversion = pend
         from .core.video_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
@@ -1435,7 +1457,8 @@ class App:
             f"repack...", "info"))
         try:
             staged, failures = stage_replacements(
-                slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb,
+                slots_by_rel, assignments, trim_to_length=trim,
+                no_conversion=no_conversion, log_cb=log_cb,
                 assets_dir=assets_dir)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
@@ -1868,4 +1891,10 @@ class App:
         """Persist the Replace-tree column widths the user dragged so the layout
         survives a restart (monkeybug).  *widths* is ``{tree_key: {col: px}}``."""
         self._settings["column_widths"] = widths
+        self._save_settings()
+
+    def _on_admin_warning_collapsed_change(self, collapsed):
+        """Persist whether the admin-warning body is collapsed so a returning
+        user who's read it once keeps it minimised (monkeybug)."""
+        self._settings["admin_warning_collapsed"] = bool(collapsed)
         self._save_settings()

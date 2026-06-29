@@ -201,6 +201,17 @@ def test_stern_detects_whitestar_zip_with_era(manufacturers_by_key, tmp_path):
     assert game.era == "whitestar"
 
 
+def test_stern_input_label_is_era_aware(manufacturers_by_key):
+    # The input medium differs by era, so the field-label noun can't be a fixed
+    # "Card image": Spike 2 loads an SD-card image, Whitestar a MAME ROM zip.
+    s = manufacturers_by_key["stern"]
+    s.set_era("spike2")
+    assert s.extract_input_label == "Card image"
+    s.set_era("whitestar")
+    assert s.extract_input_label == "ROM zip"
+    s.set_era("")  # restore default
+
+
 def test_stern_era_switch_flips_capabilities(manufacturers_by_key):
     s = manufacturers_by_key["stern"]
     s.set_era("whitestar")

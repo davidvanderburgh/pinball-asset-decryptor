@@ -38,6 +38,18 @@ _SANS_FONT, _MONO_FONT = platform_font()
 from .widgets import _Tooltip  # noqa: E402
 
 
+# Hover-tooltip text for the generic per-type Extract checkboxes
+# (capabilities.extract_categories — currently Stern Spike 2's Audio / Video /
+# Images / Text).  Keyed by category key; an unknown key falls back to a
+# generic "Include <label> when extracting." string.
+_EXTRACT_CATEGORY_TIPS = {
+    "audio": "Decode every packed sound to an individual WAV.",
+    "video": "Pull out the game's video clips (H.264 .mov).",
+    "images": "Export the loose image / texture assets (PNG / DDS).",
+    "text": "Export the on-screen display-text strings for editing.",
+}
+
+
 def _render_pinmame_frame(data, w, h, depth, scale, color):
     """Render a libpinmame RAW DMD frame to an amber-tinted PIL image.
 
@@ -97,7 +109,9 @@ class MainWindow:
                  initial_fda_acknowledged=False,
                  on_fda_acknowledge=None,
                  initial_column_widths=None,
-                 on_column_widths_change=None):
+                 on_column_widths_change=None,
+                 initial_admin_warning_collapsed=False,
+                 on_admin_warning_collapsed_change=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -129,6 +143,15 @@ class MainWindow:
         # "Hide this notice" link in the banner to dismiss manually.
         self._fda_acknowledged = bool(initial_fda_acknowledged)
         self._on_fda_acknowledge = on_fda_acknowledge
+        # Admin-warning panel: the big red banner heading stays put, but its
+        # how-to-fix body is collapsible and the choice persists (settings.json
+        # via ``on_admin_warning_collapsed_change``) so returning users who've
+        # read it once aren't shown the whole wall of text every time.  Shared
+        # across the Extract + Write copies; both register in this list.
+        self._admin_warning_collapsed = bool(initial_admin_warning_collapsed)
+        self._on_admin_warning_collapsed_change = (
+            on_admin_warning_collapsed_change)
+        self._admin_warning_frames = []
         self._app_title = app_title
 
         self._current_mfr = None
@@ -245,6 +268,10 @@ class MainWindow:
         self.video_search_var = tk.StringVar()
         self._video_sort = ("#0", False)  # (column_id, descending)
         self.video_trim_var = tk.BooleanVar(value=False)
+        # "No conversion": copy the replacement through as-is (it must already be
+        # in the slot's format) instead of re-encoding it to match.  Greys out
+        # the trim/pad option, which only applies during a re-encode.
+        self.video_no_conversion_var = tk.BooleanVar(value=False)
         self.video_status_var = tk.StringVar(value="")
         self._video_slots = []           # list[VideoSlot] from last scan
         self._video_slots_by_rel = {}    # rel_path -> VideoSlot
@@ -475,9 +502,21 @@ class MainWindow:
             top, text=self._app_title,
             font=(_SANS_FONT, 13, "bold"))
         self._title_lbl.pack(side=tk.LEFT)
+        # Era switcher — a segmented row of clickable pills right of the title,
+        # shown only for multi-era plugins (Stern Spike 2 / Whitestar).  The
+        # pills are (re)built per-manufacturer in apply_manufacturer(); the frame
+        # is packed by show_mfr_view() and hidden in the picker.
+        self._era_badges_frame = ttk.Frame(top)
+        self._era_badge_widgets = {}   # era_key -> tk.Label pill
         self._theme_btn = ttk.Button(top, text="", width=3,
                                      command=self._toggle_theme)
         self._theme_btn.pack(side=tk.RIGHT)
+        # The glyph alone isn't self-explanatory, and re-theming re-styles
+        # the whole widget tree synchronously on the UI thread — so it's
+        # also disabled mid-run (see set_running) to stop users hammering it
+        # while a pipeline floods the main loop and the window can't repaint.
+        _Tooltip(self._theme_btn, "Switch between light and dark theme",
+                 lambda: self._current_theme)
         # "Check for updates" button — always visible.  Useful both as
         # a manual override (user wants to check NOW instead of waiting
         # for next launch) and as a dev convenience (lets you exercise
@@ -488,6 +527,24 @@ class MainWindow:
             top, text="Check for updates",
             command=self._handle_check_updates)
         self._update_check_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # "Manage disk space" — only meaningful on Windows, where every
+        # native-tool pipeline (CGC/DP/BoF/JJP) stages into WSL's virtual
+        # disk, and that disk fills up / never shrinks on its own.  Opens the
+        # WSL disk-management modal (leftover-staging cleanup + reclaim).
+        if sys.platform == "win32":
+            self._disk_btn_base = "Manage disk space"
+            self._disk_btn = ttk.Button(
+                top, text=self._disk_btn_base,
+                command=self._open_disk_dialog)
+            self._disk_btn.pack(side=tk.RIGHT, padx=(0, 6))
+            _Tooltip(self._disk_btn,
+                     "View and free disk space used by extract/build staging",
+                     lambda: self._current_theme)
+            # Passive startup check: badge the button when leftover staging is
+            # found (crash/cancel leftovers that need a human to clear).
+            # Deferred + backgrounded so it never blocks launch, and it only
+            # scans WSL if WSL is already running (never spins it up).
+            self.root.after(1500, self._start_disk_badge_check)
 
         # ---- Picker view (the entry screen) --------------------------
         from .picker import ManufacturerPicker
@@ -785,9 +842,17 @@ class MainWindow:
         self._extract_macos_fda_frame = (
             self._build_macos_fda_warning_frame(f))
 
-        self._extract_badge = ttk.Label(f, text="",
+        # "Detected: <game>" badge.  Wrapped in a row with a field-label-width
+        # spacer so its left edge lines up under the path entry fields (not the
+        # labels) — see the path rows above, which all lead with a width=14
+        # anchor=W label.  The ROW is the positioned element (the source toggle
+        # in _on_input_source_change packs/forgets it); the badge stays inside.
+        self._extract_badge_row = ttk.Frame(f)
+        self._extract_badge_row.pack(fill=tk.X, padx=10, pady=(0, 2))
+        ttk.Label(self._extract_badge_row, text="", width=14).pack(side=tk.LEFT)
+        self._extract_badge = ttk.Label(self._extract_badge_row, text="",
                                         font=(_SANS_FONT, 9, "italic"))
-        self._extract_badge.pack(anchor=tk.W, padx=24, pady=(0, 2))
+        self._extract_badge.pack(side=tk.LEFT, anchor=tk.W)
         self._extract_badge.bind(
             "<Button-1>", lambda _e: self._auto_switch("extract"))
         self._extract_badge.bind(
@@ -888,10 +953,19 @@ class MainWindow:
             variable=self.extract_filesystem_var,
         ).pack(side=tk.LEFT, padx=(0, 12))
 
+        # The Extract action button and the inline option checkboxes share one
+        # bottom row: the checkbox cluster sits on the left (aligned under the
+        # path fields), the Extract button anchors right (under the Browse
+        # column).  Created here — unpacked — so the option frames below can
+        # parent into the left cluster; the row is packed at the very end of
+        # this method (after every option frame exists).
+        self._extract_action_row = ttk.Frame(f)
+        self._extract_options_row = ttk.Frame(self._extract_action_row)
+
         # Generic per-type Extract checkboxes (capabilities.extract_categories).
         # Children are (re)built per-plugin in apply_manufacturer(); built empty
         # here and pack-managed there.  Stern: Audio / Video / Images / Text.
-        self._extract_categories_frame = ttk.Frame(f)
+        self._extract_categories_frame = ttk.Frame(self._extract_options_row)
 
         # Williams-only: extract-mode checkboxes.  Both hidden in
         # apply_manufacturer() for manufacturers without
@@ -1009,41 +1083,37 @@ class MainWindow:
         self._manual_press_fn = None
         self._switch_matrix_buttons = []
 
-        # Two post-extract "auto-name" options, each one checkbox with a
-        # one-line description below it (only shown for manufacturers that
-        # advertise the matching capability).  "Call-outs" combines transcribe
-        # + rename into a single action; "music" is the AcoustID lookup.
-        self._transcribe_frame = ttk.Frame(f)
+        # Two post-extract "auto-name" options (only shown for manufacturers
+        # that advertise the matching capability).  "Call-outs" combines
+        # transcribe + rename into a single action; "music" is the AcoustID
+        # lookup.  Both sit inline in the action row's option cluster; their
+        # former one-line descriptions now live in hover tooltips so the log
+        # area stays tall.
+        self._transcribe_frame = ttk.Frame(self._extract_options_row)
         self._transcribe_check = ttk.Checkbutton(
             self._transcribe_frame,
             text="Auto-name call-outs",
             variable=self.transcribe_var)
-        self._transcribe_check.pack(anchor=tk.W, padx=(24, 8))
-        self._transcribe_desc = ttk.Label(
-            self._transcribe_frame,
-            text="Transcribe each spoken WAV (faster-whisper) and rename it by "
-                 "what's said — e.g. “Super jackpot!”. Also writes "
-                 "callouts.csv.",
-            font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=720, justify=tk.LEFT)
-        self._transcribe_desc.pack(anchor=tk.W, padx=(44, 0))
+        self._transcribe_check.pack(side=tk.LEFT)
+        _Tooltip(
+            self._transcribe_check,
+            "Transcribe each spoken WAV (faster-whisper) and rename it by "
+            "what's said — e.g. “Super jackpot!”. Also writes callouts.csv.",
+            lambda: self._current_theme)
 
         # Music-ID: identify each full music track online via AcoustID +
         # MusicBrainz and rename it by song.  Chained after transcribe.
-        self._music_id_frame = ttk.Frame(f)
+        self._music_id_frame = ttk.Frame(self._extract_options_row)
         self._music_id_check = ttk.Checkbutton(
             self._music_id_frame,
             text="Auto-name music",
             variable=self.music_id_var)
-        self._music_id_check.pack(anchor=tk.W, padx=(24, 8))
-        self._music_id_desc = ttk.Label(
-            self._music_id_frame,
-            text="Identify each full song online (AcoustID) and rename it by "
-                 "artist + title — e.g. “Led Zeppelin - Kashmir”. "
-                 "Needs internet.",
-            font=(_SANS_FONT, 9, "italic"), foreground="#888888",
-            wraplength=720, justify=tk.LEFT)
-        self._music_id_desc.pack(anchor=tk.W, padx=(44, 0))
+        self._music_id_check.pack(side=tk.LEFT)
+        _Tooltip(
+            self._music_id_check,
+            "Identify each full song online (AcoustID) and rename it by "
+            "artist + title — e.g. “Led Zeppelin - Kashmir”. Needs internet.",
+            lambda: self._current_theme)
 
         # Decode DMD checkbox -- packed only when the active manufacturer
         # has capabilities.decode_dmd (currently just CGC).  When ON,
@@ -1082,14 +1152,27 @@ class MainWindow:
         ttk.Label(_deltas_row, textvariable=self.extract_deltas_display_var,
                   font=(_SANS_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
 
-        btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
-        self._extract_btn = ttk.Button(btn_row, text="Extract",
-                                       command=self._on_extract)
-        self._extract_btn.pack(side=tk.LEFT)
-        self._extract_cancel_btn = ttk.Button(btn_row, text="Cancel",
-                                              command=self._on_extract_cancel,
-                                              state=tk.DISABLED)
-        self._extract_cancel_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # Assemble + pack the shared action row.  The Extract button anchors
+        # right (under the Browse column); the option cluster fills the space
+        # to its left.  There's no separate Cancel button any more — the single
+        # Extract button flips to "Cancel" while a run is in flight (see
+        # _set_extract_button_running) and is gated otherwise (see
+        # _refresh_extract_enabled).
+        self._extract_btn = ttk.Button(
+            self._extract_action_row, text="Extract", command=self._on_extract)
+        self._extract_btn.pack(side=tk.RIGHT)
+        self._extract_btn_tip = _Tooltip(
+            self._extract_btn, "", lambda: self._current_theme)
+        self._extract_options_row.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._extract_action_row.pack(fill=tk.X, padx=10, pady=(8, 4))
+        # Re-evaluate the button gate whenever the input source / output folder
+        # changes (manual typing, Browse, drive pick, radio flip, or a
+        # programmatic set).
+        for _var in (self.extract_input_var, self.extract_output_var,
+                     self.extract_drive_display_var,
+                     self.extract_input_source_var):
+            _var.trace_add(
+                "write", lambda *_a: self._refresh_extract_enabled())
 
     def _build_write_tab(self):
         f = self._tab_write
@@ -2614,20 +2697,22 @@ class MainWindow:
     def _build_video_tab(self):
         """Build the 'Replace Video' tab: a searchable list of the video files
         in the extracted assets folder, each a slot the user can assign + an
-        embedded-preview a replacement clip for.  Staging re-encodes each
-        replacement to its slot's container/codec/resolution and writes it over
-        the original so the normal Write step repacks it."""
+        embedded-preview a replacement clip for.  Staging copies a matching
+        replacement through as-is, else re-encodes it to its slot's
+        container/codec/resolution, and writes it over the original so the
+        normal Write step repacks it."""
         f = self._tab_video
         pad = {"padx": 10, "pady": 4}
 
         _video_desc = ttk.Label(
             f,
-            text="Swap a game's videos without copy-pasting and renaming. Your "
-                 "replacement can be almost any video format — it's auto-"
-                 "re-encoded to the original clip's format, resolution and "
-                 "frame rate for you (transparency is kept where the original "
-                 "has it). Pick your extracted folder, assign a clip to a slot, "
-                 "then build the update on the Write tab.",
+            text="Swap a game's videos without copy-pasting and renaming. A "
+                 "clip that already matches the original's format, resolution "
+                 "and frame rate is used as-is (no conversion, no quality "
+                 "loss); anything else is auto-re-encoded to match for you "
+                 "(transparency is kept where the original has it). Pick your "
+                 "extracted folder, assign a clip to a slot, then build the "
+                 "update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _video_desc.pack(anchor=tk.W, **pad)
@@ -2758,15 +2843,33 @@ class MainWindow:
             command=self._video_on_source_change)
         self._video_src_rep.pack(side=tk.LEFT, padx=(4, 0))
 
-        ttk.Checkbutton(
+        self._video_no_conversion_cb = ttk.Checkbutton(
+            f, text="No conversion — use my file as-is (it must already match "
+                    "the original's format)",
+            variable=self.video_no_conversion_var,
+            command=self._video_on_no_conversion_toggle)
+        self._video_no_conversion_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        _Tooltip(
+            self._video_no_conversion_cb,
+            "Skip re-encoding: the replacement is copied in byte-for-byte, so "
+            "it must already be the original clip's container, codec, "
+            "resolution and frame rate (a different container is rejected). "
+            "Faster and lossless, but the file has to be game-ready. Leave this "
+            "off to have the app auto-convert any video to match the slot.",
+            lambda: self._current_theme)
+
+        self._video_trim_cb = ttk.Checkbutton(
             f, text="Trim / pad replacements to the original clip length",
             variable=self.video_trim_var,
-            command=self._save_staged_changes).pack(
-                anchor=tk.W, padx=12, pady=(6, 0))
+            command=self._save_staged_changes)
+        self._video_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
         self._video_length_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
         self._video_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+        # Trim/pad only applies during a re-encode, so grey it out when
+        # "No conversion" is on (reflects any restored staged state too).
+        self._update_video_trim_enabled()
 
         ttk.Label(
             f,
@@ -2780,6 +2883,25 @@ class MainWindow:
         if hasattr(self, "_video_stop_canvas"):
             self._draw_audio_icon(self._video_stop_canvas, "stop")
         self._refresh_video_ffmpeg_warning()
+
+    def _video_on_no_conversion_toggle(self):
+        """No-conversion copies the file through verbatim, so trim/pad (a
+        re-encode-time option) doesn't apply — grey it out while it's on, then
+        persist the choice with the other staged settings."""
+        self._update_video_trim_enabled()
+        self._save_staged_changes()
+
+    def _update_video_trim_enabled(self):
+        """Enable the trim/pad checkbox only when we'll actually re-encode
+        (i.e. 'No conversion' is off)."""
+        cb = getattr(self, "_video_trim_cb", None)
+        if cb is None:
+            return
+        try:
+            cb.state(["disabled"] if self.video_no_conversion_var.get()
+                     else ["!disabled"])
+        except tk.TclError:
+            pass
 
     def _refresh_video_ffmpeg_warning(self):
         """Show the ffmpeg-missing banner only when ffmpeg can't be found.
@@ -2865,6 +2987,10 @@ class MainWindow:
                 staged.get("video"), self._video_slots_by_rel)
             if "video_trim" in staged:
                 self.video_trim_var.set(bool(staged["video_trim"]))
+            if "video_no_conversion" in staged:
+                self.video_no_conversion_var.set(
+                    bool(staged["video_no_conversion"]))
+            self._update_video_trim_enabled()
         else:
             self._video_assignments = {
                 rel: rep for rel, rep in self._video_assignments.items()
@@ -3734,10 +3860,10 @@ class MainWindow:
     # ---- Replace Video: pending assignments (applied at Write time) --
 
     def pending_video_assignments(self, assets_dir):
-        """Return ``(slots_by_rel, assignments, trim)`` of replacements the
-        user assigned for *assets_dir*, or ``None`` when there's nothing to
-        apply.  Called by the Write flow to auto-stage edits just before it
-        repacks — there is no manual "stage" step.
+        """Return ``(slots_by_rel, assignments, trim, no_conversion)`` of
+        replacements the user assigned for *assets_dir*, or ``None`` when
+        there's nothing to apply.  Called by the Write flow to auto-stage edits
+        just before it repacks — there is no manual "stage" step.
 
         Guarded so it only fires when the folder being written is the same one
         the assignments were made against."""
@@ -3756,7 +3882,8 @@ class MainWindow:
         if not assignments:
             return None
         return (dict(self._video_slots_by_rel), assignments,
-                bool(self.video_trim_var.get()))
+                bool(self.video_trim_var.get()),
+                bool(self.video_no_conversion_var.get()))
 
     # ==================================================================
     # Replace Image tab — mirrors Replace Video, but the preview is a
@@ -4313,6 +4440,8 @@ class MainWindow:
         if _live(self._video_scan_dir):
             data["video"] = dict(self._video_assignments)
             data["video_trim"] = bool(self.video_trim_var.get())
+            data["video_no_conversion"] = bool(
+                self.video_no_conversion_var.get())
         if _live(self._image_scan_dir):
             data["image"] = dict(self._image_assignments)
         staged_changes.save(assets_dir, data)
@@ -4945,6 +5074,7 @@ class MainWindow:
         # the body is just noise.  The picker has its own internal
         # "Choose a manufacturer" header.
         self._title_lbl.pack_forget()
+        self._era_badges_frame.pack_forget()
         self._picker_view.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 10))
 
     def show_mfr_view(self):
@@ -4955,10 +5085,67 @@ class MainWindow:
         self._back_btn.pack(side=tk.LEFT, padx=(0, 8))
         self._title_lbl.pack_forget()
         self._title_lbl.pack(side=tk.LEFT)
+        # Era switcher sits just right of the title (only for multi-era plugins;
+        # apply_manufacturer has already built/cleared the pills).
+        self._era_badges_frame.pack_forget()
+        if self._era_badge_widgets:
+            self._era_badges_frame.pack(side=tk.LEFT, padx=(12, 0))
         self._mfr_view_wrapper.pack(fill=tk.BOTH, expand=True)
         # Right-size the notebook to the visible tab so the Log pane fills
         # any leftover vertical space (see _resize_notebook_to_current_tab).
         self._notebook.after_idle(self._resize_notebook_to_current_tab)
+
+    def _build_era_badges(self, mfr):
+        """(Re)build the header era-switcher pills for *mfr*.  Hidden unless the
+        plugin lists more than one era."""
+        for child in self._era_badges_frame.winfo_children():
+            child.destroy()
+        self._era_badge_widgets = {}
+        eras = tuple(getattr(mfr, "eras", ()) or ())
+        if len(eras) < 2:
+            self._era_badges_frame.pack_forget()
+            return
+        for key, label in eras:
+            pill = tk.Label(
+                self._era_badges_frame, text=label,
+                font=(_SANS_FONT, 8, "bold"), padx=7, pady=1, cursor="hand2")
+            pill.pack(side=tk.LEFT, padx=(0, 4))
+            pill.bind("<Button-1>",
+                      lambda _e, k=key: self._on_era_badge_click(k))
+            self._era_badge_widgets[key] = pill
+        self._refresh_era_badges()
+
+    def _refresh_era_badges(self):
+        """Colour each era pill: the active era stands out (accent), the rest
+        recede (muted).  Theme-aware so it follows light/dark switches."""
+        if not self._era_badge_widgets:
+            return
+        c = THEMES[self._current_theme]
+        active = (getattr(self._current_mfr, "current_era", "")
+                  if self._current_mfr else "")
+        for key, pill in self._era_badge_widgets.items():
+            if key == active:
+                pill.configure(background=c["accent"], foreground="#ffffff")
+            else:
+                pill.configure(background=c["button"], foreground=c["gray"])
+
+    def _on_era_badge_click(self, era_key):
+        """Switch the active plugin to *era_key*.  Clears the Extract input (a
+        Spike 2 image isn't a Whitestar ROM, and vice-versa) and re-applies the
+        era-specific layout.  Ignored mid-run or when already on that era."""
+        mfr = self._current_mfr
+        if (mfr is None or self._is_running()
+                or not hasattr(mfr, "set_era")
+                or getattr(mfr, "current_era", "") == era_key):
+            return
+        mfr.set_era(era_key)
+        self.extract_input_var.set("")
+        self.apply_manufacturer(mfr, reset_era=False)
+        # The new era has its own prerequisites, and apply_manufacturer only
+        # reset the indicators to "[?]" — kick the App's probe worker so they
+        # actually run instead of sitting greyed out.
+        if self._on_recheck_prereqs is not None:
+            self._on_recheck_prereqs()
 
     def set_back_enabled(self, enabled):
         """Enable / disable the Back button — called by App while a
@@ -5042,8 +5229,13 @@ class MainWindow:
         self._suppress_mfr_event = False
 
         # Title bar shows just the mfr name (window title bar already
-        # has the app name).
+        # has the app name).  The hardware-generation badge (e.g. Stern's
+        # "SPIKE 2") lives on the picker card, not here — see picker.py.
         self._title_lbl.configure(text=mfr.display)
+        # Era switcher pills (multi-era plugins only) — rebuilt here so the
+        # active era is highlighted after both a manual switch and an
+        # auto-detected one (both route through apply_manufacturer).
+        self._build_era_badges(mfr)
 
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)
@@ -5062,14 +5254,22 @@ class MainWindow:
         # Make sure the working view is visible (and the picker isn't).
         self.show_mfr_view()
 
-        # Per-format label phrasing (e.g. ".upd:" vs "Input:")
+        # Per-format label phrasing.  A manufacturer may set a human noun
+        # (``extract_input_label``, e.g. Stern's "Card image") that wins over
+        # the raw primary extension (".upd:" / ".img:") or the generic "Input:".
+        noun = getattr(mfr, "extract_input_label", None)
         primary_ext = (mfr.input_spec.extensions[0]
                        if mfr.input_spec.extensions else "file")
-        self._extract_input_lbl.configure(
-            text=f"{primary_ext}:" if primary_ext.startswith(".") else "Input:")
-        self._write_original_lbl.configure(
-            text=f"Original {primary_ext}:" if primary_ext.startswith(".")
-                 else "Original:")
+        if noun:
+            self._extract_input_lbl.configure(text=f"{noun}:")
+            self._write_original_lbl.configure(text=f"Original {noun}:")
+        else:
+            self._extract_input_lbl.configure(
+                text=f"{primary_ext}:" if primary_ext.startswith(".")
+                else "Input:")
+            self._write_original_lbl.configure(
+                text=f"Original {primary_ext}:" if primary_ext.startswith(".")
+                else "Original:")
 
         # Show/hide tabs by capability.
         self._configure_tab("Replace Audio", caps.replace_audio)
@@ -5292,27 +5492,35 @@ class MainWindow:
         # decryptor.  Plugins without the capability never see it.
         if caps.asset_filters:
             self._asset_filters_frame.pack(
-                fill=tk.X, padx=10, pady=(4, 0))
+                fill=tk.X, padx=10, pady=(4, 0),
+                before=self._extract_action_row)
         else:
             self._asset_filters_frame.pack_forget()
 
         # Generic per-type Extract checkboxes (capabilities.extract_categories).
-        # Rebuilt each time so the labels match the active plugin; default all on.
+        # Rebuilt each time so the labels match the active plugin; default all
+        # on.  These live inline in the action row's option cluster: an
+        # "Extract:" label sized like the field-label column (so the checkboxes
+        # line up under the path entries) followed by one checkbox per type.
         for child in self._extract_categories_frame.winfo_children():
             child.destroy()
         self._extract_category_vars = {}
         cats = tuple(getattr(caps, "extract_categories", ()) or ())
         if cats:
             ttk.Label(self._extract_categories_frame, text="Extract:",
-                      font=(_SANS_FONT, 9)).pack(side=tk.LEFT, padx=(10, 8))
+                      width=14, anchor=tk.W,
+                      font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
             for key, label in cats:
                 var = tk.BooleanVar(value=True)
                 self._extract_category_vars[key] = var
-                ttk.Checkbutton(
+                chk = ttk.Checkbutton(
                     self._extract_categories_frame, text=label, variable=var,
-                    command=self._update_autoname_state).pack(
-                        side=tk.LEFT, padx=(0, 12))
-            self._extract_categories_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+                    command=self._update_autoname_state)
+                chk.pack(side=tk.LEFT, padx=(0, 12))
+                _Tooltip(chk, _EXTRACT_CATEGORY_TIPS.get(
+                    key, f"Include {label.lower()} when extracting."),
+                    lambda: self._current_theme)
+            self._extract_categories_frame.pack(side=tk.LEFT)
         else:
             self._extract_categories_frame.pack_forget()
         # The auto-name (transcribe / music-ID) options operate on extracted
@@ -5333,9 +5541,12 @@ class MainWindow:
                 self.capture_mode_var.set(True)
                 self._capture_gameplay_check.pack_forget()
             else:
-                self._basic_extract_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
+                self._basic_extract_frame.pack(
+                    fill=tk.X, padx=10, pady=(6, 0),
+                    before=self._extract_action_row)
                 self._capture_gameplay_check.pack(side=tk.LEFT, padx=(12, 0))
-            self._capture_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+            self._capture_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
+                                     before=self._extract_action_row)
             self._update_capture_help_text()
             # Mount the DMD preview (in the mfr view, just above the phase
             # indicators) so it's ready to surface on the first frame and
@@ -5422,15 +5633,6 @@ class MainWindow:
                     chk.state([flag])
                 except tk.TclError:
                     pass
-        # Dim the italic descriptions to match (darker gray when disabled).
-        fg = "#888888" if enabled else "#555555"
-        for lbl in (getattr(self, "_transcribe_desc", None),
-                    getattr(self, "_music_id_desc", None)):
-            if lbl is not None:
-                try:
-                    lbl.configure(foreground=fg)
-                except tk.TclError:
-                    pass
 
     def _on_extract_mode_toggle(self):
         """Either Basic-extract or Capture checkbox toggled."""
@@ -5511,8 +5713,9 @@ class MainWindow:
             self._music_id_frame.pack_forget()
             self.music_id_var.set(False)
             return
-        self._music_id_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
-                                  after=self._transcribe_frame)
+        # Inline in the action row's option cluster, right of the call-outs
+        # checkbox (call-outs is packed first, so side=LEFT lands music after).
+        self._music_id_frame.pack(side=tk.LEFT, padx=(12, 0))
 
     def _update_transcribe_visibility(self):
         """Show the auto-transcribe checkboxes only when a transcribable
@@ -5540,13 +5743,10 @@ class MainWindow:
             # transcribe onto an output that has no WAVs.
             self.transcribe_var.set(False)
             return
-        if caps.capture:
-            # Sit directly below the "Basic extract" checkbox.
-            self._transcribe_frame.pack(
-                fill=tk.X, padx=10, pady=(2, 0),
-                after=self._basic_extract_frame)
-        else:
-            self._transcribe_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+        # Inline in the action row's option cluster, to the right of the
+        # per-type Extract checkboxes (a wider leading gap visually separates
+        # the auto-name options from the what-to-extract group).
+        self._transcribe_frame.pack(side=tk.LEFT, padx=(16, 0))
 
     def _update_decode_dmd_visibility(self):
         """Show the "Decode DMD scenes" checkbox only when the active
@@ -5567,7 +5767,8 @@ class MainWindow:
         self._decode_dmd_check.configure(
             text=self._current_mfr.decode_dmd_label_for(
                 self.extract_input_var.get().strip()))
-        self._decode_dmd_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+        self._decode_dmd_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
+                                    before=self._extract_action_row)
 
     def _update_capture_help_text(self):
         basic = self.static_extract_var.get()
@@ -5922,7 +6123,8 @@ class MainWindow:
         self._extract_deltas_desc.configure(
             text=getattr(self._current_mfr, "chain_deltas_help",
                          self._extract_deltas_desc.cget("text")))
-        self._extract_deltas_frame.pack(fill=tk.X, padx=10, pady=(2, 0))
+        self._extract_deltas_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
+                                        before=self._extract_action_row)
 
     # ------------------------------------------------------------------
     # Direct-SSD source toggle + drive picker (caps.direct_ssd plugins)
@@ -5942,7 +6144,7 @@ class MainWindow:
             self._extract_ssd_warn.pack_forget()
             self._extract_admin_frame.pack_forget()
             self._extract_macos_fda_frame.pack_forget()
-            self._extract_badge.pack_forget()
+            self._extract_badge_row.pack_forget()
             if source == "ssd":
                 self._extract_drive_row.pack(
                     fill=tk.X, padx=10, pady=4,
@@ -5977,8 +6179,8 @@ class MainWindow:
                 self._extract_input_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._extract_output_row())
-                self._extract_badge.pack(
-                    anchor=tk.W, padx=24, pady=(0, 2),
+                self._extract_badge_row.pack(
+                    fill=tk.X, padx=10, pady=(0, 2),
                     before=self._extract_output_row())
             self._refresh_extract_phases()
             # Re-evaluate the Extract button gate after a source flip.
@@ -6339,16 +6541,31 @@ class MainWindow:
         ``_on_input_source_change`` decides when to pack it.  The body
         label is stashed on the frame so ``apply_manufacturer`` can swap
         in medium-aware wording.
+
+        The how-to-fix body is collapsible: the heading row carries a
+        disclosure chevron, and the collapsed/expanded choice is shared across
+        every copy of the panel and persisted (see _toggle_admin_warning) so a
+        returning user who's already read it isn't shown the wall of text every
+        time.  The banner heading itself always stays visible.
         """
         frame = tk.Frame(
             parent, bg="#5a1a1a", padx=12, pady=10,
             highlightbackground="#f44747", highlightthickness=2)
-        tk.Label(
-            frame,
+        # Heading row: warning text on the left, a click-to-toggle chevron on
+        # the right.  The whole row is clickable so the hit target is large.
+        header = tk.Frame(frame, bg="#5a1a1a")
+        header.pack(fill=tk.X)
+        heading = tk.Label(
+            header,
             text="⚠  ADMINISTRATOR PRIVILEGES REQUIRED",
             bg="#5a1a1a", fg="#ffd1d1",
             font=(_SANS_FONT, 11, "bold"),
-            anchor=tk.W).pack(fill=tk.X, anchor=tk.W)
+            anchor=tk.W)
+        heading.pack(side=tk.LEFT, anchor=tk.W)
+        chevron = tk.Label(
+            header, text="", bg="#5a1a1a", fg="#ffd1d1",
+            font=(_SANS_FONT, 11, "bold"), cursor="hand2")
+        chevron.pack(side=tk.RIGHT)
         body = tk.Label(
             frame,
             text=self._admin_body_text(None),
@@ -6356,9 +6573,35 @@ class MainWindow:
             font=(_SANS_FONT, 9),
             justify=tk.LEFT, anchor=tk.W,
             wraplength=720)
-        body.pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+        # body is packed/unpacked by _apply_admin_warning_collapsed().
         frame.body_label = body
+        frame.chevron_label = chevron
+        for w in (header, heading, chevron):
+            w.bind("<Button-1>", lambda _e: self._toggle_admin_warning())
+        self._admin_warning_frames.append(frame)
+        self._apply_admin_warning_collapsed(frame)
         return frame
+
+    def _apply_admin_warning_collapsed(self, frame):
+        """Reflect the shared collapsed state on one admin-warning panel:
+        show/hide the body and point the chevron the right way (▼ = click to
+        expand, ▲ = click to collapse)."""
+        collapsed = self._admin_warning_collapsed
+        frame.chevron_label.configure(text="▼" if collapsed else "▲")
+        if collapsed:
+            frame.body_label.pack_forget()
+        else:
+            frame.body_label.pack(fill=tk.X, anchor=tk.W, pady=(6, 0))
+
+    def _toggle_admin_warning(self):
+        """Flip the collapsed/expanded state for every admin-warning panel and
+        persist the choice so it sticks across restarts."""
+        self._admin_warning_collapsed = not self._admin_warning_collapsed
+        for frame in self._admin_warning_frames:
+            self._apply_admin_warning_collapsed(frame)
+        if self._on_admin_warning_collapsed_change:
+            self._on_admin_warning_collapsed_change(
+                self._admin_warning_collapsed)
 
     def _refresh_ssd_run_buttons(self):
         """Disable Extract / Apply Modifications when SSD + not admin.
@@ -6385,29 +6628,90 @@ class MainWindow:
             and mfr is not None
             and mfr.capabilities.direct_ssd
             and not admin)
-        block_extract = (
-            needs_admin
-            and self.extract_input_source_var.get() == "ssd")
         block_write = (
             needs_admin
             and self.write_input_source_var.get() == "ssd")
         # Don't fight whatever set_running() may have set — only
         # touch state if we're not in the middle of a run.
         if not self._is_running():
-            self._extract_btn.configure(
-                state=(tk.DISABLED if block_extract else tk.NORMAL))
+            # The Extract button state is owned by _refresh_extract_enabled —
+            # it folds in this same admin check plus the input/output gate.
+            self._refresh_extract_enabled()
             self._write_btn.configure(
                 state=(tk.DISABLED if block_write else tk.NORMAL))
 
     def _is_running(self):
         """True when a pipeline is mid-flight (either tab)."""
-        # Cancel button is enabled during runs; cheaper than tracking
-        # a separate flag and keeps the two state machines in sync.
-        try:
-            return (str(self._extract_cancel_btn.cget("state"))
-                    == tk.NORMAL)
-        except (AttributeError, tk.TclError):
-            return False
+        return getattr(self, "_running", False)
+
+    def _set_extract_button_running(self, running):
+        """Drive the single Extract/Cancel button.
+
+        While a job is in flight the Extract button doubles as a live Cancel
+        (there's no separate Cancel widget any more); otherwise it's "Extract",
+        enabled only when the inputs are ready (see _refresh_extract_enabled).
+        """
+        if running:
+            self._extract_btn.configure(
+                text="Cancel", command=self._on_extract_cancel,
+                state=tk.NORMAL)
+            self._extract_btn_tip.text = (
+                "Cancel the operation in progress — it stops as soon as it's "
+                "safe to.")
+        else:
+            self._extract_btn.configure(
+                text="Extract", command=self._on_extract)
+            self._refresh_extract_enabled()
+
+    def _have_extract_input(self):
+        """True when the Extract tab has a source selected — a file in ISO/image
+        mode, or a drive in Direct-SSD mode."""
+        mfr = self._current_mfr
+        if (mfr is not None and mfr.capabilities.direct_ssd
+                and self.extract_input_source_var.get() == "ssd"):
+            return bool(self.extract_drive_display_var.get().strip())
+        return bool(self.extract_input_var.get().strip())
+
+    def _extract_block_reason(self):
+        """Why the Extract button is disabled, or '' when it's ready to run.
+
+        Precedence: admin elevation (Windows Direct-SSD) > no input source >
+        no output folder.  Doubles as the button's tooltip text so the user
+        sees a one-line 'do this first' hint instead of a dead button.
+        """
+        import sys
+        from ..core.admin import is_admin
+        mfr = self._current_mfr
+        ssd_mode = (mfr is not None and mfr.capabilities.direct_ssd
+                    and self.extract_input_source_var.get() == "ssd")
+        # Medium / input nouns are manufacturer- + era-specific (Stern Spike 2 =
+        # "SD card" / "Card image"; Whitestar = a "ROM zip"; JJP = "SSD"), so
+        # the hints read them off the plugin instead of hardcoding SD-card lingo.
+        medium = getattr(mfr, "direct_medium_noun", "SSD") if mfr else "SSD"
+        if sys.platform == "win32" and ssd_mode and not is_admin():
+            return (f"Administrator privileges are required to read the "
+                    f"{medium} directly — see the warning above.")
+        if not self._have_extract_input():
+            if ssd_mode:
+                return f"Select the {medium} to read from first."
+            noun = getattr(mfr, "extract_input_label", None) if mfr else None
+            article = "an" if noun and noun[:1].lower() in "aeiou" else "a"
+            thing = f"{article} {noun}" if noun else "a file"
+            return f"Pick {thing} to extract first."
+        if not self.extract_output_var.get().strip():
+            return "Choose an output folder first."
+        return ""
+
+    def _refresh_extract_enabled(self):
+        """Gate the Extract button on having both an input source and an output
+        folder.  No-op mid-run (the button is a live Cancel then); folds in the
+        Windows Direct-SSD admin gate via _extract_block_reason."""
+        if not hasattr(self, "_extract_btn") or self._is_running():
+            return
+        reason = self._extract_block_reason()
+        self._extract_btn.configure(
+            state=(tk.DISABLED if reason else tk.NORMAL))
+        self._extract_btn_tip.text = reason
 
     def _log_ssd_pick(self, text, level="info"):
         """Write a Direct-SSD discovery line to the current mfr's log.
@@ -6963,6 +7267,66 @@ class MainWindow:
             on_flash=self._on_flash_image)
 
     # ------------------------------------------------------------------
+    # WSL disk-space management (Windows; all native-tool plugins)
+    # ------------------------------------------------------------------
+
+    def _open_disk_dialog(self):
+        """Open the disk-management modal (WSL + Windows-temp staging cleanup,
+        reclaim-to-Windows).  Independent of the picker/working view; the modal
+        does its own background scan and gates destructive actions behind
+        confirmations.  Re-checks the toolbar badge when it closes."""
+        from .disk_dialog import DiskManagerDialog
+        DiskManagerDialog(self._tk_root(), theme_name=self._current_theme,
+                          on_close=self._start_disk_badge_check)
+
+    def _start_disk_badge_check(self):
+        """Kick off a passive, backgrounded scan and badge the disk button if
+        leftover staging exists.  Host temp is always scanned (local, instant);
+        WSL only when it's already running (so we never start it for a badge)."""
+        if sys.platform != "win32" or not hasattr(self, "_disk_btn"):
+            return
+
+        def _worker():
+            count, total = 0, 0
+            try:
+                from ..core import host_temp
+                for e in host_temp.scan():
+                    count += 1
+                    total += e["size"]
+            except Exception:
+                pass
+            try:
+                from ..core import wsl_disk
+                if wsl_disk.is_running():
+                    for e in wsl_disk.scan_staging():
+                        count += 1
+                        total += e["size"]
+            except Exception:
+                pass
+            try:
+                self.root.after(0, lambda: self._apply_disk_badge(count, total))
+            except (RuntimeError, tk.TclError):
+                pass
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_disk_badge(self, count, total):
+        """Update the disk button to flag pending cleanup (main thread)."""
+        btn = getattr(self, "_disk_btn", None)
+        if btn is None:
+            return
+        try:
+            if count > 0:
+                from .disk_dialog import _fmt
+                btn.configure(text="%s  ⚠ %s" % (self._disk_btn_base,
+                                                 _fmt(total)))
+            else:
+                btn.configure(text=self._disk_btn_base)
+        except tk.TclError:
+            pass
+
+    # ------------------------------------------------------------------
     # BOF update-version date field
     # ------------------------------------------------------------------
 
@@ -7119,8 +7483,22 @@ class MainWindow:
                     and getattr(mfr, "_era", "") != era):
                 mfr.set_era(era)
                 self.apply_manufacturer(mfr, reset_era=False)
+                # The detected era brings its own prerequisites — re-run the
+                # probes so they don't sit greyed out (apply_manufacturer only
+                # reset the indicators to "[?]").
+                if self._on_recheck_prereqs is not None:
+                    self._on_recheck_prereqs()
                 return
             extra = f" — {game.notes}" if game.notes else ""
+            # Era-switching plugins carry an era-agnostic picker badge (Stern's
+            # "SPIKE 2"), so it can't say that *this* file's era is capture/
+            # extract-only.  Flag it here when the era-resolved capabilities
+            # expose no Write/Replace surface (e.g. Stern Whitestar ROMs).
+            caps = mfr.capabilities
+            if hasattr(mfr, "set_era") and not caps.write and not (
+                    caps.replace_audio or caps.replace_video
+                    or caps.replace_image or caps.replace_text):
+                extra += "  (extract only)"
             label.configure(text=f"Detected: {game.display}{extra}")
             return
 
@@ -7462,16 +7840,23 @@ class MainWindow:
         enough — the press cancels the running job and every queued follow-up)
         and show feedback.  The action buttons stay disabled; they're re-enabled
         only when the job actually stops, via ``set_running(False)``."""
-        self._extract_cancel_btn.configure(state=tk.DISABLED)
+        # The single Extract button is showing "Cancel" right now — freeze it
+        # and flag the in-progress stop; set_running(False) restores "Extract".
+        self._extract_btn.configure(state=tk.DISABLED, text="Cancelling…")
         self._write_cancel_btn.configure(state=tk.DISABLED)
         self.set_status("Cancelling...")
 
     def set_running(self, running, mode="extract"):
+        # Authoritative run flag (read by _is_running()); set before any widget
+        # state so a re-entrant refresh sees the right value.
+        self._running = running
         if running:
             # New run → new namespace for in-place keyed log lines.
             self._log_line_run += 1
-            self._extract_btn.configure(state=tk.DISABLED)
-            self._extract_cancel_btn.configure(state=tk.NORMAL)
+            # Re-theming is a heavy synchronous re-style; lock it out while a
+            # pipeline is monopolising the UI thread so clicks can't queue up.
+            self._theme_btn.configure(state=tk.DISABLED)
+            self._set_extract_button_running(True)
             self._write_btn.configure(state=tk.DISABLED)
             self._write_cancel_btn.configure(state=tk.NORMAL)
             if hasattr(self, "_revert_all_btn"):
@@ -7499,8 +7884,8 @@ class MainWindow:
             self._start_time = time.time()
             self._tick_timer()
         else:
-            self._extract_btn.configure(state=tk.NORMAL)
-            self._extract_cancel_btn.configure(state=tk.DISABLED)
+            self._theme_btn.configure(state=tk.NORMAL)
+            self._set_extract_button_running(False)
             self._write_btn.configure(state=tk.NORMAL)
             self._write_cancel_btn.configure(state=tk.DISABLED)
             # Revert button tracks the change count, not a blanket re-enable —
@@ -7918,6 +8303,10 @@ class MainWindow:
         # Rebuild the picker cards with the new theme colors.
         if hasattr(self, "_picker_view"):
             self._picker_view.apply_theme()
+        # Re-skin the header era-switcher pills (raw tk.Labels with explicit
+        # colours) so the active/muted contrast follows the new theme.
+        if hasattr(self, "_era_badge_widgets"):
+            self._refresh_era_badges()
 
         if theme == "dark":
             self._theme_btn.configure(text="☀", style="Sun.TButton")

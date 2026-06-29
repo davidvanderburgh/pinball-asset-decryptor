@@ -400,3 +400,80 @@ def test_flash_frame_shown_for_stern_hidden_otherwise(
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
     assert app.window._flash_frame.winfo_manager() == ""
+
+
+def test_whitestar_detect_badge_notes_extract_only(
+        app, manufacturers_by_key, tmp_path):
+    # Neither the picker card nor the era switcher conveys a *file's* per-era
+    # capability, so the working view flags a capture/extract-only file via its
+    # detect badge.  A Whitestar MAME ROM should pick up the "(extract only)"
+    # note; a full Spike-2 era never does.
+    from tests.test_pinmame_classic import _make_rom_zip, _a_whitestar_key
+    from pinball_decryptor.plugins.pinmame_classic.games import GAME_DB
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    try:
+        info = GAME_DB[_a_whitestar_key()]
+        z = _make_rom_zip(tmp_path / f"{info['family']}.zip",
+                          info["game_roms"], info["sound_roms"],
+                          dmd_roms=info["dmd_roms"])
+        app.window.extract_input_var.set(str(z))
+        app.window._update_extract_badge()
+        app.root.update()
+        txt = app.window._extract_badge.cget("text")
+        assert "extract only" in txt.lower(), txt
+    finally:
+        # Restore the shared singleton's era and leave the app on a clean
+        # (non-capture) view so the fixture teardown destroys cleanly.
+        stern.set_era("spike2")
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
+    # The header era switcher (multi-era plugins only) flips the active era +
+    # the era-specific input label, and clears the now-wrong input.  Single-era
+    # plugins show no pills.
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    win = app.window
+    try:
+        # Force a known starting state: a restored Whitestar input path from an
+        # earlier test would otherwise auto-switch the era out from under us.
+        win.extract_input_var.set("")
+        stern.set_era("spike2")
+        win.apply_manufacturer(stern, reset_era=False)
+        app.root.update()
+        assert set(win._era_badge_widgets) == {"spike2", "whitestar"}
+        assert stern.current_era == "spike2"
+        assert win._extract_input_lbl.cget("text") == "Card image:"
+
+        win.extract_input_var.set("dummy.img")
+        # Switching era must re-run the prereq probes (the new era has its own),
+        # not leave them greyed — spy on the App's probe worker to prove it.
+        kicked = []
+        orig_kick = app._kick_off_prereq_check
+        app._kick_off_prereq_check = lambda m: kicked.append(m)
+        try:
+            win._on_era_badge_click("whitestar")
+            app.root.update()
+        finally:
+            app._kick_off_prereq_check = orig_kick
+        assert stern.current_era == "whitestar"
+        assert win._extract_input_lbl.cget("text") == "ROM zip:"
+        assert win.extract_input_var.get() == ""   # cleared on era switch
+        assert kicked and kicked[-1].current_era == "whitestar"  # check re-run
+
+        # A single-era plugin surfaces no pills.
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["jjp"])
+        app.root.update()
+        assert win._era_badge_widgets == {}
+    finally:
+        stern.set_era("spike2")
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()

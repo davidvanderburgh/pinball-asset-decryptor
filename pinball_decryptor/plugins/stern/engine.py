@@ -234,6 +234,32 @@ def _sanitize_title(name, maxlen=64):
     return keep[:maxlen] or "video"
 
 
+def _work_dir(label=None, base="spike2_"):
+    """Create a uniquely-named scratch dir under the temp dir for a run.
+
+    Mirrors ``tempfile.mkdtemp``'s role (a fresh, unique dir) but folds the
+    game title into the name as ``spike2_<title>_<hex8>`` so that if the
+    process is hard-killed mid-run (the ``finally`` cleanup never runs) the
+    leftover is attributable to a game in the "Manage disk space" view
+    (:mod:`core.host_temp`).  The tag is hex (no underscores) so the title
+    parses back out cleanly.  ``label`` omitted -> bare ``spike2_<hex8>``.
+    """
+    import uuid
+    safe = ""
+    if label:
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", label).strip("._-")[:48]
+    for _ in range(8):
+        tag = uuid.uuid4().hex[:8]
+        name = f"{base}{safe}_{tag}" if safe else f"{base}{tag}"
+        path = os.path.join(tempfile.gettempdir(), name)
+        try:
+            os.makedirs(path)
+            return path
+        except FileExistsError:
+            continue
+    return tempfile.mkdtemp(prefix=base)  # astronomically unlikely fallback
+
+
 def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
     """Extract every directly-stored video (H.264 in an MP4/QuickTime ``ftyp``
     container) from the card's asset tree to ``output_dir/video/``.
@@ -832,7 +858,7 @@ def _remove_renamed_audio_twins(audio_dir, log=None):
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
                 music_banks=True, do_audio=True, do_video=True,
-                do_images=True, do_text=True):
+                do_images=True, do_text=True, label=None):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
 
@@ -863,7 +889,7 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         if progress:
             progress(int(c * 5 / max(t, 1)), 100, "Reading image.bin")
 
-    work = tempfile.mkdtemp(prefix="spike2_")
+    work = _work_dir(label)
     emu = None
     disk_f = open_disk() if open_disk is not None else open(image_path, "rb")
     try:
@@ -1983,7 +2009,7 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
 
 
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None):
+                     phase=None, label=None):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -2065,7 +2091,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if progress:
             progress(int(c * 10 / max(t, 1)), 100, "Reading image.bin")
 
-    work = tempfile.mkdtemp(prefix="spike2_")
+    work = _work_dir(label)
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
@@ -2257,7 +2283,7 @@ def _apply_writes(out, writes):
 
 
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
-                cancel=None):
+                cancel=None, label=None):
     """Patch a copy of the card image at ``output_path`` with the user's edits
     (size-neutral, in place): re-encoded cat-0 audio bodies inside ``image.bin``,
     re-encoded per-song music bodies inside their ``image-scNN.bin`` banks,
@@ -2299,7 +2325,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     disk_f = open(original_path, "rb")
     try:
         writes, counts = _compute_patches(
-            disk_f, parts, assets_dir, log, progress, cancel)
+            disk_f, parts, assets_dir, log, progress, cancel, label=label)
     except BaseException:
         copier.join()                       # let the copy finish before unlinking
         _safe_remove(output_path)
@@ -2328,7 +2354,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 
 
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
-                  cancel=None, open_disk=None, partitions=None):
+                  cancel=None, open_disk=None, partitions=None, label=None):
     """Re-derive the pristine bytes of *rels* from the source card and write them
     over the matching files in *assets_dir*.
 
@@ -2374,7 +2400,7 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
         return [], failed
 
     reverted = []
-    work = tempfile.mkdtemp(prefix="spike2_revert_")
+    work = _work_dir(label, base="spike2_revert_")
     emu = None
     disk_f = open_disk() if open_disk is not None else open(source_path, "rb")
     try:

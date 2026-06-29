@@ -51,9 +51,8 @@ before shipping.
 The big wins already shipped: the long-song re-encode (2 h in v0.23.0) came down
 via v0.24.1 (capstone-cache + scheduling + parallel) and the v0.26.0 codec
 speedups (fast capture hook + stereo 3→2 probes + cached masterdir-consumed
-restore), and v0.29.2 hid the image copy under the integrity assert (see
-*Recently resolved*).  All byte-identical.  What's left is optional and
-lower-value:
+restore), and v0.29.2 hid the image copy under the integrity assert.  All
+byte-identical.  What's left is optional and lower-value:
 
 - **Music-bank derive passes.** Each edited bank still derives 3× but a bank
   holds only 1–2 songs (seconds each) — minor. Could fold the restore-capture
@@ -65,43 +64,3 @@ lower-value:
 - **Within-song parallelism.** A single very long song is a serial tail (one
   worker); its independent blocks could fan across workers. Marginal when there
   are already more songs than cores.
-
-
-## Recently resolved
-
-### Re-encode tail / loop-point click — ★ v0.29.1
-
-The codec emits exactly **`length - 200`** samples per sound (the block at cursor
-`C` emits sample `i` only while `C + i < length`; the first block is a cursor
-lead-in).  `decode()` used to append up to ~200 trailing **padding zeros** (a
-click when a looping WAV is looped) and the engine fit replacements to the raw
-`length`, so `encode_sound`'s per-block clamp **dropped the user's last ~200
-samples** (a replaced loop misaligned).  The long-standing "`encode_sound` leaves
-the final block zero → garbage" hypothesis was a **misdiagnosis** — those tail
-body words are *dead* (never emitted), so zero is correct and `encode_sound` was
-already bit-exact on every emitted sample.
-
-Fixed with one canonical `emulator.emitted_length(length) = max(0, length-200)`:
-`_decode_with_entry` trims to it; `_encode_mono`/`_encode_stereo` fit to it.  The
-re-encoded body is **byte-identical** for the unmodified round-trip, so the
-hardware-verified Write (v0.24.0) and the TMNT bit-exact round-trip are preserved.
-Covers cat-0 + music banks + parallel decode.  Guarded by
-[tests/test_stern_audio_tail.py](../tests/test_stern_audio_tail.py) (always-on
-emit-length/wiring units + a `@pytest.mark.slow`, card-gated firmware round-trip
-on **turtles** and **led_zeppelin**, mono + stereo).
-
-### Build-update copy ∥ compute overlap — ★ v0.29.2
-
-The ~120 s master-directory integrity assert re-derives the *patched* image
-(edit-specific, can't be cached) and can't itself be shortened — but the
-file-output `write_image` no longer waits for it before copying.  It now copies
-the unpatched card to the output in a background **thread** that runs concurrently
-with the whole patch computation, joining before any patch byte is written.  The
-compute yields the GIL enough (the assert's emulator fires a per-instruction
-Python hook; the parallel re-encode blocks on its worker pool) that the copy fully
-overlaps — measured: a 7.9 GB card copy hides under the ~120 s assert (3.6 s on
-NVMe; more on slower disks, where the win is bigger).  A *subprocess* was
-considered and found unnecessary.  Safe + order-preserving (join before patch; a
-cancelled/failed build discards the half-prepared output).  Direct-SD
-`write_device` is unchanged — no big copy, and its device write must follow the
-assert (a card write can't be un-done).

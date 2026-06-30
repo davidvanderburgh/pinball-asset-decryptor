@@ -873,9 +873,17 @@ class MainWindow:
                    command=self._browse_extract_output).pack(
             side=tk.LEFT, padx=(4, 0))
 
-        self._extract_warn = ttk.Label(f, text="", foreground="#f44747",
-                                       font=(_SANS_FONT, 9))
-        self._extract_warn.pack(anchor=tk.W, padx=24)
+        # Output-folder warning ("folder is not empty…").  Wrapped in a
+        # row with a width=14 spacer — same trick as the badge row above —
+        # so its left edge lines up under the Output Folder *entry* (not
+        # the frame edge), matching the path box directly above it.
+        self._extract_warn_row = ttk.Frame(f)
+        self._extract_warn_row.pack(fill=tk.X, padx=10)
+        ttk.Label(self._extract_warn_row, text="", width=14).pack(side=tk.LEFT)
+        self._extract_warn = ttk.Label(
+            self._extract_warn_row, text="", foreground="#f44747",
+            font=(_SANS_FONT, 9))
+        self._extract_warn.pack(side=tk.LEFT, anchor=tk.W)
 
         # BOF-only callout — explains the custom-format conversion the
         # Extract pipeline does behind the scenes.  Built but not packed;
@@ -1165,7 +1173,10 @@ class MainWindow:
         self._extract_btn_tip = _Tooltip(
             self._extract_btn, "", lambda: self._current_theme)
         self._extract_options_row.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._extract_action_row.pack(fill=tk.X, padx=10, pady=(8, 4))
+        # Top pad matches the path rows' pady=4 so the gap above the Extract
+        # button equals the gap between the Input and Output rows (the extra
+        # top padding here read as an unbalanced space below Output Folder).
+        self._extract_action_row.pack(fill=tk.X, padx=10, pady=(4, 4))
         # Re-evaluate the button gate whenever the input source / output folder
         # changes (manual typing, Browse, drive pick, radio flip, or a
         # programmatic set).
@@ -5478,7 +5489,7 @@ class MainWindow:
         if mfr.key == "bof":
             self._extract_bof_banner.pack(
                 fill=tk.X, padx=10, pady=(6, 6),
-                after=self._extract_warn)
+                after=self._extract_warn_row)
         else:
             self._extract_bof_banner.pack_forget()
 
@@ -6494,12 +6505,15 @@ class MainWindow:
         display_var = (self.extract_drive_display_var
                        if mode == "extract"
                        else self.write_drive_display_var)
-        if mode == "extract":
-            self._extract_drives_cache = drives
-        else:
-            self._write_drives_cache = drives
+
+        def _set_cache(value):
+            if mode == "extract":
+                self._extract_drives_cache = value
+            else:
+                self._write_drives_cache = value
 
         if not drives:
+            _set_cache([])
             combo["values"] = ["(no drives found — click Refresh)"]
             display_var.set(combo["values"][0])
             self._log_ssd_pick(
@@ -6507,8 +6521,19 @@ class MainWindow:
                 "is connected and click Refresh.", level="error")
             return
 
-        combo["values"] = [d.display for d in drives]
         best, confidence, reason = pick
+        # Hide drives far larger than any game SD card for SD-card media
+        # (Stern) so the dropdown isn't cluttered with the user's backup
+        # disks — but always keep the auto-picked drive so the selection
+        # exists in the list.  Large-SSD media (JJP) keep every drive.
+        from ..core.drives import visible_drives
+        prefer = getattr(self._current_mfr, "direct_target_kind", "ssd")
+        keep = (best,) if best is not None else ()
+        shown = visible_drives(drives, prefer=prefer, keep=keep)
+        hidden = len(drives) - len(shown)
+
+        _set_cache(shown)
+        combo["values"] = [d.display for d in shown]
         if best is not None:
             display_var.set(best.display)
             self._on_drive_selected(mode)
@@ -6526,8 +6551,13 @@ class MainWindow:
         else:
             # pick_best_game_ssd returned (None, None, None) — should
             # only happen on an empty list which we handled above.
-            display_var.set(drives[0].display)
+            display_var.set(shown[0].display)
             self._on_drive_selected(mode)
+        if hidden > 0:
+            self._log_ssd_pick(
+                f"  (hid {hidden} drive(s) too large to be a game SD card; "
+                f"connect the card and click Refresh if you don't see it)",
+                level="info")
 
     def _build_macos_fda_warning_frame(self, parent):
         """macOS Full Disk Access guidance banner for Direct-SSD mode.

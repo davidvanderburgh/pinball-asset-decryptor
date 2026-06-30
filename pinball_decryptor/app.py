@@ -46,6 +46,12 @@ class App:
         # Reset when a new user-initiated run starts.
         self._cancel_requested = False
         self._current_mfr = None
+        # Pending (debounced) prereq-check timer id — see
+        # _kick_off_prereq_check.  Startup restores the saved input path
+        # (which can trigger an era-switch recheck) AND _apply_manufacturer
+        # kicks its own check, all within one Tk tick; coalescing them keeps
+        # the log from showing the "Checking N prerequisites…" block twice.
+        self._prereq_after_id = None
         # Replacement-staging failures from the most recent Write run
         # (list of (label, error)); drives the post-build "some replacements
         # were skipped" warning so a partial no-op isn't silent.
@@ -255,10 +261,30 @@ class App:
     # ------------------------------------------------------------------
 
     def _kick_off_prereq_check(self, mfr):
+        """Coalesce prereq-check requests, then run the probe worker.
+
+        Several call sites can fire within a single Tk tick at startup /
+        on an era switch (restore-saved-path → era recheck, plus
+        ``_apply_manufacturer``'s own kick).  Running each immediately
+        spams the log with duplicate "Checking N prerequisites…" blocks
+        and double-launches the probe threads.  Debouncing through a
+        short ``after`` window collapses a same-tick burst into one
+        check while leaving a user-initiated Re-check (spaced out in
+        time) firing normally."""
+        if self._prereq_after_id is not None:
+            try:
+                self.root.after_cancel(self._prereq_after_id)
+            except Exception:
+                pass
+        self._prereq_after_id = self.root.after(
+            60, lambda: self._run_prereq_check(mfr))
+
+    def _run_prereq_check(self, mfr):
         """Run every prereq probe in a worker thread; post each result
         through the queue so the GUI updates incrementally.  Also log
         a 'checking...' line + a final summary so the empty log pane
         on app start has SOMETHING useful in it."""
+        self._prereq_after_id = None
         if not mfr.prerequisites:
             self.msg_queue.put(LogMsg(
                 f"{mfr.display}: no runtime prerequisites to check.", "info"))

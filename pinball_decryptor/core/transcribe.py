@@ -23,6 +23,7 @@ this in via ``make_transcribe_pipeline``.
 
 import csv
 import os
+import shutil
 
 from .pipeline_base import BasePipeline, PipelineError
 
@@ -199,17 +200,40 @@ class TranscribePipeline(BasePipeline):
     # transcription (serial + parallel share _transcribe_one / _emit_file_row)
     # ------------------------------------------------------------------
     def _load_model(self):
-        """Construct the single in-process WhisperModel (serial path) with the
-        friendly load-failure hint."""
+        """Construct the single in-process WhisperModel (serial path).
+
+        Self-heals the common failure monkeybug hit: an interrupted first
+        download leaves a cached snapshot dir whose ``model.bin`` is missing
+        or truncated, so every subsequent run fails with "Unable to open
+        file 'model.bin'" — and a plain retry can't help because
+        huggingface_hub sees the dir and won't re-fetch.  When the error
+        looks like a corrupt cache we move that model's dir aside (forcing a
+        clean re-download) and retry once before surfacing a precise fix.
+        """
         from faster_whisper import WhisperModel
         try:
             return WhisperModel(self.model_size, device="cpu",
                                 compute_type="int8")
         except Exception as e:
+            if _looks_like_corrupt_model(e):
+                healed = _heal_whisper_cache(self.model_size)
+                if healed:
+                    self._log(
+                        f"  Cached {self.model_size} model looked corrupt "
+                        f"({healed}); re-downloading...", "info")
+                    try:
+                        return WhisperModel(self.model_size, device="cpu",
+                                            compute_type="int8")
+                    except Exception as e2:
+                        e = e2
+            cache = _whisper_cache_dir(self.model_size)
+            where = cache or "the huggingface cache (~/.cache/huggingface/hub)"
             raise PipelineError("Transcribe",
                 f"Failed to load Whisper model {self.model_size!r}: {e}\n\n"
-                f"If this is a network error, try again with internet "
-                f"available — the model is downloaded once and cached.")
+                f"The cached model may be incomplete or corrupt. Delete\n"
+                f"  {where}\n"
+                f"then try again with internet available — the model "
+                f"(~75 MB) is downloaded once and cached.")
 
     def _emit_file_row(self, n, total, rel, kind, text, errored, counts):
         """Tally one transcribed file, drive progress, and log its line.
@@ -365,6 +389,60 @@ def _tw_worker(task):
     rel, kind, text, errored = _transcribe_one(
         _TW_MODEL, rel, abs_path, _TW_MUSIC_MIN)
     return (idx, rel, kind, text, errored)
+
+
+def _looks_like_corrupt_model(exc):
+    """True if *exc* from loading WhisperModel smells like a bad cache.
+
+    Targets the interrupted-download signature ("Unable to open file
+    'model.bin'") so we don't nuke a perfectly good cache over an
+    unrelated failure (e.g. out of disk, ctranslate2 mismatch)."""
+    msg = str(exc).lower()
+    return ("model.bin" in msg
+            or "unable to open file" in msg
+            or "no such file or directory" in msg)
+
+
+def _whisper_cache_dir(model_size):
+    """Best-effort path to the huggingface cache dir for *model_size*.
+
+    Returns the dir only if it actually exists, else None.  Honours
+    HF_HOME / HF_HUB_CACHE via huggingface_hub's own resolved constant
+    so we point at the same place faster-whisper downloaded to."""
+    repo = f"models--Systran--faster-whisper-{model_size}"
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        base = HF_HUB_CACHE
+    except Exception:
+        base = os.path.join(os.path.expanduser("~"), ".cache",
+                            "huggingface", "hub")
+    d = os.path.join(base, repo)
+    return d if os.path.isdir(d) else None
+
+
+def _heal_whisper_cache(model_size):
+    """Move a corrupt cached model dir aside so the next load re-downloads.
+
+    Returns a short human reason if it cleared something, else None.
+    Renames to ``<dir>.corrupt`` first (cheap, reversible-ish); falls back
+    to a hard delete if the rename is blocked."""
+    d = _whisper_cache_dir(model_size)
+    if not d:
+        return None
+    aside = d + ".corrupt"
+    try:
+        if os.path.exists(aside):
+            shutil.rmtree(aside, ignore_errors=True)
+        os.rename(d, aside)
+        return f"moved {os.path.basename(d)} aside"
+    except OSError:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+            if not os.path.isdir(d):
+                return f"cleared {os.path.basename(d)}"
+        except OSError:
+            pass
+    return None
 
 
 def _find_wavs(root):

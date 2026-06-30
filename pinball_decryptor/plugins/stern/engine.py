@@ -505,8 +505,13 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
             log("Texture %s: decode failed (%s); skipped." % (ref, e), "warning")
             n_skip += 1
             continue
+        # Name by scene dir (groups a scene's textures together) + the asset
+        # ref + W×H.  The dims match the radium-embedded-image convention below
+        # so a scene's large "main" texture and its smaller child glyphs are
+        # distinguishable at a glance and matchable by resolution in a file
+        # browser — the manual workflow monkeybug was forced into.
         scene8 = path.rsplit("/scene.assets/", 1)[0].rsplit("/", 1)[1][:8]
-        base = "%s_%s" % (scene8, os.path.splitext(ref)[0])
+        base = "%s_%s_%dx%d" % (scene8, os.path.splitext(ref)[0], w, h)
         k = used.get(base, 0)
         used[base] = k + 1
         name = base if k == 0 else "%s_%d" % (base, k + 1)

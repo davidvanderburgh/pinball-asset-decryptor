@@ -14,6 +14,7 @@ from pinball_decryptor.core.drives import (
     _parse_macos_diskutil_list,
     _parse_windows_get_disk,
     pick_best_game_ssd,
+    visible_drives,
 )
 
 
@@ -392,3 +393,57 @@ class TestPickBestSdCard:
         best, conf, _ = pick_best_game_ssd(drives)  # default prefer
         assert best.device_path == r"\\.\PHYSICALDRIVE3"  # largest
         assert conf == "low"
+
+
+class TestVisibleDrives:
+    """The dropdown hides obvious backup disks for SD-card media so the
+    user isn't scrolling past multi-TB Sabrents to find the card
+    (monkeybug: "large sized drives still being listed").
+    """
+
+    def _usb(self, num, size, model="Some USB"):
+        return PhysicalDrive(device_path=rf"\\.\PHYSICALDRIVE{num}",
+                             model=model, size_bytes=size, bus_type="USB")
+
+    def test_ssd_mode_shows_everything(self):
+        # JJP's game medium IS a big removable SSD — never filter it out.
+        drives = [self._usb(1, 4_000_000_000_000), self._usb(2, 120_000_000_000)]
+        assert visible_drives(drives, prefer="ssd") == drives
+
+    def test_sd_card_mode_hides_oversize(self):
+        card = self._usb(3, 32_000_000_000, "Lexar USB")
+        big = self._usb(1, 4_000_000_000_000, "Sabrent")
+        shown = visible_drives([big, card], prefer="sd_card")
+        assert card in shown
+        assert big not in shown
+
+    def test_sd_card_keeps_sizeless(self):
+        # size 0 = unknown; never hide it (could be the card).
+        unknown = self._usb(4, 0)
+        big = self._usb(1, 4_000_000_000_000)
+        shown = visible_drives([big, unknown], prefer="sd_card")
+        assert unknown in shown
+        assert big not in shown
+
+    def test_sd_card_all_large_falls_back_to_full_list(self):
+        # If everything is oversize, show all rather than an empty list so
+        # the user can still pick manually.
+        drives = [self._usb(1, 4_000_000_000_000), self._usb(2, 2_000_000_000_000)]
+        assert visible_drives(drives, prefer="sd_card") == drives
+
+    def test_sd_card_keep_overrides_size(self):
+        # The auto-picked drive stays visible even if oversize, so the
+        # selection always exists in the dropdown.
+        big = self._usb(1, 4_000_000_000_000)
+        card = self._usb(3, 32_000_000_000)
+        shown = visible_drives([big, card], prefer="sd_card", keep=(big,))
+        assert big in shown
+        assert card in shown
+
+    def test_boundary_at_ceiling_inclusive(self):
+        # Exactly 128 GB is allowed (<=); just over is hidden.
+        at = self._usb(1, 128 * 1024 ** 3)
+        over = self._usb(2, 128 * 1024 ** 3 + 1)
+        shown = visible_drives([at, over], prefer="sd_card")
+        assert at in shown
+        assert over not in shown

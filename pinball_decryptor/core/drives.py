@@ -380,6 +380,31 @@ def _pick_sd_card(drives, externals):
             f"drive ({best.device_path}); verify before writing.")
 
 
+def visible_drives(drives, prefer="ssd", keep=()):
+    """Drives to show in the picker dropdown for a given medium.
+
+    For small-SD-card media (Stern Spike 2) the user's multi-TB backup
+    SSDs are never the write target, so hiding everything well above an
+    SD card's size keeps the dropdown short and the right card easy to
+    spot.  For large-SSD media (JJP) every drive stays — the game disk
+    *is* a big removable SSD.
+
+    *keep* is an iterable of drives that must remain visible regardless
+    of size (typically the auto-picked best, so the selection always
+    exists in the dropdown).  If filtering would hide every drive — e.g.
+    only large disks are connected — the full list is returned so the
+    user can still pick manually.
+    """
+    if prefer != "sd_card":
+        return list(drives)
+    keep_set = set(keep)
+    small = [d for d in drives
+             if d in keep_set
+             or not d.size_bytes
+             or d.size_bytes <= _SD_CARD_MAX_BYTES]
+    return small or list(drives)
+
+
 def pick_best_game_ssd(drives, prefer="ssd"):
     """Return the drive most likely to be the game medium, or None.
 

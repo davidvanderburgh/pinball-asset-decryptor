@@ -6263,7 +6263,15 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             # mount on the WSL side is ours.
             try:
                 result = self.executor.run(
-                    "findmnt -rn -o TARGET -t ext4 | grep -v '/mnt/c'",
+                    # Positively match /mnt/wsl/ — that's where
+                    # `wsl --mount` attaches physical disks.  A bare
+                    # `grep -v '/mnt/c'` also lets WSLg's own ext4
+                    # distro root (/mnt/wslg/distro) through, and on a
+                    # post-`wsl --shutdown` restart that can sort last
+                    # so mounts[-1] picks it instead of the partition —
+                    # then the /jjpe/gen1 check fails on the distro
+                    # root and we wrongly skip a real game slot.
+                    "findmnt -rn -o TARGET -t ext4 | grep '/mnt/wsl/'",
                     timeout=10)
                 mounts = [m.strip() for m in result.strip().split("\n")
                           if m.strip()]
@@ -7451,6 +7459,33 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                     f'--partition {partner_part} --type ext4')
                 rc, stdout, stderr = self.executor.run_host(
                     mount_cmd, timeout=30)
+
+                # Same stale-mount recovery the discovery loop uses:
+                # immediately after unmounting the primary slot, WSL
+                # can still report the disk/partition as attached
+                # ("WSL_E_DISK_ALREADY_MOUNTED").  A `wsl --shutdown`
+                # clears the stuck attachment; re-offline the disk so
+                # Windows releases its drive-letter hold, then retry.
+                # Without this the A/B mirror silently skips slot 5 —
+                # and if slot 5 is the active one, the machine boots
+                # with none of the changes applied.
+                if rc != 0 and "ALREADY_MOUNTED" in (
+                        stderr or stdout or "").upper():
+                    self.log(
+                        "Stale WSL mount detected — restarting WSL...",
+                        "info")
+                    self.executor.run_host('wsl --shutdown', timeout=30)
+                    disk_num = device.rstrip().replace(
+                        "\\\\", "\\").split("PHYSICALDRIVE")[-1]
+                    if disk_num.isdigit():
+                        self.executor.run_host(
+                            f'powershell -NoProfile -Command '
+                            f'"Set-Disk -Number {disk_num} '
+                            f'-IsOffline $true"',
+                            timeout=15)
+                    rc, stdout, stderr = self.executor.run_host(
+                        mount_cmd, timeout=30)
+
                 if rc != 0:
                     self.log(
                         f"Could not mount partner slot "
@@ -7462,8 +7497,10 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
                 try:
                     result = self.executor.run(
+                        # Match /mnt/wsl/ only — see the discovery-loop
+                        # note above; excludes WSLg's distro root.
                         "findmnt -rn -o TARGET -t ext4 | "
-                        "grep -v '/mnt/c'",
+                        "grep '/mnt/wsl/'",
                         timeout=10)
                     mounts = [m.strip() for m in
                               result.strip().split("\n") if m.strip()]

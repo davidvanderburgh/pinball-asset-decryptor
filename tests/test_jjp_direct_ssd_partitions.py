@@ -20,8 +20,10 @@ The bug we're guarding against:
 
 import pytest
 
+from pinball_decryptor.plugins.jjp import config
 from pinball_decryptor.plugins.jjp.pipeline import (
     DirectSSDDecryptPipeline,
+    DirectSSDModPipeline,
     _PartitionInfo,
     _parse_linux_partitions,
     _parse_macos_partitions,
@@ -614,6 +616,172 @@ class TestParseDebugfsLsLine:
         # for directories too; the parser tolerates both.
         assert self.parse("/12345/040755/20/6/Avatar/") == (
             "12345", "040755", "Avatar")
+
+
+# ----------------------------------------------------------------------
+# A/B partner-slot mirror — WSL stale-mount recovery (jedimastermatt's
+# Harry Potter bug).  On an A/B drive the firmware boots whichever slot
+# is active, so the mirror MUST write both.  Two field bugs combined:
+#   1. discovery's `findmnt | grep -v /mnt/c` let WSLg's own ext4 distro
+#      root (/mnt/wslg/distro) win mounts[-1], so a real game slot's
+#      /jjpe/gen1 check failed against the wrong mount and got skipped.
+#   2. the partner-mirror mount lacked the discovery loop's
+#      ALREADY_MOUNTED -> `wsl --shutdown` -> retry recovery, so right
+#      after unmounting the primary it hit WSL_E_DISK_ALREADY_MOUNTED
+#      and silently skipped slot 5 — the active slot — leaving the
+#      machine with none of the user's changes.
+# ----------------------------------------------------------------------
+
+class _ScriptedExecutor:
+    """Records every host command and scripts the partner mount.
+
+    The first `wsl --mount --partition 5` returns the stale-mount
+    error WSL reports right after a primary unmount; every later
+    attempt succeeds.  `run` answers the findmnt / `test -d` probes
+    the mirror makes after a successful mount.
+    """
+
+    STALE_ERR = (
+        "Wsl/Service/DetachDisk/WSL_E_DISK_ALREADY_MOUNTED")
+
+    def __init__(self, partner_part=5, fail_forever=False):
+        self.host_calls = []
+        self.run_calls = []
+        self._partner = partner_part
+        self._fail_forever = fail_forever
+        self.partner_mount_attempts = 0
+
+    def run_host(self, cmd, timeout=None):
+        self.host_calls.append(cmd)
+        if "--mount" in cmd and f"--partition {self._partner}" in cmd:
+            self.partner_mount_attempts += 1
+            first = self.partner_mount_attempts == 1
+            if first or self._fail_forever:
+                return (1, "", self.STALE_ERR)
+            return (0, "", "")
+        return (0, "", "")
+
+    def run(self, cmd, timeout=None):
+        self.run_calls.append(cmd)
+        if "findmnt" in cmd:
+            return f"/mnt/wsl/PHYSICALDRIVE1p{self._partner}\n"
+        # `test -d ...` content-verify: empty output, no raise = pass.
+        return ""
+
+
+class _MirrorStub:
+    """Drives the real ``_mirror_writes_to_partner_slots_windows``
+    against a scripted executor so the WSL recovery is exercised
+    without WSL or a real drive."""
+
+    _mirror_writes_to_partner_slots_windows = (
+        DirectSSDModPipeline._mirror_writes_to_partner_slots_windows)
+
+    def __init__(self, executor, ab_partitions=(3, 5), primary=3):
+        self.device_path = "\\\\.\\PHYSICALDRIVE1"
+        self._part_num = primary
+        self._ab_partitions = (
+            list(ab_partitions) if ab_partitions else None)
+        self.mount_point = f"/mnt/wsl/PHYSICALDRIVE1p{primary}"
+        self._ssd_mounted = True
+        self.executor = executor
+        self.encrypt_calls = []
+
+    def _phase_encrypt_ssd(self):
+        # Record the slot + mount the mirror replays writes onto.
+        self.encrypt_calls.append((self._part_num, self.mount_point))
+
+    def log(self, *args, **kwargs):
+        pass
+
+
+class TestPartnerMirrorStaleMountRecovery:
+    """The fix for jedimastermatt's report: the mirror must recover
+    from WSL_E_DISK_ALREADY_MOUNTED and actually write the partner."""
+
+    def test_recovers_and_writes_partner_after_already_mounted(self):
+        ex = _ScriptedExecutor(partner_part=5)
+        stub = _MirrorStub(ex, ab_partitions=[3, 5], primary=3)
+        stub._mirror_writes_to_partner_slots_windows()
+
+        # The mount was retried after the stale-mount error...
+        assert ex.partner_mount_attempts == 2
+        # ...because a `wsl --shutdown` cleared the stuck attachment...
+        assert any(c.strip() == "wsl --shutdown"
+                   for c in ex.host_calls)
+        # ...and the disk was re-offlined before the retry.
+        assert any("Set-Disk" in c and "IsOffline" in c
+                   for c in ex.host_calls)
+        # End result: slot 5 (the active slot) actually got written.
+        assert stub.encrypt_calls == [
+            (5, "/mnt/wsl/PHYSICALDRIVE1p5")]
+
+    def test_shutdown_precedes_the_retry_mount(self):
+        ex = _ScriptedExecutor(partner_part=5)
+        stub = _MirrorStub(ex, ab_partitions=[3, 5], primary=3)
+        stub._mirror_writes_to_partner_slots_windows()
+
+        shutdown_at = next(
+            i for i, c in enumerate(ex.host_calls)
+            if c.strip() == "wsl --shutdown")
+        mount_idxs = [
+            i for i, c in enumerate(ex.host_calls)
+            if "--mount" in c and "--partition 5" in c]
+        # Two mount attempts, and the shutdown sits between them.
+        assert len(mount_idxs) == 2
+        assert mount_idxs[0] < shutdown_at < mount_idxs[1]
+
+    def test_persistent_failure_skips_without_aborting(self):
+        # If the retry also fails, the mirror must skip the partner
+        # gracefully (the primary is already written) — never raise.
+        ex = _ScriptedExecutor(partner_part=5, fail_forever=True)
+        stub = _MirrorStub(ex, ab_partitions=[3, 5], primary=3)
+        stub._mirror_writes_to_partner_slots_windows()  # no raise
+        assert stub.encrypt_calls == []  # slot 5 never written
+
+    def test_partner_mountpoint_probe_matches_only_wsl_mounts(self):
+        # Guards Fix 1 on the partner path: the findmnt filter must
+        # positively match /mnt/wsl/ so WSLg's distro root can't be
+        # mistaken for the partition.
+        ex = _ScriptedExecutor(partner_part=5)
+        stub = _MirrorStub(ex, ab_partitions=[3, 5], primary=3)
+        stub._mirror_writes_to_partner_slots_windows()
+        findmnt = [c for c in ex.run_calls if "findmnt" in c]
+        assert findmnt, "mirror never probed for the partner mount"
+        assert all("/mnt/wsl/" in c for c in findmnt)
+        assert all("grep -v '/mnt/c'" not in c for c in findmnt)
+
+    def test_no_partner_is_a_noop(self):
+        # Single-slot (non-A/B) drive: nothing to mirror, no host
+        # commands at all.
+        ex = _ScriptedExecutor()
+        stub = _MirrorStub(ex, ab_partitions=None, primary=3)
+        stub._mirror_writes_to_partner_slots_windows()
+        assert ex.host_calls == []
+        assert stub.encrypt_calls == []
+
+
+class TestDiscoveryFindmntFilter:
+    """Guards Fix 1 on the discovery path at the source level — the
+    ext4 mount-point probes must match /mnt/wsl/ and never fall back
+    to the `grep -v /mnt/c` filter that let /mnt/wslg/distro through."""
+
+    def test_ext4_probes_use_wsl_filter(self):
+        import inspect
+        src = inspect.getsource(
+            DirectSSDDecryptPipeline._mount_ssd_windows)
+        # The ext4 mount probe must positively match /mnt/wsl/ as a
+        # single piped command — that's what keeps WSLg's distro root
+        # (/mnt/wslg/distro) out of the candidate mount list.
+        assert (
+            "findmnt -rn -o TARGET -t ext4 | grep '/mnt/wsl/'" in src)
+        # The distro-leaking filter must not appear in any actual
+        # command line (an explanatory comment may still name it).
+        cmd_lines = [
+            ln for ln in src.splitlines()
+            if "grep -v '/mnt/c'" in ln
+            and not ln.lstrip().startswith("#")]
+        assert cmd_lines == []
 
 
 class TestPreventSystemSleep:

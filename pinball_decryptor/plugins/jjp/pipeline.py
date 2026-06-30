@@ -12,7 +12,159 @@ from dataclasses import dataclass, field
 
 from . import config
 from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
-from .executor import CommandError, create_executor, find_usbipd
+from .executor import (CommandError, create_executor, find_usbipd,
+                       _decode_output as _exec_decode_output,
+                       _CREATE_FLAGS as _exec_create_flags)
+
+
+def _kill_process_tree(proc):
+    """Kill *proc* and all of its descendants.
+
+    ``run_host`` runs commands with ``shell=True``, so the real program is a
+    *grandchild* of our Popen handle (Popen -> cmd.exe -> program).  Killing
+    only the immediate child leaves the grandchild alive holding the stdout/
+    stderr pipes open, so a follow-up ``communicate()`` blocks forever — a
+    momentarily wedged WSL / PowerShell would silently hang the whole pipeline
+    with no log output.  Kill the entire tree so the pipes close.
+    """
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=10,
+                creationflags=_exec_create_flags)
+            return
+        except Exception:
+            pass
+    else:
+        import signal
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            return
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def _robust_run_host(args, timeout=60):
+    """Timeout-safe replacement for ``CommandExecutor.run_host``.
+
+    The upstream executor.py is a byte-verbatim lift (the regression firewall
+    in tests/test_upstream_regression.py), so this fix lives here in the ported
+    pipeline and is patched onto the executor instance rather than edited into
+    executor.py.  Unlike ``subprocess.run(..., shell=True, timeout=...)`` — which
+    on a timeout kills only the cmd.exe shell, then re-enters communicate() and
+    deadlocks on the grandchild's still-open pipes — this kills the whole
+    process tree and returns promptly.  Same ``(rc, stdout, stderr)`` contract.
+    """
+    popen_kwargs = dict(
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=True,
+        creationflags=_exec_create_flags,
+    )
+    if sys.platform != "win32":
+        # Own session/group so _kill_process_tree can killpg the tree.
+        popen_kwargs["start_new_session"] = True
+    try:
+        proc = subprocess.Popen(args, **popen_kwargs)
+    except FileNotFoundError:
+        return -1, "", f"Command not found: {args[0] if args else '?'}"
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out, err = b"", b""
+        return -1, _exec_decode_output(out), f"Command timed out after {timeout}s"
+    return proc.returncode, _exec_decode_output(out), _exec_decode_output(err)
+
+
+def _robust_run(executor):
+    """Return a tree-kill-hardened replacement for ``executor.run``.
+
+    Same contract as ``CommandExecutor.run`` (returns stdout as a str; raises
+    ``CommandError`` on a non-zero exit or a timeout), but built on
+    ``Popen`` + ``communicate(timeout)`` + :func:`_kill_process_tree` instead of
+    ``subprocess.run(timeout=...)``.  On a timeout ``subprocess.run`` kills only
+    the immediate child (``wsl.exe`` / ``sudo`` / ``docker``) and then re-enters
+    ``communicate()`` to reap it — which **deadlocks** on a grandchild still
+    holding the stdout pipe, e.g. a momentarily wedged WSL such as a cold boot
+    right after ``wsl --shutdown``.  That's the same failure
+    :func:`_robust_run_host` fixes for the host commands; this closes it for the
+    in-executor ``run`` path too.  It mattered because the extract's early
+    diagnostics tool-probes (``_log_system_diagnostics``) and prerequisite
+    checks go through ``run`` — so a cold WSL there hung the whole extract with
+    no log output instead of timing out cleanly.
+
+    Unknown executor types fall back to the original ``run`` unchanged.
+    """
+    cls = type(executor).__name__
+    orig_run = executor.run
+
+    def _argv(bash_cmd):
+        if cls == "WslExecutor":
+            return ["wsl", "-u", "root", "--", "bash", "-c", bash_cmd]
+        if cls == "NativeExecutor":
+            return [*executor._cmd_prefix(), bash_cmd]
+        if cls == "DockerExecutor":
+            if not getattr(executor, "_container_running", False):
+                return None  # let orig_run raise the canonical "not running"
+            from .executor import _DOCKER_CONTAINER
+            return ["docker", "exec", _DOCKER_CONTAINER, "bash", "-c", bash_cmd]
+        return None
+
+    def _run(bash_cmd, timeout=120):
+        argv = _argv(bash_cmd)
+        if argv is None:
+            return orig_run(bash_cmd, timeout=timeout)
+        popen_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            creationflags=_exec_create_flags)
+        if sys.platform != "win32":
+            popen_kwargs["start_new_session"] = True  # own group for killpg
+        try:
+            proc = subprocess.Popen(argv, **popen_kwargs)
+        except FileNotFoundError as e:
+            raise CommandError(bash_cmd, -1, str(e)) from e
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            _kill_process_tree(proc)
+            try:
+                out, err = proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                out, err = b"", b""
+            raise CommandError(
+                bash_cmd, -1, f"Command timed out after {timeout}s") from e
+        out_s = (out or b"").decode("utf-8", errors="replace")
+        err_s = (err or b"").decode("utf-8", errors="replace")
+        if proc.returncode != 0:
+            raise CommandError(bash_cmd, proc.returncode,
+                               (err_s + out_s).strip())
+        return out_s
+
+    return _run
+
+
+def _install_robust_run_host(executor):
+    """Shadow *executor*'s run/run_host/run_win with tree-killing versions.
+
+    Set on the instance (not the class) so the verbatim executor.py is left
+    untouched.  Hardens both the host-command path (``run_host``/``run_win``)
+    and the in-executor command path (``run``) so a momentarily wedged WSL
+    can't deadlock either.  See :func:`_robust_run_host` / :func:`_robust_run`.
+    """
+    executor.run_host = _robust_run_host
+    executor.run_win = _robust_run_host
+    executor.run = _robust_run(executor)
+    return executor
 
 
 class _PreventSystemSleep:
@@ -169,8 +321,15 @@ def _stage_project_file(filename, cache_dir):
 
 # Python script deployed to WSL for standalone decryption.
 # Placeholders are filled by StandaloneDecryptPipeline._phase_decrypt_standalone().
+#
+# Files are independent, so both the dongle-free filler-size scan and the
+# decrypt+write loop fan out across all CPU cores with multiprocessing.
+# WSL is Linux, so the pools use fork: worker functions inherit the module
+# globals (MP, OUT_DIR, PREFIX, HAS_FL_DAT) set before the pool is created,
+# without re-pickling them.
 _DECRYPT_SCRIPT = r'''
-import sys, os, struct
+import sys, os, struct, hashlib
+import multiprocessing as _mp
 sys.path.insert(0, "/tmp")
 from jjp_crypto import decrypt_file, detect_filler_size, crc32_buf, xor_keystream, PRNG
 from jjp_filelist import parse_fl_dat, detect_edata_prefix, FileEntry, write_fl_dat
@@ -183,116 +342,197 @@ GAME_NAME = "{game_name}"
 EXTRACT_GRAPHICS = {extract_graphics}
 EXTRACT_SOUNDS = {extract_sounds}
 
-if HAS_FL_DAT:
-    entries = parse_fl_dat("/tmp/fl_decrypted.dat")
-    prefix = detect_edata_prefix(entries)
-else:
-    # Scan filesystem to build file list (dongle-free)
-    print("Scanning edata directory...", flush=True)
-    edata_root = EDATA_DIR
-    path_prefix = edata_root[len(MP):]
-    if not path_prefix.endswith("/"):
-        path_prefix += "/"
+# Assigned in main() before the decrypt pool is created; forked workers
+# inherit it.
+PREFIX = ""
 
-    all_files = []
-    for dirpath, dirnames, filenames in os.walk(edata_root):
-        for fname in filenames:
-            full = os.path.join(dirpath, fname)
-            rel = os.path.relpath(full, edata_root)
-            crypto_path = path_prefix + rel
-            all_files.append((full, crypto_path))
+try:
+    N_WORKERS = max(1, len(os.sched_getaffinity(0)))
+except (AttributeError, OSError):
+    N_WORKERS = max(1, os.cpu_count() or 4)
 
-    print("TOTAL_FILES={{}}".format(len(all_files)), flush=True)
-    print("Detecting filler sizes...", flush=True)
+# Force the 'fork' start method so workers inherit the module globals
+# (MP, OUT_DIR, PREFIX, HAS_FL_DAT) and the top-level worker functions
+# without re-pickling them.  Python 3.14 changes the Linux default to
+# 'forkserver', which would not carry the runtime PREFIX over.
+_MP_CTX = _mp.get_context("fork")
 
-    entries = []
-    for idx, (full_path, crypto_path) in enumerate(all_files):
+
+def _scan_one(task):
+    """Detect filler size + encrypted CRC for one file (dongle-free scan)."""
+    full_path, crypto_path = task
+    try:
         with open(full_path, "rb") as f:
             enc_data = f.read()
-        if len(enc_data) < 8:
-            continue
-        filler_size = detect_filler_size(enc_data, crypto_path)
-        if filler_size < 0 or len(enc_data) <= filler_size:
-            continue
-        n2 = crc32_buf(enc_data)
-        entries.append(FileEntry(
-            path=crypto_path, filler_size=filler_size,
-            crc_encrypted=n2, crc_decrypted=0,
-        ))
-        if (idx + 1) % 500 == 0:
-            print("  Scanned {{}}/{{}}".format(idx + 1, len(all_files)), flush=True)
+    except OSError:
+        return None
+    if len(enc_data) < 8:
+        return None
+    filler_size = detect_filler_size(enc_data, crypto_path)
+    if filler_size < 0 or len(enc_data) <= filler_size:
+        return None
+    return (crypto_path, filler_size, crc32_buf(enc_data))
 
-    prefix = detect_edata_prefix(entries)
-    print("Scan complete: {{}} files found".format(len(entries)), flush=True)
 
-# Filter entries by selected categories
-if not EXTRACT_GRAPHICS or not EXTRACT_SOUNDS:
-    def _keep(e):
-        rel = e.path[len(prefix):] if prefix and e.path.startswith(prefix) else e.path
-        if rel.startswith("graphics/"):
-            return EXTRACT_GRAPHICS
-        if rel.startswith("sound/"):
-            return EXTRACT_SOUNDS
-        return True  # keep anything else (e.g. config files)
-    before = len(entries)
-    entries = [e for e in entries if _keep(e)]
-    if before != len(entries):
-        print("Filtered to {{}}/{{}} files by category selection".format(
-            len(entries), before), flush=True)
+def _decrypt_one(task):
+    """Decrypt + write one file. Returns (status, info, crc_decrypted, md5).
 
-total = len(entries)
-if total == 0:
-    print("BATCH COMPLETE", flush=True)
-    print("Total: 0  OK: 0  Failed: 0  Skipped: 0", flush=True)
-    sys.exit(0)
-
-if HAS_FL_DAT:
-    print("TOTAL_FILES={{}}".format(total), flush=True)
-
-ok = fail = skip = 0
-computed_entries = []
-
-for i, e in enumerate(entries):
-    enc_path = MP + e.path
+    md5 is the MD5 of the decrypted bytes, computed here while the content
+    is already in memory so the checksum phase never has to read every
+    asset back off disk a second time.
+    """
+    crypto_path, filler_size = task
+    enc_path = MP + crypto_path
     if not os.path.isfile(enc_path):
-        skip += 1
-        continue
+        return ("skip", crypto_path, 0, "")
     try:
         with open(enc_path, "rb") as f:
             enc_data = f.read()
-        if len(enc_data) <= e.filler_size:
-            skip += 1
-            continue
-        content = decrypt_file(enc_data, e.filler_size, e.path)
-        rel = e.path[len(prefix):] if prefix and e.path.startswith(prefix) else e.path
+        if len(enc_data) <= filler_size:
+            return ("skip", crypto_path, 0, "")
+        content = decrypt_file(enc_data, filler_size, crypto_path)
+        rel = (crypto_path[len(PREFIX):]
+               if PREFIX and crypto_path.startswith(PREFIX) else crypto_path)
         out_path = OUT_DIR + "/" + rel
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "wb") as f:
             f.write(content)
-        if not HAS_FL_DAT:
-            n3 = crc32_buf(content)
-            computed_entries.append(FileEntry(
-                path=e.path, filler_size=e.filler_size,
-                crc_encrypted=e.crc_encrypted, crc_decrypted=n3,
-            ))
-        ok += 1
+        crc = crc32_buf(content) if not HAS_FL_DAT else 0
+        return ("ok", crypto_path, crc, hashlib.md5(content).hexdigest())
     except Exception as ex:
-        print("[FAIL] {{}}: {{}}".format(e.path, ex), flush=True)
-        fail += 1
-    if (i + 1) % 100 == 0 or i + 1 == total:
-        print("Progress: {{}} (ok={{}} fail={{}} skip={{}})".format(
-            i + 1, ok, fail, skip), flush=True)
+        return ("fail", crypto_path + ": " + str(ex), 0, "")
 
-# Save generated fl_decrypted.dat if we scanned
-if not HAS_FL_DAT and computed_entries:
-    fl_out = OUT_DIR + "/fl_decrypted.dat"
-    write_fl_dat(computed_entries, fl_out)
-    print("Generated fl_decrypted.dat with {{}} entries".format(
-        len(computed_entries)), flush=True)
 
-print("BATCH COMPLETE", flush=True)
-print("Total: {{}}  OK: {{}}  Failed: {{}}  Skipped: {{}}".format(
-    ok + fail + skip, ok, fail, skip), flush=True)
+def main():
+    global PREFIX
+
+    if HAS_FL_DAT:
+        entries = parse_fl_dat("/tmp/fl_decrypted.dat")
+        PREFIX = detect_edata_prefix(entries)
+    else:
+        # Scan filesystem to build file list (dongle-free)
+        print("Scanning edata directory...", flush=True)
+        edata_root = EDATA_DIR
+        path_prefix = edata_root[len(MP):]
+        if not path_prefix.endswith("/"):
+            path_prefix += "/"
+
+        all_files = []
+        for dirpath, dirnames, filenames in os.walk(edata_root):
+            for fname in filenames:
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, edata_root)
+                all_files.append((full, path_prefix + rel))
+
+        print("TOTAL_FILES={{}}".format(len(all_files)), flush=True)
+        print("Detecting filler sizes ({{}} workers)...".format(N_WORKERS),
+              flush=True)
+
+        entries = []
+        scanned = 0
+        total_scan = len(all_files)
+        with _MP_CTX.Pool(N_WORKERS) as pool:
+            for res in pool.imap_unordered(_scan_one, all_files, chunksize=16):
+                scanned += 1
+                if res is not None:
+                    entries.append(FileEntry(
+                        path=res[0], filler_size=res[1],
+                        crc_encrypted=res[2], crc_decrypted=0,
+                    ))
+                if scanned % 500 == 0:
+                    print("  Scanned {{}}/{{}}".format(scanned, total_scan),
+                          flush=True)
+
+        PREFIX = detect_edata_prefix(entries)
+        print("Scan complete: {{}} files found".format(len(entries)),
+              flush=True)
+
+    # Filter entries by selected categories
+    if not EXTRACT_GRAPHICS or not EXTRACT_SOUNDS:
+        def _keep(e):
+            rel = (e.path[len(PREFIX):]
+                   if PREFIX and e.path.startswith(PREFIX) else e.path)
+            if rel.startswith("graphics/"):
+                return EXTRACT_GRAPHICS
+            if rel.startswith("sound/"):
+                return EXTRACT_SOUNDS
+            return True  # keep anything else (e.g. config files)
+        before = len(entries)
+        entries = [e for e in entries if _keep(e)]
+        if before != len(entries):
+            print("Filtered to {{}}/{{}} files by category selection".format(
+                len(entries), before), flush=True)
+
+    total = len(entries)
+    if total == 0:
+        print("BATCH COMPLETE", flush=True)
+        print("Total: 0  OK: 0  Failed: 0  Skipped: 0", flush=True)
+        return
+
+    if HAS_FL_DAT:
+        print("TOTAL_FILES={{}}".format(total), flush=True)
+    print("Decrypting ({{}} workers)...".format(N_WORKERS), flush=True)
+
+    ok = fail = skip = 0
+    # When generating fl_decrypted.dat we need the decrypted CRC keyed by
+    # path, so we can rebuild the entry list in the original order afterwards
+    # (imap_unordered returns results out of order).
+    crc_by_path = {{}}
+    # md5 of each decrypted file (md5sum format line), so the checksum phase
+    # doesn't have to read every asset back off disk.
+    ck_lines = []
+    tasks = [(e.path, e.filler_size) for e in entries]
+    done = 0
+    with _MP_CTX.Pool(N_WORKERS) as pool:
+        for status, info, crc, md5 in pool.imap_unordered(
+                _decrypt_one, tasks, chunksize=8):
+            done += 1
+            if status == "ok":
+                ok += 1
+                if not HAS_FL_DAT:
+                    crc_by_path[info] = crc
+                rel = (info[len(PREFIX):]
+                       if PREFIX and info.startswith(PREFIX) else info)
+                ck_lines.append(md5 + "  ./" + rel)
+            elif status == "skip":
+                skip += 1
+            else:
+                print("[FAIL] {{}}".format(info), flush=True)
+                fail += 1
+            if done % 100 == 0 or done == total:
+                print("Progress: {{}} (ok={{}} fail={{}} skip={{}})".format(
+                    done, ok, fail, skip), flush=True)
+
+    # Hand the edata checksums to the host so the checksum phase only has to
+    # hash the (far fewer) non-edata system files.  Written to a per-run
+    # sidecar; the host merges it into .checksums.md5 and deletes it.
+    ck_path = OUT_DIR + "/.checksums.edata.md5"
+    with open(ck_path, "w") as ckf:
+        if ck_lines:
+            ckf.write("\n".join(ck_lines) + "\n")
+    print("Wrote edata checksums: {{}} entries".format(len(ck_lines)),
+          flush=True)
+
+    # Save generated fl_decrypted.dat if we scanned
+    if not HAS_FL_DAT and crc_by_path:
+        computed_entries = [
+            FileEntry(path=e.path, filler_size=e.filler_size,
+                      crc_encrypted=e.crc_encrypted,
+                      crc_decrypted=crc_by_path[e.path])
+            for e in entries if e.path in crc_by_path
+        ]
+        fl_out = OUT_DIR + "/fl_decrypted.dat"
+        write_fl_dat(computed_entries, fl_out)
+        print("Generated fl_decrypted.dat with {{}} entries".format(
+            len(computed_entries)), flush=True)
+
+    print("BATCH COMPLETE", flush=True)
+    print("Total: {{}}  OK: {{}}  Failed: {{}}  Skipped: {{}}".format(
+        ok + fail + skip, ok, fail, skip), flush=True)
+
+
+if __name__ == "__main__":
+    main()
 '''
 
 
@@ -322,7 +562,7 @@ class DecryptionPipeline:
         self.on_progress = progress_cb
         self.on_done = done_cb
 
-        self.executor = create_executor()
+        self.executor = _install_robust_run_host(create_executor())
         self.mount_point = None
         self.game_name = None
         self.cancelled = False
@@ -341,73 +581,135 @@ class DecryptionPipeline:
         if self.cancelled:
             raise PipelineError("Cancelled", "Operation cancelled by user.")
 
-    def _generate_checksums(self, wsl_out):
-        """Generate .checksums.md5 with progress updates."""
+    def _generate_checksums(self, wsl_out=None):
+        """Write .checksums.md5 for asset tracking (host-side, parallel).
+
+        Hashing runs natively over the output folder rather than via md5sum
+        over the WSL 9p bridge (slow both ways), and fans out across a thread
+        pool.  When the decrypt phase pre-computed the edata files' MD5s
+        (it has the decrypted bytes in memory anyway), those are merged in
+        directly so this phase only reads the far fewer non-edata system
+        files back off disk.
+
+        *wsl_out* is accepted for caller compatibility but unused — the output
+        folder is always host-accessible (``self.output_path``).
+        """
         self.log("Generating checksums for asset tracking...", "info")
         try:
-            # Count files first, then stream md5sum with a counter so we can
-            # report progress.
-            count_cmd = (
-                f"cd '{wsl_out}' && find . -type f "
-                f"! -name '.*' ! -name 'fl_decrypted.dat' ! -name '*.img' "
-                f"| wc -l"
-            )
-            total = 0
-            try:
-                total = int(self.executor.run(count_cmd, timeout=60).strip())
-            except (CommandError, ValueError):
-                pass
-
-            # Stream md5sum one file at a time — each output line = one file done
-            checksum_cmd = (
-                f"cd '{wsl_out}' && find . -type f "
-                f"! -name '.*' ! -name 'fl_decrypted.dat' ! -name '*.img' "
-                f"-print0 | xargs -0 -n1 md5sum > '.checksums.md5'"
-            )
-            if total > 0:
-                # Use a wrapper that prints a progress counter to stderr
-                # while still writing md5sum output to the file.
-                checksum_cmd = (
-                    f"cd '{wsl_out}' && find . -type f "
-                    f"! -name '.*' ! -name 'fl_decrypted.dat' ! -name '*.img' "
-                    f"-print0 | xargs -0 -n1 md5sum "
-                    f"| awk '{{print >> \".checksums.md5\"; "
-                    f"n++; print \"CKSUM_PROGRESS \" n \" {total}\"}}'"
-                )
-                done = 0
-                for line in self.executor.stream(checksum_cmd, timeout=600):
-                    self._check_cancel()
-                    if line.startswith("CKSUM_PROGRESS "):
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            try:
-                                done = int(parts[1])
-                                t = int(parts[2])
-                                self.on_progress(done, t, f"Checksums: {done}/{t}")
-                            except ValueError:
-                                pass
-            else:
-                self.executor.run(checksum_cmd, timeout=600)
-
+            self._write_checksums_parallel(self.output_path)
             self.log("Checksums saved to .checksums.md5 in output folder.",
                      "success")
-        except CommandError:
-            self.log("Warning: Could not generate checksums. "
+        except OSError as e:
+            self.log(f"Warning: Could not generate checksums ({e}). "
                      "Asset modification tracking will not be available.",
                      "info")
 
+    def _write_checksums_parallel(self, out_dir):
+        """Hash *out_dir* into .checksums.md5 (md5sum format), in parallel.
+
+        Merges a per-run ``.checksums.edata.md5`` sidecar (written by the
+        decrypt workers) when present, so pre-hashed edata files are not read
+        again.  ``.checksums.md5`` is (re)written fresh and last, so its mtime
+        stays newest for the revert fast-path in ``core.checksums``.
+        """
+        import hashlib
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        checksum_file = os.path.join(out_dir, ".checksums.md5")
+        partial = os.path.join(out_dir, ".checksums.edata.md5")
+
+        # md5sum-style line we both emit and parse: "<32 hex>  ./<rel>".
+        line_re = re.compile(r'^([a-f0-9]{32})\s+\*?\./(.+)$')
+
+        covered = set()
+        prehashed_lines = []
+        if getattr(self, "_edata_checksum_partial", False) \
+                and os.path.isfile(partial):
+            with open(partial, "r", encoding="utf-8", errors="replace") as pf:
+                for line in pf:
+                    line = line.rstrip("\r\n")
+                    if not line:
+                        continue
+                    prehashed_lines.append(line)
+                    m = line_re.match(line)
+                    if m:
+                        covered.add(m.group(2))
+
+        # Everything not already hashed gets a native host-side md5 here.
+        skip_names = {".checksums.md5", ".checksums.edata.md5",
+                      "fl_decrypted.dat"}
+        to_hash = []  # (rel, abspath)
+        for dirpath, _dn, filenames in os.walk(out_dir):
+            for fn in filenames:
+                if fn.startswith(".") or fn in skip_names \
+                        or fn.endswith(".img"):
+                    continue
+                ap = os.path.join(dirpath, fn)
+                rel = os.path.relpath(ap, out_dir).replace(os.sep, "/")
+                if rel not in covered:
+                    to_hash.append((rel, ap))
+
+        total = len(prehashed_lines) + len(to_hash)
+        self.on_progress(0, total, "Checksums...")
+
+        def _md5(item):
+            rel, ap = item
+            try:
+                h = hashlib.md5()
+                with open(ap, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                return rel, h.hexdigest()
+            except OSError:
+                return rel, None  # unreadable -> skip (match md5sum tolerance)
+
+        n_workers = min(16, max(1, os.cpu_count() or 4))
+        done = len(prehashed_lines)
+        with open(checksum_file, "w", encoding="utf-8") as out:
+            if prehashed_lines:
+                out.write("\n".join(prehashed_lines) + "\n")
+            if to_hash:
+                with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                    futs = [ex.submit(_md5, it) for it in to_hash]
+                    for fut in as_completed(futs):
+                        rel, md5 = fut.result()
+                        if md5 is not None:
+                            out.write("{}  ./{}\n".format(md5, rel))
+                        done += 1
+                        if done % 200 == 0 or done == total:
+                            self.on_progress(done, total,
+                                             f"Checksums: {done}/{total}")
+                            if self.cancelled:
+                                for f in futs:
+                                    f.cancel()
+                                raise PipelineError(
+                                    "Cancelled", "Operation cancelled by user.")
+        self.on_progress(total, total, "Checksums complete")
+
+        # Consume the per-run sidecar so a later run can't merge a stale one.
+        if prehashed_lines or os.path.isfile(partial):
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
+
     def _log_system_diagnostics(self):
-        """Log system/environment info for remote diagnostics."""
+        """Log system/environment info for remote diagnostics.
+
+        Each line is logged the moment it's gathered rather than buffered and
+        flushed at the end, so if a probe stalls (e.g. a momentarily wedged
+        WSL) the log still shows everything up to it instead of going silent —
+        the difference between "hung at the WSL distro probe" and a blank log.
+        """
         from pinball_decryptor import __version__ as _app_version
 
         def _clean_utf16(text):
             """Strip UTF-16 null bytes that WSL commands sometimes produce."""
             return text.replace("\x00", "")
 
-        lines = [f"Pinball Asset Decryptor v{_app_version}"]
-
-        # Python version
-        lines.append(f"Python {sys.version.split()[0]}")
+        self.log("--- System Diagnostics ---", "info")
+        self.log(f"Pinball Asset Decryptor v{_app_version}", "info")
+        self.log(f"Python {sys.version.split()[0]}", "info")
 
         # Host OS
         if sys.platform == "win32":
@@ -420,15 +722,15 @@ class DecryptionPipeline:
                     timeout=10)
                 out = _clean_utf16(out)
                 if rc == 0 and out.strip():
-                    lines.append(f"Windows: {out.strip()}")
+                    self.log(f"Windows: {out.strip()}", "info")
             except Exception:
-                lines.append("Windows: (could not detect version)")
+                self.log("Windows: (could not detect version)", "info")
         elif sys.platform == "darwin":
             try:
                 rc, out, _ = self.executor.run_host(
                     "sw_vers -productVersion", timeout=5)
                 if rc == 0 and out.strip():
-                    lines.append(f"macOS: {out.strip()}")
+                    self.log(f"macOS: {out.strip()}", "info")
             except Exception:
                 pass
 
@@ -443,9 +745,9 @@ class DecryptionPipeline:
                     for wl in out.strip().splitlines()[:3]:
                         wl = wl.strip()
                         if wl:
-                            lines.append(f"  {wl}")
+                            self.log(f"  {wl}", "info")
             except Exception:
-                lines.append("  WSL: (could not detect)")
+                self.log("  WSL: (could not detect)", "info")
 
             # WSL distro
             try:
@@ -456,7 +758,7 @@ class DecryptionPipeline:
                     for dl in out.strip().splitlines():
                         dl = dl.strip()
                         if dl and "NAME" not in dl.upper()[:10]:
-                            lines.append(f"  {dl}")
+                            self.log(f"  {dl}", "info")
             except Exception:
                 pass
 
@@ -466,9 +768,9 @@ class DecryptionPipeline:
                 rc, out, _ = self.executor.run_host(
                     "docker --version", timeout=5)
                 if rc == 0 and out.strip():
-                    lines.append(f"  Docker: {out.strip()}")
+                    self.log(f"  Docker: {out.strip()}", "info")
             except Exception:
-                lines.append("  Docker: (could not detect)")
+                self.log("  Docker: (could not detect)", "info")
 
         # Tool versions inside executor (WSL, Docker, or native)
         # Skip tool checks if Docker container isn't running yet —
@@ -476,7 +778,7 @@ class DecryptionPipeline:
         from .executor import DockerExecutor
         if isinstance(self.executor, DockerExecutor) and \
                 not self.executor._container_running:
-            lines.append("  (tools available inside Docker container)")
+            self.log("  (tools available inside Docker container)", "info")
         else:
             tools = [
                 ("xorriso", "xorriso --version 2>&1 | head -1"),
@@ -491,11 +793,11 @@ class DecryptionPipeline:
                 try:
                     out = self.executor.run(cmd, timeout=5).strip()
                     if out:
-                        lines.append(f"  {name}: {out}")
+                        self.log(f"  {name}: {out}", "info")
                     else:
-                        lines.append(f"  {name}: (installed, no version)")
+                        self.log(f"  {name}: (installed, no version)", "info")
                 except Exception:
-                    lines.append(f"  {name}: NOT FOUND")
+                    self.log(f"  {name}: NOT FOUND", "info")
 
         # Disk space on /tmp (where executor work happens)
         try:
@@ -505,13 +807,10 @@ class DecryptionPipeline:
             if out:
                 parts = out.split()
                 free = parts[3] if len(parts) >= 4 else out
-                lines.append(f"  /tmp free space: {free}")
+                self.log(f"  /tmp free space: {free}", "info")
         except Exception:
             pass
 
-        self.log("--- System Diagnostics ---", "info")
-        for line in lines:
-            self.log(line, "info")
         self.log("--------------------------", "info")
 
     def _is_iso(self):
@@ -746,14 +1045,15 @@ class DecryptionPipeline:
                     ipct = int(pct)
                     if ipct > last_pct:
                         last_pct = ipct
-                        remaining = ""
-                        rm = re.search(r'Remaining:\s*([\d:]+)', clean)
-                        if rm:
-                            remaining = f"ETA {rm.group(1)}"
-                        self.on_progress(ipct, 100, remaining)
+                        # partclone also prints a "Remaining:" field, but it's
+                        # derived from instantaneous throughput and swings as the
+                        # image hits sparse vs dense regions — it never converges,
+                        # so we don't surface it as an ETA.  The progress bar and
+                        # the elapsed timer carry the real signal.
+                        self.on_progress(ipct, 100, "Extracting filesystem…")
                         # Log every 10%
                         if ipct % 10 == 0:
-                            self.log(f"  Extraction: {ipct}% {remaining}", "info")
+                            self.log(f"  Extraction: {ipct}%", "info")
                 elif any(kw in clean for kw in [
                     "File system", "Device size", "Space in use",
                     "Block size", "error", "Error", "done", "Starting"
@@ -3443,6 +3743,10 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             f"out of {final_total} files.",
             "success" if final_fail == 0 else "info",
         )
+        # The decrypt workers wrote .checksums.edata.md5 (MD5 of every
+        # decrypted file) — tell the checksum phase to merge it instead of
+        # re-hashing the assets off disk.
+        self._edata_checksum_partial = True
 
     def _phase_copy_full_filesystem(self):
         """Copy all non-edata files from the mounted filesystem to output/system/.
@@ -3629,11 +3933,16 @@ class StandaloneModPipeline(ModPipeline):
 
     def __init__(self, image_path, assets_folder, fl_dat_path,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 skip_duration_match=False):
+                 skip_duration_match=False, keep_full_length_paths=None):
         super().__init__(image_path, assets_folder,
                          log_cb, phase_cb, progress_cb, done_cb)
         self.fl_dat_path = fl_dat_path
         self.skip_duration_match = skip_duration_match
+        # Per-slot exemptions from the trim-to-original-length: rel paths
+        # (forward-slashed, relative to the assets folder — same keys the GUI
+        # uses) whose replacement should keep its own full length instead of
+        # being trimmed/padded to the original slot.  See _resize_*_to_duration.
+        self.keep_full_length_paths = frozenset(keep_full_length_paths or ())
 
     def run(self):
         """Execute the standalone mod pipeline."""
@@ -4071,11 +4380,16 @@ class StandaloneModPipeline(ModPipeline):
         Pure Python implementation — no ffmpeg needed. Truncates extra
         frames or pads with silence to match orig_fmt["nframes"].
         Returns resized WAV bytes, or original content on failure.
-        Skipped when skip_duration_match is True.
+        Skipped when skip_duration_match is True, or when this slot is in
+        keep_full_length_paths (a per-slot exemption the user ticked).
         """
         if getattr(self, 'skip_duration_match', False):
             self.log(f"  Duration matching skipped (keep original length)",
                      "info")
+            return content
+        if rel_path in getattr(self, 'keep_full_length_paths', frozenset()):
+            self.log(f"  {rel_path}: keeping full length (per-slot override) — "
+                     "not trimming to the original slot length", "info")
             return content
 
         import io as _io
@@ -4287,11 +4601,16 @@ class StandaloneModPipeline(ModPipeline):
 
         Uses ffprobe to get durations, then ffmpeg to trim or pad.
         Returns resized OGG bytes, or original content on failure.
-        Skipped when skip_duration_match is True.
+        Skipped when skip_duration_match is True, or when this slot is in
+        keep_full_length_paths (a per-slot exemption the user ticked).
         """
         if getattr(self, 'skip_duration_match', False):
             self.log(f"  Duration matching skipped (keep original length)",
                      "info")
+            return content
+        if rel_path in getattr(self, 'keep_full_length_paths', frozenset()):
+            self.log(f"  {rel_path}: keeping full length (per-slot override) — "
+                     "not trimming to the original slot length", "info")
             return content
 
         import os
@@ -5767,37 +6086,16 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 result_list.append(full_path)
 
     def _generate_checksums_native(self):
-        """Generate .checksums.md5 using native Python hashlib."""
-        import hashlib
+        """Generate .checksums.md5 (host-side, parallel)."""
         self.log("Generating checksums for asset tracking...", "info")
-        out_dir = self.output_path
-        checksum_file = os.path.join(out_dir, ".checksums.md5")
-        skip_names = {'.checksums.md5', 'fl_decrypted.dat'}
-        all_files = []
-        for dirpath, _dirnames, filenames in os.walk(out_dir):
-            for fname in filenames:
-                if fname.startswith('.') or fname in skip_names \
-                        or fname.endswith('.img'):
-                    continue
-                all_files.append(os.path.join(dirpath, fname))
-
-        total = len(all_files)
-        self.on_progress(0, total, "Checksumming...")
-        with open(checksum_file, "w") as ck:
-            for i, fpath in enumerate(all_files):
-                md5 = hashlib.md5()
-                with open(fpath, "rb") as f:
-                    while True:
-                        chunk = f.read(65536)
-                        if not chunk:
-                            break
-                        md5.update(chunk)
-                rel = os.path.relpath(fpath, out_dir)
-                ck.write(f"{md5.hexdigest()}  ./{rel}\n")
-                if (i + 1) % 500 == 0 or i + 1 == total:
-                    self.on_progress(i + 1, total,
-                                     f"{i + 1}/{total} files")
-        self.log(f"Checksums generated for {total} files.", "success")
+        try:
+            self._write_checksums_parallel(self.output_path)
+            self.log("Checksums saved to .checksums.md5 in output folder.",
+                     "success")
+        except OSError as e:
+            self.log(f"Warning: Could not generate checksums ({e}). "
+                     "Asset modification tracking will not be available.",
+                     "info")
 
     def _discover_partitions(self, device):
         """Enumerate every partition on the device with metadata.
@@ -7064,10 +7362,12 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
     def __init__(self, device_path, assets_folder, fl_dat_path,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 skip_duration_match=False, partition_override=None):
+                 skip_duration_match=False, partition_override=None,
+                 keep_full_length_paths=None):
         super().__init__(device_path, assets_folder, fl_dat_path,
                          log_cb, phase_cb, progress_cb, done_cb,
-                         skip_duration_match=skip_duration_match)
+                         skip_duration_match=skip_duration_match,
+                         keep_full_length_paths=keep_full_length_paths)
         self.device_path = device_path
         # See DirectSSDDecryptPipeline.partition_override.
         self.partition_override = partition_override
@@ -7700,7 +8000,7 @@ class RestoreToSSDPipeline:
         self._succeeded = False
         self._iso_mount = None
         self._tmp_dir = None
-        self.executor = create_executor()
+        self.executor = _install_robust_run_host(create_executor())
 
     def cancel(self):
         self.cancelled = True

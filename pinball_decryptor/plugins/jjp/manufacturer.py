@@ -89,7 +89,8 @@ class _WriteWrapper(StandaloneModPipeline):
     """
 
     def __init__(self, original_path, assets_dir, output_path,
-                 log_cb, phase_cb, progress_cb, done_cb):
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 keep_full_length_paths=None):
         self._target_output_path = output_path
         self._user_log_cb = log_cb
         self._user_done_cb = done_cb
@@ -106,6 +107,7 @@ class _WriteWrapper(StandaloneModPipeline):
             log_cb=log_cb, phase_cb=phase_cb,
             progress_cb=progress_cb,
             done_cb=self._intercept_done,
+            keep_full_length_paths=keep_full_length_paths,
         )
 
     def _intercept_done(self, success, summary):
@@ -181,6 +183,15 @@ class JJPManufacturer(Manufacturer):
         # full_dump knobs.
         asset_filters=True,
         replace_audio=True,
+        # Per-slot "keep full length" override on the Replace-Audio tab: JJP
+        # trims every track to its original slot length by default
+        # (audio_forces_length_match), but a slot the game doesn't immediately
+        # play another sound over (e.g. the end-of-game cue before attract) can
+        # hold a longer replacement.  fl.dat has no size field and the encryptor
+        # forges CRCs for any size, so a longer file validates + boots fine; the
+        # only question is runtime (whether the show cuts it), which is up to the
+        # user to test on the machine.
+        audio_keep_length_override=True,
         # JJP ships loose video containers (.webm/.mp4/.mov/.avi) that the
         # generic changed-file repack re-encrypts like any other asset, so a
         # swapped clip round-trips with no special handling.
@@ -231,7 +242,10 @@ class JJPManufacturer(Manufacturer):
         return ("Jersey Jack automatically matches every track to its original "
                 "slot length on Write — a longer replacement is trimmed to fit "
                 "and a shorter one padded with silence, regardless of the "
-                "“Trim / pad” box.")
+                "“Trim / pad” box. Tick the “Full” box on an individual slot to "
+                "keep that replacement's full length instead — best for a cue "
+                "nothing plays over (e.g. the end-of-game track before attract); "
+                "the game may still cut it short, so test on the machine.")
 
     def audio_forces_length_match(self):
         # JJP's Write always trims/pads to the original slot length, so the
@@ -257,9 +271,11 @@ class JJPManufacturer(Manufacturer):
                                full_dump=full_dump)
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
-                            log_cb, phase_cb, progress_cb, done_cb):
+                            log_cb, phase_cb, progress_cb, done_cb,
+                            keep_full_length_names=None):
         return _WriteWrapper(original_path, assets_dir, output_path,
-                             log_cb, phase_cb, progress_cb, done_cb)
+                             log_cb, phase_cb, progress_cb, done_cb,
+                             keep_full_length_paths=keep_full_length_names)
 
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,
@@ -284,7 +300,7 @@ class JJPManufacturer(Manufacturer):
     def make_direct_ssd_write_pipeline(
             self, device_path, assets_dir,
             log_cb, phase_cb, progress_cb, done_cb,
-            partition_override=None):
+            partition_override=None, keep_full_length_names=None):
         # The Direct-SSD encrypt pass NEEDS fl_decrypted.dat — without
         # the file-list metadata (filler sizes + CRC32) it can't
         # forge checksums that pass the game's integrity check, so
@@ -297,7 +313,8 @@ class JJPManufacturer(Manufacturer):
             fl_dat_path=_find_fl_dat([assets_dir]),
             log_cb=log_cb, phase_cb=phase_cb,
             progress_cb=progress_cb, done_cb=done_cb,
-            partition_override=partition_override)
+            partition_override=partition_override,
+            keep_full_length_paths=keep_full_length_names)
 
     def extract_input_help(self):
         return ("Decrypt a Jersey Jack Pinball game ISO (Wonka, Guns N' "

@@ -233,7 +233,8 @@ class MainWindow:
         self._audio_slots_by_rel = {}    # rel_path -> AudioSlot
         self._audio_assignments = {}     # rel_path -> replacement file path
         self._audio_loop_flags = {}      # rel_path -> bool (BOF loop-inject)
-        self._audio_loop_tip = None      # Loop-column hover tooltip Toplevel
+        self._audio_keep_full_flags = {}  # rel_path -> bool (JJP keep-full-len)
+        self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
         # Slots whose on-disk bytes differ from the Extract baseline even though
@@ -1611,23 +1612,29 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
-        # "loop" is the last data column so the Replacement column stays #3
-        # whether or not Loop is shown; apply_manufacturer hides it (via
-        # displaycolumns) for plugins without the audio_loop_inject capability.
+        # "loop" and "keep" are optional toggle columns shown per capability
+        # (apply_manufacturer sets displaycolumns) — "loop" for
+        # audio_loop_inject (BOF), "keep" for audio_keep_length_override (JJP).
+        # They never show together (different plugins).  displaycolumns places
+        # whichever is active just BEFORE "rep" so the narrow toggle is never
+        # the rightmost (clippable) column; the values tuple still follows this
+        # `columns` order (vals[3]=loop, vals[4]=keep) regardless of display
+        # order.
         self._audio_tree = ttk.Treeview(
-            list_frame, columns=("len", "fmt", "rep", "loop"),
+            list_frame, columns=("len", "fmt", "rep", "loop", "keep"),
             height=12, selectmode="browse")
         self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
         self._audio_tree.heading("len", text="Length", anchor=tk.W)
         self._audio_tree.heading("fmt", text="Format", anchor=tk.W)
         self._audio_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._audio_tree.heading("loop", text="Loop", anchor=tk.CENTER)
-        # Keep the base widths small enough that their sum fits a narrow
-        # window — ttk clips the rightmost column (Loop) when the total
-        # configured width exceeds the widget, and stretch only ever *grows*
+        self._audio_tree.heading("keep", text="Full", anchor=tk.CENTER)
+        # ttk has no horizontal scroll: when the total column width exceeds the
+        # widget it clips the rightmost column, and stretch only ever *grows*
         # columns, never shrinks them.  Only the track-name (#0) and
         # Replacement columns stretch to absorb extra width; the rest are fixed
-        # and compact so Loop is always on-screen at any app width.
+        # and compact.  The Replacement column is the rightmost (via
+        # displaycolumns) so it — not the toggle column — absorbs any overflow.
         self._audio_tree.column("#0", width=150, minwidth=80, stretch=True)
         # Wide enough for the m:ss.mmm length (e.g. "12:34.567").
         self._audio_tree.column("len", width=80, minwidth=66, anchor=tk.W,
@@ -1636,15 +1643,18 @@ class MainWindow:
         self._audio_tree.column("rep", width=150, minwidth=110, stretch=True)
         self._audio_tree.column("loop", width=44, minwidth=40, anchor=tk.CENTER,
                                 stretch=False)
+        self._audio_tree.column("keep", width=44, minwidth=40, anchor=tk.CENTER,
+                                stretch=False)
         self._persist_tree_columns(
-            self._audio_tree, "audio", ("#0", "len", "fmt", "rep", "loop"))
+            self._audio_tree, "audio",
+            ("#0", "len", "fmt", "rep", "loop", "keep"))
         # Click-header sort: (col_id, base heading text, default-descending).
         # Numeric columns default to descending (longest/looped first) the way
         # the old "Longest first" option did; text columns ascending.
         self._audio_sort_cfg = [
             ("#0", "Original Track", False), ("len", "Length", True),
             ("fmt", "Format", False), ("rep", "Replacement", False),
-            ("loop", "Loop", True)]
+            ("loop", "Loop", True), ("keep", "Full", True)]
         self._wire_sort_headings(self._audio_tree, self._audio_sort_cfg,
                                  "_audio_sort", self._refresh_audio_list)
         audio_scroll = ttk.Scrollbar(
@@ -1838,11 +1848,13 @@ class MainWindow:
         # than the sidecar) and just prunes vanished slots.
         from ..core import staged_changes
         saved_loops = {}
+        saved_keep = {}
         if scan_dir != self._audio_scan_dir:
             staged = self._load_staged_changes(scan_dir)
             self._audio_assignments = staged_changes.live_assignments(
                 staged.get("audio"), self._audio_slots_by_rel)
             saved_loops = staged.get("audio_loop") or {}
+            saved_keep = staged.get("audio_keep") or {}
             if "audio_trim" in staged and not self._audio_trim_forced():
                 self.audio_trim_var.set(bool(staged["audio_trim"]))
         else:
@@ -1858,6 +1870,15 @@ class MainWindow:
                          else self._audio_loop_flags.get(
                              s.rel_path,
                              "loop" in os.path.basename(s.rel_path).lower()))
+            for s in slots}
+        # Per-slot "keep full length" flag (JJP): a persisted flag wins;
+        # otherwise keep any flag the user already toggled this session, else
+        # default OFF (every slot is trimmed to the original length unless the
+        # user opts a specific one out).
+        self._audio_keep_full_flags = {
+            s.rel_path: (bool(saved_keep[s.rel_path])
+                         if s.rel_path in saved_keep
+                         else self._audio_keep_full_flags.get(s.rel_path, False))
             for s in slots}
         self._audio_scan_dir = scan_dir
         # Drop the previous folder's diff until this folder's background scan
@@ -1988,6 +2009,9 @@ class MainWindow:
                 return (2, "")
             if col == "loop":
                 return (1 if self._audio_loop_flags.get(s.rel_path) else 0,)
+            if col == "keep":
+                return (1 if self._audio_keep_full_flags.get(s.rel_path)
+                        else 0,)
             return (s.rel_path.lower(),)  # "#0" name/path
 
         slots.sort(key=_key, reverse=desc)
@@ -2011,9 +2035,11 @@ class MainWindow:
             else:
                 rep_disp, tag = "Choose…", ""
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
+            keep_disp = ("☑" if self._audio_keep_full_flags.get(s.rel_path)
+                         else "☐")
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
-                                rep_disp, loop_disp),
+                                rep_disp, loop_disp, keep_disp),
                         tags=(tag,) if tag else ())
 
         total = len(self._audio_slots)
@@ -2115,20 +2141,40 @@ class MainWindow:
 
     def _audio_on_tree_click(self, event):
         # A click in the Replacement column opens the picker (the column is a
-        # per-row "Choose…" button); a click in the Loop column toggles that
-        # slot's loop flag.  Other columns fall through to normal selection.
+        # per-row "Choose…" button); a click in the Loop or Full column toggles
+        # that slot's flag.  Other columns fall through to normal selection.
+        # Resolve the clicked display column to its data-column NAME so it works
+        # regardless of which optional columns are shown (displaycolumns).
         tree = self._audio_tree
         if tree.identify_region(event.x, event.y) != "cell":
             return
         row = tree.identify_row(event.y)
-        # columns=(len,fmt,rep,loop) -> #1,#2,#3,#4 (#4 hidden for non-BOF).
-        col = tree.identify_column(event.x)
-        if row and col == "#3":
+        if not row:
+            return
+        name = self._audio_tree_col_name(tree.identify_column(event.x))
+        if name == "rep":
             tree.selection_set(row)
             self._cancel_audio_select_job()
             self._audio_assign_rel(row)
-        elif row and col == "#4":
+        elif name == "loop":
             self._audio_toggle_loop(row)
+        elif name == "keep":
+            self._audio_toggle_keep(row)
+
+    def _audio_tree_col_name(self, display_col):
+        """Map a Treeview display-column id ('#1', '#2', …) to its data-column
+        NAME, honoring the current displaycolumns.  Returns None for '#0' or an
+        out-of-range id."""
+        tree = self._audio_tree
+        if not display_col or display_col == "#0":
+            return None
+        disp = tree["displaycolumns"]
+        cols = tree["columns"] if disp in ("#all", (), "") else disp
+        try:
+            i = int(display_col[1:]) - 1
+        except (ValueError, IndexError):
+            return None
+        return cols[i] if 0 <= i < len(cols) else None
 
     def _audio_toggle_loop(self, rel):
         """Flip a slot's Loop flag and redraw just its glyph."""
@@ -2145,6 +2191,21 @@ class MainWindow:
         except tk.TclError:
             pass
 
+    def _audio_toggle_keep(self, rel):
+        """Flip a slot's "keep full length" flag and redraw just its glyph."""
+        if rel not in self._audio_slots_by_rel:
+            return
+        new = not self._audio_keep_full_flags.get(rel, False)
+        self._audio_keep_full_flags[rel] = new
+        self._save_staged_changes()
+        try:
+            vals = list(self._audio_tree.item(rel, "values"))
+            if len(vals) >= 5:
+                vals[4] = "☑" if new else "☐"
+                self._audio_tree.item(rel, values=vals)
+        except tk.TclError:
+            pass
+
     _AUDIO_LOOP_TIP_TEXT = (
         "Loop this replacement in-game.\n\n"
         "These music stems normally play once — there's no built-in loop — so "
@@ -2156,29 +2217,31 @@ class MainWindow:
         "Defaults ON for tracks with \"LOOP\" in the name (the mode music). "
         "Leave it OFF for one-shot sound effects and callouts.")
 
+    _AUDIO_KEEP_TIP_TEXT = (
+        "Keep this replacement's full length.\n\n"
+        "By default every track is trimmed (or padded) to its original slot "
+        "length on Write. Tick Full to skip that for this one slot, so a longer "
+        "replacement plays at its full length.\n\n"
+        "The file validates and boots at any length (the game's checksums are "
+        "re-forged regardless of size). Whether it actually plays to the end is "
+        "up to the game: best for a cue nothing plays over — e.g. the "
+        "end-of-game track before attract — since the show may still cut it "
+        "short. Test on the machine.")
+
     def _audio_on_tree_motion(self, event):
-        """Show the Loop-column explainer tooltip while hovering over it."""
+        """Show the Loop- or Full-column explainer tooltip while hovering it."""
         tree = self._audio_tree
-        # Only when the Loop column is actually shown (BOF).
-        disp = tree["displaycolumns"]
-        if disp not in ("#all", ()) and "loop" not in disp:
-            self._hide_audio_loop_tip()
-            return
         region = tree.identify_region(event.x, event.y)
-        col = tree.identify_column(event.x)
-        # Resolve the display column id to its name (robust to displaycolumns).
-        cols = tree["columns"] if disp in ("#all", ()) else disp
-        name = None
-        if col and col != "#0":
-            i = int(col[1:]) - 1
-            if 0 <= i < len(cols):
-                name = cols[i]
-        if region in ("cell", "heading") and name == "loop":
-            self._show_audio_loop_tip(event)
+        name = (self._audio_tree_col_name(tree.identify_column(event.x))
+                if region in ("cell", "heading") else None)
+        if name == "loop":
+            self._show_audio_loop_tip(event, self._AUDIO_LOOP_TIP_TEXT)
+        elif name == "keep":
+            self._show_audio_loop_tip(event, self._AUDIO_KEEP_TIP_TEXT)
         else:
             self._hide_audio_loop_tip()
 
-    def _show_audio_loop_tip(self, event):
+    def _show_audio_loop_tip(self, event, text=None):
         if self._audio_loop_tip is not None:
             return
         try:
@@ -2189,7 +2252,7 @@ class MainWindow:
                 f"+{event.x_root + 14}+{event.y_root + 18}")
             tip.configure(background=c["tooltip_bg"])
             tk.Label(
-                tip, text=self._AUDIO_LOOP_TIP_TEXT,
+                tip, text=text or self._AUDIO_LOOP_TIP_TEXT,
                 background=c["tooltip_bg"], foreground=c["tooltip_fg"],
                 relief="solid", borderwidth=1, font=(_SANS_FONT, 9),
                 padx=6, pady=4, wraplength=360, justify=tk.LEFT).pack()
@@ -2615,10 +2678,12 @@ class MainWindow:
     # ---- Replace Audio: pending assignments (applied at Write time) --
 
     def pending_audio_assignments(self, assets_dir):
-        """Return ``(slots_by_rel, assignments, trim)`` of replacements the
-        user assigned for *assets_dir*, or ``None`` when there's nothing to
-        apply.  Called by the Write flow to auto-stage edits just before it
-        repacks — there is no manual "stage" step.
+        """Return ``(slots_by_rel, assignments, trim, keep_full)`` of
+        replacements the user assigned for *assets_dir*, or ``None`` when
+        there's nothing to apply.  *keep_full* is the set of rel_paths the user
+        ticked "Full" (keep full length) on — exempt from *trim*.  Called by the
+        Write flow to auto-stage edits just before it repacks — there is no
+        manual "stage" step.
 
         Guarded so it only fires when the folder being written is the same one
         the assignments were made against (so stale assignments from a
@@ -2637,8 +2702,30 @@ class MainWindow:
                        if rep and rel in self._audio_slots_by_rel}
         if not assignments:
             return None
+        keep_full = frozenset(
+            rel for rel in assignments
+            if self._audio_keep_full_flags.get(rel))
         return (dict(self._audio_slots_by_rel), assignments,
-                bool(self.audio_trim_var.get()))
+                bool(self.audio_trim_var.get()), keep_full)
+
+    def audio_keep_full_rels(self, assets_dir):
+        """Set of rel_paths the user marked "Full" (keep full length) AND
+        assigned a replacement for in *assets_dir*.  app.py passes this to the
+        write pipeline so those slots skip the trim-to-original-length.  Same
+        folder-match guard as pending_audio_assignments()."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(
+                mfr.capabilities, "audio_keep_length_override", False) \
+                or not assets_dir:
+            return frozenset()
+        scanned = self._audio_scan_dir or ""
+        if (os.path.normcase(os.path.normpath(assets_dir))
+                != os.path.normcase(os.path.normpath(scanned))):
+            return frozenset()
+        return frozenset(
+            rel for rel, rep in self._audio_assignments.items()
+            if rep and rel in self._audio_slots_by_rel
+            and self._audio_keep_full_flags.get(rel))
 
     def audio_loop_basenames(self, assets_dir):
         """Set of editable source filenames the user marked "Loop" (and
@@ -4436,6 +4523,7 @@ class MainWindow:
         if _live(self._audio_scan_dir):
             data["audio"] = dict(self._audio_assignments)
             data["audio_loop"] = dict(self._audio_loop_flags)
+            data["audio_keep"] = dict(self._audio_keep_full_flags)
             data["audio_trim"] = bool(self.audio_trim_var.get())
         if _live(self._video_scan_dir):
             data["video"] = dict(self._video_assignments)
@@ -5291,13 +5379,26 @@ class MainWindow:
         self._audio_slots_by_rel = {}
         self._audio_assignments = {}
         self._audio_loop_flags = {}
+        self._audio_keep_full_flags = {}
         self._audio_scan_dir = ""
         # Show the per-track "Loop" column only for plugins that support
-        # resource-level loop injection (BOF); hide it for everyone else.
+        # resource-level loop injection (BOF), and the "Full" (keep full length)
+        # column only for plugins with a per-slot length override (JJP).  They
+        # never show together; hide both for everyone else.
+        # The optional toggle column sits BEFORE the stretchy Replacement
+        # column, not after it.  ttk has no horizontal scroll, so when the
+        # total column width exceeds the widget it clips the rightmost column;
+        # keeping the narrow toggle ahead of the stretch column means it's
+        # always drawn and only Replacement (which stretches anyway) absorbs
+        # any overflow — the JJP "Full" / BOF "Loop" column no longer vanishes
+        # on initial load.
         if hasattr(self, "_audio_tree"):
             if getattr(caps, "audio_loop_inject", False):
-                self._audio_tree["displaycolumns"] = ("len", "fmt", "rep",
-                                                      "loop")
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "loop",
+                                                      "rep")
+            elif getattr(caps, "audio_keep_length_override", False):
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "keep",
+                                                      "rep")
             else:
                 self._audio_tree["displaycolumns"] = ("len", "fmt", "rep")
         self._audio_clear_preview()
@@ -5317,14 +5418,28 @@ class MainWindow:
             if hasattr(self, "_audio_trim_tip"):
                 if forces:
                     note = (mfr.audio_length_note() or "").strip()
-                    self._audio_trim_tip.text = (
-                        "Always on for this format — it can't be turned off.\n\n"
-                        "Write re-encodes each replacement into the original "
-                        "sound's exact slot in place (size-neutral), so every "
-                        "replacement is automatically fit to the original "
-                        "length; a different length would strand every later "
-                        "offset."
-                        + (("\n\n" + note) if note else ""))
+                    # Plugins that ALSO offer a per-slot "Full" override (JJP)
+                    # aren't size-neutral — they trim by default but a longer
+                    # file is valid; don't claim the size-neutral rationale for
+                    # them (it contradicts the Full column).  The size-neutral
+                    # wording is only true for in-place re-encoders (Spike 2).
+                    if getattr(caps, "audio_keep_length_override", False):
+                        self._audio_trim_tip.text = (
+                            "On by default — every replacement is trimmed or "
+                            "padded to its original slot length on Write.\n\n"
+                            "To keep one track's full length instead, tick the "
+                            "“Full” box on that slot in the list."
+                            + (("\n\n" + note) if note else ""))
+                    else:
+                        self._audio_trim_tip.text = (
+                            "Always on for this format — it can't be turned "
+                            "off.\n\n"
+                            "Write re-encodes each replacement into the original "
+                            "sound's exact slot in place (size-neutral), so "
+                            "every replacement is automatically fit to the "
+                            "original length; a different length would strand "
+                            "every later offset."
+                            + (("\n\n" + note) if note else ""))
                 else:
                     self._audio_trim_tip.text = (
                         "When on, a replacement longer or shorter than the "

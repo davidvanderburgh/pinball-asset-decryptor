@@ -142,18 +142,24 @@ def xor_keystream(data, prng):
     """XOR data with PRNG keystream in little-endian byte order.
 
     This is symmetric: encrypt and decrypt are the same operation.
+
+    The keystream is generated 8 bytes (one rand64) at a time, packed in
+    one struct.pack call, then XORed against the whole buffer as a single
+    big integer.  This replaces a per-byte Python loop (which dominated
+    decrypt time on large graphics/audio files) with C-speed operations;
+    output is bit-for-bit identical.  rand64() itself is inherently serial,
+    so per-file parallelism (the decrypt pipeline) is the other half of the
+    speedup.
     """
-    result = bytearray(len(data))
-    pos = 0
     length = len(data)
-    while pos < length:
-        k = prng.rand64()
-        k_bytes = struct.pack('<Q', k)
-        chunk = min(8, length - pos)
-        for b in range(chunk):
-            result[pos + b] = data[pos + b] ^ k_bytes[b]
-        pos += 8
-    return bytes(result)
+    if length == 0:
+        return b''
+    n_words = (length + 7) >> 3
+    rand64 = prng.rand64
+    keystream = struct.pack('<%dQ' % n_words,
+                            *[rand64() for _ in range(n_words)])[:length]
+    x = int.from_bytes(data, 'little') ^ int.from_bytes(keystream, 'little')
+    return x.to_bytes(length, 'little')
 
 
 def decrypt_file(encrypted_data, filler_size, path):

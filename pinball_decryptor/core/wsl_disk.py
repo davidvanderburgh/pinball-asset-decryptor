@@ -32,11 +32,26 @@ button there.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def _gib(n):
+    """Short binary-GiB string for user-facing messages (``12.0 GiB``)."""
+    return "%.1f GiB" % (n / 1024 ** 3) if n is not None else "unknown"
+
+
+def _decode_wsl(b):
+    """Decode wsl.exe output, which is UTF-16-LE (utf-8 on odd configs)."""
+    if not b:
+        return ""
+    if b"\x00" in b:
+        return b.decode("utf-16-le", errors="replace")
+    return b.decode("utf-8", errors="replace")
 
 # Top-level staging path prefixes our WSL pipelines create.  A scanned entry
 # must start with one of these (and contain no shell metacharacters) before we
@@ -472,3 +487,121 @@ def reclaim(progress=None):
     except OSError:
         after = before
     return max(0, before - after)
+
+
+# ---------------------------------------------------------------------------
+# Resize the virtual disk (grow OR shrink -- the small-WSL extract wall)
+# ---------------------------------------------------------------------------
+
+def host_free_bytes():
+    """Free bytes on the Windows drive that backs the WSL ``.vhdx`` (or None).
+
+    Growing the disk can only ever be backed by this drive's free space, so the
+    resize UI uses it to cap how large a target it offers.
+    """
+    _, vhdx = _default_distro_vhdx()
+    if not vhdx:
+        return None
+    try:
+        return shutil.disk_usage(os.path.dirname(vhdx)).free
+    except OSError:
+        return None
+
+
+def resize_supported():
+    """``(ok, message)`` -- whether ``wsl --manage --resize`` is available.
+
+    Added in WSL 2.x; older ``wsl.exe`` builds (or the in-box Windows 10 store
+    stub) don't have it, in which case resizing isn't offered.  We probe the
+    help text rather than parse a version so it works across builds.
+    """
+    if not is_supported():
+        return False, "Resizing the WSL disk is only available on Windows."
+    try:
+        proc = subprocess.run(["wsl", "--help"], capture_output=True,
+                              timeout=20, creationflags=_CREATE_FLAGS)
+    except FileNotFoundError:
+        return False, "WSL is not installed."
+    except Exception as e:  # noqa: BLE001
+        return False, f"WSL is not responding: {e}"
+    help_text = _decode_wsl(proc.stdout) + _decode_wsl(proc.stderr)
+    if "--resize" in help_text:
+        return True, "resize available"
+    return False, ("This WSL version can't resize its disk from the app "
+                   "(needs WSL 2's `--manage --resize`). Update WSL with "
+                   "`wsl --update`, then reopen this window.")
+
+
+def resize_disk(new_size_bytes, progress=None):
+    """Grow or shrink the default distro's virtual disk to *new_size_bytes*.
+
+    Drives ``wsl --manage <distro> --resize``, which resizes the ``.vhdx`` *and*
+    its ext4 filesystem in one supported step -- safer than hand-driving
+    ``diskpart`` + ``resize2fs``, and (unlike compacting) it does **not** need
+    Administrator.  Growing is bounded by the host drive's free space; shrinking
+    can only go down to just above the bytes WSL already uses, so we validate
+    that up front and raise a clear error rather than let the resize fail
+    mid-flight.  Returns the new :func:`usage` dict.
+    """
+    ok, msg = resize_supported()
+    if not ok:
+        raise WslDiskError(msg)
+    name, _vhdx = _default_distro_vhdx()
+    if not name:
+        raise WslDiskError("Could not identify the default WSL distro, so "
+                           "resizing isn't available.")
+
+    used = usage()["used"]
+    new_size_bytes = int(new_size_bytes)
+    # Never below what's in use (+1 GiB slack for filesystem metadata).  WSL's
+    # own offline resize2fs would refuse anyway, but a pre-check gives a far
+    # clearer message than its raw error.
+    floor = used + 1024 ** 3
+    if new_size_bytes < floor:
+        raise WslDiskError(
+            "Can't resize to %s -- WSL is already using %s. Choose at least "
+            "%s." % (_gib(new_size_bytes), _gib(used), _gib(floor)))
+
+    mb = max(1, new_size_bytes // (1024 ** 2))
+
+    # `wsl --manage --resize` runs an offline `e2fsck` before resizing.  If the
+    # ext4 journal wasn't cleanly flushed (a not-uncommon state even right after
+    # a `wsl --shutdown`), e2fsck *recovers the journal* and exits non-zero,
+    # which `--manage` reports as a generic "Failed to resize disk" / E_FAIL.
+    # The recovery is persisted, so a second attempt sees a clean filesystem and
+    # succeeds -- the documented "run it twice" behaviour.  So shut WSL down and
+    # try up to twice, surfacing the error only if the retry also fails.
+    last_out = ""
+    for attempt in (1, 2):
+        if progress:
+            progress("Shutting down WSL…")
+        try:
+            subprocess.run(["wsl", "--shutdown"], capture_output=True,
+                           timeout=120, creationflags=_CREATE_FLAGS)
+        except Exception as e:  # noqa: BLE001
+            raise WslDiskError(f"Could not shut down WSL: {e}")
+
+        if progress:
+            progress("Resizing the virtual disk (this can take a few "
+                     "minutes)…" if attempt == 1
+                     else "Filesystem journal recovered — retrying the "
+                          "resize…")
+        try:
+            proc = subprocess.run(
+                ["wsl", "--manage", name, "--resize", f"{mb}MB"],
+                capture_output=True, timeout=1800, creationflags=_CREATE_FLAGS)
+        except subprocess.TimeoutExpired as e:
+            raise WslDiskError("The resize timed out after 30 minutes.") from e
+        if proc.returncode == 0:
+            break
+        last_out = (_decode_wsl(proc.stdout) + _decode_wsl(proc.stderr)).strip()
+    else:
+        raise WslDiskError(
+            "WSL could not resize the disk:\n"
+            + (last_out or "wsl --manage failed twice.")
+            + "\n\nClose anything using WSL (terminals, Docker Desktop, "
+              "VS Code), then try again.")
+
+    if progress:
+        progress("Verifying new size…")
+    return usage()

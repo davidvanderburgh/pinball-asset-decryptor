@@ -614,8 +614,13 @@ class App:
                 **extra_kwargs,
             )
         # Live per-sound decode progress (Stern) updates keyed log lines in
-        # place; harmless for plugins that never emit them.
-        self.pipeline.set_log_line_cb(self._post_log_line)
+        # place; harmless for plugins that never emit them.  Guard the call:
+        # the JJP pipelines are ported standalone classes that don't inherit
+        # BasePipeline, so they lack this hook — calling it unconditionally
+        # raised AttributeError here on the main thread *before* the worker
+        # thread started, leaving a phantom "running" UI (no worker, no log).
+        if hasattr(self.pipeline, "set_log_line_cb"):
+            self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _maybe_wrap_done_for_transcribe(self, original_done_cb, output_path):
@@ -782,7 +787,10 @@ class App:
             **self._collect_asset_filter_kwargs(),
             **self._collect_extract_category_kwargs(),
         )
-        self.pipeline.set_log_line_cb(self._post_log_line)
+        # Guard: non-BasePipeline plugins (e.g. JJP) lack this hook — see the
+        # matching call in the basic-extract path above.
+        if hasattr(self.pipeline, "set_log_line_cb"):
+            self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _collect_asset_filter_kwargs(self):
@@ -943,6 +951,11 @@ class App:
             write_kwargs["loop_names"] = self.window.audio_loop_basenames(
                 assets_dir)
 
+        if getattr(self._current_mfr.capabilities,
+                   "audio_keep_length_override", False):
+            write_kwargs["keep_full_length_names"] = (
+                self.window.audio_keep_full_rels(assets_dir))
+
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -1019,10 +1032,16 @@ class App:
         self.window.reset_steps(mode="write")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        ssd_write_kwargs = {}
+        if getattr(self._current_mfr.capabilities,
+                   "audio_keep_length_override", False):
+            ssd_write_kwargs["keep_full_length_names"] = (
+                self.window.audio_keep_full_rels(assets_dir))
         self.pipeline = self._current_mfr.make_direct_ssd_write_pipeline(
             device_path, assets_dir,
             log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override,
+            **ssd_write_kwargs,
         )
         threading.Thread(
             target=self._run_pipeline_with_audio, args=(assets_dir,),
@@ -1419,7 +1438,7 @@ class App:
         pend = self.window.pending_audio_assignments(assets_dir)
         if not pend:
             return (0, 0, [])
-        slots_by_rel, assignments, trim = pend
+        slots_by_rel, assignments, trim, keep_full = pend
         from .core.audio_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
@@ -1428,7 +1447,7 @@ class App:
         try:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb,
-                assets_dir=assets_dir)
+                assets_dir=assets_dir, keep_full_rels=keep_full)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} audio replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

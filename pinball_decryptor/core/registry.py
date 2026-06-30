@@ -115,6 +115,16 @@ class Capabilities:
     # stops it on the next song change).  app.py passes the set of looped
     # slot filenames to make_write_pipeline as ``loop_names``.
     audio_loop_inject: bool = False
+    # Per-slot "keep full length" override: surfaces a "Full" checkbox column on
+    # the Replace-Audio tab.  Only meaningful for plugins that otherwise force a
+    # length match (audio_forces_length_match), where it lets the user exempt
+    # individual slots from the trim-to-original-length so a longer replacement
+    # plays at its full length.  Used by JJP: its Write trims every track to the
+    # original slot length by default, but a slot the game doesn't immediately
+    # play another sound over (e.g. the end-of-game cue before attract) can hold
+    # a longer track.  app.py passes the set of exempt slot paths to the write
+    # pipeline as ``keep_full_length_names`` and to staging.
+    audio_keep_length_override: bool = False
     # Optional WPC-DMD decode pass: surfaces a "Decode DMD scenes
     # (experimental, extract-only)" checkbox on the Extract tab.
     # When True, app.py passes ``decode_dmd`` to the extract factory.

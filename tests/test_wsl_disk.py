@@ -106,3 +106,107 @@ def test_scan_staging_parses_du(monkeypatch):
 ])
 def test_fmt(n, expected):
     assert _fmt(n) == expected
+
+
+# --- resize (wsl --manage --resize) ----------------------------------------
+
+GiB = 1024 ** 3
+
+
+def test_decode_wsl_utf16_and_utf8():
+    assert wsl_disk._decode_wsl("hi".encode("utf-16-le")) == "hi"
+    assert wsl_disk._decode_wsl(b"plain") == "plain"
+    assert wsl_disk._decode_wsl(b"") == ""
+
+
+def _patch_resize(monkeypatch, used_bytes, recorder):
+    """Wire resize_disk's deps: supported, distro name, usage, subprocess."""
+    monkeypatch.setattr(wsl_disk, "resize_supported", lambda: (True, "ok"))
+    monkeypatch.setattr(wsl_disk, "_default_distro_vhdx",
+                        lambda: ("Ubuntu", r"C:\wsl\ext4.vhdx"))
+    monkeypatch.setattr(
+        wsl_disk, "usage",
+        lambda: {"total": 8 * GiB, "used": used_bytes,
+                 "free": 8 * GiB - used_bytes, "pct": 50})
+
+    class _Proc:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    def _run(cmd, **kw):
+        recorder.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(wsl_disk.subprocess, "run", _run)
+
+
+def test_resize_rejects_below_used(monkeypatch):
+    calls = []
+    _patch_resize(monkeypatch, used_bytes=6 * GiB, recorder=calls)
+    # Floor is used + 1 GiB = 7 GiB; ask for 4 GiB.
+    with pytest.raises(wsl_disk.WslDiskError) as ei:
+        wsl_disk.resize_disk(4 * GiB)
+    assert "already using" in str(ei.value)
+    # Nothing destructive may have run (no shutdown, no --manage).
+    assert calls == []
+
+
+def test_resize_builds_manage_command(monkeypatch):
+    calls = []
+    _patch_resize(monkeypatch, used_bytes=2 * GiB, recorder=calls)
+    out = wsl_disk.resize_disk(50 * GiB)
+    # Must shut WSL down first, then resize the *named* distro in MB.
+    assert ["wsl", "--shutdown"] == calls[0]
+    manage = next(c for c in calls if "--manage" in c)
+    assert manage == ["wsl", "--manage", "Ubuntu", "--resize",
+                      f"{50 * 1024}MB"]
+    # Returns the post-resize usage dict (our stubbed usage()).
+    assert out["total"] == 8 * GiB
+
+
+def test_resize_retries_after_journal_recovery(monkeypatch):
+    """First --manage fails with e2fsck journal recovery; retry succeeds."""
+    monkeypatch.setattr(wsl_disk, "resize_supported", lambda: (True, "ok"))
+    monkeypatch.setattr(wsl_disk, "_default_distro_vhdx",
+                        lambda: ("Ubuntu", r"C:\wsl\ext4.vhdx"))
+    monkeypatch.setattr(
+        wsl_disk, "usage",
+        lambda: {"total": 100 * GiB, "used": 2 * GiB,
+                 "free": 98 * GiB, "pct": 2})
+
+    manage_calls = {"n": 0}
+
+    class _P:
+        def __init__(self, rc, out=b""):
+            self.returncode = rc
+            self.stdout = out
+            self.stderr = b""
+
+    def _run(cmd, **kw):
+        if "--manage" in cmd:
+            manage_calls["n"] += 1
+            if manage_calls["n"] == 1:
+                return _P(1, "/dev/sdd: recovering journal".encode("utf-16-le"))
+            return _P(0)
+        return _P(0)  # --shutdown
+
+    monkeypatch.setattr(wsl_disk.subprocess, "run", _run)
+    out = wsl_disk.resize_disk(50 * GiB)
+    assert manage_calls["n"] == 2          # retried exactly once
+    assert out["total"] == 100 * GiB        # succeeded
+
+
+def test_resize_surfaces_wsl_error(monkeypatch):
+    _patch_resize(monkeypatch, used_bytes=2 * GiB, recorder=[])
+
+    class _Bad:
+        returncode = 1
+        stdout = "no space on host".encode("utf-16-le")
+        stderr = b""
+
+    monkeypatch.setattr(wsl_disk.subprocess, "run",
+                        lambda cmd, **kw: _Bad())
+    with pytest.raises(wsl_disk.WslDiskError) as ei:
+        wsl_disk.resize_disk(50 * GiB)
+    assert "no space on host" in str(ei.value)

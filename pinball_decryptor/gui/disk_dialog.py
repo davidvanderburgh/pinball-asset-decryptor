@@ -157,6 +157,28 @@ class DiskManagerDialog:
             state="disabled")
         self._reclaim_btn.pack(side="left")
 
+        ttk.Separator(body, orient="horizontal").pack(fill="x", pady=14)
+
+        # ---- Resize section (grow/shrink the WSL .vhdx) ---------------
+        ttk.Label(body, text="Resize WSL disk",
+                  font=(self._sans, 10, "bold")).pack(anchor="w")
+        self._resize_lbl = ttk.Label(
+            body,
+            text=("Set how large the WSL virtual disk may grow. Increase it "
+                  "when an extract needs more room than WSL has (the biggest "
+                  "titles can need 20+ GiB); the disk only uses real space as "
+                  "it fills. Shrinking is allowed down to what's already in "
+                  "use. No Administrator needed."),
+            font=(self._sans, 9), foreground=th["gray"],
+            wraplength=620, justify="left")
+        self._resize_lbl.pack(anchor="w", pady=(0, 4))
+        zrow = ttk.Frame(body)
+        zrow.pack(fill="x")
+        self._resize_btn = ttk.Button(
+            zrow, text="Resize WSL disk…", command=self._resize,
+            state="disabled")
+        self._resize_btn.pack(side="left")
+
         # ---- Status + close -------------------------------------------
         self._status = ttk.Label(body, text="", font=(self._sans, 9),
                                   wraplength=620, justify="left")
@@ -267,6 +289,9 @@ class DiskManagerDialog:
         reclaim_ok = (not busy and self._wsl_ok and self._vhdx
                       and self._vhdx.get("path"))
         self._reclaim_btn.configure(state="normal" if reclaim_ok else "disabled")
+        # Resizing only needs a usable WSL distro (no .vhdx lookup / no admin).
+        self._resize_btn.configure(
+            state="normal" if (not busy and self._wsl_ok) else "disabled")
         if busy:
             self._clean_sel_btn.configure(state="disabled")
             self._clean_all_btn.configure(state="disabled")
@@ -549,6 +574,158 @@ class DiskManagerDialog:
             "Reclaimed",
             "Returned %s to Windows by compacting the WSL virtual disk."
             % _fmt(reclaimed), parent=self._dlg)
+        # Clear the operation flag so the follow-up _refresh isn't swallowed by
+        # its own `if self._busy: return` guard (which would leave the dialog
+        # stuck "busy" and warn on close).
+        self._busy = False
+        self._refresh()
+
+    # ------------------------------------------------------------------
+    # Resize (grow/shrink the .vhdx via `wsl --manage --resize`)
+    # ------------------------------------------------------------------
+    def _resize(self):
+        if self._busy:
+            return
+        if not self._wsl_ok:
+            messagebox.showinfo(
+                "WSL not available",
+                "There's no WSL distro to resize.", parent=self._dlg)
+            return
+        ok, msg = wsl_disk.resize_supported()
+        if not ok:
+            messagebox.showwarning("Resize not available", msg,
+                                   parent=self._dlg)
+            return
+        u = self._usage_wsl or {}
+        host_free = None
+        try:
+            host_free = wsl_disk.host_free_bytes()
+        except Exception:  # noqa: BLE001
+            pass
+        new_bytes = self._ask_new_size(
+            u.get("total"), u.get("used"), u.get("free"), host_free)
+        if not new_bytes:
+            return
+        if not messagebox.askyesno(
+                "Resize WSL disk",
+                "Resize the WSL virtual disk to %s?\n\n• WSL will be shut down "
+                "— close any running extract or build first.\n• It can take a "
+                "few minutes.\n\nContinue?" % _fmt(new_bytes),
+                parent=self._dlg):
+            return
+        self._set_busy(True, "Resizing…")
+
+        def _worker():
+            try:
+                usage = wsl_disk.resize_disk(
+                    new_bytes, progress=self._progress_from_thread)
+                self._after(self._after_resize, usage, None)
+            except Exception as e:  # noqa: BLE001
+                self._after(self._after_resize, None, str(e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _ask_new_size(self, total, used, free, host_free):
+        """Modal GB prompt; returns the chosen size in bytes, or None.
+
+        Bounds: a floor a couple GiB above what's in use (you can't discard
+        live data) and a ceiling of the current size plus the host drive's free
+        space (you can't back more than the Windows drive can hold).
+        """
+        th = self._theme
+        GiB = 1024 ** 3
+        cur_gib = int(round((total or 0) / GiB)) or 1
+        min_gib = max(1, int((used or 0) // GiB) + 2)
+        max_gib = None
+        if total is not None and host_free is not None:
+            max_gib = max(min_gib, int((total + host_free) // GiB))
+        result = {"bytes": None}
+
+        win = tk.Toplevel(self._dlg)
+        win.title("Resize WSL disk")
+        win.configure(bg=th["bg"])
+        win.transient(self._dlg)
+        frm = ttk.Frame(win, padding=16)
+        frm.pack(fill="both", expand=True)
+        ttk.Label(frm, text="Resize WSL disk",
+                  font=(self._sans, 12, "bold")).pack(anchor="w")
+        info = "Current: %s max, %s used, %s free." % (
+            _fmt(total), _fmt(used), _fmt(free))
+        if host_free is not None:
+            info += "\nWindows drive backing WSL has %s free." % _fmt(host_free)
+        ttk.Label(frm, text=info, font=(self._sans, 9),
+                  foreground=th["gray"], justify="left").pack(
+            anchor="w", pady=(2, 10))
+        row = ttk.Frame(frm)
+        row.pack(anchor="w")
+        ttk.Label(row, text="New size:", font=(self._sans, 10)).pack(
+            side="left")
+        var = tk.StringVar(value=str(cur_gib))
+        ent = ttk.Entry(row, width=8, textvariable=var)
+        ent.pack(side="left", padx=(6, 4))
+        ttk.Label(row, text="GB").pack(side="left")
+        bounds = "Allowed: %d – %s GB." % (
+            min_gib, max_gib if max_gib is not None else "?")
+        ttk.Label(frm, text=bounds, font=(self._sans, 8),
+                  foreground=th["gray"]).pack(anchor="w", pady=(4, 0))
+        err = ttk.Label(frm, text="", font=(self._sans, 9),
+                        foreground=th["error"], wraplength=360, justify="left")
+        err.pack(anchor="w", pady=(2, 0))
+
+        def _ok():
+            raw = var.get().strip()
+            try:
+                gib = int(float(raw))
+            except ValueError:
+                err.configure(text="Enter a whole number of GB.")
+                return
+            if gib < min_gib:
+                err.configure(text="Too small — WSL is using %s. Minimum "
+                              "%d GB." % (_fmt(used), min_gib))
+                return
+            if max_gib is not None and gib > max_gib:
+                err.configure(text="Larger than the host drive can back. "
+                              "Maximum %d GB." % max_gib)
+                return
+            result["bytes"] = gib * GiB
+            win.destroy()
+
+        brow = ttk.Frame(frm)
+        brow.pack(fill="x", pady=(14, 0))
+        ttk.Button(brow, text="Cancel", command=win.destroy).pack(side="right")
+        ttk.Button(brow, text="Resize", command=_ok).pack(
+            side="right", padx=(0, 8))
+        ent.focus_set()
+        ent.select_range(0, "end")
+        win.bind("<Return>", lambda _e: _ok())
+        win.bind("<Escape>", lambda _e: win.destroy())
+        win.update_idletasks()
+        win.grab_set()
+        self._dlg.wait_window(win)
+        return result["bytes"]
+
+    def _after_resize(self, usage, err):
+        if not self._alive():
+            return
+        if err:
+            self._set_busy(False, "")
+            messagebox.showerror("Resize failed", err, parent=self._dlg)
+            return
+        # Update the WSL usage bar from the authoritative post-resize numbers
+        # *before* the confirmation pops, so the bar already matches behind it.
+        if usage:
+            self._usage_wsl = usage
+            self._render_wsl_usage()
+            self._dlg.update_idletasks()
+        messagebox.showinfo(
+            "Resized",
+            "WSL disk is now %s (%s free)." % (
+                _fmt(usage.get("total")), _fmt(usage.get("free"))),
+            parent=self._dlg)
+        # Clear the operation flag first, else the follow-up _refresh hits its
+        # own `if self._busy: return` guard and the dialog stays stuck "busy".
+        self._busy = False
+        # Full re-scan reconciles staging + the Reclaim section's .vhdx numbers.
         self._refresh()
 
     # ------------------------------------------------------------------

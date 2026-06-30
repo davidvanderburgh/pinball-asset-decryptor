@@ -214,13 +214,18 @@ def stage_replacement(slot: AudioSlot, replacement_path: str,
 def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
-                       log_cb=None, progress_cb=None, assets_dir=None):
+                       log_cb=None, progress_cb=None, assets_dir=None,
+                       keep_full_rels=None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their AudioSlot.  Returns
     ``(staged, failures)`` where *failures* is a list of ``(rel_path, error)``.
     Optional *log_cb(text, level)* and *progress_cb(current, total, desc)*
     drive the GUI log + progress bar.
+
+    *keep_full_rels*, when given, is a set of rel_paths exempted from
+    *trim_to_length* — those slots are always staged at their replacement's full
+    length (the per-slot "keep full length" override; see the JJP plugin).
 
     *assets_dir*, when given, enables the pristine-original snapshot: the first
     time each slot is overwritten its baseline-matching bytes are backed up under
@@ -235,6 +240,7 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
     total = len(items)
     staged = 0
     failures: List = []
+    keep_full = frozenset(keep_full_rels or ())
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
 
     for i, (rel, rep) in enumerate(items):
@@ -245,7 +251,8 @@ def stage_replacements(slots_by_rel: Dict[str, AudioSlot],
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
-        ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length)
+        slot_trim = trim_to_length and rel not in keep_full
+        ok, detail = stage_replacement(slot, rep, trim_to_length=slot_trim)
         if ok:
             staged += 1
             if log_cb:

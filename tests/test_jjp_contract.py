@@ -19,6 +19,38 @@ import pytest
 JJP_PKG = "pinball_decryptor.plugins.jjp"
 
 
+def test_jjp_extract_pipeline_start_is_attr_safe():
+    """Regression guard — JJP Extract "hangs forever" (phantom running UI).
+
+    ``app.py`` starts every extract with::
+
+        if hasattr(self.pipeline, "set_log_line_cb"):
+            self.pipeline.set_log_line_cb(...)
+        threading.Thread(target=self.pipeline.run).start()
+
+    The JJP pipelines are ported standalone classes that do NOT inherit
+    ``BasePipeline``, so they lack ``set_log_line_cb``.  Before the guard,
+    calling it unconditionally raised ``AttributeError`` on the main thread
+    *before* the worker thread was started — the extract never ran, no log
+    appeared, and the UI sat in a phantom "running" state forever.
+
+    This builds the real extract pipeline and asserts the guarded start
+    sequence completes without raising (whether or not the hook exists).
+    """
+    from pinball_decryptor.plugins.jjp.manufacturer import JJPManufacturer
+
+    noop = lambda *a, **k: None
+    pipeline = JJPManufacturer().make_extract_pipeline(
+        r"C:\fake.iso", r"C:\out", noop, noop, noop, noop,
+        extract_graphics=True, extract_sounds=True, full_dump=False)
+
+    # The exact guarded pattern app.py uses — must not raise.
+    if hasattr(pipeline, "set_log_line_cb"):
+        pipeline.set_log_line_cb(noop)
+    # And the worker entry point the GUI threads must exist.
+    assert callable(pipeline.run)
+
+
 def test_jjp_decrypt_modules_loadable_via_get_data():
     """Regression guard — macOS "a bytes-like object is required, not
     'NoneType'" (TonyScoots report).

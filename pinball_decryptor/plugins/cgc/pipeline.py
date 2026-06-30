@@ -298,6 +298,30 @@ class ExtractPipeline(BasePipeline):
                     f"debugfs rdump produced no files. Output:\n{rdump_out}")
             self._log(f"  Staged {file_count} file(s).", "info")
 
+            # Guard against silent truncation: debugfs rdump exits 0 even
+            # when it runs out of staging-disk space mid-copy, leaving
+            # individual files truncated or 0-byte (this is what produced
+            # an "empty" pfspeech.bnk and a missing uncensored-speech
+            # folder). Compare every file in the title's data directory
+            # against its true on-disk (inode) size and abort if any came
+            # up short, so the user gets a clear disk-space error instead
+            # of a quietly-incomplete extraction.
+            src_data = f"{info['asset_subtree']}/{info['data_dir']}"
+            staged_data = (f"{rdump_stage_exec}/{subtree_basename}/"
+                           f"{info['data_dir']}")
+            short = _verify_staged_sizes(
+                self.executor, inner_exec, src_data, staged_data)
+            if short:
+                detail = "\n".join(
+                    f"    {n}: staged "
+                    f"{got if got >= 0 else 'MISSING'} of {sz:,} bytes"
+                    for n, sz, got in short)
+                raise PipelineError("Extract",
+                    "Some asset files were truncated or dropped during "
+                    "extraction — the staging disk ran out of space. Free "
+                    "up disk space on the staging drive and re-run "
+                    "Extract.\nAffected files:\n" + detail)
+
             self._log("Copying assets to output folder...", "info")
             host_stage = self._exec_to_host(rdump_stage_exec)
             host_nested = os.path.join(host_stage, subtree_basename)
@@ -512,20 +536,51 @@ class ExtractPipeline(BasePipeline):
         self._log(f"Decoding {len(bnks)} JPS sound bank(s) to WAV...",
                   "info")
         total_buffers = 0
+        failed = []
         for i, bnk_path in enumerate(sorted(bnks)):
             self._check_cancel()
             stem = os.path.splitext(os.path.basename(bnk_path))[0]
+            name = os.path.basename(bnk_path)
             target_dir = os.path.join(os.path.dirname(bnk_path), stem)
+            # Guard: a 0-byte .bnk never made it through extraction (the
+            # debugfs rdump / copy silently truncates files when the
+            # staging disk fills). Decoding it would emit a near-empty
+            # manifest and no WAVs, which looks like a successful run.
+            # Flag it loudly instead.
+            size = os.path.getsize(bnk_path)
+            if size == 0:
+                self._log(
+                    f"  {name}: EMPTY (0 bytes) — this bank did not extract. "
+                    f"The staging disk likely ran out of space mid-copy. "
+                    f"Free disk space and re-run Extract to recover its "
+                    f"sounds.", "error")
+                failed.append(name)
+                self._progress(i + 1, len(bnks), f"{stem} (FAILED)")
+                continue
             try:
                 contents = extract_bnk(bnk_path, target_dir)
             except Exception as e:
-                self._log(f"  {os.path.basename(bnk_path)}: "
-                          f"decode failed ({e})", "error")
+                self._log(f"  {name}: decode failed ({e})", "error")
+                failed.append(name)
+                self._progress(i + 1, len(bnks), f"{stem} (FAILED)")
                 continue
             n = len(contents.buffers)
+            # Guard: a non-empty bank that yields zero sound buffers is
+            # truncated or in an unrecognized format. extract_bnk still
+            # writes an (empty) manifest and no WAVs — surface that as an
+            # error rather than letting it pass as "0 sound(s)".
+            if n == 0:
+                self._log(
+                    f"  {name}: decoded 0 sounds from {size:,} bytes — the "
+                    f"bank is truncated or in an unrecognized format. No "
+                    f"WAVs were written. Re-run Extract (with free disk "
+                    f"space) to recover its sounds.", "error")
+                failed.append(name)
+                self._progress(i + 1, len(bnks), f"{stem} (FAILED)")
+                continue
             dur_min = sum(b.duration_seconds for b in contents.buffers) / 60
             self._log(
-                f"  {os.path.basename(bnk_path)}: "
+                f"  {name}: "
                 f"{n} sound(s), {dur_min:.1f} min audio "
                 f"-> {os.path.basename(target_dir)}/",
                 "info")
@@ -534,6 +589,14 @@ class ExtractPipeline(BasePipeline):
                            f"{stem} ({n} sounds)")
         self._log(f"  Total: {total_buffers} sounds across "
                   f"{len(bnks)} bank(s).", "success")
+        if failed:
+            self._log(
+                f"  WARNING: {len(failed)} sound bank(s) did not decode: "
+                f"{', '.join(failed)}. Their sounds are MISSING from this "
+                f"extraction. This is almost always caused by the staging "
+                f"disk filling up during a Pulp Fiction extract (it is the "
+                f"largest title) — free up disk space and run Extract again.",
+                "error")
 
     def _extract_dcs_audio(self, info):
         """Decode Cactus Canyon's original Williams DCS audio (the 1998 Bally
@@ -1253,6 +1316,58 @@ def _copy_tree_into(src_root, dst_root, log_cb=None, progress_cb=None):
             shutil.copyfile(abs_src, abs_dst)
         if progress_cb and (i % 50 == 0 or i == total - 1):
             progress_cb(i + 1, total, rel)
+
+
+def _verify_staged_sizes(executor, image_exec, src_dir, staged_dir):
+    """Compare debugfs source inode sizes against the staged copies for
+    every regular file in *src_dir* (one ext4 directory).
+
+    Returns a list of ``(name, source_size, staged_size)`` for any file
+    that is missing (``staged_size == -1``) or smaller than its source.
+    That short-file signature is exactly what a ``debugfs rdump`` that ran
+    out of staging-disk space leaves behind — debugfs still exits 0, but
+    individual files come up truncated or 0-byte.
+
+    Best-effort: if the debugfs listing can't be parsed, returns ``[]``
+    rather than blocking an otherwise-good extraction. The loud
+    per-bank guard in ``_explode_jps_banks`` is the backstop.
+    """
+    ls_out = executor.run(
+        f"debugfs -R 'ls -l {src_dir}' {shlex.quote(image_exec)} 2>/dev/null",
+        timeout=120)
+    src = {}
+    for line in ls_out.splitlines():
+        toks = line.split()
+        # debugfs `ls -l`: inode mode (type) uid gid size date time name
+        # Regular files have a mode field beginning "100" (0100000);
+        # directories start "40", symlinks "120" — skip those.
+        if len(toks) < 9 or not toks[1].startswith("100"):
+            continue
+        try:
+            src[toks[-1]] = int(toks[5])
+        except (ValueError, IndexError):
+            continue
+    if not src:
+        return []
+    stat_out = executor.run(
+        f"find {staged_dir} -maxdepth 1 -type f -printf '%s %f\\n' "
+        f"2>/dev/null", timeout=60)
+    staged = {}
+    for line in stat_out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            try:
+                staged[parts[1]] = int(parts[0])
+            except ValueError:
+                pass
+    problems = []
+    for name, size in sorted(src.items()):
+        got = staged.get(name)
+        if got is None:
+            problems.append((name, size, -1))
+        elif got < size:
+            problems.append((name, size, got))
+    return problems
 
 
 def _quote_dbg(p):

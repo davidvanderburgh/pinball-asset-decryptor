@@ -476,7 +476,11 @@ class DecryptPipeline(_BasePipeline):
         self._progress(0, 100, "GPG decrypting...")
 
         fun_size = os.path.getsize(self.fun_path)
-        tmp_tar_wsl = f"/tmp/bof_{game_key}.tar.gz"
+        # Stage under /var/tmp, not /tmp: a large game's decrypted tarball +
+        # extracted tree can run to several GiB, and on WSL configs where
+        # systemd mounts /tmp as a RAM-backed tmpfs that staging truncates once
+        # it exceeds RAM.  /var/tmp is always on the persistent ext4 disk.
+        tmp_tar_wsl = f"/var/tmp/bof_{game_key}.tar.gz"
         try:
             with self._poll_file_progress(tmp_tar_wsl, fun_size, "Decrypting..."):
                 self.executor.run(
@@ -509,7 +513,7 @@ class DecryptPipeline(_BasePipeline):
             pass
         estimated_uncompressed = tar_size * 2 if tar_size else 0
 
-        tmp_extract_wsl = f"/tmp/bof_{game_key}_extracted"
+        tmp_extract_wsl = f"/var/tmp/bof_{game_key}_extracted"
         try:
             self.executor.run(
                 f"rm -rf {tmp_extract_wsl!r} && mkdir -p {tmp_extract_wsl!r}",
@@ -1442,7 +1446,7 @@ class ModifyPipeline(_BasePipeline):
 
         gdre_prefix = self._gdre_prefix()
         compiled = []
-        tmp_out = "/tmp/bof_gdc_compile"
+        tmp_out = "/var/tmp/bof_gdc_compile"
 
         for rel in gd_rels:
             src_wsl = f"{pck_dir_wsl}/{rel}"
@@ -1506,7 +1510,7 @@ class ModifyPipeline(_BasePipeline):
             # Convert source image to WebP lossless, get size, assemble ctex
             src_wsl = f"{pck_dir_wsl}/{rel_src}"
             dest_wsl = self.executor.to_exec_path(dest_abs)
-            tmp_webp = "/tmp/bof_tex.webp"
+            tmp_webp = "/var/tmp/bof_tex.webp"
             header_b64 = _b64.b64encode(bytes(header)).decode()
 
             try:
@@ -1560,8 +1564,8 @@ class ModifyPipeline(_BasePipeline):
 
         fun_wsl = self.executor.to_exec_path(self.original_fun)
         out_fun_wsl = self.executor.to_exec_path(self.output_fun_path)
-        tmp_tar_wsl = f"/tmp/bof_{game_key}_mod.tar.gz"
-        tmp_dir_wsl = f"/tmp/bof_{game_key}_repack"
+        tmp_tar_wsl = f"/var/tmp/bof_{game_key}_mod.tar.gz"
+        tmp_dir_wsl = f"/var/tmp/bof_{game_key}_repack"
 
         # Phase 0 — Decrypt original .fun → tar.gz → extract to temp dir.
         # Banded progress (0→100 across all 5 phases, never resetting):
@@ -1776,12 +1780,12 @@ class ModifyPipeline(_BasePipeline):
             else:
                 self._set_band(33, 78)   # GDRE patch owns 33–78%
                 pck_dir_wsl = self.executor.to_exec_path(pck_dir)
-                tmp_binary_wsl = f"/tmp/bof_{game_key}_patched.x86_64"
+                tmp_binary_wsl = f"/var/tmp/bof_{game_key}_patched.x86_64"
                 gdre_prefix = self._gdre_prefix()
 
                 # Write patch args to a temp script to avoid quoting / arg-length limits
                 import base64 as _b64
-                patch_script = f"/tmp/bof_{game_key}_patch.sh"
+                patch_script = f"/var/tmp/bof_{game_key}_patch.sh"
                 script_lines = [
                     "#!/bin/bash",
                     "set -e",
@@ -1874,7 +1878,7 @@ class ModifyPipeline(_BasePipeline):
         self._log("Repacking archive...", "info")
         self._bp(0, 100, "Creating tar.gz...")
 
-        repack_tar_wsl = f"/tmp/bof_{game_key}_repack.tar.gz"
+        repack_tar_wsl = f"/var/tmp/bof_{game_key}_repack.tar.gz"
         try:
             # Use * glob (not .) to avoid ./ prefix and ./ directory entry,
             # matching the original tar structure exactly.
@@ -1933,8 +1937,8 @@ class ModifyPipeline(_BasePipeline):
         try:
             self.executor.run(
                 f"rm -rf {tmp_tar_wsl!r} {tmp_dir_wsl!r} {repack_tar_wsl!r} "
-                f"/tmp/bof_{game_key}_patch.sh /tmp/bof_convert.gd "
-                f"/tmp/bof_tex.webp 2>/dev/null; true",
+                f"/var/tmp/bof_{game_key}_patch.sh /var/tmp/bof_convert.gd "
+                f"/var/tmp/bof_tex.webp 2>/dev/null; true",
                 timeout=30,
             )
         except Exception:

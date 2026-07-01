@@ -66,6 +66,8 @@ _ALLOWED_PREFIXES = (
     "/tmp/bof_",
     "/tmp/jjp_",
     "/tmp/pad_aaiw_",
+    "/var/tmp/cgc_stage_",
+    "/var/tmp/bof_",
     "/var/tmp/jjp_",
     "/var/tmp/pad_aaiw_",
 )
@@ -160,10 +162,14 @@ def is_running():
 def usage():
     """Return the WSL filesystem usage as ``{total, used, free, pct}`` (bytes).
 
-    ``pct`` is used/total as an int 0-100.  ``df`` the ``/tmp`` path itself so
-    we report the filesystem the staging actually lands on.
+    ``pct`` is used/total as an int 0-100.  ``df`` the ``/var/tmp`` path -- that
+    is the filesystem the WSL pipelines stage into, and it is always on the
+    persistent (resizable) ext4 disk.  We deliberately do NOT df ``/tmp``: on
+    WSL configs where systemd mounts ``/tmp`` as a RAM-backed ``tmpfs`` that
+    would report ~half of RAM instead of the disk, so the usage bar and the
+    resize UI would track a filesystem the disk resize can't grow (RTS).
     """
-    out = _wsl_bash("df -B1 --output=size,used,avail /tmp | tail -1",
+    out = _wsl_bash("df -B1 --output=size,used,avail /var/tmp | tail -1",
                     timeout=30)
     parts = out.split()
     if len(parts) < 3:

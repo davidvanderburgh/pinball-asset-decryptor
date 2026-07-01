@@ -19,7 +19,10 @@ from pinball_decryptor.gui.disk_dialog import _fmt
     ("/tmp/cgc_stage_afm_remake_4", "Chicago Gaming Company", "Afm Remake"),
     ("/tmp/cgc_stage_22680", "Chicago Gaming Company",
      "extract / write staging"),  # legacy pid-only form
+    ("/var/tmp/cgc_stage_pulp_fiction_22680", "Chicago Gaming Company",
+     "Pulp Fiction"),  # staging moved to /var/tmp (off tmpfs /tmp)
     ("/tmp/bof_dune_extracted", "Barrels of Fun", "Dune"),
+    ("/var/tmp/bof_dune_extracted", "Barrels of Fun", "Dune"),  # moved off tmpfs
     ("/tmp/bof_dune_repack.tar.gz", "Barrels of Fun", "Dune"),
     ("/tmp/bof_convert.gd", "Barrels of Fun", "build scratch"),
     ("/var/tmp/jjp_raw_Wonka-v03.03.img", "Jersey Jack Pinball",
@@ -80,6 +83,22 @@ def test_usage_parses_df(monkeypatch):
     u = wsl_disk.usage()
     assert u == {"total": 1000000000, "used": 250000000,
                  "free": 750000000, "pct": 25}
+
+
+def test_usage_measures_var_tmp_not_tmp(monkeypatch):
+    """Usage must df /var/tmp (the resizable disk), never /tmp (may be tmpfs).
+
+    On WSL configs with a systemd tmpfs /tmp, df-ing /tmp reports ~half of RAM
+    instead of the ext4 disk the resize grows (RTS's 7.58 GiB vs 15 GiB).
+    """
+    seen = []
+    monkeypatch.setattr(
+        wsl_disk, "_wsl_bash",
+        lambda cmd, timeout=30: seen.append(cmd) or "100 10 90\n")
+    wsl_disk.usage()
+    # Must df /var/tmp, not a bare /tmp path.
+    assert "/var/tmp" in seen[0]
+    assert " /tmp " not in seen[0]
 
 
 def test_scan_staging_parses_du(monkeypatch):

@@ -101,11 +101,19 @@ _DERIVED_SUBDIRS = (DMD_SUBDIR, DCS_SUBDIR, NEW_AUDIO_SUBDIR, ART_SUBDIR,
 EMMC_INNER_PATH = "/emmc.img"
 
 # Subtree under the staging dir where we keep extracted partition images.
-# Lives on the executor side (in WSL: /tmp/cgc_stage_<pid>/).
+# Lives on the executor side (in WSL: /var/tmp/cgc_stage_<pid>/).
 
 
 def _stage_dir_for(run_id, game_key=None):
     """Return an executor-side staging path; safe for parallel runs.
+
+    Staged under ``/var/tmp`` (not ``/tmp``): the big titles peak at 20+ GiB of
+    intermediate images, and on WSL configs where systemd mounts ``/tmp`` as a
+    RAM-backed ``tmpfs`` (sized to ~half of RAM) that staging truncates the
+    moment it exceeds RAM -- and no amount of resizing the WSL *disk* can grow a
+    ``tmpfs`` (RTS: 15 GiB ext4 root, but ``/tmp`` was a 7.58 GiB tmpfs).
+    ``/var/tmp`` is always on the persistent ext4 disk, so staging there uses
+    real (and resizable) disk space.
 
     The game key is folded into the name (``cgc_stage_<game>_<pid>``) so a
     crashed run's leftover staging is attributable per-game in the WSL
@@ -113,8 +121,8 @@ def _stage_dir_for(run_id, game_key=None):
     ``cgc_stage_<pid>`` form, still recognised by the scanner.
     """
     if game_key:
-        return f"/tmp/cgc_stage_{game_key}_{run_id}"
-    return f"/tmp/cgc_stage_{run_id}"
+        return f"/var/tmp/cgc_stage_{game_key}_{run_id}"
+    return f"/var/tmp/cgc_stage_{run_id}"
 
 
 # ---------------------------------------------------------------------------

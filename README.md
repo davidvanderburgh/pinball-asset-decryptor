@@ -69,6 +69,37 @@ consult a lawyer rather than responding solo — organizations like the
 EFF have taken §1201 cases involving exactly this kind of repair and
 interoperability work.
 
+### Manufacturer license terms (EULAs)
+
+Separate from copyright and the DMCA, the software on some machines is
+licensed to the owner under an end-user license agreement (EULA) — a
+private contract. Manufacturer EULAs are often written far more broadly
+than copyright law requires and may **prohibit reverse engineering,
+modification, creating derivative works, circumventing security
+measures, and using or distributing "unauthorized" content or
+software** — which can cover both modding a machine and building or
+sharing a tool that helps others do so. A contract you agreed to can
+restrict things that copyright law alone would permit, and the fair-use
+/ interoperability framing above does **not** override it.
+
+Stern Pinball's EULA is a notable example: it expressly bars owners
+from reverse engineering the software, defeating its security measures,
+and creating or **assisting anyone else** in creating unauthorized
+content or software for a Stern machine. Using this tool on a Stern
+machine you own would be inconsistent with those terms, and Stern warns
+that unauthorized content or circumvention **may cause the machine to
+stop working permanently or lose access to its online network**, either
+immediately or after a later official update.
+
+This project does not claim to be compatible with any manufacturer's
+EULA. Whether a EULA applies to you, and whether its broadest clauses
+are enforceable where you live, are legal questions that vary by
+jurisdiction — decide for yourself, on a machine you own, and accept
+that modding it may violate the license and disable the machine or its
+online features. Breach of a EULA is a civil matter between you and the
+manufacturer; it is a different (and generally lower) category of risk
+than the criminal provisions discussed above, but it is real.
+
 No warranty. Use entirely at your own risk. **Always make a complete,
 working backup before modifying a machine** — a failed, interrupted, or
 incorrect update can leave it unbootable ("bricked"), and without a

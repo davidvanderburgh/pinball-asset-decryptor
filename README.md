@@ -42,6 +42,33 @@ firmware is not supported by this tool and is **your responsibility to
 avoid** — those activities have separate legal considerations the tool
 does not address.
 
+### A note on the DMCA
+
+Some formats this tool reads sit behind a technical protection measure,
+so U.S. users should be aware of the DMCA's anti-circumvention rules
+(17 U.S.C. §1201). Two design choices keep this project on the
+defensible side of that line:
+
+- **It ships no keys and no protected content.** Where a manufacturer
+  key is involved, the tool either derives it or reads it from *your
+  own* hardware/media at runtime — nothing secret is embedded in, or
+  distributed by, this repository.
+- **Its purpose is interoperability and repair of a device you own** —
+  the use case the Copyright Office has repeatedly recognized in its
+  triennial §1201 exemptions for software-enabled devices, and the
+  spirit of Sega v. Accolade. This is a non-commercial hobbyist utility;
+  it is not sold and derives no revenue from circumvention.
+
+None of this is legal advice, and §1201 is broad — its criminal
+provisions (§1204) turn on *willful* circumvention *for commercial
+advantage or private financial gain*, which this project is built to
+stay clear of. Redistributing decrypted game assets, keys, or ROMs is
+where real exposure lives; the tool doesn't do that and you shouldn't
+either. If you ever receive a takedown notice or cease-and-desist,
+consult a lawyer rather than responding solo — organizations like the
+EFF have taken §1201 cases involving exactly this kind of repair and
+interoperability work.
+
 No warranty. Use entirely at your own risk. **Always make a complete,
 working backup before modifying a machine** — a failed, interrupted, or
 incorrect update can leave it unbootable ("bricked"), and without a

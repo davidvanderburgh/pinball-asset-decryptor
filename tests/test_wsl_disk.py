@@ -197,6 +197,46 @@ def test_resize_retries_after_journal_recovery(monkeypatch):
     assert out["total"] == 100 * GiB        # succeeded
 
 
+def test_resize_grows_filesystem_to_fill(monkeypatch):
+    """After the .vhdx grows, resize2fs must grow the ext4 to fill it.
+
+    Some WSL builds resize only the container, not the filesystem inside (RTS:
+    resized to 200 GB, df still 7.58 GiB), so resize_disk drives resize2fs on
+    the root device itself.
+    """
+    monkeypatch.setattr(wsl_disk, "resize_supported", lambda: (True, "ok"))
+    monkeypatch.setattr(wsl_disk, "_default_distro_vhdx",
+                        lambda: ("Ubuntu", r"C:\wsl\ext4.vhdx"))
+    monkeypatch.setattr(
+        wsl_disk, "usage",
+        lambda: {"total": 200 * GiB, "used": 2 * GiB,
+                 "free": 198 * GiB, "pct": 1})
+
+    class _P:
+        returncode = 0
+        stdout = b""
+        stderr = b""
+
+    # --manage / --shutdown go through subprocess.run.
+    monkeypatch.setattr(wsl_disk.subprocess, "run", lambda cmd, **kw: _P())
+
+    # findmnt / resize2fs go through _wsl_bash — record and answer them.
+    bash_calls = []
+
+    def _bash(cmd, timeout=120):
+        bash_calls.append(cmd)
+        if "findmnt" in cmd:
+            return "/dev/sdd\n"
+        return ""
+
+    monkeypatch.setattr(wsl_disk, "_wsl_bash", _bash)
+
+    out = wsl_disk.resize_disk(200 * GiB)
+    assert any("findmnt" in c for c in bash_calls)
+    assert any("resize2fs /dev/sdd" in c for c in bash_calls)
+    assert out["total"] == 200 * GiB
+
+
 def test_resize_surfaces_wsl_error(monkeypatch):
     _patch_resize(monkeypatch, used_bytes=2 * GiB, recorder=[])
 

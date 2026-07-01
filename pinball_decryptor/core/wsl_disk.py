@@ -602,6 +602,27 @@ def resize_disk(new_size_bytes, progress=None):
             + "\n\nClose anything using WSL (terminals, Docker Desktop, "
               "VS Code), then try again.")
 
+    # `--manage --resize` grows the .vhdx, but on some WSL builds it does NOT
+    # grow the ext4 filesystem inside to fill the enlarged disk (RTS: resized to
+    # 200 GB, `df` still showed 7.58 GiB — the container grew, the filesystem
+    # didn't).  Explicitly grow the fs to the device size ourselves: resize2fs
+    # online-grows a mounted ext4, needs no Administrator, and is a harmless
+    # no-op when the fs already fills the disk (so it's safe after a shrink or
+    # on WSL builds that already resized the fs).  `findmnt -n -o SOURCE /` names
+    # the root block device unambiguously (unlike lsblk's wslg-trapped
+    # MOUNTPOINT); the first _wsl_bash call also restarts the distro we just
+    # shut down.
+    if progress:
+        progress("Growing the Linux filesystem to fill the disk…")
+    try:
+        dev = _wsl_bash("findmnt -n -o SOURCE /", timeout=60).strip()
+        if dev:
+            _wsl_bash("resize2fs %s" % dev, timeout=600)
+    except WslDiskError as e:
+        raise WslDiskError(
+            "The virtual disk was resized, but growing the Linux filesystem to "
+            "fill it failed:\n" + str(e)) from e
+
     if progress:
         progress("Verifying new size…")
     return usage()

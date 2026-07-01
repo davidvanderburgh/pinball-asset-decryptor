@@ -878,7 +878,10 @@ class MainWindow:
         # so its left edge lines up under the Output Folder *entry* (not
         # the frame edge), matching the path box directly above it.
         self._extract_warn_row = ttk.Frame(f)
-        self._extract_warn_row.pack(fill=tk.X, padx=10)
+        # Same (0, 2) pady as the detect-badge row above, so the whitespace
+        # below Output Folder matches the whitespace below Card image and the
+        # three steps sit evenly (monkeybug Extract #1).
+        self._extract_warn_row.pack(fill=tk.X, padx=10, pady=(0, 2))
         ttk.Label(self._extract_warn_row, text="", width=14).pack(side=tk.LEFT)
         self._extract_warn = ttk.Label(
             self._extract_warn_row, text="", foreground="#f44747",
@@ -1278,9 +1281,15 @@ class MainWindow:
             font=(_SANS_FONT, 9),
             wraplength=720, justify=tk.LEFT)
 
-        self._write_badge = ttk.Label(f, text="",
+        # "Detected: …" badge — indented with a width-16 spacer so it lines
+        # up with the entry fields (which follow width-16 labels), matching
+        # the Extract tab (monkeybug 4.8) instead of the old fixed padx.
+        self._write_badge_row = ttk.Frame(f)
+        self._write_badge_row.pack(fill=tk.X, padx=10, pady=(0, 2))
+        ttk.Label(self._write_badge_row, text="", width=16).pack(side=tk.LEFT)
+        self._write_badge = ttk.Label(self._write_badge_row, text="",
                                       font=(_SANS_FONT, 9, "italic"))
-        self._write_badge.pack(anchor=tk.W, padx=26, pady=(0, 2))
+        self._write_badge.pack(side=tk.LEFT, anchor=tk.W)
         self._write_badge.bind(
             "<Button-1>", lambda _e: self._auto_switch("write"))
         self._write_badge.bind(
@@ -1397,21 +1406,35 @@ class MainWindow:
         # Hidden by apply_manufacturer() for plugins without
         # direct_ssd; populated by _scan_write_preview() on tab show.
         self._write_preview_frame = ttk.LabelFrame(
-            f, text=" Modified Files Preview ", padding=4)
+            f, text=" Modified Files ", padding=4)
         # Pack-managed by apply_manufacturer + _on_input_source_change.
 
-        # Refresh toolbar — when the user edits assets in another
-        # window while this app is open, the preview goes stale.
-        # An explicit button is cheaper than file-watching and gives
-        # the user direct control.  Also useful when the user
-        # changes the assets folder textbox and wants to re-scan
-        # without flipping tabs.
+        # Toolbar across the top of the preview frame.  The Refresh button
+        # re-scans when the user edits assets in another window (cheaper than
+        # file-watching); monkeybug 4.3/4.5 also moved the primary Build +
+        # Revert actions up here — right-aligned as Build ▸ Revert ▸ Refresh —
+        # so every "act on these changes" control is grouped in one place
+        # instead of a separate button row below the frame.
         preview_toolbar = ttk.Frame(self._write_preview_frame)
         preview_toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
         self._write_preview_refresh_btn = ttk.Button(
             preview_toolbar, text="🔄  Refresh",
             command=self._scan_write_preview)
         self._write_preview_refresh_btn.pack(side=tk.RIGHT)
+        # The single Build button doubles as a live Cancel while a build runs
+        # (monkeybug 4.4 — no separate Cancel widget any more); its label and
+        # command are driven by _set_write_button_running.
+        self._write_btn = ttk.Button(
+            preview_toolbar, text="Build update",
+            command=self._on_write_clicked)
+        self._write_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # Revert is gated to plugins with a Replace surface in
+        # apply_manufacturer, which re-packs it just left of Build.
+        self._revert_all_btn = ttk.Button(
+            preview_toolbar, text="Revert all changes…",
+            command=self._revert_all_clicked)
+        self._revert_all_btn.pack(
+            side=tk.RIGHT, padx=(0, 6), before=self._write_btn)
 
         preview_inner = ttk.Frame(self._write_preview_frame)
         preview_inner.pack(fill=tk.BOTH, expand=True)
@@ -1457,21 +1480,9 @@ class MainWindow:
         # changes the assets folder before a previous scan finishes.
         self._write_preview_scan_id = 0
 
-        btn_row = ttk.Frame(f); btn_row.pack(fill=tk.X, padx=10, pady=(8, 4))
-        self._write_btn = ttk.Button(btn_row, text="Build update",
-                                     command=self._on_write)
-        self._write_btn.pack(side=tk.LEFT)
-        self._write_cancel_btn = ttk.Button(btn_row, text="Cancel",
-                                            command=self._on_write_cancel,
-                                            state=tk.DISABLED)
-        self._write_cancel_btn.pack(side=tk.LEFT, padx=(6, 0))
-        # Revert all the staged edits in the assets folder back to the extracted
-        # originals — instant from the per-edit snapshots, no full re-extract.
-        # Gated to plugins with a Replace surface in apply_manufacturer().
-        self._revert_all_btn = ttk.Button(
-            btn_row, text="Revert all changes…",
-            command=self._revert_all_clicked)
-        self._revert_all_btn.pack(side=tk.RIGHT)
+        # (Build / Revert / Refresh live in the preview-frame toolbar above;
+        # the Build button also serves as the run-time Cancel — see
+        # _set_write_button_running.  No separate bottom button row.)
 
         # Apply-delta — gated by capability flag in apply_manufacturer().
         self._delta_frame = ttk.LabelFrame(
@@ -1502,19 +1513,24 @@ class MainWindow:
         # collects the image + target card and confirms before the write runs
         # through the normal status area.
         self._flash_frame = ttk.LabelFrame(f, text="Flash Image to SD Card")
+        # Description on the left, button right-aligned (monkeybug 4.7) so it
+        # lines up with the other right-edge actions instead of sitting under
+        # the paragraph.
+        flash_row = ttk.Frame(self._flash_frame)
+        flash_row.pack(fill=tk.X, padx=8, pady=(4, 6))
         ttk.Label(
-            self._flash_frame,
+            flash_row,
             text=("Write a complete, pre-built SD-card image (.img / .raw) "
                   "directly onto a card — handy after Build SD-card image, or "
                   "to restore a backup. The whole card is erased and replaced, "
                   "and the built-in size check refuses an image too big for the "
                   "card. Requires Administrator."),
-            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=600).pack(
-            anchor=tk.W, padx=8, pady=(4, 2))
+            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=760).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
         self._flash_btn = ttk.Button(
-            self._flash_frame, text="Flash image to SD card…",
+            flash_row, text="Flash image to SD card…",
             command=self._open_flash_dialog)
-        self._flash_btn.pack(anchor=tk.W, padx=8, pady=(2, 6))
+        self._flash_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N)
 
     def _build_modpack_tab(self):
         f = self._tab_modpack
@@ -5673,6 +5689,10 @@ class MainWindow:
                 self._capture_gameplay_check.pack(side=tk.LEFT, padx=(12, 0))
             self._capture_frame.pack(fill=tk.X, padx=10, pady=(2, 0),
                                      before=self._extract_action_row)
+            # Re-show the capture-help line (the non-capture branch forgets it)
+            # just below the capture controls.
+            self._capture_help.pack(anchor=tk.W, padx=24, pady=(2, 0),
+                                    before=self._extract_action_row)
             self._update_capture_help_text()
             # Mount the DMD preview (in the mfr view, just above the phase
             # indicators) so it's ready to surface on the first frame and
@@ -5686,6 +5706,11 @@ class MainWindow:
         else:
             self._basic_extract_frame.pack_forget()
             self._capture_frame.pack_forget()
+            # Fully remove the capture-help line (not just blank its text) so it
+            # doesn't reserve an empty line between the Output-folder warning and
+            # the Extract row — that stray gap pushed Extract down and made the
+            # 3-step spacing look uneven (monkeybug Extract #1).
+            self._capture_help.pack_forget()
             self._capture_help.configure(text="")
             self.capture_mode_var.set(False)
             # Restore basic-extract default for non-Williams plugins
@@ -5731,7 +5756,8 @@ class MainWindow:
         has_replace = (caps.replace_audio or caps.replace_video
                        or caps.replace_image or caps.replace_text)
         if has_replace and self._on_revert_all is not None:
-            self._revert_all_btn.pack(side=tk.RIGHT)
+            self._revert_all_btn.pack(
+                side=tk.RIGHT, padx=(0, 6), before=self._write_btn)
         else:
             self._revert_all_btn.pack_forget()
 
@@ -6186,16 +6212,41 @@ class MainWindow:
         joined = " ".join(f"*{ext}" for ext in spec.extensions)
         return [(spec.label, joined), ("All files", "*.*")]
 
+    def _initialdir_for(self, *values):
+        """Best ``initialdir`` for a Browse dialog.
+
+        Points the OS file/folder picker at the path already in the field
+        (or, for a file field, the folder containing it) so re-browsing
+        lands where the user last was instead of a stale Windows MRU
+        folder — monkeybug's "default to the folder that is listed".  Walks
+        *values* in priority order and returns the first that resolves to
+        an existing directory; ``None`` (the picker's own default) when
+        none do.
+        """
+        for v in values:
+            v = (v or "").strip()
+            if not v:
+                continue
+            if os.path.isdir(v):
+                return v
+            parent = os.path.dirname(v)
+            if parent and os.path.isdir(parent):
+                return parent
+        return None
+
     def _browse_extract_input(self):
         path = filedialog.askopenfilename(
-            title="Select input file", filetypes=self._input_filetypes())
+            title="Select input file", filetypes=self._input_filetypes(),
+            initialdir=self._initialdir_for(self.extract_input_var.get()))
         if path:
             self.extract_input_var.set(path)
 
     def _browse_extract_deltas(self):
         paths = filedialog.askopenfilenames(
             title="Select delta update(s) to merge on top",
-            filetypes=self._input_filetypes())
+            filetypes=self._input_filetypes(),
+            initialdir=self._initialdir_for(
+                self.extract_input_var.get(), self.extract_output_var.get()))
         for p in paths:
             if p and p not in self.extract_delta_paths:
                 self.extract_delta_paths.append(p)
@@ -6324,7 +6375,7 @@ class MainWindow:
             self._write_admin_frame.pack_forget()
             self._write_admin_unc_hint.pack_forget()
             self._write_macos_fda_frame.pack_forget()
-            self._write_badge.pack_forget()
+            self._write_badge_row.pack_forget()
             self._write_desc.pack_forget()
             self._write_preview_frame.pack_forget()
             if source == "ssd":
@@ -6393,8 +6444,8 @@ class MainWindow:
                 self._write_upd_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._write_assets_row())
-                self._write_badge.pack(
-                    anchor=tk.W, padx=26, pady=(0, 2),
+                self._write_badge_row.pack(
+                    fill=tk.X, padx=10, pady=(0, 2),
                     before=self._write_assets_row())
                 self._write_desc.configure(
                     text=self._current_mfr.build_write_description())
@@ -6807,6 +6858,37 @@ class MainWindow:
             self._extract_btn.configure(
                 text="Extract", command=self._on_extract)
             self._refresh_extract_enabled()
+
+    def _current_write_button_label(self):
+        """The idle label for the single Build button — mode- and
+        manufacturer-aware ("Build SD-card image" / "Apply Modifications" /
+        "Build update").  Used to restore the button after it served as a
+        live Cancel."""
+        mfr = self._current_mfr
+        if mfr is None:
+            return "Build update"
+        ssd = (getattr(self, "write_input_source_var", None) is not None
+               and self.write_input_source_var.get() == "ssd")
+        if ssd:
+            return getattr(mfr, "write_direct_button", "Apply Modifications")
+        return getattr(mfr, "write_build_button", "Build update")
+
+    def _set_write_button_running(self, running):
+        """Drive the single Build/Cancel button.
+
+        Mirrors _set_extract_button_running: while a build/write runs the
+        Build button doubles as a live Cancel (monkeybug 4.4 — there's no
+        separate Cancel widget any more); otherwise it shows the mode's build
+        label and re-arms the write action.
+        """
+        if running:
+            self._write_btn.configure(
+                text="Cancel", command=self._on_write_cancel,
+                state=tk.NORMAL)
+        else:
+            self._write_btn.configure(
+                text=self._current_write_button_label(),
+                command=self._on_write_clicked, state=tk.NORMAL)
 
     def _have_extract_input(self):
         """True when the Extract tab has a source selected — a file in ISO/image
@@ -7280,19 +7362,26 @@ class MainWindow:
         self._scan_write_preview()
 
     def _browse_extract_output(self):
-        path = filedialog.askdirectory(title="Select output folder")
+        path = filedialog.askdirectory(
+            title="Select output folder",
+            initialdir=self._initialdir_for(
+                self.extract_output_var.get(), self.extract_input_var.get()))
         if path:
             self.extract_output_var.set(path)
 
     def _browse_write_upd(self):
         path = filedialog.askopenfilename(
             title="Select original update file",
-            filetypes=self._input_filetypes())
+            filetypes=self._input_filetypes(),
+            initialdir=self._initialdir_for(self.write_upd_var.get()))
         if path:
             self.write_upd_var.set(path)
 
     def _browse_write_assets(self):
-        path = filedialog.askdirectory(title="Select modified assets folder")
+        path = filedialog.askdirectory(
+            title="Select modified assets folder",
+            initialdir=self._initialdir_for(
+                self.write_assets_var.get(), self.extract_output_var.get()))
         if not path:
             return
         # If the picked folder has no `.checksums.md5` but a parent
@@ -7390,6 +7479,39 @@ class MainWindow:
     # Flash-image dialog (caps.flash_image plugins, e.g. Stern Spike 2)
     # ------------------------------------------------------------------
 
+    def _has_pending_write_changes(self):
+        """True if the Modified Files Preview currently lists any change.
+
+        Single source of truth the Build / Flash "nothing modified" warnings
+        share — reflects the last preview scan (staged Replace rows + on-disk
+        edits).  Returns True (assume changes) when the tree doesn't exist or
+        can't be read, so the warning only ever fires when we're *confident*
+        nothing changed — never as a false alarm the user can't clear.
+        """
+        tree = getattr(self, "_write_preview_tree", None)
+        if tree is None:
+            return True
+        try:
+            return bool(tree.get_children())
+        except tk.TclError:
+            return True
+
+    def _on_write_clicked(self):
+        """Build-button click.  Warn (but allow) when the preview shows no
+        changes — building an unmodified card just makes a copy of the
+        original, which monkeybug flagged as easy to do by accident — then
+        defer to the app's write callback."""
+        if (not self._is_running()
+                and not self._has_pending_write_changes()):
+            if not messagebox.askyesno(
+                "Nothing modified",
+                "No modified files were detected, so this will build a copy "
+                "of the original image with no changes.\n\nBuild anyway?",
+                icon="warning"):
+                return
+        if self._on_write is not None:
+            self._on_write()
+
     def _open_flash_dialog(self):
         """Open the modal that collects (image, target card) for a flash.
 
@@ -7404,6 +7526,21 @@ class MainWindow:
                 "Finish or cancel the current operation before flashing a "
                 "card.")
             return
+        # Flash writes a whole pre-built / backup image and is independent of
+        # this session's edits, so a "nothing modified" state is legitimate
+        # (restoring a backup, writing an image built earlier).  monkeybug
+        # still wanted a heads-up so an accidental no-change flash is caught.
+        if not self._has_pending_write_changes():
+            if not messagebox.askyesno(
+                "Nothing modified",
+                "Nothing was modified this session.\n\nFlashing writes a "
+                "whole pre-built or backup image onto the card, independent "
+                "of any edits here — expected if you're restoring a backup "
+                "or writing an image you built earlier. To apply changes "
+                "instead, build the SD-card image first.\n\nOpen the flash "
+                "dialog anyway?",
+                icon="warning"):
+                return
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
@@ -7560,7 +7697,10 @@ class MainWindow:
         return None
 
     def _browse_write_output(self):
-        path = filedialog.askdirectory(title="Select output folder")
+        path = filedialog.askdirectory(
+            title="Select output folder",
+            initialdir=self._initialdir_for(
+                self.write_output_var.get(), self.write_assets_var.get()))
         if path:
             self.write_output_var.set(path)
 
@@ -7777,6 +7917,14 @@ class MainWindow:
             self._extract_warn.configure(text="")
 
     def _update_write_filename(self):
+        # SD-card-image plugins (Stern / CGC, capabilities.flash_image) already
+        # show the Output Folder; the extra "Output: …/name.raw" line just
+        # repeats it (monkeybug 4.6), so keep it blank there.  The label widget
+        # itself stays as the layout anchor other rows pack `before=`.
+        mfr = getattr(self, "_current_mfr", None)
+        if mfr is not None and getattr(mfr.capabilities, "flash_image", False):
+            self._write_filename_lbl.configure(text="")
+            return
         # Direct-SD write has no output file (the card itself is the
         # destination) and the file-mode "Original" input row is hidden, so
         # don't surface its (possibly stale, e.g. a prior session's) filename.
@@ -7985,10 +8133,11 @@ class MainWindow:
         enough — the press cancels the running job and every queued follow-up)
         and show feedback.  The action buttons stay disabled; they're re-enabled
         only when the job actually stops, via ``set_running(False)``."""
-        # The single Extract button is showing "Cancel" right now — freeze it
-        # and flag the in-progress stop; set_running(False) restores "Extract".
+        # The single Extract / Build buttons are showing "Cancel" right now —
+        # freeze both and flag the in-progress stop; set_running(False)
+        # restores their idle labels.
         self._extract_btn.configure(state=tk.DISABLED, text="Cancelling…")
-        self._write_cancel_btn.configure(state=tk.DISABLED)
+        self._write_btn.configure(state=tk.DISABLED, text="Cancelling…")
         self.set_status("Cancelling...")
 
     def set_running(self, running, mode="extract"):
@@ -8002,8 +8151,7 @@ class MainWindow:
             # pipeline is monopolising the UI thread so clicks can't queue up.
             self._theme_btn.configure(state=tk.DISABLED)
             self._set_extract_button_running(True)
-            self._write_btn.configure(state=tk.DISABLED)
-            self._write_cancel_btn.configure(state=tk.NORMAL)
+            self._set_write_button_running(True)
             if hasattr(self, "_revert_all_btn"):
                 self._revert_all_btn.configure(state=tk.DISABLED)
             # Lock the Back button while work is in flight - we don't want
@@ -8031,8 +8179,7 @@ class MainWindow:
         else:
             self._theme_btn.configure(state=tk.NORMAL)
             self._set_extract_button_running(False)
-            self._write_btn.configure(state=tk.NORMAL)
-            self._write_cancel_btn.configure(state=tk.DISABLED)
+            self._set_write_button_running(False)
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()

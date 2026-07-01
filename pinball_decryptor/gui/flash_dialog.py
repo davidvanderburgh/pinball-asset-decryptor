@@ -165,8 +165,15 @@ class FlashImageDialog:
 
     # ------------------------------------------------------------------
     def _browse_image(self):
+        cur = self._image_var.get().strip()
+        initial = None
+        if cur:
+            parent = os.path.dirname(cur)
+            if parent and os.path.isdir(parent):
+                initial = parent
         path = filedialog.askopenfilename(
             parent=self._dlg, title="Select an SD-card image to flash",
+            initialdir=initial,
             filetypes=[("SD-card image", "*.img *.raw *.bin"),
                        ("All files", "*.*")])
         if path:
@@ -196,6 +203,16 @@ class FlashImageDialog:
     def _apply_drives(self, my_id, drives, pick):
         if my_id != self._enum_id:
             return                       # a newer Refresh superseded this one
+        from ..core.drives import visible_drives
+        prefer = getattr(self._mfr, "direct_target_kind", "sd_card")
+        best = pick[0] if pick else None
+        # Small-SD-card media (Stern Spike 2): hide multi-TB backup disks so
+        # the dropdown lists plausible cards only — monkeybug saw the Flash
+        # dialog still offering large drives because it skipped this filter
+        # the Direct-SD picker already uses.  The auto-picked best is force-
+        # kept visible so the selection always exists in the list.
+        drives = visible_drives(drives, prefer=prefer,
+                                keep=[best] if best else ())
         self._drives = drives
         if not drives:
             self._drive_combo["values"] = ["(no drives found — click Refresh)"]
@@ -204,8 +221,7 @@ class FlashImageDialog:
             self._update_readout()
             return
         self._drive_combo["values"] = [d.display for d in drives]
-        best = pick[0] if pick else None
-        chosen = best or drives[0]
+        chosen = best if (best and best in drives) else drives[0]
         self._drive_var.set(chosen.display)
         self._selected = chosen
         self._update_readout()

@@ -402,6 +402,65 @@ def test_flash_frame_shown_for_stern_hidden_otherwise(
     assert app.window._flash_frame.winfo_manager() == ""
 
 
+def test_write_build_button_folds_cancel_and_lives_in_toolbar(
+        app, manufacturers_by_key):
+    """monkeybug Write-tab rework: Build/Revert moved into the Modified Files
+    toolbar, the standalone Cancel widget is gone (Build doubles as a live
+    Cancel), and the redundant "Output:" line is blank for SD-card-image
+    plugins."""
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.window.extract_input_var.set("")
+    stern.set_era("spike2")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    w = app.window
+    try:
+        # The separate Cancel widget is gone.
+        assert not hasattr(w, "_write_cancel_btn")
+        # Build button is a descendant of the preview frame (its toolbar).
+        assert str(w._write_btn).startswith(str(w._write_preview_frame) + ".")
+        # Redundant Output line suppressed for flash_image plugins.
+        w._update_write_filename()
+        assert w._write_filename_lbl.cget("text") == ""
+        # Build ⇄ Cancel fold: flips to a live Cancel mid-run, restores after.
+        idle = w._write_btn.cget("text")
+        assert idle != "Cancel"
+        w.set_running(True, mode="write")
+        assert w._write_btn.cget("text") == "Cancel"
+        w.set_running(False, mode="write")
+        assert w._write_btn.cget("text") == idle
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_capture_help_line_removed_for_noncapture_plugin(
+        app, manufacturers_by_key):
+    """The capture-help line is fully unpacked (not just blanked) for a
+    non-capture plugin, so it can't reserve an empty line between the
+    Output-folder warning and the Extract row and skew the 3-step spacing
+    (monkeybug Extract #1).  winfo_manager() == "" means not managed."""
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    stern.set_era("spike2")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    try:
+        assert app.window._capture_help.winfo_manager() == ""
+        # A capture plugin (Williams) re-packs the help line — the other side
+        # of the toggle, so forgetting it for Stern can't leave it gone.
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["williams"])
+        app.root.update()
+        assert app.window._capture_help.winfo_manager() == "pack"
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
 def test_whitestar_detect_badge_notes_extract_only(
         app, manufacturers_by_key, tmp_path):
     # Neither the picker card nor the era switcher conveys a *file's* per-era

@@ -105,6 +105,38 @@ def _fmt_when(dt):
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
+# A real CGC install payload (emmc.img) is 2-4 GB.  Anything under this is an
+# empty or truncated payload the installer can't copy.
+MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
+
+
+def _assess_payload_size(size, mtime, now):
+    """Return a problem string if the emmc.img payload is implausibly small,
+    else ``None``.  Pure (no I/O) so the verdict wording is unit-testable.
+
+    A payload dated well before ``now`` was carried straight through from the
+    source .img (our build stamps a fresh mtime), so a bad payload came in
+    with the original image; a fresh mtime instead points at the build itself.
+    """
+    if size >= MIN_PLAUSIBLE_EMMC:
+        return None
+    carried = mtime < now - datetime.timedelta(days=1)
+    origin = (
+        f"The payload's timestamp ({_fmt_when(mtime)}) predates this build, "
+        "so it was carried straight through from the source .img -- the "
+        "ORIGINAL image you built/flashed from already had an empty emmc.img."
+        if carried else
+        "The payload was written empty during the build/flash, so the image "
+        "you flashed never had a real payload.")
+    return (
+        f"The install payload /emmc.img is only {size:,} bytes (should be "
+        "~2-4 GB). This empty/truncated payload IS the SHELL ERROR: the "
+        "machine's copy step has nothing to write. " + origin + " Re-check "
+        "the source .img (run these diagnostics on it, or re-image the "
+        "installer), rebuild on v0.34.1+ (which now aborts a build with an "
+        "empty payload), and re-flash.")
+
+
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
@@ -121,6 +153,9 @@ def diagnose_installer_card(path, log=None):
 
     lines = []
     say = lines.append
+    # Critical findings, surfaced again as a loud VERDICT at the end so the
+    # user isn't left to spot a 0-byte payload buried mid-report.
+    problems = []
 
     _log("Opening card (read-only)...")
     with RawDeviceFile(path, writable=False) as dev:
@@ -187,17 +222,34 @@ def diagnose_installer_card(path, log=None):
         else:
             ino, node = entries[PROCSTAT]
             when = _inode_mtime(r2, ino)
-            others = [_inode_mtime(r2, i) for n, (i, _nd) in entries.items()
-                      if n != PROCSTAT]
+            # Compare against the FACTORY files only.  procstat.txt and
+            # readonly.chk are both (re)written on every install attempt, so
+            # including readonly.chk in the baseline made a genuine fresh
+            # attempt look "same age as factory" (it shares readonly.chk's
+            # timestamp).  Exclude both.
+            _restamped = {PROCSTAT, "readonly.chk"}
+            others = [_inode_mtime(r2, i)
+                      for n, (i, _nd) in entries.items()
+                      if n not in _restamped]
             fresh = others and when > max(others) + datetime.timedelta(hours=1)
             say(f"  {node['size']:,} bytes, written {_fmt_when(when)}")
-            say("  => newer than the factory files: this log is from a real "
-                "install attempt on the machine."
-                if fresh else
-                "  => same age as the factory files: this is CGC's leftover "
-                "mastering log, NOT from your machine. Either no install "
-                "was attempted with this card, or the attempt failed "
-                "before the copy step ever started.")
+            if node["size"] == 0 and fresh:
+                say("  => 0 bytes but freshly written: the machine STARTED "
+                    "the copy (dcfldd created this log) but it produced no "
+                    "output and failed immediately -- classic sign the "
+                    "source payload (emmc.img below) is empty or unreadable.")
+                problems.append(
+                    "The installer's copy log (procstat.txt) is 0 bytes but "
+                    "dated to a real attempt -- dcfldd ran and failed with "
+                    "nothing to copy.")
+            elif fresh:
+                say("  => newer than the factory files: this log is from a "
+                    "real install attempt on the machine.")
+            else:
+                say("  => same age as the factory files: this is CGC's "
+                    "leftover mastering log, NOT from your machine. Either "
+                    "no install was attempted with this card, or it failed "
+                    "before the copy step ever started.")
             text = r2.read_file_bytes(node).decode("utf-8", "replace")
             ticks = _PROGRESS_RE.findall(text)
             if ticks:
@@ -207,8 +259,12 @@ def diagnose_installer_card(path, log=None):
                 say("  copy ran to completion (records in/out present).")
             say("  ---- final lines ----")
             tail = text.replace("\r", "\n")[-1200:]
-            for ln in [t for t in tail.split("\n") if t.strip()][-12:]:
-                say(f"  | {ln.strip()}")
+            body = [t for t in tail.split("\n") if t.strip()][-12:]
+            if body:
+                for ln in body:
+                    say(f"  | {ln.strip()}")
+            else:
+                say("  | (empty)")
         say("")
 
         # ---- data partition: the payload dcfldd copies ---------------------
@@ -217,28 +273,78 @@ def diagnose_installer_card(path, log=None):
         say(f"[P{data['index']}] install payload:")
         emmc_ino = _resolve(r3, "/emmc.img")
         if emmc_ino is None:
-            say("  /emmc.img: MISSING -- the installer cannot copy anything; "
+            say("  /emmc.img: MISSING -- the installer has nothing to copy; "
                 "this alone causes SHELL ERROR immediately after the "
                 "countdown.")
+            problems.append(
+                "The install payload /emmc.img is MISSING from the card. The "
+                "installer's copy step has no source file, so it fails "
+                "instantly (SHELL ERROR).")
         else:
             node = r3.read_inode(emmc_ino)
+            mt = _inode_mtime(r3, emmc_ino)
             say(f"  /emmc.img: present, {node['size']:,} bytes, modified "
-                f"{_fmt_when(_inode_mtime(r3, emmc_ino))}")
+                f"{_fmt_when(mt)}")
+            bad = _assess_payload_size(
+                node["size"], mt,
+                datetime.datetime.now(datetime.timezone.utc))
+            if bad is not None:
+                say(f"  *** PROBLEM: this payload is far too small (a real "
+                    f"Pulp Fiction payload is ~3.6 GB). An empty or truncated "
+                    f"emmc.img is exactly what makes the machine SHELL ERROR "
+                    f"-- dcfldd has nothing to copy.")
+                problems.append(bad)
             # Force real device reads over the head and tail of the payload
             # (a quick unreadable-card smoke test; NOT a full surface scan).
-            try:
-                head = _read_span(r3, node, 0, 64 * 1024)
-                ok_mbr = head[510:512] == b"\x55\xaa"
-                _read_span(r3, node, max(0, node["size"] - 64 * 1024),
-                           64 * 1024)
-                say("  head/tail read: OK" +
-                    ("" if ok_mbr else "  (WARNING: payload has no MBR "
-                                       "signature -- corrupt content?)"))
-            except (Ext4Error, OSError) as e:
-                say(f"  head/tail read FAILED: {e} -- the card could not be "
-                    f"read where the payload lives; suspect the card itself.")
+            if node["size"] > 0:
+                try:
+                    head = _read_span(r3, node, 0, 64 * 1024)
+                    ok_mbr = head[510:512] == b"\x55\xaa"
+                    _read_span(r3, node, max(0, node["size"] - 64 * 1024),
+                               64 * 1024)
+                    say("  head/tail read: OK" +
+                        ("" if ok_mbr else "  (WARNING: payload has no MBR "
+                                           "signature -- corrupt content?)"))
+                except (Ext4Error, OSError) as e:
+                    say(f"  head/tail read FAILED: {e} -- the card could not "
+                        f"be read where the payload lives; suspect the card "
+                        f"itself.")
+                    problems.append(
+                        "The card could not be read where the payload lives "
+                        f"({e}) -- suspect a failing card.")
+    say("")
+
+    # ---- verdict -------------------------------------------------------
+    say("=" * 60)
+    if problems:
+        say("VERDICT: problem(s) found")
+        for p in problems:
+            say("")
+            for i, chunk in enumerate(_wrap(p, 58)):
+                say(("  * " if i == 0 else "    ") + chunk)
+    else:
+        say("VERDICT: no obvious problem found on this card. The payload is "
+            "present and readable. If the machine still SHELL ERRORs, note "
+            "how long after the countdown it happens and re-run this after "
+            "the next attempt.")
+    say("=" * 60)
     say("")
     say(f"(report generated {_fmt_when(datetime.datetime.now(datetime.timezone.utc))}; "
         f"nothing on the card was modified)")
     _log("Done.")
     return "\n".join(lines)
+
+
+def _wrap(text, width):
+    """Tiny word-wrap for the verdict block (no textwrap import needed)."""
+    words = text.split()
+    out, line = [], ""
+    for w in words:
+        if line and len(line) + 1 + len(w) > width:
+            out.append(line)
+            line = w
+        else:
+            line = f"{line} {w}".strip()
+    if line:
+        out.append(line)
+    return out or [""]

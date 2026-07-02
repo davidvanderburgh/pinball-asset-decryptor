@@ -51,6 +51,42 @@ def test_diagnose_reads_stock_pf_installer():
     assert logs and logs[-1] == "Done."
 
 
+def test_assess_payload_flags_empty_carried_from_source():
+    """RTS's Pulp Fiction card: a 0-byte /emmc.img dated 2023 (older than the
+    build) is the SHELL ERROR, and the verdict must say it came IN with the
+    source .img."""
+    import datetime as dt
+    from pinball_decryptor.plugins.cgc.diagnose import _assess_payload_size
+
+    now = dt.datetime(2026, 7, 2, 21, 0, tzinfo=dt.timezone.utc)
+    old = dt.datetime(2023, 6, 28, tzinfo=dt.timezone.utc)
+    msg = _assess_payload_size(0, old, now)
+    assert msg is not None
+    assert "0 bytes" in msg
+    assert "SHELL ERROR" in msg
+    assert "source .img" in msg and "ORIGINAL image" in msg
+
+
+def test_assess_payload_fresh_mtime_blames_build():
+    """A too-small payload with a fresh (recent) mtime points at the build
+    writing it empty, not the source."""
+    import datetime as dt
+    from pinball_decryptor.plugins.cgc.diagnose import _assess_payload_size
+
+    now = dt.datetime(2026, 7, 2, 21, 0, tzinfo=dt.timezone.utc)
+    fresh = now - dt.timedelta(minutes=3)
+    msg = _assess_payload_size(1024, fresh, now)
+    assert msg is not None
+    assert "written empty during the build" in msg
+
+
+def test_assess_payload_accepts_real_size():
+    import datetime as dt
+    from pinball_decryptor.plugins.cgc.diagnose import _assess_payload_size
+    now = dt.datetime(2026, 7, 2, tzinfo=dt.timezone.utc)
+    assert _assess_payload_size(3_640_655_872, now, now) is None
+
+
 def test_diagnose_rejects_non_cgc_card(tmp_path):
     """A valid MBR with no Linux partitions must fail with a clear message,
     not a traceback from deep inside the ext4 reader."""

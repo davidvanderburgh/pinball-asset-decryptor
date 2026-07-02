@@ -246,6 +246,27 @@ def test_verify_repacked_emmc_rejects_short_file():
     assert "1,073,741,824" in str(ei.value)
 
 
+def test_verify_dumped_emmc_rejects_empty_source():
+    """A source .img whose emmc.img dumped out empty/tiny (RTS's Pulp Fiction
+    card carried a 0-byte payload) must abort the build -- the downstream
+    staged-vs-repacked guard can't catch it (0 == 0 passes)."""
+    wp = _bare_write_pipeline(_FixedOutputExecutor(["0"]))
+    with pytest.raises(cgc_pipeline.PipelineError) as ei:
+        wp._verify_dumped_emmc("/tmp/emmc.img")
+    assert "empty or truncated" in str(ei.value)
+
+
+def test_verify_dumped_emmc_rejects_truncated_source():
+    wp = _bare_write_pipeline(_FixedOutputExecutor([str(10 * 1024 * 1024)]))
+    with pytest.raises(cgc_pipeline.PipelineError):
+        wp._verify_dumped_emmc("/tmp/emmc.img")
+
+
+def test_verify_dumped_emmc_accepts_plausible_source():
+    wp = _bare_write_pipeline(_FixedOutputExecutor([str(3_640_655_872)]))
+    wp._verify_dumped_emmc("/tmp/emmc.img")  # no raise
+
+
 def test_verify_repacked_emmc_accepts_exact_size():
     wp = _bare_write_pipeline(_FixedOutputExecutor(
         ["3640655872",

@@ -864,6 +864,14 @@ class WritePipeline(BasePipeline):
             self.executor.run(
                 f"debugfs -R 'dump {EMMC_INNER_PATH} {emmc_exec}' "
                 f"{p3_exec} 2>&1", timeout=900)
+            # Sanity-floor the dumped payload BEFORE we build on it.  If the
+            # source .img's emmc.img is empty/truncated (RTS's Pulp Fiction
+            # card shipped a 0-byte emmc.img carried straight from a bad
+            # source), the dump is empty too -- and the later staged-vs-
+            # repacked size guard can't catch it (0 == 0 passes).  A real
+            # payload is 2-4 GB; anything under 256 MB is broken.  Abort loudly
+            # here rather than flash a card the machine SHELL-ERRORs on.
+            self._verify_dumped_emmc(emmc_exec)
             mbr_hex = self.executor.run(
                 f"xxd -s 446 -l 64 -c 64 -p {emmc_exec}", timeout=10).strip()
             inner_part = _parse_mbr_for_linux(mbr_hex)
@@ -1005,6 +1013,30 @@ class WritePipeline(BasePipeline):
                 # but informative; surface as info-level.
                 self._log(f"    {out.strip()}", "info")
         self._progress(total, total, "")
+
+    # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
+    # is an empty/truncated payload the machine can't install.
+    _MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
+
+    def _verify_dumped_emmc(self, emmc_exec):
+        """Reject an empty/truncated emmc.img dumped out of the source P3.
+
+        A bad source .img (RTS's Pulp Fiction card carried a 0-byte emmc.img)
+        makes the dump empty; building on it ships a payload the machine's
+        installer can't copy ("SHELL ERROR"), and the staged-vs-repacked guard
+        downstream compares 0 == 0 and misses it.  Catch it at the source.
+        """
+        size = int(self.executor.run(
+            f"stat -c%s {shlex.quote(emmc_exec)}", timeout=10).strip() or "0")
+        if size < self._MIN_PLAUSIBLE_EMMC:
+            raise PipelineError("Stage partitions",
+                f"The source installer image holds an empty or truncated "
+                f"emmc.img payload ({size:,} bytes; a real payload is "
+                f"2-4 GB). Building from it would produce a card the machine "
+                f"rejects with a SHELL ERROR (nothing to copy). The build was "
+                f"aborted; the original image is unchanged.\n\nThis almost "
+                f"always means the ORIGINAL .img you selected is itself bad — "
+                f"re-check or re-image your source installer, then rebuild.")
 
     def _verify_repacked_emmc(self, p3_exec, emmc_exec):
         """Check that ``/emmc.img`` inside the re-packed P3 exists and matches

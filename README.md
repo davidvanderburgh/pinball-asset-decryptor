@@ -412,7 +412,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    extracted originals — instantly from a per-edit backup, without
    re-extracting.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
-   someone else's mod pack on top of an extracted folder.
+   someone else's mod pack on top of an extracted folder. For Stern
+   Spike 2 (where new game code re-lays-out the card), a **Transfer Mods
+   to New Version** action pulls your pending Replace edits from an old
+   extract onto a fresh one — audio is matched by *sound content* so a
+   replacement follows its sound even if its index moved, and a slot that
+   changed or vanished is flagged rather than silently mis-applied.
 9. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact.

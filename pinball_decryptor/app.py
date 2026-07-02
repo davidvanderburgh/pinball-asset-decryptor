@@ -129,6 +129,7 @@ class App:
             on_back=self._on_back_to_picker,
             on_export=self._start_export,
             on_import=self._start_import,
+            on_transfer_mods=self._start_transfer_mods,
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
@@ -515,6 +516,12 @@ class App:
 
         in_path = self.window.extract_input_var.get().strip()
         output_path = self.window.extract_output_var.get().strip()
+        # Normalize to native separators so a hand-typed or mixed path (e.g.
+        # "c:\folder/decrypt_1") displays and propagates consistently to the
+        # Replace tabs' assets folder below.
+        if output_path:
+            output_path = os.path.normpath(output_path)
+            self.window.extract_output_var.set(output_path)
 
         if not in_path:
             messagebox.showwarning("Missing Input", "Please select an input file.")
@@ -1405,6 +1412,111 @@ class App:
                     "Import Failed", str(e)))
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def _start_transfer_mods(self):
+        """Pull the user's pending Replace edits from an OLD extract folder onto
+        the current (new-version) one, reconciling layout changes.  Shows a
+        reconciliation summary before applying, then re-scans so the transferred
+        assignments appear on the Replace tabs."""
+        if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
+            return
+        from .core import mod_transfer
+
+        target_dir = self.window.write_assets_var.get().strip()
+        if not target_dir or not os.path.isdir(target_dir):
+            messagebox.showwarning(
+                "Pick the new extract first",
+                "Set the Mod Folder above to the NEW version's extract folder "
+                "(the one you want to move your mods into) first.")
+            return
+
+        source_dir = filedialog.askdirectory(
+            title="Select the OLD extract folder you modded",
+            initialdir=(os.path.dirname(target_dir) or target_dir))
+        if not source_dir:
+            return
+        source_dir = os.path.normpath(source_dir)
+        if os.path.normcase(source_dir) == os.path.normcase(
+                os.path.normpath(target_dir)):
+            messagebox.showwarning(
+                "Same folder",
+                "The old and new extract folders are the same. Pick your "
+                "previous version's extract as the source.")
+            return
+
+        try:
+            plan = mod_transfer.plan_transfer(source_dir, target_dir)
+        except Exception as e:
+            messagebox.showerror("Transfer failed",
+                                 "Couldn't read the source folder's mods:\n%s" % e)
+            return
+
+        totals = plan["totals"]
+        if totals["transfer"] == 0 and totals["flagged"] == 0:
+            messagebox.showinfo(
+                "Nothing to transfer",
+                "No transferable edits were found in that folder. Make sure it's "
+                "the extract folder where you made your Replace edits (it should "
+                "contain a .staged_changes.json and/or text/strings.tsv).")
+            return
+
+        summary = self._format_transfer_summary(plan)
+        if not messagebox.askyesno("Transfer mods?", summary):
+            return
+
+        include_flagged = False
+        if totals["flagged"]:
+            include_flagged = messagebox.askyesno(
+                "Apply flagged audio too?",
+                "%d audio slot(s) now hold a DIFFERENT sound in the new version "
+                "(the index was reused). Applying these would put your "
+                "replacement on a different sound than before.\n\n"
+                "Apply them anyway?  (No = skip just those; recommended.)"
+                % totals["flagged"])
+
+        try:
+            res = mod_transfer.apply_transfer(
+                source_dir, target_dir, plan, include_flagged=include_flagged)
+        except Exception as e:
+            messagebox.showerror("Transfer failed",
+                                 "Couldn't write the transferred mods:\n%s" % e)
+            return
+
+        self.window.append_log(
+            "Transferred mods from %s: %d audio, %d video, %d image, %d text."
+            % (source_dir, res["audio"], res["video"], res["image"],
+               res["text"]), "success")
+        self.window.reload_assets_tabs()
+        messagebox.showinfo(
+            "Transfer complete",
+            "Transferred: %d audio, %d video, %d image, %d text.\n\n"
+            "Review the Replace tabs, then build the update on the Write tab."
+            % (res["audio"], res["video"], res["image"], res["text"]))
+
+    @staticmethod
+    def _format_transfer_summary(plan):
+        a = plan["audio"]; v = plan["video"]; i = plan["image"]; t = plan["text"]
+        lines = ["Move your mods onto the new extract:", ""]
+        lines.append("Audio:  %d matched, %d moved to a new index, "
+                     "%d flagged, %d dropped"
+                     % (len(a["matched"]), len(a["remapped"]),
+                        len(a["flagged"]), len(a["dropped"])))
+        lines.append("Video:  %d matched, %d dropped"
+                     % (len(v["matched"]), len(v["dropped"])))
+        lines.append("Image:  %d matched, %d dropped"
+                     % (len(i["matched"]), len(i["dropped"])))
+        lines.append("Text:   %d matched, %d dropped"
+                     % (len(t["matched"]), len(t["dropped"])))
+        dropped = plan["totals"]["dropped"]
+        if dropped:
+            lines.append("")
+            lines.append("%d edit(s) can't transfer (the slot/text no longer "
+                         "exists in the new version) and will be skipped."
+                         % dropped)
+        lines.append("")
+        lines.append("Your existing edits on the new extract are kept. "
+                     "Proceed?")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Replace Audio / Video — auto-applied as part of Write (no manual step)

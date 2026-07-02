@@ -108,6 +108,11 @@ class SternManufacturer(Manufacturer):
         # back into its radium in place (size-neutral: a replacement is padded
         # to the original's byte length, and one that's longer is rejected).
         replace_text=True,
+        # Mod transfer: Stern ships frequent code updates that re-lay-out the
+        # card, so the Mod Pack tab's "Transfer Mods to New Version" section lets
+        # a user carry their Replace edits from an old extract to a new one
+        # (audio matched by sound content, since idxNNNN indices can shift).
+        mod_transfer=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.

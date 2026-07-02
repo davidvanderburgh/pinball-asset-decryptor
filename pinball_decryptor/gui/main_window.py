@@ -99,6 +99,7 @@ class MainWindow:
                  on_extract, on_extract_cancel,
                  on_write, on_write_cancel,
                  on_export, on_import,
+                 on_transfer_mods=None,
                  on_apply_delta=None,
                  on_revert_all=None,
                  on_flash_image=None,
@@ -127,6 +128,7 @@ class MainWindow:
         self._on_back = on_back
         self._on_export = on_export
         self._on_import = on_import
+        self._on_transfer_mods = on_transfer_mods
         self._on_theme_change = on_theme_change
         self._on_check_updates = on_check_updates
         # Per-tree column widths the user dragged, persisted across restarts via
@@ -1570,6 +1572,27 @@ class MainWindow:
                   font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=8, pady=(4, 2))
         ttk.Button(import_frame, text="Import Mod Pack...",
                    command=self._on_import).pack(
+            anchor=tk.W, padx=8, pady=(2, 6))
+
+        # Gated per-plugin (caps.mod_transfer) in apply_manufacturer — this tab
+        # is shared, but the feature (and its wording) only fits plugins whose
+        # vendor re-lays-out the card across versions, e.g. Stern Spike 2.
+        self._modpack_transfer_frame = ttk.LabelFrame(
+            f, text="Transfer Mods to New Version")
+        ttk.Label(
+            self._modpack_transfer_frame,
+            text="New game code shipped? Extract the new card to a fresh "
+                 "folder, point the Mod Folder above at it, then pull your "
+                 "edits over from your old extract. Audio is matched by sound "
+                 "content (so a replacement follows its sound even if its index "
+                 "moved); a slot that changed or vanished is flagged, not "
+                 "mis-applied.",
+            font=(_SANS_FONT, 9), wraplength=560, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=8, pady=(4, 2))
+        ttk.Button(self._modpack_transfer_frame,
+                   text="Transfer mods from another extract...",
+                   command=(self._on_transfer_mods
+                            if self._on_transfer_mods else lambda: None)).pack(
             anchor=tk.W, padx=8, pady=(2, 6))
 
     # ------------------------------------------------------------------
@@ -3109,9 +3132,16 @@ class MainWindow:
             self._video_assignments = {
                 rel: rep for rel, rep in self._video_assignments.items()
                 if rel in self._video_slots_by_rel}
+        folder_changed = scan_dir != self._video_scan_dir
         self._video_scan_dir = scan_dir
         self._video_changed_on_disk = set()
+        if folder_changed:
+            # Drop the previous card's preview so it doesn't linger (and so the
+            # new first row's select isn't short-circuited by a matching rel).
+            self._video_clear_preview()
         self._refresh_video_list()
+        # Default to the first clip so a poster frame shows on a fresh scan.
+        self._select_first_tree_row(self._video_tree, self._video_on_tree_select)
         self._start_change_scan("video")
         # Now fill in duration / resolution / codec on a background thread so
         # the list is usable immediately even with hundreds of clips.
@@ -3257,6 +3287,17 @@ class MainWindow:
         self._video_scan_dir = ""
         self._image_scan_dir = ""
         self._text_scan_dir = ""
+
+    def reload_assets_tabs(self):
+        """Drop every Replace tab's scan stamp and re-scan whichever tab is
+        visible now, so freshly-transferred assignments (written to the folder's
+        sidecar / strings.tsv out-of-band) show immediately instead of waiting
+        for the user to re-browse.  The other tabs re-scan on their next visit."""
+        self.invalidate_asset_scans()
+        try:
+            self._autoscan_active_assets_tab()
+        except Exception:
+            pass
 
     # ---- Revert all changes (Write tab button -> app callback) -------
 
@@ -3613,7 +3654,13 @@ class MainWindow:
         self._video_preview_dur = dur or 0.0
         self._video_preview_pos = 0.0
         self._video_compute_disp_size(info)
-        self._render_video_poster(path, 0.0)
+        # Poster a representative frame, not the frame at 0.0 -- many clips open
+        # on a black leader frame, which looked like a broken/empty preview.
+        # Grab mid-clip when the duration is known, else a small offset in.  The
+        # playhead stays at 0.0; this only changes which still we show.
+        poster_pos = (self._video_preview_dur * 0.5
+                      if self._video_preview_dur > 0.2 else 0.5)
+        self._render_video_poster(path, poster_pos)
         self._video_update_time()
 
     def _render_video_poster(self, path, pos):
@@ -4208,9 +4255,17 @@ class MainWindow:
             self._image_assignments = {
                 rel: rep for rel, rep in self._image_assignments.items()
                 if rel in self._image_slots_by_rel}
+        folder_changed = scan_dir != self._image_scan_dir
         self._image_scan_dir = scan_dir
         self._image_changed_on_disk = set()
+        if folder_changed:
+            # A new folder's slots supersede the previous card's — drop the stale
+            # preview so it doesn't keep showing the old image (and so selecting
+            # the new first row isn't short-circuited by a matching current_rel).
+            self._image_clear_preview()
         self._refresh_image_list()
+        # Default to the first image so the preview isn't blank on a fresh scan.
+        self._select_first_tree_row(self._image_tree, self._image_on_tree_select)
         self._start_change_scan("image")
         # Fill in dimensions / format on a background thread so the list is
         # usable immediately even with hundreds of images.
@@ -4268,6 +4323,26 @@ class MainWindow:
         rep_disp = os.path.basename(rep) if rep else "Choose…"
         tree.item(rel, values=(slot.resolution_str(), slot.format_summary(),
                                rep_disp))
+
+    def _select_first_tree_row(self, tree, on_select=None):
+        """Select (and reveal) the first row of *tree* so a fresh scan shows a
+        default preview instead of a blank pane.  No-op on an empty tree.  Calls
+        *on_select* explicitly since a programmatic ``selection_set`` doesn't
+        reliably fire ``<<TreeviewSelect>>`` across Tk versions."""
+        if tree is None:
+            return
+        children = tree.get_children()
+        if not children:
+            return
+        first = children[0]
+        try:
+            tree.selection_set(first)
+            tree.focus(first)
+            tree.see(first)
+        except tk.TclError:
+            return
+        if on_select is not None:
+            on_select()
 
     def _refresh_image_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
@@ -5393,6 +5468,14 @@ class MainWindow:
         self._configure_tab("Replace Text", caps.replace_text)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
+        # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
+        # section only fits plugins whose vendor re-lays-out the card across
+        # versions (Stern) — show it only for those, hide it for the rest.
+        if hasattr(self, "_modpack_transfer_frame"):
+            if getattr(caps, "mod_transfer", False):
+                self._modpack_transfer_frame.pack(fill=tk.X, padx=10, pady=4)
+            else:
+                self._modpack_transfer_frame.pack_forget()
         # New mfr: drop any text rows loaded for the previous one so a stale
         # manifest can't leak across a manufacturer switch.
         self._text_rows = []
@@ -7367,7 +7450,7 @@ class MainWindow:
             initialdir=self._initialdir_for(
                 self.extract_output_var.get(), self.extract_input_var.get()))
         if path:
-            self.extract_output_var.set(path)
+            self.extract_output_var.set(os.path.normpath(path))
 
     def _browse_write_upd(self):
         path = filedialog.askopenfilename(
@@ -7402,7 +7485,7 @@ class MainWindow:
                     "Use the parent folder instead?")
                 if use_parent:
                     path = parent_with_checksums
-        self.write_assets_var.set(path)
+        self.write_assets_var.set(os.path.normpath(path))
         # Picking a folder is a strong signal the user wants to work with it —
         # kick off the scan for whichever replace tab is open instead of making
         # them click Scan separately.
@@ -7419,6 +7502,8 @@ class MainWindow:
             self._scan_video_slots_async()
         elif text == "Replace Audio":
             self._scan_audio_slots_async()
+        elif text == "Replace Images":
+            self._scan_image_slots_async()
         elif text == "Replace Text":
             self._scan_text_strings()
         elif text == "Write":

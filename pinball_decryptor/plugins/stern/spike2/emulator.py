@@ -179,6 +179,7 @@ class Spike2Emu:
     IMPORT = 0x60000000
     LAND = 0x10000000                               # decode return sentinel
     OBJ_VA = 0x18000000; VOICE_VA = 0x18001000      # codec obj + voice
+    ACC_VA = 0x19000000                             # decode scratch (fixed; see setup_decode)
     BB = 0x50000000                                 # body buffer (grown lazily)
 
     def __init__(self, game_real_path, image_path):
@@ -840,7 +841,16 @@ class Spike2Emu:
             mu.reg_write(UC_ARM_REG_FPEXC, 0x40000000)
         except Exception:
             pass
-        self.ACC = self.alloc(0x8000)
+        # Decode scratch (accumulator) at a FIXED dedicated address, NOT from
+        # the bump allocator: some large builds' boot legitimately requests a
+        # huge working buffer (e.g. Led Zeppelin 1.21.0's master-directory
+        # decode asks for ~800 MB) that runs the heap pointer past the HEAP
+        # window.  A heap-allocated ACC would then land unmapped and the
+        # host-side mem_writes below would fault -- which _slot_metrics swallows,
+        # so every sound silently decodes to None ("Decoded 0/N").  A fixed
+        # mapped page is position-independent and equivalent for the codec.
+        self.ACC = self.ACC_VA
+        self._ensure_range(self.ACC, 0x10000)
         # map the obj + voice page(s).  Page-by-page (not one bulk mem_map) so a
         # page the firmware already faulted into this region during boot/derive
         # (some builds, e.g. Metallica, touch 0x18000000 via on-demand paging)

@@ -188,6 +188,14 @@ class Capabilities:
     # directly (Stern Spike 2's SD card via core.drives + RawDeviceFile).  When
     # True, the GUI calls ``make_flash_pipeline``; needs Administrator/root.
     flash_image: bool = False
+    # Mod-transfer path: surfaces a "Transfer Mods to New Version" section on the
+    # (shared) Mod Pack tab that pulls a user's pending Replace edits from an OLD
+    # extract folder onto the current new-version one, reconciling layout changes
+    # (see core.mod_transfer).  Set True only for plugins where a new firmware
+    # version ships a re-laid-out card and mods are worth carrying over — Stern
+    # Spike 2, whose audio is index-numbered (idxNNNN.wav) and must be matched by
+    # sound content, not index.  Off elsewhere (the section is hidden).
+    mod_transfer: bool = False
 
 
 @dataclass(frozen=True)

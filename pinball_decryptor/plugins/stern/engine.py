@@ -1022,7 +1022,15 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             emu.boot()
             ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
                                 log_line=log_line)
-        log("Decoded %d/%d sounds to %s" % (ok, total, audio_dir), "success")
+        if ok == 0 and total > 0:
+            # Every sound failed to decode -- a systemic problem (a build whose
+            # codec the engine couldn't drive), not a per-sound hiccup.  Surface
+            # it loudly instead of a green "Decoded 0/N" that reads like success.
+            log("Decoded 0/%d sounds -- audio decode failed for this card. The "
+                "firmware build may use a codec path the engine can't drive yet; "
+                "video, images and text extracted normally." % total, "error")
+        else:
+            log("Decoded %d/%d sounds to %s" % (ok, total, audio_dir), "success")
         if music_banks and not cancel():
             if emu is not None:
                 emu.close(); emu = None    # free the cat-0 emu before booting CatEmu
@@ -1138,18 +1146,20 @@ def _decode_line(msg):
     if kind == "start":
         _, idx, length, chan = msg
         return ("dec%d" % idx,
-                "    idx%04d %s %s   0%%" % (idx, _dur_str(length, chan), _bar(0)),
+                "    idx%04d %-14s %s   0%%"
+                % (idx, _dur_str(length, chan), _bar(0)),
                 "info")
     if kind == "prog":
         _, idx, frac, length, chan = msg
         return ("dec%d" % idx,
-                "    idx%04d %s %s %3d%%"
+                "    idx%04d %-14s %s %3d%%"
                 % (idx, _dur_str(length, chan), _bar(frac), int(frac * 100)),
                 "info")
     # done
     _, idx, length, chan = msg
     return ("dec%d" % idx,
-            "    idx%04d %s decoded" % (idx, _dur_str(length, chan)), "success")
+            "    idx%04d %-14s decoded" % (idx, _dur_str(length, chan)),
+            "success")
 
 
 def _emit_decode(msg, log, log_line):

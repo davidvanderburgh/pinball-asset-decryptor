@@ -283,6 +283,23 @@ in the original amber-DMD look (the same look the Williams plugin
 produces). Same `wpc_decode` / `dmd_render` modules under the hood, so
 any decoder fix benefits both.
 
+### Card diagnostics (Write tab)
+
+If a rebuilt installer card fails on the machine — e.g. the classic
+"SHELL ERROR" on the displays after the countdown — the **Card
+diagnostics…** button on the Write tab reads the installer's own copy
+log (`procstat.txt`) back off the card and checks the install payload
+(`emmc.img`) is present and readable. It's read-only and needs no WSL or
+mounting (the app reads the card's ext4 partitions directly), which
+matters because Windows can't open those partitions and `wsl --mount`
+refuses most USB SD readers. The report shows how far the on-machine
+copy got and where it stopped, so a bad card, a truncated payload, or a
+failed flash can be told apart. To back this up, the Write pipeline now
+filesystem-checks the rebuilt game partition and verifies the re-packed
+`emmc.img` byte-for-byte before it will hand you an image to flash, so a
+silently-corrupt build is caught at build time instead of on the
+machine.
+
 ## Install
 
 ### Windows

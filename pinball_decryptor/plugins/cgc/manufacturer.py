@@ -58,6 +58,20 @@ class CGCManufacturer(Manufacturer):
         "⚠ This writes the WHOLE drive — pick the right one, it is erased "
         "completely. Power the machine off and keep a backup of the original "
         "card/drive before flashing.")
+
+    # "Card diagnostics…" (gui.diagnose_dialog, gated on this attribute):
+    # after a failed on-machine install (SHELL ERROR), the installer leaves
+    # its copy log (procstat.txt) on the card's ext4 rootfs, which users
+    # can't read on Windows.  This reads it back through core.rawdevice --
+    # read-only, no WSL.
+    def diagnose_card(self, device_path, log=None):
+        from .diagnose import diagnose_installer_card
+        return diagnose_installer_card(device_path, log=log)
+
+    diagnose_card_help = (
+        "Reads the installer's own log off a card after a failed install "
+        "(e.g. \"SHELL ERROR\" on the machine) and checks the install "
+        "payload is intact. Read-only — the card is not changed.")
     # CGC's nested-disk-image extraction needs ext4 read/write tooling.
     # All work runs in the executor (WSL on Windows, native on Linux,
     # Docker on macOS) -- same model as JJP.

@@ -1543,29 +1543,36 @@ class MainWindow:
         # collects the image + target card and confirms before the write runs
         # through the normal status area.
         self._flash_frame = ttk.LabelFrame(f, text="Flash Image to SD Card")
-        # Description on the left, button right-aligned (monkeybug 4.7) so it
-        # lines up with the other right-edge actions instead of sitting under
-        # the paragraph.
-        flash_row = ttk.Frame(self._flash_frame)
-        flash_row.pack(fill=tk.X, padx=8, pady=(4, 6))
-        # Button packs FIRST: pack gives space in creation order, so at narrow
-        # window widths the description shrinks instead of the button clipping
-        # to "Flash imag" (monkeybug 5).
+        # Two rows: the buttons right-aligned on their own row, and the
+        # description on a full-width row below.  An earlier single-row layout
+        # (label left, button right) truncated the description once a second
+        # button ("Card diagnostics…") was added — the two buttons ate the
+        # width budget the paragraph needed, clipping it mid-sentence.  A
+        # dedicated full-width description row can't be squeezed.
+        btn_row = ttk.Frame(self._flash_frame)
+        btn_row.pack(fill=tk.X, padx=8, pady=(4, 0))
         self._flash_btn = ttk.Button(
-            flash_row, text="Flash image to SD card…",
+            btn_row, text="Flash image to SD card…",
             command=self._open_flash_dialog)
-        self._flash_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N)
+        self._flash_btn.pack(side=tk.RIGHT)
+        # "Card diagnostics…" — only for manufacturers implementing
+        # diagnose_card (CGC): reads the on-machine installer's log back off
+        # a failed card (read-only).  Packed/hidden in apply_manufacturer().
+        self._diagnose_btn = ttk.Button(
+            btn_row, text="Card diagnostics…",
+            command=self._open_diagnose_dialog)
         _flash_lbl = ttk.Label(
-            flash_row,
+            self._flash_frame,
             text=("Write a complete, pre-built SD-card image (.img / .raw) "
                   "directly onto a card — handy after Build SD-card image, or "
                   "to restore a backup. The whole card is erased and replaced, "
                   "and the built-in size check refuses an image too big for the "
                   "card. Requires Administrator."),
             font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=760)
-        _flash_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Re-wrap to the space actually allocated, so the text never runs
-        # under the button on a narrow window.
+        _flash_lbl.pack(side=tk.TOP, fill=tk.X, expand=True, padx=8,
+                        pady=(2, 6), anchor=tk.W)
+        # Re-wrap to the width actually allocated so the full paragraph always
+        # shows (taller when narrow) instead of clipping.
         _flash_lbl.bind(
             "<Configure>",
             lambda e, lbl=_flash_lbl: lbl.configure(
@@ -5884,6 +5891,14 @@ class MainWindow:
             self._flash_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
         else:
             self._flash_frame.pack_forget()
+        # Card diagnostics — manufacturers that can read a failed install's
+        # on-card log back (CGC's diagnose_card).  Lives inside the flash
+        # frame, so it can only show when that frame is visible.
+        if caps.flash_image and getattr(mfr, "diagnose_card", None):
+            self._diagnose_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N,
+                                    after=self._flash_btn)
+        else:
+            self._diagnose_btn.pack_forget()
 
         # "Revert all changes…" — only meaningful when this plugin has a Replace
         # surface (the assets folder is where staged edits live).
@@ -7716,6 +7731,25 @@ class MainWindow:
             manufacturer=self._current_mfr,
             theme_name=self._current_theme,
             on_flash=self._on_flash_image)
+
+    def _open_diagnose_dialog(self):
+        """Open the read-only card-diagnostics modal (mfr.diagnose_card).
+
+        Unlike flash, this never writes, so it only refuses while a run is
+        in flight (the drive may be busy being flashed)."""
+        if self._is_running():
+            messagebox.showinfo(
+                "Busy",
+                "Finish or cancel the current operation before reading a "
+                "card.")
+            return
+        if getattr(self._current_mfr, "diagnose_card", None) is None:
+            return
+        from .diagnose_dialog import DiagnoseCardDialog
+        DiagnoseCardDialog(
+            self._tk_root(),
+            manufacturer=self._current_mfr,
+            theme_name=self._current_theme)
 
     # ------------------------------------------------------------------
     # WSL disk-space management (Windows; all native-tool plugins)

@@ -24,7 +24,7 @@ from pinball_decryptor.plugins.cgc.pipeline import WritePipeline
 
 # dd operands we expect after the verb; anything else means a path split.
 _DD_OPERAND_PREFIXES = ("if=", "of=", "bs=", "skip=", "seek=", "count=",
-                        "conv=", "status=")
+                        "conv=", "status=", "iflag=", "oflag=")
 
 
 class _RecordingExecutor(WslExecutor):
@@ -37,7 +37,11 @@ class _RecordingExecutor(WslExecutor):
 
     def run(self, bash_cmd, timeout=120):
         self.commands.append(bash_cmd)
-        return ""  # every caller tolerates empty stdout
+        # The re-packed-P3 fsck guard parses a trailing "__RC__<code>"; hand it
+        # a clean result so the pipeline proceeds (this test isn't about fsck).
+        if "e2fsck" in bash_cmd:
+            return "__RC__0"
+        return ""  # every other caller tolerates empty stdout
 
 
 def _drive_write(tmp_path, monkeypatch):
@@ -105,6 +109,39 @@ def test_write_dd_commands_quote_spaced_paths(tmp_path, monkeypatch):
     assert " " in out_exec
     assert any(f"if={out_exec}" in shlex.split(c) for c in dd_cmds)
     assert any(f"of={out_exec}" in shlex.split(c) for c in dd_cmds)
+
+
+def test_write_dd_commands_are_byte_exact(tmp_path, monkeypatch):
+    """Nested partition dd's must copy the *exact* byte size, not a whole
+    number of MiB.
+
+    Pulp Fiction's P3 is 4607.998 MiB; the old ``count={size_bytes //
+    (1024**2)}`` dropped its sub-MiB tail, so the round-tripped ext4 came out
+    255 blocks shorter than its superblock declared ("likely corrupt" per
+    e2fsck) and the machine froze mounting /data at power-up.  Every dd that
+    moves a partition must therefore use byte-granular ``*_bytes`` flags with
+    the true byte count.
+    """
+    rec, done, _out = _drive_write(tmp_path, monkeypatch)
+    # find_data_partition/_parse_mbr_for_linux are monkeypatched to exact byte
+    # sizes above; assert those exact values reach the count= operand and that
+    # no count is a floored-MiB value.
+    p3_size = 3702 * 1024 ** 2
+    inner_size = 3000 * 1024 ** 2
+    dd_cmds = [c for c in rec.commands if c.startswith("dd ")]
+    counts = []
+    for cmd in dd_cmds:
+        toks = shlex.split(cmd)
+        # A byte-exact copy must declare its byte-granularity intent.
+        flag_toks = [t for t in toks if t.startswith(("iflag=", "oflag="))]
+        assert any("count_bytes" in t for t in flag_toks), (
+            f"dd missing count_bytes (would round count to whole MiB): {cmd}")
+        for t in toks:
+            if t.startswith("count="):
+                counts.append(int(t.split("=", 1)[1]))
+    # The exact partition sizes must appear verbatim as a count somewhere.
+    assert p3_size in counts, counts
+    assert inner_size in counts, counts
 
 
 def test_write_modified_files_handles_apostrophe(tmp_path):

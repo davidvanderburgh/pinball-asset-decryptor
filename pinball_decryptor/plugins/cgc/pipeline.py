@@ -214,10 +214,17 @@ class ExtractPipeline(BasePipeline):
             self._progress(0, 100, "dd P3")
             self.executor.run(f"mkdir -p {stage} && rm -f {p3_exec}",
                               timeout=30)
+            # Byte-exact copy (skip_bytes/count_bytes): a partition whose size
+            # isn't a whole number of MiB (Pulp Fiction P3 = 4607.998 MiB) would
+            # otherwise lose its sub-MiB tail to whole-MiB rounding, leaving an
+            # ext4 image shorter than its superblock declares ("likely corrupt"
+            # per e2fsck). Harmless for a read-only extract, but the same
+            # rounding in Write corrupts the round-tripped filesystem.
             self.executor.run(
                 f"dd if={shlex.quote(img_exec)} of={shlex.quote(p3_exec)} "
-                f"bs=1M skip={data_part['start_bytes'] // (1024 ** 2)} "
-                f"count={data_part['size_bytes'] // (1024 ** 2)} status=none",
+                f"bs=1M iflag=skip_bytes,count_bytes "
+                f"skip={data_part['start_bytes']} "
+                f"count={data_part['size_bytes']} status=none",
                 timeout=900,
             )
             self._progress(50, 100, "dump emmc.img")
@@ -262,8 +269,9 @@ class ExtractPipeline(BasePipeline):
             self._progress(0, 100, "dd inner")
             self.executor.run(
                 f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
-                f"bs=1M skip={inner_part['start_bytes'] // (1024 ** 2)} "
-                f"count={inner_part['size_bytes'] // (1024 ** 2)} status=none",
+                f"bs=1M iflag=skip_bytes,count_bytes "
+                f"skip={inner_part['start_bytes']} "
+                f"count={inner_part['size_bytes']} status=none",
                 timeout=900,
             )
             # emmc.img is consumed too now -- the rest of Extract only reads
@@ -841,10 +849,16 @@ class WritePipeline(BasePipeline):
                               f"{emmc_exec} {inner_exec}", timeout=30)
 
             self._log("Extracting installer P3 from output .img...", "info")
+            # Byte-exact (skip_bytes/count_bytes) — see the matching note in
+            # Extract. Whole-MiB rounding here dropped P3's sub-MiB tail
+            # (Pulp Fiction P3 = 4607.998 MiB), so the round-tripped ext4 came
+            # out shorter than its superblock and the machine froze mounting
+            # /data at power-up.
             self.executor.run(
                 f"dd if={shlex.quote(out_exec)} of={shlex.quote(p3_exec)} "
-                f"bs=1M skip={data_part['start_bytes'] // (1024 ** 2)} "
-                f"count={data_part['size_bytes'] // (1024 ** 2)} status=none",
+                f"bs=1M iflag=skip_bytes,count_bytes "
+                f"skip={data_part['start_bytes']} "
+                f"count={data_part['size_bytes']} status=none",
                 timeout=900,
             )
             self.executor.run(
@@ -855,8 +869,9 @@ class WritePipeline(BasePipeline):
             inner_part = _parse_mbr_for_linux(mbr_hex)
             self.executor.run(
                 f"dd if={shlex.quote(emmc_exec)} of={shlex.quote(inner_exec)} "
-                f"bs=1M skip={inner_part['start_bytes'] // (1024 ** 2)} "
-                f"count={inner_part['size_bytes'] // (1024 ** 2)} status=none",
+                f"bs=1M iflag=skip_bytes,count_bytes "
+                f"skip={inner_part['start_bytes']} "
+                f"count={inner_part['size_bytes']} status=none",
                 timeout=900,
             )
 
@@ -868,10 +883,13 @@ class WritePipeline(BasePipeline):
                 inner_exec, changed, inner_root_to_assets_root)
 
             self._log("Re-packing emmc.img (inner P2 -> emmc.img)...", "info")
+            # Byte-exact seek/count so the inner ext4's sub-MiB tail isn't
+            # dropped (same rounding trap as the extract dd's above).
             self.executor.run(
                 f"dd if={shlex.quote(inner_exec)} of={shlex.quote(emmc_exec)} "
-                f"bs=1M seek={inner_part['start_bytes'] // (1024 ** 2)} "
-                f"count={inner_part['size_bytes'] // (1024 ** 2)} "
+                f"bs=1M oflag=seek_bytes iflag=count_bytes "
+                f"seek={inner_part['start_bytes']} "
+                f"count={inner_part['size_bytes']} "
                 f"conv=notrunc status=none", timeout=900)
 
             self._log("Re-packing installer P3 (emmc.img into P3)...", "info")
@@ -882,11 +900,20 @@ class WritePipeline(BasePipeline):
                 f"debugfs -w -R 'write {emmc_exec} {EMMC_INNER_PATH}' "
                 f"{p3_exec} 2>&1", timeout=900)
 
+            # Guard the unguarded debugfs re-pack: a P3 ext4 that ends up
+            # short or inconsistent makes the machine hang mounting /data at
+            # power-up (a dead freeze before pinstall even draws — RTS's Pulp
+            # Fiction card). debugfs exits 0 on such damage, so verify the
+            # re-packed P3 read-only and abort loudly rather than shipping an
+            # image the on-machine kernel can't mount.
+            self._verify_partition_fs(p3_exec, "installer data partition (P3)")
+
             self._log("Re-packing installer .img (P3 into output)...", "info")
             self.executor.run(
                 f"dd if={shlex.quote(p3_exec)} of={shlex.quote(out_exec)} "
-                f"bs=1M seek={data_part['start_bytes'] // (1024 ** 2)} "
-                f"count={data_part['size_bytes'] // (1024 ** 2)} "
+                f"bs=1M oflag=seek_bytes iflag=count_bytes "
+                f"seek={data_part['start_bytes']} "
+                f"count={data_part['size_bytes']} "
                 f"conv=notrunc status=none", timeout=1800)
 
         finally:
@@ -963,6 +990,30 @@ class WritePipeline(BasePipeline):
                 # but informative; surface as info-level.
                 self._log(f"    {out.strip()}", "info")
         self._progress(total, total, "")
+
+    def _verify_partition_fs(self, image_exec, label):
+        """Read-only e2fsck of a re-packed ext4 partition image; abort on any
+        inconsistency.
+
+        The nested debugfs re-pack exits 0 even when it leaves the filesystem
+        short or damaged, so without this check a corrupt build ships silently
+        and only surfaces as a frozen machine.  ``e2fsck -fn`` makes no changes
+        and returns 0 only for a clean filesystem; any other code (short image,
+        bad superblock, unresolved inconsistency) means the image must not be
+        flashed.
+        """
+        self._log(f"Verifying {label} filesystem...", "info")
+        out = self.executor.run(
+            f"e2fsck -fn {shlex.quote(image_exec)} 2>&1; echo __RC__$?",
+            timeout=900)
+        rc = out.rsplit("__RC__", 1)[-1].strip()
+        if rc != "0":
+            raise PipelineError("Write",
+                f"The re-packed {label} failed its filesystem check — the "
+                f"rebuilt installer would freeze the machine at power-up "
+                f"(a corrupt ext4 the on-machine kernel can't mount). The "
+                f"build was aborted; the original image is unchanged.\n\n"
+                f"e2fsck output:\n{out.rsplit('__RC__', 1)[0].strip()}")
 
 
 # ---------------------------------------------------------------------------

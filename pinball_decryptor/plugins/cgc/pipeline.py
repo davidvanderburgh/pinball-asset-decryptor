@@ -882,6 +882,13 @@ class WritePipeline(BasePipeline):
             self._write_modified_files(
                 inner_exec, changed, inner_root_to_assets_root)
 
+            # The mods were just written with debugfs -w, which exits 0 even
+            # when it damages the filesystem it is editing.  This inner ext4
+            # is the one the game actually boots from after install, and until
+            # now it shipped unchecked (only the outer P3 was verified).
+            self._verify_partition_fs(
+                inner_exec, "inner game partition (emmc P2)")
+
             self._log("Re-packing emmc.img (inner P2 -> emmc.img)...", "info")
             # Byte-exact seek/count so the inner ext4's sub-MiB tail isn't
             # dropped (same rounding trap as the extract dd's above).
@@ -899,6 +906,14 @@ class WritePipeline(BasePipeline):
             self.executor.run(
                 f"debugfs -w -R 'write {emmc_exec} {EMMC_INNER_PATH}' "
                 f"{p3_exec} 2>&1", timeout=900)
+
+            # debugfs `write` exits 0 even when it never created the file or
+            # ran P3 out of space partway.  e2fsck below can't catch that
+            # either: a missing or truncated-but-consistent emmc.img is a
+            # CLEAN filesystem.  On the machine it is exactly what the
+            # installer's `dcfldd if=/data/emmc.img` copy trips over as a
+            # "SHELL ERROR", so check presence + exact byte size here.
+            self._verify_repacked_emmc(p3_exec, emmc_exec)
 
             # Guard the unguarded debugfs re-pack: a P3 ext4 that ends up
             # short or inconsistent makes the machine hang mounting /data at
@@ -990,6 +1005,34 @@ class WritePipeline(BasePipeline):
                 # but informative; surface as info-level.
                 self._log(f"    {out.strip()}", "info")
         self._progress(total, total, "")
+
+    def _verify_repacked_emmc(self, p3_exec, emmc_exec):
+        """Check that ``/emmc.img`` inside the re-packed P3 exists and matches
+        the staged emmc.img byte-for-byte in size.
+
+        The on-machine installer (pinstall) has no checksum of its payload --
+        it just forks ``dcfldd if=/data/emmc.img of=/dev/mmcblk1`` and shows
+        "SHELL ERROR" if that exits nonzero.  A missing emmc.img fails the
+        install instantly; a short one silently bricks the eMMC contents.
+        Neither is visible to ``e2fsck`` (both leave a consistent filesystem),
+        so compare the inode size debugfs reports against the staged source.
+        """
+        self._log("Verifying re-packed emmc.img inside P3...", "info")
+        want = int(self.executor.run(
+            f"stat -c%s {shlex.quote(emmc_exec)}", timeout=10).strip())
+        out = self.executor.run(
+            f"debugfs -R 'stat {EMMC_INNER_PATH}' {shlex.quote(p3_exec)} "
+            f"2>&1", timeout=60)
+        m = re.search(r"\bSize:\s*(\d+)", out)
+        got = int(m.group(1)) if m else None
+        if got != want:
+            raise PipelineError("Write",
+                f"The re-packed installer data partition holds a bad "
+                f"emmc.img (expected {want:,} bytes, "
+                f"got {f'{got:,}' if got is not None else 'NO FILE'}) -- "
+                f"on the machine this fails the install with a SHELL ERROR "
+                f"or a corrupt eMMC. The build was aborted; the original "
+                f"image is unchanged.\n\ndebugfs stat output:\n{out.strip()}")
 
     def _verify_partition_fs(self, image_exec, label):
         """Read-only e2fsck of a re-packed ext4 partition image; abort on any

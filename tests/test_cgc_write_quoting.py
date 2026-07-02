@@ -35,12 +35,23 @@ class _RecordingExecutor(WslExecutor):
         super().__init__()
         self.commands = []
 
+    # Size handed to the repacked-emmc guard from both sides (staged file
+    # and debugfs inode) so the pipeline proceeds; the guard's failure modes
+    # get their own dedicated tests below.
+    EMMC_SIZE = 3640655872
+
     def run(self, bash_cmd, timeout=120):
         self.commands.append(bash_cmd)
         # The re-packed-P3 fsck guard parses a trailing "__RC__<code>"; hand it
         # a clean result so the pipeline proceeds (this test isn't about fsck).
         if "e2fsck" in bash_cmd:
             return "__RC__0"
+        if bash_cmd.startswith("stat -c%s"):
+            return str(self.EMMC_SIZE)
+        if bash_cmd.startswith("debugfs -R") and "'stat " in bash_cmd:
+            return (f"Inode: 14   Type: regular    Mode:  0644\n"
+                    f"User:     0   Group:     0   Size: {self.EMMC_SIZE}\n"
+                    f"Fragment:  Address: 0    Number: 0    Size: 0\n")
         return ""  # every other caller tolerates empty stdout
 
 
@@ -174,6 +185,74 @@ def test_write_modified_files_handles_apostrophe(tmp_path):
                for c in dbg)
     assert any(shlex.split(c)[shlex.split(c).index("-R") + 1].startswith("write ")
                for c in dbg)
+
+
+def test_write_verifies_inner_fs_and_repacked_emmc(tmp_path, monkeypatch):
+    """The Write pipeline must (a) e2fsck the INNER game ext4 after the
+    debugfs mods (it's the fs the game boots from; until v0.32.2 it shipped
+    unchecked) and (b) verify /emmc.img inside the re-packed P3 exists at its
+    exact byte size (a missing/short emmc.img passes e2fsck -- deleting it
+    outright leaves a CLEAN fs -- but fails on the machine as the installer's
+    "SHELL ERROR", RTS's Pulp Fiction report)."""
+    rec, done, _out = _drive_write(tmp_path, monkeypatch)
+    assert done.get("ok") is True, done
+
+    fsck_targets = [c for c in rec.commands if c.startswith("e2fsck -fn")]
+    assert any("inner.img" in c for c in fsck_targets), (
+        f"inner game fs never fsck'd: {fsck_targets}")
+    assert any("p3.img" in c for c in fsck_targets), (
+        f"re-packed P3 never fsck'd: {fsck_targets}")
+
+    # The emmc guard consulted both sides: staged size + debugfs inode size.
+    assert any(c.startswith("stat -c%s") and "emmc.img" in c
+               for c in rec.commands), "staged emmc.img size never read"
+    assert any(c.startswith("debugfs -R") and "'stat /emmc.img'" in c
+               for c in rec.commands), "re-packed /emmc.img never stat'd"
+
+
+class _FixedOutputExecutor:
+    def __init__(self, outputs):
+        self.outputs = outputs  # list of successive run() results
+
+    def run(self, bash_cmd, timeout=120):
+        return self.outputs.pop(0)
+
+
+def _bare_write_pipeline(executor):
+    wp = WritePipeline.__new__(WritePipeline)
+    wp.executor = executor
+    wp._log = lambda *a, **k: None
+    return wp
+
+
+def test_verify_repacked_emmc_rejects_missing_file():
+    """debugfs `stat` on a deleted /emmc.img prints "File not found by
+    ext2_lookup" (no Size line) and still exits 0 -- the guard must raise."""
+    wp = _bare_write_pipeline(_FixedOutputExecutor(
+        ["3640655872", "/emmc.img: File not found by ext2_lookup \n"]))
+    with pytest.raises(cgc_pipeline.PipelineError) as ei:
+        wp._verify_repacked_emmc("/tmp/p3.img", "/tmp/emmc.img")
+    assert "NO FILE" in str(ei.value)
+
+
+def test_verify_repacked_emmc_rejects_short_file():
+    wp = _bare_write_pipeline(_FixedOutputExecutor(
+        ["3640655872",
+         "Inode: 14   Type: regular\n"
+         "User:     0   Group:     0   Size: 1073741824\n"
+         "Fragment:  Address: 0    Number: 0    Size: 0\n"]))
+    with pytest.raises(cgc_pipeline.PipelineError) as ei:
+        wp._verify_repacked_emmc("/tmp/p3.img", "/tmp/emmc.img")
+    assert "1,073,741,824" in str(ei.value)
+
+
+def test_verify_repacked_emmc_accepts_exact_size():
+    wp = _bare_write_pipeline(_FixedOutputExecutor(
+        ["3640655872",
+         "Inode: 14   Type: regular\n"
+         "User:     0   Group:     0   Size: 3640655872\n"
+         "Fragment:  Address: 0    Number: 0    Size: 0\n"]))
+    wp._verify_repacked_emmc("/tmp/p3.img", "/tmp/emmc.img")  # no raise
 
 
 def test_diff_excludes_orig_snapshots(tmp_path):

@@ -93,7 +93,9 @@ class SternExtractPipeline(BasePipeline):
             raise PipelineError(
                 "Detect",
                 "Not a recognized Stern Spike card image (need a raw .img/.bin "
-                "with the Spike partition layout).")
+                "with the Spike partition layout).\n\n"
+                "If the file was just copied here, the copy may still have "
+                "been in progress — wait for it to finish, then try again.")
         self._log(f"Detected: {display_for_key(key, self.input_path)}", "success")
         self._check_cancel()
 

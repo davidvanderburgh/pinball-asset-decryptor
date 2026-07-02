@@ -406,8 +406,9 @@ def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         app, manufacturers_by_key):
     """monkeybug Write-tab rework: Build/Revert moved into the Modified Files
     toolbar, the standalone Cancel widget is gone (Build doubles as a live
-    Cancel), and the redundant "Output:" line is blank for SD-card-image
-    plugins."""
+    Cancel), and the redundant "Output: <full path>" line is gone for
+    SD-card-image plugins — it shows only the distinct build name when the
+    plugin renames its builds (write_output_suffix), else nothing."""
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     app.window.extract_input_var.set("")
@@ -420,9 +421,17 @@ def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         assert not hasattr(w, "_write_cancel_btn")
         # Build button is a descendant of the preview frame (its toolbar).
         assert str(w._write_btn).startswith(str(w._write_preview_frame) + ".")
-        # Redundant Output line suppressed for flash_image plugins.
+        # Redundant "Output: <full path>" line suppressed for flash_image
+        # plugins; with an original picked, Stern's -modified suffix shows
+        # as a bare "Builds: <name>" instead.
+        w.write_upd_var.set("")
         w._update_write_filename()
         assert w._write_filename_lbl.cget("text") == ""
+        w.write_upd_var.set("C:/cards/game-1_0_0.sdcard.raw")
+        w._update_write_filename()
+        assert (str(w._write_filename_lbl.cget("text"))
+                == "Builds: game-1_0_0.sdcard-modified.raw")
+        w.write_upd_var.set("")
         # Build ⇄ Cancel fold: flips to a live Cancel mid-run, restores after.
         idle = w._write_btn.cget("text")
         assert idle != "Cancel"
@@ -534,5 +543,92 @@ def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
     finally:
         stern.set_era("spike2")
         app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_path_history_records_dedupes_and_caps(app, manufacturers_by_key):
+    """Path boxes keep a per-manufacturer recent-paths history (monkeybug):
+    recorded at run start, most recent first, deduped case-insensitively,
+    capped, and pushed into the window for the comboboxes' dropdowns."""
+    import copy
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    before = copy.deepcopy(app._settings.get("path_history", {}))
+    try:
+        for i in range(8):
+            app._record_path_history(extract_input=f"C:/imgs/card{i}.raw")
+        hist = app._settings["path_history"]["stern"]["extract_input"]
+        assert len(hist) == app._PATH_HISTORY_MAX
+        assert hist[0].endswith("card7.raw")
+        # Re-recording an older path moves it to the front without
+        # duplicating (case-insensitive on purpose — Windows paths).
+        app._record_path_history(extract_input="C:/IMGS/CARD5.RAW")
+        hist = app._settings["path_history"]["stern"]["extract_input"]
+        assert len(hist) == app._PATH_HISTORY_MAX
+        assert hist[0] == "C:/IMGS/CARD5.RAW"
+        assert sum("card5" in p.lower() for p in hist) == 1
+        # The window sees the same lists (the dropdowns read _path_history).
+        assert app.window._path_history["extract_input"] == hist
+    finally:
+        # Restore the on-disk-backed history before anything can save it.
+        app._settings["path_history"] = before
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_path_boxes_are_history_comboboxes(app, manufacturers_by_key):
+    """The path fields are editable comboboxes whose dropdown lists the
+    recent paths for their field, refreshed on every open (postcommand),
+    while typing still round-trips through the shared textvariable."""
+    from tkinter import ttk as _ttk
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    w = app.window
+    try:
+        combos = [c for c in w._extract_input_row.winfo_children()
+                  if isinstance(c, _ttk.Combobox)]
+        assert len(combos) == 1
+        combo = combos[0]
+        w.set_path_history({"extract_input": ["C:/one.raw", "C:/two.raw"]})
+        # Run what opening the dropdown runs.
+        w.root.tk.call(str(combo.cget("postcommand")))
+        assert list(combo.cget("values")) == ["C:/one.raw", "C:/two.raw"]
+        w.extract_input_var.set("typed.raw")
+        assert combo.get() == "typed.raw"
+    finally:
+        w.extract_input_var.set("")
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_help_button_and_per_tab_content(app, manufacturers_by_key):
+    """The header "?" opens the per-tab tips modal (monkeybug): shown only
+    in the working view, and every notebook tab caption has help content so
+    no tab opens an empty modal."""
+    from pinball_decryptor.gui.help_dialog import HELP_CONTENT, show_tab_help
+    w = app.window
+    assert w._help_btn.winfo_manager() == ""      # hidden on the picker
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    try:
+        assert w._help_btn.winfo_manager() == "pack"
+        for tab_id in w._notebook.tabs():
+            caption = w._notebook.tab(tab_id, "text").strip()
+            assert caption in HELP_CONTENT, caption
+        dlg = show_tab_help(app.root, "Write", w._current_theme)
+        try:
+            assert "Write" in dlg.title()
+        finally:
+            dlg.destroy()
+        app._on_back_to_picker()
+        app.root.update()
+        assert w._help_btn.winfo_manager() == ""  # hidden again on Back
+    finally:
         app._on_manufacturer_change(manufacturers_by_key["spooky"])
         app.root.update()

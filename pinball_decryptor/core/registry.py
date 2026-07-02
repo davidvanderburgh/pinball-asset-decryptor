@@ -316,6 +316,14 @@ class Manufacturer(ABC):
     # field reads "Card image:" instead of the jargony ".img:".
     extract_input_label = None
 
+    # Inserted before the extension of the built file's default name (which
+    # otherwise mirrors the original's), so a build is obviously not the
+    # stock file (monkeybug 5: "led_zeppelin…-modified.raw").  Only safe for
+    # plugins whose output filename carries no meaning to the machine (a raw
+    # card image you flash yourself); leave "" when the game/installer looks
+    # the file up by name (e.g. BOF's .fun updates).
+    write_output_suffix: str = ""
+
     # Action-button captions on the Write tab, one per destination mode, so
     # the button restates the chosen action instead of a generic "Apply".
     # Defaults match JJP's historical wording (mirrors the standalone JJP

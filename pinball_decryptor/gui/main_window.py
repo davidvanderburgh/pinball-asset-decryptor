@@ -135,6 +135,11 @@ class MainWindow:
         # ``on_column_widths_change`` (settings.json).  ``{tree_key: {col: px}}``.
         self._saved_column_widths = dict(initial_column_widths or {})
         self._on_column_widths_change = on_column_widths_change
+        # Recent paths per field (``{field_key: [paths, most recent first]}``)
+        # backing the path boxes' dropdown history (monkeybug: "any text box
+        # showing a file path should have a history").  Owned + persisted by
+        # the App per manufacturer; set via set_path_history() on mfr switch.
+        self._path_history = {}
         # macOS FDA banner state.  Persisted in settings.json via
         # ``on_fda_acknowledge`` so the dismissal survives restarts —
         # the previous "always show" behaviour was out of sync with
@@ -520,6 +525,14 @@ class MainWindow:
         # while a pipeline floods the main loop and the window can't repaint.
         _Tooltip(self._theme_btn, "Switch between light and dark theme",
                  lambda: self._current_theme)
+        # "?" tips button — per-tab help modal (monkeybug: collect the
+        # scattered inline tips somewhere a user can pull up on demand).
+        # Created here, but packed only in show_mfr_view(): the picker has
+        # no tabs so the button would have nothing to explain there.
+        self._help_btn = ttk.Button(top, text="?", width=3,
+                                    command=self._open_tab_help)
+        _Tooltip(self._help_btn, "Tips for this tab",
+                 lambda: self._current_theme)
         # "Check for updates" button — always visible.  Useful both as
         # a manual override (user wants to check NOW instead of waiting
         # for next launch) and as a dev convenience (lets you exercise
@@ -785,8 +798,8 @@ class MainWindow:
         self._extract_input_lbl = ttk.Label(
             self._extract_input_row, text="Input:", width=14, anchor=tk.W)
         self._extract_input_lbl.pack(side=tk.LEFT)
-        ttk.Entry(self._extract_input_row,
-                  textvariable=self.extract_input_var).pack(
+        self._path_combo(self._extract_input_row,
+                         self.extract_input_var, "extract_input").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._extract_input_row, text="Browse...",
                    command=self._browse_extract_input).pack(
@@ -868,8 +881,8 @@ class MainWindow:
         ttk.Label(self._extract_output_row_ref,
                   text="Output Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(self._extract_output_row_ref,
-                  textvariable=self.extract_output_var).pack(
+        self._path_combo(self._extract_output_row_ref,
+                         self.extract_output_var, "extract_output").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._extract_output_row_ref, text="Browse...",
                    command=self._browse_extract_output).pack(
@@ -1224,12 +1237,20 @@ class MainWindow:
         )
         self._write_ssd_radio.pack(side=tk.LEFT)
 
+        # The Write tab's field-label column.  Everything created with
+        # width=16 below registers here so apply_manufacturer can widen the
+        # whole column in lockstep when a manufacturer noun overflows it
+        # (Stern's "Original Card image:" truncated at 16 — monkeybug 5).
+        self._write_col_labels = []
+
         # ISO original file row.
         self._write_upd_row = ttk.Frame(f)
         self._write_original_lbl = ttk.Label(
             self._write_upd_row, text="Original:", width=16, anchor=tk.W)
         self._write_original_lbl.pack(side=tk.LEFT)
-        ttk.Entry(self._write_upd_row, textvariable=self.write_upd_var).pack(
+        self._write_col_labels.append(self._write_original_lbl)
+        self._path_combo(self._write_upd_row,
+                         self.write_upd_var, "write_original").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_upd_row, text="Browse...",
                    command=self._browse_write_upd).pack(
@@ -1238,8 +1259,10 @@ class MainWindow:
 
         # SSD drive picker.
         self._write_drive_row = ttk.Frame(f)
-        ttk.Label(self._write_drive_row,
-                  text="Game SSD:", width=16, anchor=tk.W).pack(side=tk.LEFT)
+        _drive_lbl = ttk.Label(self._write_drive_row,
+                               text="Game SSD:", width=16, anchor=tk.W)
+        _drive_lbl.pack(side=tk.LEFT)
+        self._write_col_labels.append(_drive_lbl)
         self._write_drive_combo = ttk.Combobox(
             self._write_drive_row,
             textvariable=self.write_drive_display_var,
@@ -1288,7 +1311,9 @@ class MainWindow:
         # the Extract tab (monkeybug 4.8) instead of the old fixed padx.
         self._write_badge_row = ttk.Frame(f)
         self._write_badge_row.pack(fill=tk.X, padx=10, pady=(0, 2))
-        ttk.Label(self._write_badge_row, text="", width=16).pack(side=tk.LEFT)
+        _badge_spacer = ttk.Label(self._write_badge_row, text="", width=16)
+        _badge_spacer.pack(side=tk.LEFT)
+        self._write_col_labels.append(_badge_spacer)
         self._write_badge = ttk.Label(self._write_badge_row, text="",
                                       font=(_SANS_FONT, 9, "italic"))
         self._write_badge.pack(side=tk.LEFT, anchor=tk.W)
@@ -1301,11 +1326,12 @@ class MainWindow:
 
         self._write_assets_row_ref = ttk.Frame(f)
         self._write_assets_row_ref.pack(fill=tk.X, **pad)
-        ttk.Label(self._write_assets_row_ref,
-                  text="Modified Assets:", width=16, anchor=tk.W).pack(
-            side=tk.LEFT)
-        ttk.Entry(self._write_assets_row_ref,
-                  textvariable=self.write_assets_var).pack(
+        _assets_lbl = ttk.Label(self._write_assets_row_ref,
+                                text="Modified Assets:", width=16, anchor=tk.W)
+        _assets_lbl.pack(side=tk.LEFT)
+        self._write_col_labels.append(_assets_lbl)
+        self._path_combo(self._write_assets_row_ref,
+                         self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_assets_row_ref, text="Browse...",
                    command=self._browse_write_assets).pack(
@@ -1366,9 +1392,10 @@ class MainWindow:
         # stamped and lets the user override it.  Pack-managed by
         # apply_manufacturer (BOF only); see write_version_date capability.
         self._write_version_frame = ttk.Frame(f)
-        ttk.Label(self._write_version_frame,
-                  text="Update version:", width=16, anchor=tk.W).pack(
-            side=tk.LEFT)
+        _version_lbl = ttk.Label(self._write_version_frame,
+                                 text="Update version:", width=16, anchor=tk.W)
+        _version_lbl.pack(side=tk.LEFT)
+        self._write_col_labels.append(_version_lbl)
         self._write_version_auto_check = ttk.Checkbutton(
             self._write_version_frame, text="Auto",
             variable=self.write_version_auto_var,
@@ -1385,11 +1412,12 @@ class MainWindow:
 
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
-        ttk.Label(self._write_output_row_ref,
-                  text="Output Folder:", width=16, anchor=tk.W).pack(
-            side=tk.LEFT)
-        ttk.Entry(self._write_output_row_ref,
-                  textvariable=self.write_output_var).pack(
+        _out_lbl = ttk.Label(self._write_output_row_ref,
+                             text="Output Folder:", width=16, anchor=tk.W)
+        _out_lbl.pack(side=tk.LEFT)
+        self._write_col_labels.append(_out_lbl)
+        self._path_combo(self._write_output_row_ref,
+                         self.write_output_var, "write_output").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_output_row_ref, text="Browse...",
                    command=self._browse_write_output).pack(
@@ -1520,19 +1548,28 @@ class MainWindow:
         # the paragraph.
         flash_row = ttk.Frame(self._flash_frame)
         flash_row.pack(fill=tk.X, padx=8, pady=(4, 6))
-        ttk.Label(
+        # Button packs FIRST: pack gives space in creation order, so at narrow
+        # window widths the description shrinks instead of the button clipping
+        # to "Flash imag" (monkeybug 5).
+        self._flash_btn = ttk.Button(
+            flash_row, text="Flash image to SD card…",
+            command=self._open_flash_dialog)
+        self._flash_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N)
+        _flash_lbl = ttk.Label(
             flash_row,
             text=("Write a complete, pre-built SD-card image (.img / .raw) "
                   "directly onto a card — handy after Build SD-card image, or "
                   "to restore a backup. The whole card is erased and replaced, "
                   "and the built-in size check refuses an image too big for the "
                   "card. Requires Administrator."),
-            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=760).pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
-        self._flash_btn = ttk.Button(
-            flash_row, text="Flash image to SD card…",
-            command=self._open_flash_dialog)
-        self._flash_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N)
+            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=760)
+        _flash_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Re-wrap to the space actually allocated, so the text never runs
+        # under the button on a narrow window.
+        _flash_lbl.bind(
+            "<Configure>",
+            lambda e, lbl=_flash_lbl: lbl.configure(
+                wraplength=max(200, e.width - 4)))
 
     def _build_modpack_tab(self):
         f = self._tab_modpack
@@ -1546,7 +1583,7 @@ class MainWindow:
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(row, text="Mod Folder:", width=12, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse...",
                    command=self._browse_write_assets).pack(
@@ -1639,7 +1676,7 @@ class MainWindow:
         self._audio_assets_row = row
         ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "audio",
                                        self._scan_audio_slots_async)
@@ -2871,7 +2908,7 @@ class MainWindow:
         self._video_assets_row = row
         ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "video",
                                        self._scan_video_slots_async)
@@ -4089,7 +4126,7 @@ class MainWindow:
         self._image_assets_row = row
         ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "image",
                                        self._scan_image_slots_async)
@@ -4670,7 +4707,7 @@ class MainWindow:
         self._text_assets_row = row
         ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var).pack(
+        self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
         ttk.Label(f, text="(the folder Extract produced — shared with the "
@@ -5259,6 +5296,7 @@ class MainWindow:
         # disappear together.
         self._mfr_view_wrapper.pack_forget()
         self._back_btn.pack_forget()
+        self._help_btn.pack_forget()
         # Hide the app-title label entirely — the window title bar
         # already says "Pinball Asset Decryptor" so showing it again in
         # the body is just noise.  The picker has its own internal
@@ -5280,6 +5318,11 @@ class MainWindow:
         self._era_badges_frame.pack_forget()
         if self._era_badge_widgets:
             self._era_badges_frame.pack(side=tk.LEFT, padx=(12, 0))
+        # "?" tips button joins the right-side header cluster (leftmost of
+        # it — the theme/update/disk buttons were packed RIGHT at build time,
+        # so a later RIGHT pack lands left of them).
+        if not self._help_btn.winfo_manager():
+            self._help_btn.pack(side=tk.RIGHT, padx=(0, 6))
         self._mfr_view_wrapper.pack(fill=tk.BOTH, expand=True)
         # Right-size the notebook to the visible tab so the Log pane fills
         # any leftover vertical space (see _resize_notebook_to_current_tab).
@@ -5460,6 +5503,14 @@ class MainWindow:
             self._write_original_lbl.configure(
                 text=f"Original {primary_ext}:" if primary_ext.startswith(".")
                 else "Original:")
+
+        # Widen the Write tab's whole label column when the noun overflows the
+        # default 16 chars (Stern's "Original Card image:" was clipping to
+        # "Original Card imag" — monkeybug 5).  All the column's labels move
+        # together so the entry fields stay aligned.
+        col_w = max(16, len(str(self._write_original_lbl.cget("text"))) + 1)
+        for _lbl in getattr(self, "_write_col_labels", []):
+            _lbl.configure(width=col_w)
 
         # Show/hide tabs by capability.
         self._configure_tab("Replace Audio", caps.replace_audio)
@@ -6317,12 +6368,34 @@ class MainWindow:
                 return parent
         return None
 
+    def _path_combo(self, parent, var, field):
+        """An editable path box with a recent-paths dropdown.
+
+        Drop-in replacement for the plain ``ttk.Entry`` the path rows used:
+        same textvariable wiring (typing + traces unchanged), plus a dropdown
+        of this manufacturer's recent paths for *field*.  Values refresh on
+        every open (``postcommand``) so a path recorded mid-session appears
+        without any explicit widget update."""
+        combo = ttk.Combobox(parent, textvariable=var)
+        combo.configure(postcommand=lambda c=combo, f=field: c.configure(
+            values=tuple(self._path_history.get(f, ()))))
+        return combo
+
+    def set_path_history(self, history):
+        """Swap in the current manufacturer's recent-paths dict
+        (``{field_key: [paths]}``).  Called by the App on mfr switch and
+        after it records a new path."""
+        self._path_history = dict(history or {})
+
     def _browse_extract_input(self):
         path = filedialog.askopenfilename(
             title="Select input file", filetypes=self._input_filetypes(),
             initialdir=self._initialdir_for(self.extract_input_var.get()))
         if path:
-            self.extract_input_var.set(path)
+            # Tk's file dialogs return forward slashes even on Windows;
+            # normalize so path fields don't mix //server/share with
+            # \\server\share styles (monkeybug 5.5).
+            self.extract_input_var.set(os.path.normpath(path))
 
     def _browse_extract_deltas(self):
         paths = filedialog.askopenfilenames(
@@ -6331,6 +6404,7 @@ class MainWindow:
             initialdir=self._initialdir_for(
                 self.extract_input_var.get(), self.extract_output_var.get()))
         for p in paths:
+            p = os.path.normpath(p) if p else p
             if p and p not in self.extract_delta_paths:
                 self.extract_delta_paths.append(p)
         self._refresh_deltas_display()
@@ -7458,7 +7532,7 @@ class MainWindow:
             filetypes=self._input_filetypes(),
             initialdir=self._initialdir_for(self.write_upd_var.get()))
         if path:
-            self.write_upd_var.set(path)
+            self.write_upd_var.set(os.path.normpath(path))
 
     def _browse_write_assets(self):
         path = filedialog.askdirectory(
@@ -7596,6 +7670,16 @@ class MainWindow:
                 return
         if self._on_write is not None:
             self._on_write()
+
+    def _open_tab_help(self):
+        """Open the tips modal for the currently-visible notebook tab."""
+        try:
+            idx = self._notebook.index(self._notebook.select())
+            tab = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
+        except (tk.TclError, IndexError):
+            tab = "Extract"
+        from .help_dialog import show_tab_help
+        show_tab_help(self.root, tab, self._current_theme)
 
     def _open_flash_dialog(self):
         """Open the modal that collects (image, target card) for a flash.
@@ -7787,7 +7871,7 @@ class MainWindow:
             initialdir=self._initialdir_for(
                 self.write_output_var.get(), self.write_assets_var.get()))
         if path:
-            self.write_output_var.set(path)
+            self.write_output_var.set(os.path.normpath(path))
 
     # ------------------------------------------------------------------
     # Dynamic badges
@@ -8004,11 +8088,20 @@ class MainWindow:
     def _update_write_filename(self):
         # SD-card-image plugins (Stern / CGC, capabilities.flash_image) already
         # show the Output Folder; the extra "Output: …/name.raw" line just
-        # repeats it (monkeybug 4.6), so keep it blank there.  The label widget
+        # repeats it (monkeybug 4.6), so keep it blank there — UNLESS the
+        # plugin renames the build (write_output_suffix), where the distinct
+        # name is exactly what the user needs to see.  The label widget
         # itself stays as the layout anchor other rows pack `before=`.
         mfr = getattr(self, "_current_mfr", None)
+        suffix = getattr(mfr, "write_output_suffix", "") if mfr else ""
         if mfr is not None and getattr(mfr.capabilities, "flash_image", False):
-            self._write_filename_lbl.configure(text="")
+            upd = self.write_upd_var.get().strip()
+            if suffix and upd:
+                stem, ext = os.path.splitext(os.path.basename(upd))
+                self._write_filename_lbl.configure(
+                    text=f"Builds: {stem}{suffix}{ext}")
+            else:
+                self._write_filename_lbl.configure(text="")
             return
         # Direct-SD write has no output file (the card itself is the
         # destination) and the file-mode "Original" input row is hidden, so
@@ -8020,6 +8113,9 @@ class MainWindow:
         upd = self.write_upd_var.get().strip()
         out = self.write_output_var.get().strip()
         name = os.path.basename(upd) if upd else ""
+        if name and suffix:
+            stem, ext = os.path.splitext(name)
+            name = f"{stem}{suffix}{ext}"
         if name and out:
             spec_ext = (self._current_mfr.input_spec.extensions[0].lower()
                         if self._current_mfr else ".upd")

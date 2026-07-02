@@ -445,6 +445,34 @@ class App:
         self.window.write_upd_var.set(section.get("write_original", ""))
         self.window.write_assets_var.set(section.get("write_assets", ""))
         self.window.write_output_var.set(section.get("write_output", ""))
+        # This manufacturer's recent-paths lists back the path boxes'
+        # dropdown history.  Stored in a top-level settings section (NOT
+        # inside the manufacturers section, which _save_manufacturer_paths
+        # rewrites wholesale).
+        self.window.set_path_history(
+            self._settings.get("path_history", {}).get(key, {}))
+
+    # Dropdown history keeps this many recent paths per field (monkeybug
+    # suggested "maybe last 6 files").
+    _PATH_HISTORY_MAX = 6
+
+    def _record_path_history(self, **field_paths):
+        """Push the paths a run actually used onto the per-manufacturer
+        recent-paths lists (most recent first, deduped, capped).  Recorded
+        at run start — after validation — so only real, usable paths enter
+        the history.  Persistence rides on the caller's _save_settings()."""
+        if self._current_mfr is None:
+            return
+        hist = self._settings.setdefault("path_history", {}).setdefault(
+            self._current_mfr.key, {})
+        for field, path in field_paths.items():
+            path = (path or "").strip()
+            if not path:
+                continue
+            keep = [p for p in hist.get(field, [])
+                    if os.path.normcase(p) != os.path.normcase(path)]
+            hist[field] = [path] + keep[:self._PATH_HISTORY_MAX - 1]
+        self.window.set_path_history(hist)
 
     def _save_manufacturer_paths(self, key):
         # Don't clobber a manufacturer's previously-saved input path with a
@@ -518,7 +546,12 @@ class App:
         output_path = self.window.extract_output_var.get().strip()
         # Normalize to native separators so a hand-typed or mixed path (e.g.
         # "c:\folder/decrypt_1") displays and propagates consistently to the
-        # Replace tabs' assets folder below.
+        # Replace tabs' assets folder below.  Re-setting the input var also
+        # re-fires the "Detected: …" badge — if the file was still mid-copy
+        # when it was first picked, the stale "Not recognised" heals here.
+        if in_path:
+            in_path = os.path.normpath(in_path)
+            self.window.extract_input_var.set(in_path)
         if output_path:
             output_path = os.path.normpath(output_path)
             self.window.extract_output_var.set(output_path)
@@ -542,6 +575,8 @@ class App:
             ):
                 return
 
+        self._record_path_history(extract_input=in_path,
+                                  extract_output=output_path)
         self._save_settings()
 
         # Point the shared assets folder at this extract's output dir so the
@@ -788,6 +823,7 @@ class App:
                     f"Leave blank to auto-discover.")
                 return
 
+        self._record_path_history(extract_output=output_path)
         self._save_settings()
 
         # Point the shared assets folder at this extract's output dir so the
@@ -916,9 +952,14 @@ class App:
                 "Please select an output folder.")
             return
 
-        # Resolve the output filename: same as original, in the chosen folder.
-        # Allow the user to point output at an explicit filename too.
+        # Resolve the output filename: the original's name (plus the plugin's
+        # distinguishing suffix, e.g. Stern's "-modified") in the chosen
+        # folder.  Allow the user to point output at an explicit filename too.
         original_name = os.path.basename(original)
+        suffix = getattr(self._current_mfr, "write_output_suffix", "")
+        if suffix:
+            stem, ext = os.path.splitext(original_name)
+            original_name = f"{stem}{suffix}{ext}"
         primary_ext = (self._current_mfr.input_spec.extensions[0].lower()
                        if self._current_mfr.input_spec.extensions else "")
         if primary_ext and output_dir.lower().endswith(primary_ext):
@@ -961,6 +1002,9 @@ class App:
                 messagebox.showwarning("Invalid Version Date", err)
                 return
 
+        self._record_path_history(write_original=original,
+                                  write_assets=assets_dir,
+                                  write_output=output_dir)
         self._save_settings()
 
         self._active_mode = "write"
@@ -1056,6 +1100,7 @@ class App:
         ):
             return
 
+        self._record_path_history(write_assets=assets_dir)
         self._save_settings()
 
         self._active_mode = "write"

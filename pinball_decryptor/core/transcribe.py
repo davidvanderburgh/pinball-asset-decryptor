@@ -209,31 +209,65 @@ class TranscribePipeline(BasePipeline):
         huggingface_hub sees the dir and won't re-fetch.  When the error
         looks like a corrupt cache we move that model's dir aside (forcing a
         clean re-download) and retry once before surfacing a precise fix.
+
+        Also rides out Hugging Face Hub's anonymous-download rate limit
+        (HTTP 429, a fixed requests-per-IP window): waits the server's
+        suggested retry delay (capped) and retries a couple of times
+        before giving up with a wait-and-retry message instead of the
+        misleading corrupt-cache one.
         """
         from faster_whisper import WhisperModel
-        try:
-            return WhisperModel(self.model_size, device="cpu",
-                                compute_type="int8")
-        except Exception as e:
-            if _looks_like_corrupt_model(e):
-                healed = _heal_whisper_cache(self.model_size)
-                if healed:
+        healed = False
+        rate_retries = 0
+        while True:
+            try:
+                return WhisperModel(self.model_size, device="cpu",
+                                    compute_type="int8")
+            except Exception as e:
+                if not healed and _looks_like_corrupt_model(e):
+                    healed = True
+                    why = _heal_whisper_cache(self.model_size)
+                    if why:
+                        self._log(
+                            f"  Cached {self.model_size} model looked corrupt "
+                            f"({why}); re-downloading...", "info")
+                        continue
+                if _looks_like_rate_limited(e) and rate_retries < 2:
+                    rate_retries += 1
+                    wait = _rate_limit_wait_seconds(e)
                     self._log(
-                        f"  Cached {self.model_size} model looked corrupt "
-                        f"({healed}); re-downloading...", "info")
-                    try:
-                        return WhisperModel(self.model_size, device="cpu",
-                                            compute_type="int8")
-                    except Exception as e2:
-                        e = e2
-            cache = _whisper_cache_dir(self.model_size)
-            where = cache or "the huggingface cache (~/.cache/huggingface/hub)"
-            raise PipelineError("Transcribe",
-                f"Failed to load Whisper model {self.model_size!r}: {e}\n\n"
-                f"The cached model may be incomplete or corrupt. Delete\n"
-                f"  {where}\n"
-                f"then try again with internet available — the model "
-                f"(~75 MB) is downloaded once and cached.")
+                        f"  Hugging Face is rate-limiting model downloads "
+                        f"from this IP (HTTP 429). Waiting {wait}s, then "
+                        f"retrying ({rate_retries}/2)...", "info")
+                    self._wait_seconds(wait)
+                    continue
+                if _looks_like_rate_limited(e):
+                    raise PipelineError("Transcribe",
+                        f"Failed to download the Whisper model "
+                        f"{self.model_size!r}: Hugging Face is rate-limiting "
+                        f"downloads from your IP (HTTP 429 Too Many "
+                        f"Requests).\n\n"
+                        f"This is temporary — wait a few minutes and run "
+                        f"Auto-transcribe again. The model (~75 MB) is "
+                        f"downloaded once and cached, so this only affects "
+                        f"the first run.")
+                cache = _whisper_cache_dir(self.model_size)
+                where = (cache
+                         or "the huggingface cache (~/.cache/huggingface/hub)")
+                raise PipelineError("Transcribe",
+                    f"Failed to load Whisper model {self.model_size!r}: "
+                    f"{e}\n\n"
+                    f"The cached model may be incomplete or corrupt. Delete\n"
+                    f"  {where}\n"
+                    f"then try again with internet available — the model "
+                    f"(~75 MB) is downloaded once and cached.")
+
+    def _wait_seconds(self, seconds):
+        """Sleep *seconds* in 1s slices so Cancel stays responsive."""
+        import time
+        for _ in range(int(seconds)):
+            self._check_cancel()
+            time.sleep(1)
 
     def _emit_file_row(self, n, total, rel, kind, text, errored, counts):
         """Tally one transcribed file, drive progress, and log its line.
@@ -287,6 +321,15 @@ class TranscribePipeline(BasePipeline):
         identical to the serial path.  Raises if the pool can't start so the
         caller can fall back to one process."""
         import multiprocessing as mp
+        # Make sure the model is already in the local cache BEFORE spawning
+        # workers: on a cold cache every worker would download it at once,
+        # and ~8 simultaneous anonymous downloads is exactly what trips
+        # Hugging Face's per-IP rate limit (monkeybug's 429).  This one
+        # download also gets _load_model's heal/backoff logic.
+        if _whisper_cache_dir(self.model_size) is None:
+            self._log("  Downloading the model once before starting "
+                      "workers...", "info")
+            self._load_model()
         ncpu = os.cpu_count() or 2
         # Cap at 8: each worker loads its own model (~1-2 s), so more workers is
         # more fixed start-up tax for diminishing parallelism — 8 amortises well
@@ -401,6 +444,27 @@ def _looks_like_corrupt_model(exc):
     return ("model.bin" in msg
             or "unable to open file" in msg
             or "no such file or directory" in msg)
+
+
+def _looks_like_rate_limited(exc):
+    """True if *exc* from loading WhisperModel smells like Hugging Face's
+    per-IP download rate limit (HTTP 429)."""
+    msg = str(exc).lower()
+    return ("429" in msg or "too many requests" in msg
+            or "rate limit" in msg or "rate-limit" in msg)
+
+
+def _rate_limit_wait_seconds(exc):
+    """Extract the server-suggested retry delay from a 429 error message
+    ("... Retry after 20 seconds ..."), clamped to [15, 300]s; 60s when the
+    message carries no number."""
+    import re
+    m = re.search(r"retry after (\d+)", str(exc), re.IGNORECASE)
+    if not m:
+        m = re.search(r"(\d+)\s*seconds", str(exc))
+    if m:
+        return max(15, min(300, int(m.group(1)) + 5))
+    return 60
 
 
 def _whisper_cache_dir(model_size):

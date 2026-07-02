@@ -214,6 +214,10 @@ class SternManufacturer(Manufacturer):
     direct_safety_text = (
         "⚠ Power off the machine and remove the SD card before connecting "
         "it to this PC. Always keep a backup image of the original card.")
+    # Built images get a distinct default name (…-modified.raw) so they can't
+    # be mistaken for the stock image in the same folder (monkeybug 5).  Safe
+    # here: the flashed card doesn't care what the image file was called.
+    write_output_suffix = "-modified"
 
     # ------------------------------------------------------------------
     # Era-aware surface (Spike 2 SD-card vs Whitestar MAME capture)

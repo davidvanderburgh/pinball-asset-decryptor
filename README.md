@@ -402,9 +402,10 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    count so they stay in sync with their sound.
 7. **Write tab** — pick the original file, the (now-modified) assets
    folder, and an output folder; click *Build update*. You get an
-   installable file that's ready for a USB drive. Any Replace
-   Audio / Video assignments are applied automatically here — no extra
-   step. The assets folder *is* your project: your picks and built
+   installable file that's ready for a USB drive (SD-card plugins name
+   it `…-modified.raw` so it can't be mistaken for the stock image).
+   Any Replace Audio / Video assignments are applied automatically
+   here — no extra step. The assets folder *is* your project: your picks and built
    changes persist there across app restarts, so you extract once and
    keep iterating (no re-extract per edit). Each Replace tab marks slots
    already changed by an earlier build, and **Revert all changes…**
@@ -421,6 +422,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
 9. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact.
+
+Two quality-of-life touches apply everywhere: every file/folder box
+keeps a per-manufacturer dropdown of your recent paths (handy when you
+bounce between games), and the **?** button in the top bar opens a tips
+page for whichever tab you're on.
 
 If you browse to a file the current manufacturer doesn't recognise but
 *another* manufacturer does, the badge under the input field will say

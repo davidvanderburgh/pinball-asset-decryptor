@@ -149,10 +149,10 @@ class CGCManufacturer(Manufacturer):
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,
-                                 rename_after=False):
+                                 rename_after=False, model_size="tiny.en"):
         return TranscribePipeline(
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
-            rename_after=rename_after)
+            rename_after=rename_after, model_size=model_size)
 
     def extract_input_help(self):
         return ("Extract a Chicago Gaming Company installer `.img` "

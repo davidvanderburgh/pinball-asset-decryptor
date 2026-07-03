@@ -393,7 +393,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    currently decryptable — e.g. Spooky's Total Nuclear Annihilation,
    AES key unknown). Click a card to enter that manufacturer's view.
 2. The **prerequisites** row at the top of the mfr view turns each
-   needed tool green (✓) or red (✗); hover for an install hint.
+   needed tool green (✓) or red (✗); hover for an install hint. Once
+   everything is green the row tucks itself away — the **⚙ settings
+   menu** (top-right) keeps the status plus the Re-check / Install
+   actions, along with the light/dark theme switch, update check,
+   disk-space manager and voice-recognition quality.
 3. **Extract tab** — pick an input file and an output folder; click
    *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
@@ -459,7 +463,7 @@ those plugins need.
 | Manufacturer | Host-side (Windows) | WSL-side (Ubuntu) / Linux apt | Other |
 |---|---|---|---|
 | Barrels of Fun | – | gnupg, tar, curl, unzip, xvfb, webp | **GDRE Tools** — only required for pre-May 2026 firmware; the May 2026+ format (GBOF-magic PCK with RSCC Zstd containers) is handled by the bundled native extractor.  Install Prerequisites auto-downloads GDRE from [GDRETools/gdsdecomp](https://github.com/GDRETools/gdsdecomp/releases) regardless so older `.fun` files still work. |
-| Chicago Gaming Company | ffmpeg *(optional — Cactus Canyon display-art videos)* | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model, ~75 MB downloaded on first use, runs entirely on CPU). Cactus Canyon DCS audio repack uses the bundled DCSExplorer/DCSEncoder (BSD-3). |
+| Chicago Gaming Company | ffmpeg *(optional — Cactus Canyon display-art videos)* | e2fsprogs/debugfs, xxd | `faster-whisper` pip package — auto-installed by Install Prerequisites, drives the **Auto-transcribe samples to callouts.csv** checkbox on the Extract tab (tiny.en model by default, ~75 MB downloaded on first use, runs entirely on CPU; larger/more-accurate models selectable via ⚙ → Voice recognition quality). Cactus Canyon DCS audio repack uses the bundled DCSExplorer/DCSEncoder (BSD-3). |
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
 | Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
@@ -483,15 +487,18 @@ On macOS, Spooky/JJP Clonezilla flows use Docker Desktop instead of WSL
 (the app builds the container automatically the first time it's needed).
 
 On Windows, the WSL extract paths stage gigabytes inside the WSL virtual
-disk. A **Manage disk space** dialog lets you see WSL disk usage and
+disk. A **Manage disk space** dialog (⚙ settings menu) lets you see WSL disk usage and
 **resize the WSL disk** (grow or shrink, no admin needed) so a big
 Clonezilla extract doesn't wall on a too-small WSL volume.
 
 ## Auto-update
 
-The app polls the GitHub releases API on launch and posts an "Update
-available" link in the log pane if a newer release exists. The check is
-non-blocking and silent if you're already on the latest version.
+The app polls the GitHub releases API on launch. If a newer release
+exists it shows a banner at the top of the window, puts a ● notification
+on the ⚙ settings gear (with a *Download update* entry in its menu), and
+logs a clickable download link. The check is non-blocking; the outcome
+("update available" / "you're on the latest" / "check failed") is always
+mirrored into the log, and a manual check lives in the ⚙ menu.
 
 The release tag format is `vMAJOR.MINOR.PATCH`; see
 [core/updater.py](pinball_decryptor/core/updater.py) for the

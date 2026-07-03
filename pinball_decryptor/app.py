@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -142,6 +143,8 @@ class App:
                 self._settings.get("admin_warning_collapsed", False)),
             on_admin_warning_collapsed_change=(
                 self._on_admin_warning_collapsed_change),
+            initial_voice_quality=self._settings.get("voice_quality"),
+            on_voice_quality_change=self._on_voice_quality_change,
         )
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
@@ -445,6 +448,11 @@ class App:
         self.window.write_upd_var.set(section.get("write_original", ""))
         self.window.write_assets_var.set(section.get("write_assets", ""))
         self.window.write_output_var.set(section.get("write_output", ""))
+        # Extract-tab checkbox state (auto-name / categories / JJP filters) —
+        # per manufacturer, so the ticks stick across sessions (monkeybug).
+        # apply_manufacturer() re-applies this after it rebuilds the dynamic
+        # category checkboxes; setting it here covers the rest of the vars.
+        self.window.set_extract_options(section.get("extract_options", {}))
         # This manufacturer's recent-paths lists back the path boxes'
         # dropdown history.  Stored in a top-level settings section (NOT
         # inside the manufacturers section, which _save_manufacturer_paths
@@ -505,6 +513,7 @@ class App:
                 existing.get("write_original", "")),
             "write_assets": self.window.write_assets_var.get().strip(),
             "write_output": self.window.write_output_var.get().strip(),
+            "extract_options": self.window.get_extract_options(),
         }
 
     # ------------------------------------------------------------------
@@ -1224,9 +1233,11 @@ class App:
 
         # "Auto-name call-outs" is a single action = transcribe + rename, so
         # always rename (the callouts.csv is still written either way).
+        # Model size follows the ⚙ menu's voice-recognition quality pick.
         self.pipeline = self._current_mfr.make_transcribe_pipeline(
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
-            rename_after=True)
+            rename_after=True,
+            model_size=self.window.voice_quality_var.get())
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _maybe_wrap_done_for_music_id(self, original_done_cb, output_path):
@@ -1875,6 +1886,12 @@ class App:
             return
 
         is_extract = self._active_mode == "extract"
+        # Snapshot the run's wall-clock now — set_running(False) below clears
+        # the window's timer state.  Covers the whole chain (extract +
+        # auto-name follow-ups) because chained jobs never restart the clock.
+        run_elapsed = None
+        if self.window._start_time is not None:
+            run_elapsed = time.time() - self.window._start_time
         # On success, advance the phase indicator past the last phase
         # so every step shows green instead of leaving the final
         # phase stuck on "active" (blue) forever.  set_phase walks
@@ -1921,8 +1938,15 @@ class App:
             if is_extract:
                 # No modal for extraction — the per-asset progress already
                 # scrolls by in the log, so a blocking popup just gets in the
-                # way of dismissing it.  Drop the summary into the log instead.
+                # way of dismissing it.  Drop the summary into the log instead,
+                # closed out by an unambiguous "fully done" line (monkeybug).
                 self.window.append_log(summary, "success")
+                if run_elapsed is not None:
+                    h, rem = divmod(int(run_elapsed), 3600)
+                    m, s = divmod(rem, 60)
+                    self.window.append_log(
+                        f"Extract completed. Total time: "
+                        f"{h:02d}:{m:02d}:{s:02d}.", "success")
             else:
                 fails = self._staging_failures
                 if fails:
@@ -1993,25 +2017,48 @@ class App:
                     if self._current_mfr else None)
         if show_up_to_date_toast:
             self.window.set_update_check_running(True)
+        # Mirror the check into the log too (David) — the startup check runs
+        # while the picker is showing, so these lines are buffered and land
+        # in the first manufacturer log that opens.
+        self.window.append_log("Checking for updates...", "info")
 
         def _run():
             try:
                 result = check_for_update(__version__, repo=mfr_repo)
+                failed = False
             except Exception:
-                result = None
+                result, failed = None, True
             self.root.after(
                 0, self._handle_update_check_result,
-                result, show_up_to_date_toast)
+                result, show_up_to_date_toast, failed)
         threading.Thread(target=_run, daemon=True).start()
 
-    def _handle_update_check_result(self, result, show_up_to_date_toast):
+    def _handle_update_check_result(self, result, show_up_to_date_toast,
+                                    failed=False):
         """Main-thread continuation of the update check."""
         self.window.set_update_check_running(False)
         if result:
             version, url, _notes = result
             self.window.show_update_banner(version, url)
-        elif show_up_to_date_toast:
-            self.window.show_up_to_date_toast()
+            self.window.append_log(
+                f"Update available: v{version} (you're on v{__version__}).",
+                "success")
+            self.window.append_log_link(f"  Download: {url}", url)
+        elif failed:
+            # Network/API error — don't claim "up to date" when we couldn't
+            # actually check.
+            self.window.append_log(
+                "Update check failed — couldn't reach GitHub.", "error")
+            if show_up_to_date_toast:
+                messagebox.showwarning(
+                    "Update check failed",
+                    "Couldn't reach GitHub to check for updates.\n"
+                    "Check your internet connection and try again.")
+        else:
+            self.window.append_log(
+                f"You're on the latest version (v{__version__}).", "info")
+            if show_up_to_date_toast:
+                self.window.show_up_to_date_toast()
 
     # ------------------------------------------------------------------
     # Settings
@@ -2099,4 +2146,10 @@ class App:
         """Persist whether the admin-warning body is collapsed so a returning
         user who's read it once keeps it minimised (monkeybug)."""
         self._settings["admin_warning_collapsed"] = bool(collapsed)
+        self._save_settings()
+
+    def _on_voice_quality_change(self, model_size):
+        """Persist the ⚙-menu voice-recognition quality pick (the
+        faster-whisper model Auto-name call-outs transcribes with)."""
+        self._settings["voice_quality"] = model_size
         self._save_settings()

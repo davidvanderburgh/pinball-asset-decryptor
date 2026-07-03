@@ -49,6 +49,16 @@ _EXTRACT_CATEGORY_TIPS = {
     "text": "Export the on-screen display-text strings for editing.",
 }
 
+# "Voice recognition quality" choices in the ⚙ settings menu: the
+# faster-whisper model Auto-name call-outs transcribes with.  (value, label);
+# first entry is the default.  Bigger models transcribe noticeably better but
+# run several times slower and download a bigger one-time model.
+VOICE_QUALITY_CHOICES = (
+    ("tiny.en", "Standard — fastest (~75 MB model)"),
+    ("small.en", "High — better accuracy, ~4× slower (~500 MB model)"),
+    ("medium.en", "Highest — best accuracy, ~10× slower (~1.5 GB model)"),
+)
+
 
 def _render_pinmame_frame(data, w, h, depth, scale, color):
     """Render a libpinmame RAW DMD frame to an amber-tinted PIL image.
@@ -112,7 +122,9 @@ class MainWindow:
                  initial_column_widths=None,
                  on_column_widths_change=None,
                  initial_admin_warning_collapsed=False,
-                 on_admin_warning_collapsed_change=None):
+                 on_admin_warning_collapsed_change=None,
+                 initial_voice_quality=None,
+                 on_voice_quality_change=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -159,6 +171,15 @@ class MainWindow:
         self._on_admin_warning_collapsed_change = (
             on_admin_warning_collapsed_change)
         self._admin_warning_frames = []
+        # Voice-recognition (auto-name call-outs) quality — the faster-whisper
+        # model size, picked in the ⚙ settings menu and persisted in
+        # settings.json via ``on_voice_quality_change`` (monkeybug: "dial in
+        # better voice recognition at the expense of processing time").
+        vq = initial_voice_quality
+        if vq not in {v for v, _ in VOICE_QUALITY_CHOICES}:
+            vq = VOICE_QUALITY_CHOICES[0][0]
+        self.voice_quality_var = tk.StringVar(value=vq)
+        self._on_voice_quality_change = on_voice_quality_change
         self._app_title = app_title
 
         self._current_mfr = None
@@ -168,6 +189,11 @@ class MainWindow:
         # Forward to the same mfr restores their full log history.
         self._log_widgets = {}    # mfr.key -> tk.Text
         self._log_text = None     # alias for the currently-packed widget
+        # Lines logged before any mfr is selected (e.g. the startup update
+        # check while the picker is showing) — flushed into the first log
+        # widget that appears.  Entries: ("line", ts, text, level) or
+        # ("link", ts, text, url).
+        self._pending_log = []
         # Run counter namespacing the in-place keyed log lines (see
         # update_log_line); bumped on each run start so re-runs don't edit the
         # previous run's lines.
@@ -411,6 +437,12 @@ class MainWindow:
         # Text; app.py reads these and passes extract_categories={key: bool} to
         # the extract factory.  key -> BooleanVar.
         self._extract_category_vars = {}
+        # Persisted Extract-tab options for the current manufacturer
+        # (monkeybug: the auto-name checkboxes "do not stick between
+        # sessions").  Set via set_extract_options() on mfr switch; also
+        # re-applied inside apply_manufacturer() because the category
+        # checkboxes are rebuilt (default-on) on every apply/era switch.
+        self._saved_extract_options = {}
 
         # JJP-only (capabilities.direct_ssd): "From ISO / From SSD"
         # radio toggles between the file picker and the physical-drive
@@ -516,47 +548,55 @@ class MainWindow:
         # is packed by show_mfr_view() and hidden in the picker.
         self._era_badges_frame = ttk.Frame(top)
         self._era_badge_widgets = {}   # era_key -> tk.Label pill
-        self._theme_btn = ttk.Button(top, text="", width=3,
-                                     command=self._toggle_theme)
-        self._theme_btn.pack(side=tk.RIGHT)
-        # The glyph alone isn't self-explanatory, and re-theming re-styles
-        # the whole widget tree synchronously on the UI thread — so it's
-        # also disabled mid-run (see set_running) to stop users hammering it
-        # while a pipeline floods the main loop and the window can't repaint.
-        _Tooltip(self._theme_btn, "Switch between light and dark theme",
-                 lambda: self._current_theme)
-        # "?" tips button — per-tab help modal (monkeybug: collect the
+        # "⚙" settings menu — the one always-visible header control (monkeybug:
+        # the old Check-for-updates / Manage-disk-space / theme button row was
+        # permanent top-bar clutter for things you touch once in a while).
+        # Everything app-wide lives in its dropdown: theme, update check, disk
+        # space, voice-recognition quality, prerequisites.
+        # Glyphs: on Windows BOTH header icons ("?" tips + gear) come from
+        # Segoe MDL2 Assets — the OS's own Settings gear (U+2699 in Segoe UI
+        # renders as the flowery emoji gear) and its matching Help "?" — one
+        # font + one style so the two buttons are pixel-identical in size
+        # (David).  Elsewhere: text glyphs, ⚙ forced to text presentation.
+        if sys.platform == "win32":
+            self._gear_glyph = ""          # MDL2 "Settings" gear
+            self._gear_badge_glyph = ""    # MDL2 "Warning" triangle
+            self._help_glyph = ""          # MDL2 "Help" question mark
+        else:
+            self._gear_glyph = "⚙︎"    # text-presentation ⚙
+            self._gear_badge_glyph = "⚠"    # ⚠
+            self._help_glyph = "?"
+        self._gear_btn = ttk.Button(top, text=self._gear_glyph, width=3,
+                                    style="Icon.TButton",
+                                    command=self._open_settings_menu)
+        self._gear_btn.pack(side=tk.RIGHT)
+        _Tooltip(self._gear_btn, "Settings", lambda: self._current_theme)
+        # "Check for updates" busy flag — while the GitHub fetch is in flight
+        # the menu entry reads "Checking…" and is disabled (the menu is built
+        # fresh on every click, so a flag is all the state we need).
+        self._update_check_busy = False
+        # Disk-staging badge (Windows): "" or a short "⚠ 1.2 GB" suffix shown
+        # on the gear button + the Manage-disk-space menu entry when leftover
+        # staging is found.
+        self._disk_badge_suffix = ""
+        # (version, url) once the update check finds a newer release — puts a
+        # ● notification on the gear and a Download entry at the top of its
+        # menu (persists even after the banner is dismissed).
+        self._update_available = None
+        # "?" tips button — per-tab help window (monkeybug: collect the
         # scattered inline tips somewhere a user can pull up on demand).
         # Created here, but packed only in show_mfr_view(): the picker has
         # no tabs so the button would have nothing to explain there.
-        self._help_btn = ttk.Button(top, text="?", width=3,
+        self._help_btn = ttk.Button(top, text=self._help_glyph, width=3,
+                                    style="Icon.TButton",
                                     command=self._open_tab_help)
         _Tooltip(self._help_btn, "Tips for this tab",
                  lambda: self._current_theme)
-        # "Check for updates" button — always visible.  Useful both as
-        # a manual override (user wants to check NOW instead of waiting
-        # for next launch) and as a dev convenience (lets you exercise
-        # the update-banner code path without juggling __version__).
-        # Packs second with side=RIGHT, so it sits to the LEFT of the
-        # theme toggle.
-        self._update_check_btn = ttk.Button(
-            top, text="Check for updates",
-            command=self._handle_check_updates)
-        self._update_check_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        # "Manage disk space" — only meaningful on Windows, where every
-        # native-tool pipeline (CGC/DP/BoF/JJP) stages into WSL's virtual
-        # disk, and that disk fills up / never shrinks on its own.  Opens the
-        # WSL disk-management modal (leftover-staging cleanup + reclaim).
+        # The single per-app tips window (monkeybug round 2: "?" used to
+        # stack a new window per click).  Created lazily on first "?" click.
+        self._help_window = None
         if sys.platform == "win32":
-            self._disk_btn_base = "Manage disk space"
-            self._disk_btn = ttk.Button(
-                top, text=self._disk_btn_base,
-                command=self._open_disk_dialog)
-            self._disk_btn.pack(side=tk.RIGHT, padx=(0, 6))
-            _Tooltip(self._disk_btn,
-                     "View and free disk space used by extract/build staging",
-                     lambda: self._current_theme)
-            # Passive startup check: badge the button when leftover staging is
+            # Passive startup check: badge the gear when leftover staging is
             # found (crash/cancel leftovers that need a human to clear).
             # Deferred + backgrounded so it never blocks launch, and it only
             # scans WSL if WSL is already running (never spins it up).
@@ -5260,6 +5300,10 @@ class MainWindow:
             on_asset_tab=text in ("Write", "Replace Audio", "Replace Video",
                                   "Replace Images", "Replace Text"))
 
+        # Keep an open tips window in step with the tab now showing
+        # (monkeybug: "the older help text remains").
+        self._refresh_tab_help(text)
+
         # Size the notebook to the tab now showing so a short tab (e.g.
         # Extract) doesn't reserve the tallest tab's height -- the freed
         # space then flows to the expand=True Log pane below.
@@ -5306,8 +5350,8 @@ class MainWindow:
         self._help_btn.pack_forget()
         # Hide the app-title label entirely — the window title bar
         # already says "Pinball Asset Decryptor" so showing it again in
-        # the body is just noise.  The picker has its own internal
-        # "Choose a manufacturer" header.
+        # the body is just noise (the picker view is header-less too;
+        # the manufacturer cards speak for themselves).
         self._title_lbl.pack_forget()
         self._era_badges_frame.pack_forget()
         self._picker_view.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 10))
@@ -5431,6 +5475,16 @@ class MainWindow:
         bundle["scroll"].pack(side=tk.RIGHT, fill=tk.Y)
         bundle["text"].pack(fill=tk.BOTH, expand=True)
         self._log_text = bundle["text"]  # alias for append_log/append_log_link
+        # Flush anything logged while the picker was showing (the startup
+        # update check) into the first log widget to appear, keeping the
+        # timestamps of when the events actually happened.
+        if self._pending_log:
+            pending, self._pending_log = self._pending_log, []
+            for kind, ts, text, extra in pending:
+                if kind == "link":
+                    self._write_log_link(ts, text, extra)
+                else:
+                    self._write_log_line(ts, text, extra)
 
     def _apply_log_theme(self, text_widget):
         c = THEMES[self._current_theme]
@@ -5806,9 +5860,12 @@ class MainWindow:
             self._extract_categories_frame.pack(side=tk.LEFT)
         else:
             self._extract_categories_frame.pack_forget()
-        # The auto-name (transcribe / music-ID) options operate on extracted
-        # audio, so gray them out when Audio is unchecked.
-        self._update_autoname_state()
+        # Restore the persisted per-mfr Extract options onto the vars just
+        # (re)built above — the category checkboxes start default-on every
+        # apply/era switch, so this is where the saved state lands.  Also
+        # runs _update_autoname_state() (auto-name options operate on
+        # extracted audio, so they gray out when Audio is unchecked).
+        self._apply_saved_extract_options()
 
         # Show/hide the capture toggles on the Extract tab.
         if caps.capture:
@@ -5934,6 +5991,54 @@ class MainWindow:
                     chk.state([flag])
                 except tk.TclError:
                     pass
+
+    # ---- Persisted Extract options (monkeybug: checkboxes don't stick) ----
+
+    def set_extract_options(self, opts):
+        """Restore this manufacturer's saved Extract-tab options.
+
+        Called by the App on every manufacturer switch with the settings.json
+        section (``{}`` when nothing was saved → clean defaults).  Missing
+        keys fall back to the build defaults: auto-name off, every category
+        on, JJP filesystem dump off."""
+        self._saved_extract_options = dict(opts or {})
+        self._apply_saved_extract_options()
+
+    def get_extract_options(self):
+        """Snapshot the Extract-tab options for persistence (inverse of
+        :meth:`set_extract_options`)."""
+        opts = {
+            "auto_name_callouts": bool(self.transcribe_var.get()),
+            "auto_name_music": bool(self.music_id_var.get()),
+        }
+        if self._extract_category_vars:
+            opts["categories"] = {k: bool(v.get())
+                                  for k, v in
+                                  self._extract_category_vars.items()}
+        caps = getattr(self._current_mfr, "capabilities", None)
+        if caps is not None and getattr(caps, "asset_filters", False):
+            opts["asset_filters"] = {
+                "graphics": bool(self.extract_graphics_var.get()),
+                "sounds": bool(self.extract_sounds_var.get()),
+                "filesystem": bool(self.extract_filesystem_var.get()),
+            }
+        return opts
+
+    def _apply_saved_extract_options(self):
+        """Push the stashed options onto the Tk vars.  Runs both from
+        set_extract_options() and at the end of apply_manufacturer()'s
+        category rebuild (which resets those vars to default-on)."""
+        opts = self._saved_extract_options
+        self.transcribe_var.set(bool(opts.get("auto_name_callouts", False)))
+        self.music_id_var.set(bool(opts.get("auto_name_music", False)))
+        cats = opts.get("categories", {})
+        for key, var in self._extract_category_vars.items():
+            var.set(bool(cats.get(key, True)))
+        filt = opts.get("asset_filters", {})
+        self.extract_graphics_var.set(bool(filt.get("graphics", True)))
+        self.extract_sounds_var.set(bool(filt.get("sounds", True)))
+        self.extract_filesystem_var.set(bool(filt.get("filesystem", False)))
+        self._update_autoname_state()
 
     def _on_extract_mode_toggle(self):
         """Either Basic-extract or Capture checkbox toggled."""
@@ -7686,15 +7791,148 @@ class MainWindow:
         if self._on_write is not None:
             self._on_write()
 
+    # ------------------------------------------------------------------
+    # ⚙ settings menu (header gear)
+    # ------------------------------------------------------------------
+
+    def _open_settings_menu(self):
+        """Post the settings dropdown under the header gear.  Dropped just
+        under the button, right-aligned to it so it never runs off the
+        window's right edge."""
+        menu = self._build_settings_menu()
+        try:
+            self.root.update_idletasks()
+            x = (self._gear_btn.winfo_rootx()
+                 + self._gear_btn.winfo_width()
+                 - menu.winfo_reqwidth())
+            y = self._gear_btn.winfo_rooty() + self._gear_btn.winfo_height()
+            menu.tk_popup(max(0, x), y)
+        finally:
+            menu.grab_release()
+
+    def _build_settings_menu(self):
+        """Construct the ⚙ dropdown.
+
+        Built fresh on every click so the dynamic bits (theme direction,
+        update-check busy state, disk badge, prerequisite summary) are always
+        current — a Menu is cheap to construct and needs no invalidation
+        plumbing that way."""
+        c = THEMES[self._current_theme]
+        # No explicit font — Tk's TkMenuFont is the platform's native menu
+        # font/metrics; forcing our own renders visibly "off" next to real
+        # context menus (monkeybug/David).
+        kw = dict(tearoff=0, bg=c["bg"], fg=c["fg"],
+                  activebackground=c["accent"], activeforeground="#ffffff",
+                  disabledforeground=c["gray"])
+        menu = tk.Menu(self.root, **kw)
+
+        # A found update leads the menu (matches the ● on the gear) so it's
+        # still reachable after the banner is dismissed.
+        if self._update_available:
+            version, url = self._update_available
+            menu.add_command(
+                label=f"● Download update v{version}…",
+                command=lambda u=url: webbrowser.open(u))
+            menu.add_separator()
+
+        # Theme — a dynamic verb label (monkeybug: the bare ☀/☽ glyph wasn't
+        # self-explanatory).  Re-theming re-styles the whole widget tree
+        # synchronously on the UI thread, so it's locked out mid-run to stop
+        # users hammering it while a pipeline floods the main loop.
+        to_dark = self._current_theme == "light"
+        menu.add_command(
+            label=("Switch to dark theme" if to_dark
+                   else "Switch to light theme"),
+            command=self._toggle_theme,
+            state=(tk.DISABLED if self._is_running() else tk.NORMAL))
+        menu.add_separator()
+
+        # Update check — reads "Checking…" while the GitHub fetch is in
+        # flight so the click is visibly received and can't be queued twice.
+        menu.add_command(
+            label=("Checking for updates…" if self._update_check_busy
+                   else "Check for updates"),
+            command=self._handle_check_updates,
+            state=(tk.DISABLED if self._update_check_busy else tk.NORMAL))
+
+        # Disk space (Windows-only; see _build_ui).  Carries the leftover-
+        # staging badge so the warning survives the move into the menu.
+        if sys.platform == "win32":
+            label = "Manage disk space…"
+            if self._disk_badge_suffix:
+                label += f"   {self._disk_badge_suffix}"
+            menu.add_command(label=label, command=self._open_disk_dialog)
+
+        # Voice recognition quality — the faster-whisper model Auto-name
+        # call-outs uses.  App-wide (persisted), shown even for plugins
+        # without transcribe so the setting is always discoverable.
+        vq_menu = tk.Menu(menu, **kw)
+        for value, label in VOICE_QUALITY_CHOICES:
+            vq_menu.add_radiobutton(
+                label=label, value=value,
+                variable=self.voice_quality_var,
+                command=self._on_voice_quality_pick)
+        menu.add_cascade(label="Voice recognition quality", menu=vq_menu)
+        menu.add_separator()
+
+        # Prerequisites — status summary + the Re-check / Install actions
+        # (the strip under the title tucks itself away once everything is
+        # green, so this is where a returning user finds them).
+        summary, any_missing = self._prereq_menu_summary()
+        menu.add_command(label=summary, state=tk.DISABLED)
+        has_prereqs = bool(self._prereq_indicators)
+        menu.add_command(
+            label="Re-check prerequisites",
+            command=lambda: (self._on_recheck_prereqs()
+                             if self._on_recheck_prereqs else None),
+            state=(tk.NORMAL if has_prereqs and self._on_recheck_prereqs
+                   else tk.DISABLED))
+        # The auto-installer is Windows/Linux-only (frozen macOS bundles
+        # everything and can't pip-install anyway) — same rule as the strip.
+        if sys.platform != "darwin":
+            menu.add_command(
+                label="Install missing prerequisites…",
+                command=lambda: (self._on_install_prereqs()
+                                 if self._on_install_prereqs else None),
+                state=(tk.NORMAL if any_missing and self._on_install_prereqs
+                       else tk.DISABLED))
+        return menu
+
+    def _prereq_menu_summary(self):
+        """(label, any_missing) for the settings menu's prerequisite line."""
+        entries = self._prereq_indicators
+        if not entries:
+            return "Prerequisites: none for this view", False
+        oks = [e.get("ok") for e in entries.values()]
+        missing = sum(1 for ok in oks if ok is False)
+        if any(ok is None for ok in oks):
+            return "Prerequisites: checking…", missing > 0
+        if missing:
+            return f"Prerequisites: {missing} missing ✗", True
+        return f"Prerequisites: all {len(oks)} ready ✓", False
+
+    def _on_voice_quality_pick(self):
+        if self._on_voice_quality_change:
+            self._on_voice_quality_change(self.voice_quality_var.get())
+
     def _open_tab_help(self):
-        """Open the tips modal for the currently-visible notebook tab."""
+        """Open (or surface) the tips window for the visible notebook tab."""
         try:
             idx = self._notebook.index(self._notebook.select())
             tab = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
         except (tk.TclError, IndexError):
             tab = "Extract"
-        from .help_dialog import show_tab_help
-        show_tab_help(self.root, tab, self._current_theme)
+        if self._help_window is None:
+            from .help_dialog import TabHelpWindow
+            self._help_window = TabHelpWindow(
+                self.root, lambda: self._current_theme)
+        self._help_window.show(tab)
+
+    def _refresh_tab_help(self, tab_name):
+        """Re-render the tips window (if open) for *tab_name* — called on
+        notebook tab switches so the open window never shows stale text."""
+        if self._help_window is not None:
+            self._help_window.refresh(tab_name)
 
     def _open_flash_dialog(self):
         """Open the modal that collects (image, target card) for a flash.
@@ -7768,7 +8006,7 @@ class MainWindow:
         """Kick off a passive, backgrounded scan and badge the disk button if
         leftover staging exists.  Host temp is always scanned (local, instant);
         WSL only when it's already running (so we never start it for a badge)."""
-        if sys.platform != "win32" or not hasattr(self, "_disk_btn"):
+        if sys.platform != "win32":
             return
 
         def _worker():
@@ -7797,17 +8035,29 @@ class MainWindow:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_disk_badge(self, count, total):
-        """Update the disk button to flag pending cleanup (main thread)."""
-        btn = getattr(self, "_disk_btn", None)
-        if btn is None:
-            return
+        """Badge the gear button when staging cleanup is pending (main
+        thread).  The suffix also lands on the ⚙ menu's Manage-disk-space
+        entry so the amount is visible before opening the dialog."""
+        if count > 0:
+            from .disk_dialog import _fmt
+            self._disk_badge_suffix = "⚠ %s" % _fmt(total)
+        else:
+            self._disk_badge_suffix = ""
+        self._refresh_gear_badge()
+
+    def _refresh_gear_badge(self):
+        """Compose the gear button's notification marks: ● when an update is
+        available, the warning glyph when staging cleanup is pending."""
+        text = self._gear_glyph
+        width = 3
+        if self._update_available:
+            text += " ●"
+            width += 2
+        if self._disk_badge_suffix:
+            text += " " + self._gear_badge_glyph
+            width += 2
         try:
-            if count > 0:
-                from .disk_dialog import _fmt
-                btn.configure(text="%s  ⚠ %s" % (self._disk_btn_base,
-                                                 _fmt(total)))
-            else:
-                btn.configure(text=self._disk_btn_base)
+            self._gear_btn.configure(text=text, width=width)
         except tk.TclError:
             pass
 
@@ -8090,6 +8340,7 @@ class MainWindow:
             )
             self._prereq_indicators[p.name] = {
                 "label": lbl, "tooltip": tooltip, "prereq": p,
+                "ok": None,   # None = still checking; drives strip auto-hide
             }
 
     def set_prereq_result(self, name, ok, message):
@@ -8101,6 +8352,7 @@ class MainWindow:
         icon = "✓" if ok else "✗"
         color = c["success"] if ok else c["error"]
         entry["label"].configure(text=f"[{icon}] {name}", foreground=color)
+        entry["ok"] = bool(ok)
         p = entry["prereq"]
         status = "OK" if ok else "MISSING"
         tip = (f"{p.name}\n\n"
@@ -8110,6 +8362,22 @@ class MainWindow:
         if not ok and p.install_hint:
             tip += f"\n\nFix: {p.install_hint}"
         entry["tooltip"].text = tip
+        self._refresh_prereqs_visibility()
+
+    def _refresh_prereqs_visibility(self):
+        """Tuck the Prerequisites strip away once every probe came back green
+        (monkeybug: it's only useful at the beginning — after that it just
+        eats vertical space).  Anything still checking or missing keeps the
+        strip visible; the ⚙ menu carries the status + actions either way."""
+        entries = self._prereq_indicators
+        if not entries:
+            return   # reset_prereqs already decided the empty case
+        all_ok = all(e.get("ok") is True for e in entries.values())
+        if all_ok:
+            self._prereqs_frame.pack_forget()
+        elif not self._prereqs_frame.winfo_manager():
+            self._prereqs_frame.pack(fill=tk.X, padx=10, pady=(6, 0),
+                                     before=self._notebook)
 
     def _check_extract_warn(self, *_):
         path = self.extract_output_var.get().strip()
@@ -8223,9 +8491,15 @@ class MainWindow:
         # Calls before any mfr is selected (e.g. update-check on startup
         # while picker is showing) are buffered against the first mfr's
         # widget once one is selected.  For now, silently drop them.
-        if self._log_text is None:
-            return
         ts = time.strftime("%H:%M:%S")
+        if self._log_text is None:
+            # Picker is showing (no mfr log yet) — buffer; _swap_log_widget
+            # flushes into the first log widget that appears.
+            self._pending_log.append(("line", ts, text, level))
+            return
+        self._write_log_line(ts, text, level)
+
+    def _write_log_line(self, ts, text, level):
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, f"[{ts}] ", "ts")
         self._log_text.insert(tk.END, text + "\n", level)
@@ -8256,9 +8530,13 @@ class MainWindow:
         t.configure(state=tk.DISABLED)
 
     def append_log_link(self, text, url):
-        if self._log_text is None:
-            return
         ts = time.strftime("%H:%M:%S")
+        if self._log_text is None:
+            self._pending_log.append(("link", ts, text, url))
+            return
+        self._write_log_link(ts, text, url)
+
+    def _write_log_link(self, ts, text, url):
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, f"[{ts}] ", "ts")
         tag = f"link_{id(url)}"
@@ -8362,9 +8640,8 @@ class MainWindow:
         if running:
             # New run → new namespace for in-place keyed log lines.
             self._log_line_run += 1
-            # Re-theming is a heavy synchronous re-style; lock it out while a
-            # pipeline is monopolising the UI thread so clicks can't queue up.
-            self._theme_btn.configure(state=tk.DISABLED)
+            # (Re-theming is a heavy synchronous re-style; the ⚙ menu greys
+            # out its theme entry while running so clicks can't queue up.)
             self._set_extract_button_running(True)
             self._set_write_button_running(True)
             if hasattr(self, "_revert_all_btn"):
@@ -8392,7 +8669,6 @@ class MainWindow:
             self._start_time = time.time()
             self._tick_timer()
         else:
-            self._theme_btn.configure(state=tk.NORMAL)
             self._set_extract_button_running(False)
             self._set_write_button_running(False)
             # Revert button tracks the change count, not a blanket re-enable —
@@ -8505,6 +8781,10 @@ class MainWindow:
         """
         from pinball_decryptor import __version__ as _current
         self._update_banner_url = url
+        # The gear carries a ● notification too, so the news survives a
+        # dismissed banner (its menu gets a "Download update…" entry).
+        self._update_available = (version, url)
+        self._refresh_gear_badge()
         self._update_banner_text.configure(
             text=f"Pinball Asset Decryptor v{version} is available "
                  f"— you're on v{_current}.")
@@ -8616,19 +8896,14 @@ class MainWindow:
             self._on_check_updates()
 
     def set_update_check_running(self, running):
-        """Toggle the 'Check for updates' button between idle / busy.
+        """Flag the update check as in flight.
 
-        ``True`` while the GitHub fetch is in flight: button reads
-        "Checking…" and is disabled so the user can't queue up
-        concurrent requests.  ``False`` returns it to the idle
-        label.
+        The ⚙ menu is built fresh per click, so all this needs to do is
+        remember the state: while ``True`` the menu's entry reads
+        "Checking for updates…" and is disabled so the user can't queue up
+        concurrent requests.
         """
-        if running:
-            self._update_check_btn.configure(
-                text="Checking…", state=tk.DISABLED)
-        else:
-            self._update_check_btn.configure(
-                text="Check for updates", state=tk.NORMAL)
+        self._update_check_busy = bool(running)
 
     def show_up_to_date_toast(self):
         """Inform the user the manual check found nothing.
@@ -8815,17 +9090,24 @@ class MainWindow:
         if hasattr(self, "_era_badge_widgets"):
             self._refresh_era_badges()
 
-        if theme == "dark":
-            self._theme_btn.configure(text="☀", style="Sun.TButton")
-        else:
-            self._theme_btn.configure(text="☽", style="Moon.TButton")
-        icon_style = {"background": c["bg"], "borderwidth": 0, "relief": "flat"}
-        style.configure("Sun.TButton", font=(_SANS_FONT, 14), padding=(4, 0),
-                        foreground="#e6a817", **icon_style)
-        style.map("Sun.TButton", background=[("active", c["button"])])
-        style.configure("Moon.TButton", font=(_SANS_FONT, 14), padding=(4, 0),
-                        foreground="#7b9fd4", **icon_style)
-        style.map("Moon.TButton", background=[("active", c["button"])])
+        # Header icon buttons ("?" tips + gear settings) — one shared style
+        # so they render pixel-identical (David); on Windows both glyphs come
+        # from Segoe MDL2 Assets.  Negative font size = pixels, keeping the
+        # two fonts' line heights equal.  Hover matches every other button's
+        # accent-blue treatment.
+        icon_font = (("Segoe MDL2 Assets", -14) if sys.platform == "win32"
+                     else (_SANS_FONT, -14))
+        style.configure("Icon.TButton", font=icon_font, padding=(4, 3),
+                        foreground=c["fg"], background=c["button"])
+        style.map("Icon.TButton",
+                  background=[("active", c["accent"]),
+                              ("pressed", c["accent"])],
+                  foreground=[("active", "#ffffff"),
+                              ("pressed", "#ffffff")])
+
+        # An open tips window re-renders with the new palette.
+        if self._help_window is not None:
+            self._help_window.refresh()
 
         # Match the Windows title bar to the theme via DWM's immersive
         # dark mode.  Walk to the actual title-bearing HWND: Tk's

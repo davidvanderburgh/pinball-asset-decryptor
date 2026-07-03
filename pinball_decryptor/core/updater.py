@@ -17,30 +17,31 @@ def _parse_version(version_str):
 
 
 def check_for_update(current_version, repo=None):
-    """Return (latest_version, download_url, notes) if newer, else None."""
+    """Return (latest_version, download_url, notes) if newer, else None.
+
+    Raises on network/API failure (URLError, timeout, bad JSON) so the
+    caller can tell "couldn't check" apart from "checked, no newer
+    version" — the app logs the two outcomes differently.
+    """
     target_repo = repo or GITHUB_REPO
     url = f"https://api.github.com/repos/{target_repo}/releases/latest"
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Pinball-Asset-Decryptor-UpdateCheck",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode())
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Pinball-Asset-Decryptor-UpdateCheck",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode())
 
-        tag = data.get("tag_name", "")
-        html_url = data.get("html_url", "")
-        if not tag or not html_url:
-            return None
+    tag = data.get("tag_name", "")
+    html_url = data.get("html_url", "")
+    if not tag or not html_url:
+        return None
 
-        latest = _parse_version(tag)
-        current = _parse_version(current_version)
-        if latest and current and latest > current:
-            return (tag.lstrip("v"), html_url, data.get("body", "") or "")
-    except Exception:
-        pass
-
+    latest = _parse_version(tag)
+    current = _parse_version(current_version)
+    if latest and current and latest > current:
+        return (tag.lstrip("v"), html_url, data.get("body", "") or "")
     return None

@@ -385,13 +385,15 @@ class Manufacturer(ABC):
             f"{self.display} does not implement a Capture pipeline.")
 
     def make_transcribe_pipeline(self, assets_dir,
-                                 log_cb, phase_cb, progress_cb, done_cb):
+                                 log_cb, phase_cb, progress_cb, done_cb,
+                                 rename_after=False, model_size="tiny.en"):
         """Build the auto-transcribe pipeline (faster-whisper).
 
         Only meaningful when ``capabilities.transcribe`` is True.
         Walks ``assets_dir`` for .wav files, runs Whisper with VAD
         filtering to skip non-speech, and emits ``callouts.csv`` at
-        the root of the assets dir.
+        the root of the assets dir.  ``model_size`` is the whisper
+        model (the ⚙ menu's voice-recognition quality pick).
         """
         raise NotImplementedError(
             f"{self.display} does not implement a Transcribe pipeline.")

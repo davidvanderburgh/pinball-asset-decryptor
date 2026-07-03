@@ -134,10 +134,10 @@ class WilliamsManufacturer(Manufacturer):
 
     def make_transcribe_pipeline(self, assets_dir,
                                  log_cb, phase_cb, progress_cb, done_cb,
-                                 rename_after=False):
+                                 rename_after=False, model_size="tiny.en"):
         return TranscribePipeline(
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
-            rename_after=rename_after)
+            rename_after=rename_after, model_size=model_size)
 
     def audio_export_supported(self, path):
         """Only DCS-era games have statically decodable audio; pre-DCS

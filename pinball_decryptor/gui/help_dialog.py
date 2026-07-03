@@ -1,9 +1,13 @@
-"""Per-tab tips modal — the header "?" button (monkeybug feedback).
+"""Per-tab tips window — the header "?" button (monkeybug feedback).
 
 Every working-view tab carries a pile of behaviour that used to live only in
-inline grey prose or hover tooltips.  This modal collects those tips per tab
+inline grey prose or hover tooltips.  This window collects those tips per tab
 so a user can pull up "everything worth knowing about this page" on demand
 instead of hunting for hidden hovers.
+
+One window per app (monkeybug round 2): clicking "?" re-uses the open window
+instead of stacking a new Toplevel per click, and switching notebook tabs
+re-renders the open window for the new tab so the text never goes stale.
 
 Content is deliberately static + manufacturer-agnostic (plugin-specific
 behaviours say "where available"); if per-manufacturer help is ever needed,
@@ -35,14 +39,18 @@ HELP_CONTENT = {
          "The Audio / Video / Images / Text checkboxes choose which asset "
          "types to pull. Everything lands in the Output Folder, which then "
          "becomes your working assets folder on the Replace, Write and Mod "
-         "Pack tabs."),
+         "Pack tabs. These choices (and the auto-name options) are "
+         "remembered per manufacturer across sessions."),
         ("Auto-naming",
          "\"Auto-name call-outs\" transcribes speech locally (the first run "
          "downloads a ~75 MB model, after that it works offline). "
          "\"Auto-name music\" fingerprints full-length tracks against the "
          "online AcoustID database — the number after a matched title (e.g. "
          "0.97) is the match confidence. Results are also written to "
-         "callouts.csv and music_titles.csv in the output folder."),
+         "callouts.csv and music_titles.csv in the output folder. "
+         "For better transcriptions at the cost of extra processing time, "
+         "raise \"Voice recognition quality\" in the ⚙ settings menu (larger "
+         "models are downloaded on first use)."),
         ("The baseline",
          "Extract writes a hidden .checksums.md5 file recording the pristine "
          "assets. The Replace tabs and Write use it to tell what you have "
@@ -157,10 +165,16 @@ HELP_CONTENT = {
 
 # Appended to every tab's sections — app-wide behaviours users ask about.
 GENERAL_CONTENT = [
-    ("Prerequisites strip",
-     "The row under the title shows this manufacturer's required tools. "
+    ("The ⚙ settings menu",
+     "The gear in the top-right collects the app-wide controls: light/dark "
+     "theme, update check, disk-space management, voice recognition "
+     "quality, and the prerequisite tools (status, re-check, install)."),
+    ("Prerequisites",
+     "Each manufacturer needs a few tools installed. While anything is "
+     "still being checked or missing, a strip under the title lists them: "
      "[?] = still checking, [✗] = missing (\"Install Missing\" sets them "
-     "up), [✓] = ready."),
+     "up), [✓] = ready. Once everything is ready the strip tucks itself "
+     "away — the ⚙ menu keeps the status."),
     ("Recent paths",
      "Every file/folder box keeps a per-manufacturer history — open its "
      "dropdown to reuse a recent path."),
@@ -169,70 +183,139 @@ GENERAL_CONTENT = [
      "right-click the log to copy text for a bug report."),
 ]
 
+_WIDTH, _HEIGHT = 560, 520
+
+
+class TabHelpWindow:
+    """The single per-app tips window.
+
+    ``show(tab)`` opens it (or re-focuses + re-renders the open one);
+    ``refresh(tab)`` re-renders in place without stealing focus/placement —
+    used when the user switches notebook tabs or flips the theme with the
+    window open.
+    """
+
+    def __init__(self, parent, theme_fn):
+        self._parent = parent
+        self._theme_fn = theme_fn        # () -> current theme name
+        self._dlg = None
+        self._text = None
+        self._tab_name = None
+
+    def is_open(self):
+        try:
+            return self._dlg is not None and bool(self._dlg.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def show(self, tab_name):
+        """Open (or surface) the window rendered for *tab_name*."""
+        if self.is_open():
+            self._render(tab_name)
+            self._dlg.deiconify()
+            self._dlg.lift()
+            self._dlg.focus_set()
+            return self._dlg
+        self._build()
+        self._render(tab_name)
+        return self._dlg
+
+    def refresh(self, tab_name=None):
+        """Re-render the open window (new tab and/or new theme).  Keeps the
+        user's placement and stacking order; no-op when closed."""
+        if self.is_open():
+            self._render(tab_name or self._tab_name)
+
+    def close(self):
+        if self.is_open():
+            self._dlg.destroy()
+        self._dlg = None
+        self._text = None
+
+    # -- internals -----------------------------------------------------
+
+    def _build(self):
+        sans, _ = platform_font()
+        dlg = tk.Toplevel(self._parent)
+        self._dlg = dlg
+        dlg.transient(self._parent.winfo_toplevel())
+        dlg.minsize(420, 300)
+
+        body = ttk.Frame(dlg, padding=(14, 10, 8, 10))
+        body.pack(fill=tk.BOTH, expand=True)
+
+        text = tk.Text(
+            body, wrap="word", relief=tk.FLAT, borderwidth=0,
+            font=(sans, 10),
+            padx=4, pady=2, cursor="arrow",
+            highlightthickness=0)
+        self._text = text
+        scroll = ttk.Scrollbar(body, orient=tk.VERTICAL, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        btn_row = ttk.Frame(dlg)
+        btn_row.pack(fill=tk.X, padx=14, pady=(0, 10))
+        close = ttk.Button(btn_row, text="Close", command=self.close)
+        close.pack(side=tk.RIGHT)
+
+        dlg.bind("<Escape>", lambda _e: self.close())
+        dlg.protocol("WM_DELETE_WINDOW", self.close)
+        dlg.geometry(f"{_WIDTH}x{_HEIGHT}")
+        # Centre over the parent window, clamped to the screen — first open
+        # only; a refresh/re-show keeps wherever the user dragged it.
+        dlg.update_idletasks()
+        try:
+            pw = self._parent.winfo_toplevel()
+            x = pw.winfo_rootx() + (pw.winfo_width() - _WIDTH) // 2
+            y = pw.winfo_rooty() + (pw.winfo_height() - _HEIGHT) // 2
+            x = max(0, min(x, dlg.winfo_screenwidth() - _WIDTH))
+            y = max(0, min(y, dlg.winfo_screenheight() - _HEIGHT))
+            dlg.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+        close.focus_set()
+
+    def _render(self, tab_name):
+        self._tab_name = tab_name
+        sections = HELP_CONTENT.get(tab_name)
+        if sections is None:
+            # Unknown/renamed tab — show just the general tips rather than
+            # nothing so the button never feels broken.
+            sections = []
+        th = THEMES.get(self._theme_fn()) or THEMES["light"]
+        sans, _ = platform_font()
+
+        dlg, text = self._dlg, self._text
+        dlg.title(f"Tips — {tab_name}" if tab_name else "Tips")
+        dlg.configure(bg=th["bg"])
+        # (Re)apply theme colors every render so an open window follows a
+        # light/dark switch instead of keeping the stale palette.
+        text.configure(state=tk.NORMAL, bg=th["bg"], fg=th["fg"],
+                       selectbackground=th["select_bg"])
+        text.tag_configure("h", font=(sans, 10, "bold"),
+                           spacing1=10, spacing3=2, foreground=th["fg"])
+        text.tag_configure("body", spacing3=4,
+                           lmargin1=14, lmargin2=14, foreground=th["fg"])
+        text.tag_configure("rule", font=(sans, 10, "bold"),
+                           spacing1=16, spacing3=2, foreground=th["gray"])
+
+        text.delete("1.0", tk.END)
+        for title, para in sections:
+            text.insert(tk.END, title + "\n", "h")
+            text.insert(tk.END, para + "\n", "body")
+        text.insert(tk.END, "General\n", "rule")
+        for title, para in GENERAL_CONTENT:
+            text.insert(tk.END, title + "\n", "h")
+            text.insert(tk.END, para + "\n", "body")
+        text.configure(state=tk.DISABLED)
+
 
 def show_tab_help(parent, tab_name, theme_name):
-    """Open the tips modal for *tab_name* (a notebook tab caption)."""
-    sections = HELP_CONTENT.get(tab_name)
-    if sections is None:
-        # Unknown/renamed tab — show just the general tips rather than
-        # nothing so the button never feels broken.
-        sections = []
-    th = THEMES.get(theme_name) or THEMES["light"]
-    sans, _ = platform_font()
-
-    dlg = tk.Toplevel(parent)
-    dlg.title(f"Tips — {tab_name}" if tab_name else "Tips")
-    dlg.configure(bg=th["bg"])
-    dlg.transient(parent.winfo_toplevel())
-    dlg.minsize(420, 300)
-
-    body = ttk.Frame(dlg, padding=(14, 10, 8, 10))
-    body.pack(fill=tk.BOTH, expand=True)
-
-    text = tk.Text(
-        body, wrap="word", relief=tk.FLAT, borderwidth=0,
-        bg=th["bg"], fg=th["fg"], font=(sans, 10),
-        padx=4, pady=2, cursor="arrow",
-        selectbackground=th["select_bg"],
-        highlightthickness=0)
-    scroll = ttk.Scrollbar(body, orient=tk.VERTICAL, command=text.yview)
-    text.configure(yscrollcommand=scroll.set)
-    scroll.pack(side=tk.RIGHT, fill=tk.Y)
-    text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    text.tag_configure("h", font=(sans, 10, "bold"),
-                       spacing1=10, spacing3=2)
-    text.tag_configure("body", spacing3=4,
-                       lmargin1=14, lmargin2=14, foreground=th["fg"])
-    text.tag_configure("rule", font=(sans, 10, "bold"),
-                       spacing1=16, spacing3=2, foreground=th["gray"])
-
-    for title, para in sections:
-        text.insert(tk.END, title + "\n", "h")
-        text.insert(tk.END, para + "\n", "body")
-    text.insert(tk.END, "General\n", "rule")
-    for title, para in GENERAL_CONTENT:
-        text.insert(tk.END, title + "\n", "h")
-        text.insert(tk.END, para + "\n", "body")
-    text.configure(state=tk.DISABLED)
-
-    btn_row = ttk.Frame(dlg)
-    btn_row.pack(fill=tk.X, padx=14, pady=(0, 10))
-    close = ttk.Button(btn_row, text="Close", command=dlg.destroy)
-    close.pack(side=tk.RIGHT)
-
-    dlg.bind("<Escape>", lambda _e: dlg.destroy())
-    dlg.geometry("560x520")
-    # Centre over the parent window, clamped to the screen.
-    dlg.update_idletasks()
-    try:
-        pw = parent.winfo_toplevel()
-        x = pw.winfo_rootx() + (pw.winfo_width() - 560) // 2
-        y = pw.winfo_rooty() + (pw.winfo_height() - 520) // 2
-        x = max(0, min(x, dlg.winfo_screenwidth() - 560))
-        y = max(0, min(y, dlg.winfo_screenheight() - 520))
-        dlg.geometry(f"+{x}+{y}")
-    except tk.TclError:
-        pass
-    close.focus_set()
-    return dlg
+    """One-shot helper (tests/back-compat): open a fresh tips window for
+    *tab_name* and return its Toplevel.  The app itself goes through a
+    long-lived :class:`TabHelpWindow` so "?" re-uses one window."""
+    win = TabHelpWindow(parent, lambda: theme_name)
+    win.show(tab_name)
+    return win._dlg

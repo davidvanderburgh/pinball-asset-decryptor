@@ -14,10 +14,64 @@ pytestmark = pytest.mark.skipif(
     not HAS_DISPLAY, reason="no Tk display available")
 
 
+import tkinter as _tk_mod
+
+
+def _make_invisible(win):
+    """Make a toplevel effectively headless on Windows: fully transparent,
+    parked off-screen, and no taskbar button.  It's still *mapped*, so every
+    winfo_ismapped()/geometry assertion behaves exactly as with a visible
+    window — the developer just doesn't watch 30 windows strobe by."""
+    try:
+        win.attributes("-alpha", 0.0)
+        win.geometry("+10000+10000")
+        win.attributes("-toolwindow", True)
+    except _tk_mod.TclError:
+        pass
+
+
 @pytest.fixture
-def app():
-    """Build an App() instance + tear it down cleanly per-test."""
+def app(tmp_path, monkeypatch):
+    """Build an App() instance + tear it down cleanly per-test.
+
+    Settings are sandboxed to a per-test temp file — App() otherwise reads
+    AND WRITES the developer's real settings.json (last manufacturer, theme,
+    extract options, …) on every _save_settings() a test triggers.
+
+    Every root + Toplevel the test creates is made invisible (see
+    ``_make_invisible``) so a local run doesn't flash windows at whoever is
+    working on the machine."""
+    import pinball_decryptor.app as app_mod
+    monkeypatch.setattr(app_mod, "SETTINGS_FILE",
+                        str(tmp_path / "settings.json"))
+    # Don't fire the real prerequisite probes: every mfr selection would
+    # spawn a background thread + a storm of subprocess probes that outlive
+    # the (sub-second) test and churn against the next Tk create.  Tests
+    # that care about indicator state drive set_prereq_result() directly.
+    monkeypatch.setattr(app_mod.App, "_kick_off_prereq_check",
+                        lambda self, mfr: None)
+
+    real_tk, real_toplevel = _tk_mod.Tk, _tk_mod.Toplevel
+
+    class _InvisibleTk(real_tk):
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            _make_invisible(self)
+
+    class _InvisibleToplevel(real_toplevel):
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            _make_invisible(self)
+
+    monkeypatch.setattr(_tk_mod, "Tk", _InvisibleTk)
+    monkeypatch.setattr(_tk_mod, "Toplevel", _InvisibleToplevel)
+
     from pinball_decryptor.app import App
+    # NOTE: tk.Tk() can intermittently fail here on Windows with "couldn't
+    # read file .../init.tcl" (antivirus/indexer briefly locking the Tcl
+    # runtime scripts).  Don't retry in-process — a failed create leaves a
+    # zombie Tcl interpreter that poisons every Tk instance created after
+    # it in the same run.  Just re-run the suite.
     a = App()
     a.root.update()
     yield a
@@ -631,4 +685,146 @@ def test_help_button_and_per_tab_content(app, manufacturers_by_key):
         assert w._help_btn.winfo_manager() == ""  # hidden again on Back
     finally:
         app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
+    """The header ⚙ replaces the old button row (monkeybug: settings live in
+    a dropdown, not permanent top-bar clutter), and the Prerequisites strip
+    tucks itself away once every probe comes back green — reappearing the
+    moment anything is missing."""
+    w = app.window
+    assert w._gear_btn.winfo_manager() == "pack"  # visible on the picker too
+    label, missing = w._prereq_menu_summary()     # no mfr yet -> "none"
+    assert "none" in label and not missing
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    try:
+        names = list(w._prereq_indicators)
+        assert names                              # stern has prereqs
+        assert w._prereqs_frame.winfo_manager() == "pack"
+        assert "checking" in w._prereq_menu_summary()[0]
+        # All green -> strip hides; menu summary says ready.
+        for name in names:
+            w.set_prereq_result(name, True, "ok")
+        assert w._prereqs_frame.winfo_manager() == ""
+        label, missing = w._prereq_menu_summary()
+        assert "ready" in label and not missing
+        # One goes missing -> strip comes back; Install entry re-arms.
+        w.set_prereq_result(names[0], False, "gone")
+        assert w._prereqs_frame.winfo_manager() == "pack"
+        label, missing = w._prereq_menu_summary()
+        assert "1 missing" in label and missing
+        # Update-check busy state is just a flag now (menu built per click).
+        w.set_update_check_running(True)
+        assert w._update_check_busy
+        w.set_update_check_running(False)
+        assert not w._update_check_busy
+        # A found update puts a ● on the gear, a Download entry at the top
+        # of the menu, and the outcome in the log (David).
+        app._handle_update_check_result(
+            ("99.0.0", "https://example.com/release", ""), False)
+        assert "●" in w._gear_btn.cget("text")
+        upd_menu = w._build_settings_menu()
+        assert "Download update v99.0.0" in upd_menu.entrycget(0, "label")
+        assert "Update available: v99.0.0" in w._log_text.get("1.0", "end-1c")
+        # The dropdown itself builds (this is the code a real ⚙ click runs —
+        # nothing else exercises it) and carries the expected entries.
+        menu = w._build_settings_menu()
+        labels = [menu.entrycget(i, "label")
+                  for i in range(menu.index("end") + 1)
+                  if menu.type(i) not in ("separator", "tearoff")]
+        joined = "\n".join(labels)
+        # Theme entry is a dynamic verb ("Switch to dark/light theme") whose
+        # direction follows the OS default detected at startup.
+        assert "Switch to dark theme" in joined or \
+            "Switch to light theme" in joined
+        assert "Check for updates" in joined
+        assert "Voice recognition quality" in joined
+        assert "Re-check prerequisites" in joined
+        assert "1 missing" in joined
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_help_window_singleton_and_tab_refresh(app, manufacturers_by_key):
+    """"?" re-uses one tips window instead of stacking new ones, and a
+    notebook tab switch re-renders the open window (monkeybug round 2)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    try:
+        w._open_tab_help()
+        dlg = w._help_window._dlg
+        assert dlg is not None and dlg.winfo_exists()
+        assert "Extract" in dlg.title()
+        w._open_tab_help()                        # second click: same window
+        assert w._help_window._dlg is dlg
+        w._notebook.select(w._tab_write)          # tab switch: auto-refresh
+        app.root.update()
+        assert "Write" in dlg.title()
+        w._help_window.close()
+        assert not w._help_window.is_open()
+        w._open_tab_help()                        # reopens cleanly after close
+        assert w._help_window.is_open()
+        w._help_window.close()
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_extract_options_persist_per_manufacturer(app, manufacturers_by_key):
+    """Auto-name + extract-category checkboxes stick across a leave-and-return
+    (the same settings.json round trip a restart does) and stay per-mfr
+    (monkeybug: 'do not stick between sessions')."""
+    w = app.window
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.root.update()
+    try:
+        assert w._extract_category_vars           # stern advertises categories
+        cat0 = next(iter(w._extract_category_vars))
+        w.transcribe_var.set(True)
+        w.music_id_var.set(True)
+        w._extract_category_vars[cat0].set(False)
+        # Leave for another mfr: spooky starts from ITS clean defaults...
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+        assert not w.transcribe_var.get()
+        assert not w.music_id_var.get()
+        # ...and returning to stern restores the saved ticks.
+        app._on_manufacturer_change(stern)
+        app.root.update()
+        assert w.transcribe_var.get()
+        assert w.music_id_var.get()
+        assert not w._extract_category_vars[cat0].get()
+        # The other categories kept their default-on state.
+        others = [k for k in w._extract_category_vars if k != cat0]
+        assert all(w._extract_category_vars[k].get() for k in others)
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_picker_time_log_lines_flush_into_first_log(app, manufacturers_by_key):
+    """Lines logged while the picker is showing (the startup update check)
+    aren't dropped — they flush into the first manufacturer log that opens,
+    links included."""
+    w = app.window
+    w.append_log("startup-buffered-line", "info")
+    w.append_log_link("startup-buffered-link", "https://example.com/x")
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    try:
+        log = w._log_text.get("1.0", "end-1c")
+        assert "startup-buffered-line" in log
+        assert "startup-buffered-link" in log
+        assert not w._pending_log                 # buffer drained
+    finally:
+        app._on_back_to_picker()
         app.root.update()

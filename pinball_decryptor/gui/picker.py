@@ -81,23 +81,16 @@ class ManufacturerPicker(ttk.Frame):
     def _build(self):
         c = THEMES[self._theme_fn()]
 
-        # Page header.  The "Pinball Asset Decryptor" label used to
-        # appear above this; now that we've hidden that redundant
-        # element (window title bar already says it), this title gets
-        # to breathe.
-        title = tk.Label(
-            self,
-            text="Choose a manufacturer",
-            font=(_SANS_FONT, 14, "bold"),
-            background=c["bg"], foreground=c["fg"])
-        title.pack(pady=(14, 10))
+        # No page header — the "Choose a manufacturer" title was dropped for
+        # a more compact view (David): clicking a card is self-explanatory
+        # and the freed row keeps every card on screen on smaller windows.
 
         # Vertical stack of full-width cards inside a scrollable canvas.
         # Cards size naturally to their content; the canvas handles any
         # overflow so the picker still works when more manufacturers /
         # games are added in the future.
         scroll_wrap = tk.Frame(self, background=c["bg"])
-        scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 8))
+        scroll_wrap.pack(fill=tk.BOTH, expand=True, padx=24, pady=(10, 8))
 
         self._canvas = tk.Canvas(
             scroll_wrap, background=c["bg"],

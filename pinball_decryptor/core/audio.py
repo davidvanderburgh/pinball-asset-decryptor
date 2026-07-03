@@ -1095,7 +1095,7 @@ def find_ffplay():
     return None
 
 
-def play_audio_file(path, start=0.0):
+def play_audio_file(path, start=0.0, limit=None):
     """Start playing *path* in the background, no window.
 
     Prefers ffplay, which honors the *start* seek offset (seconds) used by
@@ -1105,6 +1105,12 @@ def play_audio_file(path, start=0.0):
     ignores *start* (no seek).  Returns the ``subprocess.Popen`` handle (so
     the caller can stop it) or ``None`` if nothing can play the file.  The
     caller terminates a previous handle before starting a new one.
+
+    *limit* (seconds, absolute from the file start) stops playback early --
+    used by the Replace-Audio preview so a replacement that Write will trim
+    to its slot length previews the same way (you hear only what lands on the
+    machine).  Honored by ffplay via ``-t``; the OS-native fallback can't cap,
+    so the caller's playhead tick stops it instead.
     """
     if not path or not os.path.isfile(path):
         return None
@@ -1114,6 +1120,12 @@ def play_audio_file(path, start=0.0):
         if start and start > 0.05:
             # -ss before -i: fast input seek, accurate enough for audio preview.
             cmd += ["-ss", f"{start:.3f}"]
+        if limit is not None:
+            # ffplay's -t counts from the -ss point, so subtract the seek.
+            play_for = limit - (start if start and start > 0.05 else 0.0)
+            if play_for <= 0:
+                return None
+            cmd += ["-t", f"{play_for:.3f}"]
         cmd.append(path)
         try:
             return subprocess.Popen(

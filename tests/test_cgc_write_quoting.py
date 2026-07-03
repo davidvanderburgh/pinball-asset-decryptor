@@ -97,7 +97,7 @@ def _drive_write_with(rec, tmp_path, monkeypatch):
     monkeypatch.setattr(cgc_pipeline, "read_checksums",
                         lambda d: {"snd/audio_001.wav": "deadbeef"})
     monkeypatch.setattr(cgc_pipeline, "_diff_assets",
-                        lambda a, b: ({"snd/audio_001.wav": str(changed_host)}, []))
+                        lambda a, b, **k: ({"snd/audio_001.wav": str(changed_host)}, []))
     monkeypatch.setattr(cgc_pipeline, "_verify_executor_tools", lambda ex: None)
     monkeypatch.setattr(cgc_pipeline, "_copy_with_progress",
                         lambda *a, **k: None)

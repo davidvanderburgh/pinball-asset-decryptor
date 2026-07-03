@@ -18,7 +18,8 @@ def _pattern(n):
 def test_cgc_advertises_flash_and_builds_pipeline():
     mfr = CGCManufacturer()
     assert mfr.capabilities.flash_image is True
-    assert mfr.flash_phases == ("Check card", "Write image", "Flush")
+    assert mfr.flash_phases == ("Check card", "Write image", "Verify card",
+                                "Flush")
     pipe = mfr.make_flash_pipeline(
         "x.img", r"\\.\PHYSICALDRIVE9",
         log_cb=lambda *a, **k: None, phase_cb=lambda *a, **k: None,
@@ -44,7 +45,7 @@ def test_cgc_flash_pipeline_success_against_backing_file(tmp_path, monkeypatch):
 
     assert results and results[0][0] is True
     assert "Flashed" in results[0][1]
-    assert phases == [0, 1, 2]                     # Check / Write / Flush
+    assert phases == [0, 1, 2, 3]           # Check / Write / Verify / Flush
     assert card.read_bytes()[:6000] == img_bytes
 
 

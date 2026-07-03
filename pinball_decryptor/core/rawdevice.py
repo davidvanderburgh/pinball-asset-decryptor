@@ -660,7 +660,7 @@ def _locked_volumes(device_path, log=None):
 
 
 def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
-                          cancel=None):
+                          cancel=None, verify=True, on_verify_start=None):
     """dd-style raw copy of *image_path* onto the physical *device_path*.
 
     Refuses (``FlashError``) when the image is larger than the target card — a
@@ -669,6 +669,11 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
     probed it proceeds with a logged warning rather than blocking.  Reports
     progress and honours ``cancel`` (a True return raises :class:`FlashCancelled`
     mid-write).  Returns the number of bytes written.
+
+    With *verify* (default True) the card is read back after the write and
+    compared byte-for-byte to the image; a mismatch raises :class:`FlashError`
+    so a silently-bad flash (flaky card/reader) is caught here instead of on
+    the machine.
 
     On Windows the disk is taken offline and its mounted volumes are
     locked + dismounted for the duration (a flash overwrites the mounted FAT
@@ -700,8 +705,69 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                 written = dev.copy_image_onto(
                     src, img_size, progress=progress, cancel=cancel)
             dev.flush()
+        # Read the card back and confirm it byte-for-byte matches the image.
+        # A raw flash has no other integrity check, and a silently-bad write
+        # (flaky card/reader) produces a card the machine can't install from
+        # -- on CGC, a corrupt journal region got replayed on the machine and
+        # reverted the payload to a SHELL ERROR, indistinguishable from a good
+        # card until it failed on the hardware.  Verify here, with a fresh
+        # read handle (post-flush, post-close) so we compare what actually
+        # landed, not a write-cache echo.
+        if verify:
+            if on_verify_start is not None:
+                on_verify_start()
+            _verify_flash_readback(device_path, image_path, img_size,
+                                   log=log, progress=progress, cancel=cancel)
     if progress is not None:
         progress(img_size, img_size, "Flash complete")
     if log is not None:
-        log("Wrote %s to %s." % (format_size(written), device_path), "success")
+        log("Wrote %s to %s%s." % (
+            format_size(written), device_path,
+            " (verified)" if verify else ""), "success")
     return written
+
+
+# Read-back verify chunk (bytes).  Large enough that the per-chunk overhead is
+# negligible against the multi-GB read, small enough to report smooth progress.
+_VERIFY_CHUNK = 16 * 1024 * 1024
+
+
+def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
+                           progress=None, cancel=None):
+    """Read the just-flashed card back and compare it to the source image.
+
+    Raises :class:`FlashError` at the first mismatch (the card is bad -- a
+    flaky write/card/reader); the caller must NOT let such a card reach the
+    machine.  Honours ``cancel``.
+    """
+    if log is not None:
+        log("Verifying the flashed card (reading it back)…", "info")
+    checked = 0
+    with RawDeviceFile(device_path, writable=False) as dev, \
+            open(image_path, "rb") as src:
+        while checked < img_size:
+            if cancel is not None and cancel():
+                raise FlashCancelled(
+                    "Verify cancelled after %d of %d bytes." % (
+                        checked, img_size))
+            want = min(_VERIFY_CHUNK, img_size - checked)
+            exp = src.read(want)
+            if not exp:
+                break
+            got = dev._aligned_read(checked, len(exp))
+            if got != exp:
+                off = next((i for i in range(min(len(got), len(exp)))
+                            if got[i] != exp[i]), min(len(got), len(exp)))
+                raise FlashError(
+                    "The card does not match the image after flashing (first "
+                    "difference at byte %s). The write didn't land correctly "
+                    "-- usually a flaky SD card or card reader. Flash again, "
+                    "or use a different card / reader. Do NOT install this "
+                    "card on the machine: a partially-written installer can "
+                    "fail with a SHELL ERROR or leave the machine unbootable."
+                    % f"{checked + off:,}")
+            checked += len(exp)
+            if progress is not None:
+                progress(checked, img_size, "Verifying flashed card…")
+    if log is not None:
+        log("Card verified: it matches the image byte-for-byte.", "success")

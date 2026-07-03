@@ -140,6 +140,36 @@ def test_mfr_select_switches_to_mfr_view(app, manufacturers_by_key):
     assert not app.window._picker_view.winfo_ismapped()
 
 
+def test_sidecar_pending_fallback_without_tab_scan(app, manufacturers_by_key,
+                                                   tmp_path):
+    """Assignments recorded in a folder's .staged_changes.json must reach the
+    Write staging path even when no Replace tab has scanned that folder this
+    session (mods just transferred in, or the app reopened straight onto
+    Write) — without the sidecar fallback the build silently dropped them."""
+    from pinball_decryptor.core import staged_changes
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+
+    assets = tmp_path / "extract159"
+    (assets / "images").mkdir(parents=True)
+    (assets / "images" / "backglass.png").write_bytes(b"STOCK")
+    repl = tmp_path / "modded" / "backglass.png"
+    repl.parent.mkdir(parents=True)
+    repl.write_bytes(b"1987-ART")
+    staged_changes.save(str(assets), {
+        "image": {"images/backglass.png": str(repl)}})
+
+    # No Replace tab has scanned this folder: the in-memory getter is empty...
+    assert app.window.pending_image_assignments(str(assets)) is None
+    # ...but the sidecar fallback rebuilds the pending tuple for the build.
+    pend = app._sidecar_pending(str(assets), "image")
+    assert pend is not None
+    slots_by_rel, assignments = pend
+    assert assignments == {"images/backglass.png": str(repl)}
+    assert "images/backglass.png" in slots_by_rel
+
+
 def test_back_returns_to_picker(app, manufacturers_by_key):
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
@@ -147,6 +177,82 @@ def test_back_returns_to_picker(app, manufacturers_by_key):
     app.root.update()
     assert app.window._picker_view.winfo_ismapped()
     assert not _mfr_view_visible(app.window)
+
+
+def test_cgc_trim_lock_engages_only_for_pf_extract(app, manufacturers_by_key,
+                                                   tmp_path):
+    """Selecting CGC leaves the Trim/pad checkbox a free toggle; scanning a
+    Pulp Fiction extract (fixed-length bank slots) forces it on + disabled;
+    scanning a WPC-remake extract (loose WAVs) unlocks it again."""
+    import tkinter as tk
+    cgc = manufacturers_by_key["cgc"]
+    app._on_manufacturer_change(cgc)
+    app.root.update()
+    win = app.window
+
+    # At manufacturer-select (no extract yet) the toggle is free.
+    assert str(win._audio_trim_cb.cget("state")) != "disabled"
+
+    # A Pulp Fiction extract (has data/*.bnk) forces the lock on.
+    pf = tmp_path / "pf"
+    (pf / "data").mkdir(parents=True)
+    (pf / "data" / "pfmusic.bnk").write_bytes(b"")
+    win._apply_audio_trim_lock(cgc, str(pf))
+    assert str(win._audio_trim_cb.cget("state")) == "disabled"
+    assert win.audio_trim_var.get() is True
+
+    # A WPC-remake extract (loose WAVs, no bank) unlocks it again, and the
+    # saved preference is restored rather than force-set.
+    afm = tmp_path / "afm"
+    (afm / "afmdata").mkdir(parents=True)
+    (afm / "afmdata" / "s1.wav").write_bytes(b"")
+    win._apply_audio_trim_lock(cgc, str(afm), persisted_trim=False)
+    assert str(win._audio_trim_cb.cget("state")) != "disabled"
+    assert win.audio_trim_var.get() is False
+
+
+def test_audio_preview_limit_caps_trimmed_replacement(app,
+                                                      manufacturers_by_key):
+    """When Trim/pad is on and a replacement is longer than its slot, the
+    preview stops at the slot length (matching the machine); the original
+    always previews in full, and a shorter replacement isn't capped."""
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update()
+    win = app.window
+
+    class _Slot:
+        duration = 46.0
+
+    rel = "data/pfmusic/pfmusic_sound_000.wav"
+    win._audio_slots_by_rel = {rel: _Slot()}
+    win._audio_current_rel = rel
+    win._audio_assignments = {rel: "C:/rep.wav"}
+    win._audio_keep_full_flags = {}
+    win.audio_trim_var.set(True)
+    win._audio_preview_dur = 61.8    # replacement longer than the 46s slot
+
+    # Replacement + trim on + longer -> capped at the slot length.
+    win.audio_source_var.set("rep")
+    assert win._audio_compute_preview_limit() == 46.0
+
+    # The original always plays in full -> no cap.
+    win.audio_source_var.set("orig")
+    assert win._audio_compute_preview_limit() is None
+
+    # Trim off -> no cap even for the replacement.
+    win.audio_source_var.set("rep")
+    win.audio_trim_var.set(False)
+    assert win._audio_compute_preview_limit() is None
+
+    # A slot exempted via the per-slot "Full" flag -> no cap.
+    win.audio_trim_var.set(True)
+    win._audio_keep_full_flags = {rel: True}
+    assert win._audio_compute_preview_limit() is None
+
+    # Replacement SHORTER than the slot -> no cap (padding is silent).
+    win._audio_keep_full_flags = {}
+    win._audio_preview_dur = 30.0
+    assert win._audio_compute_preview_limit() is None
 
 
 def test_per_mfr_log_persists_across_switches(app, manufacturers_by_key):

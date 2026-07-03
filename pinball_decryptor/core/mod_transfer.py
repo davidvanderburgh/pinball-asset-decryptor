@@ -28,10 +28,22 @@ asset layout.  Two hazards, handled differently:
 ``apply_transfer`` merges the resolved edits into the target folder.  Nothing
 here re-encodes or writes card data — the user still runs Write against the new
 extract afterwards, which re-encodes each replacement for the new firmware.
+
+There is also a second source of mods this module can recover: game code that
+was modded *outside* this app (another tool wrote the replacements into the
+firmware itself) and then extracted.  Such an extract has no sidecar — the mods
+are baked into the decoded files.  :func:`diff_baked_mods` detects them by
+diffing the modded extract against a **stock extract of the same version**,
+producing the same ``saved``-shaped assignment maps (each detected slot's
+replacement is the modded extract's own file), which then feed
+``plan_transfer``/``apply_transfer`` via their ``saved``/``src_saved``
+overrides — with the *stock* extract as the transfer source, so the content
+matching still keys off stock sounds.
 """
 
 import hashlib
 import os
+import re
 
 from . import staged_changes, text_manifest
 
@@ -76,7 +88,421 @@ def _stock_exists(root, rel):
     return os.path.isfile(_abs(root, rel))
 
 
-def _plan_audio(source_dir, target_dir, saved_audio):
+# Stable per-slot tokens in extracted WAV names, mirroring the Stern engine's
+# ``_wav_idx`` / ``_MUSIC_WAV_RE`` (plugins/stern/engine.py): every naming
+# option (duration prefix, Auto-transcribe rename) preserves the ``idxNNNN``
+# token / ``music_catNN_MMMM`` prefix, so two extracts of the same version pair
+# up slot-for-slot even if they were extracted with different naming settings.
+_IDX_TOKEN_RE = re.compile(r"\bidx0*(\d+)", re.IGNORECASE)
+_MUSIC_TOKEN_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
+
+
+def _audio_slot_key(name):
+    """A naming-setting-independent identity for an extracted audio file."""
+    stem = os.path.splitext(name)[0]
+    m = _MUSIC_TOKEN_RE.search(stem)
+    if m:
+        return ("music", m.group(1).lower())
+    m = _IDX_TOKEN_RE.search(stem)
+    if m:
+        return ("idx", int(m.group(1)))
+    return ("name", os.path.normcase(name))
+
+
+def _audio_by_slot_key(root):
+    """``{slot_key: rel}`` for every WAV under *root*/audio (flat, like the
+    extract lays them out).  Sorted so a duplicate key deterministically keeps
+    the first name."""
+    d = os.path.join(root, "audio")
+    out = {}
+    if os.path.isdir(d):
+        for name in sorted(os.listdir(d)):
+            if name.startswith(".") or not name.lower().endswith(".wav"):
+                continue
+            out.setdefault(_audio_slot_key(name), "audio/" + name)
+    return out
+
+
+def _walk_rels(root, topdir):
+    """Forward-slash rel paths of every file under *root*/*topdir*
+    (recursive — images nest, e.g. ``images/scene_textures/``), skipping
+    dot-entries and ``.txt`` files (the extractor's ``manifest.txt`` /
+    ``radium_images.txt`` bookkeeping lists names + sizes, so they always
+    differ across versions — never slots).  Empty when the folder doesn't
+    exist."""
+    rels = []
+    for dirpath, dirnames, filenames in os.walk(os.path.join(root, topdir)):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for fn in filenames:
+            if fn.startswith(".") or fn.lower().endswith(".txt"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, fn), root)
+            rels.append(rel.replace(os.sep, "/"))
+    return rels
+
+
+def _files_differ(path_a, path_b):
+    """True when the two files' contents differ: a size compare short-circuits
+    (no reads — matters for multi-hundred-MB videos), equal sizes fall back to
+    :func:`content_signature`.  Unreadable on either side → False: we can't
+    stage what we can't read, and a phantom diff is worse than a skip."""
+    try:
+        if os.path.getsize(path_a) != os.path.getsize(path_b):
+            return True
+    except OSError:
+        return False
+    sig_a, sig_b = content_signature(path_a), content_signature(path_b)
+    return sig_a is not None and sig_b is not None and sig_a != sig_b
+
+
+def _video_card_paths(root):
+    """``{on_card_path: rel}`` parsed from the extractor's
+    ``video/manifest.txt`` (columns: output filename, on-card path, bytes).
+
+    The on-card path is a video's STABLE identity across versions.  The
+    extractor derives output FILENAMES from scene titles — duplicate-title
+    suffixes renumber and unnamed clips fall back to positional
+    ``video_NNNN`` names, so a new version reshuffles most filenames and
+    name-pairing misses the real matches (seen on TMNT 1.58→1.59: 822
+    'old-only' files that were actually the same clips renamed).  Empty when
+    the manifest is missing (older extracts) — callers fall back to
+    filenames."""
+    out = {}
+    try:
+        with open(os.path.join(root, "video", "manifest.txt"),
+                  encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\r\n")
+                if not line or line.startswith("#"):
+                    continue
+                cols = line.split("\t")
+                if len(cols) >= 2 and cols[0] and cols[1]:
+                    out.setdefault(cols[1], "video/" + cols[0])
+    except OSError:
+        return {}
+    return out
+
+
+def _manifest_rows(path):
+    """Tab-split data rows of an extractor manifest (comment/blank lines
+    skipped); ``[]`` when the file is missing."""
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\r\n")
+                if not line or line.startswith("#"):
+                    continue
+                cols = line.split("\t")
+                if len(cols) >= 2 and cols[0] and cols[1]:
+                    rows.append(cols)
+    except OSError:
+        return []
+    return rows
+
+
+def _scene_texture_cards(root):
+    """``{asset_card_path: rel}`` from ``images/scene_textures/manifest.txt``
+    (columns: out_rel-under-images/, card path, bytes, w, h, fmt).  Scene
+    texture FILENAMES are ``<scene8>_<ref>_<WxH>`` with dedup suffixes —
+    version-unstable like video names — so the on-card asset path is the
+    stable identity."""
+    return {cols[1]: "images/" + cols[0]
+            for cols in _manifest_rows(os.path.join(
+                root, "images", "scene_textures", "manifest.txt"))}
+
+
+def _radium_occurrences(root):
+    """``{radium_card_path: [rel, rel, ...]}`` — one entry per on-card
+    occurrence, in manifest (= data offset) order — from
+    ``images/scene_textures/radium_images.txt``.
+
+    Radium-embedded images are deduplicated by content and their FILENAME
+    embeds a content hash, so a MODDED image can never pair by name (not even
+    between same-version extracts).  The stable identity is (radium card
+    path, occurrence ordinal): offsets shift across versions but the order of
+    images inside a radium doesn't, as long as none were added/removed."""
+    out = {}
+    for cols in _manifest_rows(os.path.join(
+            root, "images", "scene_textures", "radium_images.txt")):
+        out.setdefault(cols[1], []).append("images/" + cols[0])
+    return out
+
+
+def _image_rel_remap(src_dir, tgt_dir):
+    """``(remap, identified)`` pairing *src_dir*'s manifest-identified images
+    with *tgt_dir*'s.
+
+    *remap* maps ``src_rel -> tgt_rel`` for every pairable image;
+    *identified* is the set of src rels a manifest claims — for those the
+    manifest verdict is authoritative (``rel in identified`` but not in
+    *remap* means the counterpart is really gone; do NOT fall back to name
+    matching, the name may have been reused by a different image).  Loose
+    images (their rel IS the card path) are never ``identified`` — plain rel
+    pairing is correct for them.  A src store whose TARGET-side manifest is
+    missing (older extract) stays unidentified so name pairing still gets a
+    chance."""
+    remap, identified = {}, set()
+
+    src_st = _scene_texture_cards(src_dir)
+    tgt_st = _scene_texture_cards(tgt_dir)
+    if src_st and tgt_st:
+        for card, rel in src_st.items():
+            identified.add(rel)
+            tgt_rel = tgt_st.get(card)
+            if tgt_rel is not None:
+                remap.setdefault(rel, tgt_rel)
+
+    src_rad = _radium_occurrences(src_dir)
+    tgt_rad = _radium_occurrences(tgt_dir)
+    if src_rad and tgt_rad:
+        for radium, rels in src_rad.items():
+            identified.update(rels)
+            tgt_rels = tgt_rad.get(radium)
+            if tgt_rels is not None and len(tgt_rels) == len(rels):
+                for s, t in zip(rels, tgt_rels):
+                    remap.setdefault(s, t)
+    return remap, identified
+
+
+def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
+    """Detect mods that are BAKED INTO an extract (the game code itself was
+    modded, e.g. with another tool, before extraction) by diffing it against a
+    stock extract of the SAME code version.  Read-only.  Returns::
+
+        {"saved": {"audio": {stock_rel: modded_abs_path},
+                   "video": {...}, "image": {...}},
+         "text_rows": [{path, original, replacement}, ...],
+         "notes": {"paired_audio": int, "unpaired_audio": int,
+                   "skipped_text_assets": int}}
+
+    ``saved`` is shaped like the staged-changes sidecar with the *stock*
+    extract's rels as keys and the *modded* extract's files as the replacement
+    sources — ready to feed ``plan_transfer(stock_dir, target_dir,
+    saved=...)``.  ``text_rows`` pairs the two manifests positionally per
+    asset (original = stock string, replacement = modded string).
+    *log_cb(text, level="info")* streams progress (see
+    :func:`plan_direct_diff` — run off the UI thread).
+    """
+    log = log_cb or (lambda *_a, **_k: None)
+    saved = {"audio": {}, "video": {}, "image": {}}
+    notes = {"paired_audio": 0, "unpaired_audio": 0, "skipped_text_assets": 0}
+
+    mod_keys = _audio_by_slot_key(modded_dir)
+    stk_keys = _audio_by_slot_key(stock_dir)
+    log("Comparing %d sound slot(s)..." % len(stk_keys))
+    for i, (key, stk_rel) in enumerate(stk_keys.items(), 1):
+        if i % 250 == 0:
+            log("  ...%d/%d sounds compared" % (i, len(stk_keys)))
+        mod_rel = mod_keys.get(key)
+        if mod_rel is None:
+            notes["unpaired_audio"] += 1
+            continue
+        notes["paired_audio"] += 1
+        if _files_differ(_abs(stock_dir, stk_rel), _abs(modded_dir, mod_rel)):
+            saved["audio"][stk_rel] = os.path.abspath(_abs(modded_dir, mod_rel))
+    notes["unpaired_audio"] += sum(1 for k in mod_keys if k not in stk_keys)
+    log("Sounds: %d differ (%d unpaired)."
+        % (len(saved["audio"]), notes["unpaired_audio"]))
+
+    # Videos pair by on-card path when both extracts carry a manifest (same
+    # version, so filenames USUALLY agree — but the manifest is authoritative
+    # and costs nothing).  Images pair via _image_rel_remap: even between
+    # same-version extracts a MODDED radium image never name-matches (its
+    # filename embeds a content hash).  Keys stay STOCK rels so the follow-up
+    # plan_transfer(stock, target) can remap them onto the target.
+    mod_cards = _video_card_paths(modded_dir)
+    stk_rel_to_card = {r: c for c, r in _video_card_paths(stock_dir).items()}
+    img_remap, img_identified = _image_rel_remap(stock_dir, modded_dir)
+    for cat, top in (("video", "video"), ("image", "images")):
+        rels = _walk_rels(stock_dir, top)
+        log("Comparing %d %s file(s)..." % (len(rels), cat))
+        for i, rel in enumerate(rels, 1):
+            if i % 100 == 0:
+                log("  ...%d/%d %ss compared" % (i, len(rels), cat))
+            if cat == "video" and mod_cards and stk_rel_to_card:
+                card = stk_rel_to_card.get(rel)
+                mod_rel = mod_cards.get(card) if card else None
+            elif cat == "image" and rel in img_identified:
+                mod_rel = img_remap.get(rel)
+            else:
+                mod_rel = rel
+            mod_abs = _abs(modded_dir, mod_rel) if mod_rel else None
+            if not mod_abs or not os.path.isfile(mod_abs):
+                continue
+            if _files_differ(mod_abs, _abs(stock_dir, rel)):
+                saved[cat][rel] = os.path.abspath(mod_abs)
+        log("%s: %d differ."
+            % (cat.capitalize(), len(saved[cat])))
+
+    # Text: pair the manifests positionally per asset.  Text patches are
+    # same-length in-place edits, so both extracts see the same string count
+    # per asset; a count mismatch means we can't pair reliably — skip it.
+    stk_by_path, mod_by_path = {}, {}
+    for r in text_manifest.load(stock_dir):
+        stk_by_path.setdefault(r["path"], []).append(r["original"])
+    for r in text_manifest.load(modded_dir):
+        mod_by_path.setdefault(r["path"], []).append(r["original"])
+    text_rows = []
+    for path, stk_originals in stk_by_path.items():
+        mod_originals = mod_by_path.get(path)
+        if mod_originals is None:
+            continue
+        if len(mod_originals) != len(stk_originals):
+            notes["skipped_text_assets"] += 1
+            continue
+        for stock_s, modded_s in zip(stk_originals, mod_originals):
+            if modded_s != stock_s:
+                text_rows.append({"path": path, "original": stock_s,
+                                  "replacement": modded_s})
+
+    return {"saved": saved, "text_rows": text_rows, "notes": notes}
+
+
+def plan_direct_diff(modded_dir, target_dir, log_cb=None):
+    """The no-baseline fallback of :func:`diff_baked_mods`: diff a modded
+    OLD-version extract DIRECTLY against the new stock extract, for users who
+    no longer have a stock extract of the old version.
+
+    Videos pair by their on-card path (``video/manifest.txt``, filenames are
+    version-unstable — see :func:`_video_card_paths`; name-pairing is the
+    fallback for extracts without a manifest).  Loose images pair by rel path
+    (the extractor preserves the card's directory structure); scene textures
+    and radium-embedded images pair via the extract manifests (see
+    :func:`_image_rel_remap`).  A paired file whose content differs is staged
+    with the modded extract's file as the replacement, keyed by the TARGET's
+    rel.  The caller must surface the
+    result for review — without an old-version baseline a difference can also
+    be the vendor's own between-version change.  Audio (indexes shift,
+    content matching needs stock content) and text (originals change
+    legitimately) can NOT be attributed this way; ``notes`` carries heads-up
+    counts so the caller can warn that those need the baseline flow:
+
+        notes = {"video_old_only": old videos with no counterpart in the new
+                                   version (by card path, or name w/o manifest),
+                 "image_old_only": old images with no same-named new file,
+                 "audio_unmatched": old sounds with no identical sound in the
+                                    new extract (vendor changes OR audio mods),
+                 "text_unmatched":  old strings absent from the new manifest}
+
+    *log_cb(text, level="info")* streams progress — comparing thousands of
+    files is minutes of I/O on big/cloud-synced extracts, so callers run this
+    off the UI thread and surface the lines in the log.
+
+    Returns the same plan shape as :func:`plan_transfer` (audio/text empty)
+    plus the ``"notes"`` key — feed it to ``apply_transfer(...,
+    src_saved={})``.
+    """
+    log = log_cb or (lambda *_a, **_k: None)
+    plan = {"audio": {"matched": [], "remapped": [], "flagged": [],
+                      "dropped": []},
+            "video": {"matched": [], "dropped": []},
+            "image": {"matched": [], "dropped": []},
+            "text": {"matched": [], "dropped": []},
+            "toggles": {}}
+    notes = {"video_old_only": 0, "image_old_only": 0,
+             "audio_unmatched": 0, "text_unmatched": 0}
+
+    # ---- Videos: card-path pairing, filename fallback -------------------
+    mod_cards = _video_card_paths(modded_dir)
+    tgt_cards = _video_card_paths(target_dir)
+    pairs = []          # (mod_rel, tgt_rel)
+    manifest_paired = set()
+    if mod_cards and tgt_cards:
+        for card, mod_rel in mod_cards.items():
+            manifest_paired.add(mod_rel)
+            tgt_rel = tgt_cards.get(card)
+            if tgt_rel is None:
+                notes["video_old_only"] += 1
+            else:
+                pairs.append((mod_rel, tgt_rel))
+        log("Videos: %d paired by on-card path, %d only in the old version."
+            % (len(pairs), notes["video_old_only"]))
+    # Videos the manifests don't cover (older extract / hand-added files).
+    for rel in _walk_rels(modded_dir, "video"):
+        if rel in manifest_paired:
+            continue
+        if _stock_exists(target_dir, rel):
+            pairs.append((rel, rel))
+        else:
+            notes["video_old_only"] += 1
+    log("Comparing %d video pair(s)..." % len(pairs))
+    for i, (mod_rel, tgt_rel) in enumerate(pairs, 1):
+        if i % 100 == 0:
+            log("  ...%d/%d videos compared" % (i, len(pairs)))
+        mod_abs = _abs(modded_dir, mod_rel)
+        if _files_differ(mod_abs, _abs(target_dir, tgt_rel)):
+            plan["video"]["matched"].append(
+                {"rel": tgt_rel, "repl": os.path.abspath(mod_abs),
+                 "content_changed": True})
+    log("Videos: %d differ." % len(plan["video"]["matched"]))
+
+    # ---- Images ----------------------------------------------------------
+    # Loose images pair by rel (their rel IS the card path); scene textures
+    # and radium-embedded images pair via the extract manifests — their
+    # filenames are version-unstable / content-hashed, so name pairing would
+    # miss exactly the modded ones (see _image_rel_remap).
+    remap, identified = _image_rel_remap(modded_dir, target_dir)
+    image_rels = _walk_rels(modded_dir, "images")
+    log("Comparing %d image(s) (%d manifest-identified)..."
+        % (len(image_rels), len(identified)))
+    staged_img = set()
+    for i, rel in enumerate(image_rels, 1):
+        if i % 250 == 0:
+            log("  ...%d/%d images compared" % (i, len(image_rels)))
+        if rel in identified:
+            tgt_rel = remap.get(rel)
+        else:
+            tgt_rel = rel if _stock_exists(target_dir, rel) else None
+        if tgt_rel is None:
+            notes["image_old_only"] += 1
+            continue
+        mod_abs = _abs(modded_dir, rel)
+        if tgt_rel not in staged_img and _files_differ(
+                mod_abs, _abs(target_dir, tgt_rel)):
+            staged_img.add(tgt_rel)
+            plan["image"]["matched"].append(
+                {"rel": tgt_rel, "repl": os.path.abspath(mod_abs),
+                 "content_changed": True})
+    log("Images: %d differ, %d only in the old version."
+        % (len(plan["image"]["matched"]), notes["image_old_only"]))
+
+    # Heads-up counts only — differences we can't attribute without a stock
+    # old-version extract.  Guarded so a category the target extract simply
+    # doesn't have (not extracted) isn't miscounted as all-unmatched.
+    tgt_audio = _audio_by_slot_key(target_dir)
+    if tgt_audio:
+        log("Indexing %d new-version sound(s)..." % len(tgt_audio))
+    tgt_sigs = set()
+    for i, rel in enumerate(tgt_audio.values(), 1):
+        if i % 250 == 0:
+            log("  ...%d/%d sounds indexed" % (i, len(tgt_audio)))
+        sig = content_signature(_abs(target_dir, rel))
+        if sig is not None:
+            tgt_sigs.add(sig)
+    if tgt_sigs:
+        mod_audio = _audio_by_slot_key(modded_dir)
+        log("Checking %d old sound(s) against the index..." % len(mod_audio))
+        for i, rel in enumerate(mod_audio.values(), 1):
+            if i % 250 == 0:
+                log("  ...%d/%d sounds checked" % (i, len(mod_audio)))
+            sig = content_signature(_abs(modded_dir, rel))
+            if sig is not None and sig not in tgt_sigs:
+                notes["audio_unmatched"] += 1
+
+    tgt_originals = {r["original"] for r in text_manifest.load(target_dir)}
+    if tgt_originals:
+        for r in text_manifest.load(modded_dir):
+            if r["original"] not in tgt_originals:
+                notes["text_unmatched"] += 1
+
+    transfer = len(plan["video"]["matched"]) + len(plan["image"]["matched"])
+    plan["totals"] = {"transfer": transfer, "flagged": 0, "dropped": 0}
+    plan["notes"] = notes
+    return plan
+
+
+def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     """Reconcile audio assignments by stock-WAV content.
 
     Returns ``(matched, remapped, flagged, dropped)`` where each entry is a dict
@@ -86,6 +512,7 @@ def _plan_audio(source_dir, target_dir, saved_audio):
       flagged  {src_rel, repl, reason}           (index reused for another sound)
       dropped  {src_rel, repl, reason}           (sound no longer present)
     """
+    log = log_cb or (lambda *_a, **_k: None)
     matched, remapped, flagged, dropped = [], [], [], []
     if not saved_audio:
         return matched, remapped, flagged, dropped
@@ -94,9 +521,12 @@ def _plan_audio(source_dir, target_dir, saved_audio):
     tgt_audio_dir = os.path.join(target_dir, "audio")
     sig_to_rels = {}
     if os.path.isdir(tgt_audio_dir):
-        for name in os.listdir(tgt_audio_dir):
-            if not name.lower().endswith(".wav"):
-                continue
+        names = [n for n in os.listdir(tgt_audio_dir)
+                 if n.lower().endswith(".wav")]
+        log("Indexing %d new-version sound(s) by content..." % len(names))
+        for i, name in enumerate(names, 1):
+            if i % 250 == 0:
+                log("  ...%d/%d sounds indexed" % (i, len(names)))
             rel = "audio/" + name
             sig = content_signature(_abs(target_dir, rel))
             if sig is not None:
@@ -121,30 +551,76 @@ def _plan_audio(source_dir, target_dir, saved_audio):
     return matched, remapped, flagged, dropped
 
 
-def _plan_rel_category(source_dir, target_dir, saved_map):
-    """Reconcile an image/video assignment map by rel_path (stable filename).
+def _plan_image(source_dir, target_dir, saved_map):
+    """Reconcile an image assignment map.  Loose images pair by rel_path (the
+    extractor preserves the card's directory structure); scene textures and
+    radium-embedded images pair via the extract manifests (their filenames
+    are version-unstable / content-hashed — see :func:`_image_rel_remap`).
 
-    Returns ``(matched, dropped)`` — matched entries note whether the stock
-    asset's *content* changed (same name, new art) so the caller can surface it.
-    """
+    Returns ``(matched, dropped)`` — matched entries carry the TARGET's rel
+    and note whether the stock asset's *content* changed (same slot, new art)
+    so the caller can surface it."""
     matched, dropped = [], []
-    for rel, repl in (saved_map or {}).items():
-        if _stock_exists(target_dir, rel):
+    if not saved_map:
+        return matched, dropped
+    remap, identified = _image_rel_remap(source_dir, target_dir)
+    for rel, repl in saved_map.items():
+        if rel in identified:
+            tgt_rel = remap.get(rel)
+        else:
+            tgt_rel = rel if _stock_exists(target_dir, rel) else None
+        if tgt_rel is not None and _stock_exists(target_dir, tgt_rel):
             changed = (content_signature(_abs(source_dir, rel))
-                       != content_signature(_abs(target_dir, rel)))
-            matched.append({"rel": rel, "repl": repl, "content_changed": changed})
+                       != content_signature(_abs(target_dir, tgt_rel)))
+            matched.append({"rel": tgt_rel, "repl": repl,
+                            "content_changed": changed})
         else:
             dropped.append({"rel": rel, "repl": repl,
                             "reason": "no %s in the new version" % rel})
     return matched, dropped
 
 
-def _plan_text(source_dir, target_dir):
+def _plan_video(source_dir, target_dir, saved_map):
+    """Reconcile a video assignment map: by on-card path when both extracts
+    have a ``video/manifest.txt`` (output filenames are version-unstable —
+    see :func:`_video_card_paths`), by rel_path otherwise.
+
+    Matched entries carry the TARGET's rel (the slot the assignment lands
+    on), which the card-path remap may have renamed."""
+    src_cards = _video_card_paths(source_dir)   # card -> rel
+    tgt_cards = _video_card_paths(target_dir)
+    rel_to_card = {rel: card for card, rel in src_cards.items()}
+
+    matched, dropped = [], []
+    for rel, repl in (saved_map or {}).items():
+        card = rel_to_card.get(rel)
+        if card and tgt_cards:
+            # Both manifests know this clip: the card path is authoritative —
+            # even a same-named target file could be a DIFFERENT clip (the
+            # title-derived name was reused).  Missing card ⇒ really gone.
+            tgt_rel = tgt_cards.get(card)
+        else:
+            tgt_rel = rel if _stock_exists(target_dir, rel) else None
+        if tgt_rel and _stock_exists(target_dir, tgt_rel):
+            changed = (content_signature(_abs(source_dir, rel))
+                       != content_signature(_abs(target_dir, tgt_rel)))
+            matched.append({"rel": tgt_rel, "repl": repl,
+                            "content_changed": changed})
+        else:
+            dropped.append({"rel": rel, "repl": repl,
+                            "reason": "no %s in the new version" % rel})
+    return matched, dropped
+
+
+def _plan_text(source_dir, target_dir, src_rows=None):
     """Reconcile text edits: a source edit transfers if its *original* string
     still exists somewhere in the target manifest.  Returns ``(matched,
     dropped)`` where matched entries carry the number of target rows they'll
-    fill (edits apply to every scene sharing the original text)."""
-    src_rows = text_manifest.load(source_dir)
+    fill (edits apply to every scene sharing the original text).  *src_rows*
+    overrides the source manifest (rows synthesized by
+    :func:`diff_baked_mods`)."""
+    if src_rows is None:
+        src_rows = text_manifest.load(source_dir)
     tgt_rows = text_manifest.load(target_dir)
     tgt_originals = {}
     for r in tgt_rows:
@@ -171,7 +647,8 @@ def _plan_text(source_dir, target_dir):
     return matched, dropped
 
 
-def plan_transfer(source_dir, target_dir):
+def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
+                  log_cb=None):
     """Compute a reconciliation plan moving *source_dir*'s mods onto
     *target_dir*.  Read-only.  Returns a dict::
 
@@ -181,16 +658,24 @@ def plan_transfer(source_dir, target_dir):
          "text":  {matched, dropped},
          "toggles": {key: value, ...},
          "totals": {"transfer": int, "flagged": int, "dropped": int}}
+
+    *saved* / *src_text_rows* override the source folder's sidecar / text
+    manifest — used for baked-in mods recovered by :func:`diff_baked_mods`,
+    where *source_dir* must be the STOCK same-version extract (the audio
+    matching reads its WAVs as the stock content).  *log_cb* streams progress
+    (the audio content index hashes every target sound).
     """
-    saved = staged_changes.load(source_dir)
+    if saved is None:
+        saved = staged_changes.load(source_dir)
 
     a_matched, a_remapped, a_flagged, a_dropped = _plan_audio(
-        source_dir, target_dir, saved.get("audio"))
-    v_matched, v_dropped = _plan_rel_category(
+        source_dir, target_dir, saved.get("audio"), log_cb=log_cb)
+    v_matched, v_dropped = _plan_video(
         source_dir, target_dir, saved.get("video"))
-    i_matched, i_dropped = _plan_rel_category(
+    i_matched, i_dropped = _plan_image(
         source_dir, target_dir, saved.get("image"))
-    t_matched, t_dropped = _plan_text(source_dir, target_dir)
+    t_matched, t_dropped = _plan_text(source_dir, target_dir,
+                                      src_rows=src_text_rows)
 
     plan = {
         "audio": {"matched": a_matched, "remapped": a_remapped,
@@ -210,13 +695,17 @@ def plan_transfer(source_dir, target_dir):
     return plan
 
 
-def apply_transfer(source_dir, target_dir, plan, include_flagged=False):
+def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
+                   src_saved=None):
     """Merge *plan*'s transferable edits into *target_dir*'s sidecar + text
     manifest.  Existing target edits are preserved unless a transferred entry
     targets the same slot/string.  ``include_flagged`` also applies the audio
     entries whose index was reused (off by default — those are the risky ones).
-    Returns ``{"audio", "video", "image", "text"}`` counts actually written."""
-    src_saved = staged_changes.load(source_dir)
+    ``src_saved`` overrides the source sidecar (pairs with ``plan_transfer``'s
+    ``saved``).  Returns ``{"audio", "video", "image", "text"}`` counts
+    actually written."""
+    if src_saved is None:
+        src_saved = staged_changes.load(source_dir)
     tgt = staged_changes.load(target_dir)
 
     src_loop = src_saved.get("audio_loop") or {}

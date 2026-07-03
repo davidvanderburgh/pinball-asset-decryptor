@@ -499,14 +499,19 @@ class Manufacturer(ABC):
                 "isn't needed. Tick “Trim / pad” below only if a "
                 "track sounds cut off or mistimed in-game.")
 
-    def audio_forces_length_match(self) -> bool:
+    def audio_forces_length_match(self, assets_dir=None) -> bool:
         """Whether this plugin's Write ALWAYS trims/pads replacements to the
         original slot length, regardless of the "Trim / pad" checkbox.
 
         When True, the GUI forces the checkbox on and disables it (the toggle
-        would be misleading otherwise).  Used by JJP, whose Write step matches
-        every track to its original slot length unconditionally.  Default
-        False (the toggle is a real user choice)."""
+        would be misleading otherwise).  Used by JJP and Spike 2, whose Write
+        step matches every track to its original slot length unconditionally.
+
+        *assets_dir* (the scanned extract folder, or None before one is
+        loaded) lets a plugin answer per-extract when the constraint depends
+        on the game: CGC's Pulp Fiction stores audio in fixed-length JPS bank
+        slots (forced), while its WPC remakes store loose .wav the engine
+        plays at any length (a free choice).  Default False."""
         return False
 
     def video_slot_dirs(self, assets_dir):

@@ -149,7 +149,7 @@ class SternManufacturer(Manufacturer):
                                  "Extract video", "Extract images",
                                  "Decode audio", "Checksums")
     direct_ssd_write_phases = ("Scan", "Re-encode audio", "Write to SD card")
-    flash_phases = ("Check card", "Write image", "Flush")
+    flash_phases = ("Check card", "Write image", "Verify card", "Flush")
     # "Revert all changes" fallback: re-derive originals with no .orig snapshot
     # straight from the source card.
     revert_phases = ("Read source", "Restore")
@@ -280,7 +280,7 @@ class SternManufacturer(Manufacturer):
                 "is fit to its original's size — audio is trimmed or padded to "
                 "the original length; video/images are size-matched.")
 
-    def audio_forces_length_match(self):
+    def audio_forces_length_match(self, assets_dir=None):
         # Spike 2 audio is a size-neutral codec patch: each sound is re-encoded
         # to its original slot length (longer trimmed, shorter padded) and the
         # body is written back in place — keeping a different length would

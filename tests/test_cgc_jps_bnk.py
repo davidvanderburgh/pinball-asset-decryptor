@@ -204,7 +204,10 @@ def test_repack_with_edit_preserves_modification(synthetic_bnk_path,
     jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
 
     # Replace sound 1's WAV with a completely different sine wave.
-    new_pcm = _sine_pcm(150, 1320)
+    # Same length as the stock slot -- JPS slots are fixed-length, so a
+    # size-neutral swap round-trips exactly (length changes are covered
+    # by the dedicated clamp tests below).
+    new_pcm = _sine_pcm(200, 1320)
     target = out_dir / "test_sound_001.wav"
     with wave.open(str(target), "wb") as w:
         w.setnchannels(jps_bnk.CHANNELS)
@@ -261,7 +264,7 @@ def test_repack_matches_transcribe_renamed_wav(synthetic_bnk_path, tmp_path):
 
     renamed = out_dir / "test_sound_001 - Bring out the gimp.wav"
     os.rename(out_dir / "test_sound_001.wav", renamed)
-    new_pcm = _sine_pcm(150, 1320)
+    new_pcm = _sine_pcm(200, 1320)  # same length as the stock slot
     _write_wav(renamed, new_pcm)
 
     repacked = tmp_path / "repacked.bnk"
@@ -275,6 +278,171 @@ def test_repack_matches_transcribe_renamed_wav(synthetic_bnk_path, tmp_path):
     jps_bnk.extract_bnk(str(repacked), str(re_dir))
     with wave.open(str(re_dir / "repacked_sound_001.wav"), "rb") as w:
         assert w.readframes(w.getnframes()) == new_pcm
+
+
+def _riff_wav_with_list(pcm: bytes) -> bytes:
+    """A 48 kHz stereo s16le RIFF/WAVE with a LIST/INFO metadata chunk
+    between ``fmt `` and ``data`` -- exactly what ffmpeg's WAV muxer
+    emits (and what silenced the real Pulp Fiction music slot)."""
+    fmt = struct.pack("<HHIIHH", 1, jps_bnk.CHANNELS, jps_bnk.SAMPLE_RATE,
+                      jps_bnk.SAMPLE_RATE * jps_bnk.CHANNELS * 2,
+                      jps_bnk.CHANNELS * 2, 16)
+    info = b"INFOISFT" + struct.pack("<I", 6) + b"Lavf\x00\x00"
+    lst = b"LIST" + struct.pack("<I", len(info)) + info
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + lst + b"data" + struct.pack("<I", len(pcm)) + pcm)
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def _build_contiguous_riff_bnk(name: str, pcms: list,
+                               overshoot: int = 96) -> bytes:
+    """Compose a music-style bnk exactly like the real pfmusic.bnk: RIFF
+    streams packed CONTIGUOUSLY (zero gap), each with an outer RIFF ``size``
+    field INFLATED so it overshoots into the next stream by *overshoot* bytes.
+
+    This is the shape that made the shipping scanner skip every other stream
+    (advancing by ``8 + riff_size`` overshoots past the next stream's header),
+    so a correct scanner must walk by the data-chunk end instead.  The last
+    stream's inflated size deliberately runs past EOF (like the real stream
+    48), exercising the bounds check.
+    """
+    out = bytearray(b"\x00" * 0x2A0)
+    for pcm in pcms:
+        wav = bytearray(_riff_wav(pcm))          # canonical: size = 36+len(pcm)
+        struct.pack_into("<I", wav, 4, (36 + len(pcm)) + overshoot)  # inflate
+        out += wav                                # NO gap -- contiguous
+    return bytes(out)
+
+
+def test_scan_finds_all_contiguous_overshoot_streams():
+    """Regression lock for the 24->49 scanner fix: contiguous RIFF streams
+    whose outer size field overshoots must ALL be found.  The old scanner
+    (``i += 8 + riff_size``) skipped every other one and dropped the last."""
+    pcms = [_sine_pcm(100, 440), _sine_pcm(60, 880),
+            _sine_pcm(80, 220), _sine_pcm(40, 1320), _sine_pcm(70, 990)]
+    bnk = _build_contiguous_riff_bnk("music.txt", pcms)
+    bufs = jps_bnk._scan_buffers(bnk)
+    assert len(bufs) == len(pcms), (
+        f"scanner found {len(bufs)} of {len(pcms)} streams -- overshoot skip")
+    off = 0x2A0
+    for i, pcm in enumerate(pcms):
+        assert bufs[i].bnk_offset == off, f"stream {i} offset wrong"
+        assert bufs[i].pcm_size == len(pcm)
+        assert bufs[i].compressed_size == 44 + len(pcm)   # exact, no overshoot
+        off += 44 + len(pcm)
+
+
+def test_repack_riff_edit_middle_stream_is_size_neutral(tmp_path):
+    """THE Pulp Fiction silent-music fix on the real bank shape: editing one
+    stream (here a formerly-hidden middle one) with a longer LIST-carrying
+    ffmpeg WAV must splice size-neutrally -- stock header kept, LIST dropped,
+    PCM clamped, and every other stream byte-identical."""
+    pcms = [_sine_pcm(100, 440), _sine_pcm(60, 880), _sine_pcm(80, 220)]
+    bnk = _build_contiguous_riff_bnk("music.txt", pcms)
+    bnk_path = tmp_path / "music.bnk"
+    bnk_path.write_bytes(bnk)
+
+    out_dir = tmp_path / "extract"
+    contents = jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+    assert len(contents.buffers) == 3
+
+    # Edit the MIDDLE stream (index 1) with a longer LIST-chunk ffmpeg WAV.
+    longer = _sine_pcm(110, 1500)
+    (out_dir / "music_sound_001.wav").write_bytes(_riff_wav_with_list(longer))
+
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir), str(repacked))
+    out = repacked.read_bytes()
+
+    assert len(out) == len(bnk)                       # size-neutral
+    assert summary["modified_count"] == 1
+    assert summary["buffers"][1]["modified"] is True
+    assert summary["buffers"][0]["modified"] is False
+    assert summary["buffers"][2]["modified"] is False
+    assert any("truncated" in n for n in summary.get("clamp_notes", []))
+
+    # Only stream 1's PCM changed; everything else byte-identical.
+    b1 = contents.buffers[1]
+    off, plen = jps_bnk._riff_data_span(
+        bnk[b1.bnk_offset:b1.bnk_offset + b1.compressed_size])
+    pcm_start, pcm_end = b1.bnk_offset + off, b1.bnk_offset + off + plen
+    assert out[:pcm_start] == bnk[:pcm_start]
+    assert out[pcm_end:] == bnk[pcm_end:]
+    assert b"LIST" not in out[b1.bnk_offset:pcm_start]   # LIST dropped
+
+    re_dir = tmp_path / "re"
+    jps_bnk.extract_bnk(str(repacked), str(re_dir))
+    with wave.open(str(re_dir / "repacked_sound_001.wav"), "rb") as w:
+        assert w.readframes(w.getnframes()) == longer[:plen]
+    with wave.open(str(re_dir / "repacked_sound_000.wav"), "rb") as w:
+        assert w.readframes(w.getnframes()) == pcms[0]
+
+
+def test_repack_riff_pads_short_replacement(tmp_path):
+    """A replacement shorter than the stock slot is zero-padded to the
+    slot length (still size-neutral) and reported as padded."""
+    bnk = _build_contiguous_riff_bnk("music.txt", [_sine_pcm(100, 440),
+                                                    _sine_pcm(50, 880)])
+    bnk_path = tmp_path / "music.bnk"
+    bnk_path.write_bytes(bnk)
+    out_dir = tmp_path / "extract"
+    jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+
+    shorter = _sine_pcm(40, 1500)
+    (out_dir / "music_sound_000.wav").write_bytes(_riff_wav(shorter))
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir), str(repacked))
+
+    assert len(repacked.read_bytes()) == len(bnk)
+    assert any("padded" in n for n in summary.get("clamp_notes", []))
+    re_dir = tmp_path / "re"
+    jps_bnk.extract_bnk(str(repacked), str(re_dir))
+    with wave.open(str(re_dir / "repacked_sound_000.wav"), "rb") as w:
+        got = w.readframes(w.getnframes())
+    assert got[:len(shorter)] == shorter
+    assert got[len(shorter):] == b"\x00" * (len(got) - len(shorter))
+
+
+def test_repack_riff_no_op_is_byte_identical(tmp_path):
+    """Extract + repack with no edits reproduces a contiguous-overshoot bank
+    byte-for-byte (extract now emits clean WAVs, but repack preserves the
+    stock bank bytes)."""
+    bnk = _build_contiguous_riff_bnk(
+        "music.txt", [_sine_pcm(90, 440), _sine_pcm(120, 660),
+                      _sine_pcm(30, 880)])
+    bnk_path = tmp_path / "music.bnk"
+    bnk_path.write_bytes(bnk)
+    out_dir = tmp_path / "extract"
+    jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir), str(repacked))
+    assert summary["modified_count"] == 0
+    assert repacked.read_bytes() == bnk
+
+
+def test_repack_zlib_edit_is_size_neutral(tmp_path):
+    """zlib (SFX/speech) banks are fixed-length too: the engine's
+    compressed path validates the decompressed length against the stock
+    record, so a longer/shorter edit must be clamped, not shipped at its
+    own size."""
+    pcms = [_sine_pcm(100, 440), _sine_pcm(200, 880)]
+    bnk_path = tmp_path / "sfx.bnk"
+    bnk_path.write_bytes(_build_synthetic_bnk("sfx.txt", pcms))
+    out_dir = tmp_path / "extract"
+    jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+
+    with wave.open(str(out_dir / "sfx_sound_000.wav"), "rb") as w:
+        stock_len = len(w.readframes(w.getnframes()))
+    _write_wav(out_dir / "sfx_sound_000.wav", _sine_pcm(300, 1500))  # longer
+
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir), str(repacked))
+    assert any("truncated" in n for n in summary.get("clamp_notes", []))
+    re_dir = tmp_path / "re"
+    contents = jps_bnk.extract_bnk(str(repacked), str(re_dir))
+    # Slot 0's decoded PCM stayed the stock length (clamped), so the
+    # engine's length check would still pass.
+    assert contents.buffers[0].pcm_size == stock_len
 
 
 def test_repack_refuses_ambiguous_renamed_wavs(synthetic_bnk_path,
@@ -332,7 +500,7 @@ def test_diff_detects_edit_on_transcribe_renamed_wav(tmp_path):
         os.rename(sub / f"pf_sound_{i:03d}.wav", renamed)
         baseline[f"data/pf/{renamed.name}"] = md5_file(str(renamed))
 
-    new_pcm = _sine_pcm(150, 1320)
+    new_pcm = _sine_pcm(100, 1320)  # slot 0 is 100ms; keep it size-neutral
     _write_wav(sub / "pf_sound_000 - music.wav", new_pcm)
 
     changed, missing = cgc_pipeline._diff_assets(str(assets), baseline)
@@ -386,6 +554,50 @@ def test_diff_aborts_loudly_when_repack_fails(tmp_path):
 
     with pytest.raises(cgc_pipeline.PipelineError, match="failed"):
         cgc_pipeline._diff_assets(str(assets), baseline)
+
+
+def test_diff_aborts_on_stale_v1_extract_when_edited(tmp_path):
+    """A decoded subdir made before the RIFF scanner was corrected (manifest
+    format != jps_bnk_v2) has a different slot->stream mapping, so building
+    an EDIT from it would scramble the bank.  It must abort with a re-extract
+    message -- never silently ship scrambled audio."""
+    import json
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.cgc import pipeline as cgc_pipeline
+
+    assets, bnk, sub = _make_bank_assets(tmp_path)
+    baseline = {"data/pf.bnk": md5_file(str(bnk))}
+    for fn in os.listdir(sub):
+        if fn.endswith(".wav"):
+            baseline[f"data/pf/{fn}"] = md5_file(str(sub / fn))
+
+    # Simulate an OLD extract: downgrade the manifest format tag.
+    man = sub / "pf.manifest.json"
+    m = json.loads(man.read_text())
+    m["format"] = "jps_bnk_v1"
+    man.write_text(json.dumps(m))
+
+    # Edit a WAV.
+    _write_wav(sub / "pf_sound_000.wav", _sine_pcm(100, 1320))
+
+    with pytest.raises(cgc_pipeline.PipelineError, match="older version"):
+        cgc_pipeline._diff_assets(str(assets), baseline)
+
+
+def test_diff_allows_v2_extract_edit(tmp_path):
+    """The stale-extract guard must NOT fire for a current (v2) extract."""
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.cgc import pipeline as cgc_pipeline
+
+    assets, bnk, sub = _make_bank_assets(tmp_path)   # extract writes v2
+    baseline = {"data/pf.bnk": md5_file(str(bnk))}
+    for fn in os.listdir(sub):
+        if fn.endswith(".wav"):
+            baseline[f"data/pf/{fn}"] = md5_file(str(sub / fn))
+    _write_wav(sub / "pf_sound_000.wav", _sine_pcm(100, 1320))  # size-neutral
+
+    changed, missing = cgc_pipeline._diff_assets(str(assets), baseline)
+    assert "data/pf.bnk" in changed  # built, not aborted
 
 
 def test_repack_rejects_mismatched_audio_format(synthetic_bnk_path,

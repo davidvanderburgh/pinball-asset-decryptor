@@ -310,6 +310,15 @@ flashing. Builds made with v0.36.0+ retire the journal automatically;
 the diagnostics flag any older modded card that still carries the armed
 journal so you know to rebuild it rather than blame the card.
 
+Flashing a card is otherwise a blind raw write with no integrity check,
+so a single bad sector or a flaky reader can corrupt the card silently —
+and a partially-written installer can SHELL ERROR or leave the machine
+unbootable. The **Flash image to SD card** button now reads the whole
+card back after writing and compares it byte-for-byte to the image,
+aborting if anything doesn't match, so a bad flash is caught on your PC
+instead of at the machine. (This roughly doubles the flash time; the
+progress bar shows a separate "Verify card" phase.)
+
 ## Install
 
 ### Windows

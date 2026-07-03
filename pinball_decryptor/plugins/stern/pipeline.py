@@ -355,7 +355,8 @@ class SternFlashImagePipeline(BasePipeline):
             written = flash_image_to_device(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
-                cancel=lambda: self._cancelled)
+                cancel=lambda: self._cancelled,
+                on_verify_start=lambda: self._set_phase(2))  # Verify card
         except FlashCancelled:
             # The card is now partially written — surface it as a cancel, but
             # make clear the card is no longer usable until re-flashed.
@@ -367,6 +368,6 @@ class SternFlashImagePipeline(BasePipeline):
             raise PipelineError("Write image", str(e))
         self._check_cancel()
 
-        self._set_phase(2)  # Flush
+        self._set_phase(3)  # Flush
         self._done(True, "Flashed %s onto the SD card (%s)."
                    % (format_size(written), self.device_path))

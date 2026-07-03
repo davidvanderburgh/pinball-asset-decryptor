@@ -284,6 +284,9 @@ class MainWindow:
         # Preview strip (seekable spectrogram) state.
         self._audio_preview_path = None  # file currently loaded in the strip
         self._audio_preview_dur = 0.0    # its duration (s)
+        # Effective stop point (s) when previewing a replacement that Write
+        # will trim to its slot length -- None when the whole file plays.
+        self._audio_preview_limit = None
         self._audio_preview_pos = 0.0    # playhead position (s)
         self._audio_preview_playing = False
         self._audio_preview_start_pos = 0.0  # ffplay -ss offset in flight
@@ -347,7 +350,9 @@ class MainWindow:
         self._image_assignments = {}     # rel_path -> replacement file path
         self._image_scan_id = 0          # bump-counter to drop stale scans
         self._image_scan_dir = ""        # folder the current slots came from
-        self._image_preview_img = None   # Tk PhotoImage ref (must stay alive)
+        # Tk PhotoImage refs (must stay alive while drawn on the canvases).
+        self._image_preview_img_orig = None
+        self._image_preview_img_rep = None
         self._image_current_rel = None   # slot shown in the static preview
         self.image_search_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
@@ -1685,16 +1690,34 @@ class MainWindow:
             f, text="Transfer Mods to New Version")
         ttk.Label(
             self._modpack_transfer_frame,
-            text="New game code shipped? Extract the new card to a fresh "
-                 "folder, point the Mod Folder above at it, then pull your "
-                 "edits over from your old extract. Audio is matched by sound "
-                 "content (so a replacement follows its sound even if its index "
-                 "moved); a slot that changed or vanished is flagged, not "
-                 "mis-applied.",
+            text="New game code shipped? Pull your mods from your old extract "
+                 "onto a fresh extract of the new version. Audio is matched by "
+                 "sound content, images/videos by filename; a slot that "
+                 "changed or vanished is flagged, not mis-applied. Works even "
+                 "for code modded outside this app.",
             font=(_SANS_FONT, 9), wraplength=560, justify=tk.LEFT).pack(
             anchor=tk.W, padx=8, pady=(4, 2))
+        self.transfer_src_var = tk.StringVar()
+        self.transfer_dst_var = tk.StringVar()
+        tf = ttk.Frame(self._modpack_transfer_frame)
+        tf.pack(fill=tk.X, padx=8, pady=(2, 2))
+        tf.columnconfigure(1, weight=1)
+        ttk.Label(tf, text="Old extract (has your mods):").grid(
+            row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(tf, textvariable=self.transfer_src_var).grid(
+            row=0, column=1, sticky=tk.EW, padx=6, pady=2)
+        ttk.Button(tf, text="Browse...",
+                   command=self._browse_transfer_src).grid(
+            row=0, column=2, pady=2)
+        ttk.Label(tf, text="New extract (stock, new version):").grid(
+            row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(tf, textvariable=self.transfer_dst_var).grid(
+            row=1, column=1, sticky=tk.EW, padx=6, pady=2)
+        ttk.Button(tf, text="Browse...",
+                   command=self._browse_transfer_dst).grid(
+            row=1, column=2, pady=2)
         ttk.Button(self._modpack_transfer_frame,
-                   text="Transfer mods from another extract...",
+                   text="Transfer mods: old → new...",
                    command=(self._on_transfer_mods
                             if self._on_transfer_mods else lambda: None)).pack(
             anchor=tk.W, padx=8, pady=(2, 6))
@@ -2002,14 +2025,17 @@ class MainWindow:
         from ..core import staged_changes
         saved_loops = {}
         saved_keep = {}
+        # Trim/pad value to restore when the plugin doesn't force the lock:
+        # a new folder restores its saved choice (default off); a same-folder
+        # re-scan preserves the current one.
+        persisted_trim = bool(self.audio_trim_var.get())
         if scan_dir != self._audio_scan_dir:
             staged = self._load_staged_changes(scan_dir)
             self._audio_assignments = staged_changes.live_assignments(
                 staged.get("audio"), self._audio_slots_by_rel)
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
-            if "audio_trim" in staged and not self._audio_trim_forced():
-                self.audio_trim_var.set(bool(staged["audio_trim"]))
+            persisted_trim = bool(staged.get("audio_trim", False))
         else:
             self._audio_assignments = {
                 rel: rep for rel, rep in self._audio_assignments.items()
@@ -2034,6 +2060,11 @@ class MainWindow:
                          else self._audio_keep_full_flags.get(s.rel_path, False))
             for s in slots}
         self._audio_scan_dir = scan_dir
+        # Now that the real extract folder is known, lock the Trim/pad toggle
+        # for plugins whose Write is size-neutral for THIS extract (CGC's Pulp
+        # Fiction bank slots), or restore the saved/preserved choice otherwise.
+        self._apply_audio_trim_lock(self._current_mfr, scan_dir,
+                                    persisted_trim=persisted_trim)
         # Drop the previous folder's diff until this folder's background scan
         # repopulates it (avoids a flash of stale "changed" markers).
         self._audio_changed_on_disk = set()
@@ -2603,9 +2634,10 @@ class MainWindow:
         if self._audio_preview_playing:
             self._audio_stop_playback()  # pause, keeps position
         else:
-            if (self._audio_preview_dur > 0
-                    and self._audio_preview_pos
-                    >= self._audio_preview_dur - 0.05):
+            stop_at = (self._audio_preview_limit
+                       if self._audio_preview_limit is not None
+                       else self._audio_preview_dur)
+            if stop_at > 0 and self._audio_preview_pos >= stop_at - 0.05:
                 self._audio_preview_pos = 0.0  # replay from start
             self._audio_start_playback(self._audio_preview_pos)
 
@@ -2647,9 +2679,34 @@ class MainWindow:
         from ..core import audio as _audio
         self._audio_preview_path = path
         self._audio_preview_dur = _audio.probe_duration(path) or 0.0
+        self._audio_preview_limit = self._audio_compute_preview_limit()
         self._audio_preview_pos = 0.0
         self._render_audio_spectrogram(path)
         self._audio_update_time()
+
+    def _audio_compute_preview_limit(self):
+        """Stop point (s) for the loaded source, or None to play the whole
+        file.  A replacement that Write will TRIM to its slot length previews
+        only up to that length, so the preview matches the machine.  (A
+        shorter replacement is padded with silence on Write -- nothing to
+        hear -- so it just plays to its own end, no cap.)"""
+        # Only the replacement is trimmed; the original always plays in full.
+        if self.audio_source_var.get() != "rep":
+            return None
+        rel = self._audio_current_rel
+        if rel is None:
+            return None
+        # No cap when trimming is off, or this slot is exempted ("Full").
+        if not self.audio_trim_var.get():
+            return None
+        if self._audio_keep_full_flags.get(rel):
+            return None
+        slot = self._audio_slots_by_rel.get(rel)
+        slot_dur = slot.duration if slot else 0.0
+        # Only cap when the replacement is actually longer than the slot.
+        if slot_dur > 0 and self._audio_preview_dur > slot_dur + 0.02:
+            return slot_dur
+        return None
 
     def _render_audio_spectrogram(self, path):
         """Render the full-track spectrogram on a worker thread, then draw
@@ -2699,13 +2756,39 @@ class MainWindow:
         else:
             canvas.create_text(w // 2, h // 2, fill="#888888",
                                text="(preview needs ffmpeg)")
+        self._audio_draw_cut_marker()
         self._audio_draw_playhead()
+
+    def _audio_draw_cut_marker(self):
+        """Mark where a trimmed replacement stops: a dashed line at the slot
+        length with the trimmed tail hatched out, so the spectrogram shows
+        exactly what the machine will play."""
+        canvas = getattr(self, "_audio_spec_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("cutmark")
+        lim, dur = self._audio_preview_limit, self._audio_preview_dur
+        if lim is None or dur <= 0:
+            return
+        w = max(1, canvas.winfo_width())
+        h = canvas.winfo_height() or 90
+        x = max(0, min(w, int((lim / dur) * w)))
+        # Hatch the trimmed tail (stipple = pseudo-transparency in Tk) and
+        # draw a red cut line + a small label.
+        canvas.create_rectangle(x, 0, w, h, fill="#000000", outline="",
+                                stipple="gray50", tags=("cutmark",))
+        canvas.create_line(x, 0, x, h, fill="#ff6b6b", width=1,
+                           dash=(3, 2), tags=("cutmark",))
+        if x < w - 24:
+            canvas.create_text(x + 3, 8, anchor=tk.W, fill="#ff9d9d",
+                               text="trimmed", tags=("cutmark",))
 
     def _audio_start_playback(self, pos):
         import time
         from ..core import audio as _audio
         _audio.stop_audio(self._audio_play_proc)
-        proc = _audio.play_audio_file(self._audio_preview_path, start=pos)
+        proc = _audio.play_audio_file(self._audio_preview_path, start=pos,
+                                      limit=self._audio_preview_limit)
         if proc is None:
             self._audio_preview_playing = False
             self._audio_set_play_btn(False)
@@ -2747,10 +2830,18 @@ class MainWindow:
         self._audio_preview_pos = (
             self._audio_preview_start_pos
             + (time.monotonic() - self._audio_preview_start_t))
+        # Stop at the trim point if there is one, else the file's end.
+        stop_at = (self._audio_preview_limit
+                   if self._audio_preview_limit is not None
+                   else self._audio_preview_dur)
         ended = (proc is None or proc.poll() is not None
-                 or (self._audio_preview_dur > 0
-                     and self._audio_preview_pos >= self._audio_preview_dur))
+                 or (stop_at > 0 and self._audio_preview_pos >= stop_at))
         if ended:
+            # ffplay -t exits itself at the cap, but the OS-native fallback
+            # can't -- kill it so the preview really stops at the trim point.
+            from ..core import audio as _audio
+            _audio.stop_audio(proc)
+            self._audio_play_proc = None
             self._audio_preview_playing = False
             self._audio_preview_pos = 0.0  # reset so ▶ replays from the start
             self._audio_set_play_btn(False)
@@ -2779,9 +2870,17 @@ class MainWindow:
             s = max(0, int(s))
             return f"{s // 60}:{s % 60:02d}"
         if self._audio_preview_path and self._audio_preview_dur > 0:
-            self.audio_time_var.set(
-                f"{_fmt(self._audio_preview_pos)} / "
-                f"{_fmt(self._audio_preview_dur)}")
+            if self._audio_preview_limit is not None:
+                # The machine plays only up to the trim point -- show that as
+                # the length, and note the full clip length that got cut.
+                self.audio_time_var.set(
+                    f"{_fmt(self._audio_preview_pos)} / "
+                    f"{_fmt(self._audio_preview_limit)}  "
+                    f"(trimmed from {_fmt(self._audio_preview_dur)})")
+            else:
+                self.audio_time_var.set(
+                    f"{_fmt(self._audio_preview_pos)} / "
+                    f"{_fmt(self._audio_preview_dur)}")
         else:
             self.audio_time_var.set("0:00 / 0:00")
 
@@ -2791,7 +2890,12 @@ class MainWindow:
             return
         w = max(1, canvas.winfo_width())
         frac = max(0.0, min(1.0, event.x / w))
-        self._audio_preview_pos = frac * self._audio_preview_dur
+        pos = frac * self._audio_preview_dur
+        # A click in the trimmed (hatched) tail has nothing to play -- clamp
+        # to just before the cut so the playhead stays in the audible region.
+        if self._audio_preview_limit is not None:
+            pos = min(pos, max(0.0, self._audio_preview_limit - 0.05))
+        self._audio_preview_pos = pos
         if self._audio_preview_playing:
             self._audio_start_playback(self._audio_preview_pos)  # live re-seek
         else:
@@ -4256,14 +4360,26 @@ class MainWindow:
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # --- Static preview: a single thumbnail of the selected slot (or its
-        # assigned replacement if one is set).  No seek bar / transport. ---
+        # --- Static preview: original and assigned replacement side-by-side,
+        # so a transferred/assigned slot can be reviewed at a glance (the old
+        # single thumbnail showed the replacement INSTEAD of the original).
+        # No seek bar / transport. ---
         preview = ttk.LabelFrame(f, text=" Preview ")
         preview.pack(fill=tk.X, padx=10, pady=(4, 2))
+        panes = ttk.Frame(preview)
+        panes.pack(padx=6, pady=(2, 6))
+        ttk.Label(panes, text="Original", font=(_SANS_FONT, 9)).grid(
+            row=0, column=0, pady=(2, 1))
+        ttk.Label(panes, text="Replacement", font=(_SANS_FONT, 9)).grid(
+            row=0, column=1, pady=(2, 1))
         self._image_canvas = tk.Canvas(
-            preview, width=360, height=240, highlightthickness=1, bd=0,
+            panes, width=320, height=214, highlightthickness=1, bd=0,
             background="#000000")
-        self._image_canvas.pack(padx=6, pady=6)
+        self._image_canvas.grid(row=1, column=0, padx=(0, 4))
+        self._image_canvas_rep = tk.Canvas(
+            panes, width=320, height=214, highlightthickness=1, bd=0,
+            background="#000000")
+        self._image_canvas_rep.grid(row=1, column=1, padx=(4, 0))
 
         self._image_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
@@ -4650,44 +4766,58 @@ class MainWindow:
 
     # ---- Replace Image: static preview -------------------------------
 
-    def _image_render_preview(self, rel):
-        """Render a static thumbnail of *rel* (its assigned replacement if one
-        is set, else the original) centered on the preview canvas.  Tolerates a
-        missing Pillow / unreadable image by clearing the canvas."""
-        canvas = getattr(self, "_image_canvas", None)
+    def _image_render_thumb(self, canvas, path, ref_attr, empty_text=""):
+        """Draw *path*'s thumbnail centered on *canvas*, keeping the Tk image
+        alive on ``self.<ref_attr>``.  A missing/unreadable *path* (or missing
+        Pillow) clears the canvas, showing *empty_text* instead."""
         if canvas is None:
             return
         canvas.delete("all")
-        self._image_preview_img = None
-        if rel is None:
-            return
-        slot = self._image_slots_by_rel.get(rel)
-        if slot is None:
-            return
-        path = self._image_assignments.get(rel) or slot.abs_path
+        setattr(self, ref_attr, None)
         from ..core.image import thumbnail_png
         try:
             w = int(canvas.cget("width"))
             h = int(canvas.cget("height"))
         except (tk.TclError, ValueError):
-            w, h = 360, 240
-        png = thumbnail_png(path, w - 8, h - 8)
+            w, h = 320, 214
+        png = thumbnail_png(path, w - 8, h - 8) if path else None
         if not png:
+            if empty_text:
+                canvas.create_text(w // 2, h // 2, text=empty_text,
+                                   fill="#888888", font=(_SANS_FONT, 9),
+                                   width=w - 24, justify=tk.CENTER)
             return
         try:
-            self._image_preview_img = tk.PhotoImage(
-                data=base64.b64encode(png))
-            canvas.create_image(w // 2, h // 2, anchor=tk.CENTER,
-                                image=self._image_preview_img)
+            img = tk.PhotoImage(data=base64.b64encode(png))
+            setattr(self, ref_attr, img)
+            canvas.create_image(w // 2, h // 2, anchor=tk.CENTER, image=img)
         except tk.TclError:
-            self._image_preview_img = None
+            setattr(self, ref_attr, None)
+
+    def _image_render_preview(self, rel):
+        """Render *rel*'s original and assigned replacement side-by-side on
+        the two preview canvases.  Tolerates a missing Pillow / unreadable
+        image by clearing the affected canvas."""
+        slot = self._image_slots_by_rel.get(rel) if rel is not None else None
+        rep = self._image_assignments.get(rel) if rel is not None else None
+        self._image_render_thumb(
+            getattr(self, "_image_canvas", None),
+            slot.abs_path if slot else None, "_image_preview_img_orig")
+        self._image_render_thumb(
+            getattr(self, "_image_canvas_rep", None), rep,
+            "_image_preview_img_rep",
+            empty_text=("(no replacement assigned — double-click the row "
+                        "to pick one)" if slot else ""))
 
     def _image_clear_preview(self):
-        """Reset the static preview entirely (used on manufacturer switch)."""
+        """Reset the static previews entirely (used on manufacturer switch)."""
         self._image_current_rel = None
-        self._image_preview_img = None
-        if hasattr(self, "_image_canvas"):
-            self._image_canvas.delete("all")
+        self._image_preview_img_orig = None
+        self._image_preview_img_rep = None
+        for attr in ("_image_canvas", "_image_canvas_rep"):
+            canvas = getattr(self, attr, None)
+            if canvas is not None:
+                canvas.delete("all")
 
     # ---- Replace Image: pending assignments (applied at Write time) --
 
@@ -4733,6 +4863,62 @@ class MainWindow:
             return cb is not None and str(cb.cget("state")) == "disabled"
         except tk.TclError:
             return False
+
+    def _apply_audio_trim_lock(self, mfr, assets_dir=None,
+                               persisted_trim=None):
+        """Force the Trim/pad checkbox on + disabled when this plugin's Write
+        always length-matches, else leave it a free toggle.
+
+        Re-callable: the manufacturer-select path passes no *assets_dir* (the
+        plugin's default), and an audio scan passes the scanned folder so a
+        plugin whose answer is per-extract (CGC: Pulp Fiction's fixed-length
+        bank slots vs the WPC remakes' loose WAVs) can lock only when it
+        applies.  *persisted_trim* is the checkbox value to restore when the
+        lock is NOT in effect (from the folder's saved state, or the current
+        value on a same-folder re-scan); None means default off.
+        """
+        if not hasattr(self, "_audio_trim_cb") or mfr is None:
+            return False
+        caps = getattr(mfr, "capabilities", None)
+        try:
+            forces = mfr.audio_forces_length_match(assets_dir)
+        except TypeError:
+            # A plugin still on the old no-arg signature.
+            forces = mfr.audio_forces_length_match()
+        if forces:
+            self.audio_trim_var.set(True)
+        else:
+            self.audio_trim_var.set(bool(persisted_trim))
+        self._audio_trim_cb.configure(
+            state=(tk.DISABLED if forces else tk.NORMAL))
+        if hasattr(self, "_audio_trim_tip"):
+            note = (mfr.audio_length_note() or "").strip()
+            if forces and getattr(caps, "audio_keep_length_override", False):
+                # Plugins that ALSO offer a per-slot "Full" override (JJP)
+                # aren't size-neutral — they trim by default but a longer file
+                # is valid; don't claim the size-neutral rationale (it
+                # contradicts the Full column).
+                self._audio_trim_tip.text = (
+                    "On by default — every replacement is trimmed or padded "
+                    "to its original slot length on Write.\n\nTo keep one "
+                    "track's full length instead, tick the “Full” box on "
+                    "that slot in the list."
+                    + (("\n\n" + note) if note else ""))
+            elif forces:
+                self._audio_trim_tip.text = (
+                    "Always on for this format — it can't be turned off.\n\n"
+                    "Write fits each replacement into the original sound's "
+                    "exact slot in place (size-neutral), so every replacement "
+                    "is automatically matched to the original length; a "
+                    "different length would strand every later offset."
+                    + (("\n\n" + note) if note else ""))
+            else:
+                self._audio_trim_tip.text = (
+                    "When on, a replacement longer or shorter than the "
+                    "original is trimmed or padded to the original slot "
+                    "length before Write. When off, the replacement is used "
+                    "as-is.")
+        return forces
 
     def _save_staged_changes(self):
         """Persist the current Replace assignments for the active assets folder.
@@ -5630,6 +5816,7 @@ class MainWindow:
         if hasattr(self, "_modpack_transfer_frame"):
             if getattr(caps, "mod_transfer", False):
                 self._modpack_transfer_frame.pack(fill=tk.X, padx=10, pady=4)
+                self._prefill_transfer_dst()
             else:
                 self._modpack_transfer_frame.pack_forget()
         # New mfr: drop any text rows loaded for the previous one so a stale
@@ -5673,45 +5860,11 @@ class MainWindow:
             self._audio_length_note_lbl.configure(
                 text=mfr.audio_length_note() or "")
         # Force the Trim/pad checkbox on + disabled for plugins whose Write
-        # always length-matches (e.g. JJP, Spike 2), so the toggle isn't
-        # misleading — and explain WHY via a hover tooltip (the user can't tell a
-        # disabled checkbox's reason otherwise).
-        if hasattr(self, "_audio_trim_cb"):
-            forces = mfr.audio_forces_length_match()
-            self.audio_trim_var.set(True if forces else False)
-            self._audio_trim_cb.configure(
-                state=(tk.DISABLED if forces else tk.NORMAL))
-            if hasattr(self, "_audio_trim_tip"):
-                if forces:
-                    note = (mfr.audio_length_note() or "").strip()
-                    # Plugins that ALSO offer a per-slot "Full" override (JJP)
-                    # aren't size-neutral — they trim by default but a longer
-                    # file is valid; don't claim the size-neutral rationale for
-                    # them (it contradicts the Full column).  The size-neutral
-                    # wording is only true for in-place re-encoders (Spike 2).
-                    if getattr(caps, "audio_keep_length_override", False):
-                        self._audio_trim_tip.text = (
-                            "On by default — every replacement is trimmed or "
-                            "padded to its original slot length on Write.\n\n"
-                            "To keep one track's full length instead, tick the "
-                            "“Full” box on that slot in the list."
-                            + (("\n\n" + note) if note else ""))
-                    else:
-                        self._audio_trim_tip.text = (
-                            "Always on for this format — it can't be turned "
-                            "off.\n\n"
-                            "Write re-encodes each replacement into the original "
-                            "sound's exact slot in place (size-neutral), so "
-                            "every replacement is automatically fit to the "
-                            "original length; a different length would strand "
-                            "every later offset."
-                            + (("\n\n" + note) if note else ""))
-                else:
-                    self._audio_trim_tip.text = (
-                        "When on, a replacement longer or shorter than the "
-                        "original is trimmed or padded to the original slot "
-                        "length before Write. When off, the replacement is used "
-                        "as-is.")
+        # always length-matches (e.g. JJP, Spike 2, CGC's Pulp Fiction), so the
+        # toggle isn't misleading.  No extract is scanned yet here, so a plugin
+        # whose answer is per-extract (CGC) reports its default; the lock is
+        # re-applied against the real folder after an audio scan.
+        self._apply_audio_trim_lock(mfr)
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}
@@ -7509,14 +7662,16 @@ class MainWindow:
         build time, so the MD5 scan can't see them).  Returns the count added."""
         import os
         n = 0
-        for getter, label in (
-                (self.pending_audio_assignments, "Replace Audio"),
-                (self.pending_video_assignments, "Replace Video"),
-                (self.pending_image_assignments, "Replace Images")):
+        got = {}
+        for key, getter, label in (
+                ("audio", self.pending_audio_assignments, "Replace Audio"),
+                ("video", self.pending_video_assignments, "Replace Video"),
+                ("image", self.pending_image_assignments, "Replace Images")):
             try:
                 pend = getter(assets_path)
             except Exception:
                 pend = None
+            got[key] = bool(pend)
             if not pend:
                 continue
             assignments = pend[1]
@@ -7525,6 +7680,35 @@ class MainWindow:
                 self._add_write_preview_row(
                     rel, ext, f"Pending ({label})", scan_id, tag="pending")
                 n += 1
+        # Sidecar-recorded assignments no tab has restored yet (mods just
+        # transferred in, or the app reopened straight onto Write): the build
+        # stages these via the app's sidecar fallback, so the preview must
+        # show them too — only for categories with no live in-memory state
+        # (when a tab HAS scanned this folder, its memory is authoritative
+        # and the sidecar mirrors it).
+        if assets_path and not all(got.values()):
+            from ..core import staged_changes
+            try:
+                saved = staged_changes.load(assets_path)
+            except Exception:
+                saved = {}
+            mfr = self._current_mfr
+            for key, cap, label in (
+                    ("audio", "replace_audio", "Replace Audio"),
+                    ("video", "replace_video", "Replace Video"),
+                    ("image", "replace_image", "Replace Images")):
+                if got.get(key) or mfr is None or not getattr(
+                        mfr.capabilities, cap, False):
+                    continue
+                for rel, repl in sorted((saved.get(key) or {}).items()):
+                    if not (isinstance(repl, str) and os.path.isfile(repl)
+                            and os.path.isfile(os.path.join(
+                                assets_path, rel.replace("/", os.sep)))):
+                        continue
+                    ext = os.path.splitext(rel)[1].lstrip(".") or "?"
+                    self._add_write_preview_row(
+                        rel, ext, f"Pending ({label})", scan_id, tag="pending")
+                    n += 1
         # Edited on-screen text persists straight to text/strings.tsv (no
         # in-memory assignment), so read the edits back from the manifest and
         # list each changed string as a pending "original → new" row.
@@ -7761,6 +7945,33 @@ class MainWindow:
         if path:
             self.extract_output_var.set(os.path.normpath(path))
 
+    def _browse_transfer_src(self):
+        path = filedialog.askdirectory(
+            title="Select your OLD extract folder (the one with your mods)",
+            initialdir=self._initialdir_for(
+                self.transfer_src_var.get(), self.transfer_dst_var.get(),
+                self.write_assets_var.get()))
+        if path:
+            self.transfer_src_var.set(os.path.normpath(path))
+
+    def _browse_transfer_dst(self):
+        path = filedialog.askdirectory(
+            title="Select the NEW version's extract folder (freshly extracted)",
+            initialdir=self._initialdir_for(
+                self.transfer_dst_var.get(), self.write_assets_var.get(),
+                self.transfer_src_var.get()))
+        if path:
+            self.transfer_dst_var.set(os.path.normpath(path))
+
+    def _prefill_transfer_dst(self):
+        """Default the transfer destination to the Mod Folder (the usual flow:
+        the user points the app at the NEW extract, then pulls mods into it).
+        Only fills an empty field — never overwrites what the user picked."""
+        if not (self.transfer_dst_var.get() or "").strip():
+            cur = (self.write_assets_var.get() or "").strip()
+            if cur:
+                self.transfer_dst_var.set(cur)
+
     def _browse_write_upd(self):
         path = filedialog.askopenfilename(
             title="Select original update file",
@@ -7817,6 +8028,8 @@ class MainWindow:
             self._scan_text_strings()
         elif text == "Write":
             self._maybe_rescan_write_preview()
+        elif text == "Mod Pack":
+            self._prefill_transfer_dst()
 
     def _find_checksums_ancestor(self, path, max_levels=3):
         """Walk up from *path* looking for a directory that contains
@@ -9193,8 +9406,10 @@ class MainWindow:
         if hasattr(self, "_image_tree"):
             self._image_tree.tag_configure("assigned", foreground=c["success"])
             self._image_tree.tag_configure("changed", foreground=c["link"])
-        if hasattr(self, "_image_canvas"):
-            self._image_canvas.configure(highlightbackground=c["border"])
+        for _attr in ("_image_canvas", "_image_canvas_rep"):
+            _cv = getattr(self, _attr, None)
+            if _cv is not None:
+                _cv.configure(highlightbackground=c["border"])
 
         if hasattr(self, "_text_tree"):
             self._text_tree.tag_configure("assigned", foreground=c["success"])

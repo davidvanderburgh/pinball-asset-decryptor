@@ -330,10 +330,17 @@ UI-sound profile. Output dir: `C:\tmp\pf_bnk_extract_v2\`.
    - `zlib`: zlib stream containing 44-byte JPS magic + raw PCM.
      Used by UI, SFX, speech, diagnostic banks.
    - `riff`: standard embedded RIFF/WAVE inline, no compression.
-     Used by music bank (24 buffers) and occasionally elsewhere
+     Used by the music bank (49 buffers) and occasionally elsewhere
      (1 of 465 sfx buffers in pfsndfx). Makes sense: music is large
      enough that zlib overhead doesn't help, and RIFF is naturally
-     streamable.
+     streamable. **NOTE (v0.38.0):** the scanner originally reported
+     pfmusic as 24 buffers — a bug. Each stream's outer RIFF `size`
+     field is inflated (overshoots into the next stream by 62-4372
+     bytes), so advancing by `8 + riff_size` skipped every other stream
+     and dropped the last. The streams are actually packed contiguously
+     (zero gap, byte-exact to EOF); the corrected scanner advances by
+     the data-chunk end (`44 + data_size`) and finds all **49**, which
+     matches the 49-entry record table at 0x2A0.
 
 4. **Working unified extractor** in
    [pinball_decryptor/plugins/cgc/jps_bnk.py](pinball_decryptor/plugins/cgc/jps_bnk.py):
@@ -342,7 +349,7 @@ UI-sound profile. Output dir: `C:\tmp\pf_bnk_extract_v2\`.
 
    | Bank | Size | Buffers | Storage | Events | Audio |
    |---|---|---|---|---|---|
-   | pfmusic | 222 MB | 24 | riff | 69 | 11.9 min |
+   | pfmusic | 222 MB | 49 | riff | 69 | 11.9 min |
    | pfsnddiag | 3 MB | 3 | zlib | 140 | 0.4 min |
    | pfsndfx | 163 MB | 465 | zlib (464) + riff (1) | 267 | 18.9 min |
    | pfsndui | 2.7 MB | 12 | zlib | 11 | 0.3 min |

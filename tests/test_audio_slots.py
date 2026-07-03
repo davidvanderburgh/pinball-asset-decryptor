@@ -173,12 +173,50 @@ def test_bof_surfaces_wav_only_others_default(manufacturers_by_key):
 
 def test_audio_length_notes(manufacturers_by_key):
     # JJP forces a length match on Write; DP is explicitly length-flexible;
-    # everyone else gets the neutral default.
+    # CGC's note explains Pulp Fiction's fixed-length bank slots; the rest
+    # get the neutral default.
     assert "automatically matches" in manufacturers_by_key["jjp"].audio_length_note()
     assert "own length" in manufacturers_by_key["dp"].audio_length_note()
-    for key in ("spooky", "pb", "ap", "cgc", "bof"):
+    assert "fixed-length" in manufacturers_by_key["cgc"].audio_length_note()
+    for key in ("spooky", "pb", "ap", "bof"):
         note = manufacturers_by_key[key].audio_length_note()
         assert "trimming usually" in note  # the base default
+
+
+def test_cgc_forces_length_match_only_for_bnk_extracts(manufacturers_by_key,
+                                                       tmp_path):
+    """CGC's Pulp Fiction stores audio in fixed-length JPS ``.bnk`` banks, so
+    the Trim/pad lock must engage for a PF extract but stay a free choice for
+    the WPC remakes' loose ``.wav`` files (and before any extract is scanned).
+    """
+    cgc = manufacturers_by_key["cgc"]
+    # No extract loaded yet -> can't tell the game apart -> not forced.
+    assert cgc.audio_forces_length_match() is False
+    assert cgc.audio_forces_length_match(None) is False
+
+    # Pulp Fiction extract: data/<name>.bnk present -> forced.
+    pf = tmp_path / "pf"
+    (pf / "data").mkdir(parents=True)
+    (pf / "data" / "pfmusic.bnk").write_bytes(b"")
+    assert cgc.audio_forces_length_match(str(pf)) is True
+
+    # WPC remake extract: loose .wav, no bank -> not forced.
+    afm = tmp_path / "afm"
+    (afm / "afmdata" / "samples").mkdir(parents=True)
+    (afm / "afmdata" / "samples" / "s1.wav").write_bytes(b"")
+    assert cgc.audio_forces_length_match(str(afm)) is False
+
+
+def test_forces_length_match_accepts_assets_arg(manufacturers_by_key):
+    """Every plugin's audio_forces_length_match must accept the optional
+    assets_dir arg (the GUI always calls it with the scanned folder)."""
+    for mfr in manufacturers_by_key.values():
+        # Must not raise regardless of arg.
+        mfr.audio_forces_length_match()
+        mfr.audio_forces_length_match("/some/extract")
+    # JJP and Spike 2 force unconditionally.
+    assert manufacturers_by_key["jjp"].audio_forces_length_match("/x") is True
+    assert manufacturers_by_key["stern"].audio_forces_length_match("/x") is True
 
 
 def test_stage_transcodes_cross_format_source(tmp_path):

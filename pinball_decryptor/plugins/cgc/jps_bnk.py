@@ -216,35 +216,43 @@ def _scan_buffers(data: bytes) -> List[SoundBuffer]:
 
         # ---- Embedded RIFF/WAV stream (music banks) ----
         if data[i:i + 4] == b"RIFF" and data[i + 8:i + 12] == b"WAVE":
-            riff_size = struct.unpack_from("<I", data, i + 4)[0]
-            total = 8 + riff_size  # 'RIFF' + size + (riff_size bytes)
-            if i + total <= len(data):
-                # Parse fmt chunk for srate/channels/bits
-                fmt_pos = data.find(b"fmt ", i, i + 256)
-                sr, ch, bps = SAMPLE_RATE, CHANNELS, 16
-                if fmt_pos > 0:
-                    fmt_fields = struct.unpack_from("<HHIIHH", data,
-                                                    fmt_pos + 8)
-                    ch, sr, bps = (fmt_fields[1], fmt_fields[2],
-                                   fmt_fields[5])
-                # Find data chunk size for PCM-size calc
-                data_pos = data.find(b"data", i, i + 1024)
-                pcm_size = 0
-                if data_pos > 0:
-                    pcm_size = struct.unpack_from("<I", data,
-                                                  data_pos + 4)[0]
-                    pcm_size = min(pcm_size, len(data) - data_pos - 8)
-                frame_bytes = ch * (bps // 8)
-                dur = (pcm_size / frame_bytes / sr) if frame_bytes and sr else 0
-                buffers.append(SoundBuffer(
-                    index=len(buffers), bnk_offset=i, storage="riff",
-                    compressed_size=total, decompressed_size=total,
-                    pcm_size=pcm_size, duration_seconds=dur,
-                    sample_rate=sr, channels=ch,
-                    sample_width_bytes=bps // 8,
-                ))
-                i += total
-                continue
+            # The outer RIFF size field is UNRELIABLE in these banks: CGC's
+            # compiler inflates it so it overshoots into the *next* stream by
+            # 62-4372 bytes.  Advancing by 8+riff_size therefore skipped every
+            # other stream (pfmusic came out 24 of 49) AND dropped the last
+            # stream (whose inflated size runs past EOF, failing the bounds
+            # check).  The streams are packed CONTIGUOUSLY (verified: zero
+            # inter-stream padding, byte-exact reconstruction to EOF), so the
+            # true extent is the data chunk's end -- header + PCM -- which we
+            # parse and advance by instead.
+            fmt_pos = data.find(b"fmt ", i, i + 256)
+            sr, ch, bps = SAMPLE_RATE, CHANNELS, 16
+            if fmt_pos > 0:
+                fmt_fields = struct.unpack_from("<HHIIHH", data, fmt_pos + 8)
+                ch, sr, bps = (fmt_fields[1], fmt_fields[2], fmt_fields[5])
+            data_pos = data.find(b"data", i, i + 1024)
+            if data_pos > 0:
+                pcm_size = struct.unpack_from("<I", data, data_pos + 4)[0]
+                pcm_size = min(pcm_size, len(data) - data_pos - 8)
+                # Real stream extent: from the stream start through the end of
+                # its PCM (data chunk body).  For a canonical 44-byte header
+                # this is 44 + pcm_size; computing it from the parsed data
+                # offset also handles any non-standard pre-data chunk layout.
+                stream_size = (data_pos - i) + 8 + pcm_size
+                if i + stream_size <= len(data):
+                    frame_bytes = ch * (bps // 8)
+                    dur = (pcm_size / frame_bytes / sr
+                           if frame_bytes and sr else 0)
+                    buffers.append(SoundBuffer(
+                        index=len(buffers), bnk_offset=i, storage="riff",
+                        compressed_size=stream_size,
+                        decompressed_size=stream_size,
+                        pcm_size=pcm_size, duration_seconds=dur,
+                        sample_rate=sr, channels=ch,
+                        sample_width_bytes=bps // 8,
+                    ))
+                    i += stream_size
+                    continue
         # No buffer starts at i.  Jump straight to the next position that
         # could -- the nearest of the next 0x78 (zlib header) or the next
         # 'RIFF' -- rather than walking byte-by-byte through hundreds of MB of
@@ -353,17 +361,33 @@ def extract_bnk(bnk_path: str, output_dir: str) -> BnkContents:
                 w.setframerate(buf.sample_rate)
                 w.writeframes(pcm)
         else:
-            # Embedded RIFF/WAV -- copy the bytes verbatim.  No transcode.
-            with open(wav_path, "wb") as w:
-                w.write(data[buf.bnk_offset:
-                             buf.bnk_offset + buf.compressed_size])
+            # Embedded RIFF/WAV.  Re-emit a CLEAN canonical WAV rather than a
+            # verbatim copy: the bank's native RIFF ``size`` field is
+            # intentionally inflated (it overshoots into the next stream), so a
+            # verbatim copy carries a bogus size field that confuses external
+            # editors.  Read the PCM via the data chunk and write a standard
+            # 44-byte-header WAV.  (Repack splices using the stock bank header,
+            # never this file's header, so this is purely for the user's
+            # convenience.)
+            payload = data[buf.bnk_offset:buf.bnk_offset + buf.compressed_size]
+            off, plen = _riff_data_span(payload)
+            pcm = payload[off:off + plen] if off is not None else b""
+            with wave.open(wav_path, "wb") as w:
+                w.setnchannels(buf.channels)
+                w.setsampwidth(buf.sample_width_bytes)
+                w.setframerate(buf.sample_rate)
+                w.writeframes(pcm)
         buf.wav_path = wav_path
 
     # Manifest JSON -- format-stable, friendly to a future repack tool
     # that reads it back.
     manifest_path = os.path.join(output_dir, f"{bnk_basename}.manifest.json")
     manifest = {
-        "format": "jps_bnk_v1",
+        # v2: the RIFF scanner now enumerates ALL streams (pfmusic went from
+        # 24 to its true 49) with exact per-stream extents.  A v1 decoded
+        # subdir has a different (sparser) slot->stream mapping, so the Write
+        # pipeline refuses to build from one without a re-extract.
+        "format": "jps_bnk_v2",
         "bnk_basename": bnk_basename,
         "source_name": bnk.source_name,
         "audio_params": {
@@ -475,8 +499,10 @@ def repack_bnk(original_bnk_path: str, modified_wavs_dir: str,
         if wav_path and _wav_pcm_differs_from_buffer(
                 wav_path, buf, original_payload):
             # User-edited WAV -- re-encode and splice in.
-            new_payload = _encode_buffer_payload(buf, wav_path,
-                                                 original_payload, data)
+            new_payload, clamp_note = _encode_buffer_payload(
+                buf, wav_path, original_payload, data)
+            if clamp_note:
+                summary.setdefault("clamp_notes", []).append(clamp_note)
             was_modified = True
             summary["modified_count"] += 1
         else:
@@ -558,35 +584,99 @@ def _resolve_wav_path(wavs_dir: str, bnk_basename: str,
     return None
 
 
+def _riff_data_span(payload: bytes):
+    """Locate the PCM ``data`` chunk inside an embedded RIFF/WAVE payload.
+
+    Returns ``(pcm_offset, pcm_len)`` -- the byte offset of the PCM
+    samples inside *payload* and the data chunk's declared size (clamped
+    to the bytes actually present) -- or ``(None, None)`` if *payload*
+    isn't a parseable RIFF/WAVE with a data chunk.
+
+    ``pcm_len`` is exactly the length the game engine validates the
+    loaded sample against (the jps loader drops a buffer to silence when
+    the WAV's data-chunk length doesn't match the size recorded in the
+    bank), so it is the length a replacement must match.
+    """
+    if payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+        return None, None
+    pos = 12
+    n = len(payload)
+    while pos + 8 <= n:
+        cid = payload[pos:pos + 4]
+        csz = struct.unpack_from("<I", payload, pos + 4)[0]
+        body = pos + 8
+        if cid == b"data":
+            return body, min(csz, max(0, n - body))
+        pos = body + csz + (csz & 1)  # RIFF chunks are word-aligned
+    return None, None
+
+
+def _clamp_pcm(pcm: bytes, target_len: int):
+    """Fit *pcm* to exactly *target_len* bytes.  Returns
+    ``(clamped, note)`` where note is 'truncated'/'padded'/None.
+
+    JPS sound slots are fixed-length: the engine reads each buffer's PCM
+    size from an up-front record and seeks to the next buffer by that
+    size, so a replacement MUST be the stock byte length or it both
+    silences its own slot (the loaded length won't match the record) and
+    desyncs every later buffer.  *target_len* is already frame-aligned
+    (it's the stock slot length), so a head-truncation stays aligned.
+    """
+    if len(pcm) == target_len:
+        return pcm, None
+    if len(pcm) > target_len:
+        return pcm[:target_len], "truncated"
+    return pcm + b"\x00" * (target_len - len(pcm)), "padded"
+
+
 def _wav_pcm_differs_from_buffer(wav_path: str, buf: SoundBuffer,
                                  original_payload: bytes) -> bool:
     """Return True if the WAV's PCM bytes differ from what the
-    original buffer decompresses to (i.e. the user actually edited it).
+    original buffer decodes to (i.e. the user actually edited it).
+
+    Compares only the PCM at the stock slot length -- a re-exported file
+    with identical audio but a different container (extra metadata chunk,
+    chunk reorder) is NOT treated as an edit, so it's preserved verbatim.
     """
     with wave.open(wav_path, "rb") as w:
         wav_pcm = w.readframes(w.getnframes())
     if buf.storage == "riff":
-        # For RIFF buffers, compare the bytes of the embedded WAV
-        # directly -- the user's file IS the storage format.
-        return open(wav_path, "rb").read() != original_payload
+        off, plen = _riff_data_span(original_payload)
+        if off is None:
+            # Can't parse the stock payload -- treat as modified so the
+            # encode path runs its own validation and aborts loudly.
+            return True
+        stock_pcm = original_payload[off:off + plen]
+        clamped, _ = _clamp_pcm(wav_pcm, plen)
+        return clamped != stock_pcm
     # zlib storage: decompress original, strip 44-byte JPS header,
     # compare PCM.
     d = zlib.decompressobj()
     orig_decompressed = d.decompress(original_payload)
-    orig_pcm = orig_decompressed[
-        JPS_BUFFER_HEADER_SIZE:JPS_BUFFER_HEADER_SIZE + buf.pcm_size]
-    return wav_pcm != orig_pcm
+    orig_pcm = orig_decompressed[JPS_BUFFER_HEADER_SIZE:]
+    clamped, _ = _clamp_pcm(wav_pcm, len(orig_pcm))
+    return clamped != orig_pcm
 
 
 def _encode_buffer_payload(buf: SoundBuffer, wav_path: str,
                            original_payload: bytes,
-                           original_data: bytes) -> bytes:
+                           original_data: bytes):
     """Encode a modified WAV into the buffer's storage format.
 
-    For ``zlib`` buffers: read the WAV's PCM data, glue the original
-    44-byte JPS magic header to the front, then zlib-compress.
-    For ``riff`` buffers: just return the WAV bytes verbatim (the
-    storage format IS a RIFF/WAV file).
+    Returns ``(payload_bytes, clamp_note)`` where clamp_note is a
+    human-readable string when the replacement had to be truncated or
+    padded to the stock slot length, else None.
+
+    Both storage forms are edited SIZE-NEUTRALLY -- the re-packed buffer
+    is exactly the stock byte length, differing only in its PCM samples.
+    The game engine (SDL_mixer + the jps loader in ``pin``) frames every
+    buffer as a fixed header + a recorded PCM length, validates the
+    loaded length against that record (dropping the sound to silence on
+    mismatch), and seeks to the next buffer by that same length -- so a
+    longer/shorter splice silences its own slot AND desyncs the rest of
+    the bank.  The music bank additionally chains streams the extractor
+    doesn't surface, whose headers ride in each buffer's trailing bytes;
+    keeping the stock header + trailer verbatim preserves those too.
     """
     with wave.open(wav_path, "rb") as w:
         ch = w.getnchannels()
@@ -595,13 +685,8 @@ def _encode_buffer_payload(buf: SoundBuffer, wav_path: str,
         nf = w.getnframes()
         pcm = w.readframes(nf)
 
-    if buf.storage == "riff":
-        # Need to emit a complete WAV file with the same format as the
-        # original.  Easiest: copy the user's WAV bytes verbatim.
-        return open(wav_path, "rb").read()
-
-    # zlib storage: preserve the original 44-byte JPS magic header so
-    # the hash1/hash2 fields stay the same.
+    # Format must match the stock slot for BOTH storage forms (staging
+    # normally guarantees this; a hand-dropped file might not).
     if (sr, ch, sw) != (buf.sample_rate, buf.channels,
                         buf.sample_width_bytes):
         raise ValueError(
@@ -611,14 +696,48 @@ def _encode_buffer_payload(buf: SoundBuffer, wav_path: str,
             f"{buf.sample_width_bytes*8}bit. Re-export your edit at "
             f"the correct format.")
 
-    # Decompress original to extract its 44-byte JPS header.
+    frame = max(1, ch * sw)
+
+    def _note(kind, target_len):
+        user_s = len(pcm) / frame / sr if sr else 0
+        slot_s = target_len / frame / sr if sr else 0
+        verb = "truncated" if kind == "truncated" else "padded with silence"
+        return (f"buffer {buf.index}: your {user_s:.1f}s clip was {verb} "
+                f"to the slot's fixed {slot_s:.1f}s -- JPS sound slots "
+                f"can't change length")
+
+    if buf.storage == "riff":
+        # Keep the stock 44-byte header and everything after the PCM
+        # (the next chained stream's header) byte-for-byte; swap only the
+        # PCM, clamped to the stock data-chunk length.
+        pcm_off, pcm_len = _riff_data_span(original_payload)
+        if pcm_off is None:
+            raise ValueError(
+                f"Buffer {buf.index}: the stock music payload isn't a "
+                f"parseable RIFF/WAVE (no data chunk) -- refusing to "
+                f"splice, which would corrupt the bank.")
+        new_pcm, kind = _clamp_pcm(pcm, pcm_len)
+        new_payload = (original_payload[:pcm_off] + new_pcm
+                       + original_payload[pcm_off + pcm_len:])
+        if len(new_payload) != len(original_payload):
+            raise ValueError(
+                f"Buffer {buf.index}: size-neutral splice produced "
+                f"{len(new_payload)} bytes, expected "
+                f"{len(original_payload)} -- refusing to ship a "
+                f"size-shifted bank.")
+        return bytes(new_payload), (_note(kind, pcm_len) if kind else None)
+
+    # zlib storage: preserve the original 44-byte JPS magic header (its
+    # hash1/hash2 fields), clamp PCM to the stock decompressed length so
+    # the engine's decompressed-length check still passes, re-compress.
     orig_d = zlib.decompressobj()
     orig_decompressed = orig_d.decompress(original_payload)
     jps_header = orig_decompressed[:JPS_BUFFER_HEADER_SIZE]
-
-    new_decompressed = jps_header + pcm
-    # Use the same compression level zlib's default produces; that
-    # matches what JPS's compiler output appears to use (0x78 0x9C
-    # header byte in original files).
-    return zlib.compress(new_decompressed, 6)
+    target_len = len(orig_decompressed) - JPS_BUFFER_HEADER_SIZE
+    new_pcm, kind = _clamp_pcm(pcm, target_len)
+    new_decompressed = jps_header + new_pcm
+    # Match the compression level JPS's compiler appears to use (0x78
+    # 0x9C header byte in original files).
+    return (zlib.compress(new_decompressed, 6),
+            _note(kind, target_len) if kind else None)
 

@@ -247,7 +247,7 @@ class JJPManufacturer(Manufacturer):
                 "nothing plays over (e.g. the end-of-game track before attract); "
                 "the game may still cut it short, so test on the machine.")
 
-    def audio_forces_length_match(self):
+    def audio_forces_length_match(self, assets_dir=None):
         # JJP's Write always trims/pads to the original slot length, so the
         # "Trim / pad" checkbox is forced on + disabled (see audio_length_note).
         return True

@@ -19,6 +19,7 @@ All ext4-aware work happens in the executor (WSL on Windows, native on
 Linux, Docker on macOS) since Python has no in-tree ext4 writer.
 """
 
+import json
 import os
 import re
 import shlex
@@ -795,7 +796,8 @@ class WritePipeline(BasePipeline):
                 f"No baseline checksums found in:\n  {self.assets_dir}\n\n"
                 f"Run the Extract tab first to create them.")
 
-        changed, missing = _diff_assets(self.assets_dir, baseline)
+        changed, missing = _diff_assets(self.assets_dir, baseline,
+                                        log=self._log)
         if not changed:
             self._log(
                 "  No modified files found -- output will be a byte-for-byte "
@@ -1324,7 +1326,8 @@ class FlashImagePipeline(BasePipeline):
             written = flash_image_to_device(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
-                cancel=lambda: self._cancelled)
+                cancel=lambda: self._cancelled,
+                on_verify_start=lambda: self._set_phase(2))  # Verify card
         except FlashCancelled:
             self._log("Flash cancelled -- the card is incomplete and must be "
                       "re-flashed before use.", "error")
@@ -1334,7 +1337,7 @@ class FlashImagePipeline(BasePipeline):
             raise PipelineError("Write image", str(e))
         self._check_cancel()
 
-        self._set_phase(2)  # Flush
+        self._set_phase(3)  # Flush
         self._done(True, "Flashed %s onto the card (%s)."
                    % (format_size(written), self.device_path))
 
@@ -1366,7 +1369,7 @@ def _parse_mbr_for_linux(hex_str):
     raise ValueError("No Linux (0x83) partition in MBR table")
 
 
-def _diff_assets(assets_dir, baseline):
+def _diff_assets(assets_dir, baseline, log=None):
     """Return ``(changed, missing)``.
 
     ``changed`` maps **the inner-ext4 relative path** (as it appears in
@@ -1398,7 +1401,7 @@ def _diff_assets(assets_dir, baseline):
     # under those subdirs are derived assets -- they never go to the
     # eMMC, so we also gather their rel-paths into ``jps_subdir_files``
     # for filtering further down.
-    jps_subdir_files = _repack_modified_jps_bnks(assets_dir, baseline)
+    jps_subdir_files = _repack_modified_jps_bnks(assets_dir, baseline, log=log)
     # CGC Cactus Canyon pre-step: re-encode any edited decoded assets
     # (dcs_audio/ streams, new_audio/ WAVs, display_art/ PNGs) back into their
     # source eMMC blobs (s*.rom / usb.so / cgc.so) in place, so the baseline
@@ -1479,7 +1482,40 @@ def _diff_assets(assets_dir, baseline):
     return changed, missing
 
 
-def _repack_modified_jps_bnks(assets_dir, baseline=None):
+def _guard_stale_jps_extract(subdir_path, bnk_name, assets_dir, edited_wavs):
+    """Abort a build whose decoded JPS subdir predates the corrected RIFF
+    scanner (manifest ``format`` != ``jps_bnk_v2``).
+
+    Such a subdir's WAV filenames map to different streams than the current
+    scanner produces (pfmusic used to expose 24 of 49 streams), so splicing
+    them back would scramble the bank.  Only called when the user actually
+    edited a WAV in this bank.
+    """
+    manifest_path = os.path.join(subdir_path, f"{bnk_name}.manifest.json")
+    if not os.path.isfile(manifest_path):
+        return  # no manifest (hand-made subdir) -- nothing to check
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            fmt = json.load(f).get("format")
+    except (OSError, ValueError):
+        return  # unreadable -- don't block on a best-effort check
+    if fmt == "jps_bnk_v2":
+        return
+    rels = [os.path.relpath(p, assets_dir) for p in edited_wavs[:6]]
+    raise PipelineError(
+        "Detect",
+        f"The decoded {bnk_name}/ folder was extracted by an older version "
+        f"of this app (before the music-bank scanner was corrected), so its "
+        f"sound-slot files no longer line up with the game's audio streams. "
+        f"Building from it would put your edits on the WRONG tracks.\n\n"
+        f"Re-extract this game with the current version, then re-apply your "
+        f"audio change(s) and build again. Edited file(s) detected:\n  "
+        + "\n  ".join(rels)
+        + (f"\n  ... and {len(edited_wavs) - 6} more"
+           if len(edited_wavs) > 6 else ""))
+
+
+def _repack_modified_jps_bnks(assets_dir, baseline=None, log=None):
     """Find every `<X>.bnk` with a sibling `<X>/` decoded subdir, and
     if any WAV inside has been edited, repack the `.bnk` in-place.
 
@@ -1539,6 +1575,17 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
                 # Every WAV matches the extract -- the .bnk is already
                 # current, skip the decompress-and-rewrite entirely.
                 continue
+            # Stale-extract guard: a decoded subdir made before the RIFF
+            # scanner was corrected (jps_bnk_v2) has a different, sparser
+            # slot->stream mapping (pfmusic exposed 24 of 49 streams, so its
+            # sound_001.wav was actually stream 2's audio).  Repacking a v1
+            # subdir with the current scanner would splice each old WAV into
+            # the WRONG stream and silently scramble the bank.  If the user
+            # edited anything in such a subdir, stop and tell them to
+            # re-extract.
+            if edited_wavs:
+                _guard_stale_jps_extract(subdir_path, d, assets_dir,
+                                         edited_wavs)
             # A WAV inside changed -- repack the .bnk in-place.  ``repack_bnk``
             # is PCM-diff-aware -- a no-op repack copies the original bytes
             # verbatim, so calling it is safe even if our gate is imprecise.
@@ -1597,6 +1644,13 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
                     f"stray WAVs that don't belong to this bank, and "
                     f"build again.")
             if summary.get("modified_count", 0) > 0:
+                # Surface any length clamp -- a music replacement longer or
+                # shorter than the stock slot is trimmed/padded to fit (JPS
+                # slots are fixed-length), and the user should know their
+                # clip was cut rather than think the tool misbehaved.
+                for note in summary.get("clamp_notes", []):
+                    if log:
+                        log(f"  Note: {note}.", "warning")
                 # User actually edited something -- replace .bnk.  A failure
                 # here (AV/indexer lock on a 233 MB file) must be loud: the
                 # unmodified bank would ship (silent no-op build) AND the

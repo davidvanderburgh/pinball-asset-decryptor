@@ -86,6 +86,58 @@ def test_flash_full_sector_multiple_uses_fast_path(tmp_path):
     assert card.read_bytes()[:8192] == img_bytes
 
 
+# ---- read-back verify ------------------------------------------------------
+
+def test_flash_verifies_readback_and_catches_a_bad_write(tmp_path, monkeypatch):
+    """A silently-corrupt flash (card doesn't match the image) must raise so it
+    never reaches the machine -- the gap that let a bad CGC flash SHELL ERROR
+    on the hardware.  Simulate it by having the read-back return wrong bytes."""
+    img_bytes = _pattern(6000)
+    img = tmp_path / "src.img"
+    img.write_bytes(img_bytes)
+    card = tmp_path / "card.dev"
+    card.write_bytes(b"\x00" * 16384)
+
+    # After the (faithful) write, corrupt one byte of what the read-back sees.
+    real_read = RawDeviceFile._aligned_read
+
+    def _corrupting_read(self, start, length):
+        buf = bytearray(real_read(self, start, length))
+        if start <= 3000 < start + len(buf):
+            buf[3000 - start] ^= 0xFF
+        return bytes(buf)
+    monkeypatch.setattr(RawDeviceFile, "_aligned_read", _corrupting_read)
+
+    with pytest.raises(FlashError, match="does not match the image"):
+        rd.flash_image_to_device(str(img), str(card))
+
+
+def test_flash_verify_passes_on_faithful_write(tmp_path):
+    """A good write reads back byte-identical and completes without raising."""
+    img_bytes = _pattern(6000)
+    img = tmp_path / "src.img"
+    img.write_bytes(img_bytes)
+    card = tmp_path / "card.dev"
+    card.write_bytes(b"\x00" * 16384)
+    written = rd.flash_image_to_device(str(img), str(card))   # verify=True
+    assert written == 6000
+    assert card.read_bytes()[:6000] == img_bytes
+
+
+def test_flash_verify_can_be_disabled(tmp_path, monkeypatch):
+    """verify=False skips the read-back (kept for callers that verify
+    separately) -- a corrupting read-back is then NOT caught."""
+    img = tmp_path / "src.img"
+    img.write_bytes(_pattern(6000))
+    card = tmp_path / "card.dev"
+    card.write_bytes(b"\x00" * 16384)
+    monkeypatch.setattr(
+        RawDeviceFile, "_aligned_read",
+        lambda self, s, n: b"\x00" * n)   # would fail verify if it ran
+    written = rd.flash_image_to_device(str(img), str(card), verify=False)
+    assert written == 6000
+
+
 # ---- size guard ------------------------------------------------------------
 
 def test_flash_refuses_image_larger_than_card(tmp_path):
@@ -259,7 +311,7 @@ def test_flash_pipeline_success_against_backing_file(tmp_path, monkeypatch):
 
     assert results and results[0][0] is True
     assert "Flashed" in results[0][1]
-    assert phases == [0, 1, 2]                       # Check / Write / Flush
+    assert phases == [0, 1, 2, 3]             # Check / Write / Verify / Flush
     assert card.read_bytes()[:6000] == img_bytes
 
 
@@ -288,7 +340,8 @@ def test_flash_capability_and_factory_wired():
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
     mfr = SternManufacturer()
     assert mfr.capabilities.flash_image is True
-    assert mfr.flash_phases == ("Check card", "Write image", "Flush")
+    assert mfr.flash_phases == ("Check card", "Write image", "Verify card",
+                                "Flush")
     noop = lambda *a, **k: None
     pipe = mfr.make_flash_pipeline(
         "game.img", "\\\\.\\PHYSICALDRIVE9", noop, noop, noop, noop)

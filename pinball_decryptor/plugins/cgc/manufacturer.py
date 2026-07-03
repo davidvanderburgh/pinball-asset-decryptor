@@ -1,5 +1,7 @@
 """Chicago Gaming Company manufacturer plugin."""
 
+import os
+
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from .formats import detect_game
@@ -47,7 +49,7 @@ class CGCManufacturer(Manufacturer):
     extract_phases = ("Detect", "Outer image", "Inner image",
                       "Decode game data", "Checksums")
     write_phases = ("Detect", "Copy original", "Stage partitions", "Patch")
-    flash_phases = ("Check card", "Write image", "Flush")
+    flash_phases = ("Check card", "Write image", "Verify card", "Flush")
     transcribe_phases = ("Load model", "Transcribe", "Rename", "Write CSV")
     # Flash-dialog wording.  CGC installs from a microSD card or a USB drive
     # (depends on the cabinet), so the noun covers both; the picker still
@@ -113,6 +115,34 @@ class CGCManufacturer(Manufacturer):
         info = GAME_DB[key]
         return Game(key=key, display=info["display"],
                     manufacturer_key="cgc")
+
+    def audio_forces_length_match(self, assets_dir=None):
+        # Pulp Fiction stores audio in JPS ``.bnk`` banks whose slots are
+        # FIXED-LENGTH: Write splices each replacement into the original
+        # slot in place, trimmed or padded to the stock byte length,
+        # because the game engine reads each sound's length from a bank
+        # record and validates it -- a different length silences that slot
+        # and desyncs the rest of the bank.  So there the "Trim / pad"
+        # toggle is mandatory, not a choice (forced on + disabled).
+        #
+        # The WPC remakes (MM/AFM/MB) instead store loose ``.wav`` files
+        # the engine plays at whatever length they are, so length stays a
+        # free user choice for those extracts.  We tell the two apart by
+        # the presence of a bank file, so the lock only kicks in once a
+        # Pulp Fiction extract is actually scanned.
+        if not assets_dir:
+            return False
+        import glob
+        return bool(glob.glob(os.path.join(assets_dir, "data", "*.bnk")))
+
+    def audio_length_note(self):
+        return ("Pulp Fiction's music and speech live in fixed-length bank "
+                "slots — each replacement is automatically trimmed or padded "
+                "to its original slot's length (a different length would "
+                "silence the sound and mistime the rest of the bank on the "
+                "machine). The WPC remakes (Medieval Madness / Attack From "
+                "Mars / Monster Bash) use loose .wav files that play at their "
+                "own length, so trimming isn't needed there.")
 
     def decode_dmd_applies(self, input_path):
         # MM/AFM/MB: decode the bundled Williams WPC ROM to PNG scenes + MP4s.

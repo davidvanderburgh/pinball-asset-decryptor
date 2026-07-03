@@ -1491,53 +1491,284 @@ class App:
         threading.Thread(target=_run, daemon=True).start()
 
     def _start_transfer_mods(self):
-        """Pull the user's pending Replace edits from an OLD extract folder onto
-        the current (new-version) one, reconciling layout changes.  Shows a
+        """Pull the user's mods from the OLD extract folder onto the NEW one
+        (both picked on the Mod Pack tab), reconciling layout changes.  Shows a
         reconciliation summary before applying, then re-scans so the transferred
         assignments appear on the Replace tabs."""
         if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
             return
         from .core import mod_transfer
 
-        target_dir = self.window.write_assets_var.get().strip()
+        source_dir = (self.window.transfer_src_var.get() or "").strip()
+        target_dir = (self.window.transfer_dst_var.get() or "").strip()
+        if not source_dir or not os.path.isdir(source_dir):
+            messagebox.showwarning(
+                "Pick the old extract",
+                "Set 'Old extract' to the folder that has your mods (your "
+                "previous version's extract).")
+            return
         if not target_dir or not os.path.isdir(target_dir):
             messagebox.showwarning(
-                "Pick the new extract first",
-                "Set the Mod Folder above to the NEW version's extract folder "
-                "(the one you want to move your mods into) first.")
-            return
-
-        source_dir = filedialog.askdirectory(
-            title="Select the OLD extract folder you modded",
-            initialdir=(os.path.dirname(target_dir) or target_dir))
-        if not source_dir:
+                "Pick the new extract",
+                "Set 'New extract' to the NEW version's freshly-extracted "
+                "folder (the one your mods move into).")
             return
         source_dir = os.path.normpath(source_dir)
-        if os.path.normcase(source_dir) == os.path.normcase(
-                os.path.normpath(target_dir)):
+        target_dir = os.path.normpath(target_dir)
+        if os.path.normcase(source_dir) == os.path.normcase(target_dir):
             messagebox.showwarning(
                 "Same folder",
                 "The old and new extract folders are the same. Pick your "
-                "previous version's extract as the source.")
+                "previous version's extract as the old one.")
+            return
+        if getattr(self, "_transfer_busy", False):
+            messagebox.showinfo(
+                "Comparison running",
+                "A transfer comparison is already running — progress is in "
+                "the log below.")
             return
 
-        try:
-            plan = mod_transfer.plan_transfer(source_dir, target_dir)
-        except Exception as e:
-            messagebox.showerror("Transfer failed",
-                                 "Couldn't read the source folder's mods:\n%s" % e)
+        self.window.append_log(
+            "Transfer: reading pending edits from %s ..." % source_dir, "info")
+        self._transfer_worker(
+            lambda: mod_transfer.plan_transfer(
+                source_dir, target_dir, log_cb=self._transfer_log_cb()),
+            lambda plan: self._transfer_plan_ready(source_dir, target_dir,
+                                                   plan),
+            "Transfer failed")
+
+    def _transfer_log_cb(self):
+        """Worker-thread-safe logger for the transfer comparisons: lines land
+        in the main log via the message queue."""
+        return lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+
+    def _transfer_worker(self, work, done, fail_title):
+        """Run *work()* on a worker thread — the extract comparisons are
+        minutes of file I/O on big or cloud-synced folders, so the UI must
+        stay live and the log must keep moving — then continue with
+        *done(result)* on the main thread.  One at a time via
+        ``_transfer_busy``."""
+        self._transfer_busy = True
+
+        def _finish(result):
+            self._transfer_busy = False
+            done(result)
+
+        def _fail(e):
+            self._transfer_busy = False
+            messagebox.showerror(fail_title, "Couldn't finish:\n%s" % e)
+
+        def _work():
+            try:
+                result = work()
+            except Exception as e:
+                self.msg_queue.put(LogMsg("Transfer step failed: %s" % e,
+                                          "error"))
+                self.root.after(0, _fail, e)
+                return
+            self.root.after(0, _finish, result)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _transfer_plan_ready(self, source_dir, target_dir, plan):
+        """Main-thread continuation of _start_transfer_mods once the pending-
+        edits plan is computed."""
+        totals = plan["totals"]
+        if totals["transfer"] == 0 and totals["flagged"] == 0:
+            if totals["dropped"]:
+                # The source HAS pending edits — they just have no home in the
+                # new version.  Not the baked-in-mods case.
+                messagebox.showinfo(
+                    "Nothing to transfer",
+                    "That folder's edits have no matching slot or text in the "
+                    "new version, so none of them can transfer.")
+            else:
+                self._transfer_baked_mods(source_dir, target_dir)
             return
+
+        self._confirm_apply_transfer(source_dir, target_dir, plan)
+
+    def _transfer_baked_mods(self, modded_dir, target_dir):
+        """Fallback when the old extract has no pending Replace edits: the
+        mods may be BAKED INTO the game code itself (modded with another tool
+        before it was extracted).  Two recovery routes:
+
+        * The user still has a STOCK extract of the SAME OLD version → diff
+          modded-vs-stock, then run the normal content-matched transfer with
+          the STOCK extract as the source (its WAVs are the stock content the
+          audio matching keys off).  Full fidelity — the only route that can
+          carry audio and text.
+        * No stock old extract → diff the modded extract DIRECTLY against the
+          new one.  Filename-keyed images/videos transfer; audio/text can't be
+          told apart from the factory's own version-to-version changes."""
+        from .core import mod_transfer
+
+        choice = messagebox.askyesnocancel(
+            "No pending edits — compare extracts?",
+            "The old extract has no pending Replace edits made in this app, "
+            "so its mods must be baked into the game code itself (e.g. modded "
+            "with another tool before it was extracted). They can be "
+            "recovered by comparing extracts.\n\n"
+            "Do you have a STOCK (unmodded) extract of the SAME OLD "
+            "version?\n\n"
+            "  •  Yes — pick it. Most accurate, and the only way AUDIO "
+            "and TEXT mods can transfer.\n"
+            "  •  No — compare the old extract directly against the new "
+            "one. Finds image and video mods; a difference could also be a "
+            "factory change between versions, so review the result.\n\n"
+            "Tip: all folders should be extracted with this same app version "
+            "so unmodified files compare equal.")
+        if choice is None:
+            return
+        if not choice:
+            self._transfer_direct_diff(modded_dir, target_dir)
+            return
+        stock_dir = filedialog.askdirectory(
+            title="Select the STOCK (unmodded) extract of the SAME version",
+            initialdir=(os.path.dirname(modded_dir) or modded_dir))
+        if not stock_dir:
+            return
+        stock_dir = os.path.normpath(stock_dir)
+        if os.path.normcase(stock_dir) in (
+                os.path.normcase(os.path.normpath(modded_dir)),
+                os.path.normcase(os.path.normpath(target_dir))):
+            messagebox.showwarning(
+                "Wrong folder",
+                "The stock extract must be a THIRD folder: an unmodded extract "
+                "of the same code version as the modded one.")
+            return
+
+        log_cb = self._transfer_log_cb()
+        self.window.append_log(
+            "Comparing the modded extract against the stock same-version "
+            "extract — progress below.", "info")
+
+        def _work():
+            diff = mod_transfer.diff_baked_mods(modded_dir, stock_dir,
+                                                log_cb=log_cb)
+            saved = diff["saved"]
+            n_found = (len(saved["audio"]) + len(saved["video"])
+                       + len(saved["image"]) + len(diff["text_rows"]))
+            plan = None
+            if n_found:
+                plan = mod_transfer.plan_transfer(
+                    stock_dir, target_dir, saved=saved,
+                    src_text_rows=diff["text_rows"], log_cb=log_cb)
+            return diff, plan
+
+        self._transfer_worker(
+            _work,
+            lambda res: self._baked_diff_ready(modded_dir, stock_dir,
+                                               target_dir, res[0], res[1]),
+            "Compare failed")
+
+    def _baked_diff_ready(self, modded_dir, stock_dir, target_dir, diff, plan):
+        """Main-thread continuation of the stock-baseline compare."""
+        saved = diff["saved"]
+        n_found = (len(saved["audio"]) + len(saved["video"])
+                   + len(saved["image"]) + len(diff["text_rows"]))
+        if not n_found or plan is None:
+            messagebox.showinfo(
+                "No differences found",
+                "The two extracts have identical content — no baked-in mods "
+                "were detected. Make sure the stock extract is the same code "
+                "version, extracted with this same app version.")
+            return
+
+        paired = diff["notes"]["paired_audio"]
+        if paired >= 20 and len(saved["audio"]) * 2 > paired:
+            if not messagebox.askyesno(
+                    "Same code version?",
+                    "%d of %d sounds differ between the two extracts. That "
+                    "many differences usually means the stock extract is a "
+                    "DIFFERENT code version, not a real set of mods.\n\n"
+                    "Continue anyway?"
+                    % (len(saved["audio"]), paired)):
+                return
+
+        intro = ("Found %d baked-in mod(s): %d audio, %d video, %d image, "
+                 "%d text."
+                 % (n_found, len(saved["audio"]), len(saved["video"]),
+                    len(saved["image"]), len(diff["text_rows"])))
+        self._confirm_apply_transfer(stock_dir, target_dir, plan,
+                                     src_saved=saved, intro=intro,
+                                     source_label=modded_dir)
+
+    def _transfer_direct_diff(self, modded_dir, target_dir):
+        """No-baseline route: diff the modded old extract directly against the
+        new one.  Videos pair by on-card path, images by rel; audio/text can't
+        be attributed without a baseline — heads-up notes surface what this
+        route can't carry.  The comparison runs on a worker thread with
+        progress in the log."""
+        from .core import mod_transfer
+
+        log_cb = self._transfer_log_cb()
+        self.window.append_log(
+            "Comparing the old (modded) extract directly against the new one "
+            "— progress below; large folders take a while.", "info")
+        self._transfer_worker(
+            lambda: mod_transfer.plan_direct_diff(modded_dir, target_dir,
+                                                  log_cb=log_cb),
+            lambda plan: self._direct_diff_ready(modded_dir, target_dir, plan),
+            "Compare failed")
+
+    def _direct_diff_ready(self, modded_dir, target_dir, plan):
+        """Main-thread continuation of the no-baseline compare."""
+        notes = plan["notes"]
+        caveats = []
+        if notes["audio_unmatched"]:
+            caveats.append(
+                "%d old sound(s) have no identical sound in the new version — "
+                "factory changes, or audio mods this route can't carry "
+                "(those need a stock old-version extract)."
+                % notes["audio_unmatched"])
+        if notes["text_unmatched"]:
+            caveats.append(
+                "%d old text string(s) aren't in the new version — factory "
+                "changes, or text mods this route can't carry."
+                % notes["text_unmatched"])
+        if notes["video_old_only"] or notes["image_old_only"]:
+            caveats.append(
+                "%d old video(s) / %d old image(s) have no counterpart in "
+                "the new version and were skipped."
+                % (notes["video_old_only"], notes["image_old_only"]))
+
+        if plan["totals"]["transfer"] == 0:
+            messagebox.showinfo(
+                "No image or video differences",
+                "No same-named image or video differs between the two "
+                "extracts." + ("\n\n" + "\n".join(caveats) if caveats else ""))
+            return
+
+        intro = ("Found %d differing video(s) and %d differing image(s) "
+                 "between the old and new extracts.\n"
+                 "A difference can also be a factory change between versions "
+                 "— after transferring, review the Replace tabs and clear "
+                 "anything you didn't mod."
+                 % (len(plan["video"]["matched"]),
+                    len(plan["image"]["matched"])))
+        if caveats:
+            intro += "\n\n" + "\n".join(caveats)
+        self._confirm_apply_transfer(modded_dir, target_dir, plan,
+                                     src_saved={}, intro=intro)
+
+    def _confirm_apply_transfer(self, source_dir, target_dir, plan,
+                                src_saved=None, intro=None, source_label=None):
+        """Shared tail of both transfer flows: summarize the plan, confirm,
+        apply, and refresh the Replace tabs."""
+        from .core import mod_transfer
 
         totals = plan["totals"]
         if totals["transfer"] == 0 and totals["flagged"] == 0:
             messagebox.showinfo(
                 "Nothing to transfer",
-                "No transferable edits were found in that folder. Make sure it's "
-                "the extract folder where you made your Replace edits (it should "
-                "contain a .staged_changes.json and/or text/strings.tsv).")
+                "None of those mods have a matching slot or text in the new "
+                "version, so nothing can transfer.")
             return
 
         summary = self._format_transfer_summary(plan)
+        if intro:
+            summary = intro + "\n\n" + summary
         if not messagebox.askyesno("Transfer mods?", summary):
             return
 
@@ -1553,7 +1784,8 @@ class App:
 
         try:
             res = mod_transfer.apply_transfer(
-                source_dir, target_dir, plan, include_flagged=include_flagged)
+                source_dir, target_dir, plan, include_flagged=include_flagged,
+                src_saved=src_saved)
         except Exception as e:
             messagebox.showerror("Transfer failed",
                                  "Couldn't write the transferred mods:\n%s" % e)
@@ -1561,14 +1793,26 @@ class App:
 
         self.window.append_log(
             "Transferred mods from %s: %d audio, %d video, %d image, %d text."
-            % (source_dir, res["audio"], res["video"], res["image"],
-               res["text"]), "success")
+            % (source_label or source_dir, res["audio"], res["video"],
+               res["image"], res["text"]), "success")
+        # Point the app at the new extract so the Replace tabs / Write show
+        # the transferred assignments without a manual re-browse.
+        cur = os.path.normpath((self.window.write_assets_var.get() or "")
+                               .strip())
+        moved_folder = os.path.normcase(cur) != os.path.normcase(target_dir)
+        if moved_folder:
+            self.window.write_assets_var.set(target_dir)
         self.window.reload_assets_tabs()
         messagebox.showinfo(
             "Transfer complete",
-            "Transferred: %d audio, %d video, %d image, %d text.\n\n"
-            "Review the Replace tabs, then build the update on the Write tab."
-            % (res["audio"], res["video"], res["image"], res["text"]))
+            "Transferred: %d audio, %d video, %d image, %d text.\n\n%s"
+            "Nothing is written yet — the transfers are staged in the new "
+            "extract. Review them on the Replace tabs (or the Write tab's "
+            "Modified Files Preview, listed as Pending), then build the "
+            "update on the Write tab."
+            % (res["audio"], res["video"], res["image"], res["text"],
+               ("The Mod Folder now points at the new extract.\n\n"
+                if moved_folder else "")))
 
     @staticmethod
     def _format_transfer_summary(plan):
@@ -1641,6 +1885,86 @@ class App:
 
         self.pipeline.run()
 
+    def _sidecar_pending(self, assets_dir, kind):
+        """Rebuild a ``pending_<kind>_assignments``-shaped tuple straight from
+        *assets_dir*'s ``.staged_changes.json``.
+
+        The Replace tabs restore the sidecar into memory only when they scan
+        the folder — if none has this session (mods just transferred in, or
+        the app reopened straight onto Write), ``pending_*_assignments``
+        returns None and the build would silently drop the recorded
+        assignments.  This fallback re-derives the tuple on the write worker
+        thread: re-scan the slots, filter the sidecar to live entries
+        (``staged_changes.live_assignments``), probe just the assigned video
+        slots, and read the toggles from the sidecar (GUI defaults when the
+        sidecar predates them).  Returns ``None`` when the sidecar has nothing
+        live for this folder."""
+        from .core import staged_changes
+
+        mfr = self._current_mfr
+        cap = {"audio": "replace_audio", "video": "replace_video",
+               "image": "replace_image"}[kind]
+        if (mfr is None or not getattr(mfr.capabilities, cap, False)
+                or not assets_dir or not os.path.isdir(assets_dir)):
+            return None
+        saved = staged_changes.load(assets_dir)
+        if not saved.get(kind):
+            return None
+
+        def _hook(name):
+            try:
+                return getattr(mfr, name)(assets_dir)
+            except Exception:
+                return None
+
+        if kind == "audio":
+            from .core.audio_slots import scan_audio_slots
+            slots = scan_audio_slots(assets_dir,
+                                     roots=_hook("audio_slot_dirs"),
+                                     exts=_hook("audio_slot_exts"))
+        elif kind == "video":
+            from .core.video_slots import scan_video_slots
+            slots = scan_video_slots(assets_dir,
+                                     roots=_hook("video_slot_dirs"),
+                                     exts=_hook("video_slot_exts"),
+                                     probe=False)
+        else:
+            from .core.image_slots import scan_image_slots
+            slots = scan_image_slots(assets_dir,
+                                     roots=_hook("image_slot_dirs"),
+                                     exts=_hook("image_slot_exts"),
+                                     probe=False)
+        slots_by_rel = {s.rel_path: s for s in slots}
+        assignments = staged_changes.live_assignments(saved.get(kind),
+                                                      slots_by_rel)
+        if not assignments:
+            return None
+
+        if kind == "audio":
+            keep_map = saved.get("audio_keep") or {}
+            keep_full = frozenset(r for r in assignments if keep_map.get(r))
+            trim = bool(saved.get("audio_trim",
+                                  self.window.audio_trim_var.get()))
+            return (slots_by_rel, assignments, trim, keep_full)
+        if kind == "video":
+            # Probe only the assigned slots — the tab's background pass probes
+            # the whole folder, far too slow to repeat here per build.
+            from .core.video import backend_for, detect_video_info
+            for rel in assignments:
+                s = slots_by_rel[rel]
+                if s.info is None and backend_for(s.abs_path) is None:
+                    try:
+                        s.info = detect_video_info(s.abs_path)
+                    except Exception:
+                        s.info = None
+                    s.probed = True
+            return (slots_by_rel, assignments,
+                    bool(saved.get("video_trim",
+                                   self.window.video_trim_var.get())),
+                    bool(saved.get("video_no_conversion",
+                                   self.window.video_no_conversion_var.get())))
+        return (slots_by_rel, assignments)
+
     def _stage_pending_audio(self, assets_dir):
         """Convert + write the user's assigned replacement tracks over the
         matching files in *assets_dir* (so the Write pipeline that follows
@@ -1650,7 +1974,8 @@ class App:
         replacements were assigned for this folder, *staged* how many landed on
         disk, *failures* a list of ``(label, error)``.  ``(0, 0, [])`` when
         nothing is assigned for this folder."""
-        pend = self.window.pending_audio_assignments(assets_dir)
+        pend = (self.window.pending_audio_assignments(assets_dir)
+                or self._sidecar_pending(assets_dir, "audio"))
         if not pend:
             return (0, 0, [])
         slots_by_rel, assignments, trim, keep_full = pend
@@ -1680,7 +2005,8 @@ class App:
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
         Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
-        pend = self.window.pending_video_assignments(assets_dir)
+        pend = (self.window.pending_video_assignments(assets_dir)
+                or self._sidecar_pending(assets_dir, "video"))
         if not pend:
             return (0, 0, [])
         slots_by_rel, assignments, trim, no_conversion = pend
@@ -1711,7 +2037,8 @@ class App:
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
         Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
-        pend = self.window.pending_image_assignments(assets_dir)
+        pend = (self.window.pending_image_assignments(assets_dir)
+                or self._sidecar_pending(assets_dir, "image"))
         if not pend:
             return (0, 0, [])
         slots_by_rel, assignments = pend

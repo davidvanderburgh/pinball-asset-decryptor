@@ -101,9 +101,47 @@ def _sine_pcm(duration_ms: int, freq_hz: int = 440) -> bytes:
     return bytes(out)
 
 
+def _riff_wav(pcm: bytes) -> bytes:
+    """A minimal 48 kHz stereo s16le RIFF/WAVE around *pcm* (music-bank
+    storage form)."""
+    fmt = struct.pack("<HHIIHH", 1, jps_bnk.CHANNELS, jps_bnk.SAMPLE_RATE,
+                      jps_bnk.SAMPLE_RATE * jps_bnk.CHANNELS * 2,
+                      jps_bnk.CHANNELS * 2, 16)
+    body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt \
+        + b"data" + struct.pack("<I", len(pcm)) + pcm
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+def test_scan_large_riff_with_false_zlib_headers_is_fast_and_correct():
+    """A music-style RIFF buffer whose PCM is full of ``0x78 0x9C`` byte
+    pairs (valid-looking zlib headers) must be parsed as exactly one RIFF
+    buffer, quickly.
+
+    ``0x78 0x9C`` is a real zlib header, so the scanner probes it -- and the
+    naive probe decompressed the entire multi-hundred-MB tail from every such
+    hit, making a 233 MB pfmusic.bnk take ~140 s (RTS's "first 3 minutes crush
+    my processor").  The probe is now bounded, so this stays sub-second; the
+    generous 10 s bound only trips on a catastrophic regression.
+    """
+    import time
+    # 20 MB of PCM peppered with false zlib headers.
+    pcm = (b"\x78\x9c\x00\x11\x22\x33\x44\x55") * (20_000_000 // 8)
+    bnk = b"\x00" * 0x2A0 + _riff_wav(pcm)
+
+    t0 = time.time()
+    buffers = jps_bnk._scan_buffers(bnk)
+    elapsed = time.time() - t0
+
+    assert len(buffers) == 1, f"expected 1 RIFF buffer, got {len(buffers)}"
+    assert buffers[0].storage == "riff"
+    assert buffers[0].bnk_offset == 0x2A0
+    assert elapsed < 10.0, f"scan took {elapsed:.1f}s -- perf regression"
+
+
 
 @pytest.fixture
 def synthetic_bnk_path(tmp_path):

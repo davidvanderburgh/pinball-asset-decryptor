@@ -1203,7 +1203,7 @@ def _diff_assets(assets_dir, baseline):
     # under those subdirs are derived assets -- they never go to the
     # eMMC, so we also gather their rel-paths into ``jps_subdir_files``
     # for filtering further down.
-    jps_subdir_files = _repack_modified_jps_bnks(assets_dir)
+    jps_subdir_files = _repack_modified_jps_bnks(assets_dir, baseline)
     # CGC Cactus Canyon pre-step: re-encode any edited decoded assets
     # (dcs_audio/ streams, new_audio/ WAVs, display_art/ PNGs) back into their
     # source eMMC blobs (s*.rom / usb.so / cgc.so) in place, so the baseline
@@ -1272,7 +1272,7 @@ def _diff_assets(assets_dir, baseline):
     return changed, missing
 
 
-def _repack_modified_jps_bnks(assets_dir):
+def _repack_modified_jps_bnks(assets_dir, baseline=None):
     """Find every `<X>.bnk` with a sibling `<X>/` decoded subdir, and
     if any WAV inside has been edited, repack the `.bnk` in-place.
 
@@ -1280,6 +1280,14 @@ def _repack_modified_jps_bnks(assets_dir):
     *assets_dir*) of every file under any `<X>/` subdir, so the caller
     can exclude them from the assets-to-write set (they're plugin
     decode artifacts, not eMMC payloads).
+
+    ``baseline`` (the extract-time ``.checksums`` map) lets us skip the
+    expensive repack for banks whose WAVs are all unchanged: ``repack_bnk``
+    decompresses every buffer and rewrites the whole bank, so running it on
+    all 6 Pulp Fiction banks (~1000 sounds) unconditionally cost ~2.5 min of
+    pegged CPU per build even when a single file changed (RTS's "first 3
+    minutes crush my processor").  We gate on the content md5s we already
+    have, so a real edit is never missed -- only untouched banks are skipped.
     """
     from .jps_bnk import repack_bnk
     decoded_subdir_files = set()
@@ -1289,17 +1297,30 @@ def _repack_modified_jps_bnks(assets_dir):
             if not os.path.isfile(bnk_sibling):
                 continue
             subdir_path = os.path.join(dirpath, d)
-            # Collect every file under <X>/ so callers can skip them.
+            # Collect every file under <X>/ so callers can skip them, and
+            # note whether any WAV differs from its baseline md5.
+            bank_changed = baseline is None  # no baseline -> always repack
             for sub_dirpath, _, sub_files in os.walk(subdir_path):
                 for fn in sub_files:
                     abs_p = os.path.join(sub_dirpath, fn)
                     rel = os.path.relpath(
                         abs_p, assets_dir).replace("\\", "/")
                     decoded_subdir_files.add(rel)
-            # If any WAV inside differs from what the .bnk currently
-            # encodes, repack the .bnk in-place.  ``repack_bnk`` is
-            # PCM-diff-aware -- a no-op repack copies the original
-            # bytes verbatim, so calling it unconditionally is safe.
+                    if bank_changed or not fn.lower().endswith(".wav"):
+                        continue
+                    base_md5 = baseline.get(rel) or baseline.get(
+                        rel.replace("/", "\\"))
+                    # A new WAV (not in baseline) or a content change flags
+                    # the bank for repack.  Only .wav edits affect the bnk.
+                    if base_md5 is None or md5_file(abs_p) != base_md5:
+                        bank_changed = True
+            if not bank_changed:
+                # Every WAV matches the extract -- the .bnk is already
+                # current, skip the decompress-and-rewrite entirely.
+                continue
+            # A WAV inside changed -- repack the .bnk in-place.  ``repack_bnk``
+            # is PCM-diff-aware -- a no-op repack copies the original bytes
+            # verbatim, so calling it is safe even if our gate is imprecise.
             tmp_path = bnk_sibling + ".repack_tmp"
             try:
                 summary = repack_bnk(bnk_sibling, subdir_path, tmp_path)

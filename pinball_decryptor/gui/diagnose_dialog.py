@@ -87,13 +87,22 @@ class DiagnoseCardDialog:
         self._read_btn = ttk.Button(card_row, text="Read card",
                                     command=self._start_read)
         self._read_btn.pack(side="left", padx=(8, 0))
+        # A card isn't the only thing worth diagnosing: the SAME check runs on
+        # a built or source ``.img`` file, which is how you confirm an image
+        # has a real payload BEFORE flashing (no Administrator needed to read a
+        # plain file).  The dropdown only lists physical drives, so without
+        # this there's no way to point diagnostics at a file on disk.
+        self._file_btn = ttk.Button(card_row, text="Image file…",
+                                    command=self._start_read_file)
+        self._file_btn.pack(side="left", padx=(4, 0))
 
         if not is_admin():
             tk.Label(
                 body,
-                text=("⚠ Reading a physical card needs Administrator. Close "
+                text=("⚠ Reading a physical card needs Administrator (close "
                       "the app, right-click the shortcut, choose \"Run as "
-                      "administrator\", and reopen this dialog."),
+                      "administrator\", and reopen). Diagnosing an image "
+                      "file with \"Image file…\" does not need Administrator."),
                 bg=th["bg"], fg=th["error"], font=(self._sans, 9),
                 wraplength=640, justify="left", anchor="w").pack(
                 fill="x", pady=(2, 0))
@@ -225,24 +234,43 @@ class DiagnoseCardDialog:
             messagebox.showerror(
                 "Administrator required",
                 "Reading raw disk sectors needs Administrator. Re-launch the "
-                "app as administrator and try again.", parent=self._dlg)
+                "app as administrator and try again.\n\nTo diagnose an image "
+                "*file* instead (no Administrator needed), use \"Image "
+                "file…\".", parent=self._dlg)
             return
+        self._launch(card.device_path)
 
+    def _start_read_file(self):
+        """Diagnose a built or source ``.img`` file (no Administrator; the
+        dropdown only offers physical drives)."""
+        if self._running:
+            return
+        path = filedialog.askopenfilename(
+            parent=self._dlg, title="Select an installer image to diagnose",
+            filetypes=[("Installer image", "*.img *.raw *.bin"),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        self._launch(path)
+
+    def _launch(self, target):
+        """Shared: run the manufacturer's read-only diagnosis on *target* (a
+        physical device path or an image file path) on a worker thread."""
         self._running = True
         self._report = None
         self._read_btn.configure(state="disabled")
+        self._file_btn.configure(state="disabled")
         self._save_btn.configure(state="disabled")
         self._text.configure(state="normal")
         self._text.delete("1.0", "end")
         self._text.configure(state="disabled")
-        device_path = card.device_path
 
         def _worker():
             # Runs off the main thread: push everything through the queue,
             # never call Tk here.
             try:
                 report = self._mfr.diagnose_card(
-                    device_path,
+                    target,
                     log=lambda m: self._q.put(("log", m)))
                 self._q.put(("done", report))
             except Exception as e:  # noqa: BLE001 - surfaced in the report box
@@ -280,6 +308,7 @@ class DiagnoseCardDialog:
         self._running = False
         try:
             self._read_btn.configure(state="normal")
+            self._file_btn.configure(state="normal")
         except tk.TclError:
             return
         if error is not None:

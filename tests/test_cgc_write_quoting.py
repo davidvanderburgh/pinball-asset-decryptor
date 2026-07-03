@@ -39,6 +39,10 @@ class _RecordingExecutor(WslExecutor):
     # and debugfs inode) so the pipeline proceeds; the guard's failure modes
     # get their own dedicated tests below.
     EMMC_SIZE = 3640655872
+    # Byte size of every modified asset the tests stage on disk; the per-file
+    # written-size verify stats the file inside the inner ext4 and must see
+    # the same number.
+    WAV_SIZE = 12
 
     def run(self, bash_cmd, timeout=120):
         self.commands.append(bash_cmd)
@@ -46,16 +50,32 @@ class _RecordingExecutor(WslExecutor):
         # a clean result so the pipeline proceeds (this test isn't about fsck).
         if "e2fsck" in bash_cmd:
             return "__RC__0"
+        if bash_cmd.startswith("dumpe2fs"):
+            # Clean journal (no needs_recovery) -- the armed case gets its
+            # own stateful executor below.
+            return "Filesystem features:      has_journal ext_attr extent"
         if bash_cmd.startswith("stat -c%s"):
             return str(self.EMMC_SIZE)
-        if bash_cmd.startswith("debugfs -R") and "'stat " in bash_cmd:
+        if bash_cmd.startswith("debugfs -R") and "'stat /emmc.img'" in bash_cmd:
             return (f"Inode: 14   Type: regular    Mode:  0644\n"
                     f"User:     0   Group:     0   Size: {self.EMMC_SIZE}\n"
+                    f"Fragment:  Address: 0    Number: 0    Size: 0\n")
+        if bash_cmd.startswith("debugfs -R") and "'stat " in bash_cmd:
+            # per-file written-size verify inside the inner ext4
+            return (f"Inode: 20   Type: regular    Mode:  0644\n"
+                    f"User:     0   Group:     0   Size: {self.WAV_SIZE}\n"
                     f"Fragment:  Address: 0    Number: 0    Size: 0\n")
         return ""  # every other caller tolerates empty stdout
 
 
 def _drive_write(tmp_path, monkeypatch):
+    rec = _RecordingExecutor()
+    done, _cmds = _drive_write_with(rec, tmp_path, monkeypatch)
+    return rec, done, rec.to_exec_path(str(
+        tmp_path / "AFMr Decryptor out" / "AttackFromMars100Installer.img"))
+
+
+def _drive_write_with(rec, tmp_path, monkeypatch):
     # Spaces in EVERY user-controlled path: input image, output image, and
     # the modified asset's host path.
     in_dir = tmp_path / "AFMr Decryptor in"
@@ -69,6 +89,8 @@ def _drive_write(tmp_path, monkeypatch):
     assets = tmp_path / "afm assets"
     assets.mkdir()
     changed_host = assets / "sound bank" / "audio_001.wav"
+    changed_host.parent.mkdir()
+    changed_host.write_bytes(b"x" * _RecordingExecutor.WAV_SIZE)
 
     # Neutralise everything the run touches except the dd-command building.
     monkeypatch.setattr(cgc_pipeline, "detect_game", lambda p: "afm_remake")
@@ -95,10 +117,9 @@ def _drive_write(tmp_path, monkeypatch):
         phase_cb=lambda *a, **k: None,
         progress_cb=lambda *a, **k: None,
         done_cb=lambda ok, msg: done.update(ok=ok, msg=msg))
-    rec = _RecordingExecutor()
     wp.executor = rec
-    wp._run()
-    return rec, done, rec.to_exec_path(str(output))
+    wp.run()  # run(), not _run(): converts PipelineError into done(False, msg)
+    return done, rec.commands
 
 
 def test_write_dd_commands_quote_spaced_paths(tmp_path, monkeypatch):
@@ -168,7 +189,9 @@ def test_write_modified_files_handles_apostrophe(tmp_path):
     wp._log = lambda *a, **k: None
 
     rel = "afmdata/samples/vol_25perc/S0315_C6 We'll blow the Martians.wav"
-    host = str(tmp_path / "edited.wav")
+    host_file = tmp_path / "edited.wav"
+    host_file.write_bytes(b"x" * _RecordingExecutor.WAV_SIZE)
+    host = str(host_file)
     wp._write_modified_files("/tmp/inner.img", {rel: host}, "/home/debian/emumm")
 
     dbg = [c for c in rec.commands if c.startswith("debugfs -w -R")]
@@ -208,6 +231,75 @@ def test_write_verifies_inner_fs_and_repacked_emmc(tmp_path, monkeypatch):
                for c in rec.commands), "staged emmc.img size never read"
     assert any(c.startswith("debugfs -R") and "'stat /emmc.img'" in c
                for c in rec.commands), "re-packed /emmc.img never stat'd"
+
+
+class _ArmedJournalExecutor(_RecordingExecutor):
+    """Reports every staged partition's ext4 journal as ARMED
+    (needs_recovery) until an ``e2fsck -fy`` has run against that image --
+    the real CGC condition: stock installers ship P3 with the factory's
+    stale journal still pending."""
+
+    def __init__(self):
+        super().__init__()
+        self.replayed = set()
+
+    def run(self, bash_cmd, timeout=120):
+        if bash_cmd.startswith("dumpe2fs -h "):
+            self.commands.append(bash_cmd)
+            target = shlex.split(bash_cmd)[2]
+            if target in self.replayed:
+                return "Filesystem features:      has_journal ext_attr extent"
+            return ("Filesystem features:      has_journal ext_attr "
+                    "needs_recovery extent")
+        if bash_cmd.startswith("e2fsck -fy "):
+            self.commands.append(bash_cmd)
+            self.replayed.add(shlex.split(bash_cmd)[2])
+            return "__RC__0"
+        return super().run(bash_cmd, timeout)
+
+
+def test_write_replays_armed_journal_before_any_debugfs(tmp_path, monkeypatch):
+    """THE Pulp Fiction SHELL ERROR root cause (proven on two machines):
+    stock CGC installers ship P3 with the factory journal armed
+    (needs_recovery).  Our debugfs edits bypass the journal, so the
+    machine's first mount of /data replayed the stale factory transactions
+    OVER the edits and reverted /emmc.img to a deleted 0-byte inode --
+    dcfldd then had nothing to copy.  The Write pipeline must replay/retire
+    the journal (e2fsck -fy) BEFORE any debugfs touches a staged partition
+    image."""
+    rec = _ArmedJournalExecutor()
+    # reuse _drive_write's monkeypatching but with the stateful executor
+    done, cmds = _drive_write_with(rec, tmp_path, monkeypatch)
+    assert done.get("ok") is True, done
+
+    for img in ("p3.img", "inner.img"):
+        replay_idx = [i for i, c in enumerate(cmds)
+                      if c.startswith("e2fsck -fy ") and img in c]
+        assert replay_idx, f"no journal replay ever ran for {img}: {cmds}"
+        debugfs_idx = [i for i, c in enumerate(cmds)
+                       if c.startswith("debugfs") and img in c]
+        assert debugfs_idx, f"expected debugfs commands against {img}"
+        assert replay_idx[0] < debugfs_idx[0], (
+            f"journal replay for {img} ran AFTER debugfs first touched it -- "
+            f"the machine would replay the stale journal over the edits")
+
+
+def test_write_verifies_each_written_file_size(tmp_path, monkeypatch):
+    """debugfs write failures are masked by `|| true` (needed for the grep)
+    and by debugfs's own exit-0-on-error habit; a dropped/truncated file must
+    be caught by the post-write per-file stat, not shipped."""
+    class _TruncatingExecutor(_RecordingExecutor):
+        def run(self, bash_cmd, timeout=120):
+            if (bash_cmd.startswith("debugfs -R") and "'stat " in bash_cmd
+                    and "/emmc.img'" not in bash_cmd):
+                self.commands.append(bash_cmd)
+                return "audio_001.wav: File not found by ext2_lookup\n"
+            return super().run(bash_cmd, timeout)
+
+    rec = _TruncatingExecutor()
+    done, _cmds = _drive_write_with(rec, tmp_path, monkeypatch)
+    assert done.get("ok") is False
+    assert "did not land inside the game filesystem" in done.get("msg", "")
 
 
 class _FixedOutputExecutor:

@@ -546,7 +546,11 @@ def _resolve_wav_path(wavs_dir: str, bnk_basename: str,
     for stem in stems:
         pattern = os.path.join(glob.escape(wavs_dir),
                                f"{glob.escape(stem)} - *.wav")
-        matches = glob.glob(pattern)
+        # A leftover Replace-Audio staging temp ("<name>.stage.wav", from an
+        # interrupted staging) matches the pattern too and would make a
+        # perfectly good rename look ambiguous -- ignore staging scratch.
+        matches = [m for m in glob.glob(pattern)
+                   if ".stage." not in os.path.basename(m).lower()]
         if len(matches) == 1:
             return matches[0]
         if matches:

@@ -114,27 +114,36 @@ def _assess_payload_size(size, mtime, now):
     """Return a problem string if the emmc.img payload is implausibly small,
     else ``None``.  Pure (no I/O) so the verdict wording is unit-testable.
 
-    A payload dated well before ``now`` was carried straight through from the
-    source .img (our build stamps a fresh mtime), so a bad payload came in
-    with the original image; a fresh mtime instead points at the build itself.
+    A payload dated well before ``now`` on a card that has been in a machine
+    is the machine's own boot reverting a modded build: installers built
+    before v0.36.0 shipped the factory's stale ext4 journal still armed, and
+    the kernel's journal replay at first mount clobbered the build's debugfs
+    edits, reverting /emmc.img to a deleted 0-byte factory inode (dated
+    2023-06-28 on Pulp Fiction -- proven on two real machines).  A fresh
+    mtime instead points at the build/flash itself.
     """
     if size >= MIN_PLAUSIBLE_EMMC:
         return None
     carried = mtime < now - datetime.timedelta(days=1)
     origin = (
-        f"The payload's timestamp ({_fmt_when(mtime)}) predates this build, "
-        "so it was carried straight through from the source .img -- the "
-        "ORIGINAL image you built/flashed from already had an empty emmc.img."
+        f"The payload's timestamp ({_fmt_when(mtime)}) predates this build. "
+        "If this card has been in a machine, the machine did this: builds "
+        "made before v0.36.0 left the factory's stale ext4 journal armed, "
+        "and the machine's first mount replayed it OVER the build's "
+        "modifications, reverting the payload to a deleted 0-byte factory "
+        "inode. Rebuild with v0.36.0+ and re-flash. If this image was never "
+        "in a machine, the ORIGINAL source .img may itself carry an empty "
+        "payload -- run these diagnostics on that exact source .img file."
         if carried else
         "The payload was written empty during the build/flash, so the image "
-        "you flashed never had a real payload.")
+        "you flashed never had a real payload. Re-check the source .img "
+        "(run these diagnostics on it, or re-image the installer), rebuild "
+        "on v0.34.1+ (which aborts a build with an empty payload), and "
+        "re-flash.")
     return (
         f"The install payload /emmc.img is only {size:,} bytes (should be "
         "~2-4 GB). This empty/truncated payload IS the SHELL ERROR: the "
-        "machine's copy step has nothing to write. " + origin + " Re-check "
-        "the source .img (run these diagnostics on it, or re-image the "
-        "installer), rebuild on v0.34.1+ (which now aborts a build with an "
-        "empty payload), and re-flash.")
+        "machine's copy step has nothing to write. " + origin)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +280,22 @@ def diagnose_installer_card(path, log=None):
         _log("Checking install payload (P%d)..." % data["index"])
         r3 = Ext4Reader(dev, data["start_bytes"], data["size_bytes"])
         say(f"[P{data['index']}] install payload:")
+        # Journal state.  Stock CGC images ship P3 with the factory's ext4
+        # journal still armed (needs_recovery set) -- harmless on a factory
+        # card, but fatal on a modded build made before v0.36.0: the
+        # machine's first mount replays the stale factory transactions over
+        # the build's debugfs edits, reverting /emmc.img to a deleted
+        # 0-byte inode (SHELL ERROR).  s_magic @0x38, s_feature_incompat
+        # @0x60, EXT3_FEATURE_INCOMPAT_RECOVER = 0x0004.
+        sb = dev._aligned_read(data["start_bytes"] + 1024, 1024)
+        journal_armed = None
+        if sb[0x38:0x3A] == b"\x53\xEF":
+            journal_armed = bool(
+                struct.unpack("<I", sb[0x60:0x64])[0] & 0x0004)
+            say("  ext4 journal: "
+                + ("ARMED (needs_recovery -- normal for a stock/factory "
+                   "image; fatal for a pre-v0.36.0 modded build)"
+                   if journal_armed else "clean"))
         emmc_ino = _resolve(r3, "/emmc.img")
         if emmc_ino is None:
             say("  /emmc.img: MISSING -- the installer has nothing to copy; "
@@ -285,15 +310,31 @@ def diagnose_installer_card(path, log=None):
             mt = _inode_mtime(r3, emmc_ino)
             say(f"  /emmc.img: present, {node['size']:,} bytes, modified "
                 f"{_fmt_when(mt)}")
-            bad = _assess_payload_size(
-                node["size"], mt,
-                datetime.datetime.now(datetime.timezone.utc))
+            now = datetime.datetime.now(datetime.timezone.utc)
+            bad = _assess_payload_size(node["size"], mt, now)
             if bad is not None:
                 say(f"  *** PROBLEM: this payload is far too small (a real "
                     f"Pulp Fiction payload is ~3.6 GB). An empty or truncated "
                     f"emmc.img is exactly what makes the machine SHELL ERROR "
                     f"-- dcfldd has nothing to copy.")
                 problems.append(bad)
+            elif journal_armed and mt > now - datetime.timedelta(days=30):
+                # Healthy-looking payload with a build-fresh mtime BUT the
+                # factory journal is still armed: a pre-v0.36.0 modded
+                # build.  It looks perfect now and dies at the machine's
+                # first mount.
+                say("  *** PROBLEM: modded build with the factory journal "
+                    "still armed -- the machine will revert it at boot.")
+                problems.append(
+                    "This card carries a modified build (payload written "
+                    f"{_fmt_when(mt)}) but the data partition's ext4 journal "
+                    "is still armed with stale factory transactions "
+                    "(needs_recovery). At its first mount the machine "
+                    "replays that journal OVER the modifications and "
+                    "reverts the payload to a deleted 0-byte inode -- the "
+                    "install then fails with SHELL ERROR. Rebuild this "
+                    "image with v0.36.0 or newer (which retires the journal "
+                    "during the build) and re-flash.")
             # Force real device reads over the head and tail of the payload
             # (a quick unreadable-card smoke test; NOT a full surface scan).
             if node["size"] > 0:

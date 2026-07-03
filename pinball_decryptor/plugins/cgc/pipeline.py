@@ -23,6 +23,7 @@ import os
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -866,6 +867,18 @@ class WritePipeline(BasePipeline):
                 f"count={data_part['size_bytes']} status=none",
                 timeout=900,
             )
+            # CGC ships every installer with P3's journal DIRTY (the factory
+            # pulled the card without unmounting; `needs_recovery` is set and
+            # ~64 MB of stale 2024 transactions are pending).  All our edits
+            # below go through debugfs, which bypasses the journal -- so on a
+            # stock-derived P3 the machine's kernel would replay those stale
+            # factory transactions OVER our modifications at its first mount
+            # of /data, reverting /emmc.img's inode to a deleted 0-byte
+            # factory placeholder ("SHELL ERROR", dcfldd has nothing to copy).
+            # Replay + retire the journal here, BEFORE any debugfs touches the
+            # filesystem, so the machine finds nothing to replay.
+            self._replay_stale_journal(
+                p3_exec, "installer data partition (P3)")
             self.executor.run(
                 f"debugfs -R 'dump {EMMC_INNER_PATH} {emmc_exec}' "
                 f"{p3_exec} 2>&1", timeout=900)
@@ -887,6 +900,10 @@ class WritePipeline(BasePipeline):
                 f"count={inner_part['size_bytes']} status=none",
                 timeout=900,
             )
+            # Stock inner game filesystems ship clean today, but this is the
+            # other fs we edit with journal-bypassing debugfs -- same replay
+            # hazard as P3 if any title/version ever ships it dirty.
+            self._replay_stale_journal(inner_exec, "inner game partition")
 
             self._set_phase(3)
             self._log("Writing modified files into inner ext4 via debugfs...",
@@ -952,8 +969,9 @@ class WritePipeline(BasePipeline):
 
         # Final backstop: read the finished output's payload back and confirm
         # it's real, whatever happened upstream (a bad source, a stale mount,
-        # a partial write).  Same check the no-op path runs.
-        self._verify_output_payload()
+        # a partial write).  Same check the no-op path runs, plus the
+        # armed-journal refusal that only applies to modified builds.
+        self._verify_output_payload(expect_clean_journal=True)
 
         self._log("Done.", "success")
         self._done(True,
@@ -1024,11 +1042,37 @@ class WritePipeline(BasePipeline):
                 self._log(f"    {out.strip()}", "info")
         self._progress(total, total, "")
 
+        # debugfs exits 0 even when a write failed or ran out of space, and
+        # the `|| true` above (needed for the grep) makes the shell agree --
+        # so a dropped or truncated file would otherwise ship inside a
+        # "verified" image (e2fsck can't see it: a missing file is a clean
+        # filesystem).  Stat every file we just wrote and require its exact
+        # source byte size.
+        self._log("Verifying written files inside inner ext4...", "info")
+        for rel, abs_host in sorted(changed.items()):
+            inner_path = f"{inner_root_to_assets_root.rstrip('/')}/{rel}"
+            want = os.path.getsize(abs_host)
+            stat_cmd = shlex.quote(f"stat {_quote_dbg(inner_path)}")
+            out = self.executor.run(
+                f"debugfs -R {stat_cmd} {shlex.quote(inner_exec)} 2>&1",
+                timeout=60)
+            m = re.search(r"\bSize:\s*(\d+)", out)
+            got = int(m.group(1)) if m else None
+            if got != want:
+                raise PipelineError("Write",
+                    f"{rel} did not land inside the game filesystem "
+                    f"(expected {want:,} bytes, "
+                    f"got {f'{got:,}' if got is not None else 'NO FILE'}). "
+                    f"debugfs reported success but the file is missing or "
+                    f"truncated -- often the game partition ran out of free "
+                    f"space. The build was aborted; the original image is "
+                    f"unchanged.\n\ndebugfs stat output:\n{out.strip()}")
+
     # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
     # is an empty/truncated payload the machine can't install.
     _MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
 
-    def _verify_output_payload(self):
+    def _verify_output_payload(self, expect_clean_journal=False):
         """Read the FINISHED output .img's ``/emmc.img`` back and abort if it's
         empty/truncated -- the last line of defence before the user flashes.
 
@@ -1039,12 +1083,29 @@ class WritePipeline(BasePipeline):
         machine then SHELL-ERRORs because ``dcfldd`` has nothing to copy.
         Reads only the inode (cheap, pure-Python ext4 -- no WSL), so it works
         even after the executor staging is gone.
+
+        With ``expect_clean_journal`` (the modified-build path), also read
+        P3's superblock and refuse to ship an armed ext4 journal
+        (``needs_recovery``): the machine's first mount would replay stale
+        factory transactions over this build's debugfs edits and revert the
+        payload to a 0-byte inode -- the proven SHELL ERROR mechanism.  The
+        no-op path keeps stock bytes (armed journal and all), which is
+        exactly what a factory card ships and installs fine.
         """
         from ..stern.ext4 import Ext4Error, Ext4Reader
         self._log("Verifying finished payload (output emmc.img)...", "info")
+        recover_armed = None
         try:
             data_part = find_data_partition(self.output_img)
             with open(self.output_img, "rb") as f:
+                if expect_clean_journal:
+                    f.seek(data_part["start_bytes"] + 1024)
+                    sb = f.read(1024)
+                    # s_magic @0x38, s_feature_incompat @0x60;
+                    # EXT3_FEATURE_INCOMPAT_RECOVER = 0x0004.
+                    if sb[0x38:0x3A] == b"\x53\xEF":
+                        incompat = struct.unpack("<I", sb[0x60:0x64])[0]
+                        recover_armed = bool(incompat & 0x0004)
                 r = Ext4Reader(f, data_part["start_bytes"],
                                data_part["size_bytes"])
                 ino = 2
@@ -1064,6 +1125,13 @@ class WritePipeline(BasePipeline):
             # path's own guards already covered the re-pack.
             self._log(f"  (payload verify skipped: {e})", "info")
             return
+        if recover_armed:
+            raise PipelineError("Verify",
+                f"The finished installer's data partition still has an "
+                f"armed ext4 journal (needs_recovery). At first mount the "
+                f"machine would replay stale factory transactions over this "
+                f"build's modifications, reverting the payload (SHELL "
+                f"ERROR). The build was aborted; do not flash this image.")
         if size < self._MIN_PLAUSIBLE_EMMC:
             raise PipelineError("Verify",
                 f"The finished installer holds an empty or truncated emmc.img "
@@ -1126,6 +1194,60 @@ class WritePipeline(BasePipeline):
                 f"or a corrupt eMMC. The build was aborted; the original "
                 f"image is unchanged.\n\ndebugfs stat output:\n{out.strip()}")
 
+    def _replay_stale_journal(self, image_exec, label):
+        """Replay and retire a stale ext4 journal BEFORE debugfs edits.
+
+        CGC masters their installer partitions by yanking the card without a
+        clean unmount, so stock images ship with ``needs_recovery`` set and
+        the factory's final transactions still pending in the journal.  On a
+        stock card that replay is a harmless no-op (the on-disk state already
+        matches), which is why factory installs work.  But debugfs bypasses
+        the journal entirely: if we modify the filesystem and ship the stale
+        journal armed, the machine's kernel replays the FACTORY transactions
+        over OUR metadata at first mount -- on Pulp Fiction that reverts
+        /emmc.img to a deleted 0-byte factory placeholder inode and the
+        install dies with a SHELL ERROR (proven on two real machines; both
+        failed cards showed the identical reverted inode, 0 bytes / 2023-06-28).
+        Neither ``e2fsck -fn`` (which skips journal recovery) nor our
+        pure-Python ext4 reader (which ignores journals) can see this armed
+        state, so it must be defused here, not detected later.
+        """
+        out = self.executor.run(
+            f"dumpe2fs -h {shlex.quote(image_exec)} 2>&1", timeout=60)
+        if "needs_recovery" not in out:
+            return
+        self._log(
+            f"  {label}: factory journal left armed (needs_recovery) -- "
+            f"replaying it now so the machine can't replay it over the "
+            f"modifications.", "info")
+        out = self.executor.run(
+            f"e2fsck -fy {shlex.quote(image_exec)} 2>&1; echo __RC__$?",
+            timeout=900)
+        rc = out.rsplit("__RC__", 1)[-1].strip()
+        body = out.rsplit("__RC__", 1)[0].strip()
+        # 0 = clean after replay (stock images), 1 = e2fsck corrected
+        # something.  Anything else means the source fs is genuinely damaged.
+        if rc not in ("0", "1"):
+            raise PipelineError("Stage partitions",
+                f"Replaying the {label}'s stale journal failed (e2fsck exit "
+                f"{rc}) -- the source image's filesystem is damaged and can't "
+                f"be built on. If this source .img was produced by an older "
+                f"version of this app, rebuild from a factory installer "
+                f"image.\n\ne2fsck output:\n{body}")
+        if rc == "1":
+            self._log(
+                f"  {label}: e2fsck corrected inconsistencies during the "
+                f"replay (usually a source .img built by an older app "
+                f"version). Downstream payload checks will confirm the "
+                f"result.\n{body}", "info")
+        check = self.executor.run(
+            f"dumpe2fs -h {shlex.quote(image_exec)} 2>&1", timeout=60)
+        if "needs_recovery" in check:
+            raise PipelineError("Stage partitions",
+                f"The {label}'s journal is still marked needs_recovery after "
+                f"replay -- refusing to build an image the machine would "
+                f"corrupt at first mount.")
+
     def _verify_partition_fs(self, image_exec, label):
         """Read-only e2fsck of a re-packed ext4 partition image; abort on any
         inconsistency.
@@ -1149,6 +1271,19 @@ class WritePipeline(BasePipeline):
                 f"(a corrupt ext4 the on-machine kernel can't mount). The "
                 f"build was aborted; the original image is unchanged.\n\n"
                 f"e2fsck output:\n{out.rsplit('__RC__', 1)[0].strip()}")
+        # e2fsck -fn deliberately SKIPS journal recovery, so it returns 0 even
+        # when the journal is still armed with stale factory transactions the
+        # machine would replay over this build's edits.  The replay step
+        # upstream should have retired it; fail loudly if any path forgot.
+        feats = self.executor.run(
+            f"dumpe2fs -h {shlex.quote(image_exec)} 2>&1", timeout=60)
+        if "needs_recovery" in feats:
+            raise PipelineError("Write",
+                f"The re-packed {label} still has an armed ext4 journal "
+                f"(needs_recovery). The machine would replay stale factory "
+                f"transactions over the modifications at first mount and the "
+                f"install would fail with a SHELL ERROR. The build was "
+                f"aborted; the original image is unchanged.")
 
 
 # ---------------------------------------------------------------------------
@@ -1287,7 +1422,16 @@ def _diff_assets(assets_dir, baseline):
             if md5_file(abs_path) != orig_md5:
                 changed[rel_norm] = abs_path
             continue
-        # Original path is gone -- look for a renamed sibling.
+        # Original path is gone -- look for a renamed sibling.  But never
+        # via a bank-decode subdir: a stale baseline that still holds the
+        # pre-rename key ("data/pfmusic/pfmusic_sound_000.wav") would
+        # resolve to the renamed WAV and ship it as a standalone asset --
+        # a path that doesn't even exist inside the inner ext4 (the .bnk
+        # parent carries the edit; the repack already consumed it).
+        rel_dir = rel_norm.rsplit("/", 1)[0] + "/" if "/" in rel_norm else ""
+        if rel_dir and any(f.startswith(rel_dir) for f in jps_subdir_files):
+            consumed_on_disk.add(rel_norm)
+            continue
         renamed_abs = _find_renamed_sibling(assets_dir, rel)
         if renamed_abs is None:
             missing.append(rel)
@@ -1321,7 +1465,10 @@ def _diff_assets(assets_dir, baseline):
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
                     or fn == CALLOUTS_CSV
-                    or fn.startswith(".")):
+                    or fn.startswith(".")
+                    # repack scratch (ours); a leftover from an interrupted
+                    # build must never ship as a "new" 233 MB asset.
+                    or fn.endswith(".repack_tmp")):
                 continue
             abs_path = os.path.join(dirpath, fn)
             rel = os.path.relpath(abs_path, assets_dir).replace("\\", "/")
@@ -1450,11 +1597,21 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
                     f"stray WAVs that don't belong to this bank, and "
                     f"build again.")
             if summary.get("modified_count", 0) > 0:
-                # User actually edited something -- replace .bnk.
+                # User actually edited something -- replace .bnk.  A failure
+                # here (AV/indexer lock on a 233 MB file) must be loud: the
+                # unmodified bank would ship (silent no-op build) AND the
+                # .repack_tmp left behind would be picked up as a brand-new
+                # asset by the diff walk.
                 try:
                     os.replace(tmp_path, bnk_sibling)
-                except OSError:
-                    pass
+                except OSError as e:
+                    raise PipelineError(
+                        "Detect",
+                        f"Rebuilt {d}.bnk but could not replace the "
+                        f"original file ({e}). Another program (antivirus, "
+                        f"indexer, an audio editor) may be holding it open. "
+                        f"Close it and build again; your edits were NOT "
+                        f"applied.")
             else:
                 # Nothing changed -- discard the temp (identical to
                 # the original anyway).
@@ -1685,7 +1842,7 @@ def _verify_executor_tools(executor):
         raise PipelineError("Detect",
             f"Executor not available: {msg}\n\n"
             f"On Windows, install WSL2 via: wsl --install -d Ubuntu")
-    for tool in ("debugfs", "dd", "xxd"):
+    for tool in ("debugfs", "dd", "xxd", "e2fsck", "dumpe2fs"):
         try:
             executor.run(f"command -v {tool} >/dev/null", timeout=10)
         except CommandError:

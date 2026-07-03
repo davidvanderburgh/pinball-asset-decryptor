@@ -51,10 +51,11 @@ def test_diagnose_reads_stock_pf_installer():
     assert logs and logs[-1] == "Done."
 
 
-def test_assess_payload_flags_empty_carried_from_source():
-    """RTS's Pulp Fiction card: a 0-byte /emmc.img dated 2023 (older than the
-    build) is the SHELL ERROR, and the verdict must say it came IN with the
-    source .img."""
+def test_assess_payload_flags_empty_old_mtime_names_journal_revert():
+    """The 0-byte /emmc.img dated 2023 (older than the build) is the SHELL
+    ERROR, and the verdict must name the proven mechanism: the machine's
+    boot-time replay of the stale factory journal reverting a pre-v0.36.0
+    modded build (with bad-source as the fallback for never-booted images)."""
     import datetime as dt
     from pinball_decryptor.plugins.cgc.diagnose import _assess_payload_size
 
@@ -64,7 +65,8 @@ def test_assess_payload_flags_empty_carried_from_source():
     assert msg is not None
     assert "0 bytes" in msg
     assert "SHELL ERROR" in msg
-    assert "source .img" in msg and "ORIGINAL image" in msg
+    assert "replayed it OVER" in msg and "v0.36.0" in msg
+    assert "source .img" in msg  # never-booted fallback still mentioned
 
 
 def test_assess_payload_fresh_mtime_blames_build():

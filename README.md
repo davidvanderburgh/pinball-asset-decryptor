@@ -300,6 +300,16 @@ filesystem-checks the rebuilt game partition and verifies the re-packed
 silently-corrupt build is caught at build time instead of on the
 machine.
 
+The most important thing the diagnostics know about: CGC's factory
+images ship their data partition with an unfinished ext4 journal, and
+on any card built by a version older than v0.36.0 the machine's first
+mount would silently replay that stale factory journal over the
+build's modifications — reverting the payload and failing the install
+with SHELL ERROR even though the card verified perfectly after
+flashing. Builds made with v0.36.0+ retire the journal automatically;
+the diagnostics flag any older modded card that still carries the armed
+journal so you know to rebuild it rather than blame the card.
+
 ## Install
 
 ### Windows

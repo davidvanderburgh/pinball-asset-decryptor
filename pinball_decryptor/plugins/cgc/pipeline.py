@@ -1348,6 +1348,11 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
     pegged CPU per build even when a single file changed (RTS's "first 3
     minutes crush my processor").  We gate on the content md5s we already
     have, so a real edit is never missed -- only untouched banks are skipped.
+
+    Raises ``PipelineError`` when the user edited WAV(s) in a bank but the
+    repack either failed or could not match those file(s) to a sound slot
+    by name -- both used to degrade to a silent "no modifications"
+    byte-for-byte build that reported success while dropping the mod.
     """
     from .jps_bnk import repack_bnk
     decoded_subdir_files = set()
@@ -1358,23 +1363,32 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
                 continue
             subdir_path = os.path.join(dirpath, d)
             # Collect every file under <X>/ so callers can skip them, and
-            # note whether any WAV differs from its baseline md5.
-            bank_changed = baseline is None  # no baseline -> always repack
+            # every WAV whose content differs from its baseline md5 (or
+            # that isn't in the baseline at all).  We gather the FULL
+            # edited set, not just the first hit: it feeds the
+            # consumed-check after repack, which is what catches a user
+            # edit the repacker failed to match by name.  A transcribed
+            # extract renames every WAV ("pfmusic_sound_000 - music.wav"),
+            # and before that check existed a rename the resolver didn't
+            # understand meant every buffer was preserved verbatim,
+            # modified_count == 0, and the build "succeeded" as a
+            # byte-for-byte copy -- the user's mod silently vanished.
+            edited_wavs = []
             for sub_dirpath, _, sub_files in os.walk(subdir_path):
                 for fn in sub_files:
                     abs_p = os.path.join(sub_dirpath, fn)
                     rel = os.path.relpath(
                         abs_p, assets_dir).replace("\\", "/")
                     decoded_subdir_files.add(rel)
-                    if bank_changed or not fn.lower().endswith(".wav"):
+                    if baseline is None or not fn.lower().endswith(".wav"):
                         continue
                     base_md5 = baseline.get(rel) or baseline.get(
                         rel.replace("/", "\\"))
                     # A new WAV (not in baseline) or a content change flags
                     # the bank for repack.  Only .wav edits affect the bnk.
                     if base_md5 is None or md5_file(abs_p) != base_md5:
-                        bank_changed = True
-            if not bank_changed:
+                        edited_wavs.append(abs_p)
+            if baseline is not None and not edited_wavs:
                 # Every WAV matches the extract -- the .bnk is already
                 # current, skip the decompress-and-rewrite entirely.
                 continue
@@ -1384,16 +1398,57 @@ def _repack_modified_jps_bnks(assets_dir, baseline=None):
             tmp_path = bnk_sibling + ".repack_tmp"
             try:
                 summary = repack_bnk(bnk_sibling, subdir_path, tmp_path)
-            except Exception:
-                # Leave the .bnk untouched if anything goes wrong -- the
-                # main Write pipeline will still ship the unmodified
-                # version.
+            except Exception as e:
                 if os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
                     except OSError:
                         pass
+                if edited_wavs:
+                    # The user edited WAV(s) in this bank but the repack
+                    # blew up -- shipping the unmodified .bnk would be a
+                    # silent no-op build, so stop loudly instead.
+                    raise PipelineError(
+                        "Detect",
+                        f"You modified audio in {d}/ but rebuilding "
+                        f"{d}.bnk failed, so your change(s) would NOT "
+                        f"make it into the update:\n  {e}\n\n"
+                        f"Fix the file(s) below (or restore them from the "
+                        f"extract) and build again:\n  "
+                        + "\n  ".join(os.path.relpath(p, assets_dir)
+                                      for p in edited_wavs[:10]))
+                # No user edits in this bank (always-repack mode) --
+                # the unmodified original is still valid, carry on.
                 continue
+            # Loud no-op guard: every edited WAV must have been matched to
+            # a buffer by the repacker.  An edited file it couldn't
+            # resolve (unrecognized rename, stray file) would otherwise
+            # be dropped without a trace.
+            consumed = {os.path.normcase(b["wav"])
+                        for b in summary.get("buffers", []) if b.get("wav")}
+            orphans = [p for p in edited_wavs
+                       if os.path.normcase(p) not in consumed]
+            if orphans:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                rels = [os.path.relpath(p, assets_dir) for p in orphans]
+                raise PipelineError(
+                    "Detect",
+                    f"You modified {len(orphans)} audio file(s) in {d}/ "
+                    f"that could not be matched to any sound slot in "
+                    f"{d}.bnk, so your change(s) would NOT make it into "
+                    f"the update:\n  " + "\n  ".join(rels[:10])
+                    + (f"\n  ... and {len(rels) - 10} more"
+                       if len(rels) > 10 else "")
+                    + f"\n\nEach WAV must keep its extracted name -- "
+                    f"'{d}_sound_NNN.wav' or "
+                    f"'{d}_sound_NNN - <any text>.wav' (exactly one file "
+                    f"per slot).  Rename the file(s) back, or remove "
+                    f"stray WAVs that don't belong to this bank, and "
+                    f"build again.")
             if summary.get("modified_count", 0) > 0:
                 # User actually edited something -- replace .bnk.
                 try:

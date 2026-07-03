@@ -493,6 +493,11 @@ def repack_bnk(original_bnk_path: str, modified_wavs_dir: str,
             "new_size": len(new_payload),
             "size_delta": len(new_payload) - len(original_payload),
             "modified": was_modified,
+            # The WAV this buffer resolved to (None if no file matched).
+            # Callers use this to verify every user-edited WAV was
+            # actually consumed by some buffer -- an edited file the
+            # resolver can't match would otherwise vanish silently.
+            "wav": wav_path,
         })
 
         new_data.extend(new_payload)
@@ -517,17 +522,35 @@ def _resolve_wav_path(wavs_dir: str, bnk_basename: str,
     """Find the WAV file that corresponds to a given buffer index.
 
     Tries the canonical name first (``<bnk>_sound_NNN.wav``) then
-    falls back to ``sound_NNN.wav`` (older convention).  Returns the
-    first match or None.
+    falls back to ``sound_NNN.wav`` (older convention).  If neither
+    exists, looks for a transcribe-renamed sibling: Extract's
+    auto-transcribe step renames WAVs to ``<stem> - <transcript>.wav``
+    (strict " - " separator, same convention as the Write pipeline's
+    ``_find_renamed_sibling``), and Replace Audio then stages the
+    user's track over the *renamed* file -- without this fallback no
+    audio mod on a transcribed extract ever reaches the bank.  A
+    renamed lookup only counts when it's unique; multiple matches are
+    ambiguous, so we return None rather than guess (the pipeline-level
+    consumed-check turns that into a loud abort, not a silent
+    unmodified build).
     """
-    candidates = [
-        f"{bnk_basename}_sound_{buf_index:03d}.wav",
-        f"sound_{buf_index:03d}.wav",
+    import glob
+    stems = [
+        f"{bnk_basename}_sound_{buf_index:03d}",
+        f"sound_{buf_index:03d}",
     ]
-    for name in candidates:
-        p = os.path.join(wavs_dir, name)
+    for stem in stems:
+        p = os.path.join(wavs_dir, stem + ".wav")
         if os.path.isfile(p):
             return p
+    for stem in stems:
+        pattern = os.path.join(glob.escape(wavs_dir),
+                               f"{glob.escape(stem)} - *.wav")
+        matches = glob.glob(pattern)
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return None  # ambiguous -- refuse to guess
     return None
 
 

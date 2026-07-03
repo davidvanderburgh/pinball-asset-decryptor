@@ -240,6 +240,154 @@ def test_repack_with_edit_preserves_modification(synthetic_bnk_path,
         assert orig_pcm == re_pcm, f"untouched buffer {i} got mangled"
 
 
+def _write_wav(path, pcm, rate=None, channels=None):
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(channels or jps_bnk.CHANNELS)
+        w.setsampwidth(jps_bnk.SAMPLE_WIDTH_BYTES)
+        w.setframerate(rate or jps_bnk.SAMPLE_RATE)
+        w.writeframes(pcm)
+
+
+def test_repack_matches_transcribe_renamed_wav(synthetic_bnk_path, tmp_path):
+    """Extract's auto-transcribe renames WAVs to ``<stem> - <text>.wav``
+    and Replace Audio stages the user's track over the *renamed* file.
+    The repacker must still map it back to its buffer -- before the
+    rename-aware fallback existed, every buffer was preserved verbatim
+    (modified_count == 0) and the Write build degenerated to a silent
+    byte-for-byte copy ("No modified files found")."""
+    bnk_path, _ = synthetic_bnk_path
+    out_dir = tmp_path / "extract"
+    jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+
+    renamed = out_dir / "test_sound_001 - Bring out the gimp.wav"
+    os.rename(out_dir / "test_sound_001.wav", renamed)
+    new_pcm = _sine_pcm(150, 1320)
+    _write_wav(renamed, new_pcm)
+
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir),
+                                  str(repacked))
+    assert summary["modified_count"] == 1
+    assert summary["buffers"][1]["modified"] is True
+    assert summary["buffers"][1]["wav"] == str(renamed)
+
+    re_dir = tmp_path / "re_extract"
+    jps_bnk.extract_bnk(str(repacked), str(re_dir))
+    with wave.open(str(re_dir / "repacked_sound_001.wav"), "rb") as w:
+        assert w.readframes(w.getnframes()) == new_pcm
+
+
+def test_repack_refuses_ambiguous_renamed_wavs(synthetic_bnk_path,
+                                                tmp_path):
+    """Two ``<stem> - *.wav`` siblings for the same slot are ambiguous --
+    the resolver must not guess (the pipeline-level consumed-check turns
+    the unmatched edit into a loud abort)."""
+    bnk_path, _ = synthetic_bnk_path
+    out_dir = tmp_path / "extract"
+    jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+
+    orig = out_dir / "test_sound_001.wav"
+    stock_bytes = orig.read_bytes()
+    os.rename(orig, out_dir / "test_sound_001 - take one.wav")
+    (out_dir / "test_sound_001 - take two.wav").write_bytes(stock_bytes)
+    _write_wav(out_dir / "test_sound_001 - take one.wav",
+               _sine_pcm(150, 1320))
+
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir),
+                                  str(repacked))
+    assert summary["modified_count"] == 0
+    assert summary["buffers"][1]["wav"] is None
+    assert bnk_path.read_bytes() == repacked.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Write-pipeline pre-step: renamed edits must be detected, and edits the
+# repacker can't place must abort loudly (never a silent no-op build).
+# ---------------------------------------------------------------------------
+
+def _make_bank_assets(tmp_path):
+    """An assets dir shaped like a PF extract: data/pf.bnk + decoded
+    data/pf/ subdir.  Returns (assets_root, bnk_path, subdir_path)."""
+    assets = tmp_path / "assets"
+    (assets / "data").mkdir(parents=True)
+    bnk = assets / "data" / "pf.bnk"
+    bnk.write_bytes(_build_synthetic_bnk(
+        "pf.txt", [_sine_pcm(100, 440), _sine_pcm(200, 880)]))
+    jps_bnk.extract_bnk(str(bnk), str(assets / "data" / "pf"))
+    return assets, bnk, assets / "data" / "pf"
+
+
+def test_diff_detects_edit_on_transcribe_renamed_wav(tmp_path):
+    """End-to-end shape of the real failure: transcribed extract (all
+    WAVs renamed, baseline re-pointed), one renamed WAV edited ->
+    _diff_assets must repack the bank and report the .bnk as changed."""
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.cgc import pipeline as cgc_pipeline
+
+    assets, bnk, sub = _make_bank_assets(tmp_path)
+    baseline = {"data/pf.bnk": md5_file(str(bnk))}
+    for i, label in enumerate(["music", "Zed's dead baby"]):
+        renamed = sub / f"pf_sound_{i:03d} - {label}.wav"
+        os.rename(sub / f"pf_sound_{i:03d}.wav", renamed)
+        baseline[f"data/pf/{renamed.name}"] = md5_file(str(renamed))
+
+    new_pcm = _sine_pcm(150, 1320)
+    _write_wav(sub / "pf_sound_000 - music.wav", new_pcm)
+
+    changed, missing = cgc_pipeline._diff_assets(str(assets), baseline)
+    assert "data/pf.bnk" in changed
+    assert not missing
+    assert not any(k.endswith(".wav") for k in changed)
+
+    re_dir = tmp_path / "re_extract"
+    jps_bnk.extract_bnk(str(bnk), str(re_dir))
+    with wave.open(str(re_dir / "pf_sound_000.wav"), "rb") as w:
+        assert w.readframes(w.getnframes()) == new_pcm
+
+
+def test_diff_aborts_loudly_on_unmatchable_edited_wav(tmp_path):
+    """An edited WAV the repacker can't map to a slot (rename that broke
+    the naming convention) must abort the build, not ship an unmodified
+    image that reports success."""
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.cgc import pipeline as cgc_pipeline
+
+    assets, bnk, sub = _make_bank_assets(tmp_path)
+    baseline = {"data/pf.bnk": md5_file(str(bnk))}
+    for fn in os.listdir(sub):
+        if fn.endswith(".wav"):
+            baseline[f"data/pf/{fn}"] = md5_file(str(sub / fn))
+
+    broken = sub / "royale with cheese.wav"
+    os.rename(sub / "pf_sound_001.wav", broken)
+    _write_wav(broken, _sine_pcm(150, 1320))
+
+    with pytest.raises(cgc_pipeline.PipelineError,
+                       match="could not be matched"):
+        cgc_pipeline._diff_assets(str(assets), baseline)
+
+
+def test_diff_aborts_loudly_when_repack_fails(tmp_path):
+    """A repack failure on a bank the user edited (e.g. wrong WAV format)
+    must abort the build instead of silently shipping the stock .bnk."""
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.cgc import pipeline as cgc_pipeline
+
+    assets, bnk, sub = _make_bank_assets(tmp_path)
+    baseline = {"data/pf.bnk": md5_file(str(bnk))}
+    for fn in os.listdir(sub):
+        if fn.endswith(".wav"):
+            baseline[f"data/pf/{fn}"] = md5_file(str(sub / fn))
+
+    # Wrong sample rate + mono -> repack_bnk raises ValueError inside.
+    _write_wav(sub / "pf_sound_000.wav", b"\x00\x00" * 1000,
+               rate=22050, channels=1)
+
+    with pytest.raises(cgc_pipeline.PipelineError, match="failed"):
+        cgc_pipeline._diff_assets(str(assets), baseline)
+
+
 def test_repack_rejects_mismatched_audio_format(synthetic_bnk_path,
                                                  tmp_path):
     """Different sample rate / channels should raise rather than

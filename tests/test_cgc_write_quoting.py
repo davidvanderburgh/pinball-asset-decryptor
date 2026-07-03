@@ -276,6 +276,53 @@ def test_verify_repacked_emmc_accepts_exact_size():
     wp._verify_repacked_emmc("/tmp/p3.img", "/tmp/emmc.img")  # no raise
 
 
+class _FakeExt4Reader:
+    """Minimal stand-in: root dir holds one file 'emmc.img' of *size* bytes."""
+    _EMMC_INO = 14
+
+    def __init__(self, size):
+        self._size = size
+
+    def read_inode(self, ino):
+        return {"size": self._size if ino == self._EMMC_INO else 0,
+                "mode": 0x8000}
+
+    def _iter_dir(self, node):
+        yield ("emmc.img", self._EMMC_INO, 1)
+
+
+def _run_output_guard(tmp_path, monkeypatch, emmc_size):
+    img = tmp_path / "out.img"
+    img.write_bytes(b"\x00" * 512)  # just needs to be openable
+    monkeypatch.setattr(cgc_pipeline, "find_data_partition",
+                        lambda p: {"start_bytes": 0, "size_bytes": 1 << 30})
+    import pinball_decryptor.plugins.stern.ext4 as ext4mod
+    monkeypatch.setattr(ext4mod, "Ext4Reader",
+                        lambda f, off, sz: _FakeExt4Reader(emmc_size))
+    wp = WritePipeline.__new__(WritePipeline)
+    wp.output_img = str(img)
+    wp._log = lambda *a, **k: None
+    wp._verify_output_payload()
+
+
+def test_output_payload_guard_aborts_on_empty(tmp_path, monkeypatch):
+    """The finished-output guard must reject a 0-byte emmc.img -- the no-op
+    copy path's only defence against a source whose payload is empty (RTS's
+    recurring 0-byte/2023 payload copied straight through to the card)."""
+    with pytest.raises(cgc_pipeline.PipelineError) as ei:
+        _run_output_guard(tmp_path, monkeypatch, 0)
+    assert "empty or truncated" in str(ei.value)
+
+
+def test_output_payload_guard_aborts_on_truncated(tmp_path, monkeypatch):
+    with pytest.raises(cgc_pipeline.PipelineError):
+        _run_output_guard(tmp_path, monkeypatch, 100 * 1024 * 1024)
+
+
+def test_output_payload_guard_accepts_real_payload(tmp_path, monkeypatch):
+    _run_output_guard(tmp_path, monkeypatch, 3_640_655_872)  # no raise
+
+
 def test_diff_excludes_orig_snapshots(tmp_path):
     """The ``.orig/`` pristine-snapshot store (core.staged_originals) must
     never be diffed as a game asset -- otherwise its files get written into

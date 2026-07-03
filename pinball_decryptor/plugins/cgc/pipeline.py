@@ -828,6 +828,11 @@ class WritePipeline(BasePipeline):
 
         if not changed:
             self._set_phase(3)
+            # Even a verbatim copy must hold a real payload: this path runs no
+            # other guard, so a source whose emmc.img is empty (RTS's recurring
+            # 0-byte/2023 payload, copied straight through) would otherwise
+            # ship a card the machine SHELL-ERRORs on.
+            self._verify_output_payload()
             self._log("Done (no changes applied).", "success")
             self._done(True,
                 f"{info['display']} installer rebuilt (no modifications).\n\n"
@@ -945,6 +950,11 @@ class WritePipeline(BasePipeline):
             except Exception:
                 pass
 
+        # Final backstop: read the finished output's payload back and confirm
+        # it's real, whatever happened upstream (a bad source, a stale mount,
+        # a partial write).  Same check the no-op path runs.
+        self._verify_output_payload()
+
         self._log("Done.", "success")
         self._done(True,
             f"{info['display']} installer rebuilt with "
@@ -1017,6 +1027,56 @@ class WritePipeline(BasePipeline):
     # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
     # is an empty/truncated payload the machine can't install.
     _MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
+
+    def _verify_output_payload(self):
+        """Read the FINISHED output .img's ``/emmc.img`` back and abort if it's
+        empty/truncated -- the last line of defence before the user flashes.
+
+        This runs on BOTH build paths, including the no-op/verbatim-copy path
+        that otherwise has no guard at all.  It is what finally catches RTS's
+        recurring 0-byte payload: a source .img whose ``emmc.img`` is empty
+        (his was 0 bytes, dated 2023) gets copied straight through, and the
+        machine then SHELL-ERRORs because ``dcfldd`` has nothing to copy.
+        Reads only the inode (cheap, pure-Python ext4 -- no WSL), so it works
+        even after the executor staging is gone.
+        """
+        from ..stern.ext4 import Ext4Error, Ext4Reader
+        self._log("Verifying finished payload (output emmc.img)...", "info")
+        try:
+            data_part = find_data_partition(self.output_img)
+            with open(self.output_img, "rb") as f:
+                r = Ext4Reader(f, data_part["start_bytes"],
+                               data_part["size_bytes"])
+                ino = 2
+                for part in EMMC_INNER_PATH.strip("/").split("/"):
+                    found = None
+                    for name, child, _ft in r._iter_dir(r.read_inode(ino)):
+                        if name == part:
+                            found = child
+                            break
+                    if found is None:
+                        ino = None
+                        break
+                    ino = found
+                size = r.read_inode(ino)["size"] if ino else 0
+        except (Ext4Error, OSError, ValueError) as e:
+            # Don't false-abort a good build over a read hiccup; the modified
+            # path's own guards already covered the re-pack.
+            self._log(f"  (payload verify skipped: {e})", "info")
+            return
+        if size < self._MIN_PLAUSIBLE_EMMC:
+            raise PipelineError("Verify",
+                f"The finished installer holds an empty or truncated emmc.img "
+                f"payload ({size:,} bytes; a real one is 2-4 GB). The machine "
+                f"would reject it with a SHELL ERROR -- its copy step has "
+                f"nothing to write. This almost always means the ORIGINAL "
+                f".img you built from already has an empty payload: run Card "
+                f"diagnostics on that exact source file to confirm, then "
+                f"re-image it from a known-good installer. The build was "
+                f"aborted; nothing was flashed.")
+        self._log(
+            f"  Output payload OK ({size / 1024 ** 3:.2f} GiB emmc.img).",
+            "success")
 
     def _verify_dumped_emmc(self, emmc_exec):
         """Reject an empty/truncated emmc.img dumped out of the source P3.

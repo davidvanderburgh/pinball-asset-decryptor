@@ -398,6 +398,11 @@ class MainWindow:
         # online AcoustID + MusicBrainz lookup of each full music track and
         # renames it by song title (preferring the pin's band).
         self.music_id_var = tk.BooleanVar(value=False)
+        # Length-prefixed extract names (capabilities.audio_duration_names):
+        # when ON, extracted audio is named "01m22s235 - idx0001.wav" so a
+        # name sort orders by play length — the stable key for lining sounds
+        # up across firmware versions, where slot indexes shift (monkeybug).
+        self.duration_names_var = tk.BooleanVar(value=False)
         # Whether the currently-selected extract input is a game whose
         # audio we can export (drives the Auto-transcribe controls +
         # the "Extract audio" phase).  Re-probed on every input change;
@@ -491,8 +496,13 @@ class MainWindow:
         self._apply_theme(self._current_theme)
 
         self.extract_input_var.trace_add("write", self._update_extract_badge)
-        self.extract_output_var.trace_add("write", self._check_extract_warn)
         self.write_upd_var.trace_add("write", self._update_write_badge)
+        # Default the Write Output Folder off the original image's location
+        # the first time an original is picked (monkeybug: the box starting
+        # blank forced an extra Browse; the -modified suffix already prevents
+        # name clashes with the source).
+        self.write_upd_var.trace_add(
+            "write", lambda *_: self._maybe_default_write_output())
         self.write_upd_var.trace_add(
             "write", lambda *_: self._update_write_filename())
         self.write_output_var.trace_add(
@@ -533,10 +543,17 @@ class MainWindow:
         top = ttk.Frame(root)
         self._top_bar = top  # banner uses this as `before=` anchor
         top.pack(fill=tk.X, padx=10, pady=(8, 0))
-        # Back button — hidden until the user has picked a manufacturer.
+        # Back-to-picker button — hidden until the user has picked a
+        # manufacturer.  A house glyph rather than "< Back" so it matches the
+        # header's ?/⚙ icon set (monkeybug): Segoe MDL2 "Home" on Windows
+        # (same font/style as the gear — see the glyph comment below), text
+        # "⌂" elsewhere.  The tooltip carries the words the icon dropped.
+        home_glyph = "" if sys.platform == "win32" else "⌂"
         self._back_btn = ttk.Button(
-            top, text="< Back", width=8,
+            top, text=home_glyph, width=3, style="Icon.TButton",
             command=self._handle_back)
+        _Tooltip(self._back_btn, "Back to game selection",
+                 lambda: self._current_theme)
         # not packed yet — show_mfr_view() does that
         self._title_lbl = ttk.Label(
             top, text=self._app_title,
@@ -843,7 +860,7 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._extract_input_row, text="Browse...",
                    command=self._browse_extract_input).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
         self._extract_input_row.pack(fill=tk.X, **pad)
 
         # SSD drive-picker row — shown when source == "ssd".  Created
@@ -862,7 +879,7 @@ class MainWindow:
             lambda _e: self._on_drive_selected("extract"))
         ttk.Button(self._extract_drive_row, text="Refresh",
                    command=lambda: self._refresh_drives("extract")).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
 
         # We previously surfaced a "Force partition #" entry here, but
         # it spooked users — a numeric override field next to a
@@ -926,22 +943,12 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._extract_output_row_ref, text="Browse...",
                    command=self._browse_extract_output).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
 
-        # Output-folder warning ("folder is not empty…").  Wrapped in a
-        # row with a width=14 spacer — same trick as the badge row above —
-        # so its left edge lines up under the Output Folder *entry* (not
-        # the frame edge), matching the path box directly above it.
-        self._extract_warn_row = ttk.Frame(f)
-        # Same (0, 2) pady as the detect-badge row above, so the whitespace
-        # below Output Folder matches the whitespace below Card image and the
-        # three steps sit evenly (monkeybug Extract #1).
-        self._extract_warn_row.pack(fill=tk.X, padx=10, pady=(0, 2))
-        ttk.Label(self._extract_warn_row, text="", width=14).pack(side=tk.LEFT)
-        self._extract_warn = ttk.Label(
-            self._extract_warn_row, text="", foreground="#f44747",
-            font=(_SANS_FONT, 9))
-        self._extract_warn.pack(side=tk.LEFT, anchor=tk.W)
+        # NOTE: a red "Output folder is not empty — files may be overwritten."
+        # label used to live here, but the Extract click already raises a
+        # confirm dialog for that case, so the always-on inline warning was
+        # redundant noise eating a row of vertical space (monkeybug).
 
         # BOF-only callout — explains the custom-format conversion the
         # Extract pipeline does behind the scenes.  Built but not packed;
@@ -1182,6 +1189,22 @@ class MainWindow:
             "artist + title — e.g. “Led Zeppelin - Kashmir”. Needs internet.",
             lambda: self._current_theme)
 
+        # Length-prefix names (capabilities.audio_duration_names) — see the
+        # duration_names_var comment for what it does and why.
+        self._duration_names_frame = ttk.Frame(self._extract_options_row)
+        self._duration_names_check = ttk.Checkbutton(
+            self._duration_names_frame,
+            text="Length-prefix names",
+            variable=self.duration_names_var)
+        self._duration_names_check.pack(side=tk.LEFT)
+        _Tooltip(
+            self._duration_names_check,
+            "Lead each extracted sound's filename with its play length — "
+            "e.g. “01m22s235 - idx0001.wav” — so sorting by name lines the "
+            "same sounds up across firmware versions (slot numbers shift "
+            "between releases; play lengths rarely do).",
+            lambda: self._current_theme)
+
         # Decode DMD checkbox -- packed only when the active manufacturer
         # has capabilities.decode_dmd (currently just CGC).  When ON,
         # Extract decodes the bundled Williams WPC ROM into PNG scenes
@@ -1248,13 +1271,10 @@ class MainWindow:
         f = self._tab_write
         pad = {"padx": 10, "pady": 4}
 
-        # Static intro (manufacturer-aware; set in apply_manufacturer).  The
-        # default ISO-build wording is wrong for an SD-card plugin like Stern.
-        self._write_intro_lbl = ttk.Label(
-            f,
-            text="Re-pack modified assets into an installable update file.",
-            font=(_SANS_FONT, 9, "italic"))
-        self._write_intro_lbl.pack(anchor=tk.W, **pad)
+        # NOTE: a static per-manufacturer intro label (mfr.write_intro()) used
+        # to lead this tab, but it doubled up with the mode-aware description
+        # below the source toggle (_write_desc) — one paragraph of guidance on
+        # the tab is enough; the rest lives in the "?" tips window (monkeybug).
 
         # Write-destination toggle (hidden for plugins without
         # direct_ssd).  Action-oriented language here — writes have
@@ -1294,7 +1314,7 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_upd_row, text="Browse...",
                    command=self._browse_write_upd).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
         self._write_upd_row.pack(fill=tk.X, **pad)
 
         # SSD drive picker.
@@ -1314,7 +1334,7 @@ class MainWindow:
             lambda _e: self._on_drive_selected("write"))
         ttk.Button(self._write_drive_row, text="Refresh",
                    command=lambda: self._refresh_drives("write")).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
 
         # See the extract tab for why the "Force partition #" field
         # is intentionally absent.  Same content-verify auto-pick.
@@ -1375,7 +1395,7 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_assets_row_ref, text="Browse...",
                    command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
 
         # Inline warning that appears when the picked Modified Assets
         # folder doesn't contain a `.checksums.md5` baseline (the user
@@ -1461,7 +1481,7 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_output_row_ref, text="Browse...",
                    command=self._browse_write_output).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
 
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
@@ -1634,7 +1654,7 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse...",
                    command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(4, 0))
+            side=tk.LEFT, padx=(8, 0))
         ttk.Label(f, text="(shared with the Write tab's Modified Assets path)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
@@ -1692,14 +1712,13 @@ class MainWindow:
         f = self._tab_audio
         pad = {"padx": 10, "pady": 4}
 
+        # One-line intro; the full behaviour notes live in the "?" tips window
+        # (monkeybug: the multi-line paragraphs crowded every tab).
         _audio_desc = ttk.Label(
             f,
-            text="Swap a game's music / sound files without copy-pasting and "
-                 "renaming. Your replacement can be almost any audio format "
-                 "(mp3, wav, ogg, flac, m4a, …) — it doesn't need to match the "
-                 "original; it's auto-converted to the original track's format "
-                 "for you. Pick your extracted folder, assign a track to a slot, "
-                 "then build the update on the Write tab.",
+            text="Assign a replacement track to any slot — almost any audio "
+                 "format is accepted and auto-converted — then build the "
+                 "update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _audio_desc.pack(anchor=tk.W, **pad)
@@ -2192,6 +2211,8 @@ class MainWindow:
             self.audio_status_var.set(
                 f"{changed_total} of {total} slots changed{extra}")
             self._audio_empty.place_forget()
+        # Fit-to-content column widths (the toggle columns stay fixed).
+        self._autosize_tree_columns(tree, "audio", ("#0", "len", "fmt", "rep"))
 
     def _maybe_rescan_audio(self):
         """Auto-scan when the Replace Audio tab becomes visible and the
@@ -2925,15 +2946,12 @@ class MainWindow:
         f = self._tab_video
         pad = {"padx": 10, "pady": 4}
 
+        # One-line intro; the full behaviour notes live in the "?" tips window.
         _video_desc = ttk.Label(
             f,
-            text="Swap a game's videos without copy-pasting and renaming. A "
-                 "clip that already matches the original's format, resolution "
-                 "and frame rate is used as-is (no conversion, no quality "
-                 "loss); anything else is auto-re-encoded to match for you "
-                 "(transparency is kept where the original has it). Pick your "
-                 "extracted folder, assign a clip to a slot, then build the "
-                 "update on the Write tab.",
+            text="Assign a replacement clip to any slot — a matching clip is "
+                 "used as-is, anything else is auto-re-encoded — then build "
+                 "the update on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _video_desc.pack(anchor=tk.W, **pad)
@@ -3349,6 +3367,8 @@ class MainWindow:
             self.video_status_var.set(
                 f"{changed_total} of {total} slots changed{extra}")
             self._video_empty.place_forget()
+        self._autosize_tree_columns(
+            tree, "video", ("#0", "len", "res", "fmt", "rep"))
 
     def _default_assets_from_extract(self):
         """Default the (shared) assets folder to the Extract tab's output when
@@ -4144,14 +4164,12 @@ class MainWindow:
         f = self._tab_image
         pad = {"padx": 10, "pady": 4}
 
+        # One-line intro; the full behaviour notes live in the "?" tips window.
         _image_desc = ttk.Label(
             f,
-            text="Swap a game's images without copy-pasting and renaming. Your "
-                 "replacement can be almost any image format — it's auto-scaled "
-                 "to the original image's pixel dimensions and saved in its "
-                 "format for you (transparency is kept where the original has "
-                 "it). Pick your extracted folder, assign an image to a slot, "
-                 "then build the update on the Write tab.",
+            text="Assign a replacement image to any slot — it's auto-scaled "
+                 "and converted to the slot's format — then build the update "
+                 "on the Write tab.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _image_desc.pack(anchor=tk.W, **pad)
@@ -4196,22 +4214,29 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        # "src" tells the three image stores apart (monkeybug: file-system
+        # PNGs, scene textures and radium-embedded images were indistinguishable
+        # beyond their paths) — see _image_source_label.
         self._image_tree = ttk.Treeview(
-            list_frame, columns=("res", "fmt", "rep"),
+            list_frame, columns=("res", "fmt", "src", "rep"),
             height=9, selectmode="browse")
         self._image_tree.heading("#0", text="Original Image", anchor=tk.W)
         self._image_tree.heading("res", text="Resolution", anchor=tk.W)
         self._image_tree.heading("fmt", text="Format", anchor=tk.W)
+        self._image_tree.heading("src", text="Source", anchor=tk.W)
         self._image_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._image_tree.column("#0", width=300, minwidth=160)
         self._image_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._image_tree.column("fmt", width=140, minwidth=80)
+        self._image_tree.column("src", width=100, minwidth=70, anchor=tk.W,
+                                stretch=False)
         self._image_tree.column("rep", width=200, minwidth=110)
         self._persist_tree_columns(
-            self._image_tree, "image", ("#0", "res", "fmt", "rep"))
+            self._image_tree, "image", ("#0", "res", "fmt", "src", "rep"))
         self._image_sort_cfg = [
             ("#0", "Original Image", False), ("res", "Resolution", True),
-            ("fmt", "Format", False), ("rep", "Replacement", False)]
+            ("fmt", "Format", False), ("src", "Source", False),
+            ("rep", "Replacement", False)]
         self._wire_sort_headings(self._image_tree, self._image_sort_cfg,
                                  "_image_sort", self._refresh_image_list)
         image_scroll = ttk.Scrollbar(
@@ -4406,7 +4431,7 @@ class MainWindow:
         rep = self._image_assignments.get(rel)
         rep_disp = os.path.basename(rep) if rep else "Choose…"
         tree.item(rel, values=(slot.resolution_str(), slot.format_summary(),
-                               rep_disp))
+                               self._image_source_label(rel), rep_disp))
 
     def _select_first_tree_row(self, tree, on_select=None):
         """Select (and reveal) the first row of *tree* so a fresh scan shows a
@@ -4428,6 +4453,21 @@ class MainWindow:
         if on_select is not None:
             on_select()
 
+    @staticmethod
+    def _image_source_label(rel_path):
+        """Which of the three image stores *rel_path* came from (monkeybug:
+        make them tell-apart-able + sortable).  Derived purely from the
+        extract layout: the Stern engine lands decoded scene textures under
+        ``scene_textures/`` (radium-embedded ones named ``radimg_*``); every
+        other image is a plain file copied off the card.  Non-Stern plugins
+        simply show "File" throughout."""
+        parts = rel_path.replace("\\", "/").lower().split("/")
+        if "scene_textures" in parts:
+            if os.path.basename(rel_path).lower().startswith("radimg"):
+                return "Radium"
+            return "Scene texture"
+        return "File"
+
     def _refresh_image_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
         tree = getattr(self, "_image_tree", None)
@@ -4448,6 +4488,9 @@ class MainWindow:
                 return (wh,)
             if col == "fmt":
                 return (s.format_summary().lower(), s.rel_path.lower())
+            if col == "src":
+                return (self._image_source_label(s.rel_path),
+                        s.rel_path.lower())
             if col == "rep":
                 rep = self._image_assignments.get(s.rel_path)
                 if rep:
@@ -4473,7 +4516,9 @@ class MainWindow:
             else:
                 res = s.resolution_str()
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(res, s.format_summary(), rep_disp),
+                        values=(res, s.format_summary(),
+                                self._image_source_label(s.rel_path),
+                                rep_disp),
                         tags=(tag,) if tag else ())
 
         total = len(self._image_slots)
@@ -4489,6 +4534,8 @@ class MainWindow:
             self.image_status_var.set(
                 f"{total} images, {changed_total} changed{extra}")
             self._image_empty.place_forget()
+        self._autosize_tree_columns(
+            tree, "image", ("#0", "res", "fmt", "src", "rep"))
 
     def _maybe_rescan_image(self):
         """Auto-scan when the Replace Image tab becomes visible and the folder
@@ -4551,8 +4598,8 @@ class MainWindow:
         if tree.identify_region(event.x, event.y) != "cell":
             return
         row = tree.identify_row(event.y)
-        col = tree.identify_column(event.x)  # cols=(res,fmt,rep) -> #1..#3
-        if row and col == "#3":
+        col = tree.identify_column(event.x)  # cols=(res,fmt,src,rep) -> #1..#4
+        if row and col == "#4":
             tree.selection_set(row)
             self._image_assign_rel(row)
 
@@ -5534,9 +5581,6 @@ class MainWindow:
         # Per-mfr phase indicators (defaults to core EXTRACT/WRITE_PHASES).
         self._rebuild_phase_steps(mfr.extract_phases, mfr.write_phases)
 
-        # Per-mfr Write-tab intro (SD-card plugins shouldn't read "update file").
-        self._write_intro_lbl.configure(text=mfr.write_intro())
-
         # Per-mfr prereq indicators - start in "checking" state.  The
         # App's worker thread fills in actual results via
         # set_prereq_result() shortly after.
@@ -5700,7 +5744,7 @@ class MainWindow:
         if mfr.key == "bof":
             self._extract_bof_banner.pack(
                 fill=tk.X, padx=10, pady=(6, 6),
-                after=self._extract_warn_row)
+                after=self._extract_output_row_ref)
         else:
             self._extract_bof_banner.pack_forget()
 
@@ -5926,6 +5970,7 @@ class MainWindow:
         # plugins they sit under "Basic extract" and track it.
         self._update_transcribe_visibility()
         self._update_music_id_visibility()
+        self._update_duration_names_visibility()
         self._update_decode_dmd_visibility()
         self._update_chain_deltas_visibility()
 
@@ -5985,7 +6030,8 @@ class MainWindow:
         enabled = audio_var is None or bool(audio_var.get())
         flag = "!disabled" if enabled else "disabled"
         for chk in (getattr(self, "_transcribe_check", None),
-                    getattr(self, "_music_id_check", None)):
+                    getattr(self, "_music_id_check", None),
+                    getattr(self, "_duration_names_check", None)):
             if chk is not None:
                 try:
                     chk.state([flag])
@@ -6010,6 +6056,7 @@ class MainWindow:
         opts = {
             "auto_name_callouts": bool(self.transcribe_var.get()),
             "auto_name_music": bool(self.music_id_var.get()),
+            "duration_names": bool(self.duration_names_var.get()),
         }
         if self._extract_category_vars:
             opts["categories"] = {k: bool(v.get())
@@ -6031,6 +6078,7 @@ class MainWindow:
         opts = self._saved_extract_options
         self.transcribe_var.set(bool(opts.get("auto_name_callouts", False)))
         self.music_id_var.set(bool(opts.get("auto_name_music", False)))
+        self.duration_names_var.set(bool(opts.get("duration_names", False)))
         cats = opts.get("categories", {})
         for key, var in self._extract_category_vars.items():
             var.set(bool(cats.get(key, True)))
@@ -6047,6 +6095,7 @@ class MainWindow:
         # Transcribe is only meaningful when the basic extract runs.
         self._update_transcribe_visibility()
         self._update_music_id_visibility()
+        self._update_duration_names_visibility()
 
     def _refresh_extract_phases(self):
         """Rebuild the extract phase indicator for the current extract
@@ -6121,7 +6170,25 @@ class MainWindow:
             return
         # Inline in the action row's option cluster, right of the call-outs
         # checkbox (call-outs is packed first, so side=LEFT lands music after).
-        self._music_id_frame.pack(side=tk.LEFT, padx=(12, 0))
+        # Trailing (0, 12) keeps the whole checkbox row evenly spaced.
+        self._music_id_frame.pack(side=tk.LEFT, padx=(0, 12))
+
+    def _update_duration_names_visibility(self):
+        """Show the "Length-prefix names" checkbox only when the active
+        manufacturer advertises ``audio_duration_names`` and an audio extract
+        will actually run — same gating as the auto-name options."""
+        if self._current_mfr is None:
+            return
+        caps = self._current_mfr.capabilities
+        show = (getattr(caps, "audio_duration_names", False)
+                and self._extract_audio_supported
+                and (not caps.capture or self.static_extract_var.get()))
+        if not show:
+            self._duration_names_frame.pack_forget()
+            self.duration_names_var.set(False)
+            return
+        # Rightmost of the option cluster (transcribe + music pack first).
+        self._duration_names_frame.pack(side=tk.LEFT, padx=(0, 12))
 
     def _update_transcribe_visibility(self):
         """Show the auto-transcribe checkboxes only when a transcribable
@@ -6150,9 +6217,10 @@ class MainWindow:
             self.transcribe_var.set(False)
             return
         # Inline in the action row's option cluster, to the right of the
-        # per-type Extract checkboxes (a wider leading gap visually separates
-        # the auto-name options from the what-to-extract group).
-        self._transcribe_frame.pack(side=tk.LEFT, padx=(16, 0))
+        # per-type Extract checkboxes.  Trailing padx matches the category
+        # checkboxes' (0, 12) so every checkbox in the row sits the same
+        # distance apart (monkeybug: the gaps were visibly unequal).
+        self._transcribe_frame.pack(side=tk.LEFT, padx=(0, 12))
 
     def _update_decode_dmd_visibility(self):
         """Show the "Decode DMD scenes" checkbox only when the active
@@ -7530,6 +7598,53 @@ class MainWindow:
             except Exception:
                 pass
 
+    # Pixel ceiling for auto-sized tree columns — roughly 60 characters of
+    # the default UI font.  Content wider than this stays ellipsized.
+    _AUTOSIZE_MAX_PX = 480
+
+    def _autosize_tree_columns(self, tree, tree_key, col_ids):
+        """Fit each column in *col_ids* to its widest cell, capped at
+        ``_AUTOSIZE_MAX_PX`` (monkeybug 4.2: long names sat ellipsized while
+        fixed-width columns wasted the space).  Called after a list refresh.
+        A column the user has dragged themselves (persisted by
+        :meth:`_persist_tree_columns`) keeps the user's width; each column's
+        configured minwidth still applies.  No-op on an empty tree."""
+        rows = tree.get_children()
+        if not rows:
+            return
+        saved = self._saved_column_widths.get(tree_key) or {}
+        try:
+            import tkinter.font as tkfont
+            name = ttk.Style().lookup("Treeview", "font") or "TkDefaultFont"
+            try:
+                fnt = tkfont.nametofont(name)
+            except tk.TclError:
+                fnt = tkfont.Font(font=name)
+            for col in col_ids:
+                if col in saved:
+                    continue               # the user's tuned width wins
+                # Header first (plus room for the ▲/▼ sort suffix), then the
+                # cells; stop early once the cap is reached.
+                wmax = fnt.measure(tree.heading(col, "text")) + 24
+                if col == "#0":
+                    texts, pad = (tree.item(r, "text") for r in rows), 28
+                else:
+                    texts, pad = (tree.set(r, col) for r in rows), 16
+                for t in texts:
+                    w = fnt.measure(t) + pad
+                    if w > wmax:
+                        wmax = w
+                        if wmax >= self._AUTOSIZE_MAX_PX:
+                            break
+                try:
+                    minw = int(tree.column(col, "minwidth"))
+                except tk.TclError:
+                    minw = 20
+                tree.column(col, width=max(minw,
+                                           min(wmax, self._AUTOSIZE_MAX_PX)))
+        except tk.TclError:
+            pass                            # tree torn down mid-refresh
+
     def _register_responsive_wrap(self, label, margin=44, minimum=420):
         """Track *label* so :meth:`_resize_mfr_view` keeps its ``wraplength`` in
         step with the content width — a fixed wraplength left a dead band to the
@@ -7551,7 +7666,7 @@ class MainWindow:
         Scan command differs."""
         browse = ttk.Button(row, text="Browse...",
                             command=self._browse_write_assets)
-        browse.pack(side=tk.LEFT, padx=(4, 0))
+        browse.pack(side=tk.LEFT, padx=(8, 0))
         scan = ttk.Button(row, text="Scan", command=scan_cmd)
         scan.pack(side=tk.LEFT, padx=(4, 0))
         self._browse_buttons[tab_key] = browse
@@ -7875,13 +7990,16 @@ class MainWindow:
         menu.add_cascade(label="Voice recognition quality", menu=vq_menu)
         menu.add_separator()
 
-        # Prerequisites — status summary + the Re-check / Install actions
-        # (the strip under the title tucks itself away once everything is
-        # green, so this is where a returning user finds them).
+        # Prerequisites — one cascade, like the voice-quality submenu above
+        # (monkeybug: three loose prerequisite lines read as clutter).  The
+        # cascade LABEL is the status summary, so the state is visible without
+        # opening it; the submenu holds the Re-check / Install actions.  The
+        # strip under the title tucks itself away once everything is green,
+        # so this is where a returning user finds them.
         summary, any_missing = self._prereq_menu_summary()
-        menu.add_command(label=summary, state=tk.DISABLED)
         has_prereqs = bool(self._prereq_indicators)
-        menu.add_command(
+        prereq_menu = tk.Menu(menu, **kw)
+        prereq_menu.add_command(
             label="Re-check prerequisites",
             command=lambda: (self._on_recheck_prereqs()
                              if self._on_recheck_prereqs else None),
@@ -7890,12 +8008,13 @@ class MainWindow:
         # The auto-installer is Windows/Linux-only (frozen macOS bundles
         # everything and can't pip-install anyway) — same rule as the strip.
         if sys.platform != "darwin":
-            menu.add_command(
+            prereq_menu.add_command(
                 label="Install missing prerequisites…",
                 command=lambda: (self._on_install_prereqs()
                                  if self._on_install_prereqs else None),
                 state=(tk.NORMAL if any_missing and self._on_install_prereqs
                        else tk.DISABLED))
+        menu.add_cascade(label=summary, menu=prereq_menu)
         return menu
 
     def _prereq_menu_summary(self):
@@ -8190,6 +8309,7 @@ class MainWindow:
         self._refresh_extract_phases()
         self._update_transcribe_visibility()
         self._update_music_id_visibility()
+        self._update_duration_names_visibility()
 
     def _update_write_badge(self, *_):
         self._set_badge(self._write_badge, self.write_upd_var.get(),
@@ -8379,13 +8499,18 @@ class MainWindow:
             self._prereqs_frame.pack(fill=tk.X, padx=10, pady=(6, 0),
                                      before=self._notebook)
 
-    def _check_extract_warn(self, *_):
-        path = self.extract_output_var.get().strip()
-        if path and os.path.isdir(path) and os.listdir(path):
-            self._extract_warn.configure(
-                text="Output folder is not empty — files may be overwritten.")
-        else:
-            self._extract_warn.configure(text="")
+    def _maybe_default_write_output(self):
+        """Fill an EMPTY Write Output Folder with the original image's folder
+        when an original is picked (Browse, post-extract default, or a typed
+        path).  A non-empty box — including one restored from settings — is
+        the user's choice and is never overwritten."""
+        if self.write_output_var.get().strip():
+            return
+        upd = self.write_upd_var.get().strip()
+        if upd and os.path.isfile(upd):
+            parent = os.path.dirname(os.path.normpath(upd))
+            if parent and os.path.isdir(parent):
+                self.write_output_var.set(parent)
 
     def _update_write_filename(self):
         # SD-card-image plugins (Stern / CGC, capabilities.flash_image) already

@@ -122,6 +122,10 @@ class SternManufacturer(Manufacturer):
         # commercial recordings — so identify each full music track online via
         # AcoustID + MusicBrainz and name it by song (preferring the pin's band).
         music_id=True,
+        # Length-prefix names: Spike 2 sounds are named only by master-dir
+        # index, and indexes shift between firmware versions — a play-length
+        # prefix gives users a sort key that survives updates (monkeybug).
+        audio_duration_names=True,
         # Per-type Extract checkboxes (default all on): audio decode is the slow
         # part (~minutes) and images now include hundreds of scene textures, so
         # let the user skip categories they don't need for a faster extract.
@@ -330,10 +334,11 @@ class SternManufacturer(Manufacturer):
 
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
-                              extract_categories=None):
+                              extract_categories=None, duration_names=False):
         return SternExtractPipeline(
             input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
-            extract_categories=extract_categories)
+            extract_categories=extract_categories,
+            duration_names=duration_names)
 
     def make_capture_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
@@ -356,11 +361,13 @@ class SternManufacturer(Manufacturer):
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
-            partition_override=None, extract_categories=None):
+            partition_override=None, extract_categories=None,
+            duration_names=False):
         return SternDirectSsdExtractPipeline(
             device_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
             partition_override=partition_override,
-            extract_categories=extract_categories)
+            extract_categories=extract_categories,
+            duration_names=duration_names)
 
     def make_direct_ssd_write_pipeline(
             self, device_path, assets_dir,

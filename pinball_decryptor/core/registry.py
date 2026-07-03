@@ -79,6 +79,15 @@ class Capabilities:
     # For band pins (e.g. Stern Led Zeppelin) whose song->index binding is
     # unrecoverable from the firmware but whose music is a commercial recording.
     music_id: bool = False
+    # Length-prefixed extract names: surfaces a "Length-prefix names" checkbox
+    # on the Extract tab.  When ON, the plugin's extract leads each decoded
+    # audio filename with its play length ("01m22s235 - idx0001.wav") so a
+    # name sort orders by duration — durations are stable across firmware
+    # versions while slot indexes shift, so this is how a modder lines up the
+    # same sounds between two extracts (monkeybug).  app.py passes
+    # ``duration_names`` (bool) to the extract factories.  Used by Stern
+    # Spike 2, whose sounds are otherwise named only by index.
+    audio_duration_names: bool = False
     # Direct-SSD path: read from / write to a physically-connected
     # game SSD instead of an ISO/file.  Surfaces a radio toggle on
     # the Extract / Write tabs swapping the file picker for a drive

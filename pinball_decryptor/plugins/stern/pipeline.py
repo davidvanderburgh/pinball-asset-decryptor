@@ -79,11 +79,12 @@ class SternExtractPipeline(BasePipeline):
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 extract_categories=None):
+                 extract_categories=None, duration_names=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.input_path = input_path
         self.output_dir = output_dir
         self.extract_categories = extract_categories
+        self.duration_names = duration_names
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -117,7 +118,8 @@ class SternExtractPipeline(BasePipeline):
             self.input_path, parts, self.output_dir,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             phase=self._set_phase, log_line=self._log_line,
-            label=display_for_key(key, self.input_path), **flags)
+            label=display_for_key(key, self.input_path),
+            duration_names=self.duration_names, **flags)
         # extract_all returns promptly on cancel (it checks between every phase
         # and per decoded sound).  Stop here instead of grinding through the
         # checksum pass and reporting success on a run the user aborted.
@@ -176,12 +178,14 @@ class SternDirectSsdExtractPipeline(BasePipeline):
 
     def __init__(self, device_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
-                 partition_override=None, extract_categories=None):
+                 partition_override=None, extract_categories=None,
+                 duration_names=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.device_path = device_path
         self.output_dir = output_dir
         self.partition_override = partition_override
         self.extract_categories = extract_categories
+        self.duration_names = duration_names
 
     def _run(self):
         self._set_phase(0)  # Read SD card
@@ -212,7 +216,8 @@ class SternDirectSsdExtractPipeline(BasePipeline):
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             open_disk=lambda: RawDeviceFile(self.device_path, writable=False),
-            log_line=self._log_line, **flags)
+            log_line=self._log_line,
+            duration_names=self.duration_names, **flags)
         self._check_cancel()   # don't run checksums on a cancelled extract
 
         self._set_phase(5)  # Checksums

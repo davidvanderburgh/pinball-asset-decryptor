@@ -742,8 +742,18 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
             "Switch to light theme" in joined
         assert "Check for updates" in joined
         assert "Voice recognition quality" in joined
-        assert "Re-check prerequisites" in joined
+        # Prerequisites are a cascade now (monkeybug): the cascade label IS
+        # the status summary; the actions live in its submenu.
         assert "1 missing" in joined
+        prereq_i = next(
+            i for i in range(menu.index("end") + 1)
+            if menu.type(i) == "cascade"
+            and "Prerequisites" in menu.entrycget(i, "label"))
+        sub = menu.nametowidget(menu.entrycget(prereq_i, "menu"))
+        sub_labels = [sub.entrycget(i, "label")
+                      for i in range(sub.index("end") + 1)
+                      if sub.type(i) not in ("separator", "tearoff")]
+        assert "Re-check prerequisites" in "\n".join(sub_labels)
     finally:
         app._on_back_to_picker()
         app._on_manufacturer_change(manufacturers_by_key["spooky"])

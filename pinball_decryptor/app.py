@@ -445,9 +445,12 @@ class App:
         section = self._manufacturers_section().get(key, {})
         self.window.extract_input_var.set(section.get("extract_input", ""))
         self.window.extract_output_var.set(section.get("extract_output", ""))
+        # Output before original: setting the original fires the fill-empty-
+        # Output-Folder default (window._maybe_default_write_output), and a
+        # restore that then wrote "" over it would throw the default away.
+        self.window.write_output_var.set(section.get("write_output", ""))
         self.window.write_upd_var.set(section.get("write_original", ""))
         self.window.write_assets_var.set(section.get("write_assets", ""))
-        self.window.write_output_var.set(section.get("write_output", ""))
         # Extract-tab checkbox state (auto-name / categories / JJP filters) —
         # per manufacturer, so the ticks stick across sessions (monkeybug).
         # apply_manufacturer() re-applies this after it rebuilds the dynamic
@@ -577,10 +580,13 @@ class App:
             return
 
         if os.path.isdir(output_path) and os.listdir(output_path):
+            # icon: a question mark undersells "your edits get clobbered"
+            # (monkeybug) — this is a warning-grade confirm.
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
                 "The output folder already contains files.\n\n"
                 "Extracting will overwrite existing files.\n\nContinue?",
+                icon="warning",
             ):
                 return
 
@@ -676,6 +682,7 @@ class App:
                 chained_done_cb, output_path)
             extra_kwargs = self._collect_asset_filter_kwargs()
             extra_kwargs.update(self._collect_extract_category_kwargs())
+            extra_kwargs.update(self._collect_duration_names_kwargs())
             if getattr(
                     self._current_mfr.capabilities, "decode_dmd", False):
                 extra_kwargs["decode_dmd"] = bool(
@@ -817,6 +824,7 @@ class App:
                 "Output Folder Not Empty",
                 "The output folder already contains files.\n\n"
                 "Extracting will overwrite existing files.\n\nContinue?",
+                icon="warning",
             ):
                 return
 
@@ -864,6 +872,7 @@ class App:
             partition_override=partition_override,
             **self._collect_asset_filter_kwargs(),
             **self._collect_extract_category_kwargs(),
+            **self._collect_duration_names_kwargs(),
         )
         # Guard: non-BasePipeline plugins (e.g. JJP) lack this hook — see the
         # matching call in the basic-extract path above.
@@ -911,6 +920,18 @@ class App:
             return {}
         return {"extract_categories":
                 {key: bool(var.get()) for key, var in vars_.items()}}
+
+    def _collect_duration_names_kwargs(self):
+        """``{"duration_names": bool}`` for plugins that advertise
+        ``capabilities.audio_duration_names`` (length-prefixed extract audio
+        filenames); empty dict otherwise so other factories' signatures stay
+        unchanged."""
+        if (self._current_mfr is None
+                or not getattr(self._current_mfr.capabilities,
+                               "audio_duration_names", False)):
+            return {}
+        return {"duration_names":
+                bool(self.window.duration_names_var.get())}
 
     # ------------------------------------------------------------------
     # Write

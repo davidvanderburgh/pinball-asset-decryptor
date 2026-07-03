@@ -32,7 +32,27 @@ import wave
 # prerequisite probe + a lazy import error, not by hiding the tabs.
 AVAILABLE = True
 
-_WAV_RE = re.compile(r"(?:idx)?0*(\d+)", re.IGNORECASE)
+# The master-directory index in a decode-WAV stem.  The "idx" token can sit
+# anywhere in the name: bare decode output ("idx0001"), an Auto-transcribe /
+# Music-ID rename ("idx0001 - Kashmir"), and/or a play-length prefix
+# ("01m22s235 - idx0001 - Kashmir", the Length-prefix-names extract option).
+# A leading-anchored match would read the length prefix's digits as the index
+# (mapping the edit onto the WRONG on-card sound), so search for the literal
+# token; a stem that is nothing but digits ("0001.wav") stays accepted for
+# hand-named files.
+_IDX_TOKEN_RE = re.compile(r"\bidx0*(\d+)", re.IGNORECASE)
+_BARE_NUM_RE = re.compile(r"^0*(\d+)$")
+
+
+def _wav_idx(stem):
+    """Master-directory index parsed from a WAV *stem*, or ``None``."""
+    m = _IDX_TOKEN_RE.search(stem)
+    if m:
+        return int(m.group(1))
+    m = _BARE_NUM_RE.match(stem)
+    return int(m.group(1)) if m else None
+
+
 # Per-song music-bank WAVs (image-scNN.bin banks). EXTRACT-ONLY: Write re-encodes
 # only the cat-0 sounds (idxNNNN.wav) back into image.bin — music_catNN_* live in
 # separate image-scNN.bin banks Write doesn't patch.  The prefix survives an
@@ -826,44 +846,73 @@ def _write_wav(path, L, R, stereo):
 # --------------------------------------------------------------------------
 # public API (called by the pipelines)
 # Auto-transcribe / Music-ID *renamed* decode WAVs — "idx0001 - music.wav",
-# "music_cat01_0001 - Battery.wav".  The bare "idx0001.wav" the decode writes is
-# deliberately NOT matched (it's overwritten in place); only the renamed copies
-# a prior extract left behind are.
+# "music_cat01_0001 - Battery.wav", either with the optional play-length
+# prefix ("01m22s235 - idx0001 - music.wav").  The bare file the decode
+# writes is deliberately NOT matched here (it's overwritten in place); only
+# the renamed copies a prior extract left behind are.
 _RENAMED_AUDIO_RE = re.compile(
-    r"^(?:idx\d+|music_cat\d+_\d+) - .*\.wav$", re.IGNORECASE)
+    r"^(?:\d+m\d+s\d+ - )?(?:idx\d+|music_cat\d+_\d+) - .*\.wav$",
+    re.IGNORECASE)
+# The two bare decode-output shapes.  Whichever shape the CURRENT extract is
+# NOT writing is a stale leftover from a run with the opposite Length-prefix
+# setting (the fresh decode won't overwrite it), so it gets removed too.
+_BARE_IDX_RE = re.compile(r"^idx\d+\.wav$", re.IGNORECASE)
+_PREFIXED_IDX_RE = re.compile(r"^\d+m\d+s\d+ - idx\d+\.wav$", re.IGNORECASE)
 
 
-def _remove_renamed_audio_twins(audio_dir, log=None):
-    """Delete stale auto-named decode WAVs left in *audio_dir* by a prior run.
+def _wav_basename(p, duration_names):
+    """Output filename for a decoded cat-0 sound.
 
-    Re-extracting writes fresh bare ``idxNNNN.wav`` but the previous run's
-    Auto-transcribe/Music-ID *renamed* copies (``idx0001 - music.wav``) have
-    different names, so they survive — leaving two files per sound: clutter the
-    GUI shows as duplicates and a hazard for the leading-index Write key.  The
-    fresh decode regenerates every sound, so those renamed leftovers are always
-    stale.  Removing them (the bare files are overwritten anyway) keeps one file
-    per sound.  No-op on a first extract into an empty folder.
+    Default is the classic ``idx0001.wav``.  With *duration_names* (the
+    Extract tab's "Length-prefix names" option) the play length leads —
+    ``01m22s235 - idx0001.wav`` — zero-padded so a plain name sort orders by
+    duration: the stable key for lining the same sounds up across firmware
+    versions, where the idx shifts (monkeybug).  ``:`` is not legal in
+    Windows filenames, hence the m/s spelling."""
+    if not duration_names:
+        return "idx%04d.wav" % p["idx"]
+    ms = int(round(p.get("length", 0) * 1000.0 / 44100.0))
+    m, rem = divmod(ms, 60000)
+    s, ms = divmod(rem, 1000)
+    return "%02dm%02ds%03d - idx%04d.wav" % (m, s, ms, p["idx"])
+
+
+def _remove_renamed_audio_twins(audio_dir, log=None, duration_names=False):
+    """Delete stale decode WAVs in *audio_dir* the fresh decode won't overwrite.
+
+    Two kinds go: (a) a previous run's Auto-transcribe/Music-ID *renamed*
+    copies (``idx0001 - music.wav``) — the fresh decode regenerates every
+    sound, so those are always stale; (b) bare decode outputs in the OTHER
+    Length-prefix style than this run writes (``idx0001.wav`` vs
+    ``01m22s235 - idx0001.wav``) — same sound, different name, so it would
+    otherwise survive as a duplicate.  Either way a leftover means two files
+    per idx: GUI clutter and a hazard for the idx-keyed Write mapping.  The
+    same-style bare files are left alone (they're overwritten in place).
+    No-op on a first extract into an empty folder.
     """
     if not os.path.isdir(audio_dir):
         return
+    stale_bare = _BARE_IDX_RE if duration_names else _PREFIXED_IDX_RE
     removed = 0
     for fn in os.listdir(audio_dir):
-        if _RENAMED_AUDIO_RE.match(fn):
+        if _RENAMED_AUDIO_RE.match(fn) or stale_bare.match(fn):
             try:
                 os.remove(os.path.join(audio_dir, fn))
                 removed += 1
             except OSError:
                 pass
     if removed and log:
-        log("Removed %d stale auto-named audio file(s) from a previous extract "
-            "(re-naming will run again if enabled)." % removed, "info")
+        log("Removed %d stale audio file(s) from a previous extract "
+            "(renamed twins and/or the other naming style; re-naming will "
+            "run again if enabled)." % removed, "info")
 
 
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
                 music_banks=True, do_audio=True, do_video=True,
-                do_images=True, do_text=True, label=None):
+                do_images=True, do_text=True, label=None,
+                duration_names=False):
     """Decode every cat-0 sound in the card image to ``output_dir`` as WAV
     (under ``audio/``) and extract videos (under ``video/``).
 
@@ -1003,7 +1052,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         os.makedirs(audio_dir, exist_ok=True)
         # Drop a previous extract's auto-named twins so re-extracting doesn't
         # accumulate "idx0001.wav" + "idx0001 - music.wav" duplicates.
-        _remove_renamed_audio_twins(audio_dir, log)
+        _remove_renamed_audio_twins(audio_dir, log,
+                                    duration_names=duration_names)
         total = len(params)
         ok = None
         nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
@@ -1012,7 +1062,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 log("Decoding %d sounds across %d processes..." % (total, nworkers), "info")
                 ok = _parallel_decode(gr_path, img_path, params, audio_dir,
                                       log, progress, cancel, nworkers,
-                                      log_line=log_line)
+                                      log_line=log_line,
+                                      duration_names=duration_names)
             except Exception as e:
                 log("Parallel decode unavailable (%s); using a single process."
                     % e, "warning")
@@ -1021,7 +1072,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             emu = Spike2Emu(gr_path, img_path)
             emu.boot()
             ok = _serial_decode(emu, params, audio_dir, log, progress, cancel,
-                                log_line=log_line)
+                                log_line=log_line,
+                                duration_names=duration_names)
         if ok == 0 and total > 0:
             # Every sound failed to decode -- a systemic problem (a build whose
             # codec the engine couldn't drive), not a per-sound hiccup.  Surface
@@ -1093,7 +1145,8 @@ def _serial_progress_cb(p, emit):
     return cb
 
 
-def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None):
+def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None,
+                   duration_names=False):
     total = len(params)
     ok = 0
 
@@ -1118,7 +1171,8 @@ def _serial_decode(emu, params, audio_dir, log, progress, cancel, log_line=None)
         if r is None:
             continue
         L, R, stereo = r
-        _write_wav(os.path.join(audio_dir, "idx%04d.wav" % p["idx"]), L, R, stereo)
+        _write_wav(os.path.join(audio_dir, _wav_basename(p, duration_names)),
+                   L, R, stereo)
         emit(("done", p["idx"], length, chan))
         ok += 1
     return ok
@@ -1176,7 +1230,7 @@ def _emit_decode(msg, log, log_line):
 
 
 def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel,
-                     nworkers, log_line=None):
+                     nworkers, log_line=None, duration_names=False):
     """Decode across ``nworkers`` spawned emulator processes (each boots once,
     decodes its share, writes WAVs directly).  Raises on any pool failure so the
     caller can fall back to a single process.
@@ -1195,7 +1249,8 @@ def _parallel_decode(gr_path, img_path, params, audio_dir, log, progress, cancel
     # per-sound progress below surfaces the long music tracks (which would
     # otherwise look stalled) without reordering the queue, so we don't trade
     # away that "files appear as it goes" feedback.
-    tasks = [(p, os.path.join(audio_dir, "idx%04d.wav" % p["idx"])) for p in params]
+    tasks = [(p, os.path.join(audio_dir, _wav_basename(p, duration_names)))
+             for p in params]
     total = len(tasks)
     ctx = mp.get_context("spawn")
     # Manager queue: picklable across spawn (a plain mp.Queue isn't), so it can
@@ -1500,15 +1555,14 @@ def _select_changed_idx_wavs(assets_dir, baseline):
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue
-            m = _WAV_RE.match(os.path.splitext(fn)[0])
-            if m:
-                by_idx.setdefault(int(m.group(1)), []).append(
-                    os.path.join(root, fn))
+            idx = _wav_idx(os.path.splitext(fn)[0])
+            if idx is not None:
+                by_idx.setdefault(idx, []).append(os.path.join(root, fn))
     base_by_idx = {}
     for rel in baseline:
-        mm = _WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
-        if mm:
-            base_by_idx[int(mm.group(1))] = baseline[rel]
+        idx = _wav_idx(os.path.splitext(os.path.basename(rel))[0])
+        if idx is not None:
+            base_by_idx[idx] = baseline[rel]
 
     edits = {}
     for idx, paths in by_idx.items():
@@ -2401,9 +2455,9 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
             if _MUSIC_WAV_RE.search(base):
                 failed.append(rel)           # music-bank revert not supported here
                 continue
-            m = _WAV_RE.match(base)
-            if m:
-                audio_idx[int(m.group(1))] = rel
+            idx = _wav_idx(base)
+            if idx is not None:
+                audio_idx[idx] = rel
             else:
                 failed.append(rel)
         elif top in ("video", "images"):

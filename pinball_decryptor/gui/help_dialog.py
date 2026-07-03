@@ -51,6 +51,12 @@ HELP_CONTENT = {
          "For better transcriptions at the cost of extra processing time, "
          "raise \"Voice recognition quality\" in the ⚙ settings menu (larger "
          "models are downloaded on first use)."),
+        ("Length-prefixed names",
+         "\"Length-prefix names\" (where available) leads each extracted "
+         "sound's filename with its play length — e.g. "
+         "\"01m22s235 - idx0001.wav\" — so sorting by name lines the same "
+         "sounds up across firmware versions: slot numbers shift between "
+         "releases, play lengths rarely do."),
         ("The baseline",
          "Extract writes a hidden .checksums.md5 file recording the pristine "
          "assets. The Replace tabs and Write use it to tell what you have "
@@ -62,8 +68,9 @@ HELP_CONTENT = {
     "Replace Audio": [
         ("Scan and assign",
          "Scan lists every sound slot in the assets folder. Assign a "
-         "replacement per slot — most common audio formats are accepted and "
-         "are converted and fitted (length / sample rate / volume) "
+         "replacement per slot — almost any audio format is accepted (mp3, "
+         "wav, ogg, flac, m4a, …); it doesn't need to match the original, "
+         "it's converted and fitted (length / sample rate / volume) "
          "automatically when you build."),
         ("Change markers",
          "Green = assigned this session (staged when you build). "
@@ -85,7 +92,10 @@ HELP_CONTENT = {
     "Replace Video": [
         ("Scan and assign",
          "Scan lists every video slot; assign a replacement clip per slot "
-         "and preview A/B before building."),
+         "and preview A/B before building. A clip that already matches the "
+         "original's format, resolution and frame rate is used as-is; "
+         "anything else is auto-re-encoded to match (transparency is kept "
+         "where the original has it)."),
         ("Size limits",
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
@@ -101,8 +111,23 @@ HELP_CONTENT = {
     "Replace Images": [
         ("Scan and assign",
          "Scan lists the game's replaceable images. Assign a replacement "
-         "per slot — it is converted to the slot's format automatically. "
-         "Keep the original resolution for best results."),
+         "per slot — almost any image format works; it is auto-scaled to "
+         "the original's pixel dimensions and converted to the slot's "
+         "format (transparency is kept where the original has it). Keep "
+         "the original resolution for best results."),
+        ("Where images come from",
+         "The Source column tells the three stores apart. \"File\" = a "
+         "plain image file on the card (menus, apron/test art). \"Scene "
+         "texture\" = artwork decoded out of the game's compiled display "
+         "scenes — many are frames of an animation or sprite sheets. "
+         "\"Radium\" = images embedded inside the scene descriptions "
+         "themselves (song-title banners and similar). All three replace "
+         "the same way; click the Source header to group them."),
+        ("Font atlases",
+         "Some scene textures are font/glyph maps — a grid of characters "
+         "the game draws text from. You can re-style them, but keep every "
+         "glyph in its original position: the game blits fixed rectangles, "
+         "so moving or resizing glyphs scrambles on-screen text."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget; over-budget images are compressed "

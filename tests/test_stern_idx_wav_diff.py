@@ -12,7 +12,8 @@ import hashlib
 import os
 
 from pinball_decryptor.plugins.stern.engine import (
-    _fmt_idx_list, _remove_renamed_audio_twins, _select_changed_idx_wavs)
+    _fmt_idx_list, _remove_renamed_audio_twins, _select_changed_idx_wavs,
+    _wav_basename, _wav_idx)
 
 
 def _wav(path, data):
@@ -126,6 +127,60 @@ def test_cleanup_is_noop_on_empty_or_missing(tmp_path):
     _remove_renamed_audio_twins(str(tmp_path / "does_not_exist"))  # no raise
     _remove_renamed_audio_twins(str(tmp_path))                     # empty dir
     assert os.listdir(tmp_path) == []
+
+
+# --- Length-prefix names (monkeybug: sort extracts by play length) ---------
+
+def test_wav_basename_formats():
+    p = {"idx": 1, "length": 82 * 44100 + int(0.235 * 44100)}   # 1m22.235s
+    assert _wav_basename(p, False) == "idx0001.wav"
+    assert _wav_basename(p, True) == "01m22s235 - idx0001.wav"
+
+
+def test_wav_idx_parses_every_shape():
+    # bare decode output, renamed, length-prefixed, and both combined
+    assert _wav_idx("idx0001") == 1
+    assert _wav_idx("idx0001 - Kashmir") == 1
+    assert _wav_idx("01m22s235 - idx0001") == 1
+    assert _wav_idx("01m22s235 - idx0001 - Kashmir") == 1
+    assert _wav_idx("0007") == 7                 # hand-named all-digits stem
+    # The length prefix's own digits must NEVER be read as the index, and
+    # non-slot names must not match at all.
+    assert _wav_idx("01m22s235 - somebody's song") is None
+    assert _wav_idx("my callout - keep") is None
+    assert _wav_idx("music_cat01_0001") is None
+    assert _wav_idx("20 seconds of fame") is None
+
+
+def test_select_changed_handles_length_prefixed_names(tmp_path):
+    orig = b"RIFF....original sound...."
+    edit = b"RIFF....the user's replacement...."
+    name = "01m22s235 - idx0003.wav"
+    _wav(tmp_path / name, edit)
+    base = _baseline((name, orig))
+    edits = _select_changed_idx_wavs(str(tmp_path), base)
+    assert set(edits) == {3}
+    assert os.path.basename(edits[3]) == name
+
+
+def test_cleanup_swaps_naming_styles(tmp_path):
+    # Re-extract with Length-prefix ON removes the old bare style (the fresh
+    # decode writes prefixed names, so the bare ones would linger as twins)…
+    _wav(tmp_path / "idx0001.wav", b"a")
+    _wav(tmp_path / "01m22s235 - idx0001.wav", b"a")
+    _remove_renamed_audio_twins(str(tmp_path), duration_names=True)
+    assert set(os.listdir(tmp_path)) == {"01m22s235 - idx0001.wav"}
+    # …and OFF removes the prefixed style, keeping the bare one.
+    _wav(tmp_path / "idx0001.wav", b"a")
+    _remove_renamed_audio_twins(str(tmp_path), duration_names=False)
+    assert set(os.listdir(tmp_path)) == {"idx0001.wav"}
+
+
+def test_cleanup_removes_prefixed_renamed_twins(tmp_path):
+    _wav(tmp_path / "01m22s235 - idx0001.wav", b"a")             # kept (bare)
+    _wav(tmp_path / "01m22s235 - idx0001 - Kashmir.wav", b"a")   # renamed twin
+    _remove_renamed_audio_twins(str(tmp_path), duration_names=True)
+    assert set(os.listdir(tmp_path)) == {"01m22s235 - idx0001.wav"}
 
 
 # --- _fmt_idx_list: the Write log spells out which sounds it will re-encode --

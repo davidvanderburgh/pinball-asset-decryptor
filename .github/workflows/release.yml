@@ -45,7 +45,23 @@ jobs:
           path: installer/Output/*.exe
 
   build-macos:
-    runs-on: macos-latest
+    # PyInstaller builds for the host arch only and macos-latest has been
+    # an Apple Silicon (arm64) runner since 2024, so a single job would
+    # ship an arm64-only .app that Intel iMacs refuse to launch ("not
+    # supported on this type of Mac" -- Rosetta only goes x86_64->arm64).
+    # Build one DMG per architecture; build_macos.sh names each by arch.
+    # macos-15-intel is a standard (free-tier) x64 label, unlike -large.
+    # Note the Intel wheel floors: onnxruntime resolves to 1.23.x there
+    # (last release with a macOS x86_64 wheel), which needs macOS 13+.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +81,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
+          name: macos-dmg-${{ matrix.arch }}
           path: installer/Output/*.dmg
 
   build-linux:
@@ -107,10 +123,11 @@ jobs:
           name: windows-installer
           path: artifacts/windows-installer
 
-      - name: Download macOS artifact
+      - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          name: macos-dmg
+          pattern: macos-dmg-*
+          merge-multiple: true
           path: artifacts/macos-dmg
 
       - name: Download Linux artifact

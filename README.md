@@ -335,8 +335,20 @@ below).
 
 ### macOS
 
-1. Download the latest `Pinball_Asset_Decryptor_v*_macOS.dmg` from the
-   [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases).
+1. Download the DMG matching your Mac from the
+   [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases):
+   - `Pinball_Asset_Decryptor_v*_macOS_AppleSilicon.dmg` for Apple
+     Silicon Macs (M1 or newer).
+   - `Pinball_Asset_Decryptor_v*_macOS_Intel.dmg` for Intel Macs
+     (requires macOS 13 Ventura or newer).
+
+   Not sure which you have?  **Apple menu → About This Mac** — the
+   *Chip* line says "Apple M1/M2/…" on Apple Silicon; Intel Macs show a
+   *Processor* line with "Intel" in it.  Opening the wrong one fails
+   with *"…is not supported on this type of Mac"* (an architecture
+   error, not the security prompt described below — releases before
+   v0.39.0 shipped Apple Silicon only, which is why they refused to
+   open on Intel iMacs).
 2. Open the DMG and drag **Pinball Asset Decryptor** to your
    `/Applications` folder.
 3. **First-launch security override** — required because the app is
@@ -671,7 +683,9 @@ installer\build.ps1
 ```bash
 # Requires: Python 3.10+, brew install create-dmg
 bash installer/build_macos.sh
-# Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_macOS.dmg
+# Output: installer/Output/Pinball_Asset_Decryptor_vX.Y.Z_macOS_<arch>.dmg
+# (<arch> = AppleSilicon or Intel — PyInstaller targets the host arch,
+#  so build on the kind of Mac you want to ship for)
 ```
 
 ### Linux

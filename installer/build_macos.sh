@@ -123,9 +123,19 @@ echo "Ad-hoc code signing..."
 codesign --force --deep --sign - "$APP_PATH"
 
 # --- Package as DMG -----------------------------------------------------
-echo "Creating DMG..."
+# PyInstaller builds for the host architecture only, so the DMG name
+# carries the arch: Apple Silicon Macs cannot be targeted from Intel and
+# vice versa (Rosetta only translates x86_64 -> arm64, so an arm64-only
+# .app is a hard "not supported on this type of Mac" on Intel iMacs).
+if [ "$(uname -m)" = "arm64" ]; then
+    ARCH_LABEL="AppleSilicon"
+else
+    ARCH_LABEL="Intel"
+fi
+
+echo "Creating DMG (${ARCH_LABEL})..."
 mkdir -p "$SCRIPT_DIR/Output"
-DMG_NAME="Pinball_Asset_Decryptor_v${VERSION}_macOS.dmg"
+DMG_NAME="Pinball_Asset_Decryptor_v${VERSION}_macOS_${ARCH_LABEL}.dmg"
 DMG_PATH="$SCRIPT_DIR/Output/$DMG_NAME"
 
 if command -v create-dmg &>/dev/null; then

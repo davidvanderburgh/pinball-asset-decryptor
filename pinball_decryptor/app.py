@@ -1740,13 +1740,27 @@ class App:
                 "extracts." + ("\n\n" + "\n".join(caveats) if caveats else ""))
             return
 
+        n_vid = len(plan["video"]["matched"])
+        n_img = len(plan["image"]["matched"])
         intro = ("Found %d differing video(s) and %d differing image(s) "
-                 "between the old and new extracts.\n"
-                 "A difference can also be a factory change between versions "
-                 "— after transferring, review the Replace tabs and clear "
-                 "anything you didn't mod."
-                 % (len(plan["video"]["matched"]),
-                    len(plan["image"]["matched"])))
+                 "between the old and new extracts." % (n_vid, n_img))
+        # Without a same-version baseline a difference can be the FACTORY's own
+        # between-version re-bake, not a mod.  Carrying those writes old-version
+        # bytes over re-baked assets, which the newer game can count as content
+        # mismatches (e.g. a "GAME VALIDATION ERROR" tech alert).  A real mod
+        # rarely changes dozens of images, so escalate the caution when many do.
+        if n_img >= 30:
+            intro += ("\n\n%d images differ — that is a lot for a mod, and "
+                      "usually means the factory re-baked images between the "
+                      "two versions.  Transferring those puts old-version "
+                      "content on the new card, which the game can flag.  For "
+                      "an accurate transfer, cancel and re-run this with a "
+                      "STOCK (unmodded) extract of the SAME OLD version as the "
+                      "baseline — that carries ONLY your real mods." % n_img)
+        else:
+            intro += ("\nA difference can also be a factory change between "
+                      "versions — after transferring, review the Replace tabs "
+                      "and clear anything you didn't mod.")
         if caveats:
             intro += "\n\n" + "\n".join(caveats)
         self._confirm_apply_transfer(modded_dir, target_dir, plan,

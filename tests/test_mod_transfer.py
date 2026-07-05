@@ -266,6 +266,48 @@ def test_plan_direct_diff_images_videos_no_baseline(tmp_path):
         os.path.join(mod, "images", "backglass.png"))
 
 
+def test_baseline_excludes_vendor_rebake_that_direct_diff_carries(tmp_path):
+    """A file the VENDOR re-baked between versions but the user never modded:
+
+    ``system_font`` is byte-identical in the modded old extract and the stock
+    OLD extract (the user didn't touch it) but differs in the new version (the
+    factory re-baked it).  ``game_art`` is a genuine user mod.
+
+    * ``diff_baked_mods`` (stock same-version baseline) stages ONLY the genuine
+      mod — the re-bake is ``modded == old-stock`` so it is correctly left out.
+    * ``plan_direct_diff`` (no baseline) has nothing to compare the old bytes
+      against but the NEW stock, so it wrongly stages the re-bake too.
+
+    On a real card the no-baseline route therefore writes old-version bytes over
+    an asset the new firmware re-baked, and the new firmware's per-asset content
+    check counts every one as a mismatch (the TMNT ``#5`` second counter).  The
+    baseline flow is the fix; this locks that contrast in."""
+    mod = str(tmp_path / "modded158")
+    old_stock = str(tmp_path / "stock158")
+    new_stock = str(tmp_path / "stock159")
+    _mk_extract(mod, {}, images={
+        "images/system_font.png": b"FONT-158",     # untouched (== old stock)
+        "images/game_art.png": b"1987-ART",        # a genuine user mod
+    })
+    _mk_extract(old_stock, {}, images={
+        "images/system_font.png": b"FONT-158",
+        "images/game_art.png": b"STOCK-ART-158",
+    })
+    _mk_extract(new_stock, {}, images={
+        "images/system_font.png": b"FONT-159",     # vendor re-baked it
+        "images/game_art.png": b"STOCK-ART-159",
+    })
+
+    # Baseline flow: only the genuine mod; the vendor re-bake is excluded.
+    diff = mod_transfer.diff_baked_mods(mod, old_stock)
+    assert list(diff["saved"]["image"]) == ["images/game_art.png"]
+
+    # No-baseline flow: carries the vendor re-bake as if it were a mod.
+    plan = mod_transfer.plan_direct_diff(mod, new_stock)
+    assert sorted(e["rel"] for e in plan["image"]["matched"]) == [
+        "images/game_art.png", "images/system_font.png"]
+
+
 def _write_manifest(root, rows):
     """rows: list of (output filename, on-card path)."""
     d = os.path.join(root, "video")

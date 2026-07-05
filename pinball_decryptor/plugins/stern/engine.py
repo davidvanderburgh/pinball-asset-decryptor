@@ -554,7 +554,7 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
 
 # --------------------------------------------------------------------------
 # Radium-embedded images: the BC3/DXT5 "display-system" bitmaps stored INLINE
-# in a scene.radium (the song-title text glyphs like "ROCK AND ROLL" PB shows
+# in a scene.radium (the song-title text glyphs like "ROCK AND ROLL" shown
 # under a scene) — not a scene.assets file.  Same codec, patched in place.
 # --------------------------------------------------------------------------
 _RADIUM_IMAGE_MANIFEST = "radium_images.txt"
@@ -1420,16 +1420,54 @@ def _fit_video_payload(staged_path, target, work_dir, log):
         return None
     log("Video %s re-encoded to fit (%d -> %d bytes of %d)."
         % (name, len(data), len(shrunk), target), "info")
+    # Warn when the byte slot forces a bitrate so low the result will look
+    # blocky/scrambled — the on-card slot is fixed-size, so a big clip in a
+    # tiny slot (e.g. a 456 KB attract background) can't keep its quality.
+    # Judge by bits-per-pixel-per-second (resolution-aware): H.264 looks poor
+    # below ~0.03 bpp regardless of absolute bitrate.
+    if info and info.width > 0 and info.height > 0:
+        dur = info.duration if info.duration and info.duration > 0 else 0
+        if dur > 0:
+            bitrate = len(shrunk) * 8 / dur
+            fps = info.fps if info.fps and info.fps > 0 else 30.0
+            bpp = bitrate / (info.width * info.height * fps)
+            if bpp < 0.03:
+                slot_str = ("%.1f MB" % (target / 1e6) if target >= 1e6
+                            else "%d KB" % (target / 1024))
+                log("Video %s: the on-card slot is only %s, so this clip had "
+                    "to be squeezed to ~%d kbps (%dx%d, %.0fs) — it will look "
+                    "very blocky. This slot is too small for a full-quality "
+                    "replacement; use a shorter or lower-resolution clip for "
+                    "it."
+                    % (name, slot_str, bitrate / 1000,
+                       info.width, info.height, dur), "warning")
     return _pad_isobmff(shrunk, target)
 
 
-def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
-    """Resolve each changed video to its card inode and size-fit its bytes.
-    Returns ``([(node, payload), ...], n_skipped)`` where every payload is
-    exactly the inode's size, ready for an in-place ``disk_ranges`` write."""
+def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
+                           originals=None, dest_is_device=False):
+    """Resolve each changed video to its card inode and prepare it for Write.
+
+    Returns ``([(node, payload), ...], n_skipped, grow_jobs)``.  Any video with
+    an assignable ORIGINAL is returned as a job ``(card_rel, source_file)`` for
+    the caller to copy in INTACT via the ext4 driver (the file's inode grows OR
+    shrinks to the source size).  This keeps the user's exact bytes on the card
+    — full quality, and the form the game's content validation accepts: *any*
+    re-encode is rejected, including the container remux that a clip which
+    already "fits" its slot would otherwise get.  Only videos without an
+    assignable original (or when the ext4 driver isn't reachable, or a direct-SD
+    write) fall back to the old size-fit-in-place patch.
+
+    *originals* maps the extract rel (``video/<name>``) to the user's assigned
+    replacement file; the intact copy uses that source, never the transcoded
+    staged copy."""
+    originals = originals or {}
     nodes = _resolve_card_nodes(reader, [cp for (_f, cp, _s) in video_edits],
                                 cancel)
-    patches = []
+
+    # Classify: a video with an assigned original is replaced INTACT (via the
+    # ext4 driver); one without falls back to the size-fit raw patch.
+    intact, fit = [], []      # intact: (fname, card_path, node, src, staged)
     skipped = 0
     for fname, card_path, staged in video_edits:
         if cancel():
@@ -1440,6 +1478,38 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
                 "skipped." % (fname, card_path), "warning")
             skipped += 1
             continue
+        src = originals.get("video/" + fname)
+        if src and os.path.isfile(src):
+            intact.append((fname, card_path, node, src, staged))
+        else:
+            fit.append((fname, card_path, node, staged))
+
+    can_grow = False
+    if intact and dest_is_device:
+        log("%d replaced video(s) will be re-encoded to fit their slots for a "
+            "direct-SD write. Build an image file and flash it instead to keep "
+            "them full quality (and pass the game's content validation)."
+            % len(intact), "warning")
+    elif intact:
+        from ...core import ext4_grow
+        can_grow, why = ext4_grow.available()
+        if not can_grow:
+            log("Can't replace videos intact on this system (%s); they'll be "
+                "re-encoded to fit their slots instead (lower quality)." % why,
+                "warning")
+
+    patches, grow_jobs = [], []
+    for fname, card_path, node, src, staged in intact:
+        if can_grow:
+            grow_jobs.append((card_path.lstrip("/"), src))
+            sz = os.path.getsize(src)
+            log("Video %s: replacing the slot with the intact %d B original "
+                "(slot was %d B) — full quality, no re-encode."
+                % (fname, sz, node["size"]), "info")
+        else:
+            fit.append((fname, card_path, node, staged))
+
+    for fname, card_path, node, staged in fit:
         payload = _fit_video_payload(staged, node["size"], work_dir, log)
         if payload is None:
             skipped += 1
@@ -1447,7 +1517,7 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel):
         patches.append((node, payload))
         log("Video %s: ready to patch (%d bytes)." % (fname, node["size"]),
             "info")
-    return patches, skipped
+    return patches, skipped, grow_jobs
 
 
 # --------------------------------------------------------------------------
@@ -2078,7 +2148,7 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
 
 
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None, label=None):
+                     phase=None, label=None, dest_is_device=False):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
     edits, and resolve them to a flat list of absolute on-disk writes
     ``[(disk_offset, bytes), ...]`` (offsets relative to the start of
@@ -2172,7 +2242,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             gr_path, img_path, reader, _fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
             if cancel():
-                return None, None
+                return None, None, None
             if not audio_decode_supported(gr_path):
                 # This title's audio codec can't be re-encoded.  If the user
                 # only edited video/images, carry on and write those; otherwise
@@ -2199,7 +2269,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel)
                     if audio_patches is None:
-                        return None, None
+                        return None, None, None
                     # Keep the firmware's master-directory forward-chain intact:
                     # restore the bytes its decode consumes, then verify every
                     # sound still derives valid codec params (else abort — the
@@ -2210,7 +2280,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, audio_patches, log, progress,
                             cancel)
                         if audio_patches is None:
-                            return None, None
+                            return None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
                                                 params, np, log, work)
 
@@ -2223,7 +2293,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         reader, gr_path, img_path, music_edits, work, log,
                         progress, cancel, np)
                     if cancel():
-                        return None, None
+                        return None, None, None
 
         # A video / image / text-only write (or one whose audio turned out
         # unsupported) still needs a reader to resolve the loose-file inodes.
@@ -2245,7 +2315,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
-                return None, None
+                return None, None, None
 
         # Edited radium-embedded DXT5 images -> also already-flat (disk_offset,
         # bytes) writes (patched in place inside the scene.radium inode).
@@ -2258,16 +2328,23 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, assets_dir, baseline, log, cancel)
             _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
-                return None, None
+                return None, None, None
 
         video_patches = []     # (inode, payload bytes == inode size)
+        video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
         if video_edits:
             if progress:
                 progress(86, 100, "Preparing video...")
-            video_patches, _vskip = _prepare_video_patches(
-                reader, video_edits, work, log, cancel)
+            # The user's assigned replacements (extract rel -> source file);
+            # oversized ones grow their slot instead of being crushed to fit.
+            from ...core import staged_changes as _sc
+            _saved = _sc.load(assets_dir)
+            video_patches, _vskip, video_grow_jobs = _prepare_video_patches(
+                reader, video_edits, work, log, cancel,
+                originals=_saved.get("video") or {},
+                dest_is_device=dest_is_device)
             if cancel():
-                return None, None
+                return None, None, None
 
         image_patches = []     # (inode, payload bytes == inode size)
         if image_edits:
@@ -2276,7 +2353,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             image_patches, _iskip = _prepare_image_patches(
                 reader, image_edits, work, log, cancel)
             if cancel():
-                return None, None
+                return None, None, None
 
         texture_patches = []   # (inode, payload bytes == inode size)
         if texture_edits:
@@ -2285,11 +2362,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             texture_patches, _tskip = _prepare_texture_patches(
                 reader, texture_edits, log, cancel)
             if cancel():
-                return None, None
+                return None, None, None
 
         if (not audio_patches and not music_patches and not video_patches
-                and not image_patches and not texture_patches
-                and not radimg_writes and not text_writes):
+                and not video_grow_jobs and not image_patches
+                and not texture_patches and not radimg_writes
+                and not text_writes):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
@@ -2331,13 +2409,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
 
+        # Grown videos aren't flat disk writes — they're copied in by the ext4
+        # driver after the in-place writes land.  Hand them back to the caller
+        # (with the data-partition offset) as a separate plan.
+        grow_plan = ({"offset": reader.base, "jobs": video_grow_jobs}
+                     if video_grow_jobs else None)
+
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
         # stays the same shape.
-        return writes, (len(audio_patches) + len(music_patches),
-                        len(video_patches),
-                        len(image_patches) + len(texture_patches) + n_radimg,
-                        n_text)
+        counts = (len(audio_patches) + len(music_patches),
+                  len(video_patches) + len(video_grow_jobs),
+                  len(image_patches) + len(texture_patches) + n_radimg,
+                  n_text)
+        return writes, counts, grow_plan
     finally:
         _rmtree(work)
 
@@ -2393,7 +2478,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(original_path, "rb")
     try:
-        writes, counts = _compute_patches(
+        writes, counts, grow_plan = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label)
     except BaseException:
         copier.join()                       # let the copy finish before unlinking
@@ -2415,11 +2500,32 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         _apply_writes(out, writes)
         out.flush()
         os.fsync(out.fileno())
+    # Grow any oversized video slots (kept full-quality, not crushed) by copying
+    # the replacements in through the ext4 driver — done AFTER the in-place
+    # writes so the filesystem it mounts is already consistent.
+    _grow_video_slots(output_path, grow_plan, log)
     n_audio, n_video, n_image, n_text = counts
     log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
     return n_audio + n_video + n_image + n_text
+
+
+def _grow_video_slots(image_or_device, grow_plan, log):
+    """Copy oversized replacement videos into their (grown) slots via the ext4
+    driver.  A growth failure is surfaced loudly but does NOT discard the rest
+    of the write — the in-place edits already landed, and the un-grown videos
+    simply keep their stock content until the user retries."""
+    if not grow_plan or not grow_plan.get("jobs"):
+        return
+    from ...core import ext4_grow
+    try:
+        ext4_grow.grow_files(image_or_device, grow_plan["offset"],
+                             grow_plan["jobs"], log=log)
+    except ext4_grow.Ext4GrowUnavailable as e:
+        log("Could not grow the full-size videos: %s" % e, "warning")
+    except ext4_grow.Ext4GrowError as e:
+        log("Video growth failed: %s" % e, "error")
 
 
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
@@ -2612,8 +2718,9 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     parts = device_partitions(device_path, partition_override, log=log)
 
     with RawDeviceFile(device_path, writable=False) as disk_f:
-        writes, counts = _compute_patches(
-            disk_f, parts, assets_dir, log, progress, cancel, phase=phase)
+        writes, counts, _grow_plan = _compute_patches(
+            disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
+            dest_is_device=True)
     if writes is None:                          # cancelled mid-compute
         return 0
 

@@ -35,7 +35,7 @@ def test_compute_patches_is_defined_with_expected_signature():
     params = list(inspect.signature(engine._compute_patches).parameters)
     assert params == [
         "disk_f", "parts", "assets_dir", "log", "progress", "cancel", "phase",
-        "label"]
+        "label", "dest_is_device"]
 
 
 def test_empty_assets_dir_raises_filenotfound_not_nameerror(tmp_path):
@@ -87,8 +87,9 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
 
     def fake_compute(disk_f, parts, assets_dir, log, progress, cancel,
-                     phase=None, label=None):
-        return ({19: b"PATCHED!"}, (3, 0, 0, 0))   # 3 sounds, off 19
+                     phase=None, label=None, dest_is_device=False):
+        # (writes, counts, grow_plan) — no oversized videos, so grow_plan=None
+        return ({19: b"PATCHED!"}, (3, 0, 0, 0), None)   # 3 sounds, off 19
     monkeypatch.setattr(engine, "_compute_patches", fake_compute)
 
     seen = {}
@@ -114,7 +115,7 @@ def test_write_image_cancel_discards_output(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: (None, None))      # cancelled mid-compute
+                        lambda *a, **k: (None, None, None))  # cancelled mid-compute
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch on cancel"))
     assert engine.write_image(str(src), str(tmp_path), str(out), log=_log) == 0
@@ -142,7 +143,7 @@ def test_write_image_copy_failure_surfaces(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0)))
+                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), None))
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch when copy failed"))
 
@@ -164,7 +165,7 @@ def test_write_image_waits_for_slow_copy_before_patching(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0)))
+                        lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0), None))
 
     real_copy = shutil.copyfile
 

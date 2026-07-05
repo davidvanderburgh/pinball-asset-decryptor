@@ -109,8 +109,9 @@ def test_prepare_video_patches_pads_to_slot_size(tmp_path):
     reader = _FakeReader({"/g/1.asset": 80})
     edits = [("a.mp4", "/g/1.asset", str(staged))]
 
-    patches, skipped = _prepare(reader, edits, work)
+    patches, skipped, grow = _prepare(reader, edits, work)
     assert skipped == 0
+    assert grow == []                          # nothing oversized here
     assert len(patches) == 1
     node, payload = patches[0]
     assert node["size"] == 80
@@ -126,9 +127,94 @@ def test_prepare_video_patches_skips_when_inode_missing(tmp_path):
     reader = _FakeReader({})               # card path not found on the card
     edits = [("a.mp4", "/g/1.asset", str(staged))]
 
-    patches, skipped = _prepare(reader, edits, work)
+    patches, skipped, grow = _prepare(reader, edits, work)
     assert patches == []
+    assert grow == []
     assert skipped == 1
+
+
+def test_prepare_video_patches_grows_oversized_source(tmp_path, monkeypatch):
+    # The user's assigned source is bigger than the on-card slot: instead of
+    # crushing it in place, it becomes a GROW job (card_rel, source) — kept
+    # intact for the ext4 driver to copy in.  No in-place patch is produced.
+    big = tmp_path / "orig.mp4"
+    big.write_bytes(b"B" * 500)              # 500 B > 80 B slot
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(b"x" * 999)           # transcoded staged copy (ignored)
+    work = tmp_path / "work"; work.mkdir()
+    reader = _FakeReader({"/g/1.asset": 80})
+    edits = [("a.mov", "/g/1.asset", str(staged))]
+    monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
+                        lambda: (True, "ok"))
+
+    patches, skipped, grow = engine._prepare_video_patches(
+        reader, edits, str(work), log=lambda *a, **k: None,
+        cancel=lambda: False, originals={"video/a.mov": str(big)})
+    assert patches == []                     # not patched in place
+    assert skipped == 0
+    assert grow == [("g/1.asset", str(big))]  # card rel (no leading /), source
+
+
+def test_prepare_video_patches_replaces_fit_size_original_intact(
+        tmp_path, monkeypatch):
+    # Even a source that FITS its slot is replaced intact via the ext4 driver
+    # rather than re-encoded — any re-encode (even a container remux) is what
+    # the game's content validation rejects.
+    small = tmp_path / "orig.mp4"
+    small.write_bytes(b"B" * 40)             # 40 B <= 80 B slot (fits)
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(b"x" * 70)
+    work = tmp_path / "work"; work.mkdir()
+    reader = _FakeReader({"/g/1.asset": 80})
+    edits = [("a.mov", "/g/1.asset", str(staged))]
+    monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
+                        lambda: (True, "ok"))
+
+    patches, skipped, grow = engine._prepare_video_patches(
+        reader, edits, str(work), log=lambda *a, **k: None,
+        cancel=lambda: False, originals={"video/a.mov": str(small)})
+    assert patches == []                     # NOT re-encoded / raw-patched
+    assert grow == [("g/1.asset", str(small))]   # replaced intact instead
+
+
+def test_prepare_video_patches_oversized_falls_back_to_fit_without_grow(
+        tmp_path, monkeypatch):
+    # When the ext4 driver isn't reachable, an oversized source falls back to
+    # the old size-fit-in-place behaviour (never dropped).  The staged copy is
+    # <= slot here so it pads (no ffmpeg needed).
+    big = tmp_path / "orig.mp4"
+    big.write_bytes(b"B" * 500)
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(b"y" * 50)            # <= 80 slot -> pads
+    work = tmp_path / "work"; work.mkdir()
+    reader = _FakeReader({"/g/1.asset": 80})
+    edits = [("a.mov", "/g/1.asset", str(staged))]
+    monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
+                        lambda: (False, "no WSL"))
+
+    patches, skipped, grow = engine._prepare_video_patches(
+        reader, edits, str(work), log=lambda *a, **k: None,
+        cancel=lambda: False, originals={"video/a.mov": str(big)})
+    assert grow == []                        # growth unavailable
+    assert len(patches) == 1                 # size-fit in place instead
+
+
+def test_prepare_video_patches_device_dest_never_grows(tmp_path, monkeypatch):
+    # Direct-SD writes can't grow slots; an oversized source falls back to fit.
+    big = tmp_path / "orig.mp4"; big.write_bytes(b"B" * 500)
+    staged = tmp_path / "a.mov"; staged.write_bytes(b"y" * 50)
+    work = tmp_path / "work"; work.mkdir()
+    reader = _FakeReader({"/g/1.asset": 80})
+    edits = [("a.mov", "/g/1.asset", str(staged))]
+    # available() would say yes, but dest_is_device must veto growth.
+    monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
+                        lambda: (True, "ok"))
+    patches, skipped, grow = engine._prepare_video_patches(
+        reader, edits, str(work), log=lambda *a, **k: None,
+        cancel=lambda: False, originals={"video/a.mov": str(big)},
+        dest_is_device=True)
+    assert grow == []
+    assert len(patches) == 1
 
 
 def _prepare(reader, edits, work):

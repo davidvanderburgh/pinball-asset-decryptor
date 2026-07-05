@@ -107,6 +107,7 @@ pyinstaller \
     --collect-all "tokenizers" \
     --collect-all "huggingface_hub" \
     --collect-all "imageio_ffmpeg" \
+    --collect-all "certifi" \
     --collect-submodules "pinball_decryptor.plugins" \
     --collect-submodules "pinball_decryptor.core" \
     --noconfirm \

@@ -13,7 +13,12 @@
 # unicorn + capstone power the Stern Spike 2 audio engine: it drives the card's
 # own game_real firmware in an ARM emulator to recover the per-sound codec
 # keystream (decode every sound to WAV; re-encode replacements bit-exact).
+# certifi supplies the CA bundle for the app's direct HTTPS calls (update
+# check, AcoustID lookup): the frozen macOS builds link a Homebrew OpenSSL
+# whose default CA path doesn't exist on non-Homebrew Macs, so without a
+# bundled trust store every HTTPS request fails certificate verification.
 Pillow>=10.0
+certifi>=2024.2.2
 zstandard>=0.22
 pycryptodome>=3
 numpy>=1.24

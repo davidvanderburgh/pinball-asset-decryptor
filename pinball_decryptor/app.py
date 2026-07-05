@@ -2434,16 +2434,20 @@ class App:
         def _run():
             try:
                 result = check_for_update(__version__, repo=mfr_repo)
-                failed = False
-            except Exception:
-                result, failed = None, True
+                failed = None
+            except Exception as e:
+                # Keep the real error — v0.41 and earlier reduced every
+                # failure to "couldn't reach GitHub", which hid the actual
+                # macOS cause (no CA roots -> CERTIFICATE_VERIFY_FAILED)
+                # and made field reports undiagnosable.
+                result, failed = None, f"{type(e).__name__}: {e}"
             self.root.after(
                 0, self._handle_update_check_result,
                 result, show_up_to_date_toast, failed)
         threading.Thread(target=_run, daemon=True).start()
 
     def _handle_update_check_result(self, result, show_up_to_date_toast,
-                                    failed=False):
+                                    failed=None):
         """Main-thread continuation of the update check."""
         self.window.set_update_check_running(False)
         if result:
@@ -2457,12 +2461,14 @@ class App:
             # Network/API error — don't claim "up to date" when we couldn't
             # actually check.
             self.window.append_log(
-                "Update check failed — couldn't reach GitHub.", "error")
+                f"Update check failed — couldn't reach GitHub ({failed}).",
+                "error")
             if show_up_to_date_toast:
                 messagebox.showwarning(
                     "Update check failed",
                     "Couldn't reach GitHub to check for updates.\n"
-                    "Check your internet connection and try again.")
+                    "Check your internet connection and try again.\n\n"
+                    f"Details: {failed}")
         else:
             self.window.append_log(
                 f"You're on the latest version (v{__version__}).", "info")

@@ -3,6 +3,7 @@
 import json
 import urllib.request
 
+from . import net
 from .config import GITHUB_REPO
 
 REQUEST_TIMEOUT = 5
@@ -32,7 +33,10 @@ def check_for_update(current_version, repo=None):
             "User-Agent": "Pinball-Asset-Decryptor-UpdateCheck",
         },
     )
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+    # net.urlopen, not a bare urlopen: the frozen macOS app has no
+    # OpenSSL default CA path, so the default context can't verify
+    # api.github.com and every check fails (see core/net.py).
+    with net.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
         data = json.loads(resp.read().decode())
 
     tag = data.get("tag_name", "")

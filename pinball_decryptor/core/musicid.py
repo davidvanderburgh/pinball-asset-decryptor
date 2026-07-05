@@ -26,6 +26,7 @@ import urllib.request
 
 # Reuse the shared ffmpeg layer: robust exe discovery + the Windows
 # CREATE_NO_WINDOW flag so fingerprinting never flashes a console window.
+from . import net
 from .audio import _CREATE_FLAGS, find_ffmpeg, probe_duration
 from .pipeline_base import BasePipeline, PipelineError
 
@@ -86,7 +87,7 @@ def fingerprint_file(path):
 
 
 def lookup(fingerprint, duration, client_key, timeout=20,
-           _opener=urllib.request.urlopen):
+           _opener=net.urlopen):
     """Query AcoustID; return the parsed JSON dict.  ``_opener`` is injectable
     for tests.  Raises ValueError on a transport/HTTP error."""
     fields = [

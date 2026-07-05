@@ -78,7 +78,9 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
             dirs[:] = [d for d in dirs if not d.startswith(".")]
             for fn in files:
                 ext = os.path.splitext(fn)[1].lower()
-                if ext not in allowed or ".stage." in fn:
+                # Dot-files are our sidecars (.blank.png, the transparent
+                # group-blank source), never slots.
+                if ext not in allowed or ".stage." in fn or fn.startswith("."):
                     continue
                 abs_path = os.path.join(root, fn)
                 if abs_path in seen:

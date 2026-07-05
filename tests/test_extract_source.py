@@ -5,7 +5,8 @@ import json
 import os
 
 from pinball_decryptor.core.extract_source import (
-    SIDE_CAR, stale_source_message, write_extract_source)
+    SIDE_CAR, read_extract_source, stale_source_message,
+    version_hint_for_dir, version_hint_from_name, write_extract_source)
 
 
 def _make_image(path, data=b"\x00" * 4096):
@@ -89,3 +90,32 @@ def test_sidecar_records_expected_fields(tmp_path):
     assert rec["input_name"] == "the_image.raw"
     assert rec["size"] == 4096
     assert "mtime" in rec and isinstance(rec["mtime"], int)
+
+
+def test_version_hint_from_name():
+    # Stern card-image naming: <game>-<maj>_<min>_<patch>.<tag>.<size>...
+    assert (version_hint_from_name("turtles_pro-1_59_0.Release.8G.sdcard.raw")
+            == "1.59.0 (Release)")
+    assert (version_hint_from_name("turtles_pro-1_58_1.1987.8G.sdcard.raw")
+            == "1.58.1 (1987)")
+    # A media-size token in the channel slot is not a build tag.
+    assert version_hint_from_name("acdc-2_10_0.8G.raw") == "2.10.0"
+    # No version pattern / no name -> None (caller shows nothing).
+    assert version_hint_from_name("some_random_backup.img") is None
+    assert version_hint_from_name(None) is None
+
+
+def test_read_and_version_hint_for_dir(tmp_path):
+    img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    out = tmp_path / "out"
+    out.mkdir()
+    _make_image(str(img))
+    write_extract_source(str(out), str(img))
+    rec = read_extract_source(str(out))
+    assert rec is not None and rec["input_path"] == os.path.abspath(str(img))
+    assert version_hint_for_dir(str(out)) == "1.59.0 (Release)"
+    # A folder with no sidecar opts out cleanly.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert read_extract_source(str(empty)) is None
+    assert version_hint_for_dir(str(empty)) is None

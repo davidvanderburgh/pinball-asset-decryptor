@@ -20,9 +20,15 @@ asset layout.  Two hazards, handled differently:
   Extract produced, which stays stock until Write), not by the raw index — so a
   replacement follows its sound even if it moved to a new index, and an index
   that now holds a *different* sound is flagged rather than silently mis-applied.
-* **Image / Video / Text** are keyed by stable identities (asset filename, or
-  for text the original string).  A rel_path / original that no longer exists in
-  the target is dropped (a safe no-op), never re-pointed.
+* **Image / Video / Text** are keyed by stable identities: loose images and
+  videos by rel path / on-card path, scene textures by the manifest's asset
+  card path, radium-embedded images by (radium card path, occurrence ordinal)
+  — and because radium images are extracted content-deduplicated, ONE source
+  image can own SEVERAL occurrence slots, each of which may be a distinct
+  file on the target side; the remap fans a single source rel out to every
+  target rel it identifies.  For text the key is the original string.  A
+  rel_path / original that no longer exists in the target is dropped (a safe
+  no-op), never re-pointed.
 
 ``plan_transfer`` computes a reconciliation report without touching anything;
 ``apply_transfer`` merges the resolved edits into the target folder.  Nothing
@@ -39,6 +45,12 @@ replacement is the modded extract's own file), which then feed
 ``plan_transfer``/``apply_transfer`` via their ``saved``/``src_saved``
 overrides — with the *stock* extract as the transfer source, so the content
 matching still keys off stock sounds.
+
+Both baked-mod routes (:func:`diff_baked_mods` and :func:`plan_direct_diff`)
+diff by file bytes, but an image pair that decodes to identical pixels is NOT
+a mod — vendor re-bakes and external-tool re-encodes change the compression /
+metadata without touching a pixel — so those are skipped (and counted) rather
+than staged.
 """
 
 import hashlib
@@ -155,6 +167,26 @@ def _files_differ(path_a, path_b):
     return sig_a is not None and sig_b is not None and sig_a != sig_b
 
 
+def _pixels_identical(path_a, path_b):
+    """True when two image files decode to the SAME RGBA pixels even though
+    their bytes differ — vendor re-bakes and external-tool re-encodes change
+    the compression / metadata without touching a pixel, and staging those as
+    "mods" writes stale old-version bytes over assets the new firmware
+    re-baked.  Any failure (unreadable, not an image Pillow can decode, size
+    mismatch) returns False: fail open and treat the pair as different —
+    staging a vendor no-op is recoverable, silently dropping a real mod
+    isn't."""
+    try:
+        from PIL import Image
+        with Image.open(path_a) as im_a, Image.open(path_b) as im_b:
+            if im_a.size != im_b.size:
+                return False
+            return (im_a.convert("RGBA").tobytes()
+                    == im_b.convert("RGBA").tobytes())
+    except Exception:
+        return False
+
+
 def _video_card_paths(root):
     """``{on_card_path: rel}`` parsed from the extractor's
     ``video/manifest.txt`` (columns: output filename, on-card path, bytes).
@@ -233,16 +265,25 @@ def _image_rel_remap(src_dir, tgt_dir):
     """``(remap, identified)`` pairing *src_dir*'s manifest-identified images
     with *tgt_dir*'s.
 
-    *remap* maps ``src_rel -> tgt_rel`` for every pairable image;
-    *identified* is the set of src rels a manifest claims — for those the
-    manifest verdict is authoritative (``rel in identified`` but not in
-    *remap* means the counterpart is really gone; do NOT fall back to name
-    matching, the name may have been reused by a different image).  Loose
-    images (their rel IS the card path) are never ``identified`` — plain rel
-    pairing is correct for them.  A src store whose TARGET-side manifest is
-    missing (older extract) stays unidentified so name pairing still gets a
-    chance."""
+    *remap* maps ``src_rel -> [tgt_rel, ...]`` (ordered, deduped) for every
+    pairable image.  It's a MULTImap because radium images are extracted
+    content-deduplicated: one src file can occupy many occurrence slots — an
+    animation whose frames were all baked identical is ONE src PNG — while
+    the target side has a distinct file per slot; every one of those target
+    rels is that src image's slot.  *identified* is the set of src rels a
+    manifest claims — for those the manifest verdict is authoritative
+    (``rel in identified`` but not in *remap* means the counterpart is really
+    gone; do NOT fall back to name matching, the name may have been reused by
+    a different image).  Loose images (their rel IS the card path) are never
+    ``identified`` — plain rel pairing is correct for them.  A src store
+    whose TARGET-side manifest is missing (older extract) stays unidentified
+    so name pairing still gets a chance."""
     remap, identified = {}, set()
+
+    def _pair(s, t):
+        tgts = remap.setdefault(s, [])
+        if t not in tgts:
+            tgts.append(t)
 
     src_st = _scene_texture_cards(src_dir)
     tgt_st = _scene_texture_cards(tgt_dir)
@@ -251,7 +292,7 @@ def _image_rel_remap(src_dir, tgt_dir):
             identified.add(rel)
             tgt_rel = tgt_st.get(card)
             if tgt_rel is not None:
-                remap.setdefault(rel, tgt_rel)
+                _pair(rel, tgt_rel)
 
     src_rad = _radium_occurrences(src_dir)
     tgt_rad = _radium_occurrences(tgt_dir)
@@ -261,7 +302,7 @@ def _image_rel_remap(src_dir, tgt_dir):
             tgt_rels = tgt_rad.get(radium)
             if tgt_rels is not None and len(tgt_rels) == len(rels):
                 for s, t in zip(rels, tgt_rels):
-                    remap.setdefault(s, t)
+                    _pair(s, t)
     return remap, identified
 
 
@@ -274,7 +315,11 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
                    "video": {...}, "image": {...}},
          "text_rows": [{path, original, replacement}, ...],
          "notes": {"paired_audio": int, "unpaired_audio": int,
-                   "skipped_text_assets": int}}
+                   "skipped_text_assets": int, "image_rebake_skipped": int}}
+
+    ``image_rebake_skipped`` counts image pairs whose bytes differ but whose
+    pixels are identical (a re-encode, not a mod — see
+    :func:`_pixels_identical`); those are not staged.
 
     ``saved`` is shaped like the staged-changes sidecar with the *stock*
     extract's rels as keys and the *modded* extract's files as the replacement
@@ -286,7 +331,8 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
     """
     log = log_cb or (lambda *_a, **_k: None)
     saved = {"audio": {}, "video": {}, "image": {}}
-    notes = {"paired_audio": 0, "unpaired_audio": 0, "skipped_text_assets": 0}
+    notes = {"paired_audio": 0, "unpaired_audio": 0, "skipped_text_assets": 0,
+             "image_rebake_skipped": 0}
 
     mod_keys = _audio_by_slot_key(modded_dir)
     stk_keys = _audio_by_slot_key(stock_dir)
@@ -324,16 +370,28 @@ def diff_baked_mods(modded_dir, stock_dir, log_cb=None):
                 card = stk_rel_to_card.get(rel)
                 mod_rel = mod_cards.get(card) if card else None
             elif cat == "image" and rel in img_identified:
-                mod_rel = img_remap.get(rel)
+                # First mapped element: the walk visits each STOCK file once
+                # and ``saved`` can only hold one replacement per stock rel
+                # anyway; occurrence order is preserved, so the first pairing
+                # is the deterministic representative.
+                mod_rels = img_remap.get(rel)
+                mod_rel = mod_rels[0] if mod_rels else None
             else:
                 mod_rel = rel
             mod_abs = _abs(modded_dir, mod_rel) if mod_rel else None
             if not mod_abs or not os.path.isfile(mod_abs):
                 continue
             if _files_differ(mod_abs, _abs(stock_dir, rel)):
+                if cat == "image" and _pixels_identical(
+                        mod_abs, _abs(stock_dir, rel)):
+                    notes["image_rebake_skipped"] += 1
+                    continue
                 saved[cat][rel] = os.path.abspath(mod_abs)
-        log("%s: %d differ."
-            % (cat.capitalize(), len(saved[cat])))
+        extra = (" (%d pixel-identical re-encode(s) skipped)"
+                 % notes["image_rebake_skipped"]
+                 if cat == "image" and notes["image_rebake_skipped"] else "")
+        log("%s: %d differ.%s"
+            % (cat.capitalize(), len(saved[cat]), extra))
 
     # Text: pair the manifests positionally per asset.  Text patches are
     # same-length in-place edits, so both extracts see the same string count
@@ -383,7 +441,10 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
                  "image_old_only": old images with no same-named new file,
                  "audio_unmatched": old sounds with no identical sound in the
                                     new extract (vendor changes OR audio mods),
-                 "text_unmatched":  old strings absent from the new manifest}
+                 "text_unmatched":  old strings absent from the new manifest,
+                 "image_rebake_skipped": image pairs whose bytes differ but
+                                    whose pixels are identical (a vendor /
+                                    tool re-encode, not a mod — not staged)}
 
     *log_cb(text, level="info")* streams progress — comparing thousands of
     files is minutes of I/O on big/cloud-synced extracts, so callers run this
@@ -401,7 +462,8 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
             "text": {"matched": [], "dropped": []},
             "toggles": {}}
     notes = {"video_old_only": 0, "image_old_only": 0,
-             "audio_unmatched": 0, "text_unmatched": 0}
+             "audio_unmatched": 0, "text_unmatched": 0,
+             "image_rebake_skipped": 0}
 
     # ---- Videos: card-path pairing, filename fallback -------------------
     mod_cards = _video_card_paths(modded_dir)
@@ -451,21 +513,31 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
         if i % 250 == 0:
             log("  ...%d/%d images compared" % (i, len(image_rels)))
         if rel in identified:
-            tgt_rel = remap.get(rel)
+            tgt_rels = remap.get(rel) or []
         else:
-            tgt_rel = rel if _stock_exists(target_dir, rel) else None
-        if tgt_rel is None:
+            tgt_rels = [rel] if _stock_exists(target_dir, rel) else []
+        if not tgt_rels:
             notes["image_old_only"] += 1
             continue
+        # A content-deduped source image can own several target slots (see
+        # _image_rel_remap) — stage EVERY one, first assignment per target
+        # slot wins.
         mod_abs = _abs(modded_dir, rel)
-        if tgt_rel not in staged_img and _files_differ(
-                mod_abs, _abs(target_dir, tgt_rel)):
+        for tgt_rel in tgt_rels:
+            if tgt_rel in staged_img or not _files_differ(
+                    mod_abs, _abs(target_dir, tgt_rel)):
+                continue
+            if _pixels_identical(mod_abs, _abs(target_dir, tgt_rel)):
+                notes["image_rebake_skipped"] += 1
+                continue
             staged_img.add(tgt_rel)
             plan["image"]["matched"].append(
                 {"rel": tgt_rel, "repl": os.path.abspath(mod_abs),
                  "content_changed": True})
-    log("Images: %d differ, %d only in the old version."
-        % (len(plan["image"]["matched"]), notes["image_old_only"]))
+    log("Images: %d differ, %d only in the old version, %d pixel-identical "
+        "re-encode(s) skipped."
+        % (len(plan["image"]["matched"]), notes["image_old_only"],
+           notes["image_rebake_skipped"]))
 
     # Heads-up counts only — differences we can't attribute without a stock
     # old-version extract.  Guarded so a category the target extract simply
@@ -559,21 +631,26 @@ def _plan_image(source_dir, target_dir, saved_map):
 
     Returns ``(matched, dropped)`` — matched entries carry the TARGET's rel
     and note whether the stock asset's *content* changed (same slot, new art)
-    so the caller can surface it."""
+    so the caller can surface it.  A content-deduped source image can own
+    several target slots (see :func:`_image_rel_remap`) — the assignment fans
+    out to one matched entry per target rel."""
     matched, dropped = [], []
     if not saved_map:
         return matched, dropped
     remap, identified = _image_rel_remap(source_dir, target_dir)
     for rel, repl in saved_map.items():
         if rel in identified:
-            tgt_rel = remap.get(rel)
+            tgt_rels = remap.get(rel) or []
         else:
-            tgt_rel = rel if _stock_exists(target_dir, rel) else None
-        if tgt_rel is not None and _stock_exists(target_dir, tgt_rel):
-            changed = (content_signature(_abs(source_dir, rel))
-                       != content_signature(_abs(target_dir, tgt_rel)))
-            matched.append({"rel": tgt_rel, "repl": repl,
-                            "content_changed": changed})
+            tgt_rels = [rel] if _stock_exists(target_dir, rel) else []
+        tgt_rels = [t for t in tgt_rels if _stock_exists(target_dir, t)]
+        if tgt_rels:
+            src_sig = content_signature(_abs(source_dir, rel))
+            for tgt_rel in tgt_rels:
+                changed = (src_sig
+                           != content_signature(_abs(target_dir, tgt_rel)))
+                matched.append({"rel": tgt_rel, "repl": repl,
+                                "content_changed": changed})
         else:
             dropped.append({"rel": rel, "repl": repl,
                             "reason": "no %s in the new version" % rel})

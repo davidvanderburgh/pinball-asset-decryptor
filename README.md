@@ -467,10 +467,19 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
 8. **Mod Pack tab** — share just your changed files as a zip, or apply
    someone else's mod pack on top of an extracted folder. For Stern
    Spike 2 (where new game code re-lays-out the card), a **Transfer Mods
-   to New Version** action pulls your pending Replace edits from an old
-   extract onto a fresh one — audio is matched by *sound content* so a
+   to New Version** panel pulls your mods from an old extract onto a
+   fresh one via four explicit inputs: your old (modded) extract, the new
+   stock extract, an *optional* clean extract of the old version (fill it
+   to also carry audio and text and to avoid mistaking the factory's own
+   between-version changes for your mods; leave it empty to compare old
+   against new directly for images and video), and the new version's card
+   image to build onto. Audio is matched by *sound content* so a
    replacement follows its sound even if its index moved, and a slot that
-   changed or vanished is flagged rather than silently mis-applied.
+   changed or vanished is flagged rather than silently mis-applied. It
+   works even for code modded outside this app (mods baked into the game
+   itself), reads a version hint from each extract so you can see what
+   you're combining, and wires the build straight to the new version so
+   the result can't accidentally come out on the old code.
 9. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact.

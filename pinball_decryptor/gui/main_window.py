@@ -59,6 +59,18 @@ VOICE_QUALITY_CHOICES = (
     ("medium.en", "Highest — best accuracy, ~10× slower (~1.5 GB model)"),
 )
 
+# Replace-Image "Group by scene" parent-row iid prefix.  Image-row iids are
+# the slot rel_path (relative, so it can never start with a colon); this
+# prefix guarantees a group header's iid can't collide with any slot.
+_IMG_GROUP_IID = "::grp::"
+
+# Fully-transparent 16×16 RGBA PNG — the "Blank all images" group action
+# assigns it to every slot in a scene so the whole element renders as nothing;
+# Write's normal staging rescales/re-encodes it per slot like any replacement.
+_BLANK_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR42mNgGAWjYBSM"
+    "AggAAAQQAAGvRYgsAAAAAElFTkSuQmCC")
+
 
 def _render_pinmame_frame(data, w, h, depth, scale, color):
     """Render a libpinmame RAW DMD frame to an amber-tinted PIL image.
@@ -345,9 +357,20 @@ class MainWindow:
         self.image_search_var = tk.StringVar()
         self._image_sort = ("#0", False)  # (column_id, descending)
         self.image_status_var = tk.StringVar(value="")
+        # List-view toggles: show only assigned/changed slots, and group the
+        # rows under their scene/animation container (Stern manifests; every
+        # uncovered slot falls back to its parent folder).  Persisted per
+        # assets folder with the other Replace toggles (see
+        # _save_staged_changes / _populate_image_after_scan).
+        self.image_changed_only_var = tk.BooleanVar(value=False)
+        self.image_group_by_scene_var = tk.BooleanVar(value=False)
         self._image_slots = []           # list[ImageSlot] from last scan
         self._image_slots_by_rel = {}    # rel_path -> ImageSlot
         self._image_assignments = {}     # rel_path -> replacement file path
+        # Manifest-derived grouping from the last scan (see
+        # _scan_image_groups): rel_path -> (group_key, label_base, order).
+        self._image_groups = {}
+        self._image_group_occ = {}       # rel_path -> on-card occurrence count
         self._image_scan_id = 0          # bump-counter to drop stale scans
         self._image_scan_dir = ""        # folder the current slots came from
         # Tk PhotoImage refs (must stay alive while drawn on the canvases).
@@ -355,6 +378,10 @@ class MainWindow:
         self._image_preview_img_rep = None
         self._image_current_rel = None   # slot shown in the static preview
         self.image_search_var.trace_add(
+            "write", lambda *a: self._refresh_image_list())
+        self.image_changed_only_var.trace_add(
+            "write", lambda *a: self._refresh_image_list())
+        self.image_group_by_scene_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
         # Replace-Text tab state (capabilities.replace_text plugins).  Unlike the
         # audio/video/image tabs (which hold in-memory assignments staged at
@@ -1691,36 +1718,89 @@ class MainWindow:
         ttk.Label(
             self._modpack_transfer_frame,
             text="New game code shipped? Pull your mods from your old extract "
-                 "onto a fresh extract of the new version. Audio is matched by "
-                 "sound content, images/videos by filename; a slot that "
-                 "changed or vanished is flagged, not mis-applied. Works even "
-                 "for code modded outside this app.",
+                 "onto a fresh extract of the new version, then build the new "
+                 "version's card with your mods on it. Fill the two required "
+                 "folders (and, if you have it, the optional one for a more "
+                 "accurate transfer). Works even for code modded outside this "
+                 "app.",
             font=(_SANS_FONT, 9), wraplength=560, justify=tk.LEFT).pack(
             anchor=tk.W, padx=8, pady=(4, 2))
         self.transfer_src_var = tk.StringVar()
         self.transfer_dst_var = tk.StringVar()
+        # Optional stock extract of the OLD version — its presence (not a
+        # modal) chooses the accurate baseline route; empty = direct compare.
+        self.transfer_oldstock_var = tk.StringVar()
+        # The NEW version's card image (.raw): the base the build patches your
+        # mods onto, and what the output is named after.  Auto-filled from the
+        # new extract's recorded source so it can't drift to the old version
+        # (the mistake that produced an old-version-named build).
+        self.transfer_newimg_var = tk.StringVar()
+        # Read-only hints recomputed by _transfer_refresh_meta.
+        self.transfer_src_ver_var = tk.StringVar()
+        self.transfer_dst_ver_var = tk.StringVar()
+        self.transfer_img_ver_var = tk.StringVar()
+        self.transfer_output_var = tk.StringVar()
+        self.transfer_next_var = tk.StringVar()
+
         tf = ttk.Frame(self._modpack_transfer_frame)
         tf.pack(fill=tk.X, padx=8, pady=(2, 2))
         tf.columnconfigure(1, weight=1)
-        ttk.Label(tf, text="Old extract (has your mods):").grid(
-            row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(tf, textvariable=self.transfer_src_var).grid(
-            row=0, column=1, sticky=tk.EW, padx=6, pady=2)
-        ttk.Button(tf, text="Browse...",
-                   command=self._browse_transfer_src).grid(
-            row=0, column=2, pady=2)
-        ttk.Label(tf, text="New extract (stock, new version):").grid(
-            row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(tf, textvariable=self.transfer_dst_var).grid(
-            row=1, column=1, sticky=tk.EW, padx=6, pady=2)
-        ttk.Button(tf, text="Browse...",
-                   command=self._browse_transfer_dst).grid(
-            row=1, column=2, pady=2)
+
+        def _picker(row, label, var, browse, ver_var=None):
+            ttk.Label(tf, text=label).grid(
+                row=row, column=0, sticky=tk.W, pady=2)
+            ttk.Entry(tf, textvariable=var).grid(
+                row=row, column=1, sticky=tk.EW, padx=6, pady=2)
+            ttk.Button(tf, text="Browse...", command=browse).grid(
+                row=row, column=2, pady=2)
+            if ver_var is not None:
+                ttk.Label(tf, textvariable=ver_var, foreground="#4a90d9",
+                          font=(_SANS_FONT, 8)).grid(
+                    row=row, column=3, sticky=tk.W, padx=(6, 0))
+
+        _picker(0, "1. Old extract (has your mods):",
+                self.transfer_src_var, self._browse_transfer_src,
+                self.transfer_src_ver_var)
+        _picker(1, "2. New extract (stock, new version):",
+                self.transfer_dst_var, self._browse_transfer_dst,
+                self.transfer_dst_ver_var)
+        _picker(2, "3. Stock extract of the OLD version (optional):",
+                self.transfer_oldstock_var, self._browse_transfer_oldstock)
+        ttk.Label(
+            tf,
+            text="     Leave empty to compare your old extract straight "
+                 "against the new one (finds image + video mods). Provide a "
+                 "clean, unmodified extract of the SAME old version to also "
+                 "carry AUDIO and TEXT and to avoid mistaking the factory's "
+                 "own between-version changes for your mods.",
+            font=(_SANS_FONT, 8, "italic"), wraplength=560,
+            justify=tk.LEFT).grid(row=3, column=0, columnspan=4,
+                                  sticky=tk.W, pady=(0, 4))
+        _picker(4, "4. New version card image (.raw) to build onto:",
+                self.transfer_newimg_var, self._browse_transfer_newimg,
+                self.transfer_img_ver_var)
+        ttk.Label(tf, textvariable=self.transfer_output_var,
+                  font=(_SANS_FONT, 8, "italic"), wraplength=560,
+                  justify=tk.LEFT).grid(row=5, column=0, columnspan=4,
+                                        sticky=tk.W, pady=(0, 2))
+
         ttk.Button(self._modpack_transfer_frame,
-                   text="Transfer mods: old → new...",
+                   text="Transfer mods → new version...",
                    command=(self._on_transfer_mods
                             if self._on_transfer_mods else lambda: None)).pack(
-            anchor=tk.W, padx=8, pady=(2, 6))
+            anchor=tk.W, padx=8, pady=(2, 2))
+        # Filled after a successful transfer with the exact next step (also
+        # written to the log, so it survives once this panel scrolls away).
+        ttk.Label(self._modpack_transfer_frame,
+                  textvariable=self.transfer_next_var, foreground="#3aa76d",
+                  font=(_SANS_FONT, 9, "bold"), wraplength=560,
+                  justify=tk.LEFT).pack(anchor=tk.W, padx=8, pady=(0, 6))
+
+        # Recompute version hints + output name whenever a field changes; the
+        # new-extract field also auto-fills the base image (row 4).
+        for _v in (self.transfer_src_var, self.transfer_dst_var,
+                   self.transfer_newimg_var):
+            _v.trace_add("write", lambda *_a: self._transfer_refresh_meta())
 
     # ------------------------------------------------------------------
     # Replace Audio tab (capabilities.replace_audio plugins)
@@ -4308,6 +4388,27 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
+        self._image_changed_only_cb = ttk.Checkbutton(
+            tools, text="Changed only",
+            variable=self.image_changed_only_var,
+            command=self._save_staged_changes)
+        self._image_changed_only_cb.pack(side=tk.LEFT, padx=(0, 8))
+        _Tooltip(
+            self._image_changed_only_cb,
+            "Show only the images with a pending replacement or already "
+            "changed on disk by a previous build.",
+            lambda: self._current_theme)
+        self._image_group_cb = ttk.Checkbutton(
+            tools, text="Group by scene",
+            variable=self.image_group_by_scene_var,
+            command=self._save_staged_changes)
+        self._image_group_cb.pack(side=tk.LEFT, padx=(0, 12))
+        _Tooltip(
+            self._image_group_cb,
+            "Group the images under the scene / animation they belong to "
+            "(in play order), so a whole animation can be reviewed — or "
+            "bulk-replaced via right-click — as one unit.",
+            lambda: self._current_theme)
         ttk.Label(tools, text="(click a column header to sort)",
                   font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
         self._image_status_lbl = ttk.Label(
@@ -4425,6 +4526,8 @@ class MainWindow:
         if not assets_path or not os.path.isdir(assets_path):
             self._image_slots = []
             self._image_slots_by_rel = {}
+            self._image_groups = {}
+            self._image_group_occ = {}
             self._refresh_image_list()
             self._image_empty.configure(
                 text="Pick your extracted assets folder above, then click Scan.")
@@ -4453,22 +4556,29 @@ class MainWindow:
                                          probe=False)
             except Exception:
                 slots = []
+            try:
+                groups, group_occ = self._scan_image_groups(assets_path)
+            except Exception:
+                groups, group_occ = {}, {}
             if self._image_scan_id != scan_id:
                 return
             self._tk_root().after(
                 0, self._populate_image_after_scan,
-                slots, scan_id, assets_path)
+                slots, scan_id, assets_path, groups, group_occ)
 
         self._set_tab_scanning("image", True)
         threading.Thread(target=_work, daemon=True).start()
 
-    def _populate_image_after_scan(self, slots, scan_id, scan_dir):
+    def _populate_image_after_scan(self, slots, scan_id, scan_dir,
+                                   groups=None, group_occ=None):
         """Main-thread: store scan results and refresh the list."""
         if self._image_scan_id != scan_id:
             return
         self._set_tab_scanning("image", False)
         self._image_slots = slots
         self._image_slots_by_rel = {s.rel_path: s for s in slots}
+        self._image_groups = groups or {}
+        self._image_group_occ = group_occ or {}
         # Restore assignments persisted for a freshly-scanned folder; a re-scan
         # of the same folder keeps the live in-memory ones (see audio above).
         from ..core import staged_changes
@@ -4476,6 +4586,12 @@ class MainWindow:
             staged = self._load_staged_changes(scan_dir)
             self._image_assignments = staged_changes.live_assignments(
                 staged.get("image"), self._image_slots_by_rel)
+            if "image_changed_only" in staged:
+                self.image_changed_only_var.set(
+                    bool(staged["image_changed_only"]))
+            if "image_group_by_scene" in staged:
+                self.image_group_by_scene_var.set(
+                    bool(staged["image_group_by_scene"]))
         else:
             self._image_assignments = {
                 rel: rep for rel, rep in self._image_assignments.items()
@@ -4584,19 +4700,149 @@ class MainWindow:
             return "Scene texture"
         return "File"
 
+    @staticmethod
+    def _scan_image_groups(assets_path):
+        """Parse the Stern extractor's image manifests (all optional) into the
+        "Group by scene" mapping: ``({rel_path: (group_key, label_base,
+        order)}, {rel_path: occurrences})``.
+
+        Grouping identity is the on-card container: the radium card path for
+        radium-embedded images (ordered by data offset = the animation's
+        frame/play order), the scene directory for scene.assets textures, and
+        the card directory for loose images.  Radium PNGs are extracted
+        content-deduplicated across containers — the FIRST manifest row is a
+        PNG's home group, and *occurrences* remembers how many on-card slots
+        it patches.  Cheap text parsing (a few thousand tab rows), run on the
+        scan worker thread; a slot no manifest covers (every non-Stern plugin)
+        falls back to its parent folder in :meth:`_image_group_of`."""
+        import re as _re
+
+        groups, occ = {}, {}
+
+        def _rows(*parts):
+            try:
+                with open(os.path.join(assets_path, *parts),
+                          encoding="utf-8") as f:
+                    for line in f:
+                        line = line.rstrip("\r\n")
+                        if line and not line.startswith("#"):
+                            yield line.split("\t")
+            except OSError:
+                return
+
+        # Radium-embedded images: one row per on-card occurrence
+        # (output, radium card path, data offset, length, pad_w, pad_h, fmt).
+        primary = {}                # rel -> (card, data_off) of its first row
+        per_card = {}               # card -> [(data_off, rel), ...]
+        for cols in _rows("images", "scene_textures", "radium_images.txt"):
+            if len(cols) < 3:
+                continue
+            try:
+                off = int(cols[2])
+            except ValueError:
+                continue
+            rel = "images/" + cols[0]
+            occ[rel] = occ.get(rel, 0) + 1
+            primary.setdefault(rel, (cols[1], off))
+            per_card.setdefault(cols[1], []).append((off, rel))
+        # A group's friendly name: the element-name hint baked into the first
+        # member's filename (radimg_<Name>_<WxH>_<hash8>.png — see the
+        # extractor's naming), plus the container's scene-hash parent dir
+        # shortened to 8 chars (the Replace Text Scene-column shorthand).
+        # The hash half is not decoration: element hints repeat across
+        # sibling containers (TMNT's four char-select scenes all lead with
+        # the same sprite name) and hash-named members carry no hint at all,
+        # so neither half alone is unique or searchable.
+        name_re = _re.compile(
+            r"^radimg_(.+)_\d+x\d+_[0-9a-f]{8}\.png$", _re.IGNORECASE)
+        labels = {}
+        for card, members in per_card.items():
+            label = ""
+            for _off, mrel in sorted(members):
+                m = name_re.match(os.path.basename(mrel))
+                if m:
+                    label = m.group(1)
+                    break
+            id8 = os.path.basename(os.path.dirname(card))[:8] or card
+            labels[card] = ("%s · %s" % (label, id8)) if label else id8
+        for rel, (card, off) in primary.items():
+            groups[rel] = ("rad::" + card, labels[card], off)
+
+        # scene.assets textures (output, card path, bytes, w, h, fmt): group =
+        # the scene directory; manifest order stands in for play order.
+        for idx, cols in enumerate(
+                _rows("images", "scene_textures", "manifest.txt")):
+            if len(cols) < 2:
+                continue
+            card = cols[1]
+            if "/scene.assets/" in card:
+                scene = card.rsplit("/scene.assets/", 1)[0]
+            else:
+                scene = card.rsplit("/", 1)[0] or card
+            label = scene.rstrip("/").rsplit("/", 1)[-1][:8] or scene
+            groups.setdefault("images/" + cols[0],
+                              ("scn::" + scene, label, idx))
+
+        # Loose images (output, card path, bytes): group = the card directory
+        # (mirrors the rel-path parent, but named as the card names it).
+        for idx, cols in enumerate(_rows("images", "manifest.txt")):
+            if len(cols) < 2:
+                continue
+            card_dir = cols[1].rsplit("/", 1)[0] if "/" in cols[1] else ""
+            label = card_dir or "(root)"
+            groups.setdefault("images/" + cols[0],
+                              ("dir::" + label, label, idx))
+
+        return groups, occ
+
+    def _image_group_of(self, rel):
+        """``(group_key, label_base, order)`` for slot *rel*: the
+        manifest-derived container from the last scan, or the parent-folder
+        fallback for slots no manifest covers (every non-Stern plugin)."""
+        g = self._image_groups.get(rel)
+        if g is not None:
+            return g
+        folder = os.path.dirname(rel).replace("\\", "/") or "(root)"
+        return ("dir::" + folder, folder, 0)
+
     def _refresh_image_list(self):
-        """Apply the search filter + sort and repopulate the slot tree."""
+        """Apply the search filter + sort and repopulate the slot tree — flat
+        (exactly the audio/video tabs' behaviour), or two-level when "Group by
+        scene" is on: one collapsed parent per scene/animation container, its
+        images nested beneath in play order."""
         tree = getattr(self, "_image_tree", None)
         if tree is None:
             return
+        # Keep the groups the user expanded open across a rebuild (assigning,
+        # filtering and sorting all funnel through here).
+        open_groups = set()
+        for iid in tree.get_children():
+            if iid.startswith(_IMG_GROUP_IID):
+                try:
+                    if tree.item(iid, "open") in (1, True, "true"):
+                        open_groups.add(iid)
+                except tk.TclError:
+                    pass
         tree.delete(*tree.get_children())
 
         query = (self.image_search_var.get() or "").strip().lower()
-        slots = [s for s in self._image_slots
-                 if not query or query in s.rel_path.lower()]
-        col, desc = self._image_sort
-
+        grouped = bool(self.image_group_by_scene_var.get())
         changed = self._image_changed_on_disk
+        touched = set(self._image_assignments) | changed
+
+        slots = self._image_slots
+        if self.image_changed_only_var.get():
+            slots = [s for s in slots if s.rel_path in touched]
+        if grouped:
+            # The search matches the group label too, so "Char_Select" finds
+            # a whole animation whose member files are just hashes.
+            slots = [s for s in slots
+                     if not query or query in s.rel_path.lower()
+                     or query in self._image_group_of(s.rel_path)[1].lower()]
+        else:
+            slots = [s for s in slots
+                     if not query or query in s.rel_path.lower()]
+        col, desc = self._image_sort
 
         def _key(s):
             if col == "res":
@@ -4614,10 +4860,9 @@ class MainWindow:
                 return (1, "") if s.rel_path in changed else (2, "")
             return (s.rel_path.lower(),)  # "#0" name/path
 
-        slots.sort(key=_key, reverse=desc)
         self._show_sort_arrows(tree, self._image_sort_cfg, self._image_sort)
 
-        for s in slots:
+        def _insert(parent, s):
             rep = self._image_assignments.get(s.rel_path)
             is_changed = s.rel_path in changed
             if rep:
@@ -4631,11 +4876,42 @@ class MainWindow:
                 res = "…"  # metadata still loading
             else:
                 res = s.resolution_str()
-            tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
+            tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(res, s.format_summary(),
                                 self._image_source_label(s.rel_path),
                                 rep_disp),
                         tags=(tag,) if tag else ())
+
+        if grouped:
+            by_grp = {}                    # key -> (label_base, [slots])
+            for s in slots:
+                key, label, _order = self._image_group_of(s.rel_path)
+                by_grp.setdefault(key, (label, []))[1].append(s)
+            # Groups stay label-sorted; a header click re-sorts the children
+            # WITHIN each group.  The default "#0" sort means play order here
+            # (the manifests' frame sequence), not the flat path sort.
+            for key in sorted(by_grp,
+                              key=lambda k: (by_grp[k][0].lower(), k)):
+                label, members = by_grp[key]
+                if col == "#0":
+                    members.sort(
+                        key=lambda s: (self._image_group_of(s.rel_path)[2],
+                                       s.rel_path.lower()),
+                        reverse=desc)
+                else:
+                    members.sort(key=_key, reverse=desc)
+                giid = _IMG_GROUP_IID + key
+                n = len(members)
+                tree.insert(
+                    "", tk.END, iid=giid, open=(giid in open_groups),
+                    text="%s — %d image%s" % (label, n,
+                                              "" if n == 1 else "s"))
+                for s in members:
+                    _insert(giid, s)
+        else:
+            slots.sort(key=_key, reverse=desc)
+            for s in slots:
+                _insert("", s)
 
         total = len(self._image_slots)
         changed_total = len(set(self._image_assignments) | changed)
@@ -4667,6 +4943,8 @@ class MainWindow:
     # ---- Replace Image: per-slot actions -----------------------------
 
     def _image_selected_rel(self):
+        # NB: in grouped mode this can be a group header's iid
+        # (``_IMG_GROUP_IID`` prefix), not a slot rel_path.
         sel = self._image_tree.selection() if hasattr(self, "_image_tree") else ()
         return sel[0] if sel else None
 
@@ -4696,13 +4974,31 @@ class MainWindow:
 
     def _image_on_tree_select(self, _event=None):
         rel = self._image_selected_rel()
-        if rel is None or rel == self._image_current_rel:
+        if rel is None:
+            return
+        if rel.startswith(_IMG_GROUP_IID):
+            # A group header: preview its first shown child's original so the
+            # click isn't a dead end; no single replacement applies, so the
+            # replacement pane clears.
+            kids = self._image_tree.get_children(rel)
+            slot = self._image_slots_by_rel.get(kids[0]) if kids else None
+            self._image_current_rel = None
+            self._image_render_thumb(
+                getattr(self, "_image_canvas", None),
+                slot.abs_path if slot else None, "_image_preview_img_orig")
+            self._image_render_thumb(
+                getattr(self, "_image_canvas_rep", None), None,
+                "_image_preview_img_rep")
+            return
+        if rel == self._image_current_rel:
             return
         self._image_current_rel = rel
         self._image_render_preview(rel)
 
     def _image_on_tree_double(self, _event=None):
         rel = self._image_selected_rel()
+        if rel is not None and rel.startswith(_IMG_GROUP_IID):
+            return          # double-click toggles the group (Tk's default)
         if rel is None:
             messagebox.showinfo("No Slot Selected",
                                 "Select an image to assign.")
@@ -4715,7 +5011,7 @@ class MainWindow:
             return
         row = tree.identify_row(event.y)
         col = tree.identify_column(event.x)  # cols=(res,fmt,src,rep) -> #1..#4
-        if row and col == "#4":
+        if row and col == "#4" and not row.startswith(_IMG_GROUP_IID):
             tree.selection_set(row)
             self._image_assign_rel(row)
 
@@ -4734,22 +5030,129 @@ class MainWindow:
                 activeforeground="#ffffff")
         except tk.TclError:
             pass
-        menu.add_command(label="Choose replacement…",
-                         command=lambda r=row: self._image_assign_rel(r))
-        if self._image_assignments.get(row):
-            menu.add_separator()
-            menu.add_command(label="Clear replacement",
-                             command=self._image_clear_selected)
-        slot = self._image_slots_by_rel.get(row)
-        if slot is not None:
-            menu.add_separator()
+        if row.startswith(_IMG_GROUP_IID):
+            # Group header: bulk actions over the children currently shown
+            # (the search / Changed-only filters have already been applied).
+            kids = tuple(tree.get_children(row))
+            n = len(kids)
+            plural = "" if n == 1 else "s"
             menu.add_command(
-                label=self._reveal_menu_label(),
-                command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
+                label="Assign replacement to all %d image%s…" % (n, plural),
+                command=lambda g=row, k=kids: self._image_group_assign(g, k))
+            menu.add_command(
+                label="Blank all %d image%s (transparent)…" % (n, plural),
+                command=lambda g=row, k=kids: self._image_group_blank(g, k))
+            if any(k in self._image_assignments for k in kids):
+                menu.add_separator()
+                menu.add_command(
+                    label="Clear replacements in group",
+                    command=lambda g=row, k=kids:
+                        self._image_group_apply(g, k, None))
+        else:
+            menu.add_command(label="Choose replacement…",
+                             command=lambda r=row: self._image_assign_rel(r))
+            if self._image_assignments.get(row):
+                menu.add_separator()
+                menu.add_command(label="Clear replacement",
+                                 command=self._image_clear_selected)
+            slot = self._image_slots_by_rel.get(row)
+            if slot is not None:
+                menu.add_separator()
+                menu.add_command(
+                    label=self._reveal_menu_label(),
+                    command=lambda p=slot.abs_path:
+                        self._reveal_in_file_manager(p))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    # ---- Replace Image: group bulk actions ---------------------------
+
+    def _image_group_apply(self, group_iid, rels, rep_path):
+        """Record *rep_path* as the replacement for every slot in *rels*
+        (``None`` clears instead), then persist + refresh once and put the
+        selection back on the group row.  Pure assignment plumbing — the
+        actual pixel scaling/re-encode happens at Write, per slot, exactly
+        like a single-row assignment."""
+        changed_any = False
+        for rel in rels:
+            if rel not in self._image_slots_by_rel:
+                continue
+            if rep_path is None:
+                changed_any |= (
+                    self._image_assignments.pop(rel, None) is not None)
+            else:
+                self._image_assignments[rel] = rep_path
+                changed_any = True
+        if not changed_any:
+            return
+        self._save_staged_changes()
+        self._refresh_image_list()
+        if self._image_current_rel in set(rels):
+            self._image_render_preview(self._image_current_rel)
+        try:
+            self._image_tree.selection_set(group_iid)
+            self._image_tree.see(group_iid)
+        except tk.TclError:
+            pass    # the Changed-only filter may have dropped the group
+
+    def _image_group_assign(self, group_iid, rels):
+        """Group menu: one picker, assigned to every shown slot in the group
+        (each is still scaled/converted to its own slot format at Write)."""
+        if not rels:
+            return
+        from ..core.image import REPLACEMENT_EXTS
+        spec = " ".join(f"*{e}" for e in REPLACEMENT_EXTS)
+        path = filedialog.askopenfilename(
+            title="Choose a replacement for %d images" % len(rels),
+            filetypes=[("Image files", spec), ("All files", "*.*")])
+        if not path:
+            return
+        self._image_group_apply(group_iid, rels, path)
+
+    def _image_group_blank(self, group_iid, rels):
+        """Group menu: assign a fully-transparent image to every shown slot so
+        the whole scene/animation renders as nothing in-game."""
+        if not rels:
+            return
+        n = len(rels)
+        if not messagebox.askyesno(
+                "Blank Images",
+                "Assign a transparent image to all %d image%s in this "
+                "group?\n\nThey'll render as fully transparent once you "
+                "build the update on the Write tab (and can be cleared "
+                "again from this menu until then)."
+                % (n, "" if n == 1 else "s")):
+            return
+        blank = self._ensure_blank_image()
+        if not blank:
+            messagebox.showerror(
+                "Blank Images",
+                "Couldn't create the transparent placeholder image in the "
+                "assets folder — check the folder is writable.")
+            return
+        self._image_group_apply(group_iid, rels, blank)
+
+    def _ensure_blank_image(self):
+        """Path to a fully-transparent 16×16 RGBA PNG inside the scanned
+        assets folder (created on first use), or ``""`` on failure.  It lives
+        IN the assets folder so the sidecar's assignments travel with the
+        extract; the dot name keeps it out of slot scans and checksum diffs
+        (same rule as .staged_changes.json)."""
+        assets = self._image_scan_dir or (
+            self.write_assets_var.get() or "").strip()
+        if not assets or not os.path.isdir(assets):
+            return ""
+        path = os.path.join(assets, ".blank.png")
+        if os.path.isfile(path):
+            return path
+        try:
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(_BLANK_PNG_B64))
+        except OSError:
+            return ""
+        return path
 
     def _image_clear_selected(self):
         rel = self._image_selected_rel()
@@ -4951,6 +5354,10 @@ class MainWindow:
                 self.video_no_conversion_var.get())
         if _live(self._image_scan_dir):
             data["image"] = dict(self._image_assignments)
+            data["image_changed_only"] = bool(
+                self.image_changed_only_var.get())
+            data["image_group_by_scene"] = bool(
+                self.image_group_by_scene_var.get())
         staged_changes.save(assets_dir, data)
 
     # ==================================================================
@@ -7793,7 +8200,14 @@ class MainWindow:
         A column the user has dragged themselves (persisted by
         :meth:`_persist_tree_columns`) keeps the user's width; each column's
         configured minwidth still applies.  No-op on an empty tree."""
-        rows = tree.get_children()
+        # Include nested rows (the image tab's "Group by scene" mode) — a
+        # flat tree yields the same top-level list as before.
+        rows = []
+        stack = list(tree.get_children())
+        while stack:
+            r = stack.pop()
+            rows.append(r)
+            stack.extend(tree.get_children(r))
         if not rows:
             return
         saved = self._saved_column_widths.get(tree_key) or {}
@@ -7810,12 +8224,13 @@ class MainWindow:
                 # Header first (plus room for the ▲/▼ sort suffix), then the
                 # cells; stop early once the cap is reached.
                 wmax = fnt.measure(tree.heading(col, "text")) + 24
-                if col == "#0":
-                    texts, pad = (tree.item(r, "text") for r in rows), 28
-                else:
-                    texts, pad = (tree.set(r, col) for r in rows), 16
-                for t in texts:
-                    w = fnt.measure(t) + pad
+                for r in rows:
+                    if col == "#0":
+                        # A child row's text sits one indent level deeper.
+                        pad = 48 if tree.parent(r) else 28
+                        w = fnt.measure(tree.item(r, "text")) + pad
+                    else:
+                        w = fnt.measure(tree.set(r, col)) + 16
                     if w > wmax:
                         wmax = w
                         if wmax >= self._AUTOSIZE_MAX_PX:
@@ -7963,6 +8378,27 @@ class MainWindow:
         if path:
             self.transfer_dst_var.set(os.path.normpath(path))
 
+    def _browse_transfer_oldstock(self):
+        path = filedialog.askdirectory(
+            title="Select a STOCK (unmodified) extract of the OLD version "
+                  "— optional",
+            initialdir=self._initialdir_for(
+                self.transfer_oldstock_var.get(), self.transfer_src_var.get()))
+        if path:
+            self.transfer_oldstock_var.set(os.path.normpath(path))
+
+    def _browse_transfer_newimg(self):
+        path = filedialog.askopenfilename(
+            title="Select the NEW version's card image (.raw/.img) to build "
+                  "onto",
+            filetypes=[("Card image", "*.raw *.img *.bin"),
+                       ("All files", "*.*")],
+            initialdir=self._initialdir_for(
+                os.path.dirname(self.transfer_newimg_var.get() or ""),
+                self.transfer_dst_var.get()))
+        if path:
+            self.transfer_newimg_var.set(os.path.normpath(path))
+
     def _prefill_transfer_dst(self):
         """Default the transfer destination to the Mod Folder (the usual flow:
         the user points the app at the NEW extract, then pulls mods into it).
@@ -7971,6 +8407,54 @@ class MainWindow:
             cur = (self.write_assets_var.get() or "").strip()
             if cur:
                 self.transfer_dst_var.set(cur)
+        self._transfer_refresh_meta()
+
+    def _transfer_refresh_meta(self):
+        """Recompute the read-only version hints and the output-name preview
+        from the current field values, and auto-fill the base card image (row
+        4) from the new extract's recorded source.
+
+        The card stores no game-version string, so every version hint is parsed
+        from a source FILENAME (shown as a hint, not ground truth).  Auto-
+        filling the base image from the NEW extract's ``.extract_source.json``
+        is what keeps the build on the new version — the old-version image can
+        never sneak in as the base."""
+        from ..core import extract_source
+
+        src = (self.transfer_src_var.get() or "").strip()
+        dst = (self.transfer_dst_var.get() or "").strip()
+
+        def _dir_ver(d):
+            v = extract_source.version_hint_for_dir(d) if d else None
+            return ("version ~ " + v) if v else ""
+        self.transfer_src_ver_var.set(_dir_ver(src))
+        self.transfer_dst_ver_var.set(_dir_ver(dst))
+
+        # Auto-fill the base image from the new extract's recorded source,
+        # unless the user has typed their own path.
+        if dst and not (self.transfer_newimg_var.get() or "").strip():
+            rec = extract_source.read_extract_source(dst)
+            recorded = (rec or {}).get("input_path")
+            if recorded and os.path.isfile(recorded):
+                # Setting the var re-enters this method via its trace; the
+                # guard above (field now non-empty) stops the recursion.
+                self.transfer_newimg_var.set(os.path.normpath(recorded))
+                return
+
+        img = (self.transfer_newimg_var.get() or "").strip()
+        img_ver = (extract_source.version_hint_from_name(os.path.basename(img))
+                   if img else None)
+        self.transfer_img_ver_var.set(("version ~ " + img_ver)
+                                      if img_ver else "")
+        if img:
+            suffix = getattr(self._current_mfr, "write_output_suffix",
+                             "-modified") or "-modified"
+            stem, ext = os.path.splitext(os.path.basename(img))
+            self.transfer_output_var.set(
+                "     After transfer, the Write tab builds: %s%s%s"
+                % (stem, suffix, ext))
+        else:
+            self.transfer_output_var.set("")
 
     def _browse_write_upd(self):
         path = filedialog.askopenfilename(

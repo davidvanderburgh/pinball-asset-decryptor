@@ -140,6 +140,59 @@ def test_mfr_select_switches_to_mfr_view(app, manufacturers_by_key):
     assert not app.window._picker_view.winfo_ismapped()
 
 
+def test_transfer_panel_autofills_base_image_and_versions(
+        app, manufacturers_by_key, tmp_path):
+    """The redesigned transfer panel parses a version hint from each extract's
+    recorded source filename, auto-fills the build's base image from the NEW
+    extract's .extract_source.json (so it can't drift to the old version), and
+    previews the output filename."""
+    import os
+    from pinball_decryptor.core import extract_source
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    w = app.window
+
+    old = tmp_path / "old158"
+    new = tmp_path / "new159"
+    old.mkdir(); new.mkdir()
+    # A real (empty) file standing in for the new version's card image.
+    base_img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    base_img.write_bytes(b"")
+    old_img = _touch(tmp_path / "turtles_pro-1_58_1.1987.8G.sdcard.raw")
+    extract_source.write_extract_source(str(old), old_img)
+    extract_source.write_extract_source(str(new), str(base_img))
+
+    w.transfer_src_var.set(str(old))
+    w.transfer_dst_var.set(str(new))
+    app.root.update()
+
+    # Version hints parsed from the recorded source filenames.
+    assert "1.58.1 (1987)" in w.transfer_src_ver_var.get()
+    assert "1.59.0 (Release)" in w.transfer_dst_ver_var.get()
+    # Base image auto-filled from the NEW extract's recorded source...
+    assert os.path.normcase(w.transfer_newimg_var.get()) == os.path.normcase(
+        str(base_img))
+    assert "1.59.0 (Release)" in w.transfer_img_ver_var.get()
+    # ...and the output-name preview reflects it (Stern's -modified suffix).
+    assert "turtles_pro-1_59_0.Release.8G.sdcard-modified.raw" in \
+        w.transfer_output_var.get()
+
+    # A user-typed base image is never overwritten by the auto-fill.
+    other = tmp_path / "turtles_pro-1_60_0.Release.8G.sdcard.raw"
+    other.write_bytes(b"")
+    w.transfer_newimg_var.set(str(other))
+    w.transfer_dst_var.set(str(new))          # retrigger refresh
+    app.root.update()
+    assert os.path.normcase(w.transfer_newimg_var.get()) == os.path.normcase(
+        str(other))
+
+
+def _touch(p):
+    p.write_bytes(b"")
+    return str(p)
+
+
 def test_sidecar_pending_fallback_without_tab_scan(app, manufacturers_by_key,
                                                    tmp_path):
     """Assignments recorded in a folder's .staged_changes.json must reach the
@@ -944,3 +997,199 @@ def test_picker_time_log_lines_flush_into_first_log(app, manufacturers_by_key):
     finally:
         app._on_back_to_picker()
         app.root.update()
+
+# ---------------------------------------------------------------------------
+# Replace Image: "Group by scene" / "Changed only" list modes + group actions
+# ---------------------------------------------------------------------------
+
+def _seed_image_assets(tmp_path):
+    """An assets folder with three radium-frame PNGs (one animation), one
+    loose PNG, the extractor manifests describing them, and a baseline."""
+    st = tmp_path / "images" / "scene_textures"
+    st.mkdir(parents=True)
+    frames = ["radimg_Char_Select_8x8_00000001.png",
+              "radimg_Char_Select_8x8_00000002.png",
+              "radimg_8x8_00000003.png"]
+    for fn in frames:
+        (st / fn).write_bytes(b"\x89PNG-fake")
+    (tmp_path / "images" / "loose").mkdir()
+    (tmp_path / "images" / "loose" / "logo.png").write_bytes(b"\x89PNG-fake")
+    card = "/game/scenes/a1b2c3d4e5f6/scene.radium"
+    with open(st / "radium_images.txt", "w", encoding="utf-8") as f:
+        f.write("# output\tradium card path\tdata offset\tlength"
+                "\tpad_w\tpad_h\tfmt\n")
+        # File order is NOT play order: offsets 300, 100, 200.
+        f.write("scene_textures/%s\t%s\t300\t16\t8\t8\t5\n" % (frames[2], card))
+        f.write("scene_textures/%s\t%s\t100\t16\t8\t8\t5\n" % (frames[0], card))
+        f.write("scene_textures/%s\t%s\t200\t16\t8\t8\t5\n" % (frames[1], card))
+    with open(tmp_path / "images" / "manifest.txt", "w",
+              encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\n")
+        f.write("loose/logo.png\t/game/assets/loose/logo.png\t9\n")
+    (tmp_path / ".checksums.md5").write_text("", encoding="utf-8")
+    return str(tmp_path)
+
+
+def _scan_images(window, assets_dir):
+    """Synchronously scan + populate the image tab for *assets_dir* (bypasses
+    the worker thread so the test is deterministic)."""
+    from pinball_decryptor.core.image_slots import scan_image_slots
+    slots = scan_image_slots(assets_dir, probe=False)
+    groups, occ = window._scan_image_groups(assets_dir)
+    window._image_scan_id += 1
+    window._populate_image_after_scan(
+        slots, window._image_scan_id, assets_dir, groups, occ)
+    return slots
+
+
+def test_image_group_scan_parses_manifests(tmp_path):
+    """The manifest parser groups radium frames under their container with a
+    friendly element-name label, counts dedup occurrences, and yields nothing
+    for a folder with no manifests."""
+    from pinball_decryptor.gui.main_window import MainWindow
+    assets = _seed_image_assets(tmp_path)
+    groups, occ = MainWindow._scan_image_groups(assets)
+    key = "rad::/game/scenes/a1b2c3d4e5f6/scene.radium"
+    rel1 = "images/scene_textures/radimg_Char_Select_8x8_00000001.png"
+    # Label = element hint + searchable container-hash shorthand: hints
+    # repeat across sibling containers, so the hash half disambiguates.
+    assert groups[rel1] == (key, "Char_Select · a1b2c3d4", 100)
+    # The nameless frame inherits the group label; order = its data offset.
+    rel3 = "images/scene_textures/radimg_8x8_00000003.png"
+    assert groups[rel3] == (key, "Char_Select · a1b2c3d4", 300)
+    assert occ[rel1] == 1
+    assert groups["images/loose/logo.png"] == (
+        "dir::/game/assets/loose", "/game/assets/loose", 0)
+    empty = tmp_path / "no_manifests"
+    empty.mkdir()
+    assert MainWindow._scan_image_groups(str(empty)) == ({}, {})
+
+
+def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
+                                             tmp_path):
+    """Grouped mode nests slot rows (same iids) under collapsed per-scene
+    parents in play order; Changed-only prunes untouched rows and, in grouped
+    mode, whole untouched groups; flat mode is unchanged."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_image_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    tree = w._image_tree
+    rels = ["images/scene_textures/radimg_Char_Select_8x8_00000001.png",
+            "images/scene_textures/radimg_Char_Select_8x8_00000002.png",
+            "images/scene_textures/radimg_8x8_00000003.png",
+            "images/loose/logo.png"]
+
+    # Flat mode: exactly the rel-path rows, path-sorted, no parents.
+    assert list(tree.get_children()) == sorted(rels, key=str.lower)
+    assert "4 images" in w.image_status_var.get()
+
+    w.image_group_by_scene_var.set(True)
+    tops = list(tree.get_children())
+    assert all(t.startswith("::grp::") for t in tops)
+    grp = [t for t in tops if "Char_Select" in tree.item(t, "text")]
+    assert len(grp) == 1
+    assert "Char_Select · a1b2c3d4 — 3 images" in tree.item(grp[0], "text")
+    assert not tree.item(grp[0], "open")          # inserted collapsed
+    # Children keep the slot iid and sit in play order (data offset).
+    assert list(tree.get_children(grp[0])) == rels[:3]
+    # Counts stay over image rows, not group headers.
+    assert "4 images" in w.image_status_var.get()
+
+    # Search matches the group LABEL even though the files are hash-named —
+    # by element hint or by the container-hash shorthand.
+    w.image_search_var.set("char_sel")
+    tops = list(tree.get_children())
+    assert len(tops) == 1 and len(tree.get_children(tops[0])) == 3
+    w.image_search_var.set("a1b2c3d4")
+    tops = list(tree.get_children())
+    assert len(tops) == 1 and len(tree.get_children(tops[0])) == 3
+    w.image_search_var.set("")
+
+    # Changed-only: an assignment keeps its group; the untouched group goes.
+    w._image_assignments[rels[0]] = str(tmp_path / "rep.png")
+    w.image_changed_only_var.set(True)
+    tops = list(tree.get_children())
+    assert len(tops) == 1
+    assert "Char_Select · a1b2c3d4 — 1 image" in tree.item(tops[0], "text")
+    assert list(tree.get_children(tops[0])) == [rels[0]]
+    # ...and in flat mode only the assigned row survives.
+    w.image_group_by_scene_var.set(False)
+    assert list(tree.get_children()) == [rels[0]]
+
+    w.image_changed_only_var.set(False)
+    w._image_assignments.clear()
+
+
+def test_image_group_bulk_assign_blank_clear(app, manufacturers_by_key,
+                                             tmp_path):
+    """The group-header bulk actions run through the normal assignment
+    plumbing: assign-to-all, blank-to-all (transparent dotfile PNG, invisible
+    to a re-scan) and clear-all, persisted to the sidecar each time."""
+    import os as _os
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.core.image_slots import scan_image_slots
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_image_assets(tmp_path)
+    rep = tmp_path / "rep.png"
+    rep.write_bytes(b"\x89PNG-fake")
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    w.image_group_by_scene_var.set(True)
+    tree = w._image_tree
+    grp = [t for t in tree.get_children()
+           if "Char_Select" in tree.item(t, "text")][0]
+    kids = tuple(tree.get_children(grp))
+
+    w._image_group_apply(grp, kids, str(rep))
+    assert {r: p for r, p in w._image_assignments.items()
+            if r in kids} == {k: str(rep) for k in kids}
+    assert staged_changes.load(assets)["image"] == w._image_assignments
+    # The group survives the refresh and is re-selected.
+    assert tree.selection() == (grp,)
+
+    # Blank: the transparent source is created once, as a dotfile the slot
+    # scanner skips, and assigned to every child.
+    blank = w._ensure_blank_image()
+    assert blank and blank.endswith(".blank.png")
+    assert _os.path.isfile(blank)
+    w._image_group_apply(grp, kids, blank)
+    assert all(w._image_assignments[k] == blank for k in kids)
+    assert not any(".blank" in s.rel_path
+                   for s in scan_image_slots(assets, probe=False))
+
+    # Clear drops exactly the group's assignments.
+    w._image_group_apply(grp, kids, None)
+    assert w._image_assignments == {}
+    assert staged_changes.load(assets)["image"] == {}
+
+
+def test_image_group_iid_guards_select_and_meta(app, manufacturers_by_key,
+                                                tmp_path):
+    """Selecting a group header previews its first child's original (no
+    crash, replacement pane cleared), and a late metadata probe update lands
+    on the nested row."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_image_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    w.image_group_by_scene_var.set(True)
+    tree = w._image_tree
+    grp = [t for t in tree.get_children()
+           if "Char_Select" in tree.item(t, "text")][0]
+    tree.selection_set(grp)
+    w._image_on_tree_select()                     # must not raise
+    assert w._image_current_rel is None
+    # A probe result for a nested child still updates its row in place.
+    child = tree.get_children(grp)[0]
+    w._apply_image_meta(w._image_scan_id, child, None)
+    assert tree.exists(child)

@@ -501,6 +501,127 @@ def test_plan_transfer_image_remaps_by_manifest(tmp_path):
         "images/scene_textures/Bonus_5_64x64.png"] == r"C:\r\art.png"
 
 
+def test_plan_direct_diff_fans_deduped_src_image_to_all_ordinals(tmp_path):
+    # Extraction content-dedupes radium images: an animation whose frames were
+    # all baked identical is ONE old-side PNG occupying two occurrence slots.
+    # The new version's frames differ per slot, so the modded image must land
+    # on BOTH target rels, not just the first pairing.
+    mod, tgt = str(tmp_path / "modded158"), str(tmp_path / "stock159")
+    _mk_extract(mod, {}, images={
+        "images/scene_textures/radimg_Anim_64x64_aaaaaaaa.png": b"1987-FRAME"})
+    _mk_extract(tgt, {}, images={
+        "images/scene_textures/radimg_Anim_64x64_cccccccc.png": b"STOCK-F1",
+        "images/scene_textures/radimg_Anim_64x64_dddddddd.png": b"STOCK-F2"})
+    _write_radium_manifest(mod, [
+        ("scene_textures/radimg_Anim_64x64_aaaaaaaa.png",
+         "/scenes/Anim/scene.radium"),
+        ("scene_textures/radimg_Anim_64x64_aaaaaaaa.png",
+         "/scenes/Anim/scene.radium"),
+    ])
+    _write_radium_manifest(tgt, [
+        ("scene_textures/radimg_Anim_64x64_cccccccc.png",
+         "/scenes/Anim/scene.radium"),
+        ("scene_textures/radimg_Anim_64x64_dddddddd.png",
+         "/scenes/Anim/scene.radium"),
+    ])
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    repl = os.path.abspath(os.path.join(
+        mod, "images", "scene_textures", "radimg_Anim_64x64_aaaaaaaa.png"))
+    assert sorted(e["rel"] for e in plan["image"]["matched"]) == [
+        "images/scene_textures/radimg_Anim_64x64_cccccccc.png",
+        "images/scene_textures/radimg_Anim_64x64_dddddddd.png"]
+    assert all(e["repl"] == repl for e in plan["image"]["matched"])
+    assert plan["notes"]["image_old_only"] == 0
+    assert plan["totals"]["transfer"] == 2
+
+
+def test_plan_transfer_image_fans_deduped_assignment_to_all_ordinals(tmp_path):
+    # Same fan-out through the sidecar route: one pending assignment on a
+    # deduped source rel becomes one matched entry PER target occurrence rel.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={
+        "images/scene_textures/radimg_Anim_64x64_aaaaaaaa.png": b"OLD-STOCK"})
+    _mk_extract(tgt, {}, images={
+        "images/scene_textures/radimg_Anim_64x64_cccccccc.png": b"NEW-F1",
+        "images/scene_textures/radimg_Anim_64x64_dddddddd.png": b"NEW-F2"})
+    _write_radium_manifest(src, [
+        ("scene_textures/radimg_Anim_64x64_aaaaaaaa.png",
+         "/scenes/Anim/scene.radium"),
+        ("scene_textures/radimg_Anim_64x64_aaaaaaaa.png",
+         "/scenes/Anim/scene.radium"),
+    ])
+    _write_radium_manifest(tgt, [
+        ("scene_textures/radimg_Anim_64x64_cccccccc.png",
+         "/scenes/Anim/scene.radium"),
+        ("scene_textures/radimg_Anim_64x64_dddddddd.png",
+         "/scenes/Anim/scene.radium"),
+    ])
+    staged_changes.save(src, {"image": {
+        "images/scene_textures/radimg_Anim_64x64_aaaaaaaa.png":
+            r"C:\r\frame.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert sorted(e["rel"] for e in plan["image"]["matched"]) == [
+        "images/scene_textures/radimg_Anim_64x64_cccccccc.png",
+        "images/scene_textures/radimg_Anim_64x64_dddddddd.png"]
+    assert all(e["repl"] == r"C:\r\frame.png"
+               for e in plan["image"]["matched"])
+    assert not plan["image"]["dropped"]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    saved = staged_changes.load(tgt)["image"]
+    assert saved == {
+        "images/scene_textures/radimg_Anim_64x64_cccccccc.png":
+            r"C:\r\frame.png",
+        "images/scene_textures/radimg_Anim_64x64_dddddddd.png":
+            r"C:\r\frame.png"}
+
+
+def _png(path, color, comment):
+    """A real PNG: same *color* + different *comment* = byte-different files
+    that decode to identical pixels (a re-encode, not a mod)."""
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    info = PngInfo()
+    info.add_text("Comment", comment)
+    Image.new("RGBA", (4, 4), color).save(path, pnginfo=info)
+
+
+def test_plan_direct_diff_skips_pixel_identical_rebake(tmp_path):
+    # A vendor/tool re-encode byte-differs but is a pixel no-op — it must be
+    # skipped (and counted), while a real pixel change still stages.
+    mod, tgt = str(tmp_path / "modded158"), str(tmp_path / "stock159")
+    _png(os.path.join(mod, "images", "rebaked.png"), (255, 0, 0, 255), "old")
+    _png(os.path.join(tgt, "images", "rebaked.png"), (255, 0, 0, 255), "new")
+    _png(os.path.join(mod, "images", "modded.png"), (0, 255, 0, 255), "old")
+    _png(os.path.join(tgt, "images", "modded.png"), (0, 0, 255, 255), "new")
+    with open(os.path.join(mod, "images", "rebaked.png"), "rb") as f_a, \
+            open(os.path.join(tgt, "images", "rebaked.png"), "rb") as f_b:
+        assert f_a.read() != f_b.read()     # fixture sanity: bytes DO differ
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    assert [e["rel"] for e in plan["image"]["matched"]] == [
+        "images/modded.png"]
+    assert plan["notes"]["image_rebake_skipped"] == 1
+    assert plan["totals"]["transfer"] == 1
+
+
+def test_diff_baked_mods_skips_pixel_identical_rebake(tmp_path):
+    # Same filter on the stock-baseline route: an external tool re-encoded an
+    # image it never modified — bytes differ, pixels don't, so it isn't a mod.
+    mod, stk = str(tmp_path / "modded"), str(tmp_path / "stock")
+    _png(os.path.join(mod, "images", "reencoded.png"), (255, 0, 0, 255), "a")
+    _png(os.path.join(stk, "images", "reencoded.png"), (255, 0, 0, 255), "b")
+    _png(os.path.join(mod, "images", "modded.png"), (0, 255, 0, 255), "a")
+    _png(os.path.join(stk, "images", "modded.png"), (0, 0, 255, 255), "b")
+
+    diff = mod_transfer.diff_baked_mods(mod, stk)
+    assert list(diff["saved"]["image"]) == ["images/modded.png"]
+    assert diff["notes"]["image_rebake_skipped"] == 1
+
+
 def test_plan_direct_diff_audio_text_headsup_counts(tmp_path):
     # Audio/text can't transfer without a baseline, but the plan counts what
     # it couldn't attribute so the GUI can warn.

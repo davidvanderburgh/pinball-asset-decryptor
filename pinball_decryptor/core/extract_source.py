@@ -16,11 +16,21 @@ folder recording the source image's path + ``(size, mtime)`` at extract time.
 
 import json
 import os
+import re
 from typing import Optional
 
 # Sidecar file written at the root of every extract output folder.  Dotfile so
 # the audio/video/image slot scanners (which skip dot-entries) ignore it.
 SIDE_CAR = ".extract_source.json"
+
+# Stern names its card images ``<game>-<maj>_<min>_<patch>.<channel>.<size>...``
+# (e.g. ``turtles_pro-1_59_0.Release.8G.sdcard.raw``).  The firmware itself
+# stores no game-version string on the card (``/…/VERSION.txt`` is the SPIKE OS
+# version, identical across game builds), so the source FILENAME is the only
+# reliable version signal — parse it rather than trusting the user to read it.
+_VER_RE = re.compile(r"-(\d+)_(\d+)_(\d+)(?:\.([A-Za-z0-9]+))?")
+# Channel-position tokens that are media-size markers, not a build tag.
+_SIZE_TOKENS = frozenset({"8g", "4g", "16g", "2g", "32g"})
 
 
 def _signature(input_path: str) -> Optional[dict]:
@@ -56,6 +66,49 @@ def write_extract_source(output_dir: str, input_path: str) -> None:
             json.dump(sig, f, indent=2)
     except OSError:
         pass
+
+
+def read_extract_source(assets_dir: str) -> Optional[dict]:
+    """Return the source signature recorded for *assets_dir* (the dict written
+    by :func:`write_extract_source`), or ``None`` when there's no readable
+    sidecar.  Lets callers recover the ``.raw``/``.img`` an extract came from —
+    e.g. the transfer panel auto-fills the build's base image from the new
+    extract's own recorded source."""
+    if not assets_dir:
+        return None
+    try:
+        with open(os.path.join(assets_dir, SIDE_CAR), encoding="utf-8") as f:
+            recorded = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return recorded if isinstance(recorded, dict) else None
+
+
+def version_hint_from_name(name: Optional[str]) -> Optional[str]:
+    """A human version label parsed from a card-image filename, or ``None``.
+
+    ``turtles_pro-1_59_0.Release.8G.sdcard.raw`` -> ``"1.59.0 (Release)"``;
+    ``turtles_pro-1_58_1.1987.8G.sdcard.raw``    -> ``"1.58.1 (1987)"``.
+    Filename-derived (the card carries no game-version string), so callers
+    should present it as a hint, not ground truth."""
+    if not name:
+        return None
+    m = _VER_RE.search(name)
+    if not m:
+        return None
+    ver = "%s.%s.%s" % (m.group(1), m.group(2), m.group(3))
+    tag = m.group(4)
+    if tag and tag.lower() not in _SIZE_TOKENS:
+        return "%s (%s)" % (ver, tag)
+    return ver
+
+
+def version_hint_for_dir(assets_dir: str) -> Optional[str]:
+    """:func:`version_hint_from_name` of the source recorded for *assets_dir*."""
+    rec = read_extract_source(assets_dir)
+    if not rec:
+        return None
+    return version_hint_from_name(rec.get("input_name"))
 
 
 def stale_source_message(assets_dir: str) -> Optional[str]:

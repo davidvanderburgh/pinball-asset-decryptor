@@ -1521,6 +1521,45 @@ class App:
                 "The old and new extract folders are the same. Pick your "
                 "previous version's extract as the old one.")
             return
+
+        # Optional 3rd input: a stock extract of the OLD version.  Its presence
+        # (not a modal) selects the accurate baseline route in the baked case.
+        old_stock = (self.window.transfer_oldstock_var.get() or "").strip()
+        if old_stock:
+            old_stock = os.path.normpath(old_stock)
+            if not os.path.isdir(old_stock):
+                messagebox.showwarning(
+                    "Old stock extract not found",
+                    "The optional 'Stock extract of the OLD version' isn't a "
+                    "folder. Fix the path or clear it to compare directly.")
+                return
+            if os.path.normcase(old_stock) in (os.path.normcase(source_dir),
+                                               os.path.normcase(target_dir)):
+                messagebox.showwarning(
+                    "Wrong folder",
+                    "The optional stock extract must be a THIRD folder: a "
+                    "clean, unmodified extract of the SAME old version as your "
+                    "modded one.")
+                return
+        else:
+            old_stock = None
+
+        # 4th input: the new version's base card image the build patches onto.
+        new_img = (self.window.transfer_newimg_var.get() or "").strip()
+        if new_img:
+            new_img = os.path.normpath(new_img)
+            if not os.path.isfile(new_img):
+                messagebox.showwarning(
+                    "Base image not found",
+                    "The 'New version card image (.raw)' isn't a file. Fix the "
+                    "path or clear it — you can also set it later on the Write "
+                    "tab.")
+                return
+        else:
+            new_img = None
+        self._transfer_old_stock = old_stock
+        self._transfer_new_img = new_img
+
         if getattr(self, "_transfer_busy", False):
             messagebox.showinfo(
                 "Comparison running",
@@ -1589,54 +1628,29 @@ class App:
         self._confirm_apply_transfer(source_dir, target_dir, plan)
 
     def _transfer_baked_mods(self, modded_dir, target_dir):
-        """Fallback when the old extract has no pending Replace edits: the
-        mods may be BAKED INTO the game code itself (modded with another tool
-        before it was extracted).  Two recovery routes:
+        """Route the baked-in-mods case (old extract has no pending Replace
+        edits — modded with another tool before it was extracted) using the
+        optional 3rd field instead of a modal:
 
-        * The user still has a STOCK extract of the SAME OLD version → diff
-          modded-vs-stock, then run the normal content-matched transfer with
-          the STOCK extract as the source (its WAVs are the stock content the
-          audio matching keys off).  Full fidelity — the only route that can
-          carry audio and text.
-        * No stock old extract → diff the modded extract DIRECTLY against the
-          new one.  Filename-keyed images/videos transfer; audio/text can't be
-          told apart from the factory's own version-to-version changes."""
-        from .core import mod_transfer
-
-        choice = messagebox.askyesnocancel(
-            "No pending edits — compare extracts?",
-            "The old extract has no pending Replace edits made in this app, "
-            "so its mods must be baked into the game code itself (e.g. modded "
-            "with another tool before it was extracted). They can be "
-            "recovered by comparing extracts.\n\n"
-            "Do you have a STOCK (unmodded) extract of the SAME OLD "
-            "version?\n\n"
-            "  •  Yes — pick it. Most accurate, and the only way AUDIO "
-            "and TEXT mods can transfer.\n"
-            "  •  No — compare the old extract directly against the new "
-            "one. Finds image and video mods; a difference could also be a "
-            "factory change between versions, so review the result.\n\n"
-            "Tip: all folders should be extracted with this same app version "
-            "so unmodified files compare equal.")
-        if choice is None:
-            return
-        if not choice:
+        * Stock extract of the OLD version provided → diff modded-vs-stock,
+          then run the normal content-matched transfer with the STOCK extract
+          as the source (its WAVs are the stock content the audio matching
+          keys off).  Full fidelity — the only route that carries audio/text.
+        * Field empty → diff the modded extract DIRECTLY against the new one.
+          Filename-keyed images/videos transfer; audio/text can't be told
+          apart from the factory's own version-to-version changes."""
+        stock_dir = getattr(self, "_transfer_old_stock", None)
+        if not stock_dir:
+            self.window.append_log(
+                "No stock old-version extract given — comparing the modded "
+                "extract directly against the new one (images + video only).",
+                "info")
             self._transfer_direct_diff(modded_dir, target_dir)
             return
-        stock_dir = filedialog.askdirectory(
-            title="Select the STOCK (unmodded) extract of the SAME version",
-            initialdir=(os.path.dirname(modded_dir) or modded_dir))
-        if not stock_dir:
-            return
-        stock_dir = os.path.normpath(stock_dir)
-        if os.path.normcase(stock_dir) in (
-                os.path.normcase(os.path.normpath(modded_dir)),
-                os.path.normcase(os.path.normpath(target_dir))):
-            messagebox.showwarning(
-                "Wrong folder",
-                "The stock extract must be a THIRD folder: an unmodded extract "
-                "of the same code version as the modded one.")
-            return
+        self.window.append_log(
+            "Using the stock old-version extract as a baseline — this is the "
+            "accurate route and can also carry audio and text.", "info")
+        from .core import mod_transfer
 
         log_cb = self._transfer_log_cb()
         self.window.append_log(
@@ -1754,9 +1768,9 @@ class App:
                       "usually means the factory re-baked images between the "
                       "two versions.  Transferring those puts old-version "
                       "content on the new card, which the game can flag.  For "
-                      "an accurate transfer, cancel and re-run this with a "
-                      "STOCK (unmodded) extract of the SAME OLD version as the "
-                      "baseline — that carries ONLY your real mods." % n_img)
+                      "an accurate transfer, cancel and fill field 3 (a STOCK, "
+                      "unmodified extract of the SAME OLD version), which "
+                      "carries ONLY your real mods." % n_img)
         else:
             intro += ("\nA difference can also be a factory change between "
                       "versions — after transferring, review the Replace tabs "
@@ -1816,17 +1830,50 @@ class App:
         moved_folder = os.path.normcase(cur) != os.path.normcase(target_dir)
         if moved_folder:
             self.window.write_assets_var.set(target_dir)
+
+        # Wire the Write tab's base image to the NEW version's card image so
+        # the build patches your mods onto the new firmware (and names the
+        # output after it).  This is the step whose absence produced an
+        # old-version-named build: the assets moved to the new version but the
+        # base image stayed on the old one.
+        new_img = getattr(self, "_transfer_new_img", None)
+        wired_img = False
+        if new_img and os.path.isfile(new_img):
+            self.window.write_upd_var.set(new_img)
+            wired_img = True
+            self.window.append_log(
+                "Write tab's base image set to %s — the build targets the new "
+                "version." % os.path.basename(new_img), "info")
         self.window.reload_assets_tabs()
+
+        # Spell out the exact next step, in the log (survives the dialog) and
+        # on the panel's persistent next-step line.
+        if wired_img:
+            suffix = getattr(self._current_mfr, "write_output_suffix",
+                             "-modified") or "-modified"
+            stem, ext = os.path.splitext(os.path.basename(new_img))
+            next_step = (
+                "Next: open the Write tab and click the build button. It will "
+                "produce %s%s%s — your mods on the new version."
+                % (stem, suffix, ext))
+        else:
+            next_step = (
+                "Next: open the Write tab, set 'Original' to the NEW version's "
+                "card image (.raw), then build. (Tip: set field 4 here first "
+                "and it wires that up for you.)")
+        self.window.append_log("Transfer complete. " + next_step, "success")
+        if hasattr(self.window, "transfer_next_var"):
+            self.window.transfer_next_var.set("✓ " + next_step)
+
         messagebox.showinfo(
             "Transfer complete",
-            "Transferred: %d audio, %d video, %d image, %d text.\n\n%s"
-            "Nothing is written yet — the transfers are staged in the new "
-            "extract. Review them on the Replace tabs (or the Write tab's "
-            "Modified Files Preview, listed as Pending), then build the "
-            "update on the Write tab."
+            "Transferred: %d audio, %d video, %d image, %d text.\n\n%s%s\n\n%s"
             % (res["audio"], res["video"], res["image"], res["text"],
-               ("The Mod Folder now points at the new extract.\n\n"
-                if moved_folder else "")))
+               ("The Mod Folder now points at the new extract.\n"
+                if moved_folder else ""),
+               ("The Write tab's base image is set to the new version.\n"
+                if wired_img else ""),
+               next_step))
 
     @staticmethod
     def _format_transfer_summary(plan):

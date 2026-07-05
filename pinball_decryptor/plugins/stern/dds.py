@@ -351,7 +351,7 @@ def dds_header(width, height, linear_size, fourcc=b"DXT5"):
 
 
 def to_dds(raw, width, height, fourcc=b"DXT5"):
-    """Wrap raw BC3 block bytes in a DDS container (what PB exports)."""
+    """Wrap raw BC3 block bytes in a DDS container."""
     return dds_header(width, height, len(raw), fourcc) + raw
 
 

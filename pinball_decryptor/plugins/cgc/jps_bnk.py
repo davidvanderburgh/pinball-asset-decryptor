@@ -70,6 +70,44 @@ EVENT_CHUNK_SIZE = 96
 PLAY_BUFFER_INDEX_FIELD_OFFSET = 0x20
 PLAY_BUFFER_INDEX_STRIDE = 68
 
+# --- Per-buffer compressed-length prefix (zlib storage) ---------------------
+# Each zlib sound buffer is preceded in the file by a 4-byte LE uint32 that
+# the JPS loader reads to learn how many bytes to `fread` + hand to
+# `uncompress` as its source length; it then continues sequentially to the
+# next prefix.  The value is OBFUSCATED: the loader recovers the true
+# compressed byte length as ``prefix ^ JPS_LEN_ENCODE_EXP mod
+# JPS_LEN_MODULUS`` (a modular exponentiation, RE'd from `pin`'s bank loader
+# @0x77354, decode routine @0x76428).  So a re-compressed buffer whose byte
+# length changed MUST have this prefix rewritten -- otherwise the loader reads
+# the wrong number of bytes and every following buffer in the bank desyncs
+# (edited sound plays stale audio, untouched sounds fall silent, a later
+# reference dereferences garbage and crashes).  The write direction uses the
+# inverse exponent so ``JPS_LEN_ENCODE(len)`` reproduces the stock prefix
+# (verified against all 1007 stock zlib buffers across the 5 PF zlib banks).
+JPS_LEN_MODULUS = 0xE8A6B4C3        # 61967 * 62989 (both prime)
+JPS_LEN_DECODE_EXP = 0xBC95E7B1     # prefix -> true length (loader's exponent)
+JPS_LEN_ENCODE_EXP = 0x35AD47A9     # true length -> prefix (inverse mod lambda(N))
+JPS_LEN_PREFIX_SIZE = 4
+
+
+def _encode_length_prefix(length: int) -> bytes:
+    """Return the 4-byte obfuscated compressed-length prefix the JPS loader
+    expects in front of a zlib buffer of *length* bytes.
+
+    Raises ValueError if the value doesn't round-trip through the loader's
+    decode (only possible for the vanishingly rare length that shares a
+    factor with the modulus) -- shipping a prefix the engine would decode to
+    the wrong length is exactly the desync bug we're fixing, so we refuse to
+    guess.
+    """
+    prefix_val = pow(length, JPS_LEN_ENCODE_EXP, JPS_LEN_MODULUS)
+    if pow(prefix_val, JPS_LEN_DECODE_EXP, JPS_LEN_MODULUS) != length:
+        raise ValueError(
+            f"can't encode compressed length {length} into a JPS size prefix "
+            f"(not invertible under the loader's cipher) -- re-export the clip "
+            f"so it compresses to a different length.")
+    return struct.pack("<I", prefix_val)
+
 
 # -----------------------------------------------------------------------------
 # Data classes
@@ -503,6 +541,20 @@ def repack_bnk(original_bnk_path: str, modified_wavs_dir: str,
                 buf, wav_path, original_payload, data)
             if clamp_note:
                 summary.setdefault("clamp_notes", []).append(clamp_note)
+            # A zlib re-compress almost never reproduces the stock byte length,
+            # and the loader reads each buffer's length from an obfuscated
+            # 4-byte prefix that sits immediately before the payload (the last
+            # 4 bytes we've appended so far -- part of the file header for
+            # buffer 0, otherwise the inter-buffer gap).  Rewrite it to match
+            # the new compressed length, else the loader mis-reads this buffer
+            # and desyncs every buffer after it.  (RIFF buffers are spliced
+            # size-neutrally and carry no such prefix, so they're left alone.)
+            if (buf.storage == "zlib"
+                    and len(new_payload) != buf.compressed_size
+                    and len(new_data) >= JPS_LEN_PREFIX_SIZE):
+                new_prefix = _encode_length_prefix(len(new_payload))
+                new_data[-JPS_LEN_PREFIX_SIZE:] = new_prefix
+                summary.setdefault("prefix_rewrites", []).append(buf.index)
             was_modified = True
             summary["modified_count"] += 1
         else:

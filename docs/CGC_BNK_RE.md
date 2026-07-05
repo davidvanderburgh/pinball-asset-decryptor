@@ -484,3 +484,63 @@ UI-sound profile. Output dir: `C:\tmp\pf_bnk_extract_v2\`.
    The repacker handles this correctly by shifting subsequent
    buffers; the test confirmed this works for one modification.
    Multi-modification stress-tests would be a nice-to-have.
+
+## Session 5 close-out (2026-07-05) — the zlib length-prefix (dead-card fix)
+
+### ★ROOT CAUSE of RTS's crashed PF card (v0.38.0, zlib speech edit)
+
+Report: modded `pfspeech_sound_152` swapped in with no build/flash errors,
+card diagnostics clean, but the machine booted into a loop, several
+**untouched** sounds went silent, and it **crashed** when a ball hit the
+Start Scene scoop. Classic sequential-stream desync — and this session
+found exactly why.
+
+**Every zlib sound buffer is preceded in the file by a 4-byte
+little-endian compressed-length prefix.** The JPS bank loader
+(`jps_bank_load_compiled` @VA 0x77354 in `pin`) reads buffers *purely
+sequentially*: `fread` the 4-byte prefix -> decode it -> `malloc` that
+many bytes -> `fread` that many bytes -> `uncompress(dest, &destLen, src,
+srcLen=decoded_len)` -> continue to the next prefix. There is **no offset
+table** — alignment depends entirely on each prefix matching its buffer's
+real compressed byte length.
+
+The prefix is **obfuscated**. The loader decodes it via a modular
+exponentiation (routine @0x76428, `value ^ 0xBC95E7B1 mod 0xE8A6B4C3`).
+Confirmed by Unicorn-emulating the routine on the real prefix bytes:
+`decode(prefix)` == the buffer's compressed length for **all 1007 zlib
+buffers** across the 5 zlib banks (pfsndui/pfsnddiag/pfsndfx/pfspeech/
+pfspeechBEEPD).
+
+`repack_bnk` re-zlib-compresses an edited buffer (which essentially never
+reproduces the stock byte length) but was **preserving the stock prefix
+verbatim** (it lives in the 4-byte "inter-buffer gap" that repack copied
+unchanged). So the loader read the *old* byte count for the edited buffer,
+then read its next "prefix" from the wrong file position -> every
+following buffer misaligned -> garbage/failed decompress (silent slots) ->
+eventual bad pointer (crash). David's own PF test only swapped a **RIFF**
+music track (size-neutral, no such prefix), which is why it worked for him
+but not RTS.
+
+### Fix
+
+- Cracked the **encode** direction: modulus `N = 0xE8A6B4C3 = 61967 *
+  62989` (both prime), `lambda(N) = 1951557204`, encode exponent
+  `D = E^-1 mod lambda = 0x35AD47A9`. `encode(len) = len^D mod N`
+  reproduces the stock prefix for all 1007 buffers (0 mismatches).
+- `jps_bnk._encode_length_prefix(len)` returns the 4-byte prefix and
+  self-checks the round-trip (raises for the ~0.006%/buffer non-coprime
+  length rather than shipping a prefix the engine would misdecode).
+- `repack_bnk` now rewrites the 4 bytes immediately before a re-encoded
+  zlib payload (`new_data[-4:]`) to `_encode_length_prefix(new_len)`.
+  RIFF buffers are spliced size-neutrally and carry no such prefix, so
+  they're untouched.
+- End-to-end verified on the real 92 MB `pfspeech.bnk` (RTS's exact edit,
+  buffer 152, +15139 bytes after re-zlib): repacked bank re-parses to 264
+  buffers with **every** prefix decoding to its actual compressed length,
+  the edit intact, all 263 untouched buffers byte-identical.
+- Regression test `test_repack_zlib_edit_rewrites_length_prefix` (the
+  synthetic fixture now writes real encoded prefixes); it fails loudly
+  without the rewrite (prefix decodes to the stale size).
+
+HW retest on RTS's machine still pending, but the software proof uses the
+engine's own decode routine, so confidence is high.

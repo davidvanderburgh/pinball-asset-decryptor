@@ -80,12 +80,15 @@ def _build_synthetic_bnk(name: str, buffer_pcms: list) -> bytes:
             i * jps_bnk.PLAY_BUFFER_INDEX_STRIDE)
         out += play
 
-    # zlib-compressed buffers + 4-byte gap before each subsequent one.
+    # zlib-compressed buffers, each preceded by its 4-byte obfuscated
+    # compressed-length prefix -- exactly as the real loader reads it
+    # (read prefix -> inflate that many bytes -> next prefix).  Encoding the
+    # true length here (not a placeholder) is what lets the repack tests
+    # assert the prefix is rewritten in step with a re-compressed buffer.
     for i, pcm in enumerate(buffer_pcms):
-        if i > 0:
-            out += b"\xab\xcd\xef\x01"  # placeholder 4-byte gap
-        out += _make_jps_buffer(pcm, hash1=0x10000 + i,
-                                hash2=0x20000 + i)
+        comp = _make_jps_buffer(pcm, hash1=0x10000 + i, hash2=0x20000 + i)
+        out += jps_bnk._encode_length_prefix(len(comp))
+        out += comp
 
     return bytes(out)
 
@@ -443,6 +446,69 @@ def test_repack_zlib_edit_is_size_neutral(tmp_path):
     # Slot 0's decoded PCM stayed the stock length (clamped), so the
     # engine's length check would still pass.
     assert contents.buffers[0].pcm_size == stock_len
+
+
+def _noise_pcm(n_bytes: int, seed: int = 1) -> bytes:
+    """Deterministic pseudo-random stereo s16 PCM -- compresses far worse
+    than a pure sine, so re-zlib is guaranteed to change the buffer's
+    compressed byte length (which forces the length-prefix rewrite)."""
+    out = bytearray()
+    x = seed & 0xFFFFFFFF
+    while len(out) < n_bytes:
+        x = (1103515245 * x + 12345) & 0xFFFFFFFF
+        out += struct.pack("<I", x)
+    return bytes(out[:n_bytes])
+
+
+def test_repack_zlib_edit_rewrites_length_prefix(tmp_path):
+    """Regression for RTS's dead card: every zlib buffer is preceded by an
+    obfuscated 4-byte compressed-length prefix the loader reads to know how
+    many bytes to inflate before advancing to the next buffer.  A re-compressed
+    edit changes that length, so the prefix MUST be rewritten -- otherwise the
+    loader mis-reads the edited buffer and DESYNCS every buffer after it (the
+    edit plays stale audio, untouched sounds fall silent, a later reference
+    crashes).  Here we edit the MIDDLE buffer with noise (guaranteed to
+    re-compress to a different size) and assert the whole bank still reads back
+    aligned -- i.e. every prefix decodes to its buffer's ACTUAL compressed
+    length, exactly as `pin`'s loader would walk it."""
+    pcms = [_sine_pcm(100, 440), _sine_pcm(200, 880), _sine_pcm(80, 220)]
+    bnk_path = tmp_path / "speech.bnk"
+    bnk_path.write_bytes(_build_synthetic_bnk("speech.txt", pcms))
+    out_dir = tmp_path / "extract"
+    stock = jps_bnk.extract_bnk(str(bnk_path), str(out_dir))
+
+    # Edit the middle buffer with noise the length of its stock slot.
+    edit = _noise_pcm(stock.buffers[1].pcm_size, seed=99)
+    _write_wav(out_dir / "speech_sound_001.wav", edit)
+
+    repacked = tmp_path / "repacked.bnk"
+    summary = jps_bnk.repack_bnk(str(bnk_path), str(out_dir), str(repacked))
+    assert summary["modified_count"] == 1
+    # The re-compress changed buffer 1's size, so its prefix was rewritten.
+    assert 1 in summary.get("prefix_rewrites", [])
+
+    # ---- read the repacked bank back exactly as the loader does ----
+    rep = jps_bnk.parse_bnk(str(repacked))
+    rdata = repacked.read_bytes()
+    assert len(rep.buffers) == len(pcms), "buffer count changed -> desync"
+    for b in rep.buffers:
+        if b.storage != "zlib":
+            continue
+        prefix_val = struct.unpack_from("<I", rdata, b.bnk_offset - 4)[0]
+        decoded = pow(prefix_val, jps_bnk.JPS_LEN_DECODE_EXP,
+                      jps_bnk.JPS_LEN_MODULUS)
+        assert decoded == b.compressed_size, (
+            f"buffer {b.index}: prefix decodes to {decoded} but the buffer is "
+            f"{b.compressed_size} bytes -- loader would desync here")
+
+    # And the edit survives while neighbors are untouched.
+    re_dir = tmp_path / "re"
+    jps_bnk.extract_bnk(str(repacked), str(re_dir))
+    with wave.open(str(re_dir / "repacked_sound_001.wav"), "rb") as w:
+        assert w.readframes(w.getnframes()) == edit
+    for i in (0, 2):
+        with wave.open(str(re_dir / f"repacked_sound_{i:03d}.wav"), "rb") as w:
+            assert w.readframes(w.getnframes()) == pcms[i]
 
 
 def test_repack_refuses_ambiguous_renamed_wavs(synthetic_bnk_path,

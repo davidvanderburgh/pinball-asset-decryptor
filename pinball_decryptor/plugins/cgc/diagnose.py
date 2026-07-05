@@ -105,6 +105,145 @@ def _fmt_when(dt):
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
+# ---------------------------------------------------------------------------
+# ext4 journal (jbd2) inspection
+# ---------------------------------------------------------------------------
+# The needs_recovery flag alone can't say WHO armed the journal: CGC's
+# factory (stale 2024 transactions that revert a modded build's debugfs
+# edits at first mount -- the proven SHELL ERROR mechanism) or a mount that
+# happened AFTER the build (the machine itself, or a Windows ext4 driver
+# like Paragon extFS writing to the card behind the user's back).  Dating
+# the journal's pending commit blocks tells them apart.
+#
+# jbd2 on-disk structures are BIG-endian.
+
+_JBD2_MAGIC = 0xC03B3998
+_JBD2_COMMIT_BLOCK = 2
+_JBD2_SUPERBLOCK_TYPES = (3, 4)  # v1 / v2
+
+
+def _parse_journal_sb(buf):
+    """Parse a jbd2 journal superblock; dict or ``None`` when it isn't one.
+
+    Header: h_magic @0x00, h_blocktype @0x04; then s_blocksize @0x0C,
+    s_maxlen @0x10, s_first @0x14, s_sequence @0x18, s_start @0x1C
+    (``s_start == 0`` means the journal is empty -- nothing to replay).
+    """
+    if len(buf) < 0x20:
+        return None
+    magic, btype = struct.unpack_from(">II", buf, 0)
+    if magic != _JBD2_MAGIC or btype not in _JBD2_SUPERBLOCK_TYPES:
+        return None
+    bs, maxlen, first, seq, start = struct.unpack_from(">5I", buf, 0x0C)
+    return {"blocksize": bs, "maxlen": maxlen, "first": first,
+            "sequence": seq, "start": start}
+
+
+def _pending_commit_times(blocks, sequence):
+    """Commit timestamps of the transactions a mount would still replay.
+
+    ``blocks`` yields raw journal blocks.  A commit block (h_blocktype 2)
+    whose h_sequence is >= the journal superblock's s_sequence belongs to a
+    PENDING transaction; already-replayed history keeps smaller sequence
+    numbers.  Journalled data blocks can never alias a control block (jbd2
+    escapes any data block that starts with its magic), so a plain magic +
+    blocktype match is safe.  h_commit_sec is a be64 @0x30.
+    """
+    out = []
+    for blk in blocks:
+        if len(blk) < 0x38:
+            continue
+        magic, btype, seq = struct.unpack_from(">III", blk, 0)
+        if magic != _JBD2_MAGIC or btype != _JBD2_COMMIT_BLOCK:
+            continue
+        if seq < sequence:
+            continue
+        secs = struct.unpack_from(">Q", blk, 0x30)[0]
+        if 10 ** 9 < secs < 2 ** 32:  # plausible: 2001..2106
+            out.append(datetime.datetime.fromtimestamp(
+                secs, datetime.timezone.utc))
+    return out
+
+
+def _journal_pending_commits(reader, sb):
+    """Count + date the armed journal's pending transactions.
+
+    Returns ``(count, newest_commit_datetime)`` -- ``(0, None)`` when the
+    journal is armed but empty -- or ``None`` when the journal can't be
+    read at all (never fail the whole diagnosis over it).
+    """
+    try:
+        j_inum = struct.unpack_from("<I", sb, 0xE0)[0]  # s_journal_inum
+        if not j_inum:
+            return None
+        jnode = reader.read_inode(j_inum)
+        jsb = _parse_journal_sb(_read_span(reader, jnode, 0, 1024))
+        if jsb is None:
+            return None
+        if jsb["start"] == 0:
+            return (0, None)
+        bs = jsb["blocksize"] or reader.block_size
+        if not 1024 <= bs <= 65536 or bs & (bs - 1):
+            return None
+        total = min(jsb["maxlen"] * bs, jnode["size"], 512 * 2 ** 20)
+        commits = []
+        step = 4 * 2 ** 20  # a multiple of any jbd2 block size
+        for off in range(0, total, step):
+            data = _read_span(reader, jnode, off, min(step, total - off))
+            commits.extend(_pending_commit_times(
+                (data[i:i + bs] for i in range(0, len(data), bs)),
+                jsb["sequence"]))
+        return (len(commits), max(commits) if commits else None)
+    except (Ext4Error, OSError, ValueError, struct.error):
+        return None
+
+
+def _armed_journal_problem(pending, payload_mtime):
+    """Word the armed-journal + fresh-payload verdict.  Pure (unit-testable).
+
+    ``pending`` is :func:`_journal_pending_commits`' result.  Returns the
+    problem string, or ``None`` when the armed flag isn't actually a
+    problem (empty journal: the machine's mount just clears it).
+    """
+    base = (
+        "This card carries a modified build (payload written "
+        f"{_fmt_when(payload_mtime)}) but the data partition's ext4 journal "
+        "is still armed (needs_recovery). ")
+    tail_stale = (
+        "At its first mount the machine replays them OVER the "
+        "modifications and reverts the payload to a deleted 0-byte inode "
+        "-- the install then fails with SHELL ERROR. Rebuild this image "
+        "with v0.36.0 or newer (which retires the journal during the "
+        "build) and re-flash.")
+    if pending is None:
+        return base + (
+            "Its pending transactions could not be read to date them; if "
+            "they are the factory's stale transactions, " + tail_stale)
+    count, newest = pending
+    if count == 0:
+        return None
+    if newest < payload_mtime:
+        return base + (
+            f"Its {count} pending transaction(s) were committed "
+            f"{_fmt_when(newest)} -- BEFORE this build was written: these "
+            "are the stale factory transactions. " + tail_stale)
+    return base + (
+        f"Its {count} pending transaction(s) were committed "
+        f"{_fmt_when(newest)} -- AFTER this build was written, so these "
+        "are NOT the stale factory transactions: something mounted this "
+        "partition after the image was built. If this card has been in a "
+        "machine since it was flashed, the machine's own mount did this "
+        "and it is normal aftermath, not the factory-revert failure. If "
+        "it has NOT been in a machine, something on this PC is mounting "
+        "and writing to the card after flashing (typically a Windows ext4 "
+        "driver such as Paragon extFS or DiskGenius). Either way, check "
+        "the image itself: run these diagnostics on the .img FILE you "
+        "flashed (the \"Image file...\" button, no Administrator needed). "
+        "If the file reports a clean journal, the image is good -- "
+        "re-flash it and re-run this diagnostic before anything mounts "
+        "the card.")
+
+
 # A real CGC install payload (emmc.img) is 2-4 GB.  Anything under this is an
 # empty or truncated payload the installer can't copy.
 MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
@@ -289,6 +428,7 @@ def diagnose_installer_card(path, log=None):
         # @0x60, EXT3_FEATURE_INCOMPAT_RECOVER = 0x0004.
         sb = dev._aligned_read(data["start_bytes"] + 1024, 1024)
         journal_armed = None
+        journal_pending = None  # (count, newest commit) once read
         if sb[0x38:0x3A] == b"\x53\xEF":
             journal_armed = bool(
                 struct.unpack("<I", sb[0x60:0x64])[0] & 0x0004)
@@ -296,6 +436,21 @@ def diagnose_installer_card(path, log=None):
                 + ("ARMED (needs_recovery -- normal for a stock/factory "
                    "image; fatal for a pre-v0.36.0 modded build)"
                    if journal_armed else "clean"))
+            if journal_armed:
+                # Date the pending transactions: stale factory ones are the
+                # proven payload-revert mechanism, fresh ones just mean
+                # something mounted the card after it was written.
+                _log("Reading the armed journal's pending transactions...")
+                journal_pending = _journal_pending_commits(r3, sb)
+                if journal_pending is None:
+                    say("    (its pending transactions could not be read, "
+                        "so they can't be dated)")
+                elif journal_pending[0] == 0:
+                    say("    pending transactions: none -- the armed flag "
+                        "sits over an empty journal; a mount just clears it")
+                else:
+                    say(f"    pending transactions: {journal_pending[0]}, "
+                        f"newest committed {_fmt_when(journal_pending[1])}")
         emmc_ino = _resolve(r3, "/emmc.img")
         if emmc_ino is None:
             say("  /emmc.img: MISSING -- the installer has nothing to copy; "
@@ -320,21 +475,17 @@ def diagnose_installer_card(path, log=None):
                 problems.append(bad)
             elif journal_armed and mt > now - datetime.timedelta(days=30):
                 # Healthy-looking payload with a build-fresh mtime BUT the
-                # factory journal is still armed: a pre-v0.36.0 modded
-                # build.  It looks perfect now and dies at the machine's
-                # first mount.
-                say("  *** PROBLEM: modded build with the factory journal "
-                    "still armed -- the machine will revert it at boot.")
-                problems.append(
-                    "This card carries a modified build (payload written "
-                    f"{_fmt_when(mt)}) but the data partition's ext4 journal "
-                    "is still armed with stale factory transactions "
-                    "(needs_recovery). At its first mount the machine "
-                    "replays that journal OVER the modifications and "
-                    "reverts the payload to a deleted 0-byte inode -- the "
-                    "install then fails with SHELL ERROR. Rebuild this "
-                    "image with v0.36.0 or newer (which retires the journal "
-                    "during the build) and re-flash.")
+                # journal is still armed.  Stale factory transactions mean a
+                # pre-v0.36.0 modded build that looks perfect now and dies
+                # at the machine's first mount; transactions dated AFTER the
+                # build mean something merely mounted the card since it was
+                # written.  _armed_journal_problem words each case (and
+                # clears the empty-journal one).
+                bad_journal = _armed_journal_problem(journal_pending, mt)
+                if bad_journal is not None:
+                    say("  *** PROBLEM: modded build with the journal still "
+                        "armed -- see the verdict below.")
+                    problems.append(bad_journal)
             # Force real device reads over the head and tail of the payload
             # (a quick unreadable-card smoke test; NOT a full surface scan).
             if node["size"] > 0:

@@ -835,7 +835,7 @@ class WritePipeline(BasePipeline):
             # other guard, so a source whose emmc.img is empty (RTS's recurring
             # 0-byte/2023 payload, copied straight through) would otherwise
             # ship a card the machine SHELL-ERRORs on.
-            self._verify_output_payload()
+            self._final_output_verify()
             self._log("Done (no changes applied).", "success")
             self._done(True,
                 f"{info['display']} installer rebuilt (no modifications).\n\n"
@@ -956,12 +956,18 @@ class WritePipeline(BasePipeline):
             self._verify_partition_fs(p3_exec, "installer data partition (P3)")
 
             self._log("Re-packing installer .img (P3 into output)...", "info")
-            self.executor.run(
-                f"dd if={shlex.quote(p3_exec)} of={shlex.quote(out_exec)} "
-                f"bs=1M oflag=seek_bytes iflag=count_bytes "
-                f"seek={data_part['start_bytes']} "
-                f"count={data_part['size_bytes']} "
-                f"conv=notrunc status=none", timeout=1800)
+            try:
+                self.executor.run(
+                    f"dd if={shlex.quote(p3_exec)} of={shlex.quote(out_exec)} "
+                    f"bs=1M oflag=seek_bytes iflag=count_bytes "
+                    f"seek={data_part['start_bytes']} "
+                    f"count={data_part['size_bytes']} "
+                    f"conv=notrunc status=none", timeout=1800)
+            except Exception:
+                # A failed/partial write-back leaves the output half-stock,
+                # half-modified: complete-looking, flashable, and broken.
+                self._quarantine_output()
+                raise
 
         finally:
             try:
@@ -973,7 +979,7 @@ class WritePipeline(BasePipeline):
         # it's real, whatever happened upstream (a bad source, a stale mount,
         # a partial write).  Same check the no-op path runs, plus the
         # armed-journal refusal that only applies to modified builds.
-        self._verify_output_payload(expect_clean_journal=True)
+        self._final_output_verify(expect_clean_journal=True)
 
         self._log("Done.", "success")
         self._done(True,
@@ -1073,6 +1079,50 @@ class WritePipeline(BasePipeline):
     # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
     # is an empty/truncated payload the machine can't install.
     _MIN_PLAUSIBLE_EMMC = 256 * 1024 * 1024
+
+    def _final_output_verify(self, expect_clean_journal=False):
+        """Run the final payload verify; quarantine the output on refusal.
+
+        The final checks can only refuse the output AFTER the file has been
+        fully written, so "The build was aborted; do not flash this image"
+        used to leave a complete-looking, flashable .img sitting at the
+        output path -- with all the user's mods inside, indistinguishable
+        from a good build by eye.  Rename it out of harm's way and say so in
+        the error itself.
+        """
+        try:
+            self._verify_output_payload(
+                expect_clean_journal=expect_clean_journal)
+        except PipelineError as e:
+            raise PipelineError(e.phase, e.message + self._quarantine_output())
+
+    def _quarantine_output(self):
+        """Rename a rejected output .img to ``*.REJECTED.img``.
+
+        Makes the "do not flash this image" refusal stick: the flash button
+        refuses ``.REJECTED`` names (see :class:`FlashImagePipeline`), and the
+        name itself warns anyone reaching for Etcher/Rufus.  Returns a note to
+        append to the error message ("" when nothing was renamed).
+        """
+        if os.path.abspath(self.original_img) == os.path.abspath(
+                self.output_img):
+            # In-place build: never rename the user's source image.
+            return ""
+        base, ext = os.path.splitext(self.output_img)
+        target = f"{base}.REJECTED{ext or '.img'}"
+        try:
+            os.replace(self.output_img, target)
+        except OSError as e:
+            self._log(
+                f"Could not rename the rejected output ({e}). Do NOT flash "
+                f"{os.path.basename(self.output_img)}.", "error")
+            return ""
+        self._log(
+            f"Rejected output renamed to {os.path.basename(target)} so it "
+            f"can't be flashed by mistake.", "error")
+        return (f"\n\nThe unusable output file was renamed to "
+                f"{os.path.basename(target)} so it can't be flashed by "
+                f"mistake.")
 
     def _verify_output_payload(self, expect_clean_journal=False):
         """Read the FINISHED output .img's ``/emmc.img`` back and abort if it's
@@ -1319,6 +1369,20 @@ class FlashImagePipeline(BasePipeline):
         if not self.image_path or not os.path.isfile(self.image_path):
             raise PipelineError(
                 "Check card", "Image file not found: %r" % self.image_path)
+        if ".REJECTED" in os.path.basename(self.image_path).upper():
+            # A Write that aborts after its output was already written
+            # renames the unusable file to *.REJECTED.img (see
+            # WritePipeline._quarantine_output).  Such an image looks
+            # complete and carries the user's mods, but the build refused it
+            # for a reason -- on the machine it fails with a SHELL ERROR or
+            # worse.
+            raise PipelineError(
+                "Check card",
+                "This image was refused by its build and renamed to "
+                "*.REJECTED.img -- the Write step aborted AFTER writing it "
+                "(see that build's error message for why). Flashing it "
+                "would produce a card that fails on the machine. Re-run "
+                "Write to produce a good image, and flash that instead.")
         self._check_cancel()
 
         self._set_phase(1)  # Write image

@@ -35,6 +35,15 @@ def test_diagnose_reads_stock_pf_installer():
     assert "GAME_NAME = Pulp Fiction" in report
     assert "INSTALL_DEST = /dev/mmcblk1" in report
 
+    # The stock card ships its factory journal armed, and the jbd2 scan
+    # dates its single pending transaction to CGC's mastering-day install
+    # test (minutes before procstat.txt's 16:44 timestamp).  An OLD payload
+    # mtime keeps it out of the problems list -- stock cards install fine.
+    assert "ext4 journal: ARMED" in report
+    assert ("pending transactions: 1, newest committed "
+            "2024-08-19 16:39 UTC") in report
+    assert "VERDICT: no obvious problem" in report
+
     # procstat.txt found, recognised as CGC's factory leftover (its mtime
     # matches the other mastering-time files), with the completed-copy
     # markers from CGC's own mastering run.
@@ -87,6 +96,111 @@ def test_assess_payload_accepts_real_size():
     from pinball_decryptor.plugins.cgc.diagnose import _assess_payload_size
     now = dt.datetime(2026, 7, 2, tzinfo=dt.timezone.utc)
     assert _assess_payload_size(3_640_655_872, now, now) is None
+
+
+# ---------------------------------------------------------------------------
+# ext4 journal (jbd2) inspection: dating the armed journal's pending
+# transactions to tell stale FACTORY transactions (the proven payload-revert
+# SHELL ERROR) from a journal armed by a mount AFTER the build (machine boot,
+# or a Windows ext4 driver writing to the card) -- RTS's 2026-07-05 card
+# report couldn't distinguish the two.
+# ---------------------------------------------------------------------------
+
+_JBD2_MAGIC = 0xC03B3998
+
+
+def _jbd2_block(btype, seq, bs=1024, commit_secs=None):
+    blk = bytearray(bs)
+    struct.pack_into(">III", blk, 0, _JBD2_MAGIC, btype, seq)
+    if commit_secs is not None:
+        struct.pack_into(">Q", blk, 0x30, commit_secs)
+    return bytes(blk)
+
+
+def test_parse_journal_sb_roundtrip():
+    from pinball_decryptor.plugins.cgc.diagnose import _parse_journal_sb
+    buf = bytearray(1024)
+    struct.pack_into(">III", buf, 0, _JBD2_MAGIC, 4, 0)     # header, v2 sb
+    struct.pack_into(">5I", buf, 0x0C, 1024, 8192, 1, 7, 42)
+    assert _parse_journal_sb(bytes(buf)) == {
+        "blocksize": 1024, "maxlen": 8192, "first": 1,
+        "sequence": 7, "start": 42}
+
+
+def test_parse_journal_sb_rejects_non_journal():
+    from pinball_decryptor.plugins.cgc.diagnose import _parse_journal_sb
+    assert _parse_journal_sb(b"\x00" * 1024) is None      # no magic
+    assert _parse_journal_sb(b"\x00" * 8) is None         # too short
+    commit = _jbd2_block(2, 7)                            # wrong blocktype
+    assert _parse_journal_sb(commit) is None
+
+
+def test_pending_commit_times_filters_replayed_and_noise():
+    import datetime as dt
+    from pinball_decryptor.plugins.cgc.diagnose import _pending_commit_times
+
+    factory = int(dt.datetime(2024, 8, 19, 16, 39,
+                              tzinfo=dt.timezone.utc).timestamp())
+    blocks = [
+        _jbd2_block(2, 7, commit_secs=factory),      # pending commit: counted
+        _jbd2_block(2, 6, commit_secs=factory - 60), # replayed history: no
+        _jbd2_block(1, 7),                           # descriptor block: no
+        b"\x00" * 1024,                              # data block: no magic
+        _jbd2_block(2, 8, commit_secs=0),            # implausible timestamp
+        b"\xff" * 16,                                # runt: skipped
+    ]
+    times = _pending_commit_times(blocks, sequence=7)
+    assert times == [dt.datetime(2024, 8, 19, 16, 39,
+                                 tzinfo=dt.timezone.utc)]
+
+
+def _dt(*args):
+    import datetime as dt
+    return dt.datetime(*args, tzinfo=dt.timezone.utc)
+
+
+def test_armed_journal_stale_factory_is_the_fatal_verdict():
+    """Pending transactions dated BEFORE the build = the factory's stale
+    journal: the machine's first mount reverts the payload (SHELL ERROR)."""
+    from pinball_decryptor.plugins.cgc.diagnose import _armed_journal_problem
+    msg = _armed_journal_problem((1, _dt(2024, 8, 19, 16, 39)),
+                                 _dt(2026, 7, 5, 13, 9))
+    assert msg is not None
+    assert "BEFORE" in msg and "stale factory transactions" in msg
+    assert "SHELL ERROR" in msg and "v0.36.0" in msg
+    assert "2024-08-19 16:39 UTC" in msg
+
+
+def test_armed_journal_post_build_mount_names_the_real_writer():
+    """Pending transactions dated AFTER the build are NOT the factory's:
+    something (machine boot, or a Windows ext4 driver) mounted the card
+    after it was written.  The verdict must say so and steer the user to
+    diagnosing the .img file to localize img-vs-card."""
+    from pinball_decryptor.plugins.cgc.diagnose import _armed_journal_problem
+    built = _dt(2026, 7, 5, 13, 9)
+    msg = _armed_journal_problem((3, _dt(2026, 7, 5, 14, 30)), built)
+    assert msg is not None
+    assert "AFTER" in msg and "NOT the stale factory transactions" in msg
+    assert "ext4 driver" in msg
+    assert "Image file" in msg          # points at the file-mode diagnostic
+    assert "v0.36.0" not in msg         # a rebuild is NOT the prescription
+
+
+def test_armed_journal_empty_journal_is_not_a_problem():
+    """needs_recovery over an EMPTY journal (s_start == 0): nothing to
+    replay, a mount just clears the flag."""
+    from pinball_decryptor.plugins.cgc.diagnose import _armed_journal_problem
+    assert _armed_journal_problem((0, None), _dt(2026, 7, 5)) is None
+
+
+def test_armed_journal_unreadable_falls_back_to_stale_wording():
+    """When the journal can't be read the old (worst-case) advice stands,
+    with an honest note that the transactions couldn't be dated."""
+    from pinball_decryptor.plugins.cgc.diagnose import _armed_journal_problem
+    msg = _armed_journal_problem(None, _dt(2026, 7, 5, 13, 9))
+    assert msg is not None
+    assert "could not be read" in msg
+    assert "v0.36.0" in msg
 
 
 def test_diagnose_rejects_non_cgc_card(tmp_path):

@@ -579,13 +579,13 @@ class App:
                 "Please select an output folder.")
             return
 
-        if os.path.isdir(output_path) and os.listdir(output_path):
+        if self._extract_overwrite_risk(output_path):
             # icon: a question mark undersells "your edits get clobbered"
             # (monkeybug) — this is a warning-grade confirm.
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
-                "The output folder already contains files.\n\n"
-                "Extracting will overwrite existing files.\n\nContinue?",
+                "The output folder already contains files this extract "
+                "would overwrite.\n\nContinue?",
                 icon="warning",
             ):
                 return
@@ -819,11 +819,11 @@ class App:
                 "Missing Output",
                 "Please select an output folder.")
             return
-        if os.path.isdir(output_path) and os.listdir(output_path):
+        if self._extract_overwrite_risk(output_path):
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
-                "The output folder already contains files.\n\n"
-                "Extracting will overwrite existing files.\n\nContinue?",
+                "The output folder already contains files this extract "
+                "would overwrite.\n\nContinue?",
                 icon="warning",
             ):
                 return
@@ -904,6 +904,32 @@ class App:
             "full_dump": bool(
                 self.window.extract_filesystem_var.get()),
         }
+
+    def _extract_overwrite_risk(self, output_path):
+        """True if this extract would actually overwrite something in
+        *output_path* (drives the "Output Folder Not Empty" confirm).
+
+        For plugins with per-type Extract checkboxes the category keys map
+        1:1 onto the output subfolders (audio/ video/ images/ text/), so
+        only the SELECTED categories' non-empty subfolders count —
+        monkeybug deleted audio/ to re-extract audio alone and still got
+        warned about the leftover video/ + images/.  Top-level sidecars
+        (.checksums.md5, callouts.csv, ...) are app-regenerated metadata,
+        not user edits, so they don't count.  Plugins without categories
+        keep the conservative any-content check."""
+        if not os.path.isdir(output_path):
+            return False
+        cats = (self._collect_extract_category_kwargs()
+                .get("extract_categories"))
+        try:
+            if not cats:
+                return bool(os.listdir(output_path))
+            return any(
+                selected and os.path.isdir(os.path.join(output_path, key))
+                and os.listdir(os.path.join(output_path, key))
+                for key, selected in cats.items())
+        except OSError:
+            return False
 
     def _collect_extract_category_kwargs(self):
         """Build the ``extract_categories={key: bool}`` kwarg for the extract
@@ -1259,6 +1285,10 @@ class App:
             assets_dir, log_cb, phase_cb, progress_cb, done_cb,
             rename_after=True,
             model_size=self.window.voice_quality_var.get())
+        # Keyed log lines (the model-download "... 340 / 1500 MB" counter
+        # rewrites one line in place instead of appending every tick).
+        if hasattr(self.pipeline, "set_log_line_cb"):
+            self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
     def _maybe_wrap_done_for_music_id(self, original_done_cb, output_path):
@@ -2565,6 +2595,26 @@ class App:
 
     def _on_voice_quality_change(self, model_size):
         """Persist the ⚙-menu voice-recognition quality pick (the
-        faster-whisper model Auto-name call-outs transcribes with)."""
+        faster-whisper model Auto-name call-outs transcribes with), and log
+        whether that model is already downloaded — a quality bump otherwise
+        silently implies a multi-GB download on the next extract (David:
+        "log the status of that download when it is selected")."""
         self._settings["voice_quality"] = model_size
         self._save_settings()
+        try:
+            from .core.transcribe import whisper_model_cached, \
+                _MODEL_APPROX_MB
+            if whisper_model_cached(model_size):
+                self.window.append_log(
+                    f"Voice recognition quality set to {model_size} — "
+                    f"model already downloaded, ready to use.", "info")
+            else:
+                approx = _MODEL_APPROX_MB.get(model_size)
+                size = f" (~{approx} MB)" if approx else ""
+                self.window.append_log(
+                    f"Voice recognition quality set to {model_size} — "
+                    f"model not downloaded yet{size}; it downloads once, "
+                    f"automatically, on the next Auto-name call-outs run.",
+                    "info")
+        except Exception:
+            pass

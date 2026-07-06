@@ -302,15 +302,11 @@ class SternManufacturer(Manufacturer):
                 "clip. Tick “Trim / pad” to also match the original length.")
 
     def image_note(self):
-        return ("Each image is scaled to the original's pixel dimensions and "
-                "patched into the SD-card image in place, so it's fit to the "
-                "original's byte size: it drops straight in if it's small "
-                "enough, is re-compressed (fewer colours) to fit if larger, and "
-                "is skipped (left unchanged) if it still won't fit — use a "
-                "simpler image.  Slots under scene_textures/ are the in-scene "
-                "glyph/sprite atlases (BC3/DXT5); a replacement is auto-scaled to "
-                "the atlas's exact dimensions, keeps its transparency, and is "
-                "re-encoded losslessly to the slot — no byte-size limit.")
+        # One line on the tab; the full per-store fitting rules moved into
+        # the "?" help window (monkeybug: the paragraph read as clutter).
+        return ("Each replacement is auto-fit to its slot in place — "
+                "scaled, format-converted and size-matched. The per-store "
+                "rules are in the ? help.")
 
     def detect(self, path):
         # Route by extension: MAME ROM zip => classic Whitestar (capture

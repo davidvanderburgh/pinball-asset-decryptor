@@ -1173,6 +1173,15 @@ class MainWindow:
         # _scan_image_groups): rel_path -> (group_key, label_base, order).
         self._image_groups = {}
         self._image_group_occ = {}       # rel_path -> on-card occurrence count
+        # User-authored display names for scene groups (group_key -> name,
+        # <=50 chars) — the vendor's own element names are mostly
+        # "unnamed_instance_N" (monkeybug).  Persisted in the staged-changes
+        # sidecar per assets folder.
+        self._image_group_tags = {}
+        # "Source" column filter: All sources / File / Scene texture / Radium.
+        self.image_source_filter_var = tk.StringVar(value="All sources")
+        self.image_source_filter_var.trace_add(
+            "write", lambda *a: self._refresh_image_list())
         self._image_scan_id = 0          # bump-counter to drop stale scans
         self._image_scan_dir = ""        # folder the current slots came from
         # Tk PhotoImage refs (must stay alive while drawn on the canvases).
@@ -1870,6 +1879,17 @@ class MainWindow:
         self._extract_action_row = ttk.Frame(f)
         self._extract_options_row = ttk.Frame(self._extract_action_row)
 
+        # Second, separate "Options:" row for the auto-name / length-prefix
+        # cluster (monkeybug: sharing one row with the category checkboxes
+        # AND the Extract button cut the labels off at narrow widths).
+        # Packed on demand by _update_extract_options_row_visibility — most
+        # non-Stern plugins show none of the three options, and an empty
+        # row would leave a stray label.
+        self._extract_optnames_row = ttk.Frame(f)
+        ttk.Label(self._extract_optnames_row, text="Options:",
+                  width=14, anchor=tk.W,
+                  font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
+
         # Generic per-type Extract checkboxes (capabilities.extract_categories).
         # Children are (re)built per-plugin in apply_manufacturer(); built empty
         # here and pack-managed there.  Stern: Audio / Video / Images / Text.
@@ -1994,10 +2014,10 @@ class MainWindow:
         # Two post-extract "auto-name" options (only shown for manufacturers
         # that advertise the matching capability).  "Call-outs" combines
         # transcribe + rename into a single action; "music" is the AcoustID
-        # lookup.  Both sit inline in the action row's option cluster; their
-        # former one-line descriptions now live in hover tooltips so the log
+        # lookup.  Both sit on the second "Options:" row; their former
+        # one-line descriptions now live in hover tooltips so the log
         # area stays tall.
-        self._transcribe_frame = ttk.Frame(self._extract_options_row)
+        self._transcribe_frame = ttk.Frame(self._extract_optnames_row)
         self._transcribe_check = ttk.Checkbutton(
             self._transcribe_frame,
             text="Auto-name call-outs",
@@ -2011,7 +2031,7 @@ class MainWindow:
 
         # Music-ID: identify each full music track online via AcoustID +
         # MusicBrainz and rename it by song.  Chained after transcribe.
-        self._music_id_frame = ttk.Frame(self._extract_options_row)
+        self._music_id_frame = ttk.Frame(self._extract_optnames_row)
         self._music_id_check = ttk.Checkbutton(
             self._music_id_frame,
             text="Auto-name music",
@@ -2025,7 +2045,7 @@ class MainWindow:
 
         # Length-prefix names (capabilities.audio_duration_names) — see the
         # duration_names_var comment for what it does and why.
-        self._duration_names_frame = ttk.Frame(self._extract_options_row)
+        self._duration_names_frame = ttk.Frame(self._extract_optnames_row)
         self._duration_names_check = ttk.Checkbutton(
             self._duration_names_frame,
             text="Length-prefix names",
@@ -2872,7 +2892,13 @@ class MainWindow:
             except Exception:
                 exts = None
             try:
-                slots = scan_audio_slots(assets_path, roots=roots, exts=exts)
+                # Fast walk: list slots instantly; per-file format/duration
+                # headers are filled in afterwards on a background pass.  A
+                # cloud-offloaded (iCloud "Optimize Mac Storage") or network
+                # folder makes even the small header reads crawl — the walk
+                # itself never opens a file, so the list always appears.
+                slots = scan_audio_slots(assets_path, roots=roots, exts=exts,
+                                         probe=False)
             except Exception:
                 slots = []
             if self._audio_scan_id != scan_id:
@@ -2889,6 +2915,16 @@ class MainWindow:
         if self._audio_scan_id != scan_id:
             return
         self._set_tab_scanning("audio", False)
+        # Same-folder rescan: carry over already-probed metadata for
+        # unchanged files so a rescan (transcribe renames, manual Scan)
+        # doesn't reset every Length cell to "—" and re-read every header.
+        if scan_dir == self._audio_scan_dir:
+            old = self._audio_slots_by_rel
+            for s in slots:
+                prev = old.get(s.rel_path)
+                if (prev is not None and prev.info is not None
+                        and s.info is None and s.size == prev.size):
+                    s.info = prev.info
         self._audio_slots = slots
         self._audio_slots_by_rel = {s.rel_path: s for s in slots}
         # A new folder invalidates any in-memory assignments aimed at the old
@@ -2960,6 +2996,95 @@ class MainWindow:
             self._ensure_audio_dup_groups(quiet=True)
         self._refresh_audio_list()
         self._start_change_scan("audio")
+        # Now fill in duration / format on a background thread so the list is
+        # usable immediately even when the folder's contents are slow to read.
+        self._probe_audio_metadata_async(scan_id)
+
+    def _run_probe_pass(self, scan_id, current_id_fn, pending, detect,
+                        apply_fn):
+        """Read per-file metadata for *pending* slots on a worker pool and
+        land every result on the main thread.  Shared by the audio / video /
+        image background probes.
+
+        Workers NEVER touch Tk: results go into a queue that a main-thread
+        after()-loop drains in batches.  The old shape posted each result
+        with a cross-thread ``after(0, ...)``, which raises "main thread is
+        not in main loop" whenever the main thread spends over ~1 s inside
+        one callback — a 2562-row tree rebuild plus the first row's
+        spectrogram render does exactly that — and a single raise killed the
+        whole pass through its blanket except, leaving every row's metadata
+        "—" forever (David's Guardians extract).  A stale pass (a newer scan
+        started) stops via *current_id_fn*.
+        """
+        import queue as queue_mod
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        q = queue_mod.SimpleQueue()
+        done = threading.Event()
+
+        def _coordinator():
+            try:
+                workers = min(8, (os.cpu_count() or 4))
+                with ThreadPoolExecutor(max_workers=workers) as ex:
+                    futs = {ex.submit(detect, s.abs_path): s for s in pending}
+                    for fut in as_completed(futs):
+                        if current_id_fn() != scan_id:
+                            for f in futs:
+                                f.cancel()
+                            return
+                        try:
+                            info = fut.result()
+                        except Exception:
+                            info = None
+                        q.put((futs[fut].rel_path, info))
+            except Exception:
+                pass
+            finally:
+                done.set()
+
+        def _drain():
+            if current_id_fn() != scan_id:
+                return
+            for _ in range(500):       # bounded per tick: keep the UI live
+                try:
+                    rel, info = q.get_nowait()
+                except queue_mod.Empty:
+                    break
+                apply_fn(scan_id, rel, info)
+            if not (done.is_set() and q.empty()):
+                try:
+                    self._tk_root().after(100, _drain)
+                except tk.TclError:
+                    pass                # window torn down
+
+        threading.Thread(target=_coordinator, daemon=True).start()
+        _drain()                        # we're on the main thread post-scan
+
+    def _probe_audio_metadata_async(self, scan_id):
+        """Read each just-scanned slot's format/duration header off the main
+        thread (the probe=False scan walk never opens files), landing each
+        row's info via _run_probe_pass."""
+        from ..core.audio import detect_audio_info
+        pending = [s for s in self._audio_slots if s.info is None]
+        if pending:
+            self._run_probe_pass(scan_id, lambda: self._audio_scan_id,
+                                 pending, detect_audio_info,
+                                 self._apply_audio_meta)
+
+    def _apply_audio_meta(self, scan_id, rel, info):
+        """Main-thread: store a probed slot's metadata and update its row."""
+        if self._audio_scan_id != scan_id:
+            return
+        slot = self._audio_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        slot.info = info
+        tree = getattr(self, "_audio_tree", None)
+        if tree is None or not tree.exists(rel):
+            return
+        tree.set(rel, "len", slot.duration_str())
+        tree.set(rel, "fmt", slot.format_summary())
 
     # ---- Replace Audio: duplicate grouping (CGC banks) ----------------
 
@@ -3143,10 +3268,19 @@ class MainWindow:
                 setattr(self, "_%s_changed_on_disk" % kind, changed)
                 if refresh:
                     refresh()
-            try:
-                root.after(0, _apply)
-            except (tk.TclError, RuntimeError):
-                pass              # window torn down before the scan finished
+            # A busy main thread (>1 s inside one callback — big tree
+            # rebuild, spectrogram render) makes this cross-thread after()
+            # raise RuntimeError; retry until it lands so the changed-marks
+            # aren't silently lost.  TclError = window torn down: give up.
+            import time as _time
+            for _ in range(50):
+                try:
+                    root.after(0, _apply)
+                    break
+                except RuntimeError:
+                    _time.sleep(0.2)
+                except tk.TclError:
+                    break
 
         # Spawn through the event loop (after-idle) rather than synchronously, so
         # a caller that builds + tears down the window without running the loop
@@ -3160,6 +3294,18 @@ class MainWindow:
             pass
 
     # ---- Replace tabs: click-header sorting (shared) -----------------
+
+    @staticmethod
+    def _double_click_on_rows(tree, event):
+        """True if a <Double-1> landed on a data row (region "tree"/"cell").
+
+        Clicking a sortable column header fast enough registers as a
+        double-click too; without this guard it falls through to the row
+        action — the image tab popped "No Slot Selected" mid-sort
+        (monkeybug).  A None event (programmatic call) is allowed through."""
+        if event is None:
+            return True
+        return tree.identify_region(event.x, event.y) in ("tree", "cell")
 
     def _sort_click(self, state_attr, col, default_desc, refresh_fn):
         """Header-click handler: toggle direction when already sorting by
@@ -3411,6 +3557,8 @@ class MainWindow:
         self._audio_load_track(rel)  # shows both seek bars, no play
 
     def _audio_on_tree_double(self, _event=None):
+        if not self._double_click_on_rows(self._audio_tree, _event):
+            return
         self._cancel_audio_select_job()
         self._audio_play_original()
 
@@ -4167,42 +4315,16 @@ class MainWindow:
         self._probe_video_metadata_async(scan_id)
 
     def _probe_video_metadata_async(self, scan_id):
-        """Probe ffprobe metadata for the just-scanned slots on a small thread
-        pool, updating each row as its info arrives.  Backend (.cdmd) slots are
-        already populated by the scan, so only ffmpeg-format slots are probed.
-        Stale passes (a newer scan started) drop out via the scan-id."""
-        import threading
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        """Probe ffprobe metadata for the just-scanned slots off the main
+        thread.  Backend (.cdmd) slots are already populated by the scan, so
+        only ffmpeg-format slots are probed.  See _run_probe_pass."""
         from ..core.video import backend_for, detect_video_info
-
         pending = [s for s in self._video_slots
                    if s.info is None and backend_for(s.abs_path) is None]
-        if not pending:
-            return
-
-        def _coordinator():
-            workers = min(8, (os.cpu_count() or 4))
-            try:
-                with ThreadPoolExecutor(max_workers=workers) as ex:
-                    futs = {ex.submit(detect_video_info, s.abs_path): s
-                            for s in pending}
-                    for fut in as_completed(futs):
-                        if self._video_scan_id != scan_id:
-                            for f in futs:
-                                f.cancel()
-                            return
-                        slot = futs[fut]
-                        try:
-                            info = fut.result()
-                        except Exception:
-                            info = None
-                        self._tk_root().after(
-                            0, self._apply_video_meta,
-                            scan_id, slot.rel_path, info)
-            except Exception:
-                pass
-
-        threading.Thread(target=_coordinator, daemon=True).start()
+        if pending:
+            self._run_probe_pass(scan_id, lambda: self._video_scan_id,
+                                 pending, detect_video_info,
+                                 self._apply_video_meta)
 
     def _apply_video_meta(self, scan_id, rel, info):
         """Main-thread: store a probed slot's metadata and update its row."""
@@ -4501,6 +4623,8 @@ class MainWindow:
         self._video_load_track(rel)  # posters both panes, no play
 
     def _video_on_tree_double(self, _event=None):
+        if not self._double_click_on_rows(self._video_tree, _event):
+            return
         self._cancel_video_select_job()
         self._video_play_original()
 
@@ -4727,6 +4851,21 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
+        # Source filter (monkeybug): narrow the list to one of the three
+        # image stores; the values mirror the Source column's labels.
+        self._image_source_combo = ttk.Combobox(
+            tools, textvariable=self.image_source_filter_var,
+            state="readonly", width=13,
+            values=("All sources", "File", "Scene texture", "Radium"))
+        self._image_source_combo.pack(side=tk.LEFT, padx=(0, 12))
+        self._image_source_combo.bind(
+            "<<ComboboxSelected>>", lambda _e: self._save_staged_changes())
+        _Tooltip(
+            self._image_source_combo,
+            "Show only images from one store: plain files on the card, "
+            "scene.assets textures, or radium-embedded images (the Source "
+            "column).",
+            lambda: self._current_theme)
         self._image_changed_only_cb = ttk.Checkbutton(
             tools, text="Changed only",
             variable=self.image_changed_only_var,
@@ -4931,6 +5070,14 @@ class MainWindow:
             if "image_group_by_scene" in staged:
                 self.image_group_by_scene_var.set(
                     bool(staged["image_group_by_scene"]))
+            tags = staged.get("image_group_tags")
+            self._image_group_tags = (
+                {str(k): str(v).strip()[:50] for k, v in tags.items()
+                 if str(v).strip()}
+                if isinstance(tags, dict) else {})
+            srcf = staged.get("image_source_filter")
+            if srcf in ("All sources", "File", "Scene texture", "Radium"):
+                self.image_source_filter_var.set(srcf)
         else:
             self._image_assignments = {
                 rel: rep for rel, rep in self._image_assignments.items()
@@ -4952,40 +5099,14 @@ class MainWindow:
         self._probe_image_metadata_async(scan_id)
 
     def _probe_image_metadata_async(self, scan_id):
-        """Probe Pillow metadata for the just-scanned slots on a small thread
-        pool, updating each row as its info arrives.  Stale passes (a newer scan
-        started) drop out via the scan-id."""
-        import threading
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        """Probe Pillow metadata for the just-scanned slots off the main
+        thread.  See _run_probe_pass."""
         from ..core.image import detect_image_info
-
         pending = [s for s in self._image_slots if s.info is None]
-        if not pending:
-            return
-
-        def _coordinator():
-            workers = min(8, (os.cpu_count() or 4))
-            try:
-                with ThreadPoolExecutor(max_workers=workers) as ex:
-                    futs = {ex.submit(detect_image_info, s.abs_path): s
-                            for s in pending}
-                    for fut in as_completed(futs):
-                        if self._image_scan_id != scan_id:
-                            for fu in futs:
-                                fu.cancel()
-                            return
-                        slot = futs[fut]
-                        try:
-                            info = fut.result()
-                        except Exception:
-                            info = None
-                        self._tk_root().after(
-                            0, self._apply_image_meta,
-                            scan_id, slot.rel_path, info)
-            except Exception:
-                pass
-
-        threading.Thread(target=_coordinator, daemon=True).start()
+        if pending:
+            self._run_probe_pass(scan_id, lambda: self._image_scan_id,
+                                 pending, detect_image_info,
+                                 self._apply_image_meta)
 
     def _apply_image_meta(self, scan_id, rel, info):
         """Main-thread: store a probed slot's metadata and update its row."""
@@ -5172,12 +5293,23 @@ class MainWindow:
         slots = self._image_slots
         if self.image_changed_only_var.get():
             slots = [s for s in slots if s.rel_path in touched]
-        if grouped:
-            # The search matches the group label too, so "Char_Select" finds
-            # a whole animation whose member files are just hashes.
+        srcf = self.image_source_filter_var.get()
+        if srcf and srcf != "All sources":
             slots = [s for s in slots
-                     if not query or query in s.rel_path.lower()
-                     or query in self._image_group_of(s.rel_path)[1].lower()]
+                     if self._image_source_label(s.rel_path) == srcf]
+        if grouped:
+            # The search matches the group label too — the manifest name
+            # AND the user's rename (see _image_group_rename) — so
+            # "Char_Select" or a custom tag finds a whole animation whose
+            # member files are just hashes.
+            def _match(s):
+                if query in s.rel_path.lower():
+                    return True
+                key, label, _o = self._image_group_of(s.rel_path)
+                return (query in label.lower()
+                        or query in self._image_group_tags.get(
+                            key, "").lower())
+            slots = [s for s in slots if not query or _match(s)]
         else:
             slots = [s for s in slots
                      if not query or query in s.rel_path.lower()]
@@ -5229,9 +5361,13 @@ class MainWindow:
             # Groups stay label-sorted; a header click re-sorts the children
             # WITHIN each group.  The default "#0" sort means play order here
             # (the manifests' frame sequence), not the flat path sort.
-            for key in sorted(by_grp,
-                              key=lambda k: (by_grp[k][0].lower(), k)):
-                label, members = by_grp[key]
+            # A user rename (_image_group_rename) replaces the display label
+            # AND the sort key, so renamed groups land where you'd look.
+            def _disp(k):
+                return self._image_group_tags.get(k) or by_grp[k][0]
+            for key in sorted(by_grp, key=lambda k: (_disp(k).lower(), k)):
+                members = by_grp[key][1]
+                label = _disp(key)
                 if col == "#0":
                     members.sort(
                         key=lambda s: (self._image_group_of(s.rel_path)[2],
@@ -5335,6 +5471,8 @@ class MainWindow:
         self._image_render_preview(rel)
 
     def _image_on_tree_double(self, _event=None):
+        if not self._double_click_on_rows(self._image_tree, _event):
+            return
         rel = self._image_selected_rel()
         if rel is not None and rel.startswith(_IMG_GROUP_IID):
             return          # double-click toggles the group (Tk's default)
@@ -5387,6 +5525,10 @@ class MainWindow:
                     label="Clear replacements in group",
                     command=lambda g=row, k=kids:
                         self._image_group_apply(g, k, None))
+            menu.add_separator()
+            menu.add_command(
+                label="Rename group…",
+                command=lambda g=row: self._image_group_rename(g))
         else:
             menu.add_command(label="Choose replacement…",
                              command=lambda r=row: self._image_assign_rel(r))
@@ -5407,6 +5549,42 @@ class MainWindow:
             menu.grab_release()
 
     # ---- Replace Image: group bulk actions ---------------------------
+
+    def _image_group_rename(self, group_iid):
+        """Right-click → Rename group…: give a scene/animation group a
+        custom display name.  The vendor's own scene-element names are
+        mostly generic ("unnamed_instance_14"), so there's nothing better
+        to extract automatically (monkeybug).  Stored per assets folder in
+        the staged-changes sidecar; a blank (or unchanged-generic) entry
+        restores the manifest name.  The rename also becomes the group's
+        sort key and a Search match."""
+        from tkinter import simpledialog
+        key = group_iid[len(_IMG_GROUP_IID):]
+        generic = next(
+            (label for gkey, label, _o in self._image_groups.values()
+             if gkey == key), "")
+        if not generic and key.startswith("dir::"):
+            generic = key[len("dir::"):]      # folder-fallback groups
+        name = simpledialog.askstring(
+            "Rename Group",
+            "Display name for this group\n"
+            "(blank restores \"%s\"):" % (generic or "the original name"),
+            initialvalue=self._image_group_tags.get(key, generic),
+            parent=self._tk_root())
+        if name is None:
+            return                            # cancelled
+        name = " ".join(name.split())[:50]
+        if not name or name == generic:
+            self._image_group_tags.pop(key, None)
+        else:
+            self._image_group_tags[key] = name
+        self._save_staged_changes()
+        self._refresh_image_list()
+        try:
+            self._image_tree.selection_set(group_iid)
+            self._image_tree.see(group_iid)
+        except tk.TclError:
+            pass       # renamed group may have re-sorted out of view
 
     def _image_group_apply(self, group_iid, rels, rep_path):
         """Record *rep_path* as the replacement for every slot in *rels*
@@ -5697,6 +5875,9 @@ class MainWindow:
                 self.image_changed_only_var.get())
             data["image_group_by_scene"] = bool(
                 self.image_group_by_scene_var.get())
+            data["image_group_tags"] = {
+                k: v for k, v in self._image_group_tags.items() if v}
+            data["image_source_filter"] = self.image_source_filter_var.get()
         staged_changes.save(assets_dir, data)
 
     # ==================================================================
@@ -6005,6 +6186,8 @@ class MainWindow:
         self._text_update_budget()
 
     def _text_on_tree_double(self, _event=None):
+        if not self._double_click_on_rows(self._text_tree, _event):
+            return
         if self._text_current_iid is not None:
             self._text_new_entry.focus_set()
 
@@ -7079,11 +7262,13 @@ class MainWindow:
         if not show:
             self._music_id_frame.pack_forget()
             self.music_id_var.set(False)
+            self._update_extract_options_row_visibility()
             return
-        # Inline in the action row's option cluster, right of the call-outs
-        # checkbox (call-outs is packed first, so side=LEFT lands music after).
-        # Trailing (0, 12) keeps the whole checkbox row evenly spaced.
+        # On the "Options:" row, right of the call-outs checkbox (call-outs
+        # is packed first, so side=LEFT lands music after).  Trailing
+        # (0, 12) keeps the whole checkbox row evenly spaced.
         self._music_id_frame.pack(side=tk.LEFT, padx=(0, 12))
+        self._update_extract_options_row_visibility()
 
     def _update_duration_names_visibility(self):
         """Show the "Length-prefix names" checkbox only when the active
@@ -7098,9 +7283,11 @@ class MainWindow:
         if not show:
             self._duration_names_frame.pack_forget()
             self.duration_names_var.set(False)
+            self._update_extract_options_row_visibility()
             return
         # Rightmost of the option cluster (transcribe + music pack first).
         self._duration_names_frame.pack(side=tk.LEFT, padx=(0, 12))
+        self._update_extract_options_row_visibility()
 
     def _update_transcribe_visibility(self):
         """Show the auto-transcribe checkboxes only when a transcribable
@@ -7127,12 +7314,32 @@ class MainWindow:
             # Hidden means it won't run — don't let a stale tick chain
             # transcribe onto an output that has no WAVs.
             self.transcribe_var.set(False)
+            self._update_extract_options_row_visibility()
             return
-        # Inline in the action row's option cluster, to the right of the
-        # per-type Extract checkboxes.  Trailing padx matches the category
-        # checkboxes' (0, 12) so every checkbox in the row sits the same
+        # First of the "Options:" row's cluster.  Trailing padx matches the
+        # category checkboxes' (0, 12) so every checkbox sits the same
         # distance apart (monkeybug: the gaps were visibly unequal).
         self._transcribe_frame.pack(side=tk.LEFT, padx=(0, 12))
+        self._update_extract_options_row_visibility()
+
+    def _update_extract_options_row_visibility(self):
+        """Pack the second "Options:" row only while at least one of the
+        auto-name / length-prefix options is showing — most non-Stern
+        plugins show none of the three, and an empty row would leave a
+        stray "Options:" label under the action row."""
+        row = self._extract_optnames_row
+        any_shown = any(
+            fr.winfo_manager()
+            for fr in (self._transcribe_frame, self._music_id_frame,
+                       self._duration_names_frame))
+        if any_shown:
+            if not row.winfo_manager():
+                # Right under the action row, matching its horizontal pad so
+                # "Options:" aligns with the "Extract:" label column above.
+                row.pack(fill=tk.X, padx=10, pady=(0, 4),
+                         after=self._extract_action_row)
+        else:
+            row.pack_forget()
 
     def _update_decode_dmd_visibility(self):
         """Show the "Decode DMD scenes" checkbox only when the active
@@ -9058,6 +9265,14 @@ class MainWindow:
                 label=label, value=value,
                 variable=self.voice_quality_var,
                 command=self._on_voice_quality_pick)
+        # Escape hatch for a damaged model download (monkeybug): clears the
+        # huggingface cache dirs so the next run re-downloads clean.  Locked
+        # out mid-run — a transcribe in flight holds its model files open.
+        vq_menu.add_separator()
+        vq_menu.add_command(
+            label="Clear downloaded voice models…",
+            command=self._clear_voice_models,
+            state=(tk.DISABLED if self._is_running() else tk.NORMAL))
         menu.add_cascade(label="Voice recognition quality", menu=vq_menu)
         menu.add_separator()
 
@@ -9104,6 +9319,36 @@ class MainWindow:
     def _on_voice_quality_pick(self):
         if self._on_voice_quality_change:
             self._on_voice_quality_change(self.voice_quality_var.get())
+
+    def _clear_voice_models(self):
+        """⚙ → Voice recognition quality → Clear downloaded voice models."""
+        if not messagebox.askyesno(
+                "Clear Downloaded Voice Models",
+                "Delete all downloaded voice-recognition models?\n\n"
+                "The next Auto-name call-outs run downloads its model "
+                "again. This is the fix when a damaged download keeps "
+                "failing with a \"model.bin\" error."):
+            return
+        from ..core.transcribe import clear_whisper_cache
+        try:
+            n, freed = clear_whisper_cache()
+        except Exception as e:
+            messagebox.showerror(
+                "Clear Downloaded Voice Models",
+                f"Could not clear the voice-model cache:\n{e}")
+            return
+        if n:
+            mb = freed / 1e6
+            size = ("%.1f GB" % (mb / 1000.0)) if mb >= 1000 else (
+                "%.0f MB" % mb)
+            messagebox.showinfo(
+                "Clear Downloaded Voice Models",
+                f"Removed {n} cached model folder(s), freeing {size}.\n\n"
+                f"The model re-downloads on the next Auto-name "
+                f"call-outs run.")
+        else:
+            messagebox.showinfo("Clear Downloaded Voice Models",
+                                "No downloaded voice models found.")
 
     def _open_tab_help(self):
         """Open (or surface) the tips window for the visible notebook tab."""

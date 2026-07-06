@@ -89,6 +89,39 @@ def test_scan_roots_restricts_walk(tmp_path):
     assert [s.rel_path for s in slots] == ["editable/keep.wav"]
 
 
+def test_scan_probe_false_lists_without_reading(tmp_path):
+    # probe=False is the GUI's instant-list mode: same slots, no per-file
+    # header reads (info stays None until the background pass fills it).
+    _make_wav(str(tmp_path / "sounds" / "a.wav"))
+    _make_wav(str(tmp_path / "b.wav"))
+
+    fast = scan_audio_slots(str(tmp_path), probe=False)
+    assert sorted(s.rel_path for s in fast) == ["b.wav", "sounds/a.wav"]
+    assert all(s.info is None for s in fast)
+    assert all(s.size > 0 for s in fast)
+
+
+def test_stage_from_unprobed_slot_detects_info_on_demand(tmp_path):
+    # A slot staged before the background metadata pass reaches it must not
+    # skip format matching: stage_replacement detects the slot's info itself.
+    orig = str(tmp_path / "sounds" / "track.wav")
+    _make_wav(orig, seconds=1.0, rate=22050, channels=1)
+    rep = str(tmp_path / "replacement.wav")
+    _make_wav(rep, seconds=2.0, rate=22050, channels=2)
+
+    slots = {s.rel_path: s for s in
+             scan_audio_slots(str(tmp_path), probe=False)}
+    rel = "sounds/track.wav"
+    assert slots[rel].info is None
+    staged, failures = stage_replacements(
+        {rel: slots[rel]}, {rel: rep}, trim_to_length=False)
+    assert staged == 1 and failures == []
+
+    after = {s.rel_path: s for s in scan_audio_slots(str(tmp_path))}[rel]
+    assert after.info.channels == 1            # matched to original mono
+    assert after.info.duration > 1.5           # full replacement length kept
+
+
 def test_stage_matches_format_keeps_length_by_default(tmp_path):
     orig = str(tmp_path / "sounds" / "track.wav")
     _make_wav(orig, seconds=1.0, rate=22050, channels=1)

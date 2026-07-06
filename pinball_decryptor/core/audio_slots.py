@@ -116,7 +116,8 @@ class AudioSlot:
         return f"{m}:{s:02d}.{ms:03d}"
 
 
-def scan_audio_slots(assets_dir: str, roots=None, exts=None) -> List[AudioSlot]:
+def scan_audio_slots(assets_dir: str, roots=None, exts=None,
+                     probe: bool = True) -> List[AudioSlot]:
     """Walk *assets_dir* and return AudioSlot for every .wav/.ogg file,
     sorted by relative path.  Hidden dot-folders and our own ``*.stage.*``
     temp files are skipped.
@@ -131,6 +132,13 @@ def scan_audio_slots(assets_dir: str, roots=None, exts=None) -> List[AudioSlot]:
     *exts* optionally narrows which audio extensions count as slots (default
     both ``.wav`` and ``.ogg``).  BoF passes ``(".wav",)`` because its Write
     can't yet repack edited ``.ogg`` from the editable folder.
+
+    *probe=False* skips the per-file header read, leaving ``info`` ``None``.
+    The walk then never opens a file, so a folder whose contents are slow to
+    read (cloud-offloaded — e.g. iCloud "Optimize Mac Storage" — or on a
+    network / external drive) still lists instantly; the GUI fills the
+    format/duration in on a background pass, and :func:`stage_replacement`
+    re-detects on demand for any slot staged before its probe lands.
     """
     slots: List[AudioSlot] = []
     if not assets_dir or not os.path.isdir(assets_dir):
@@ -157,7 +165,8 @@ def scan_audio_slots(assets_dir: str, roots=None, exts=None) -> List[AudioSlot]:
                     size = 0
                 slots.append(AudioSlot(
                     rel_path=rel, abs_path=abs_path, ext=ext,
-                    info=detect_audio_info(abs_path), size=size))
+                    info=detect_audio_info(abs_path) if probe else None,
+                    size=size))
 
     slots.sort(key=lambda s: s.rel_path.lower())
     return slots
@@ -176,6 +185,12 @@ def stage_replacement(slot: AudioSlot, replacement_path: str,
     """
     if not os.path.isfile(replacement_path):
         return False, "replacement file not found"
+
+    # A probe=False scan leaves info unfilled until the background pass gets
+    # to it; staging needs it as the format-match target, so detect it now
+    # (one file, on demand).
+    if slot.info is None:
+        slot.info = detect_audio_info(slot.abs_path)
 
     rep_ext = os.path.splitext(replacement_path)[1].lower()
     tmp = slot.abs_path + ".stage" + slot.ext

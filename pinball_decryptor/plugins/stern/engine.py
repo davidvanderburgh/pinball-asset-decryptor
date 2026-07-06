@@ -868,10 +868,16 @@ def _wav_basename(p, duration_names):
     ``01m22s235 - idx0001.wav`` — zero-padded so a plain name sort orders by
     duration: the stable key for lining the same sounds up across firmware
     versions, where the idx shifts (monkeybug).  ``:`` is not legal in
-    Windows filenames, hence the m/s spelling."""
+    Windows filenames, hence the m/s spelling.
+
+    The prefix is the TRUE decoded play length (header length minus the
+    200-sample cursor lead-in, see emitted_length) — the raw header length
+    read ~4.5 ms long, so a replacement trimmed to the advertised time got
+    its tail cut at encode (monkeybug's Replace-tab mismatch)."""
     if not duration_names:
         return "idx%04d.wav" % p["idx"]
-    ms = int(round(p.get("length", 0) * 1000.0 / 44100.0))
+    from .spike2.emulator import emitted_length
+    ms = int(round(emitted_length(p.get("length", 0)) * 1000.0 / 44100.0))
     m, rem = divmod(ms, 60000)
     s, ms = divmod(rem, 1000)
     return "%02dm%02ds%03d - idx%04d.wav" % (m, s, ms, p["idx"])
@@ -2756,10 +2762,25 @@ def _load_wav(path, want_stereo, np):
     return a.mean(1).astype(np.int64) if ch == 2 else a[:, 0]
 
 
-def _fit(a, length, np):
+def _fit(a, length, np, fade_ms=5.0):
+    """Truncate / zero-pad *a* to exactly *length* samples, with a short
+    raised-cosine fade to zero on the tail of the actual audio (the
+    truncation point, or the last real sample before the zero padding).
+
+    Every caller feeds user replacement audio, and a replacement that ends
+    non-zero — hard-trimmed to fill the slot, or carrying DC offset — is a
+    step the machine renders as an audible click at the end of the callout
+    (monkeybug, real-HW; stock sounds end at silence so stock never
+    clicked).  ~5 ms is below an audible fade but removes the step."""
     a = np.asarray(a, np.int64)
     if len(a) > length:
         a = a[:length]
+    n = min(len(a), int(round(fade_ms * 44.1)))
+    if n > 1:
+        ramp = 0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi, n))
+        a = np.concatenate(
+            [a[:len(a) - n],
+             np.round(a[len(a) - n:] * ramp).astype(np.int64)])
     if len(a) < length:
         a = np.concatenate([a, np.zeros(length - len(a), np.int64)])
     return a

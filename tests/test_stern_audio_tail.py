@@ -79,6 +79,41 @@ def test_encoders_fit_target_to_emitted_length(monkeypatch):
     assert captured["L"] == captured["R"] == want
 
 
+def test_fit_fades_audio_tail_to_zero():
+    """_fit must land the end of the actual audio at zero via a short fade:
+    a replacement that ends non-zero (hard-trimmed to the slot, DC offset)
+    is a step the machine plays as a click at the end of the callout
+    (monkeybug, real-HW). Both the truncation point and the last real
+    sample before zero-padding are audio ends."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _fit
+
+    loud = np.full(5000, 10000, np.int64)
+    fade_n = int(round(5.0 * 44.1))          # ~220 samples
+
+    # Truncated: the cut lands mid-audio -> tail must ramp to 0.
+    out = _fit(loud, 4000, np)
+    assert len(out) == 4000
+    assert out[-1] == 0
+    assert out[3999 - fade_n] == 10000        # audio before the fade intact
+    assert 0 < out[-fade_n // 2] < 10000      # it's a ramp, not a mute
+
+    # Shorter than the slot: fade sits at the END OF THE AUDIO, then zeros.
+    out = _fit(loud[:3000], 4000, np)
+    assert len(out) == 4000
+    assert out[2999] == 0                     # last real sample faded out
+    assert not out[3000:].any()               # padding stays silent
+    assert out[1000] == 10000
+
+    # Exact-length audio still gets its tail faded.
+    out = _fit(loud[:4000], 4000, np)
+    assert out[-1] == 0 and out[0] == 10000
+
+    # Degenerate inputs don't blow up.
+    assert len(_fit(np.zeros(0, np.int64), 100, np)) == 100
+    assert list(_fit(np.array([5], np.int64), 1, np)) == [5]
+
+
 def _card_path(title):
     return os.path.join(IMG_DIR, CARDS[title])
 

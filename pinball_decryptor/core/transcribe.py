@@ -11,10 +11,11 @@ ambience) skip Whisper entirely and just get logged as ``[no speech]``.
 
 Output: ``callouts.csv`` at the root of the assets dir, with columns:
 
-    relative_path, classification, text
+    folder, file, seconds, classification, text
 
 where ``classification`` is ``speech`` for transcribed WAVs and
-``non-speech`` for VAD-skipped ones.  Shared infrastructure — any
+``non-speech`` for VAD-skipped ones; ``seconds`` is the WAV's play
+length (a plain numeric sort key for Excel).  Shared infrastructure — any
 manufacturer plugin whose ``Capabilities.transcribe`` is True wires
 this in via ``make_transcribe_pipeline``.
 
@@ -38,6 +39,54 @@ WHISPER_IMPORT_HINT = (
 )
 
 CALLOUTS_CSV = "callouts.csv"
+
+# Rough one-time download size per model (the GUI's quality choices), for
+# the "Downloading..." log line.  Approximate on purpose.
+_MODEL_APPROX_MB = {"tiny.en": 75, "small.en": 500, "medium.en": 1500}
+
+# The files WhisperModel actually needs (mirrors faster-whisper's own
+# download list) — everything else in the repo is skipped.
+_MODEL_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin",
+                   "tokenizer.json", "vocabulary.*"]
+
+
+def _disable_hf_progress_bars():
+    """huggingface_hub's tqdm progress bars write to sys.stderr, which is
+    ``None`` in the windowed app — a model download then dies instantly
+    with "'NoneType' object has no attribute 'write'" (David's Guardians
+    run).  faster-whisper dodges this with a disabled tqdm class; this is
+    the supported global equivalent.  Idempotent and cheap."""
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+        disable_progress_bars()
+    except Exception:
+        pass
+
+
+def _local_model_dir(model_size):
+    """The local snapshot dir for *model_size*, only if it's COMPLETE
+    (``model.bin`` present).  Pure local check — never touches the
+    network; None when huggingface_hub is missing or the cache is
+    absent/partial."""
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception:
+        return None
+    try:
+        d = snapshot_download("Systran/faster-whisper-%s" % model_size,
+                              allow_patterns=_MODEL_PATTERNS,
+                              local_files_only=True)
+    except Exception:
+        return None
+    return d if os.path.isfile(os.path.join(d, "model.bin")) else None
+
+
+def whisper_model_cached(model_size):
+    """True if the voice model for *model_size* is fully downloaded (the ⚙
+    quality picker logs this so a quality bump doesn't silently imply a
+    multi-GB download on the next extract)."""
+    return _local_model_dir(model_size) is not None
 
 # Transcribe in parallel (one Whisper model per process) only once there are at
 # least this many WAVs — below it the per-worker model load costs more than it
@@ -174,11 +223,21 @@ class TranscribePipeline(BasePipeline):
         self._set_phase(3 if self.rename_after else 2)
         out_path = os.path.join(self.assets_dir, CALLOUTS_CSV)
         self._log(f"Writing {CALLOUTS_CSV}...", "info")
+        # folder + file split into their own columns and a numeric seconds
+        # column (both plain sort keys in Excel — monkeybug: the combined
+        # path drowned the filename, and the play length was only findable
+        # inside the Length-prefix filename).
         with open(out_path, "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["relative_path", "classification", "text"])
-            for row in rows:
-                w.writerow(row)
+            w.writerow(["folder", "file", "seconds", "classification",
+                        "text"])
+            for rel, kind, text in rows:
+                folder, _, fname = rel.rpartition("/")
+                secs = _wav_seconds(
+                    os.path.join(self.assets_dir, *rel.split("/")))
+                w.writerow([folder, fname,
+                            "" if secs is None else "%.3f" % secs,
+                            kind, text])
 
         rename_summary = (
             f"\nRenamed {renamed_count} file(s) using transcripts."
@@ -192,37 +251,105 @@ class TranscribePipeline(BasePipeline):
             f"skipped {non_speech_count} non-speech sample(s).{music_summary}"
             f"{rename_summary}\n\n"
             f"Output: {out_path}\n\n"
-            f"Each row pairs a relative WAV path with its detected "
-            f"English text (or 'music'). Open in Excel / a CSV viewer and "
-            f"search for the callout you want to mod.")
+            f"Each row pairs a WAV (folder / file / play seconds) with its "
+            f"detected English text (or 'music'). Open in Excel / a CSV "
+            f"viewer and search for the callout you want to mod.")
 
     # ------------------------------------------------------------------
     # transcription (serial + parallel share _transcribe_one / _emit_file_row)
     # ------------------------------------------------------------------
+    def _resolve_model_dir(self):
+        """Download (or reuse) the model snapshot OURSELVES and return the
+        local dir to hand to ``WhisperModel`` (serial path and workers alike
+        — nothing downstream ever touches the network).
+
+        Why not let faster-whisper download?  Its downloader swallows
+        Hugging Face HTTP errors (the anonymous per-IP 429 rate limit,
+        dropped connections) and silently falls back to whatever partial
+        snapshot is cached, so EVERY failure surfaces as "Unable to open
+        file 'model.bin'" — monkeybug hit that wall repeatedly, with the
+        cache self-heal powerless because each "re-download" 429'd the same
+        silent way.  Doing the snapshot_download here makes the real error
+        visible: 429s wait the server's suggested delay and retry, a dead
+        connection says so, and a snapshot missing model.bin is verified
+        before anything tries to load it.
+        """
+        try:
+            from huggingface_hub import snapshot_download
+        except Exception:
+            return self.model_size   # odd env: fall back to faster-whisper
+        _disable_hf_progress_bars()
+        repo = "Systran/faster-whisper-%s" % self.model_size
+
+        d = _local_model_dir(self.model_size)
+        if d:
+            return d                  # complete cache: zero network traffic
+        approx_mb = _MODEL_APPROX_MB.get(self.model_size)
+        self._log(f"  Downloading the {self.model_size} model "
+                  f"(~{approx_mb or '?'} MB, one-time)...", "info")
+        rate_retries = 0
+        while True:
+            self._check_cancel()
+            err = None
+            watcher = self._start_download_watcher(approx_mb)
+            try:
+                snapshot_download(repo, allow_patterns=_MODEL_PATTERNS)
+            except Exception as e:
+                err = e
+            finally:
+                watcher()
+            if err is None:
+                d = _local_model_dir(self.model_size)
+                if d:
+                    self._log_line("whisper-dl",
+                                   f"  Model downloaded ({self.model_size}).",
+                                   "success")
+                    return d
+                err = RuntimeError("download finished but 'model.bin' is "
+                                   "missing from the snapshot")
+            if _looks_like_rate_limited(err) and rate_retries < 2:
+                rate_retries += 1
+                wait = _rate_limit_wait_seconds(err)
+                self._log(
+                    f"  Hugging Face is rate-limiting model downloads "
+                    f"from this IP (HTTP 429). Waiting {wait}s, then "
+                    f"retrying ({rate_retries}/2)...", "info")
+                self._wait_seconds(wait)
+                continue
+            if _looks_like_rate_limited(err):
+                raise PipelineError("Transcribe",
+                    f"Failed to download the Whisper model "
+                    f"{self.model_size!r}: Hugging Face is rate-limiting "
+                    f"downloads from your IP (HTTP 429 Too Many "
+                    f"Requests).\n\n"
+                    f"This is temporary — wait a few minutes and run "
+                    f"Auto-transcribe again. The model is downloaded once "
+                    f"and cached, so this only affects the first run.")
+            raise PipelineError("Transcribe",
+                f"Failed to download the Whisper model "
+                f"{self.model_size!r}: {err}\n\n"
+                f"Check your internet connection and try again — the "
+                f"model is downloaded once and cached. (Settings ⚙ → "
+                f"Voice recognition quality → Clear downloaded voice "
+                f"models resets the cache.)")
+
     def _load_model(self):
-        """Construct the single in-process WhisperModel (serial path).
+        """Construct the single in-process WhisperModel (serial path) from
+        the locally resolved snapshot.
 
-        Self-heals the common failure monkeybug hit: an interrupted first
-        download leaves a cached snapshot dir whose ``model.bin`` is missing
-        or truncated, so every subsequent run fails with "Unable to open
-        file 'model.bin'" — and a plain retry can't help because
-        huggingface_hub sees the dir and won't re-fetch.  When the error
-        looks like a corrupt cache we move that model's dir aside (forcing a
-        clean re-download) and retry once before surfacing a precise fix.
-
-        Also rides out Hugging Face Hub's anonymous-download rate limit
-        (HTTP 429, a fixed requests-per-IP window): waits the server's
-        suggested retry delay (capped) and retries a couple of times
-        before giving up with a wait-and-retry message instead of the
-        misleading corrupt-cache one.
+        Self-heals a corrupt cache: if ctranslate2 can't open a snapshot
+        that looked complete (truncated blob), the model's cache dir is
+        moved aside and re-resolved (= clean re-download) once before
+        surfacing a precise fix.  Download errors — including the 429 rate
+        limit — surface from :meth:`_resolve_model_dir` with their own
+        messages and never reach the corrupt-cache one.
         """
         from faster_whisper import WhisperModel
         healed = False
-        rate_retries = 0
         while True:
+            mdir = self._resolve_model_dir()
             try:
-                return WhisperModel(self.model_size, device="cpu",
-                                    compute_type="int8")
+                return WhisperModel(mdir, device="cpu", compute_type="int8")
             except Exception as e:
                 if not healed and _looks_like_corrupt_model(e):
                     healed = True
@@ -232,25 +359,6 @@ class TranscribePipeline(BasePipeline):
                             f"  Cached {self.model_size} model looked corrupt "
                             f"({why}); re-downloading...", "info")
                         continue
-                if _looks_like_rate_limited(e) and rate_retries < 2:
-                    rate_retries += 1
-                    wait = _rate_limit_wait_seconds(e)
-                    self._log(
-                        f"  Hugging Face is rate-limiting model downloads "
-                        f"from this IP (HTTP 429). Waiting {wait}s, then "
-                        f"retrying ({rate_retries}/2)...", "info")
-                    self._wait_seconds(wait)
-                    continue
-                if _looks_like_rate_limited(e):
-                    raise PipelineError("Transcribe",
-                        f"Failed to download the Whisper model "
-                        f"{self.model_size!r}: Hugging Face is rate-limiting "
-                        f"downloads from your IP (HTTP 429 Too Many "
-                        f"Requests).\n\n"
-                        f"This is temporary — wait a few minutes and run "
-                        f"Auto-transcribe again. The model (~75 MB) is "
-                        f"downloaded once and cached, so this only affects "
-                        f"the first run.")
                 cache = _whisper_cache_dir(self.model_size)
                 where = (cache
                          or "the huggingface cache (~/.cache/huggingface/hub)")
@@ -259,8 +367,56 @@ class TranscribePipeline(BasePipeline):
                     f"{e}\n\n"
                     f"The cached model may be incomplete or corrupt. Delete\n"
                     f"  {where}\n"
-                    f"then try again with internet available — the model "
-                    f"(~75 MB) is downloaded once and cached.")
+                    f"(or use Settings ⚙ → Voice recognition quality → "
+                    f"Clear downloaded voice models) then try again with "
+                    f"internet available — the model is downloaded once "
+                    f"and cached.")
+
+    def _start_download_watcher(self, approx_mb):
+        """Live feedback while ``snapshot_download`` blocks: a daemon thread
+        polls the model's growing cache dir and rewrites ONE keyed log line
+        ("… 340 / 1500 MB") every couple of seconds, so a multi-GB model
+        download doesn't look like a hang (David).  Returns a stop()
+        callable; safe no-matter-what — any polling error just ends it."""
+        import threading
+
+        stop = threading.Event()
+
+        def _dir_mb():
+            d = _whisper_cache_dir(self.model_size)
+            if not d:
+                return 0
+            total = 0
+            for dirpath, _dirs, files in os.walk(d):
+                for fn in files:
+                    try:
+                        total += os.path.getsize(os.path.join(dirpath, fn))
+                    except OSError:
+                        pass
+            return total // 1_000_000
+
+        def _watch():
+            try:
+                while not stop.wait(2.0):
+                    mb = _dir_mb()
+                    if mb <= 0:
+                        continue
+                    of = f" / ~{approx_mb}" if approx_mb else ""
+                    self._log_line(
+                        "whisper-dl",
+                        f"  Downloading the {self.model_size} model... "
+                        f"{mb}{of} MB", "info")
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+        def _stop():
+            stop.set()
+            t.join(timeout=0.5)
+
+        return _stop
 
     def _wait_seconds(self, seconds):
         """Sleep *seconds* in 1s slices so Cancel stays responsive."""
@@ -321,15 +477,13 @@ class TranscribePipeline(BasePipeline):
         identical to the serial path.  Raises if the pool can't start so the
         caller can fall back to one process."""
         import multiprocessing as mp
-        # Make sure the model is already in the local cache BEFORE spawning
-        # workers: on a cold cache every worker would download it at once,
-        # and ~8 simultaneous anonymous downloads is exactly what trips
-        # Hugging Face's per-IP rate limit (monkeybug's 429).  This one
-        # download also gets _load_model's heal/backoff logic.
-        if _whisper_cache_dir(self.model_size) is None:
-            self._log("  Downloading the model once before starting "
-                      "workers...", "info")
-            self._load_model()
+        # Resolve (download if needed) the model snapshot ONCE before
+        # spawning workers and hand them the local PATH: on a cold cache
+        # every worker would otherwise download it at once, and ~8
+        # simultaneous anonymous downloads is exactly what trips Hugging
+        # Face's per-IP rate limit (monkeybug's 429).  A partial cache dir
+        # counts as cold — _resolve_model_dir verifies model.bin exists.
+        model_ref = self._resolve_model_dir()
         ncpu = os.cpu_count() or 2
         # Cap at 8: each worker loads its own model (~1-2 s), so more workers is
         # more fixed start-up tax for diminishing parallelism — 8 amortises well
@@ -341,7 +495,7 @@ class TranscribePipeline(BasePipeline):
         self._log(f"  Loading {nworkers} model(s) across {nworkers} "
                   f"process(es)...", "info")
         pool = ctx.Pool(nworkers, initializer=_tw_init,
-                        initargs=(self.model_size, self.music_min_seconds, 1))
+                        initargs=(model_ref, self.music_min_seconds, 1))
         tasks = []
         for i, abs_path in enumerate(wavs):
             rel = os.path.relpath(abs_path, self.assets_dir).replace("\\", "/")
@@ -413,10 +567,13 @@ _TW_MODEL = None
 _TW_MUSIC_MIN = None
 
 
-def _tw_init(model_size, music_min_seconds, cpu_threads):
+def _tw_init(model_ref, music_min_seconds, cpu_threads):
+    """*model_ref* is the LOCAL snapshot dir _resolve_model_dir returned
+    (workers must never download — see _transcribe_parallel); a bare model
+    size still works for the odd env without huggingface_hub."""
     global _TW_MODEL, _TW_MUSIC_MIN
     from faster_whisper import WhisperModel
-    _TW_MODEL = WhisperModel(model_size, device="cpu", compute_type="int8",
+    _TW_MODEL = WhisperModel(model_ref, device="cpu", compute_type="int8",
                              cpu_threads=cpu_threads)
     _TW_MUSIC_MIN = music_min_seconds
 
@@ -484,6 +641,41 @@ def _whisper_cache_dir(model_size):
     return d if os.path.isdir(d) else None
 
 
+def clear_whisper_cache():
+    """Delete every cached faster-whisper model — all sizes, plus any
+    ``.corrupt`` dirs the self-heal set aside.  Returns ``(n_dirs,
+    bytes_freed)``; the next Auto-name call-outs run re-downloads its model.
+    Backs the ⚙ menu's "Clear downloaded voice models" (monkeybug's ask:
+    a user-friendly way out of a cache no automatic heal could recover)."""
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        base = HF_HUB_CACHE
+    except Exception:
+        base = os.path.join(os.path.expanduser("~"), ".cache",
+                            "huggingface", "hub")
+    if not os.path.isdir(base):
+        return 0, 0
+    n = freed = 0
+    for fn in os.listdir(base):
+        if not fn.startswith("models--Systran--faster-whisper-"):
+            continue
+        d = os.path.join(base, fn)
+        if not os.path.isdir(d):
+            continue
+        size = 0
+        for dirpath, _dirs, files in os.walk(d):
+            for f in files:
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, f))
+                except OSError:
+                    pass
+        shutil.rmtree(d, ignore_errors=True)
+        if not os.path.isdir(d):
+            n += 1
+            freed += size
+    return n, freed
+
+
 def _heal_whisper_cache(model_size):
     """Move a corrupt cached model dir aside so the next load re-downloads.
 
@@ -507,6 +699,20 @@ def _heal_whisper_cache(model_size):
         except OSError:
             pass
     return None
+
+
+def _wav_seconds(path):
+    """Play length of *path* in seconds (float), or None if unreadable."""
+    import wave
+    try:
+        w = wave.open(path, "rb")
+        try:
+            n, r = w.getnframes(), w.getframerate()
+        finally:
+            w.close()
+        return (n / float(r)) if r else None
+    except Exception:
+        return None
 
 
 def _find_wavs(root):

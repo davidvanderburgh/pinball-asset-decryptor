@@ -125,7 +125,16 @@ HELP_CONTENT = {
          "scenes — many are frames of an animation or sprite sheets. "
          "\"Radium\" = images embedded inside the scene descriptions "
          "themselves (song-title banners and similar). All three replace "
-         "the same way; click the Source header to group them."),
+         "the same way; the Source dropdown in the toolbar narrows the "
+         "list to one store, and clicking the Source header sorts by it."),
+        ("Scene groups",
+         "\"Group by scene\" nests each image under the scene / animation "
+         "it belongs to, in play order. Right-click a group header to "
+         "assign one replacement to every frame, blank the whole "
+         "animation (transparent), clear its pending replacements, or "
+         "rename the group — most factory scene names are generic "
+         "(\"unnamed_instance_14\"); your name is remembered for that "
+         "assets folder and is matched by Search."),
         ("Font atlases",
          "Some scene textures are font/glyph maps — a grid of characters "
          "the game draws text from. You can re-style them, but keep every "
@@ -133,8 +142,12 @@ HELP_CONTENT = {
          "so moving or resizing glyphs scrambles on-screen text."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
-         "original slot's byte budget; over-budget images are compressed "
-         "harder or rejected with a warning."),
+         "original slot's byte budget — a small enough image drops "
+         "straight in, a larger one is re-compressed (fewer colours) to "
+         "fit, and one that still won't fit is skipped (left unchanged); "
+         "use a simpler image. Exception: scene/radium glyph and sprite "
+         "atlases are re-encoded losslessly to the slot's exact "
+         "dimensions with no byte-size limit."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),

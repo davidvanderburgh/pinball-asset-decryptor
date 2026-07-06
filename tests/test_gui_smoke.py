@@ -594,6 +594,49 @@ def _scan_audio(window, assets_dir):
     return slots
 
 
+def test_audio_probe_fills_length_column(app, manufacturers_by_key, tmp_path):
+    """The probe=False fast scan leaves Length as "—"; the background
+    metadata pass must then fill every row (David: a fresh Guardians
+    extract showed dashes across all 2562 slots)."""
+    import time
+    import wave
+    from pinball_decryptor.core.audio_slots import scan_audio_slots
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    (tmp_path / "audio").mkdir()
+    for i in range(3):
+        wf = wave.open(str(tmp_path / "audio" / ("idx%04d.wav" % i)), "wb")
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(44100)
+        wf.writeframes(b"\x00\x00" * 4410)          # 0.1 s
+        wf.close()
+    assets = str(tmp_path)
+    w.write_assets_var.set(assets)
+    slots = scan_audio_slots(assets, probe=False)
+    assert slots and all(s.info is None for s in slots)
+    w._audio_scan_id += 1
+    w._populate_audio_after_scan(slots, w._audio_scan_id, assets)
+    tree = w._audio_tree
+    assert tree.set(slots[0].rel_path, "len") == "—"
+    # The probe thread posts results via after(), which needs a REAL running
+    # mainloop (update()-pumping makes cross-thread after() raise) — run one
+    # briefly, polling until the rows fill or a deadline passes.
+    deadline = time.time() + 10
+
+    def _poll():
+        done = all(tree.set(s.rel_path, "len") != "—" for s in slots)
+        if done or time.time() > deadline:
+            app.root.quit()
+        else:
+            app.root.after(50, _poll)
+
+    app.root.after(50, _poll)
+    app.root.mainloop()
+    vals = [tree.set(s.rel_path, "len") for s in slots]
+    assert vals == ["0:00.100"] * 3, vals
+    assert "44.1kHz" in tree.set(slots[0].rel_path, "fmt")
+
+
 def test_audio_assignment_persists_across_relaunch(
         app, manufacturers_by_key, tmp_path):
     """Assigning a replacement writes the sidecar, and a fresh scan of the same
@@ -644,6 +687,43 @@ def test_missing_replacement_not_restored(
     w._audio_scan_dir = ""
     _scan_audio(w, assets)
     assert w._audio_assignments == {}
+
+
+def test_audio_metadata_backfills_rows_after_fast_scan(
+        app, manufacturers_by_key, tmp_path):
+    """The fast (probe=False) scan lists rows with placeholder length/format;
+    _apply_audio_meta then fills each row in place as the background pass
+    delivers its header info.  Guards the instant-list rework (a slow-to-read
+    folder must never hold the whole list hostage on 'Scanning…')."""
+    from pinball_decryptor.core.audio import AudioInfo
+    from pinball_decryptor.core.audio_slots import scan_audio_slots
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_audio_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    slots = scan_audio_slots(assets, probe=False)
+    w._audio_scan_id += 1
+    w._populate_audio_after_scan(slots, w._audio_scan_id, assets)
+
+    rel = "audio/idx0001.wav"
+    assert w._audio_slots_by_rel[rel].info is None
+    assert w._audio_tree.set(rel, "len") == "—"      # placeholder until probed
+
+    info = AudioInfo(rel, channels=1, sample_rate=22050, bit_depth=16,
+                     duration=1.5)
+    w._apply_audio_meta(w._audio_scan_id, rel, info)
+    assert w._audio_slots_by_rel[rel].info is info
+    assert w._audio_tree.set(rel, "len") == "0:01.500"
+    assert "mono" in w._audio_tree.set(rel, "fmt")
+
+    # A stale pass (newer scan started) must not touch slot or row.
+    stale = AudioInfo(rel, channels=2, sample_rate=44100, bit_depth=16,
+                      duration=9.0)
+    w._apply_audio_meta(w._audio_scan_id - 1, rel, stale)
+    assert w._audio_slots_by_rel[rel].info is info
+    assert w._audio_tree.set(rel, "len") == "0:01.500"
 
 
 def test_save_preserves_other_tabs_sections(
@@ -1347,3 +1427,93 @@ def test_image_group_iid_guards_select_and_meta(app, manufacturers_by_key,
     child = tree.get_children(grp)[0]
     w._apply_image_meta(w._image_scan_id, child, None)
     assert tree.exists(child)
+
+
+def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
+                                              tmp_path, monkeypatch):
+    """The Source dropdown narrows the list to one image store, and
+    right-click Rename gives a scene group a persistent display name that
+    renders, searches, and lands in the staged-changes sidecar; a blank
+    rename restores the manifest label (monkeybug)."""
+    from pinball_decryptor.core import staged_changes
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    assets = _seed_image_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    tree = w._image_tree
+
+    # Source filter: the radimg_* slots are "Radium", logo.png is "File".
+    w.image_source_filter_var.set("Radium")
+    assert len(tree.get_children()) == 3
+    assert all("radimg" in r for r in tree.get_children())
+    w.image_source_filter_var.set("File")
+    assert list(tree.get_children()) == ["images/loose/logo.png"]
+    w.image_source_filter_var.set("All sources")
+    assert len(tree.get_children()) == 4
+
+    # Rename a grouped scene: display + sidecar + search all follow.
+    w.image_group_by_scene_var.set(True)
+    grp = [t for t in tree.get_children()
+           if "Char_Select" in tree.item(t, "text")][0]
+    monkeypatch.setattr("tkinter.simpledialog.askstring",
+                        lambda *a, **k: "Boss Intro")
+    w._image_group_rename(grp)
+    assert "Boss Intro — 3 images" in tree.item(grp, "text")
+    saved = staged_changes.load(assets)
+    assert list(saved.get("image_group_tags", {}).values()) == ["Boss Intro"]
+    w.image_search_var.set("boss in")
+    tops = tree.get_children()
+    assert len(tops) == 1 and len(tree.get_children(tops[0])) == 3
+    w.image_search_var.set("")
+    # A blank rename restores the manifest label and drops the tag.
+    monkeypatch.setattr("tkinter.simpledialog.askstring",
+                        lambda *a, **k: "")
+    w._image_group_rename(grp)
+    assert "Char_Select · a1b2c3d4" in tree.item(grp, "text")
+    assert not staged_changes.load(assets).get("image_group_tags")
+
+
+def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
+                                                 tmp_path, monkeypatch):
+    """Clicking a sortable column header fast registers as <Double-1> too;
+    the row-action double-click handlers must ignore anything outside the
+    data rows (monkeybug: sorting the image tab quickly popped the
+    "No Slot Selected" box / opened the picker)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_image_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    tree = w._image_tree
+    app.root.update()
+
+    popups, assigns = [], []
+    monkeypatch.setattr(
+        "pinball_decryptor.gui.main_window.messagebox.showinfo",
+        lambda *a, **k: popups.append(a))
+    monkeypatch.setattr(w, "_image_assign_rel", assigns.append)
+    # The invisible test window never maps the tree, so Tk's pixel
+    # hit-testing can't run for real — stub the region resolution.
+    monkeypatch.setattr(tree, "identify_region",
+                        lambda x, y: "heading" if y < 20 else "tree")
+
+    class _HdrEv:
+        x, y = 5, 5
+
+    class _RowEv:
+        x, y = 5, 40
+
+    # Header double-click: no popup, no picker — with and without a selection.
+    w._image_on_tree_double(_HdrEv)
+    rel = tree.get_children()[0]
+    tree.selection_set(rel)
+    w._image_on_tree_double(_HdrEv)
+    assert popups == [] and assigns == []
+
+    # A row double-click still opens the picker for the selected slot.
+    w._image_on_tree_double(_RowEv)
+    assert assigns == [rel] and popups == []

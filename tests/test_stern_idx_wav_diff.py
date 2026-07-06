@@ -132,7 +132,10 @@ def test_cleanup_is_noop_on_empty_or_missing(tmp_path):
 # --- Length-prefix names (monkeybug: sort extracts by play length) ---------
 
 def test_wav_basename_formats():
-    p = {"idx": 1, "length": 82 * 44100 + int(0.235 * 44100)}   # 1m22.235s
+    # Header length carries a 200-sample cursor lead-in the codec never
+    # emits; the prefix must reflect the TRUE 1m22.235s play length the
+    # decoded WAV actually has (monkeybug: names read ~4.5 ms long).
+    p = {"idx": 1, "length": 82 * 44100 + int(0.235 * 44100) + 200}
     assert _wav_basename(p, False) == "idx0001.wav"
     assert _wav_basename(p, True) == "01m22s235 - idx0001.wav"
 

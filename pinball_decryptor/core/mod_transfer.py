@@ -26,9 +26,12 @@ asset layout.  Two hazards, handled differently:
   — and because radium images are extracted content-deduplicated, ONE source
   image can own SEVERAL occurrence slots, each of which may be a distinct
   file on the target side; the remap fans a single source rel out to every
-  target rel it identifies.  For text the key is the original string.  A
-  rel_path / original that no longer exists in the target is dropped (a safe
-  no-op), never re-pointed.
+  target rel it identifies.  Font glyph slices key one level deeper, by
+  (radium card path, atlas occurrence ordinal, char).  For text the key is
+  the original string.  A rel_path / original that no longer exists in the
+  target is dropped (a safe no-op), never re-pointed.  The user's renamed
+  image groups (``image_group_tags``) ride along too — their group keys are
+  container identities that transfer when the container still exists.
 
 ``plan_transfer`` computes a reconciliation report without touching anything;
 ``apply_transfer`` merges the resolved edits into the target folder.  Nothing
@@ -261,6 +264,33 @@ def _radium_occurrences(root):
     return out
 
 
+def _glyph_identities(root, radium_occ, radiums):
+    """``{(radium_card_path, occurrence_ordinal, char): rel}`` for every font
+    glyph slice, from ``images/scene_textures/glyph_images.txt``.
+
+    A glyph PNG's path embeds its ATLAS's content hash (version-unstable —
+    same trap as the atlases themselves), but a character has a stable
+    identity: the (radium card path, occurrence ordinal) slots its atlas
+    occupies plus its char code.  *radium_occ* is :func:`_radium_occurrences`
+    for *root*; only radiums in *radiums* contribute keys (the caller
+    restricts to radiums whose occurrence count matches on both sides, the
+    same guard ordinal pairing itself uses)."""
+    atlas_occ = {}
+    for radium, rels in radium_occ.items():
+        if radium not in radiums:
+            continue
+        for k, rel in enumerate(rels):
+            atlas_occ.setdefault(rel, []).append((radium, k))
+    out = {}
+    for cols in _manifest_rows(os.path.join(
+            root, "images", "scene_textures", "glyph_images.txt")):
+        if len(cols) < 3:
+            continue
+        for radium, k in atlas_occ.get("images/" + cols[1], ()):
+            out[(radium, k, cols[2])] = "images/" + cols[0]
+    return out
+
+
 def _image_rel_remap(src_dir, tgt_dir):
     """``(remap, identified)`` pairing *src_dir*'s manifest-identified images
     with *tgt_dir*'s.
@@ -277,7 +307,12 @@ def _image_rel_remap(src_dir, tgt_dir):
     a different image).  Loose images (their rel IS the card path) are never
     ``identified`` — plain rel pairing is correct for them.  A src store
     whose TARGET-side manifest is missing (older extract) stays unidentified
-    so name pairing still gets a chance."""
+    so name pairing still gets a chance.
+
+    Font glyph slices pair the same way as their atlases, one level deeper:
+    by (radium card path, atlas occurrence ordinal, char) via
+    :func:`_glyph_identities` — a glyph edit follows its character even when
+    the atlas art (and thus every path under ``glyphs/``) changed."""
     remap, identified = {}, set()
 
     def _pair(s, t):
@@ -303,6 +338,16 @@ def _image_rel_remap(src_dir, tgt_dir):
             if tgt_rels is not None and len(tgt_rels) == len(rels):
                 for s, t in zip(rels, tgt_rels):
                     _pair(s, t)
+        stable = {r for r, rels in src_rad.items()
+                  if len(tgt_rad.get(r) or ()) == len(rels)}
+        src_gl = _glyph_identities(src_dir, src_rad, stable)
+        tgt_gl = _glyph_identities(tgt_dir, tgt_rad, stable)
+        if src_gl and tgt_gl:
+            for key, rel in src_gl.items():
+                identified.add(rel)
+                tgt_rel = tgt_gl.get(key)
+                if tgt_rel is not None:
+                    _pair(rel, tgt_rel)
     return remap, identified
 
 
@@ -724,6 +769,71 @@ def _plan_text(source_dir, target_dir, src_rows=None):
     return matched, dropped
 
 
+_GLYPH_DIR_RE = re.compile(r"^images/scene_textures/glyphs/([^/]+)$")
+
+
+def _plan_group_tags(source_dir, target_dir, saved):
+    """Reconcile the user's renamed image groups (the ``image_group_tags``
+    sidecar map, written by the Replace Images tab's "Rename group…").
+
+    Group keys are container identities and mostly version-stable already:
+    ``rad::<radium card path>`` / ``scn::<scene dir>`` / ``dir::<card or
+    extract folder>`` — a tag transfers when its container still exists in
+    the target extract.  The exception is a glyph folder
+    (``dir::images/scene_textures/glyphs/<atlas stem>``): the stem embeds the
+    atlas's content hash, so it's remapped through the atlas identity like
+    the glyph slices themselves.  Returns ``(matched, dropped)``."""
+    tags = {k: v for k, v in
+            ((saved or {}).get("image_group_tags") or {}).items() if v}
+    if not tags:
+        return [], []
+    tgt_rad = set(_radium_occurrences(target_dir))
+    tgt_scenes = set()
+    for card in _scene_texture_cards(target_dir):
+        if "/scene.assets/" in card:
+            tgt_scenes.add(card.rsplit("/scene.assets/", 1)[0])
+        else:
+            tgt_scenes.add(card.rsplit("/", 1)[0] or card)
+    tgt_dirs = set()
+    for cols in _manifest_rows(os.path.join(target_dir, "images",
+                                            "manifest.txt")):
+        card_dir = cols[1].rsplit("/", 1)[0] if "/" in cols[1] else ""
+        tgt_dirs.add(card_dir or "(root)")
+
+    remap = None
+    matched, dropped = [], []
+    for key, name in sorted(tags.items()):
+        tgt_keys = []
+        if key.startswith("rad::"):
+            if key[5:] in tgt_rad:
+                tgt_keys = [key]
+        elif key.startswith("scn::"):
+            if key[5:] in tgt_scenes:
+                tgt_keys = [key]
+        elif key.startswith("dir::"):
+            folder = key[5:]
+            gm = _GLYPH_DIR_RE.match(folder)
+            if gm:
+                if remap is None:
+                    remap, _ident = _image_rel_remap(source_dir, target_dir)
+                src_atlas = "images/scene_textures/%s.png" % gm.group(1)
+                for t in remap.get(src_atlas) or ():
+                    stem = os.path.splitext(os.path.basename(t))[0]
+                    tk = "dir::images/scene_textures/glyphs/" + stem
+                    if tk not in tgt_keys:
+                        tgt_keys.append(tk)
+            elif folder in tgt_dirs or (
+                    folder != "(root)" and os.path.isdir(_abs(target_dir,
+                                                              folder))):
+                tgt_keys = [key]
+        for k in tgt_keys:
+            matched.append({"key": k, "name": name})
+        if not tgt_keys:
+            dropped.append({"key": key, "name": name,
+                            "reason": "that group isn't in the new version"})
+    return matched, dropped
+
+
 def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
                   log_cb=None):
     """Compute a reconciliation plan moving *source_dir*'s mods onto
@@ -733,6 +843,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
          "video": {matched, dropped},
          "image": {matched, dropped},
          "text":  {matched, dropped},
+         "group_tags": {matched, dropped},
          "toggles": {key: value, ...},
          "totals": {"transfer": int, "flagged": int, "dropped": int}}
 
@@ -753,6 +864,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         source_dir, target_dir, saved.get("image"))
     t_matched, t_dropped = _plan_text(source_dir, target_dir,
                                       src_rows=src_text_rows)
+    g_matched, g_dropped = _plan_group_tags(source_dir, target_dir, saved)
 
     plan = {
         "audio": {"matched": a_matched, "remapped": a_remapped,
@@ -760,13 +872,14 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         "video": {"matched": v_matched, "dropped": v_dropped},
         "image": {"matched": i_matched, "dropped": i_dropped},
         "text": {"matched": t_matched, "dropped": t_dropped},
+        "group_tags": {"matched": g_matched, "dropped": g_dropped},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
     }
     transfer = (len(a_matched) + len(a_remapped) + len(v_matched)
-                + len(i_matched) + len(t_matched))
+                + len(i_matched) + len(t_matched) + len(g_matched))
     flagged = len(a_flagged)
     dropped = (len(a_dropped) + len(v_dropped) + len(i_dropped)
-               + len(t_dropped))
+               + len(t_dropped) + len(g_dropped))
     plan["totals"] = {"transfer": transfer, "flagged": flagged,
                       "dropped": dropped}
     return plan
@@ -779,8 +892,8 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     targets the same slot/string.  ``include_flagged`` also applies the audio
     entries whose index was reused (off by default — those are the risky ones).
     ``src_saved`` overrides the source sidecar (pairs with ``plan_transfer``'s
-    ``saved``).  Returns ``{"audio", "video", "image", "text"}`` counts
-    actually written."""
+    ``saved``).  Returns ``{"audio", "video", "image", "text", "group_tags"}``
+    counts actually written."""
     if src_saved is None:
         src_saved = staged_changes.load(source_dir)
     tgt = staged_changes.load(target_dir)
@@ -825,6 +938,17 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     if tgt_image:
         tgt["image"] = tgt_image
 
+    # Renamed image groups: a name the user already gave a group on the
+    # TARGET extract wins over the transferred one (same rule as toggles).
+    n_tags = 0
+    tgt_tags = dict(tgt.get("image_group_tags") or {})
+    for e in (plan.get("group_tags") or {}).get("matched", ()):
+        if e["key"] not in tgt_tags:
+            tgt_tags[e["key"]] = e["name"]
+            n_tags += 1
+    if tgt_tags:
+        tgt["image_group_tags"] = tgt_tags
+
     # Toggles copy over only if the target doesn't already set them.
     for k, v in plan.get("toggles", {}).items():
         tgt.setdefault(k, v)
@@ -844,4 +968,5 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
             text_manifest.save(target_dir, rows)
 
     return {"audio": n_audio, "video": len(plan["video"]["matched"]),
-            "image": len(plan["image"]["matched"]), "text": n_text}
+            "image": len(plan["image"]["matched"]), "text": n_text,
+            "group_tags": n_tags}

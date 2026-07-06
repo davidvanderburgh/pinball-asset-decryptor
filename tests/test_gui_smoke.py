@@ -120,9 +120,22 @@ def _mfr_view_visible(window):
 
 
 def test_app_starts_on_picker(app):
+    # No saved last_manufacturer (fresh sandboxed settings) -> picker.
     assert app.window._picker_view.winfo_ismapped()
     assert not _mfr_view_visible(app.window)
     assert app._current_mfr is None
+
+
+def test_resolve_startup_manufacturer(all_manufacturers):
+    """The launch-target decision: a saved key that still loads opens directly;
+    a missing / stale key falls back to the picker (returns None).  Pure — no
+    Tk — so it can't add to the init.tcl flake surface."""
+    from pinball_decryptor.app import _resolve_startup_manufacturer as resolve
+    stern = next(m for m in all_manufacturers if m.key == "stern")
+    assert resolve(all_manufacturers, {"last_manufacturer": "stern"}) is stern
+    assert resolve(all_manufacturers, {"last_manufacturer": "gone"}) is None
+    assert resolve(all_manufacturers, {}) is None
+    assert resolve(all_manufacturers, {"last_manufacturer": ""}) is None
 
 
 def test_picker_has_all_manufacturer_cards(app):
@@ -1326,12 +1339,29 @@ def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
     assert all(t.startswith("::grp::") for t in tops)
     grp = [t for t in tops if "Char_Select" in tree.item(t, "text")]
     assert len(grp) == 1
-    assert "Char_Select · a1b2c3d4 — 3 images" in tree.item(grp[0], "text")
+    assert "Char_Select · a1b2c3d4" in tree.item(grp[0], "text")
+    # The member count lives in its own sortable "Images" column (monkeybug),
+    # which only shows in grouped mode.
+    assert tree.item(grp[0], "values")[0] == "3 images"
+    assert tree["displaycolumns"][0] == "n"
     assert not tree.item(grp[0], "open")          # inserted collapsed
     # Children keep the slot iid and sit in play order (data offset).
     assert list(tree.get_children(grp[0])) == rels[:3]
     # Counts stay over image rows, not group headers.
     assert "4 images" in w.image_status_var.get()
+
+    # Clicking the Images header sorts the GROUPS by member count.
+    w._image_sort = ("n", True)
+    w._refresh_image_list()
+    tops = list(tree.get_children())
+    counts = [tree.item(t, "values")[0] for t in tops]
+    assert counts == ["3 images", "1 image"]
+    w._image_sort = ("n", False)
+    w._refresh_image_list()
+    tops = list(tree.get_children())
+    assert [tree.item(t, "values")[0] for t in tops] == ["1 image", "3 images"]
+    w._image_sort = ("#0", False)
+    w._refresh_image_list()
 
     # Search matches the group LABEL even though the files are hash-named —
     # by element hint or by the container-hash shorthand.
@@ -1348,11 +1378,13 @@ def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
     w.image_changed_only_var.set(True)
     tops = list(tree.get_children())
     assert len(tops) == 1
-    assert "Char_Select · a1b2c3d4 — 1 image" in tree.item(tops[0], "text")
+    assert "Char_Select · a1b2c3d4" in tree.item(tops[0], "text")
+    assert tree.item(tops[0], "values")[0] == "1 image"
     assert list(tree.get_children(tops[0])) == [rels[0]]
-    # ...and in flat mode only the assigned row survives.
+    # ...and in flat mode only the assigned row survives (count column gone).
     w.image_group_by_scene_var.set(False)
     assert list(tree.get_children()) == [rels[0]]
+    assert "n" not in tree["displaycolumns"]
 
     w.image_changed_only_var.set(False)
     w._image_assignments.clear()
@@ -1468,7 +1500,8 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     monkeypatch.setattr("tkinter.simpledialog.askstring",
                         lambda *a, **k: "Boss Intro")
     w._image_group_rename(grp)
-    assert "Boss Intro — 3 images" in tree.item(grp, "text")
+    assert "Boss Intro" in tree.item(grp, "text")
+    assert tree.item(grp, "values")[0] == "3 images"
     saved = staged_changes.load(assets)
     assert list(saved.get("image_group_tags", {}).values()) == ["Boss Intro"]
     w.image_search_var.set("boss in")

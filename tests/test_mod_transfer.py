@@ -655,3 +655,146 @@ def test_apply_preserves_existing_target_edits(tmp_path):
     saved = staged_changes.load(tgt)["audio"]
     assert saved["audio/idx0001.wav"] == r"C:\r\a.mp3"
     assert saved["audio/idx0002.wav"] == r"C:\r\b.mp3"
+
+
+# ---- font glyph slices: (radium, atlas ordinal, char) identity ---------------
+
+def _write_glyph_manifest(root, rows):
+    """rows: list of (glyph out_rel under images/, atlas out_rel, char str)."""
+    d = os.path.join(root, "images", "scene_textures")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "glyph_images.txt"), "w", encoding="utf-8") as f:
+        f.write("# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont\n")
+        for out, atlas, char in rows:
+            f.write("%s\t%s\t%s\t1\t1\t8\t8\tFace\n" % (out, atlas, char))
+
+
+def _glyph_fixture(root, stem, glyph_bytes, chars=("0x0041",)):
+    """One font atlas + its glyph slice(s) with matching manifests."""
+    atlas_rel = "scene_textures/radimg_Font_64x64_%s.png" % stem
+    imgs = {"images/" + atlas_rel: b"ATLAS-" + stem.encode()}
+    rows = []
+    for i, ch in enumerate(chars):
+        g_rel = "scene_textures/glyphs/radimg_Font_64x64_%s/U+%s_G%d.png" % (
+            stem, ch[2:], i)
+        imgs["images/" + g_rel] = glyph_bytes + ch.encode()
+        rows.append((g_rel, atlas_rel, ch))
+    _mk_extract(root, {}, images=imgs)
+    _write_radium_manifest(root, [(atlas_rel, "/scenes/Font/scene.radium")])
+    _write_glyph_manifest(root, rows)
+    return ["images/" + r[0] for r in rows]
+
+
+def test_plan_transfer_glyph_follows_char_across_atlas_rename(tmp_path):
+    # The font art changed between versions, so every path under glyphs/
+    # (atlas content hash) is new — the char identity carries the edit over.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    (src_glyph,) = _glyph_fixture(src, "aaaaaaaa", b"OLD")
+    (tgt_glyph,) = _glyph_fixture(tgt, "cccccccc", b"NEW")
+    staged_changes.save(src, {"image": {src_glyph: r"C:\r\A.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["rel"] for e in plan["image"]["matched"]] == [tgt_glyph]
+    assert not plan["image"]["dropped"]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    assert staged_changes.load(tgt)["image"][tgt_glyph] == r"C:\r\A.png"
+
+
+def test_plan_transfer_glyph_char_gone_is_dropped(tmp_path):
+    # The new font dropped the character: the manifests are authoritative, so
+    # the edit is dropped even though a same-named file happens to exist.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    (src_glyph,) = _glyph_fixture(src, "aaaaaaaa", b"SAME")
+    _glyph_fixture(tgt, "aaaaaaaa", b"SAME", chars=("0x0042",))
+    # forge the same-rel file on the target (stale leftover)
+    _wav(os.path.join(tgt, src_glyph.replace("/", os.sep)), b"stale")
+    staged_changes.save(src, {"image": {src_glyph: r"C:\r\A.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert not plan["image"]["matched"]
+    assert len(plan["image"]["dropped"]) == 1
+
+
+def test_plan_direct_diff_stages_modded_glyph(tmp_path):
+    # Baked-mods direct diff: a glyph slice whose pixels differ is staged onto
+    # the TARGET's (renamed) glyph rel through the same identity.
+    mod, tgt = str(tmp_path / "modded"), str(tmp_path / "stock159")
+    (mod_glyph,) = _glyph_fixture(mod, "aaaaaaaa", b"MODDED")
+    (tgt_glyph,) = _glyph_fixture(tgt, "cccccccc", b"STOCK")
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    staged = {e["rel"]: e["repl"] for e in plan["image"]["matched"]}
+    assert tgt_glyph in staged
+    assert staged[tgt_glyph] == os.path.abspath(
+        os.path.join(mod, mod_glyph.replace("/", os.sep)))
+
+
+# ---- renamed image groups (image_group_tags) ---------------------------------
+
+def _write_loose_manifest(root, rows):
+    """rows: list of (out_rel under images/, card path)."""
+    d = os.path.join(root, "images")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "manifest.txt"), "w", encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\n")
+        for out, card in rows:
+            f.write("%s\t%s\t9\n" % (out, card))
+
+
+def test_plan_transfer_carries_group_tags(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {}, images={"images/x.png": b"X"})
+    _mk_extract(tgt, {}, images={"images/x.png": b"X"})
+    _write_radium_manifest(tgt, [
+        ("scene_textures/radimg_T_64x64_cc.png", "/scenes/Title/scene.radium")])
+    _write_texture_manifest(tgt, [
+        ("scene_textures/Bonus_3_64x64.png", "/scenes/Bonus/scene.assets/3")])
+    _write_loose_manifest(tgt, [("loose/logo.png", "/game/assets/loose/logo.png")])
+    staged_changes.save(src, {"image_group_tags": {
+        "rad::/scenes/Title/scene.radium": "Title Anim",
+        "scn::/scenes/Bonus": "Bonus Art",
+        "dir::/game/assets/loose": "Loose Stuff",
+        "rad::/scenes/Gone/scene.radium": "Gone Group",
+    }})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    got = {e["key"]: e["name"] for e in plan["group_tags"]["matched"]}
+    assert got == {"rad::/scenes/Title/scene.radium": "Title Anim",
+                   "scn::/scenes/Bonus": "Bonus Art",
+                   "dir::/game/assets/loose": "Loose Stuff"}
+    assert [e["key"] for e in plan["group_tags"]["dropped"]] == [
+        "rad::/scenes/Gone/scene.radium"]
+    assert plan["totals"]["transfer"] == 3
+    assert plan["totals"]["dropped"] == 1
+
+    # A name the user already gave a group on the TARGET wins.
+    staged_changes.save(tgt, {"image_group_tags": {
+        "rad::/scenes/Title/scene.radium": "Theirs"}})
+    res = mod_transfer.apply_transfer(src, tgt, plan)
+    assert res["group_tags"] == 2
+    tags = staged_changes.load(tgt)["image_group_tags"]
+    assert tags["rad::/scenes/Title/scene.radium"] == "Theirs"
+    assert tags["scn::/scenes/Bonus"] == "Bonus Art"
+    assert tags["dir::/game/assets/loose"] == "Loose Stuff"
+    assert "rad::/scenes/Gone/scene.radium" not in tags
+
+
+def test_plan_transfer_remaps_glyph_folder_tag(tmp_path):
+    # A renamed GLYPH group's key embeds the atlas content hash — it follows
+    # the atlas identity onto the new version's stem.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _glyph_fixture(src, "aaaaaaaa", b"OLD")
+    _glyph_fixture(tgt, "cccccccc", b"NEW")
+    staged_changes.save(src, {"image_group_tags": {
+        "dir::images/scene_textures/glyphs/radimg_Font_64x64_aaaaaaaa":
+            "Score Font"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["key"] for e in plan["group_tags"]["matched"]] == [
+        "dir::images/scene_textures/glyphs/radimg_Font_64x64_cccccccc"]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    assert staged_changes.load(tgt)["image_group_tags"] == {
+        "dir::images/scene_textures/glyphs/radimg_Font_64x64_cccccccc":
+            "Score Font"}

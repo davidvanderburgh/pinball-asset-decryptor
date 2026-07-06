@@ -4902,24 +4902,32 @@ class MainWindow:
         # "src" tells the three image stores apart (monkeybug: file-system
         # PNGs, scene textures and radium-embedded images were indistinguishable
         # beyond their paths) — see _image_source_label.
+        # "n" (Images) is grouped-mode only: the per-group member count as its
+        # own sortable column (monkeybug: the count baked into the header text
+        # couldn't be sorted on) — _refresh_image_list toggles displaycolumns.
         self._image_tree = ttk.Treeview(
-            list_frame, columns=("res", "fmt", "src", "rep"),
+            list_frame, columns=("n", "res", "fmt", "src", "rep"),
             height=9, selectmode="browse")
         self._image_tree.heading("#0", text="Original Image", anchor=tk.W)
+        self._image_tree.heading("n", text="Images", anchor=tk.W)
         self._image_tree.heading("res", text="Resolution", anchor=tk.W)
         self._image_tree.heading("fmt", text="Format", anchor=tk.W)
         self._image_tree.heading("src", text="Source", anchor=tk.W)
         self._image_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._image_tree.column("#0", width=300, minwidth=160)
+        self._image_tree.column("n", width=70, minwidth=50, anchor=tk.W,
+                                stretch=False)
         self._image_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._image_tree.column("fmt", width=140, minwidth=80)
         self._image_tree.column("src", width=100, minwidth=70, anchor=tk.W,
                                 stretch=False)
         self._image_tree.column("rep", width=200, minwidth=110)
+        self._image_tree["displaycolumns"] = ("res", "fmt", "src", "rep")
         self._persist_tree_columns(
-            self._image_tree, "image", ("#0", "res", "fmt", "src", "rep"))
+            self._image_tree, "image", ("#0", "n", "res", "fmt", "src", "rep"))
         self._image_sort_cfg = [
-            ("#0", "Original Image", False), ("res", "Resolution", True),
+            ("#0", "Original Image", False), ("n", "Images", True),
+            ("res", "Resolution", True),
             ("fmt", "Format", False), ("src", "Source", False),
             ("rep", "Replacement", False)]
         self._wire_sort_headings(self._image_tree, self._image_sort_cfg,
@@ -5125,7 +5133,8 @@ class MainWindow:
             return
         rep = self._image_assignments.get(rel)
         rep_disp = os.path.basename(rep) if rep else "Choose…"
-        tree.item(rel, values=(slot.resolution_str(), slot.format_summary(),
+        tree.item(rel, values=("", slot.resolution_str(),
+                               slot.format_summary(),
                                self._image_source_label(rel), rep_disp))
 
     def _select_first_tree_row(self, tree, on_select=None):
@@ -5293,6 +5302,11 @@ class MainWindow:
 
         query = (self.image_search_var.get() or "").strip().lower()
         grouped = bool(self.image_group_by_scene_var.get())
+        # The per-group "Images" count column only exists in grouped mode
+        # (monkeybug: a sortable count column beats a count baked into the
+        # header text); flat mode hides it rather than show an empty column.
+        tree["displaycolumns"] = (("n", "res", "fmt", "src", "rep") if grouped
+                                  else ("res", "fmt", "src", "rep"))
         changed = self._image_changed_on_disk
         touched = set(self._image_assignments) | changed
 
@@ -5354,7 +5368,7 @@ class MainWindow:
             else:
                 res = s.resolution_str()
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(res, s.format_summary(),
+                        values=("", res, s.format_summary(),
                                 self._image_source_label(s.rel_path),
                                 rep_disp),
                         tags=(tag,) if tag else ())
@@ -5365,28 +5379,38 @@ class MainWindow:
                 key, label, _order = self._image_group_of(s.rel_path)
                 by_grp.setdefault(key, (label, []))[1].append(s)
             # Groups stay label-sorted; a header click re-sorts the children
-            # WITHIN each group.  The default "#0" sort means play order here
-            # (the manifests' frame sequence), not the flat path sort.
-            # A user rename (_image_group_rename) replaces the display label
-            # AND the sort key, so renamed groups land where you'd look.
+            # WITHIN each group — except "Images", which sorts the GROUPS by
+            # member count (the column belongs to the group rows).  The
+            # default "#0" sort means play order here (the manifests' frame
+            # sequence), not the flat path sort.  A user rename
+            # (_image_group_rename) replaces the display label AND the sort
+            # key, so renamed groups land where you'd look.
             def _disp(k):
                 return self._image_group_tags.get(k) or by_grp[k][0]
-            for key in sorted(by_grp, key=lambda k: (_disp(k).lower(), k)):
+            if col == "n":
+                group_order = sorted(
+                    by_grp, key=lambda k: (len(by_grp[k][1]),
+                                           _disp(k).lower(), k),
+                    reverse=desc)
+            else:
+                group_order = sorted(by_grp,
+                                     key=lambda k: (_disp(k).lower(), k))
+            for key in group_order:
                 members = by_grp[key][1]
                 label = _disp(key)
-                if col == "#0":
+                if col in ("#0", "n"):
                     members.sort(
                         key=lambda s: (self._image_group_of(s.rel_path)[2],
                                        s.rel_path.lower()),
-                        reverse=desc)
+                        reverse=desc if col == "#0" else False)
                 else:
                     members.sort(key=_key, reverse=desc)
                 giid = _IMG_GROUP_IID + key
                 n = len(members)
                 tree.insert(
                     "", tk.END, iid=giid, open=(giid in open_groups),
-                    text="%s — %d image%s" % (label, n,
-                                              "" if n == 1 else "s"))
+                    text=label,
+                    values=("%d image%s" % (n, "" if n == 1 else "s"),))
                 for s in members:
                     _insert(giid, s)
         else:

@@ -21,6 +21,18 @@ from .core.updater import check_for_update
 from .gui.main_window import MainWindow
 
 
+def _resolve_startup_manufacturer(manufacturers, settings):
+    """The manufacturer to open directly on launch, or ``None`` to show the
+    picker.  ``None`` when there's no saved ``last_manufacturer`` (first
+    launch) or the saved key no longer maps to a loaded plugin (removed /
+    renamed) — either way the picker is the safe fallback."""
+    last = settings.get("last_manufacturer")
+    if not last:
+        return None
+    return next((m for m in manufacturers
+                 if getattr(m, "key", None) == last), None)
+
+
 class App:
     def __init__(self):
         # Expose the bundled ffmpeg (imageio-ffmpeg, in the frozen Mac/Linux
@@ -163,11 +175,17 @@ class App:
         # a since-disconnected monitor can't open off-screen.
         self._restore_window_geometry()
 
-        # Start at the manufacturer picker.  Even if the user has a
-        # last_manufacturer saved, the explicit pick step makes "which
-        # mfr am I about to work on" unambiguous and prevents the
-        # accidental mid-session mfr switch class of bug.
-        self.window.show_picker()
+        # Start where the user left off: most users work one machine at a
+        # time, so the saved last_manufacturer opens directly (the header's
+        # home button returns to the picker; the always-visible manufacturer
+        # header keeps "which mfr am I on" unambiguous).  First launch — or
+        # a saved key that no longer loads — starts at the picker.
+        last_mfr = _resolve_startup_manufacturer(
+            self._manufacturers, self._settings)
+        if last_mfr is not None:
+            self._apply_manufacturer(last_mfr)
+        else:
+            self.window.show_picker()
 
         # Reveal the window now that it's at its saved geometry and the picker
         # is laid out — the first thing the user sees is the real UI, not a
@@ -1849,10 +1867,12 @@ class App:
                                  "Couldn't write the transferred mods:\n%s" % e)
             return
 
+        tags_note = ("" if not res.get("group_tags")
+                     else ", %d group name(s)" % res["group_tags"])
         self.window.append_log(
-            "Transferred mods from %s: %d audio, %d video, %d image, %d text."
+            "Transferred mods from %s: %d audio, %d video, %d image, %d text%s."
             % (source_label or source_dir, res["audio"], res["video"],
-               res["image"], res["text"]), "success")
+               res["image"], res["text"], tags_note), "success")
         # Point the app at the new extract so the Replace tabs / Write show
         # the transferred assignments without a manual re-browse.
         cur = os.path.normpath((self.window.write_assets_var.get() or "")
@@ -1897,8 +1917,9 @@ class App:
 
         messagebox.showinfo(
             "Transfer complete",
-            "Transferred: %d audio, %d video, %d image, %d text.\n\n%s%s\n\n%s"
+            "Transferred: %d audio, %d video, %d image, %d text%s.\n\n%s%s\n\n%s"
             % (res["audio"], res["video"], res["image"], res["text"],
+               tags_note,
                ("The Mod Folder now points at the new extract.\n"
                 if moved_folder else ""),
                ("The Write tab's base image is set to the new version.\n"
@@ -1919,6 +1940,11 @@ class App:
                      % (len(i["matched"]), len(i["dropped"])))
         lines.append("Text:   %d matched, %d dropped"
                      % (len(t["matched"]), len(t["dropped"])))
+        g = plan.get("group_tags") or {}
+        if g.get("matched") or g.get("dropped"):
+            lines.append("Groups: %d renamed group name(s) carried, %d dropped"
+                         % (len(g.get("matched", ())),
+                            len(g.get("dropped", ()))))
         dropped = plan["totals"]["dropped"]
         if dropped:
             lines.append("")

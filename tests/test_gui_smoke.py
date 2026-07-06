@@ -1440,18 +1440,26 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
     assets = _seed_image_assets(tmp_path)
+    # ...plus one font-glyph slice (the glyph-atlas slicer's output tree).
+    gdir = tmp_path / "images" / "scene_textures" / "glyphs" / "atlas_x"
+    gdir.mkdir(parents=True)
+    (gdir / "U+0041_A.png").write_bytes(b"\x89PNG-fake")
     w.write_assets_var.set(assets)
     _scan_images(w, assets)
     tree = w._image_tree
 
-    # Source filter: the radimg_* slots are "Radium", logo.png is "File".
+    # Source filter: the radimg_* slots are "Radium", logo.png is "File",
+    # the glyphs/ slice is "Glyph".
     w.image_source_filter_var.set("Radium")
     assert len(tree.get_children()) == 3
     assert all("radimg" in r for r in tree.get_children())
     w.image_source_filter_var.set("File")
     assert list(tree.get_children()) == ["images/loose/logo.png"]
+    w.image_source_filter_var.set("Glyph")
+    assert list(tree.get_children()) == [
+        "images/scene_textures/glyphs/atlas_x/U+0041_A.png"]
     w.image_source_filter_var.set("All sources")
-    assert len(tree.get_children()) == 4
+    assert len(tree.get_children()) == 5
 
     # Rename a grouped scene: display + sidecar + search all follow.
     w.image_group_by_scene_var.set(True)

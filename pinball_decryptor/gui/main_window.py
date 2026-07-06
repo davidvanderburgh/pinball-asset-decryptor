@@ -1178,7 +1178,8 @@ class MainWindow:
         # "unnamed_instance_N" (monkeybug).  Persisted in the staged-changes
         # sidecar per assets folder.
         self._image_group_tags = {}
-        # "Source" column filter: All sources / File / Scene texture / Radium.
+        # "Source" column filter: All sources / File / Scene texture / Radium
+        # / Glyph.
         self.image_source_filter_var = tk.StringVar(value="All sources")
         self.image_source_filter_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
@@ -4851,20 +4852,21 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        # Source filter (monkeybug): narrow the list to one of the three
-        # image stores; the values mirror the Source column's labels.
+        # Source filter (monkeybug): narrow the list to one of the image
+        # stores; the values mirror the Source column's labels.
         self._image_source_combo = ttk.Combobox(
             tools, textvariable=self.image_source_filter_var,
             state="readonly", width=13,
-            values=("All sources", "File", "Scene texture", "Radium"))
+            values=("All sources", "File", "Scene texture", "Radium",
+                    "Glyph"))
         self._image_source_combo.pack(side=tk.LEFT, padx=(0, 12))
         self._image_source_combo.bind(
             "<<ComboboxSelected>>", lambda _e: self._save_staged_changes())
         _Tooltip(
             self._image_source_combo,
             "Show only images from one store: plain files on the card, "
-            "scene.assets textures, or radium-embedded images (the Source "
-            "column).",
+            "scene.assets textures, radium-embedded images, or per-character "
+            "font glyph slices (the Source column).",
             lambda: self._current_theme)
         self._image_changed_only_cb = ttk.Checkbutton(
             tools, text="Changed only",
@@ -5076,7 +5078,8 @@ class MainWindow:
                  if str(v).strip()}
                 if isinstance(tags, dict) else {})
             srcf = staged.get("image_source_filter")
-            if srcf in ("All sources", "File", "Scene texture", "Radium"):
+            if srcf in ("All sources", "File", "Scene texture", "Radium",
+                        "Glyph"):
                 self.image_source_filter_var.set(srcf)
         else:
             self._image_assignments = {
@@ -5147,14 +5150,17 @@ class MainWindow:
 
     @staticmethod
     def _image_source_label(rel_path):
-        """Which of the three image stores *rel_path* came from (monkeybug:
-        make them tell-apart-able + sortable).  Derived purely from the
-        extract layout: the Stern engine lands decoded scene textures under
-        ``scene_textures/`` (radium-embedded ones named ``radimg_*``); every
-        other image is a plain file copied off the card.  Non-Stern plugins
-        simply show "File" throughout."""
+        """Which of the image stores *rel_path* came from (monkeybug: make
+        them tell-apart-able + sortable).  Derived purely from the extract
+        layout: the Stern engine lands decoded scene textures under
+        ``scene_textures/`` (radium-embedded ones named ``radimg_*``,
+        per-character font slices under ``glyphs/``); every other image is a
+        plain file copied off the card.  Non-Stern plugins simply show "File"
+        throughout."""
         parts = rel_path.replace("\\", "/").lower().split("/")
         if "scene_textures" in parts:
+            if "glyphs" in parts:
+                return "Glyph"
             if os.path.basename(rel_path).lower().startswith("radimg"):
                 return "Radium"
             return "Scene texture"

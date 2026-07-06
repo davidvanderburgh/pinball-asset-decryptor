@@ -82,15 +82,53 @@ def detect_image_info(path):
         return None
 
 
+# The image editors' transparency checkerboard: both black and white art
+# reads against it in either app theme (a black font glyph on the dark theme
+# was invisible — the preview canvas matched the glyph).
+_CHECKER_LIGHT = (204, 204, 204, 255)
+_CHECKER_DARK = (153, 153, 153, 255)
+_CHECKER_SQ = 8
+
+
+def _checkerboard(size):
+    """An RGBA checkerboard of *size*, drawn only behind the image itself so
+    its true bounds stay visible against the canvas."""
+    w, h = size
+    bg = Image.new("RGBA", size, _CHECKER_LIGHT)
+    dark = Image.new("RGBA", (_CHECKER_SQ, _CHECKER_SQ), _CHECKER_DARK)
+    for y in range(0, h, _CHECKER_SQ):
+        for x in range(0, w, _CHECKER_SQ):
+            if (x // _CHECKER_SQ + y // _CHECKER_SQ) % 2:
+                bg.paste(dark, (x, y))
+    return bg
+
+
 def thumbnail_png(path, max_w, max_h):
     """Return PNG bytes of *path* scaled to fit ``max_w`` x ``max_h`` (aspect
-    preserved), for the tab's preview pane, or ``None`` on failure."""
+    preserved), for the tab's preview pane, or ``None`` on failure.
+
+    An image smaller than the pane (font glyph slices are usually a few dozen
+    pixels) is upscaled by a whole-number factor with nearest-neighbour so it
+    stays crisp and inspectable; anything with transparency is composited
+    over the standard checkerboard."""
     if not _PIL_OK or not path or not os.path.isfile(path):
         return None
     try:
         with Image.open(path) as im:
             im = im.convert("RGBA")
-            im.thumbnail((max(1, int(max_w)), max(1, int(max_h))))
+            max_w = max(1, int(max_w))
+            max_h = max(1, int(max_h))
+            if im.width > max_w or im.height > max_h:
+                im.thumbnail((max_w, max_h))
+            else:
+                k = min(max_w // im.width, max_h // im.height)
+                if k >= 2:
+                    im = im.resize((im.width * k, im.height * k),
+                                   Image.NEAREST)
+            if im.getchannel("A").getextrema()[0] < 255:
+                bg = _checkerboard(im.size)
+                bg.alpha_composite(im)
+                im = bg
             buf = io.BytesIO()
             im.save(buf, "PNG")
             return buf.getvalue()

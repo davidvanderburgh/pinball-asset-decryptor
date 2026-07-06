@@ -558,6 +558,20 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
 # under a scene) — not a scene.assets file.  Same codec, patched in place.
 # --------------------------------------------------------------------------
 _RADIUM_IMAGE_MANIFEST = "radium_images.txt"
+# Per-glyph slices of the font atlases above: one PNG per character under
+# scene_textures/glyphs/<atlas stem>/, plus a manifest mapping each slice back
+# to its atlas PNG + pixel rectangle (see radium.parse_glyph_tables).
+_GLYPH_MANIFEST = "glyph_images.txt"
+_GLYPH_DIR = "glyphs"
+
+
+def _glyph_png_name(char):
+    """Filename for a glyph slice: codepoint first (unique even on Windows'
+    case-insensitive filesystems where A.png == a.png), readable char after."""
+    c = chr(char)
+    if c.isascii() and c.isalnum():
+        return "U+%04X_%s.png" % (char, c)
+    return "U+%04X.png" % char
 
 # Scene-graph element-TYPE keywords — skipped when naming an image after its
 # nearest scene element (we want the instance id like "Song_Progress", not the
@@ -652,10 +666,18 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     ``radium_images.txt`` manifest records **every** on-card occurrence (a row
     per ``radium card path + data offset``).  Editing one PNG therefore patches
     all of its occurrences at Write, so the change shows everywhere in-game (the
-    same all-occurrences rule the display-text replace uses)."""
+    same all-occurrences rule the display-text replace uses).
+
+    Font atlases are additionally **sliced into per-character PNGs** under
+    ``scene_textures/glyphs/<atlas stem>/U+0041_A.png`` (rects from the scene's
+    Font glyph tables — see :func:`radium.parse_glyph_tables`), so a user edits
+    a single character instead of hand-measuring the atlas.  ``glyph_images.txt``
+    maps each slice back to its atlas PNG + pixel rectangle; at Write, changed
+    slices are pasted into their atlas before the normal atlas re-encode."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     from . import dds as _dds
+    from . import radium as _radium
     from ...core.checksums import md5_file  # noqa: F401  (kept for parity)
     import hashlib
     try:
@@ -677,7 +699,9 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     os.makedirs(tex_dir, exist_ok=True)
     manifest = []                 # one row per occurrence
     by_hash = {}                  # content hash -> output rel path (PNG written once)
-    n_unique = n_occ = 0
+    glyph_manifest = []           # one row per unique glyph slice
+    sliced_atlases = set()        # atlas out_rel already sliced (content-deduped)
+    n_unique = n_occ = n_glyphs = 0
     for ri, (path, node) in enumerate(radiums):
         if cancel():
             break
@@ -689,6 +713,7 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
         except Exception:
             continue
         imgs = parse_radium_images(data)
+        off2rel = {}              # this radium's image offsets -> atlas PNG rel
         for im in imgs:
             raw = data[im["data_off"]:im["data_off"] + im["length"]]
             h = hashlib.md5(raw).hexdigest()
@@ -717,10 +742,57 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 pic.save(os.path.join(output_dir, "images", *out_rel.split("/")))
                 by_hash[h] = out_rel
                 n_unique += 1
+            off2rel[im["data_off"]] = out_rel
             manifest.append("%s\t%s\t%d\t%d\t%d\t%d\t%d"
                             % (out_rel, path, im["data_off"], im["length"],
                                im["pad_w"], im["pad_h"], im["fmt"]))
             n_occ += 1
+        # ---- font glyph slices: one PNG per character of each atlas ---------
+        # A font's glyph table and its atlas always live in the same radium
+        # (the atlas is introduced inline by its first glyph), and identical
+        # atlas content ⇒ identical font ⇒ identical rects, so slicing is
+        # deduped per atlas PNG just like the atlases themselves.
+        for table in (_radium.parse_glyph_tables(data, imgs) if imgs else ()):
+            if cancel():
+                break
+            rgba_cache = {}
+            for g in table["glyphs"]:
+                px = _radium.glyph_px_rect(g)
+                if px is None:
+                    continue                     # no bitmap (e.g. space)
+                atlas_rel = off2rel.get(g["atlas"]["data_off"])
+                if atlas_rel is None or atlas_rel in sliced_atlases:
+                    continue
+                a = g["atlas"]
+                rgba = rgba_cache.get(a["data_off"])
+                if rgba is None:
+                    try:
+                        decode = (_dds.decode_bc1 if a["fmt"] == _DXT1_FORMAT
+                                  else _dds.decode_bc3)
+                        rgba = decode(
+                            data[a["data_off"]:a["data_off"] + a["length"]],
+                            a["pad_w"], a["pad_h"])
+                    except Exception:
+                        continue
+                    rgba_cache[a["data_off"]] = rgba
+                x, y, w, hh = px
+                stem = os.path.splitext(os.path.basename(atlas_rel))[0]
+                g_rel = "scene_textures/%s/%s/%s" % (
+                    _GLYPH_DIR, stem, _glyph_png_name(g["char"]))
+                g_abs = os.path.join(output_dir, "images", *g_rel.split("/"))
+                os.makedirs(os.path.dirname(g_abs), exist_ok=True)
+                Image.fromarray(rgba[y:y + hh, x:x + w], "RGBA").save(g_abs)
+                glyph_manifest.append(
+                    "%s\t%s\t0x%04X\t%d\t%d\t%d\t%d\t%s"
+                    % (g_rel, atlas_rel, g["char"], x, y, w, hh,
+                       table["name"]))
+                n_glyphs += 1
+            # every glyph of a table shares its per-atlas dedupe fate; mark
+            # the table's atlases done only after the whole table is sliced
+            sliced_atlases.update(
+                off2rel[g["atlas"]["data_off"]] for g in table["glyphs"]
+                if g["atlas"] is not None
+                and g["atlas"]["data_off"] in off2rel)
     if not manifest:
         return 0
     try:
@@ -730,8 +802,20 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                     + "\n".join(manifest) + "\n")
     except Exception:
         pass
+    if glyph_manifest:
+        try:
+            with open(os.path.join(tex_dir, _GLYPH_MANIFEST), "w",
+                      encoding="utf-8") as f:
+                f.write("# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont\n"
+                        + "\n".join(glyph_manifest) + "\n")
+        except Exception:
+            pass
     log("Extracted %d unique embedded radium image(s) (%d on-card occurrence(s)) "
         "to %s." % (n_unique, n_occ, tex_dir), "success")
+    if n_glyphs:
+        log("Sliced %d font glyph(s) from %d atlas(es) to %s."
+            % (n_glyphs, len(sliced_atlases), os.path.join(tex_dir, _GLYPH_DIR)),
+            "success")
     return n_unique
 
 
@@ -1922,11 +2006,145 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
     return patches, skipped
 
 
-def _changed_radium_images(assets_dir, baseline):
+def _changed_glyph_images(assets_dir, baseline):
+    """Return ``{atlas_output: [(glyph_output, staged, x, y, w, h), ...]}`` for
+    the font-glyph slice PNGs whose bytes differ from the Extract baseline,
+    grouped by the atlas PNG they belong to.  Empty when there's no
+    ``glyph_images.txt`` manifest (see :func:`extract_radium_images`)."""
+    from ...core.checksums import md5_file
+    tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
+    manifest = os.path.join(tex_dir, _GLYPH_MANIFEST)
+    if not os.path.isfile(manifest):
+        return {}
+    out = {}
+    with open(manifest, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < 7:
+                continue
+            g_rel, atlas_rel = cols[0], cols[1]
+            try:
+                x, y, w, h = (int(c) for c in cols[3:7])
+            except ValueError:
+                continue
+            staged = os.path.join(assets_dir, "images", *g_rel.split("/"))
+            if not os.path.isfile(staged):
+                continue
+            base = baseline.get("images/" + g_rel)
+            try:
+                if base is not None and md5_file(staged) == base:
+                    continue                   # untouched since extract
+            except OSError:
+                pass
+            out.setdefault(atlas_rel, []).append((g_rel, staged, x, y, w, h))
+    return out
+
+
+def _glyph_atlas_overrides(assets_dir, baseline, log):
+    """Composite each changed font-glyph slice into its atlas: returns
+    ``{atlas_output: PIL.Image}`` — the staged atlas PNG with the edited
+    glyphs pasted over their rectangles (a slice whose size differs from its
+    rectangle is auto-scaled to fit).  These atlases must be treated as edited
+    by the radium-image write even when the atlas PNG itself is untouched."""
+    per_atlas = _changed_glyph_images(assets_dir, baseline)
+    if not per_atlas:
+        return {}
+    try:
+        from PIL import Image
+    except Exception as e:
+        log("Pillow unavailable (%s); font-glyph edits skipped." % e, "warning")
+        return {}
+    overrides = {}
+    for atlas_rel, glyphs in per_atlas.items():
+        staged_atlas = os.path.join(assets_dir, "images", *atlas_rel.split("/"))
+        try:
+            atlas = Image.open(staged_atlas).convert("RGBA")
+        except Exception as e:
+            log("Glyph atlas %s: can't read PNG (%s); its %d glyph edit(s) "
+                "skipped." % (atlas_rel, e, len(glyphs)), "warning")
+            continue
+        n = 0
+        for g_rel, staged, x, y, w, h in glyphs:
+            try:
+                tile = Image.open(staged).convert("RGBA")
+            except Exception as e:
+                log("Glyph %s: can't read PNG (%s); skipped." % (g_rel, e),
+                    "warning")
+                continue
+            if tile.size != (w, h):
+                log("Glyph %s is %dx%d; scaling to its %dx%d atlas slot."
+                    % (g_rel, tile.size[0], tile.size[1], w, h), "info")
+                tile = tile.resize((w, h), Image.LANCZOS)
+            atlas.paste(tile, (x, y))          # replaces pixels incl. alpha
+            n += 1
+        if n:
+            overrides[atlas_rel] = atlas
+            log("Font atlas %s: %d edited glyph(s) pasted in." % (atlas_rel, n),
+                "info")
+    return overrides
+
+
+def _atlas_png_changed(staged, baseline, output):
+    """True when the atlas PNG itself differs from the Extract baseline (as
+    opposed to only its glyph slices) -- decides whole re-encode vs the
+    surgical block splice in :func:`_radium_image_writes`."""
+    from ...core.checksums import md5_file
+    base = baseline.get("images/" + output)
+    if base is None:
+        return True
+    try:
+        return md5_file(staged) != base
+    except OSError:
+        return True
+
+
+def _splice_changed_blocks(raw, target, pad_w, pad_h, fmt):
+    """Re-encode ONLY the 4x4 BC blocks whose pixels differ between the stock
+    atlas bytes *raw* and the composited RGBA *target* (uint8 ``(pad_h, pad_w,
+    4)``), splicing them into a copy of *raw*.  BC blocks are independent, so
+    every untouched character stays bit-identical to stock -- a whole-atlas
+    re-encode would subtly reflow every block, changing characters the user
+    never edited.  Returns the patched bytes (``raw`` itself when nothing
+    differs)."""
+    from . import dds as _dds
+    import numpy as np
+    decode = _dds.decode_bc1 if fmt == _DXT1_FORMAT else _dds.decode_bc3
+    encode = _dds.encode_bc1 if fmt == _DXT1_FORMAT else _dds.encode_bc3
+    bs = 8 if fmt == _DXT1_FORMAT else 16
+    stock = decode(raw, pad_w, pad_h)
+    diff = np.any(stock != target, axis=2)
+    if not diff.any():
+        return raw
+    nbx = pad_w // 4
+    blocks = diff.reshape(pad_h // 4, 4, nbx, 4).any(axis=(1, 3))
+    bys, bxs = np.nonzero(blocks)
+    by0, by1 = int(bys.min()), int(bys.max())
+    bx0, bx1 = int(bxs.min()), int(bxs.max())
+    # One encode of the changed blocks' bounding rect (vectorised), then copy
+    # only the truly-changed blocks' bytes -- block outputs depend on nothing
+    # but their own 4x4 pixels, so this equals a per-block encode.
+    sub = np.ascontiguousarray(
+        target[by0 * 4:(by1 + 1) * 4, bx0 * 4:(bx1 + 1) * 4])
+    enc = encode(sub)
+    out = bytearray(raw)
+    nbx_sub = bx1 - bx0 + 1
+    for bj, bi in zip(bys, bxs):
+        src = ((int(bj) - by0) * nbx_sub + (int(bi) - bx0)) * bs
+        dst = (int(bj) * nbx + int(bi)) * bs
+        out[dst:dst + bs] = enc[src:src + bs]
+    return bytes(out)
+
+
+def _changed_radium_images(assets_dir, baseline, extra_changed=()):
     """Return ``[(output, radium_card_path, staged, data_off, length, pad_w,
     pad_h, fmt), ...]`` for the radium-embedded images whose PNG differs from the
     Extract baseline.  Empty when there's no ``radium_images.txt`` manifest.
-    ``fmt`` defaults to BC3/DXT5 for manifests written before the BC1 column."""
+    ``fmt`` defaults to BC3/DXT5 for manifests written before the BC1 column.
+    Outputs in *extra_changed* are included even when their own PNG is
+    untouched (an atlas whose glyph slices were edited)."""
     from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
@@ -1951,12 +2169,13 @@ def _changed_radium_images(assets_dir, baseline):
             staged = os.path.join(assets_dir, "images", *output.split("/"))
             if not os.path.isfile(staged):
                 continue
-            base = baseline.get("images/" + output)
-            try:
-                if base is not None and md5_file(staged) == base:
-                    continue                   # untouched since extract
-            except OSError:
-                pass
+            if output not in extra_changed:
+                base = baseline.get("images/" + output)
+                try:
+                    if base is not None and md5_file(staged) == base:
+                        continue               # untouched since extract
+                except OSError:
+                    pass
             out.append((output, radium_path, staged, data_off, length,
                         pad_w, pad_h, fmt))
     return out
@@ -1974,8 +2193,14 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
 
     Returns ``(writes, n_images, overlays)`` where ``overlays`` is
     ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
-    inode, so the caller can recompute its ``.sidx`` digest."""
-    edits = _changed_radium_images(assets_dir, baseline)
+    inode, so the caller can recompute its ``.sidx`` digest.
+
+    Edited font-glyph slices (``scene_textures/glyphs/``) are composited into
+    their atlas first (:func:`_glyph_atlas_overrides`), which makes the atlas
+    count as edited and re-encode from the pasted-over pixels."""
+    glyph_atlases = _glyph_atlas_overrides(assets_dir, baseline, log)
+    edits = _changed_radium_images(assets_dir, baseline,
+                                   extra_changed=set(glyph_atlases))
     if not edits:
         return [], 0, {}
     from . import dds as _dds
@@ -2002,8 +2227,10 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
             continue
         payload = encoded.get(staged)
         if payload is None:
+            override = glyph_atlases.get(output)
             try:
-                im = Image.open(staged).convert("RGBA")
+                im = override if override is not None else (
+                    Image.open(staged).convert("RGBA"))
             except Exception as e:
                 log("Radium image %s: can't read PNG (%s); skipped."
                     % (output, e), "warning")
@@ -2014,8 +2241,23 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                     % (output, im.size[0], im.size[1], pad_w, pad_h), "warning")
                 continue
             arr = np.asarray(im, dtype=np.uint8)
-            payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
-                       else _dds.encode_bc3(arr))
+            if (override is not None
+                    and not _atlas_png_changed(staged, baseline, output)):
+                # Glyph-only edit: splice just the changed BC blocks into the
+                # stock atlas bytes so every character the user didn't touch
+                # stays bit-identical (occurrences share one content, so the
+                # first occurrence's bytes serve them all).
+                try:
+                    raw = reader.read_file_bytes(node)[data_off:data_off
+                                                       + length]
+                except Exception:
+                    raw = b""
+                if len(raw) == length:
+                    payload = _splice_changed_blocks(raw, arr, pad_w, pad_h,
+                                                     fmt)
+            if payload is None:
+                payload = (_dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                           else _dds.encode_bc3(arr))
             encoded[staged] = payload
         if len(payload) != length:
             log("Radium image %s: re-encoded to %d bytes but the slot is %d; "
@@ -2190,7 +2432,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)
     texture_edits = _changed_scene_textures(assets_dir, baseline)
-    radimg_edits = _changed_radium_images(assets_dir, baseline)
+    # Edited font-glyph slices make their atlas count as an edited radium image
+    # (the composite happens inside _radium_image_writes).
+    glyph_edits = _changed_glyph_images(assets_dir, baseline)
+    radimg_edits = _changed_radium_images(assets_dir, baseline,
+                                          extra_changed=set(glyph_edits))
     # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
     # back into their image-scNN.bin banks (see _compute_music_patches).
     music_edits = _changed_music_banks(assets_dir, baseline)
@@ -2224,6 +2470,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         log("Found %d replaced image(s) to write." % len(image_edits), "info")
     if texture_edits:
         log("Found %d edited scene texture(s) to write." % len(texture_edits),
+            "info")
+    if glyph_edits:
+        log("Found %d edited font glyph(s) across %d atlas(es) to write."
+            % (sum(len(v) for v in glyph_edits.values()), len(glyph_edits)),
             "info")
     if radimg_edits:
         log("Found %d edited radium image(s) to write." % len(radimg_edits),

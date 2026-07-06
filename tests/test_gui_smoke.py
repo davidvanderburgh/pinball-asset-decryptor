@@ -140,6 +140,137 @@ def test_mfr_select_switches_to_mfr_view(app, manufacturers_by_key):
     assert not app.window._picker_view.winfo_ismapped()
 
 
+def test_audio_group_duplicates_checkbox_only_for_cgc(
+        app, manufacturers_by_key):
+    """The Replace Audio 'Group duplicates' checkbox is packed only for
+    plugins implementing find_duplicate_sounds (CGC — Pulp Fiction ships the
+    same recording at several bank slots); everyone else must not see it."""
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update(); app.root.update()
+    assert win._audio_dup_group_cb.winfo_manager() == "pack"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert win._audio_dup_group_cb.winfo_manager() == ""
+
+
+def test_audio_group_duplicates_renders_two_level_tree(
+        app, manufacturers_by_key):
+    """With 'Group duplicates' on and a warm group cache, the audio list
+    renders one parent per duplicate group (dup-scan order, members nested,
+    'N of M modded' note) and every unique slot flat below; toggling off
+    restores the flat list.  Parent rows must never collide with slot iids
+    and must not offer per-slot actions."""
+    from pinball_decryptor.core.audio_slots import AudioSlot
+    from pinball_decryptor.gui.main_window import _AUD_DUP_GROUP_IID
+
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update(); app.root.update()
+    win = app.window
+
+    rels = ["data/pfspeech/pfspeech_sound_000.wav",
+            "data/pfspeechBEEPD/pfspeechBEEPD_sound_000.wav",
+            "data/pfspeech/pfspeech_sound_001.wav"]
+    win._audio_slots = [
+        AudioSlot(rel_path=r, abs_path="X:/pf/" + r, ext=".wav",
+                  info=None, size=0) for r in rels]
+    win._audio_slots_by_rel = {s.rel_path: s for s in win._audio_slots}
+    win._audio_scan_dir = "X:/pf"
+    win._audio_dup_scan_dir = "X:/pf"
+    win._audio_dup_groups = [("pfspeech_sound_000", "0:01.000",
+                              [rels[0], rels[1]])]
+    win._audio_assignments = {rels[0]: "C:/mods/new.wav"}
+
+    win.audio_group_dups_var.set(True)     # trace triggers the refresh
+    app.root.update()
+    tree = win._audio_tree
+    top = tree.get_children()
+    giid = _AUD_DUP_GROUP_IID + "0"
+    assert list(top) == [giid, rels[2]]    # group first, unique flat below
+    assert set(tree.get_children(giid)) == {rels[0], rels[1]}
+    assert "2 copies" in tree.item(giid, "text")
+    assert "1 of 2 modded" in tree.item(giid, "values")[2]
+
+    win.audio_group_dups_var.set(False)
+    app.root.update()
+    assert set(tree.get_children()) == set(rels)  # flat again
+
+
+def test_audio_apply_to_all_copies_fans_out_assignment(
+        app, manufacturers_by_key):
+    """Right-click 'Apply to all copies' pushes one slot's replacement onto
+    every other copy in its duplicate group, so the machine can't play a
+    still-stock twin — the action that replaced the removed fan-out dialog."""
+    from pinball_decryptor.core.audio_slots import AudioSlot
+
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update(); app.root.update()
+    win = app.window
+
+    rels = ["data/pfspeech/pfspeech_sound_152.wav",
+            "data/pfspeechBEEPD/pfspeechBEEPD_sound_152.wav",
+            "data/pfsndui/pfsndui_sound_011.wav",
+            "data/pfsndfx/pfsndfx_sound_003.wav"]      # a non-duplicate slot
+    win._audio_slots = [
+        AudioSlot(rel_path=r, abs_path="X:/pf/" + r, ext=".wav",
+                  info=None, size=0) for r in rels]
+    win._audio_slots_by_rel = {s.rel_path: s for s in win._audio_slots}
+    win._audio_scan_dir = "X:/pf"
+    win._audio_dup_scan_dir = "X:/pf"
+    win._audio_dup_groups = [("pfspeech_sound_152", "0:02.500", rels[:3])]
+    win._audio_assignments = {rels[0]: "C:/mods/royale.wav"}
+
+    # Siblings resolve only within the group, and only present slots.
+    assert set(win._audio_dup_siblings(rels[0])) == {rels[1], rels[2]}
+    assert win._audio_dup_siblings(rels[3]) == []      # not in any group
+
+    win._audio_fanout_to_copies(rels[0])
+    assert win._audio_assignments[rels[1]] == "C:/mods/royale.wav"
+    assert win._audio_assignments[rels[2]] == "C:/mods/royale.wav"
+    assert rels[3] not in win._audio_assignments       # untouched
+
+
+def test_audio_group_duplicates_off_by_default_and_not_remembered(
+        app, manufacturers_by_key):
+    """'Group duplicates' starts unchecked and isn't carried across a
+    manufacturer switch — it kicks a ~10 s scan, so it must be opt-in each
+    session, never restored on."""
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update()
+    assert not win.audio_group_dups_var.get()
+    win.audio_group_dups_var.set(True)
+    app.root.update()
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update()
+    assert not win.audio_group_dups_var.get()
+
+
+def test_audio_group_duplicates_shows_busy_overlay(app, manufacturers_by_key):
+    """The bank scan runs ~10 s on a worker thread, so the busy painter must
+    clear the list to a centred 'scanning' overlay the instant grouping
+    starts — otherwise the checkbox click looks like a dead pause."""
+    from pinball_decryptor.core.audio_slots import AudioSlot
+
+    app._on_manufacturer_change(manufacturers_by_key["cgc"])
+    app.root.update()
+    win = app.window
+    win._audio_slots = [AudioSlot(rel_path="data/pfspeech/a.wav",
+                                  abs_path="X:/pf/a.wav", ext=".wav",
+                                  info=None, size=0)]
+    win._audio_slots_by_rel = {s.rel_path: s for s in win._audio_slots}
+    win._refresh_audio_list()
+    assert win._audio_tree.get_children()               # flat row present
+
+    win._set_audio_dup_scanning(True)
+    assert not win._audio_tree.get_children()            # cleared to overlay
+    assert win._audio_empty.winfo_manager() == "place"
+    assert "duplicates" in win._audio_empty.cget("text").lower()
+    assert win.audio_status_var.get() == "Grouping duplicates…"
+
+
 def test_transfer_panel_autofills_base_image_and_versions(
         app, manufacturers_by_key, tmp_path):
     """The redesigned transfer panel parses a version hint from each extract's
@@ -267,8 +398,9 @@ def test_cgc_trim_lock_engages_only_for_pf_extract(app, manufacturers_by_key,
 def test_audio_preview_limit_caps_trimmed_replacement(app,
                                                       manufacturers_by_key):
     """When Trim/pad is on and a replacement is longer than its slot, the
-    preview stops at the slot length (matching the machine); the original
-    always previews in full, and a shorter replacement isn't capped."""
+    Replacement pane stops at the slot length (matching the machine); only
+    the Replacement pane is ever capped (the Original pane always passes
+    limit=None), and a shorter replacement isn't capped."""
     app._on_manufacturer_change(manufacturers_by_key["cgc"])
     app.root.update()
     win = app.window
@@ -282,30 +414,51 @@ def test_audio_preview_limit_caps_trimmed_replacement(app,
     win._audio_assignments = {rel: "C:/rep.wav"}
     win._audio_keep_full_flags = {}
     win.audio_trim_var.set(True)
-    win._audio_preview_dur = 61.8    # replacement longer than the 46s slot
 
-    # Replacement + trim on + longer -> capped at the slot length.
-    win.audio_source_var.set("rep")
-    assert win._audio_compute_preview_limit() == 46.0
-
-    # The original always plays in full -> no cap.
-    win.audio_source_var.set("orig")
-    assert win._audio_compute_preview_limit() is None
+    # Trim on + replacement longer than the 46s slot -> capped at slot length.
+    assert win._audio_compute_preview_limit(rel, 61.8) == 46.0
 
     # Trim off -> no cap even for the replacement.
-    win.audio_source_var.set("rep")
     win.audio_trim_var.set(False)
-    assert win._audio_compute_preview_limit() is None
+    assert win._audio_compute_preview_limit(rel, 61.8) is None
 
     # A slot exempted via the per-slot "Full" flag -> no cap.
     win.audio_trim_var.set(True)
     win._audio_keep_full_flags = {rel: True}
-    assert win._audio_compute_preview_limit() is None
+    assert win._audio_compute_preview_limit(rel, 61.8) is None
 
     # Replacement SHORTER than the slot -> no cap (padding is silent).
     win._audio_keep_full_flags = {}
-    win._audio_preview_dur = 30.0
-    assert win._audio_compute_preview_limit() is None
+    assert win._audio_compute_preview_limit(rel, 30.0) is None
+
+
+def test_preview_panes_side_by_side(app, manufacturers_by_key):
+    """Replace Audio + Replace Video previews show Original and Replacement
+    side by side (like the image tab), each with its own play/stop transport
+    — the old single player's Source A/B radios are gone (David)."""
+    app._on_manufacturer_change(manufacturers_by_key["jjp"])
+    app.root.update()
+    w = app.window
+    for orig, rep in ((w._audio_pane_orig, w._audio_pane_rep),
+                      (w._video_pane_orig, w._video_pane_rep)):
+        assert orig is not None and rep is not None
+        # Wired as siblings so starting one pane pauses the other.
+        assert orig.sibling is rep and rep.sibling is orig
+        assert orig.frame.winfo_manager() == "grid"
+        assert rep.frame.winfo_manager() == "grid"
+        # Each pane owns its own transport + clock.
+        assert orig.play_canvas is not rep.play_canvas
+        assert orig.time_var is not rep.time_var
+    # The old single-player Source switch is gone.
+    assert not hasattr(w, "audio_source_var")
+    assert not hasattr(w, "video_source_var")
+    assert not hasattr(w, "_audio_src_rep")
+    assert not hasattr(w, "_video_src_rep")
+    # Clearing resets both panes; the Replacement side keeps its hint.
+    w._audio_clear_preview()
+    w._video_clear_preview()
+    assert w._audio_pane_rep._hint == "no replacement assigned"
+    assert w._video_pane_rep._hint == "no replacement assigned"
 
 
 def test_per_mfr_log_persists_across_switches(app, manufacturers_by_key):
@@ -850,8 +1003,8 @@ def test_help_button_and_per_tab_content(app, manufacturers_by_key):
 def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
     """The header ⚙ replaces the old button row (monkeybug: settings live in
     a dropdown, not permanent top-bar clutter), and the Prerequisites strip
-    tucks itself away once every probe comes back green — reappearing the
-    moment anything is missing."""
+    stays hidden until a probe CONFIRMS something is missing (David: no
+    flash-then-vanish "checking" strip on tab entry)."""
     w = app.window
     assert w._gear_btn.winfo_manager() == "pack"  # visible on the picker too
     label, missing = w._prereq_menu_summary()     # no mfr yet -> "none"
@@ -862,15 +1015,16 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
     try:
         names = list(w._prereq_indicators)
         assert names                              # stern has prereqs
-        assert w._prereqs_frame.winfo_manager() == "pack"
+        # Still checking -> strip stays hidden; only the ⚙ menu says so.
+        assert w._prereqs_frame.winfo_manager() == ""
         assert "checking" in w._prereq_menu_summary()[0]
-        # All green -> strip hides; menu summary says ready.
+        # All green -> strip stays hidden; menu summary says ready.
         for name in names:
             w.set_prereq_result(name, True, "ok")
         assert w._prereqs_frame.winfo_manager() == ""
         label, missing = w._prereq_menu_summary()
         assert "ready" in label and not missing
-        # One goes missing -> strip comes back; Install entry re-arms.
+        # One goes missing -> strip appears; Install entry re-arms.
         w.set_prereq_result(names[0], False, "gone")
         assert w._prereqs_frame.winfo_manager() == "pack"
         label, missing = w._prereq_menu_summary()

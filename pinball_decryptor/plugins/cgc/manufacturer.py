@@ -74,6 +74,16 @@ class CGCManufacturer(Manufacturer):
         "Reads the installer's own log off a card after a failed install "
         "(e.g. \"SHELL ERROR\" on the machine) and checks the install "
         "payload is intact. Read-only — the card is not changed.")
+
+    # Duplicate-sound grouping (Replace Audio tab's "Group duplicates" +
+    # per-slot "Apply to all copies", both gated on this attribute):
+    # Pulp Fiction ships the same recording at multiple bank slots
+    # (pfspeechBEEPD mirrors pfspeech; some lines repeat in pfsndui/pfsndfx),
+    # so replacing one copy can still leave the stock take audible on the
+    # machine.  This decodes every bank slot and groups byte-identical audio.
+    def find_duplicate_sounds(self, assets_dir, log=None):
+        from .dup_sounds import scan_duplicate_sounds
+        return scan_duplicate_sounds(assets_dir, log=log)
     # CGC's nested-disk-image extraction needs ext4 read/write tooling.
     # All work runs in the executor (WSL on Windows, native on Linux,
     # Docker on macOS) -- same model as JJP.

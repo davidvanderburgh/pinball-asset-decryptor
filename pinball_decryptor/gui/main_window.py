@@ -64,6 +64,10 @@ VOICE_QUALITY_CHOICES = (
 # prefix guarantees a group header's iid can't collide with any slot.
 _IMG_GROUP_IID = "::grp::"
 
+# Replace-Audio "Group duplicates" parent-row iid prefix — same collision
+# guarantee as _IMG_GROUP_IID (slot iids are relative paths, never ::-led).
+_AUD_DUP_GROUP_IID = "::dupgrp::"
+
 # Fully-transparent 16×16 RGBA PNG — the "Blank all images" group action
 # assigns it to every slot in a scene so the whole element renders as nothing;
 # Write's normal staging rescales/re-encodes it per slot like any replacement.
@@ -111,6 +115,816 @@ def _render_pinmame_frame(data, w, h, depth, scale, color):
     if scale > 1:
         img = img.resize((w * scale, h * scale), Image.NEAREST)
     return img
+
+
+class _AudioPreviewPane:
+    """One self-contained audio preview player: a seekable spectrogram strip
+    with its own play/stop transport.  The Replace Audio tab shows two of
+    these side by side — Original and Replacement — so a slot and its
+    assigned track can be compared directly, replacing the old single player
+    with a Source A/B switch (David).  Starting one pane pauses its sibling
+    so the two streams never play over each other.
+
+    *win* is the MainWindow (theme, Tk root, shared icon drawing);
+    *on_activate* is called when ▶ is pressed with nothing loaded yet (the
+    window loads the selected row's files, then autoplays this pane)."""
+
+    def __init__(self, win, parent, title, on_activate=None):
+        self._win = win
+        self._on_activate = on_activate
+        self.sibling = None       # the other pane; paused when this one plays
+        self.path = None          # file currently loaded in the strip
+        self.dur = 0.0            # its duration (s)
+        # Effective stop point (s) when Write will trim this file to its slot
+        # length — None when the whole file plays (originals are always None).
+        self.limit = None
+        self.pos = 0.0            # playhead position (s)
+        self.playing = False
+        self._start_pos = 0.0     # ffplay -ss offset in flight
+        self._start_t = 0.0       # monotonic clock at playback start
+        self._proc = None         # ffplay handle, if any
+        self._tick_job = None     # after() id for the position timer
+        self._render_id = 0       # bump to drop stale async renders
+        self._spec_img = None     # PhotoImage ref (must stay alive)
+        self._hint = ""           # message shown when nothing is loaded
+
+        self.frame = ttk.Frame(parent)
+        ttk.Label(self.frame, text=title, font=(_SANS_FONT, 9)).pack(
+            pady=(2, 1))
+        # Spectrogram = the seek bar.  Click or drag anywhere to seek; the
+        # playhead tracks playback.  Rendered by ffmpeg, shown via Pillow.
+        self.spec_canvas = tk.Canvas(
+            self.frame, height=90, highlightthickness=1, bd=0, cursor="hand2")
+        self.spec_canvas.pack(fill=tk.X, expand=True, pady=(0, 2))
+        self.spec_canvas.bind("<Button-1>", self._seek_click)
+        self.spec_canvas.bind("<B1-Motion>", self._seek_click)
+        self.spec_canvas.bind("<Configure>", self._on_canvas_resize, add="+")
+
+        transport = ttk.Frame(self.frame)
+        transport.pack(fill=tk.X)
+        _ib = dict(width=26, height=26, highlightthickness=0, bd=0,
+                   cursor="hand2", takefocus=0)
+        self.play_canvas = tk.Canvas(transport, **_ib)
+        self.play_canvas.pack(side=tk.LEFT)
+        self.play_canvas.bind("<Button-1>", lambda _e: self.toggle_play())
+        self.stop_canvas = tk.Canvas(transport, **_ib)
+        self.stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
+        self.stop_canvas.bind("<Button-1>", lambda _e: self.stop_to_start())
+        self.time_var = tk.StringVar(value="0:00 / 0:00")
+        ttk.Label(transport, textvariable=self.time_var,
+                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
+        self._set_play_btn(False)
+        win._draw_audio_icon(self.stop_canvas, "stop")
+
+    # ---- loading ------------------------------------------------------
+
+    def load(self, path, dur, limit=None, autoplay=False):
+        """Load *path* into the strip.  *dur* is its probed duration (s);
+        *limit* is the trim stop point (s), or None to play the whole file."""
+        self.stop_playback()
+        self.path = path
+        self.dur = dur or 0.0
+        self.limit = limit
+        self.pos = 0.0
+        self._hint = ""
+        self._render_spectrogram(path)
+        self._update_time()
+        if autoplay:
+            self.start_playback(0.0)
+
+    def clear(self, hint=""):
+        """Empty the strip; *hint* is shown centered (e.g. the Replacement
+        pane's 'no replacement assigned')."""
+        self.stop_playback()
+        self.path = None
+        self.dur = 0.0
+        self.limit = None
+        self.pos = 0.0
+        self._render_id += 1  # drop any in-flight render
+        self._spec_img = None
+        self._hint = hint
+        self._draw_hint()
+        self._update_time()
+
+    def _draw_hint(self):
+        canvas = self.spec_canvas
+        canvas.delete("all")
+        if not self._hint:
+            return
+        w = canvas.winfo_width()
+        h = canvas.winfo_height() or 90
+        if w <= 10:  # not mapped yet; <Configure> re-draws once it is
+            return
+        canvas.create_text(w // 2, h // 2, fill="#888888", text=self._hint)
+
+    def _on_canvas_resize(self, _event=None):
+        if self.path is None:
+            self._draw_hint()
+
+    def _render_spectrogram(self, path):
+        """Render the full-track spectrogram on a worker thread, then draw
+        it.  Stale renders (track changed) are dropped via a counter."""
+        canvas = self.spec_canvas
+        self._render_id += 1
+        rid = self._render_id
+        w = max(200, canvas.winfo_width())
+        h = 90  # fixed canvas height (widget is created height=90)
+        canvas.delete("all")
+        if not _HAVE_PIL:
+            canvas.create_text(w // 2, h // 2, fill="#888888",
+                               text="(install Pillow to see the spectrogram)")
+            return
+        canvas.create_text(w // 2, h // 2, fill="#888888",
+                           text="rendering preview…", tags=("hint",))
+
+        import threading
+        from ..core import audio as _audio
+
+        def _work():
+            png = _audio.render_spectrogram_png(path, w, h)
+            if self._render_id != rid:
+                return
+            self._win._tk_root().after(
+                0, self._show_spectrogram, png, rid, w, h)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_spectrogram(self, png, rid, w, h):
+        if self._render_id != rid:
+            return
+        canvas = self.spec_canvas
+        canvas.delete("all")
+        if png:
+            try:
+                import io
+                img = Image.open(io.BytesIO(png)).convert("RGB")
+                self._spec_img = ImageTk.PhotoImage(img)
+                canvas.create_image(0, 0, anchor=tk.NW,
+                                    image=self._spec_img, tags=("spec",))
+            except Exception:
+                self._spec_img = None
+        else:
+            canvas.create_text(w // 2, h // 2, fill="#888888",
+                               text="(preview needs ffmpeg)")
+        self._draw_cut_marker()
+        self._draw_playhead()
+
+    def _draw_cut_marker(self):
+        """Mark where a trimmed replacement stops: a dashed line at the slot
+        length with the trimmed tail hatched out, so the spectrogram shows
+        exactly what the machine will play."""
+        canvas = self.spec_canvas
+        canvas.delete("cutmark")
+        lim, dur = self.limit, self.dur
+        if lim is None or dur <= 0:
+            return
+        w = max(1, canvas.winfo_width())
+        h = canvas.winfo_height() or 90
+        x = max(0, min(w, int((lim / dur) * w)))
+        # Hatch the trimmed tail (stipple = pseudo-transparency in Tk) and
+        # draw a red cut line + a small label.
+        canvas.create_rectangle(x, 0, w, h, fill="#000000", outline="",
+                                stipple="gray50", tags=("cutmark",))
+        canvas.create_line(x, 0, x, h, fill="#ff6b6b", width=1,
+                           dash=(3, 2), tags=("cutmark",))
+        if x < w - 24:
+            canvas.create_text(x + 3, 8, anchor=tk.W, fill="#ff9d9d",
+                               text="trimmed", tags=("cutmark",))
+
+    # ---- transport ----------------------------------------------------
+
+    def toggle_play(self):
+        """Play/pause.  ffplay (-nodisp) can't pause in place, so pause =
+        stop + remember position; resume = restart ffplay at that position."""
+        if self.path is None:
+            if self._on_activate is not None:
+                self._on_activate()
+            return
+        if self.playing:
+            self.stop_playback()  # pause, keeps position
+        else:
+            stop_at = self.limit if self.limit is not None else self.dur
+            if stop_at > 0 and self.pos >= stop_at - 0.05:
+                self.pos = 0.0  # replay from start
+            self.start_playback(self.pos)
+
+    def stop_to_start(self):
+        self.stop_playback()
+        self.pos = 0.0
+        self._draw_playhead()
+
+    def _set_play_btn(self, playing):
+        self._win._draw_audio_icon(self.play_canvas,
+                                   "pause" if playing else "play")
+
+    def start_playback(self, pos):
+        import time
+        from ..core import audio as _audio
+        if self.sibling is not None:
+            self.sibling.stop_playback()  # never talk over the other pane
+        _audio.stop_audio(self._proc)
+        proc = _audio.play_audio_file(self.path, start=pos, limit=self.limit)
+        if proc is None:
+            self.playing = False
+            self._set_play_btn(False)
+            messagebox.showwarning(
+                "Can't Preview",
+                "Audio preview needs ffplay, which ships with the FULL ffmpeg "
+                "build but NOT the \"essentials\" build.\n\n"
+                "Fix it one of these ways:\n"
+                "  • Use \"Install Missing\" above the tabs (installs the full "
+                "build), then restart this app, or\n"
+                "  • Download the full ffmpeg build and drop ffplay.exe in the "
+                "same folder as ffmpeg.exe (run `where ffmpeg` to find it), "
+                "then restart.\n\n"
+                "Preview is optional -- it doesn't affect building the update; "
+                "your replacements still get staged and written.")
+            return
+        self._proc = proc
+        self._start_pos = pos
+        self._start_t = time.monotonic()
+        self.pos = pos
+        self.playing = True
+        self._set_play_btn(True)
+        self._schedule_tick()
+
+    def _schedule_tick(self):
+        if self._tick_job is not None:
+            try:
+                self._win._tk_root().after_cancel(self._tick_job)
+            except Exception:
+                pass
+        self._tick_job = self._win._tk_root().after(60, self._tick)
+
+    def _tick(self):
+        import time
+        self._tick_job = None
+        if not self.playing:
+            return
+        proc = self._proc
+        self.pos = self._start_pos + (time.monotonic() - self._start_t)
+        # Stop at the trim point if there is one, else the file's end.
+        stop_at = self.limit if self.limit is not None else self.dur
+        ended = (proc is None or proc.poll() is not None
+                 or (stop_at > 0 and self.pos >= stop_at))
+        if ended:
+            # ffplay -t exits itself at the cap, but the OS-native fallback
+            # can't -- kill it so the preview really stops at the trim point.
+            from ..core import audio as _audio
+            _audio.stop_audio(proc)
+            self._proc = None
+            self.playing = False
+            self.pos = 0.0  # reset so ▶ replays from the start
+            self._set_play_btn(False)
+            self._draw_playhead()
+            return
+        self._draw_playhead()
+        self._schedule_tick()
+
+    def _draw_playhead(self):
+        canvas = self.spec_canvas
+        canvas.delete("playhead")
+        if self.dur > 0 and self.path:
+            w = max(1, canvas.winfo_width())
+            h = canvas.winfo_height() or 90
+            x = int((self.pos / self.dur) * w)
+            x = max(0, min(w, x))
+            canvas.create_line(x, 0, x, h, fill="#ffffff", width=1,
+                               tags=("playhead",))
+        self._update_time()
+
+    def _update_time(self):
+        def _fmt(s):
+            s = max(0, int(s))
+            return f"{s // 60}:{s % 60:02d}"
+        if self.path and self.dur > 0:
+            if self.limit is not None:
+                # The machine plays only up to the trim point -- show that as
+                # the length, and note the full clip length that got cut.
+                self.time_var.set(
+                    f"{_fmt(self.pos)} / {_fmt(self.limit)}  "
+                    f"(trimmed from {_fmt(self.dur)})")
+            else:
+                self.time_var.set(f"{_fmt(self.pos)} / {_fmt(self.dur)}")
+        else:
+            self.time_var.set("0:00 / 0:00")
+
+    def _seek_click(self, event):
+        if not self.path or self.dur <= 0:
+            return
+        w = max(1, self.spec_canvas.winfo_width())
+        frac = max(0.0, min(1.0, event.x / w))
+        pos = frac * self.dur
+        # A click in the trimmed (hatched) tail has nothing to play -- clamp
+        # to just before the cut so the playhead stays in the audible region.
+        if self.limit is not None:
+            pos = min(pos, max(0.0, self.limit - 0.05))
+        self.pos = pos
+        if self.playing:
+            self.start_playback(self.pos)  # live re-seek
+        else:
+            self._draw_playhead()
+
+    def stop_playback(self):
+        """Stop playback (keeps the strip + playhead where it landed)."""
+        from ..core import audio as _audio
+        _audio.stop_audio(self._proc)
+        self._proc = None
+        self.playing = False
+        if self._tick_job is not None:
+            try:
+                self._win._tk_root().after_cancel(self._tick_job)
+            except Exception:
+                pass
+            self._tick_job = None
+        self._set_play_btn(False)
+        self._draw_playhead()
+
+    def apply_theme(self, c):
+        """Re-skin after a theme change (canvas chrome + transport icons)."""
+        self.spec_canvas.configure(background=c["field_bg"],
+                                   highlightbackground=c["border"])
+        for cv in (self.play_canvas, self.stop_canvas):
+            cv.configure(background=c["bg"])
+        self._set_play_btn(self.playing)
+        self._win._draw_audio_icon(self.stop_canvas, "stop")
+
+
+class _VideoPreviewPane:
+    """One self-contained embedded video player: a frame canvas (a decode
+    thread streams raw frames here while ffplay carries the sound), a seek
+    bar, and its own play/stop transport.  The Replace Video tab shows two
+    of these side by side — Original and Replacement — replacing the old
+    single player with a Source A/B switch (David).  Starting one pane
+    pauses its sibling so the soundtracks never overlap."""
+
+    MAX_W, MAX_H = 320, 180
+
+    def __init__(self, win, parent, title, on_activate=None):
+        self._win = win
+        self._on_activate = on_activate
+        self.sibling = None       # the other pane; paused when this one plays
+        self.path = None          # file currently loaded in the player
+        self.info = None          # its VideoInfo (dims / fps / alpha)
+        self.dur = 0.0            # duration (s)
+        self.pos = 0.0            # playhead position (s)
+        self.playing = False
+        self._start_pos = 0.0     # decode/audio -ss offset in flight
+        self._start_t = 0.0       # monotonic clock at playback start
+        self._audio_proc = None   # ffplay handle carrying the sound
+        self._decode_proc = None  # ffmpeg raw-frame stream handle
+        self._decode_thread = None
+        self._stop_event = None   # signals the decode thread to exit
+        self._frame_q = None      # queue of (idx, rgb_bytes) frames
+        self._session = 0         # bump to invalidate a play session
+        self._render_id = 0       # bump to drop stale single-frame renders
+        self._frame_img = None    # PhotoImage ref (must stay alive)
+        self._disp_w = self.MAX_W  # frame-canvas draw size (aspect-fit)
+        self._disp_h = self.MAX_H
+        self._tick_job = None     # after() id for the playback timer
+        self._scrub_job = None    # debounce: decode a frame while scrubbing
+        self._hint = ""           # message shown when nothing is loaded
+
+        self.frame = ttk.Frame(parent)
+        ttk.Label(self.frame, text=title, font=(_SANS_FONT, 9)).pack(
+            pady=(2, 1))
+        self.canvas = tk.Canvas(
+            self.frame, width=self.MAX_W, height=self.MAX_H,
+            highlightthickness=1, bd=0, background="#000000")
+        self.canvas.pack(pady=(0, 2))
+        self.canvas.bind("<Configure>", self._on_canvas_resize, add="+")
+        # Seek bar: click or drag to seek; the playhead tracks playback.
+        self.seek_canvas = tk.Canvas(
+            self.frame, height=16, highlightthickness=1, bd=0, cursor="hand2")
+        self.seek_canvas.pack(fill=tk.X, pady=(0, 2))
+        self.seek_canvas.bind("<Button-1>", self._seek_click)
+        self.seek_canvas.bind("<B1-Motion>", self._seek_click)
+
+        transport = ttk.Frame(self.frame)
+        transport.pack(fill=tk.X)
+        _ib = dict(width=26, height=26, highlightthickness=0, bd=0,
+                   cursor="hand2", takefocus=0)
+        self.play_canvas = tk.Canvas(transport, **_ib)
+        self.play_canvas.pack(side=tk.LEFT)
+        self.play_canvas.bind("<Button-1>", lambda _e: self.toggle_play())
+        self.stop_canvas = tk.Canvas(transport, **_ib)
+        self.stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
+        self.stop_canvas.bind("<Button-1>", lambda _e: self.stop_to_start())
+        self.time_var = tk.StringVar(value="0:00 / 0:00")
+        ttk.Label(transport, textvariable=self.time_var,
+                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
+        self._set_play_btn(False)
+        win._draw_audio_icon(self.stop_canvas, "stop")
+
+    # ---- loading ------------------------------------------------------
+
+    def load(self, path, autoplay=False):
+        """Load *path* into the player and poster a representative frame."""
+        from ..core import video as _video
+        self._cancel_scrub()
+        self.stop_playback()
+        self._hint = ""
+        self.path = path
+        info = _video.detect_video_info(path)
+        self.info = info
+        dur = (info.duration if info and info.duration > 0
+               else _video.probe_video_duration(path))
+        self.dur = dur or 0.0
+        self.pos = 0.0
+        self._compute_disp_size(info)
+        # Poster a representative frame, not the frame at 0.0 -- many clips
+        # open on a black leader frame, which looked like a broken/empty
+        # preview.  Grab mid-clip when the duration is known, else a small
+        # offset in.  The playhead stays at 0.0; this only changes the still.
+        poster_pos = self.dur * 0.5 if self.dur > 0.2 else 0.5
+        self._render_poster(poster_pos)
+        self._update_time()
+        if autoplay:
+            self.start_playback(0.0)
+
+    def clear(self, hint=""):
+        """Reset the player entirely; *hint* is shown centered on the frame
+        canvas (e.g. the Replacement pane's 'no replacement assigned')."""
+        self._cancel_scrub()
+        self.stop_playback()
+        self.path = None
+        self.info = None
+        self.dur = 0.0
+        self.pos = 0.0
+        self._render_id += 1  # drop any in-flight render
+        self._frame_img = None
+        self._hint = hint
+        self._draw_hint()
+        self.seek_canvas.delete("all")
+        self._update_time()
+
+    def _draw_hint(self):
+        canvas = self.canvas
+        canvas.delete("all")
+        if not self._hint:
+            return
+        cw, ch = canvas.winfo_width(), canvas.winfo_height()
+        if cw <= 10:  # not mapped yet; <Configure> re-draws once it is
+            cw, ch = self.MAX_W, self.MAX_H
+        canvas.create_text(cw // 2, ch // 2, fill="#888888", width=cw - 16,
+                           text=self._hint)
+
+    def _on_canvas_resize(self, _event=None):
+        if self.path is None:
+            self._draw_hint()
+
+    def _compute_disp_size(self, info):
+        """Aspect-fit the clip inside the frame canvas; store the even-numbered
+        draw size used by both the poster render and the decode stream."""
+        max_w, max_h = self.MAX_W, self.MAX_H
+        if info and info.width > 0 and info.height > 0:
+            w, h = info.width, info.height
+        else:
+            w, h = 16, 9
+        scale = min(max_w / w, max_h / h)
+        dw = max(16, int(w * scale))
+        dh = max(16, int(h * scale))
+        self._disp_w = dw - (dw % 2)
+        self._disp_h = dh - (dh % 2)
+
+    def _render_poster(self, pos):
+        """Decode a single frame at *pos* on a worker thread, then show it.
+        Stale renders (clip/seek changed) are dropped via a counter."""
+        canvas = self.canvas
+        path = self.path
+        self._render_id += 1
+        rid = self._render_id
+        cw, ch = canvas.winfo_width(), canvas.winfo_height()
+        if cw <= 10:
+            cw, ch = self.MAX_W, self.MAX_H
+        canvas.delete("all")
+        if not _HAVE_PIL:
+            canvas.create_text(cw // 2, ch // 2, fill="#bbbbbb",
+                               width=cw - 16,
+                               text="Install Pillow to preview frames in-app "
+                                    "(Play still opens an ffplay window).")
+            return
+        canvas.create_text(cw // 2, ch // 2, fill="#888888",
+                           text="loading frame…")
+
+        import threading
+        from ..core import video as _video
+
+        def _work():
+            png = _video.extract_frame_png(
+                path, pos, self._disp_w, self._disp_h)
+            if self._render_id != rid:
+                return
+            self._win._tk_root().after(0, self._show_poster, png, rid)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_poster(self, png, rid):
+        if self._render_id != rid:
+            return
+        canvas = self.canvas
+        canvas.delete("all")
+        cw = canvas.winfo_width() or self.MAX_W
+        ch = canvas.winfo_height() or self.MAX_H
+        if png and _HAVE_PIL:
+            try:
+                import io
+                img = Image.open(io.BytesIO(png)).convert("RGB")
+                self._frame_img = ImageTk.PhotoImage(img)
+                canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
+                                    image=self._frame_img, tags=("frame",))
+            except Exception:
+                self._frame_img = None
+        else:
+            canvas.create_text(cw // 2, ch // 2, fill="#888888",
+                               text="(preview needs ffmpeg)")
+        self._draw_playhead()
+
+    def _show_frame_rgb(self, data):
+        """Display one raw rgb24 frame (from the decode thread) on the canvas."""
+        if not _HAVE_PIL:
+            return
+        w, h = self._disp_w, self._disp_h
+        if not data or len(data) != w * h * 3:
+            return
+        try:
+            img = Image.frombytes("RGB", (w, h), data)
+            self._frame_img = ImageTk.PhotoImage(img)
+            canvas = self.canvas
+            cw = canvas.winfo_width() or self.MAX_W
+            ch = canvas.winfo_height() or self.MAX_H
+            canvas.delete("frame")
+            canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
+                                image=self._frame_img, tags=("frame",))
+        except Exception:
+            pass
+
+    # ---- transport ----------------------------------------------------
+
+    def toggle_play(self):
+        if self.path is None:
+            if self._on_activate is not None:
+                self._on_activate()
+            return
+        if self.playing:
+            self.stop_playback()  # pause, keeps position
+            self._draw_playhead()
+        else:
+            if self.dur > 0 and self.pos >= self.dur - 0.05:
+                self.pos = 0.0  # replay from start
+            self.start_playback(self.pos)
+
+    def stop_to_start(self):
+        self.stop_playback()
+        self.pos = 0.0
+        self._draw_playhead()
+        if self.path:
+            self._render_poster(0.0)
+
+    def _set_play_btn(self, playing):
+        self._win._draw_audio_icon(self.play_canvas,
+                                   "pause" if playing else "play")
+
+    def start_playback(self, pos):
+        import threading
+        import queue
+        import time
+        from ..core import audio as _audio
+        from ..core import video as _video
+
+        self.stop_playback()  # tear down any prior session
+        if self.sibling is not None:
+            self.sibling.stop_playback()  # never talk over the other pane
+        path = self.path
+        if not path:
+            return
+        info = self.info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+        w, h = self._disp_w, self._disp_h
+
+        proc = (_video.open_raw_stream(path, w, h, fps, start=pos)
+                if _HAVE_PIL else None)
+        if proc is None:
+            # No ffmpeg frame stream (or no Pillow): fall back to a windowed
+            # ffplay that plays video + audio in its own window.
+            ap = _video.play_video_windowed(path, start=pos)
+            if ap is None:
+                messagebox.showwarning(
+                    "Can't Preview",
+                    "Video preview needs ffmpeg / ffplay on your PATH.\n\n"
+                    "Install ffmpeg to preview clips before staging.")
+                return
+            self._audio_proc = ap
+        else:
+            self._session += 1
+            self._decode_proc = proc
+            stop_event = threading.Event()
+            self._stop_event = stop_event
+            q = queue.Queue(maxsize=int(max(8, fps)))  # ~1s of frames
+            self._frame_q = q
+            framesize = w * h * 3
+            t = threading.Thread(
+                target=self._decode_worker,
+                args=(proc, framesize, q, stop_event), daemon=True)
+            self._decode_thread = t
+            t.start()
+            # Sound: ffplay -nodisp carries the audio track.  Most formats play
+            # their own audio; a custom backend (.cdmd) points at a sibling
+            # .wav instead.
+            if info is None or info.has_audio:
+                asrc = _video.audio_source_for(path)
+                if asrc:
+                    self._audio_proc = _audio.play_audio_file(asrc, start=pos)
+
+        self._start_pos = pos
+        self._start_t = time.monotonic()
+        self.pos = pos
+        self.playing = True
+        self._set_play_btn(True)
+        self._schedule_tick()
+
+    def _decode_worker(self, proc, framesize, q, stop_event):
+        """Worker thread: read raw rgb24 frames from ffmpeg into *q* until the
+        stream ends or the session is cancelled."""
+        import queue as _q
+        idx = 0
+        try:
+            stdout = proc.stdout
+            while not stop_event.is_set():
+                data = stdout.read(framesize)
+                if not data or len(data) < framesize:
+                    break
+                while not stop_event.is_set():
+                    try:
+                        q.put((idx, data), timeout=0.2)
+                        break
+                    except _q.Full:
+                        continue
+                idx += 1
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                q.put((None, None), timeout=0.2)  # sentinel: stream ended
+            except Exception:
+                pass
+
+    def _schedule_tick(self):
+        info = self.info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+        # Poll a bit faster than the frame rate so the queue stays drained.
+        interval = int(1000 / (fps * 1.3))
+        interval = max(10, min(45, interval))
+        if self._tick_job is not None:
+            try:
+                self._win._tk_root().after_cancel(self._tick_job)
+            except Exception:
+                pass
+        self._tick_job = self._win._tk_root().after(interval, self._tick)
+
+    def _tick(self):
+        import time
+        import queue as _q
+        self._tick_job = None
+        if not self.playing:
+            return
+
+        self.pos = self._start_pos + (time.monotonic() - self._start_t)
+        info = self.info
+        fps = info.fps if (info and info.fps > 0) else 30.0
+
+        ended = False
+        q = self._frame_q
+        if q is not None:
+            # Drain up to the frame the clock has reached; show the latest.
+            desired = int((self.pos - self._start_pos) * fps)
+            frame = None
+            while True:
+                try:
+                    idx, data = q.get_nowait()
+                except _q.Empty:
+                    break
+                if idx is None:
+                    ended = True
+                    break
+                frame = data
+                if idx >= desired:
+                    break
+            if frame is not None:
+                self._show_frame_rgb(frame)
+        else:
+            # Windowed-ffplay fallback: end when that process exits.
+            ap = self._audio_proc
+            if ap is not None and ap.poll() is not None:
+                ended = True
+
+        if not ended and self.dur > 0 and self.pos >= self.dur:
+            ended = True
+
+        if ended:
+            self.stop_playback()
+            self.pos = 0.0  # so ▶ replays from the start
+            self._draw_playhead()
+            if self.path:
+                self._render_poster(0.0)
+            return
+
+        self._draw_playhead()
+        self._schedule_tick()
+
+    def _draw_playhead(self):
+        canvas = self.seek_canvas
+        canvas.delete("all")
+        w = max(1, canvas.winfo_width())
+        h = canvas.winfo_height() or 16
+        c = THEMES.get(self._win._current_theme, {})
+        canvas.create_rectangle(0, 0, w, h,
+                                fill=c.get("field_bg", "#222222"), outline="")
+        if self.dur > 0 and self.path:
+            x = int((self.pos / self.dur) * w)
+            x = max(0, min(w, x))
+            canvas.create_rectangle(0, 0, x, h,
+                                    fill=c.get("select_bg", "#3a6ea5"),
+                                    outline="")
+            canvas.create_line(x, 0, x, h, fill="#ffffff", width=2)
+        self._update_time()
+
+    def _update_time(self):
+        def _fmt(s):
+            s = max(0, int(s))
+            return f"{s // 60}:{s % 60:02d}"
+        if self.path and self.dur > 0:
+            self.time_var.set(f"{_fmt(self.pos)} / {_fmt(self.dur)}")
+        else:
+            self.time_var.set("0:00 / 0:00")
+
+    def _seek_click(self, event):
+        if not self.path or self.dur <= 0:
+            return
+        w = max(1, self.seek_canvas.winfo_width())
+        frac = max(0.0, min(1.0, event.x / w))
+        self.pos = frac * self.dur
+        if self.playing:
+            self.start_playback(self.pos)  # live re-seek
+        else:
+            self._draw_playhead()
+            self._schedule_scrub()  # decode the frame at rest (debounced)
+
+    def _schedule_scrub(self):
+        self._cancel_scrub()
+        self._scrub_job = self._win._tk_root().after(120, self._do_scrub)
+
+    def _cancel_scrub(self):
+        if self._scrub_job is not None:
+            try:
+                self._win._tk_root().after_cancel(self._scrub_job)
+            except Exception:
+                pass
+            self._scrub_job = None
+
+    def _do_scrub(self):
+        self._scrub_job = None
+        if self.playing or not self.path:
+            return
+        self._render_poster(self.pos)
+
+    def stop_playback(self):
+        """Stop playback: cancel the session, kill the decode + audio
+        processes, and stop the timer (keeps the playhead where it landed)."""
+        from ..core import audio as _audio
+        self._session += 1  # invalidate any in-flight session
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._decode_proc is not None:
+            try:
+                if self._decode_proc.poll() is None:
+                    self._decode_proc.terminate()
+            except OSError:
+                pass
+        self._decode_proc = None
+        _audio.stop_audio(self._audio_proc)
+        self._audio_proc = None
+        self._decode_thread = None
+        self._stop_event = None
+        self._frame_q = None
+        self.playing = False
+        if self._tick_job is not None:
+            try:
+                self._win._tk_root().after_cancel(self._tick_job)
+            except Exception:
+                pass
+            self._tick_job = None
+        self._set_play_btn(False)
+
+    def apply_theme(self, c):
+        """Re-skin after a theme change (canvas chrome + transport icons)."""
+        self.canvas.configure(highlightbackground=c["border"])
+        self.seek_canvas.configure(highlightbackground=c["border"])
+        for cv in (self.play_canvas, self.stop_canvas):
+            cv.configure(background=c["bg"])
+        self._set_play_btn(self.playing)
+        self._win._draw_audio_icon(self.stop_canvas, "stop")
+        self._draw_playhead()
 
 
 class MainWindow:
@@ -282,6 +1096,20 @@ class MainWindow:
         self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
+        # "Group duplicates" (CGC banks): cluster slots that carry
+        # byte-identical factory audio under one parent row.  The grouping
+        # comes from the plugin's duplicate scan (~10 s on a full PF
+        # extract), cached per folder; ticking the box with a cold cache
+        # kicks the scan and shows a busy overlay until it lands.  NOT
+        # persisted — off by default each session so a folder load never
+        # auto-kicks the scan.
+        self.audio_group_dups_var = tk.BooleanVar(value=False)
+        self.audio_group_dups_var.trace_add(
+            "write", lambda *a: self._refresh_audio_list())
+        self._audio_dup_groups = None    # [(label, dur_str, [rel, …]), …]
+        self._audio_dup_scan_dir = ""    # folder the dup groups came from
+        self._audio_dup_scan_id = 0      # bump-counter to drop stale scans
+        self._audio_dup_scanning = False
         # Slots whose on-disk bytes differ from the Extract baseline even though
         # the user hasn't assigned a replacement *this* session — i.e. edits
         # already staged by a previous build (or hand-edited).  The Write step
@@ -292,22 +1120,12 @@ class MainWindow:
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
         self._change_scan_id = 0         # bump-counter for the background diff
-        self._audio_play_proc = None     # ffplay preview handle, if any
-        # Preview strip (seekable spectrogram) state.
-        self._audio_preview_path = None  # file currently loaded in the strip
-        self._audio_preview_dur = 0.0    # its duration (s)
-        # Effective stop point (s) when previewing a replacement that Write
-        # will trim to its slot length -- None when the whole file plays.
-        self._audio_preview_limit = None
-        self._audio_preview_pos = 0.0    # playhead position (s)
-        self._audio_preview_playing = False
-        self._audio_preview_start_pos = 0.0  # ffplay -ss offset in flight
-        self._audio_preview_start_t = 0.0    # monotonic clock at playback start
-        self._audio_spec_img = None      # PhotoImage ref (must stay alive)
-        self._audio_spec_render_id = 0   # bump to drop stale async renders
-        self._audio_tick_job = None      # after() id for the position timer
-        self._audio_select_job = None    # debounce: render seek bar on select
-        self._audio_current_rel = None   # the slot loaded in the preview player
+        # Preview players: Original + Replacement side-by-side panes
+        # (_AudioPreviewPane), built with the tab; None for plugins without it.
+        self._audio_pane_orig = None
+        self._audio_pane_rep = None
+        self._audio_select_job = None    # debounce: load preview on select
+        self._audio_current_rel = None   # the slot loaded in the preview panes
         self.audio_search_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
         # Replace-Video tab state (capabilities.replace_video plugins).
@@ -327,28 +1145,12 @@ class MainWindow:
         self._video_assignments = {}     # rel_path -> replacement file path
         self._video_scan_id = 0          # bump-counter to drop stale scans
         self._video_scan_dir = ""        # folder the current slots came from
-        # Embedded preview-player state.
-        self._video_preview_path = None  # file currently loaded in the player
-        self._video_preview_info = None  # its VideoInfo (dims / fps / alpha)
-        self._video_preview_dur = 0.0    # duration (s)
-        self._video_preview_pos = 0.0    # playhead position (s)
-        self._video_preview_playing = False
-        self._video_preview_start_pos = 0.0  # decode/audio -ss offset in flight
-        self._video_preview_start_t = 0.0    # monotonic clock at playback start
-        self._video_audio_proc = None    # ffplay handle carrying the sound
-        self._video_decode_proc = None   # ffmpeg raw-frame stream handle
-        self._video_decode_thread = None
-        self._video_stop_event = None    # signals the decode thread to exit
-        self._video_frame_q = None       # queue of (idx, rgb_bytes) frames
-        self._video_session = 0          # bump to invalidate a play session
-        self._video_render_id = 0        # bump to drop stale single-frame renders
-        self._video_frame_img = None     # PhotoImage ref (must stay alive)
-        self._video_disp_w = 320         # frame-canvas draw size (aspect-fit)
-        self._video_disp_h = 180
-        self._video_tick_job = None      # after() id for the playback timer
+        # Preview players: Original + Replacement side-by-side panes
+        # (_VideoPreviewPane), built with the tab; None for plugins without it.
+        self._video_pane_orig = None
+        self._video_pane_rep = None
         self._video_select_job = None    # debounce: load preview on select
-        self._video_scrub_job = None     # debounce: decode a frame while scrubbing
-        self._video_current_rel = None   # slot loaded in the preview player
+        self._video_current_rel = None   # slot loaded in the preview panes
         self.video_search_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
         # Replace-Image tab state (capabilities.replace_image plugins).
@@ -1858,8 +2660,25 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.audio_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        ttk.Label(tools, text="(click a column header to sort)",
-                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
+        # "Group duplicates" — created here, packed per-manufacturer next to
+        # the sort hint (apply_manufacturer, CGC only).
+        self._audio_dup_group_cb = ttk.Checkbutton(
+            tools, text="Group duplicates",
+            variable=self.audio_group_dups_var,
+            command=self._on_audio_group_dups_toggle)
+        _Tooltip(
+            self._audio_dup_group_cb,
+            "Group the slots that carry byte-identical factory audio under "
+            "one row, so every copy of a sound sits together. The first "
+            "tick scans the sound banks (about ten seconds). The game may "
+            "play any copy of a duplicated sound, so mod them together — "
+            "assign a replacement to one copy, then right-click it and "
+            "choose \"Apply to all copies\".",
+            lambda: self._current_theme)
+        self._audio_sort_hint_lbl = ttk.Label(
+            tools, text="(click a column header to sort)",
+            font=(_SANS_FONT, 8, "italic"))
+        self._audio_sort_hint_lbl.pack(side=tk.LEFT)
         self._audio_status_lbl = ttk.Label(
             tools, textvariable=self.audio_status_var,
             font=(_SANS_FONT, 9))
@@ -1941,55 +2760,30 @@ class MainWindow:
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # --- Preview player: a media-player-style panel with the spectrogram
-        # seek bar and the transport controls (play/pause, stop, time, and an
-        # A/B Original ↔ Replacement source switch) all colocated. ---
+        # --- Preview players: Original and Replacement side by side (like
+        # the image tab), each a media-player-style panel with its own
+        # spectrogram seek bar and transport — replacing the old single
+        # player + Source A/B switch (David).  Starting one pane pauses the
+        # other so the two tracks never play over each other. ---
         player = ttk.LabelFrame(f, text=" Preview ")
         player.pack(fill=tk.X, padx=10, pady=(4, 2))
-
-        # Spectrogram = the seek bar.  Click or drag anywhere to seek; the
-        # playhead tracks playback.  Rendered by ffmpeg, shown via Pillow.
-        self._audio_spec_canvas = tk.Canvas(
-            player, height=90, highlightthickness=1, bd=0, cursor="hand2")
-        self._audio_spec_canvas.pack(fill=tk.X, padx=6, pady=(6, 2))
-        self._audio_spec_canvas.bind("<Button-1>", self._audio_seek_click)
-        self._audio_spec_canvas.bind("<B1-Motion>", self._audio_seek_click)
-
-        transport = ttk.Frame(player)
-        transport.pack(fill=tk.X, padx=6, pady=(2, 6))
-        # Borderless, same-family icons drawn on a Canvas (play/pause triangle
-        # ↔ two bars, stop square) so they're crisp, uniform, and have no
-        # button box around them.  Coloured + sized in _draw_audio_icon.
-        _IB = dict(width=26, height=26, highlightthickness=0, bd=0,
-                   cursor="hand2", takefocus=0)
-        self._audio_play_canvas = tk.Canvas(transport, **_IB)
-        self._audio_play_canvas.pack(side=tk.LEFT)
-        self._audio_play_canvas.bind(
-            "<Button-1>", lambda _e: self._audio_toggle_play())
-        self._audio_stop_canvas = tk.Canvas(transport, **_IB)
-        self._audio_stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
-        self._audio_stop_canvas.bind(
-            "<Button-1>", lambda _e: self._audio_stop_to_start())
-        self.audio_time_var = tk.StringVar(value="0:00 / 0:00")
-        ttk.Label(transport, textvariable=self.audio_time_var,
-                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
-
-        # A/B source switch — flip between the original and your replacement
-        # to compare them in the same player.  Replacement is disabled until
-        # the selected slot has one assigned.
-        self.audio_source_var = tk.StringVar(value="orig")
-        srcbox = ttk.Frame(transport); srcbox.pack(side=tk.RIGHT)
-        ttk.Label(srcbox, text="Source:").pack(side=tk.LEFT, padx=(0, 4))
-        self._audio_src_orig = ttk.Radiobutton(
-            srcbox, text="Original", value="orig",
-            variable=self.audio_source_var,
-            command=self._audio_on_source_change)
-        self._audio_src_orig.pack(side=tk.LEFT)
-        self._audio_src_rep = ttk.Radiobutton(
-            srcbox, text="Replacement", value="rep", state=tk.DISABLED,
-            variable=self.audio_source_var,
-            command=self._audio_on_source_change)
-        self._audio_src_rep.pack(side=tk.LEFT, padx=(4, 0))
+        panes = ttk.Frame(player)
+        panes.pack(fill=tk.X, padx=6, pady=(2, 6))
+        panes.columnconfigure(0, weight=1, uniform="audiopane")
+        panes.columnconfigure(1, weight=1, uniform="audiopane")
+        self._audio_pane_orig = _AudioPreviewPane(
+            self, panes, "Original",
+            on_activate=lambda: self._audio_activate_pane("orig"))
+        self._audio_pane_rep = _AudioPreviewPane(
+            self, panes, "Replacement",
+            on_activate=lambda: self._audio_activate_pane("rep"))
+        self._audio_pane_orig.sibling = self._audio_pane_rep
+        self._audio_pane_rep.sibling = self._audio_pane_orig
+        self._audio_pane_orig.frame.grid(row=0, column=0, sticky="ew",
+                                         padx=(0, 4))
+        self._audio_pane_rep.frame.grid(row=0, column=1, sticky="ew",
+                                        padx=(4, 0))
+        self._audio_pane_rep.clear("no replacement assigned")
 
         # Length-matching option + per-manufacturer guidance note.  The
         # checkbox is forced on + disabled for plugins whose Write always
@@ -2116,6 +2910,10 @@ class MainWindow:
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
+            # "Group duplicates" is NOT persisted/restored: it's off by
+            # default and opt-in per session, so a new folder never
+            # auto-kicks the (~10 s) bank scan on load.
+            self.audio_group_dups_var.set(False)
         else:
             self._audio_assignments = {
                 rel: rep for rel, rep in self._audio_assignments.items()
@@ -2148,8 +2946,158 @@ class MainWindow:
         # Drop the previous folder's diff until this folder's background scan
         # repopulates it (avoids a flash of stale "changed" markers).
         self._audio_changed_on_disk = set()
+        # Duplicate-group cache: a different folder invalidates it outright;
+        # a same-folder rescan keeps it unless a cached member vanished
+        # (transcribe renames slots out from under the cached rel_paths).
+        if self._audio_dup_scan_dir and self._audio_dup_scan_dir != scan_dir:
+            self._audio_dup_groups = None
+        elif (self._audio_dup_groups is not None
+              and any(r not in self._audio_slots_by_rel
+                      for _lbl, _dur, rels in self._audio_dup_groups
+                      for r in rels)):
+            self._audio_dup_groups = None
+        if self.audio_group_dups_var.get():
+            self._ensure_audio_dup_groups(quiet=True)
         self._refresh_audio_list()
         self._start_change_scan("audio")
+
+    # ---- Replace Audio: duplicate grouping (CGC banks) ----------------
+
+    def _on_audio_group_dups_toggle(self):
+        """Checkbox click: warm the group cache (not persisted — off by
+        default each session)."""
+        if self.audio_group_dups_var.get():
+            self._ensure_audio_dup_groups()
+
+    def _audio_dup_siblings(self, rel):
+        """The other present slots that share *rel*'s duplicate group (byte
+        -identical factory audio), or [] when the dup scan hasn't run or
+        *rel* isn't in a multi-slot group.  Drives the right-click "Apply to
+        all copies" fan-out — the action that keeps the machine from playing
+        a still-stock twin of a modded sound."""
+        if not self._audio_dup_groups:
+            return []
+        for _label, _dur, rels in self._audio_dup_groups:
+            if rel in rels:
+                return [r for r in rels
+                        if r != rel and r in self._audio_slots_by_rel]
+        return []
+
+    def _audio_fanout_to_copies(self, rel):
+        """Assign *rel*'s replacement to every other copy in its duplicate
+        group, so one edit covers all the identical-audio slots the game
+        might play.  No-op (with a nudge) if the slot has no replacement or
+        no duplicates."""
+        rep = self._audio_assignments.get(rel)
+        siblings = self._audio_dup_siblings(rel)
+        if not rep or not siblings:
+            return
+        for sib in siblings:
+            self._audio_assignments[sib] = rep
+        self._save_staged_changes()
+        self._refresh_audio_list()
+        self.audio_status_var.set(
+            "Applied to %d duplicate copy%s of this sound."
+            % (len(siblings), "" if len(siblings) == 1 else "ies"))
+
+    def _ensure_audio_dup_groups(self, quiet=False):
+        """Start the bank duplicate scan unless the cache already matches
+        the current folder.  Runs on a worker thread (~10 s on a full PF
+        extract); the list stays flat until the groups land.  *quiet*
+        suppresses the error popup (used by the automatic re-check after a
+        slot scan, where a modal would interrupt unprompted)."""
+        import threading
+        assets = (self._audio_scan_dir
+                  or (self.write_assets_var.get() or "").strip())
+        mfr = self._current_mfr
+        if (not assets or not os.path.isdir(assets)
+                or getattr(mfr, "find_duplicate_sounds", None) is None):
+            return
+        if (self._audio_dup_groups is not None
+                and self._audio_dup_scan_dir == assets):
+            self._refresh_audio_list()
+            return
+        if self._audio_dup_scanning:
+            return
+        self._audio_dup_scan_id += 1
+        my_id = self._audio_dup_scan_id
+        self._audio_dup_scanning = True
+        # The bank scan takes ~10 s and the list can't group until it lands,
+        # so show an immediate busy state instead of a dead pause: clear the
+        # list to a centred "scanning" overlay (the same shape as the slot
+        # scan) so the click visibly does something right away.
+        self._set_audio_dup_scanning(True)
+
+        def _work():
+            # Off the main thread: never touch Tk here.
+            try:
+                res = mfr.find_duplicate_sounds(assets)
+            except Exception as e:  # noqa: BLE001 — surfaced on main thread
+                res = e
+            try:
+                self._tk_root().after(
+                    0, self._apply_audio_dup_groups, my_id, assets, res,
+                    quiet)
+            except (RuntimeError, tk.TclError):
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _set_audio_dup_scanning(self, active):
+        """Show/clear the "grouping duplicates" busy state on the audio list.
+
+        While active, the list is replaced by a centred overlay so the
+        checkbox click reacts instantly (the bank scan runs on a worker
+        thread for ~10 s).  Clearing is handled by the next
+        :meth:`_refresh_audio_list`, which hides the overlay once slots are
+        drawn again — so this only needs to paint the busy state."""
+        if not active:
+            return
+        tree = getattr(self, "_audio_tree", None)
+        if tree is not None:
+            try:
+                tree.delete(*tree.get_children())
+            except tk.TclError:
+                pass
+        self.audio_status_var.set("Grouping duplicates…")
+        if hasattr(self, "_audio_empty"):
+            self._audio_empty.configure(
+                text="⏳  Scanning the sound banks for duplicates…\n"
+                     "(about ten seconds)")
+            self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+    def _apply_audio_dup_groups(self, my_id, assets, res, quiet=False):
+        """Main-thread: store the dup-scan result as ``(label, dur_str,
+        [rel_path, …])`` tuples keyed like the slot list, or untick and
+        surface the scan error (e.g. a WPC-remake extract has no banks)."""
+        if my_id != self._audio_dup_scan_id:
+            return
+        self._audio_dup_scanning = False
+        if isinstance(res, Exception):
+            self._audio_dup_groups = []            # nothing to group
+            self.audio_group_dups_var.set(False)   # trace refreshes the list
+            self._refresh_audio_list()             # ensure overlay clears
+            if not quiet:
+                messagebox.showinfo("Can't group duplicates", str(res))
+            return
+
+        def _dur(sec):
+            m, s = divmod(max(0.0, float(sec or 0)), 60)
+            return "%d:%06.3f" % (int(m), s)
+
+        groups = []
+        for g in getattr(res, "groups", ()):
+            # Slots without a resolvable WAV (missing file / stale v1
+            # decode dir) have no row in this tab — drop them; a group
+            # needs 2+ present rows to be worth a parent.
+            rels = [os.path.relpath(s.wav_path, assets).replace(os.sep, "/")
+                    for s in g.slots if s.wav_path]
+            if len(rels) >= 2:
+                stem = os.path.splitext(os.path.basename(rels[0]))[0]
+                groups.append((stem, _dur(g.duration_seconds), rels))
+        self._audio_dup_groups = groups
+        self._audio_dup_scan_dir = assets
+        self._refresh_audio_list()
 
     # ---- Replace tabs: on-disk change diff (shared) ------------------
 
@@ -2244,10 +3192,24 @@ class MainWindow:
             tree.heading(col_id, text=(base + arrow) if col_id == col else base)
 
     def _refresh_audio_list(self):
-        """Apply the search filter + sort and repopulate the slot tree."""
+        """Apply the search filter + sort and repopulate the slot tree — flat,
+        or two-level when "Group duplicates" is on and the bank duplicate scan
+        has run for this folder: one collapsed parent per group of
+        byte-identical factory audio (longest first, the dup scan's order),
+        its member slots nested, every unique slot flat below the groups."""
         tree = getattr(self, "_audio_tree", None)
         if tree is None:
             return
+        # Keep the groups the user expanded open across a rebuild (assigning,
+        # filtering and sorting all funnel through here).
+        open_groups = set()
+        for iid in tree.get_children():
+            if iid.startswith(_AUD_DUP_GROUP_IID):
+                try:
+                    if tree.item(iid, "open") in (1, True, "true"):
+                        open_groups.add(iid)
+                except tk.TclError:
+                    pass
         tree.delete(*tree.get_children())
 
         query = (self.audio_search_var.get() or "").strip().lower()
@@ -2278,10 +3240,9 @@ class MainWindow:
                         else 0,)
             return (s.rel_path.lower(),)  # "#0" name/path
 
-        slots.sort(key=_key, reverse=desc)
         self._show_sort_arrows(tree, self._audio_sort_cfg, self._audio_sort)
 
-        for s in slots:
+        def _insert(parent, s):
             rep = self._audio_assignments.get(s.rel_path)
             is_changed = s.rel_path in changed
             if rep:
@@ -2301,10 +3262,58 @@ class MainWindow:
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
             keep_disp = ("☑" if self._audio_keep_full_flags.get(s.rel_path)
                          else "☐")
-            tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
+            tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp, keep_disp),
                         tags=(tag,) if tag else ())
+
+        grouped = (bool(self.audio_group_dups_var.get())
+                   and self._audio_dup_groups is not None
+                   and self._audio_dup_scan_dir == self._audio_scan_dir)
+        if grouped:
+            # Duplicate groups first (dup-scan order = longest first), then
+            # everything unique flat below.  Members keep the scan's
+            # bank/slot order on the default sort; a header click re-sorts
+            # WITHIN each group, like the image tab's scene grouping.  The
+            # group iid is the group's position in the cached list, so the
+            # open-state survives filtering/sorting rebuilds.
+            in_groups = set()
+            for gidx, (label, dur_str, rels) in enumerate(
+                    self._audio_dup_groups):
+                members = [self._audio_slots_by_rel[r] for r in rels
+                           if r in self._audio_slots_by_rel]
+                visible = [m for m in members
+                           if not query or query in m.rel_path.lower()]
+                if len(members) < 2 or not visible:
+                    continue
+                in_groups.update(m.rel_path for m in visible)
+                if col == "#0":
+                    if desc:
+                        visible = list(reversed(visible))
+                else:
+                    visible = sorted(visible, key=_key, reverse=desc)
+                touched_n = sum(
+                    1 for m in members
+                    if m.rel_path in self._audio_assignments
+                    or m.rel_path in changed)
+                giid = _AUD_DUP_GROUP_IID + str(gidx)
+                tree.insert(
+                    "", tk.END, iid=giid, open=(giid in open_groups),
+                    text="%s — %d copies" % (label, len(members)),
+                    values=(dur_str, "",
+                            ("%d of %d modded" % (touched_n, len(members))
+                             if touched_n else ""),
+                            "", ""))
+                for m in visible:
+                    _insert(giid, m)
+            rest = [s for s in slots if s.rel_path not in in_groups]
+            rest.sort(key=_key, reverse=desc)
+            for s in rest:
+                _insert("", s)
+        else:
+            slots.sort(key=_key, reverse=desc)
+            for s in slots:
+                _insert("", s)
 
         total = len(self._audio_slots)
         # Count what the build will actually change: assignments made this
@@ -2367,7 +3376,7 @@ class MainWindow:
         self._save_staged_changes()
         self._refresh_audio_list()
         if rel == self._audio_current_rel:
-            self._audio_update_source_radio()  # enable the Replacement toggle
+            self._audio_load_rep_pane(rel)  # show the new pick right away
         try:
             self._audio_tree.selection_set(rel)
             self._audio_tree.see(rel)
@@ -2393,13 +3402,13 @@ class MainWindow:
 
     def _audio_preview_selected(self):
         self._audio_select_job = None
-        if self._audio_preview_playing:
+        if ((self._audio_pane_orig and self._audio_pane_orig.playing)
+                or (self._audio_pane_rep and self._audio_pane_rep.playing)):
             return  # don't yank a track that's currently playing
         rel = self._audio_selected_rel()
         if rel is None or rel == self._audio_current_rel:
             return
-        self.audio_source_var.set("orig")
-        self._audio_load_track(rel, autoplay=False)  # shows seek bar, no play
+        self._audio_load_track(rel)  # shows both seek bars, no play
 
     def _audio_on_tree_double(self, _event=None):
         self._cancel_audio_select_job()
@@ -2539,6 +3548,8 @@ class MainWindow:
         row = tree.identify_row(event.y)
         if not row:
             return
+        if row not in self._audio_slots_by_rel:
+            return  # "Group duplicates" parent row — no per-slot actions
         tree.selection_set(row)
         menu = tk.Menu(tree, tearoff=0)
         c = THEMES.get(self._current_theme, {})
@@ -2558,6 +3569,15 @@ class MainWindow:
         if has_assignment:
             menu.add_command(label="▶  Play replacement",
                              command=self._audio_play_replacement)
+        # Fan-out: push this slot's replacement onto every copy that shares
+        # its factory audio, so the machine can't play a still-stock twin.
+        # Needs the duplicate scan (Group duplicates) to have run.
+        siblings = self._audio_dup_siblings(row)
+        if has_assignment and siblings:
+            menu.add_command(
+                label="⧉  Apply to all %d copies of this sound"
+                      % (len(siblings) + 1),
+                command=lambda r=row: self._audio_fanout_to_copies(r))
         # One undo action, by state — never both (they confused users):
         #   * built into the working copy → "Revert to original" restores the
         #     file on disk (and drops any pick);
@@ -2589,7 +3609,7 @@ class MainWindow:
             self._save_staged_changes()
             self._refresh_audio_list()
             if rel == self._audio_current_rel:
-                self._audio_update_source_radio()
+                self._audio_load_rep_pane(rel)  # back to "no replacement"
             try:
                 self._audio_tree.selection_set(rel)
             except tk.TclError:
@@ -2620,7 +3640,9 @@ class MainWindow:
         self._save_staged_changes()
         self._refresh_audio_list()
         if rel == self._audio_current_rel:
-            self._audio_update_source_radio()
+            # Both sides may have changed: the assignment is gone AND the
+            # original file on disk may have just been restored.
+            self._audio_load_track(rel)
         try:
             self._audio_tree.selection_set(rel)
         except tk.TclError:
@@ -2640,8 +3662,7 @@ class MainWindow:
             messagebox.showinfo("No Slot Selected",
                                 "Select a track to preview.")
             return
-        self.audio_source_var.set("orig")
-        self._audio_load_track(rel, autoplay=True)
+        self._audio_load_track(rel, autoplay="orig")
 
     def _audio_play_replacement(self):
         rel = self._audio_selected_rel()
@@ -2650,86 +3671,47 @@ class MainWindow:
                 "No Replacement",
                 "Assign a replacement to this slot first.")
             return
-        self.audio_source_var.set("rep")
-        self._audio_load_track(rel, autoplay=True)
+        self._audio_load_track(rel, autoplay="rep")
 
-    # ---- Replace Audio: preview player (transport + seek) ------------
+    # ---- Replace Audio: preview panes (Original | Replacement) -------
 
-    def _audio_load_track(self, rel, autoplay=False):
-        """Make *rel* the active track in the preview player and load the
-        currently-selected source (original or replacement) into it."""
+    def _audio_load_track(self, rel, autoplay=None):
+        """Load *rel* into both preview panes — its original on the left, its
+        assigned replacement (if any) on the right.  *autoplay* names the
+        pane to start ("orig"/"rep"), or None to just show the seek strips."""
         if rel not in self._audio_slots_by_rel:
             return
+        from ..core import audio as _audio
         self._audio_current_rel = rel
-        self._audio_update_source_radio()
-        self._audio_load_current_source(autoplay=autoplay)
-
-    def _audio_current_source_path(self):
-        rel = self._audio_current_rel
-        if rel is None:
-            return None
-        if self.audio_source_var.get() == "rep":
-            return self._audio_assignments.get(rel)
         slot = self._audio_slots_by_rel.get(rel)
-        return slot.abs_path if slot else None
-
-    def _audio_load_current_source(self, autoplay=False):
-        self._audio_stop_playback()
-        path = self._audio_current_source_path()
-        if not path or not os.path.isfile(path):
-            self._audio_preview_path = None
-            self._audio_preview_dur = 0.0
-            self._audio_preview_pos = 0.0
-            self._audio_spec_render_id += 1
-            if hasattr(self, "_audio_spec_canvas"):
-                self._audio_spec_canvas.delete("all")
-            self._audio_update_time()
-            return
-        self._audio_load_preview(path)
-        if autoplay:
-            self._audio_start_playback(0.0)
-
-    def _audio_on_source_change(self):
-        # Flip A/B between original and replacement; keep playing if we were,
-        # so the comparison is immediate.
-        self._audio_load_current_source(autoplay=self._audio_preview_playing)
-
-    def _audio_update_source_radio(self):
-        rel = self._audio_current_rel
-        has_rep = bool(rel and self._audio_assignments.get(rel))
-        if hasattr(self, "_audio_src_rep"):
-            self._audio_src_rep.configure(
-                state=(tk.NORMAL if has_rep else tk.DISABLED))
-        if not has_rep and self.audio_source_var.get() == "rep":
-            self.audio_source_var.set("orig")
-
-    def _audio_toggle_play(self):
-        """Play/pause.  ffplay (-nodisp) can't pause in place, so pause =
-        stop + remember position; resume = restart ffplay at that position."""
-        if self._audio_preview_path is None:
-            rel = self._audio_selected_rel()
-            if rel is not None:
-                self._audio_load_track(rel, autoplay=True)
-            return
-        if self._audio_preview_playing:
-            self._audio_stop_playback()  # pause, keeps position
+        opath = slot.abs_path if slot else None
+        if opath and os.path.isfile(opath):
+            self._audio_pane_orig.load(
+                opath, _audio.probe_duration(opath) or 0.0, None,
+                autoplay=(autoplay == "orig"))
         else:
-            stop_at = (self._audio_preview_limit
-                       if self._audio_preview_limit is not None
-                       else self._audio_preview_dur)
-            if stop_at > 0 and self._audio_preview_pos >= stop_at - 0.05:
-                self._audio_preview_pos = 0.0  # replay from start
-            self._audio_start_playback(self._audio_preview_pos)
+            self._audio_pane_orig.clear()
+        self._audio_load_rep_pane(rel, autoplay=(autoplay == "rep"))
 
-    def _audio_stop_to_start(self):
-        self._audio_stop_playback()
-        self._audio_preview_pos = 0.0
-        self._audio_draw_playhead()
+    def _audio_load_rep_pane(self, rel, autoplay=False):
+        """(Re)load the Replacement pane for *rel* — after a track change or
+        an assign/clear/revert of the currently-loaded slot."""
+        from ..core import audio as _audio
+        rpath = self._audio_assignments.get(rel) if rel else None
+        if rpath and os.path.isfile(rpath):
+            rdur = _audio.probe_duration(rpath) or 0.0
+            self._audio_pane_rep.load(
+                rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
+                autoplay=autoplay)
+        else:
+            self._audio_pane_rep.clear("no replacement assigned")
 
-    def _audio_set_play_btn(self, playing):
-        if hasattr(self, "_audio_play_canvas"):
-            self._draw_audio_icon(self._audio_play_canvas,
-                                  "pause" if playing else "play")
+    def _audio_activate_pane(self, side):
+        """▶ pressed on an empty pane: load the selected row, then play the
+        pane that asked."""
+        rel = self._audio_selected_rel()
+        if rel is not None:
+            self._audio_load_track(rel, autoplay=side)
 
     def _draw_audio_icon(self, canvas, kind):
         """Draw a crisp, borderless transport icon (play triangle / pause two
@@ -2755,25 +3737,14 @@ class MainWindow:
         elif kind == "stop":
             canvas.create_rectangle(m, m, s - m, s - m, fill=fg, outline=fg)
 
-    def _audio_load_preview(self, path):
-        from ..core import audio as _audio
-        self._audio_preview_path = path
-        self._audio_preview_dur = _audio.probe_duration(path) or 0.0
-        self._audio_preview_limit = self._audio_compute_preview_limit()
-        self._audio_preview_pos = 0.0
-        self._render_audio_spectrogram(path)
-        self._audio_update_time()
-
-    def _audio_compute_preview_limit(self):
-        """Stop point (s) for the loaded source, or None to play the whole
-        file.  A replacement that Write will TRIM to its slot length previews
-        only up to that length, so the preview matches the machine.  (A
-        shorter replacement is padded with silence on Write -- nothing to
-        hear -- so it just plays to its own end, no cap.)"""
-        # Only the replacement is trimmed; the original always plays in full.
-        if self.audio_source_var.get() != "rep":
-            return None
-        rel = self._audio_current_rel
+    def _audio_compute_preview_limit(self, rel, rep_dur):
+        """Stop point (s) for *rel*'s REPLACEMENT (duration *rep_dur*), or
+        None to play the whole file.  A replacement that Write will TRIM to
+        its slot length previews only up to that length, so the preview
+        matches the machine.  (A shorter replacement is padded with silence
+        on Write -- nothing to hear -- so it just plays to its own end, no
+        cap.)  The original always plays in full; only the Replacement pane
+        gets a limit."""
         if rel is None:
             return None
         # No cap when trimming is off, or this slot is exempted ("Full").
@@ -2784,235 +3755,24 @@ class MainWindow:
         slot = self._audio_slots_by_rel.get(rel)
         slot_dur = slot.duration if slot else 0.0
         # Only cap when the replacement is actually longer than the slot.
-        if slot_dur > 0 and self._audio_preview_dur > slot_dur + 0.02:
+        if slot_dur > 0 and rep_dur > slot_dur + 0.02:
             return slot_dur
         return None
 
-    def _render_audio_spectrogram(self, path):
-        """Render the full-track spectrogram on a worker thread, then draw
-        it.  Stale renders (folder/track changed) are dropped via a counter."""
-        canvas = getattr(self, "_audio_spec_canvas", None)
-        if canvas is None:
-            return
-        self._audio_spec_render_id += 1
-        rid = self._audio_spec_render_id
-        w = max(200, canvas.winfo_width())
-        h = 90  # fixed canvas height (widget is created height=90)
-        canvas.delete("all")
-        if not _HAVE_PIL:
-            canvas.create_text(w // 2, h // 2, fill="#888888",
-                               text="(install Pillow to see the spectrogram)")
-            return
-        canvas.create_text(w // 2, h // 2, fill="#888888",
-                           text="rendering preview…", tags=("hint",))
-
-        import threading
-        from ..core import audio as _audio
-
-        def _work():
-            png = _audio.render_spectrogram_png(path, w, h)
-            if self._audio_spec_render_id != rid:
-                return
-            self._tk_root().after(
-                0, self._show_audio_spectrogram, png, rid, w, h)
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    def _show_audio_spectrogram(self, png, rid, w, h):
-        if self._audio_spec_render_id != rid:
-            return
-        canvas = self._audio_spec_canvas
-        canvas.delete("all")
-        if png:
-            try:
-                import io
-                from PIL import Image, ImageTk
-                img = Image.open(io.BytesIO(png)).convert("RGB")
-                self._audio_spec_img = ImageTk.PhotoImage(img)
-                canvas.create_image(0, 0, anchor=tk.NW,
-                                    image=self._audio_spec_img, tags=("spec",))
-            except Exception:
-                self._audio_spec_img = None
-        else:
-            canvas.create_text(w // 2, h // 2, fill="#888888",
-                               text="(preview needs ffmpeg)")
-        self._audio_draw_cut_marker()
-        self._audio_draw_playhead()
-
-    def _audio_draw_cut_marker(self):
-        """Mark where a trimmed replacement stops: a dashed line at the slot
-        length with the trimmed tail hatched out, so the spectrogram shows
-        exactly what the machine will play."""
-        canvas = getattr(self, "_audio_spec_canvas", None)
-        if canvas is None:
-            return
-        canvas.delete("cutmark")
-        lim, dur = self._audio_preview_limit, self._audio_preview_dur
-        if lim is None or dur <= 0:
-            return
-        w = max(1, canvas.winfo_width())
-        h = canvas.winfo_height() or 90
-        x = max(0, min(w, int((lim / dur) * w)))
-        # Hatch the trimmed tail (stipple = pseudo-transparency in Tk) and
-        # draw a red cut line + a small label.
-        canvas.create_rectangle(x, 0, w, h, fill="#000000", outline="",
-                                stipple="gray50", tags=("cutmark",))
-        canvas.create_line(x, 0, x, h, fill="#ff6b6b", width=1,
-                           dash=(3, 2), tags=("cutmark",))
-        if x < w - 24:
-            canvas.create_text(x + 3, 8, anchor=tk.W, fill="#ff9d9d",
-                               text="trimmed", tags=("cutmark",))
-
-    def _audio_start_playback(self, pos):
-        import time
-        from ..core import audio as _audio
-        _audio.stop_audio(self._audio_play_proc)
-        proc = _audio.play_audio_file(self._audio_preview_path, start=pos,
-                                      limit=self._audio_preview_limit)
-        if proc is None:
-            self._audio_preview_playing = False
-            self._audio_set_play_btn(False)
-            messagebox.showwarning(
-                "Can't Preview",
-                "Audio preview needs ffplay, which ships with the FULL ffmpeg "
-                "build but NOT the \"essentials\" build.\n\n"
-                "Fix it one of these ways:\n"
-                "  • Use \"Install Missing\" above the tabs (installs the full "
-                "build), then restart this app, or\n"
-                "  • Download the full ffmpeg build and drop ffplay.exe in the "
-                "same folder as ffmpeg.exe (run `where ffmpeg` to find it), "
-                "then restart.\n\n"
-                "Preview is optional -- it doesn't affect building the update; "
-                "your replacements still get staged and written.")
-            return
-        self._audio_play_proc = proc
-        self._audio_preview_start_pos = pos
-        self._audio_preview_start_t = time.monotonic()
-        self._audio_preview_pos = pos
-        self._audio_preview_playing = True
-        self._audio_set_play_btn(True)
-        self._audio_schedule_tick()
-
-    def _audio_schedule_tick(self):
-        if self._audio_tick_job is not None:
-            try:
-                self._tk_root().after_cancel(self._audio_tick_job)
-            except Exception:
-                pass
-        self._audio_tick_job = self._tk_root().after(60, self._audio_tick)
-
-    def _audio_tick(self):
-        import time
-        self._audio_tick_job = None
-        if not self._audio_preview_playing:
-            return
-        proc = self._audio_play_proc
-        self._audio_preview_pos = (
-            self._audio_preview_start_pos
-            + (time.monotonic() - self._audio_preview_start_t))
-        # Stop at the trim point if there is one, else the file's end.
-        stop_at = (self._audio_preview_limit
-                   if self._audio_preview_limit is not None
-                   else self._audio_preview_dur)
-        ended = (proc is None or proc.poll() is not None
-                 or (stop_at > 0 and self._audio_preview_pos >= stop_at))
-        if ended:
-            # ffplay -t exits itself at the cap, but the OS-native fallback
-            # can't -- kill it so the preview really stops at the trim point.
-            from ..core import audio as _audio
-            _audio.stop_audio(proc)
-            self._audio_play_proc = None
-            self._audio_preview_playing = False
-            self._audio_preview_pos = 0.0  # reset so ▶ replays from the start
-            self._audio_set_play_btn(False)
-            self._audio_draw_playhead()
-            return
-        self._audio_draw_playhead()
-        self._audio_schedule_tick()
-
-    def _audio_draw_playhead(self):
-        canvas = getattr(self, "_audio_spec_canvas", None)
-        if canvas is None:
-            return
-        canvas.delete("playhead")
-        dur = self._audio_preview_dur
-        if dur > 0 and self._audio_preview_path:
-            w = max(1, canvas.winfo_width())
-            h = canvas.winfo_height() or 90
-            x = int((self._audio_preview_pos / dur) * w)
-            x = max(0, min(w, x))
-            canvas.create_line(x, 0, x, h, fill="#ffffff", width=1,
-                               tags=("playhead",))
-        self._audio_update_time()
-
-    def _audio_update_time(self):
-        def _fmt(s):
-            s = max(0, int(s))
-            return f"{s // 60}:{s % 60:02d}"
-        if self._audio_preview_path and self._audio_preview_dur > 0:
-            if self._audio_preview_limit is not None:
-                # The machine plays only up to the trim point -- show that as
-                # the length, and note the full clip length that got cut.
-                self.audio_time_var.set(
-                    f"{_fmt(self._audio_preview_pos)} / "
-                    f"{_fmt(self._audio_preview_limit)}  "
-                    f"(trimmed from {_fmt(self._audio_preview_dur)})")
-            else:
-                self.audio_time_var.set(
-                    f"{_fmt(self._audio_preview_pos)} / "
-                    f"{_fmt(self._audio_preview_dur)}")
-        else:
-            self.audio_time_var.set("0:00 / 0:00")
-
-    def _audio_seek_click(self, event):
-        canvas = self._audio_spec_canvas
-        if not self._audio_preview_path or self._audio_preview_dur <= 0:
-            return
-        w = max(1, canvas.winfo_width())
-        frac = max(0.0, min(1.0, event.x / w))
-        pos = frac * self._audio_preview_dur
-        # A click in the trimmed (hatched) tail has nothing to play -- clamp
-        # to just before the cut so the playhead stays in the audible region.
-        if self._audio_preview_limit is not None:
-            pos = min(pos, max(0.0, self._audio_preview_limit - 0.05))
-        self._audio_preview_pos = pos
-        if self._audio_preview_playing:
-            self._audio_start_playback(self._audio_preview_pos)  # live re-seek
-        else:
-            self._audio_draw_playhead()
-
     def _audio_stop_playback(self):
-        """Stop playback (keeps the strip + playhead where it landed)."""
-        from ..core import audio as _audio
-        _audio.stop_audio(self._audio_play_proc)
-        self._audio_play_proc = None
-        self._audio_preview_playing = False
-        if self._audio_tick_job is not None:
-            try:
-                self._tk_root().after_cancel(self._audio_tick_job)
-            except Exception:
-                pass
-            self._audio_tick_job = None
-        self._audio_set_play_btn(False)
-        self._audio_draw_playhead()
+        """Stop both preview panes (keeps their playheads where they landed)."""
+        for pane in (self._audio_pane_orig, self._audio_pane_rep):
+            if pane is not None:
+                pane.stop_playback()
 
     def _audio_clear_preview(self):
-        """Reset the preview player entirely (used on manufacturer switch)."""
+        """Reset both preview panes entirely (used on manufacturer switch)."""
         self._cancel_audio_select_job()
-        self._audio_stop_playback()
         self._audio_current_rel = None
-        self._audio_preview_path = None
-        self._audio_preview_dur = 0.0
-        self._audio_preview_pos = 0.0
-        self._audio_spec_render_id += 1  # drop any in-flight render
-        self._audio_spec_img = None
-        if hasattr(self, "audio_source_var"):
-            self.audio_source_var.set("orig")
-        if hasattr(self, "_audio_src_rep"):
-            self._audio_src_rep.configure(state=tk.DISABLED)
-        if hasattr(self, "_audio_spec_canvas"):
-            self._audio_spec_canvas.delete("all")
-        self._audio_update_time()
+        if self._audio_pane_orig is not None:
+            self._audio_pane_orig.clear()
+        if self._audio_pane_rep is not None:
+            self._audio_pane_rep.clear("no replacement assigned")
 
     # ---- Replace Audio: pending assignments (applied at Write time) --
 
@@ -3218,53 +3978,29 @@ class MainWindow:
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # --- Embedded preview player: a frame canvas (a decode thread streams
-        # frames here while ffplay carries the sound), a seek bar, and the
-        # transport controls + an A/B Original ↔ Replacement source switch. ---
+        # --- Embedded preview players: Original and Replacement side by side
+        # (like the image tab), each a frame canvas (a decode thread streams
+        # frames there while ffplay carries the sound) with its own seek bar
+        # and transport — replacing the old single player + Source A/B switch
+        # (David).  Starting one pane pauses the other so the soundtracks
+        # never overlap. ---
         player = ttk.LabelFrame(f, text=" Preview ")
         player.pack(fill=tk.X, padx=10, pady=(4, 2))
-
-        self._video_canvas = tk.Canvas(
-            player, width=360, height=203, highlightthickness=1, bd=0,
-            background="#000000")
-        self._video_canvas.pack(padx=6, pady=(6, 2))
-
-        # Seek bar: click or drag to seek; the playhead tracks playback.
-        self._video_seek_canvas = tk.Canvas(
-            player, height=16, highlightthickness=1, bd=0, cursor="hand2")
-        self._video_seek_canvas.pack(fill=tk.X, padx=6, pady=(0, 2))
-        self._video_seek_canvas.bind("<Button-1>", self._video_seek_click)
-        self._video_seek_canvas.bind("<B1-Motion>", self._video_seek_click)
-
-        transport = ttk.Frame(player)
-        transport.pack(fill=tk.X, padx=6, pady=(2, 6))
-        _IB = dict(width=26, height=26, highlightthickness=0, bd=0,
-                   cursor="hand2", takefocus=0)
-        self._video_play_canvas = tk.Canvas(transport, **_IB)
-        self._video_play_canvas.pack(side=tk.LEFT)
-        self._video_play_canvas.bind(
-            "<Button-1>", lambda _e: self._video_toggle_play())
-        self._video_stop_canvas = tk.Canvas(transport, **_IB)
-        self._video_stop_canvas.pack(side=tk.LEFT, padx=(2, 0))
-        self._video_stop_canvas.bind(
-            "<Button-1>", lambda _e: self._video_stop_to_start())
-        self.video_time_var = tk.StringVar(value="0:00 / 0:00")
-        ttk.Label(transport, textvariable=self.video_time_var,
-                  font=(_MONO_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
-
-        self.video_source_var = tk.StringVar(value="orig")
-        srcbox = ttk.Frame(transport); srcbox.pack(side=tk.RIGHT)
-        ttk.Label(srcbox, text="Source:").pack(side=tk.LEFT, padx=(0, 4))
-        self._video_src_orig = ttk.Radiobutton(
-            srcbox, text="Original", value="orig",
-            variable=self.video_source_var,
-            command=self._video_on_source_change)
-        self._video_src_orig.pack(side=tk.LEFT)
-        self._video_src_rep = ttk.Radiobutton(
-            srcbox, text="Replacement", value="rep", state=tk.DISABLED,
-            variable=self.video_source_var,
-            command=self._video_on_source_change)
-        self._video_src_rep.pack(side=tk.LEFT, padx=(4, 0))
+        panes = ttk.Frame(player)
+        panes.pack(padx=6, pady=(2, 6))
+        self._video_pane_orig = _VideoPreviewPane(
+            self, panes, "Original",
+            on_activate=lambda: self._video_activate_pane("orig"))
+        self._video_pane_rep = _VideoPreviewPane(
+            self, panes, "Replacement",
+            on_activate=lambda: self._video_activate_pane("rep"))
+        self._video_pane_orig.sibling = self._video_pane_rep
+        self._video_pane_rep.sibling = self._video_pane_orig
+        self._video_pane_orig.frame.grid(row=0, column=0, sticky="n",
+                                         padx=(0, 4))
+        self._video_pane_rep.frame.grid(row=0, column=1, sticky="n",
+                                        padx=(4, 0))
+        self._video_pane_rep.clear("no replacement assigned")
 
         self._video_no_conversion_cb = ttk.Checkbutton(
             f, text="No conversion — use my file as-is (it must already match "
@@ -3302,9 +4038,6 @@ class MainWindow:
             wraplength=720, justify=tk.LEFT).pack(
             anchor=tk.W, padx=12, pady=(8, 8))
 
-        self._video_set_play_btn(False)
-        if hasattr(self, "_video_stop_canvas"):
-            self._draw_audio_icon(self._video_stop_canvas, "stop")
         self._refresh_video_ffmpeg_warning()
 
     def _video_on_no_conversion_toggle(self):
@@ -3577,13 +4310,21 @@ class MainWindow:
         self._text_scan_dir = ""
 
     def reload_assets_tabs(self):
-        """Drop every Replace tab's scan stamp and re-scan whichever tab is
-        visible now, so freshly-transferred assignments (written to the folder's
-        sidecar / strings.tsv out-of-band) show immediately instead of waiting
-        for the user to re-browse.  The other tabs re-scan on their next visit."""
+        """Drop every Replace tab's scan stamp and re-scan ALL assets tabs
+        against the current folder, so freshly-transferred assignments (written
+        to the folder's sidecar / strings.tsv out-of-band) load into every tab
+        at once.
+
+        Scanning only the visible tab left the others holding stale in-memory
+        assignments from a previously scanned folder, which then tripped the
+        Write "replacements won't be applied" folder-mismatch warning even
+        though the transfer had written its edits to the new folder's sidecar
+        (and the build would apply them via the sidecar fallback).  Re-scanning
+        every tab re-points each one's assignments at the new folder so the tabs,
+        the warning check, and the build all agree."""
         self.invalidate_asset_scans()
         try:
-            self._autoscan_active_assets_tab()
+            self._rescan_all_assets_tabs()
         except Exception:
             pass
 
@@ -3727,7 +4468,7 @@ class MainWindow:
         self._save_staged_changes()
         self._refresh_video_list()
         if rel == self._video_current_rel:
-            self._video_update_source_radio()
+            self._video_load_rep_pane(rel)  # show the new pick right away
         try:
             self._video_tree.selection_set(rel)
             self._video_tree.see(rel)
@@ -3751,13 +4492,13 @@ class MainWindow:
 
     def _video_preview_selected(self):
         self._video_select_job = None
-        if self._video_preview_playing:
-            return
+        if ((self._video_pane_orig and self._video_pane_orig.playing)
+                or (self._video_pane_rep and self._video_pane_rep.playing)):
+            return  # don't yank a clip that's currently playing
         rel = self._video_selected_rel()
         if rel is None or rel == self._video_current_rel:
             return
-        self.video_source_var.set("orig")
-        self._video_load_track(rel, autoplay=False)
+        self._video_load_track(rel)  # posters both panes, no play
 
     def _video_on_tree_double(self, _event=None):
         self._cancel_video_select_job()
@@ -3817,7 +4558,7 @@ class MainWindow:
             self._save_staged_changes()
             self._refresh_video_list()
             if rel == self._video_current_rel:
-                self._video_update_source_radio()
+                self._video_load_rep_pane(rel)  # back to "no replacement"
             try:
                 self._video_tree.selection_set(rel)
             except tk.TclError:
@@ -3829,8 +4570,7 @@ class MainWindow:
             messagebox.showinfo("No Slot Selected",
                                 "Select a clip to preview.")
             return
-        self.video_source_var.set("orig")
-        self._video_load_track(rel, autoplay=True)
+        self._video_load_track(rel, autoplay="orig")
 
     def _video_play_replacement(self):
         rel = self._video_selected_rel()
@@ -3838,438 +4578,55 @@ class MainWindow:
             messagebox.showinfo("No Replacement",
                                 "Assign a replacement to this slot first.")
             return
-        self.video_source_var.set("rep")
-        self._video_load_track(rel, autoplay=True)
+        self._video_load_track(rel, autoplay="rep")
 
-    # ---- Replace Video: embedded preview player ----------------------
+    # ---- Replace Video: preview panes (Original | Replacement) -------
 
-    def _video_load_track(self, rel, autoplay=False):
-        """Make *rel* the active clip in the preview player and load the
-        currently-selected source (original or replacement) into it."""
+    def _video_load_track(self, rel, autoplay=None):
+        """Load *rel* into both preview panes — its original on the left, its
+        assigned replacement (if any) on the right.  *autoplay* names the
+        pane to start ("orig"/"rep"), or None to just poster the frames."""
         if rel not in self._video_slots_by_rel:
             return
         self._video_current_rel = rel
-        self._video_update_source_radio()
-        self._video_load_current_source(autoplay=autoplay)
-
-    def _video_current_source_path(self):
-        rel = self._video_current_rel
-        if rel is None:
-            return None
-        if self.video_source_var.get() == "rep":
-            return self._video_assignments.get(rel)
         slot = self._video_slots_by_rel.get(rel)
-        return slot.abs_path if slot else None
-
-    def _video_load_current_source(self, autoplay=False):
-        self._video_stop_playback()
-        path = self._video_current_source_path()
-        if not path or not os.path.isfile(path):
-            self._video_preview_path = None
-            self._video_preview_info = None
-            self._video_preview_dur = 0.0
-            self._video_preview_pos = 0.0
-            self._video_render_id += 1
-            if hasattr(self, "_video_canvas"):
-                self._video_canvas.delete("all")
-            self._video_draw_playhead()
-            return
-        self._video_load_preview(path)
-        if autoplay:
-            self._video_start_playback(0.0)
-
-    def _video_on_source_change(self):
-        self._video_load_current_source(autoplay=self._video_preview_playing)
-
-    def _video_update_source_radio(self):
-        rel = self._video_current_rel
-        has_rep = bool(rel and self._video_assignments.get(rel))
-        if hasattr(self, "_video_src_rep"):
-            self._video_src_rep.configure(
-                state=(tk.NORMAL if has_rep else tk.DISABLED))
-        if not has_rep and self.video_source_var.get() == "rep":
-            self.video_source_var.set("orig")
-
-    def _video_set_play_btn(self, playing):
-        if hasattr(self, "_video_play_canvas"):
-            self._draw_audio_icon(self._video_play_canvas,
-                                  "pause" if playing else "play")
-
-    def _video_toggle_play(self):
-        if self._video_preview_path is None:
-            rel = self._video_selected_rel()
-            if rel is not None:
-                self._video_load_track(rel, autoplay=True)
-            return
-        if self._video_preview_playing:
-            self._video_stop_playback()  # pause, keeps position
-            self._video_draw_playhead()
+        opath = slot.abs_path if slot else None
+        if opath and os.path.isfile(opath):
+            self._video_pane_orig.load(opath, autoplay=(autoplay == "orig"))
         else:
-            if (self._video_preview_dur > 0
-                    and self._video_preview_pos
-                    >= self._video_preview_dur - 0.05):
-                self._video_preview_pos = 0.0  # replay from start
-            self._video_start_playback(self._video_preview_pos)
+            self._video_pane_orig.clear()
+        self._video_load_rep_pane(rel, autoplay=(autoplay == "rep"))
 
-    def _video_stop_to_start(self):
-        self._video_stop_playback()
-        self._video_preview_pos = 0.0
-        self._video_draw_playhead()
-        if self._video_preview_path:
-            self._render_video_poster(self._video_preview_path, 0.0)
-
-    def _video_compute_disp_size(self, info):
-        """Aspect-fit the clip inside the frame canvas; store the even-numbered
-        draw size used by both the poster render and the decode stream."""
-        max_w, max_h = 360, 203
-        if info and info.width > 0 and info.height > 0:
-            w, h = info.width, info.height
+    def _video_load_rep_pane(self, rel, autoplay=False):
+        """(Re)load the Replacement pane for *rel* — after a clip change or
+        an assign/clear of the currently-loaded slot."""
+        rpath = self._video_assignments.get(rel) if rel else None
+        if rpath and os.path.isfile(rpath):
+            self._video_pane_rep.load(rpath, autoplay=autoplay)
         else:
-            w, h = 16, 9
-        scale = min(max_w / w, max_h / h)
-        dw = max(16, int(w * scale))
-        dh = max(16, int(h * scale))
-        self._video_disp_w = dw - (dw % 2)
-        self._video_disp_h = dh - (dh % 2)
+            self._video_pane_rep.clear("no replacement assigned")
 
-    def _video_load_preview(self, path):
-        from ..core import video as _video
-        self._video_preview_path = path
-        info = _video.detect_video_info(path)
-        self._video_preview_info = info
-        dur = (info.duration if info and info.duration > 0
-               else _video.probe_video_duration(path))
-        self._video_preview_dur = dur or 0.0
-        self._video_preview_pos = 0.0
-        self._video_compute_disp_size(info)
-        # Poster a representative frame, not the frame at 0.0 -- many clips open
-        # on a black leader frame, which looked like a broken/empty preview.
-        # Grab mid-clip when the duration is known, else a small offset in.  The
-        # playhead stays at 0.0; this only changes which still we show.
-        poster_pos = (self._video_preview_dur * 0.5
-                      if self._video_preview_dur > 0.2 else 0.5)
-        self._render_video_poster(path, poster_pos)
-        self._video_update_time()
-
-    def _render_video_poster(self, path, pos):
-        """Decode a single frame at *pos* on a worker thread, then show it.
-        Stale renders (clip/seek changed) are dropped via a counter."""
-        canvas = getattr(self, "_video_canvas", None)
-        if canvas is None:
-            return
-        self._video_render_id += 1
-        rid = self._video_render_id
-        cw = canvas.winfo_width() or 360
-        ch = canvas.winfo_height() or 203
-        canvas.delete("all")
-        if not _HAVE_PIL:
-            canvas.create_text(cw // 2, ch // 2, fill="#bbbbbb",
-                               width=cw - 16,
-                               text="Install Pillow to preview frames in-app "
-                                    "(Play still opens an ffplay window).")
-            return
-        canvas.create_text(cw // 2, ch // 2, fill="#888888",
-                           text="loading frame…")
-
-        import threading
-        from ..core import video as _video
-
-        def _work():
-            png = _video.extract_frame_png(
-                path, pos, self._video_disp_w, self._video_disp_h)
-            if self._video_render_id != rid:
-                return
-            self._tk_root().after(0, self._show_video_poster, png, rid)
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    def _show_video_poster(self, png, rid):
-        if self._video_render_id != rid:
-            return
-        canvas = self._video_canvas
-        canvas.delete("all")
-        cw = canvas.winfo_width() or 360
-        ch = canvas.winfo_height() or 203
-        if png and _HAVE_PIL:
-            try:
-                import io
-                img = Image.open(io.BytesIO(png)).convert("RGB")
-                self._video_frame_img = ImageTk.PhotoImage(img)
-                canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
-                                    image=self._video_frame_img, tags=("frame",))
-            except Exception:
-                self._video_frame_img = None
-        else:
-            canvas.create_text(cw // 2, ch // 2, fill="#888888",
-                               text="(preview needs ffmpeg)")
-        self._video_draw_playhead()
-
-    def _show_video_frame_rgb(self, data):
-        """Display one raw rgb24 frame (from the decode thread) on the canvas."""
-        if not _HAVE_PIL:
-            return
-        w, h = self._video_disp_w, self._video_disp_h
-        if not data or len(data) != w * h * 3:
-            return
-        try:
-            img = Image.frombytes("RGB", (w, h), data)
-            self._video_frame_img = ImageTk.PhotoImage(img)
-            canvas = self._video_canvas
-            cw = canvas.winfo_width() or 360
-            ch = canvas.winfo_height() or 203
-            canvas.delete("frame")
-            canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
-                                image=self._video_frame_img, tags=("frame",))
-        except Exception:
-            pass
-
-    def _video_start_playback(self, pos):
-        import threading
-        import queue
-        import time
-        from ..core import audio as _audio
-        from ..core import video as _video
-
-        self._video_stop_playback()  # tear down any prior session
-        path = self._video_preview_path
-        if not path:
-            return
-        info = self._video_preview_info
-        fps = info.fps if (info and info.fps > 0) else 30.0
-        w, h = self._video_disp_w, self._video_disp_h
-
-        proc = (_video.open_raw_stream(path, w, h, fps, start=pos)
-                if _HAVE_PIL else None)
-        if proc is None:
-            # No ffmpeg frame stream (or no Pillow): fall back to a windowed
-            # ffplay that plays video + audio in its own window.
-            ap = _video.play_video_windowed(path, start=pos)
-            if ap is None:
-                messagebox.showwarning(
-                    "Can't Preview",
-                    "Video preview needs ffmpeg / ffplay on your PATH.\n\n"
-                    "Install ffmpeg to preview clips before staging.")
-                return
-            self._video_audio_proc = ap
-        else:
-            self._video_session += 1
-            session = self._video_session
-            self._video_decode_proc = proc
-            stop_event = threading.Event()
-            self._video_stop_event = stop_event
-            q = queue.Queue(maxsize=int(max(8, fps)))  # ~1s of frames
-            self._video_frame_q = q
-            framesize = w * h * 3
-            t = threading.Thread(
-                target=self._video_decode_worker,
-                args=(session, proc, framesize, q, stop_event), daemon=True)
-            self._video_decode_thread = t
-            t.start()
-            # Sound: ffplay -nodisp carries the audio track.  Most formats play
-            # their own audio; a custom backend (.cdmd) points at a sibling
-            # .wav instead.
-            if info is None or info.has_audio:
-                asrc = _video.audio_source_for(path)
-                if asrc:
-                    self._video_audio_proc = _audio.play_audio_file(
-                        asrc, start=pos)
-
-        self._video_preview_start_pos = pos
-        self._video_preview_start_t = time.monotonic()
-        self._video_preview_pos = pos
-        self._video_preview_playing = True
-        self._video_set_play_btn(True)
-        self._video_schedule_tick()
-
-    def _video_decode_worker(self, session, proc, framesize, q, stop_event):
-        """Worker thread: read raw rgb24 frames from ffmpeg into *q* until the
-        stream ends or the session is cancelled."""
-        import queue as _q
-        idx = 0
-        try:
-            stdout = proc.stdout
-            while not stop_event.is_set():
-                data = stdout.read(framesize)
-                if not data or len(data) < framesize:
-                    break
-                while not stop_event.is_set():
-                    try:
-                        q.put((idx, data), timeout=0.2)
-                        break
-                    except _q.Full:
-                        continue
-                idx += 1
-        except (OSError, ValueError):
-            pass
-        finally:
-            try:
-                q.put((None, None), timeout=0.2)  # sentinel: stream ended
-            except Exception:
-                pass
-
-    def _video_schedule_tick(self):
-        info = self._video_preview_info
-        fps = info.fps if (info and info.fps > 0) else 30.0
-        # Poll a bit faster than the frame rate so the queue stays drained.
-        interval = int(1000 / (fps * 1.3))
-        interval = max(10, min(45, interval))
-        if self._video_tick_job is not None:
-            try:
-                self._tk_root().after_cancel(self._video_tick_job)
-            except Exception:
-                pass
-        self._video_tick_job = self._tk_root().after(
-            interval, self._video_tick)
-
-    def _video_tick(self):
-        import time
-        import queue as _q
-        self._video_tick_job = None
-        if not self._video_preview_playing:
-            return
-
-        self._video_preview_pos = (
-            self._video_preview_start_pos
-            + (time.monotonic() - self._video_preview_start_t))
-        info = self._video_preview_info
-        fps = info.fps if (info and info.fps > 0) else 30.0
-
-        ended = False
-        q = self._video_frame_q
-        if q is not None:
-            # Drain up to the frame the clock has reached; show the latest.
-            desired = int(
-                (self._video_preview_pos - self._video_preview_start_pos) * fps)
-            frame = None
-            while True:
-                try:
-                    idx, data = q.get_nowait()
-                except _q.Empty:
-                    break
-                if idx is None:
-                    ended = True
-                    break
-                frame = data
-                if idx >= desired:
-                    break
-            if frame is not None:
-                self._show_video_frame_rgb(frame)
-        else:
-            # Windowed-ffplay fallback: end when that process exits.
-            ap = self._video_audio_proc
-            if ap is not None and ap.poll() is not None:
-                ended = True
-
-        if not ended and self._video_preview_dur > 0 \
-                and self._video_preview_pos >= self._video_preview_dur:
-            ended = True
-
-        if ended:
-            self._video_stop_playback()
-            self._video_preview_pos = 0.0  # so ▶ replays from the start
-            self._video_draw_playhead()
-            if self._video_preview_path:
-                self._render_video_poster(self._video_preview_path, 0.0)
-            return
-
-        self._video_draw_playhead()
-        self._video_schedule_tick()
-
-    def _video_draw_playhead(self):
-        canvas = getattr(self, "_video_seek_canvas", None)
-        if canvas is None:
-            return
-        canvas.delete("all")
-        w = max(1, canvas.winfo_width())
-        h = canvas.winfo_height() or 16
-        c = THEMES.get(self._current_theme, {})
-        canvas.create_rectangle(0, 0, w, h,
-                                fill=c.get("field_bg", "#222222"), outline="")
-        dur = self._video_preview_dur
-        if dur > 0 and self._video_preview_path:
-            x = int((self._video_preview_pos / dur) * w)
-            x = max(0, min(w, x))
-            canvas.create_rectangle(0, 0, x, h,
-                                    fill=c.get("select_bg", "#3a6ea5"),
-                                    outline="")
-            canvas.create_line(x, 0, x, h, fill="#ffffff", width=2)
-        self._video_update_time()
-
-    def _video_update_time(self):
-        def _fmt(s):
-            s = max(0, int(s))
-            return f"{s // 60}:{s % 60:02d}"
-        if self._video_preview_path and self._video_preview_dur > 0:
-            self.video_time_var.set(
-                f"{_fmt(self._video_preview_pos)} / "
-                f"{_fmt(self._video_preview_dur)}")
-        else:
-            self.video_time_var.set("0:00 / 0:00")
-
-    def _video_seek_click(self, event):
-        canvas = self._video_seek_canvas
-        if not self._video_preview_path or self._video_preview_dur <= 0:
-            return
-        w = max(1, canvas.winfo_width())
-        frac = max(0.0, min(1.0, event.x / w))
-        self._video_preview_pos = frac * self._video_preview_dur
-        if self._video_preview_playing:
-            self._video_start_playback(self._video_preview_pos)  # live re-seek
-        else:
-            self._video_draw_playhead()
-            self._schedule_video_scrub()  # decode the frame at rest (debounced)
-
-    def _schedule_video_scrub(self):
-        if self._video_scrub_job is not None:
-            try:
-                self._tk_root().after_cancel(self._video_scrub_job)
-            except Exception:
-                pass
-        self._video_scrub_job = self._tk_root().after(120, self._do_video_scrub)
-
-    def _do_video_scrub(self):
-        self._video_scrub_job = None
-        if self._video_preview_playing or not self._video_preview_path:
-            return
-        self._render_video_poster(self._video_preview_path,
-                                  self._video_preview_pos)
+    def _video_activate_pane(self, side):
+        """▶ pressed on an empty pane: load the selected row, then play the
+        pane that asked."""
+        rel = self._video_selected_rel()
+        if rel is not None:
+            self._video_load_track(rel, autoplay=side)
 
     def _video_stop_playback(self):
-        """Stop playback: cancel the session, kill the decode + audio
-        processes, and stop the timer (keeps the playhead where it landed)."""
-        from ..core import audio as _audio
-        self._video_session += 1  # invalidate any in-flight session
-        if self._video_stop_event is not None:
-            self._video_stop_event.set()
-        if self._video_decode_proc is not None:
-            try:
-                if self._video_decode_proc.poll() is None:
-                    self._video_decode_proc.terminate()
-            except OSError:
-                pass
-        self._video_decode_proc = None
-        _audio.stop_audio(self._video_audio_proc)
-        self._video_audio_proc = None
-        self._video_decode_thread = None
-        self._video_stop_event = None
-        self._video_frame_q = None
-        self._video_preview_playing = False
-        if self._video_tick_job is not None:
-            try:
-                self._tk_root().after_cancel(self._video_tick_job)
-            except Exception:
-                pass
-            self._video_tick_job = None
-        self._video_set_play_btn(False)
+        """Stop both preview panes (keeps their playheads where they landed)."""
+        for pane in (self._video_pane_orig, self._video_pane_rep):
+            if pane is not None:
+                pane.stop_playback()
 
     def stop_all_preview_playback(self):
-        """Stop both preview players (Replace Audio transport + Replace Video
-        embedded clip) and kill their ffplay/ffmpeg children.  Called on every
-        tab change and on app close so a playing song/clip never outlives the
-        tab it was started on -- an ffplay child is a detached OS process that
-        otherwise keeps playing after the window is gone.  Idempotent and safe
-        for plugins that never built either player (the helpers guard on the
-        widgets/handles, all of which default to None in __init__)."""
+        """Stop every preview pane (Replace Audio + Replace Video, Original
+        and Replacement sides) and kill their ffplay/ffmpeg children.  Called
+        on every tab change and on app close so a playing song/clip never
+        outlives the tab it was started on -- an ffplay child is a detached
+        OS process that otherwise keeps playing after the window is gone.
+        Idempotent and safe for plugins that never built either player (the
+        pane handles default to None in __init__)."""
         try:
             self._audio_stop_playback()
         except Exception:
@@ -4280,31 +4637,13 @@ class MainWindow:
             pass
 
     def _video_clear_preview(self):
-        """Reset the preview player entirely (used on manufacturer switch)."""
+        """Reset both preview panes entirely (used on manufacturer switch)."""
         self._cancel_video_select_job()
-        if self._video_scrub_job is not None:
-            try:
-                self._tk_root().after_cancel(self._video_scrub_job)
-            except Exception:
-                pass
-            self._video_scrub_job = None
-        self._video_stop_playback()
         self._video_current_rel = None
-        self._video_preview_path = None
-        self._video_preview_info = None
-        self._video_preview_dur = 0.0
-        self._video_preview_pos = 0.0
-        self._video_render_id += 1
-        self._video_frame_img = None
-        if hasattr(self, "video_source_var"):
-            self.video_source_var.set("orig")
-        if hasattr(self, "_video_src_rep"):
-            self._video_src_rep.configure(state=tk.DISABLED)
-        if hasattr(self, "_video_canvas"):
-            self._video_canvas.delete("all")
-        if hasattr(self, "_video_seek_canvas"):
-            self._video_seek_canvas.delete("all")
-        self._video_update_time()
+        if self._video_pane_orig is not None:
+            self._video_pane_orig.clear()
+        if self._video_pane_rep is not None:
+            self._video_pane_rep.clear("no replacement assigned")
 
     # ---- Replace Video: pending assignments (applied at Write time) --
 
@@ -6241,6 +6580,9 @@ class MainWindow:
         self._audio_loop_flags = {}
         self._audio_keep_full_flags = {}
         self._audio_scan_dir = ""
+        self._audio_dup_groups = None
+        self._audio_dup_scan_dir = ""
+        self.audio_group_dups_var.set(False)  # off by default per mfr
         # Show the per-track "Loop" column only for plugins that support
         # resource-level loop injection (BOF), and the "Full" (keep full length)
         # column only for plugins with a per-slot length override (JJP).  They
@@ -6261,6 +6603,16 @@ class MainWindow:
                                                       "rep")
             else:
                 self._audio_tree["displaycolumns"] = ("len", "fmt", "rep")
+        # "Group duplicates" checkbox: only for plugins that implement the
+        # duplicate scan (CGC).
+        if hasattr(self, "_audio_dup_group_cb"):
+            if getattr(mfr, "find_duplicate_sounds", None):
+                if not self._audio_dup_group_cb.winfo_ismapped():
+                    self._audio_dup_group_cb.pack(
+                        side=tk.LEFT, padx=(0, 12),
+                        before=self._audio_sort_hint_lbl)
+            else:
+                self._audio_dup_group_cb.pack_forget()
         self._audio_clear_preview()
         self._refresh_audio_list()
         if hasattr(self, "_audio_length_note_lbl"):
@@ -8502,6 +8854,12 @@ class MainWindow:
             text = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
         except Exception:
             return
+        self._scan_assets_tab_by_name(text)
+
+    def _scan_assets_tab_by_name(self, text):
+        """(Re-)scan the tab named *text* against the current assets folder.
+        Shared by the active-tab autoscan and the transfer flow's scan-every-tab
+        resync so both dispatch off one mapping."""
         if text == "Replace Video":
             self._scan_video_slots_async()
         elif text == "Replace Audio":
@@ -8514,6 +8872,22 @@ class MainWindow:
             self._maybe_rescan_write_preview()
         elif text == "Mod Pack":
             self._prefill_transfer_dst()
+
+    def _rescan_all_assets_tabs(self):
+        """Re-scan every tab present in the notebook, not just the visible one,
+        so all Replace tabs share one view of the current assets folder.  Only
+        tabs actually in the notebook are touched, so a plugin that omits a
+        Replace tab is skipped automatically."""
+        try:
+            tabs = self._notebook.tabs()
+        except Exception:
+            return
+        for tab_id in tabs:
+            try:
+                text = self._notebook.tab(tab_id, "text").strip()
+            except Exception:
+                continue
+            self._scan_assets_tab_by_name(text)
 
     def _find_checksums_ancestor(self, path, max_levels=3):
         """Walk up from *path* looking for a directory that contains
@@ -8804,6 +9178,7 @@ class MainWindow:
             self._tk_root(),
             manufacturer=self._current_mfr,
             theme_name=self._current_theme)
+
 
     # ------------------------------------------------------------------
     # WSL disk-space management (Windows; all native-tool plugins)
@@ -9127,18 +9502,18 @@ class MainWindow:
 
         Each prereq starts in "checking" state ([?] name); the App's
         worker thread fills in real results via :meth:`set_prereq_result`.
-        Hides the section entirely when *prereqs* is empty.
+        The strip itself stays hidden until a probe confirms something is
+        actually missing — flashing a "checking…" row that vanishes a moment
+        later just draws the eye for nothing.  The ⚙ menu always carries the
+        live status either way.
         """
         for w in self._prereqs_inner.winfo_children():
             w.destroy()
         self._prereq_indicators = {}
+        self._prereqs_frame.pack_forget()
 
         if not prereqs:
-            self._prereqs_frame.pack_forget()
             return
-
-        self._prereqs_frame.pack(fill=tk.X, padx=10, pady=(6, 0),
-                                 before=self._notebook)
 
         c = THEMES[self._current_theme]
         for p in prereqs:
@@ -9182,15 +9557,15 @@ class MainWindow:
         self._refresh_prereqs_visibility()
 
     def _refresh_prereqs_visibility(self):
-        """Tuck the Prerequisites strip away once every probe came back green
-        (monkeybug: it's only useful at the beginning — after that it just
-        eats vertical space).  Anything still checking or missing keeps the
-        strip visible; the ⚙ menu carries the status + actions either way."""
+        """Show the Prerequisites strip only once a probe has CONFIRMED a
+        missing prerequisite.  While checks are still running (or when all
+        came back green) it stays hidden — no flash-then-vanish on tab entry;
+        the ⚙ menu carries the status + actions either way."""
         entries = self._prereq_indicators
         if not entries:
             return   # reset_prereqs already decided the empty case
-        all_ok = all(e.get("ok") is True for e in entries.values())
-        if all_ok:
+        any_missing = any(e.get("ok") is False for e in entries.values())
+        if not any_missing:
             self._prereqs_frame.pack_forget()
         elif not self._prereqs_frame.winfo_manager():
             self._prereqs_frame.pack(fill=tk.X, padx=10, pady=(6, 0),
@@ -9860,32 +10235,18 @@ class MainWindow:
             # Already changed on disk by an earlier build — same hue as the
             # Write tab's "Modified" rows so the two views read as one truth.
             self._audio_tree.tag_configure("changed", foreground=c["link"])
-        if hasattr(self, "_audio_spec_canvas"):
-            self._audio_spec_canvas.configure(
-                background=c["field_bg"], highlightbackground=c["border"])
-        if hasattr(self, "_audio_play_canvas"):
-            for cv in (self._audio_play_canvas, self._audio_stop_canvas):
-                cv.configure(background=c["bg"])
-            self._draw_audio_icon(
-                self._audio_play_canvas,
-                "pause" if self._audio_preview_playing else "play")
-            self._draw_audio_icon(self._audio_stop_canvas, "stop")
+        for pane in (getattr(self, "_audio_pane_orig", None),
+                     getattr(self, "_audio_pane_rep", None)):
+            if pane is not None:
+                pane.apply_theme(c)
 
         if hasattr(self, "_video_tree"):
             self._video_tree.tag_configure("assigned", foreground=c["success"])
             self._video_tree.tag_configure("changed", foreground=c["link"])
-        if hasattr(self, "_video_seek_canvas"):
-            self._video_seek_canvas.configure(highlightbackground=c["border"])
-            self._video_draw_playhead()
-        if hasattr(self, "_video_canvas"):
-            self._video_canvas.configure(highlightbackground=c["border"])
-        if hasattr(self, "_video_play_canvas"):
-            for cv in (self._video_play_canvas, self._video_stop_canvas):
-                cv.configure(background=c["bg"])
-            self._draw_audio_icon(
-                self._video_play_canvas,
-                "pause" if self._video_preview_playing else "play")
-            self._draw_audio_icon(self._video_stop_canvas, "stop")
+        for pane in (getattr(self, "_video_pane_orig", None),
+                     getattr(self, "_video_pane_rep", None)):
+            if pane is not None:
+                pane.apply_theme(c)
 
         if hasattr(self, "_image_tree"):
             self._image_tree.tag_configure("assigned", foreground=c["success"])

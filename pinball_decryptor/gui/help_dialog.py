@@ -78,8 +78,10 @@ HELP_CONTENT = {
          "baseline (an earlier build or a hand edit). The counter shows every "
          "change the next build will pack — not just this session's."),
         ("Preview",
-         "The player previews a slot and A/Bs the original against your "
-         "replacement before you commit to a build."),
+         "Two players side by side — the original on the left, your "
+         "replacement on the right — each with its own controls, so you can "
+         "compare them before you commit to a build. Starting one pauses "
+         "the other."),
         ("Undo",
          "Right-click a slot: \"Remove replacement\" cancels an un-built "
          "assignment; \"Revert to original\" restores an already-changed "
@@ -92,7 +94,8 @@ HELP_CONTENT = {
     "Replace Video": [
         ("Scan and assign",
          "Scan lists every video slot; assign a replacement clip per slot "
-         "and preview A/B before building. A clip that already matches the "
+         "and compare it against the original in the side-by-side preview "
+         "players before building. A clip that already matches the "
          "original's format, resolution and frame rate is used as-is; "
          "anything else is auto-re-encoded to match (transparency is kept "
          "where the original has it)."),

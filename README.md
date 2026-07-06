@@ -259,6 +259,20 @@ auto-installed by **Install Prerequisites** (same flow as the WSL
 tools). The model itself (~75 MB) downloads on first transcribe-run
 and is cached in `%USERPROFILE%\.cache\huggingface\`.
 
+### Group duplicate sounds (Pulp Fiction)
+
+Pulp Fiction ships the same recording at several bank slots at once —
+the censored `pfspeechBEEPD` bank mirrors `pfspeech`, and some lines
+repeat again in the UI and SFX banks — so replacing just one copy can
+leave the machine playing a stock twin, which looks exactly like a
+build that didn't take. Tick **Group duplicates** on the Replace Audio
+tab to cluster every slot that carries byte-identical audio under one
+collapsible row (the first tick decodes and fingerprints all ~1,000
+sounds, about ten seconds). To mod a duplicated sound everywhere it
+plays, assign your replacement to one copy, then right-click it and
+choose **Apply to all copies** — the edit fans out to the rest of the
+group in one step.
+
 ### Decode DMD scenes to PNG/MP4 (experimental, opt-in)
 
 CGC's MM / AFM / MB remakes bundle the original Williams WPC game ROM
@@ -443,13 +457,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    sound effects without copy-pasting and renaming. Scan the assets
    folder, pick a slot, and assign a replacement in almost any format
    (mp3, wav, ogg, flac, m4a, …) — it's auto-converted to the original
-   track's codec / sample-rate for you. A seekable spectrogram preview
-   plays the original ↔ your replacement so you can A/B them.
+   track's codec / sample-rate for you. The original and your replacement
+   sit in side-by-side seekable-spectrogram panes, each with its own
+   play/stop transport, so you can A/B them (starting one pane pauses the
+   other).
 6. **Replace Video tab** *(file-based plugins)* — the same idea
    for video: assign a replacement clip and it's re-encoded to the
    original's container / codec / resolution (transparency preserved
-   where the original has it). An embedded player previews each clip in
-   place. The Big Lebowski's colour-DMD `.cdmd` clips are supported
+   where the original has it). Original and replacement preview
+   side by side, each in its own embedded player. The Big Lebowski's colour-DMD `.cdmd` clips are supported
    too — they're re-encoded back into `.cdmd` at the original frame
    count so they stay in sync with their sound.
 7. **Write tab** — pick the original file, the (now-modified) assets

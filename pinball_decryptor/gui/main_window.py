@@ -2374,9 +2374,12 @@ class MainWindow:
             self._write_filename_row, textvariable=self.write_filename_var)
         self._write_filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # Flush-left with the "File Name:" / "Output Folder:" row labels (padx
+        # matches the rows' `pad`), not indented under the entry -- monkeybug
+        # found the old 26px indent read as off-centre / non-standard.
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
-        self._write_filename_lbl.pack(anchor=tk.W, padx=26)
+        self._write_filename_lbl.pack(anchor=tk.W, padx=10)
 
         # JJP Direct-SSD-only: "Modified Files Preview" — same shape
         # as the standalone JJP decryptor.  Walks the assets folder

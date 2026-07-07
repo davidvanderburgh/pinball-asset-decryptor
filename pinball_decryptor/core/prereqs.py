@@ -112,7 +112,34 @@ def check_prerequisites(prereqs) -> List[PrerequisiteResult]:
 # Host-side probe — uses the OS's default shell.
 # ---------------------------------------------------------------------------
 
+# Shell features that make a probe more than a plain "is this binary present?"
+# check.  When any appear we must actually run the command — PATH presence of
+# the leading token can't stand in for the whole pipeline's exit code.
+_SHELL_METACHARS = set("|&;<>()$`\n*?[]{}")
+
+
+def _probe_presence_exe(cmd: str) -> Optional[str]:
+    """The leading executable of *cmd* when it is a simple presence probe
+    (``ffmpeg -version``, ``gpg --version``), else None for compound shell
+    commands where we can't substitute a PATH lookup for running it."""
+    if not cmd or any(c in _SHELL_METACHARS for c in cmd):
+        return None
+    parts = cmd.split()
+    return parts[0] if parts else None
+
+
 def _probe_host(cmd: str) -> Tuple[bool, str]:
+    # Fast, load-proof path for binary-presence probes: shutil.which is a pure
+    # PATH scan (no subprocess), so an installed tool resolves instantly even
+    # while a big extract + disk churn hammer the machine.  Actually executing
+    # `ffmpeg -version` under that load can blow past PROBE_TIMEOUT or fail to
+    # spawn, wrongly flipping a green prereq to red mid-extract — monkeybug saw
+    # ffmpeg flagged missing during a Led Zeppelin extract, then a re-check when
+    # idle said OK.  Only fall through to running the command when the tool
+    # ISN'T on PATH (a genuine "not installed") or the probe is compound.
+    exe = _probe_presence_exe(cmd)
+    if exe and shutil.which(exe):
+        return True, f"{exe} on PATH"
     try:
         result = subprocess.run(
             cmd,
@@ -124,7 +151,7 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
         )
     except subprocess.TimeoutExpired:
         return False, f"timed out after {PROBE_TIMEOUT}s"
-    except FileNotFoundError as e:
+    except OSError as e:
         return False, str(e)
 
     if result.returncode == 0:

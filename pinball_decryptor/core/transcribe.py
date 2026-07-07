@@ -25,6 +25,7 @@ this in via ``make_transcribe_pipeline``.
 import csv
 import os
 import shutil
+import sys
 
 from .pipeline_base import BasePipeline, PipelineError
 
@@ -98,6 +99,85 @@ _PARALLEL_MIN_WAVS = 16
 # the same pass — they're exactly the clips a fingerprint match can then title.
 # Songs run minutes; SFX/ambience beds are short.  0 disables the tag.
 DEFAULT_MUSIC_MIN_SECONDS = 20.0
+
+# Approximate resident RAM per parallel Whisper worker, by model size (GB).
+# Each worker loads its OWN model, and the int8 ctranslate2 weights plus the
+# encoder activations for a long (multi-minute) clip are what dominate.
+# Deliberately generous: under-counting is exactly what let 7 medium.en workers
+# exhaust memory partway through a run and spew "mkl_malloc: failed to allocate
+# memory", silently demoting long music/speech clips to non-speech (monkeybug,
+# Led Zeppelin extract — the failures bunched at the end because files are
+# duration-sorted, so every worker hit a multi-minute clip at once).
+_MODEL_WORKER_GB = {
+    "tiny.en": 0.6, "tiny": 0.6,
+    "base.en": 0.8, "base": 0.8,
+    "small.en": 1.2, "small": 1.2,
+    "medium.en": 2.2, "medium": 2.2,
+    "large-v3": 4.0, "large-v2": 4.0, "large": 4.0,
+}
+_DEFAULT_WORKER_GB = 2.2
+# Leave this much RAM for the OS, the app, and the just-finished extract's
+# still-warm page cache before dividing what's left among the workers.
+_RAM_HEADROOM_GB = 2.0
+
+
+def _available_ram_gb():
+    """Best-effort AVAILABLE (not total) physical RAM in GB, or None when it
+    can't be read cheaply without a new dependency.  None-safe on purpose:
+    callers fall back to a conservative model-only cap rather than trust a
+    number we couldn't get."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            ms = _MEMORYSTATUSEX()
+            ms.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                return ms.ullAvailPhys / (1024 ** 3)
+        elif sys.platform.startswith("linux"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) / (1024 ** 2)  # kB -> GB
+    except Exception:
+        return None
+    return None
+
+
+def _plan_workers(model_size, ncpu, nwavs, avail_ram_gb=None):
+    """How many parallel transcription workers to spawn.
+
+    Bounded by CPUs (``ncpu - 1``, capped at 8 — each worker loads its own
+    model, so more workers is more fixed start-up tax for diminishing return)
+    and by the work available (``nwavs``), then further by a RAM budget: each
+    worker needs ~``_MODEL_WORKER_GB[model_size]`` and they all peak together
+    on the long clips.  Without the RAM cap, a 2 GB+ model x (cores-1) workers
+    over-subscribes memory and inference starts failing mid-run.
+
+    ``avail_ram_gb`` is injected by tests; production reads it live.  When RAM
+    can't be read, fall back to a conservative model-only cap (cheap models get
+    the full CPU count; a heavy model gets very few) instead of trusting cores.
+    """
+    hard = max(1, min(ncpu - 1, nwavs, 8))
+    per = _MODEL_WORKER_GB.get(model_size, _DEFAULT_WORKER_GB)
+    if avail_ram_gb is None:
+        avail_ram_gb = _available_ram_gb()
+    if avail_ram_gb is None:
+        mem_cap = 8 if per <= 1.0 else (4 if per <= 1.5 else 2)
+    else:
+        mem_cap = int((avail_ram_gb - _RAM_HEADROOM_GB) / per)
+    return max(1, min(hard, mem_cap))
 
 
 class TranscribePipeline(BasePipeline):
@@ -485,10 +565,16 @@ class TranscribePipeline(BasePipeline):
         # counts as cold — _resolve_model_dir verifies model.bin exists.
         model_ref = self._resolve_model_dir()
         ncpu = os.cpu_count() or 2
-        # Cap at 8: each worker loads its own model (~1-2 s), so more workers is
-        # more fixed start-up tax for diminishing parallelism — 8 amortises well
-        # without flooding a 16+ core box with model loads.
-        nworkers = max(1, min(ncpu - 1, len(wavs), 8))
+        # Workers are bounded by CPUs (cap 8: each loads its own model, so more
+        # is start-up tax for diminishing return) AND by a RAM budget, so a
+        # heavy model can't over-subscribe memory and start failing mid-run
+        # ("mkl_malloc: failed to allocate memory" — monkeybug's 7 medium.en
+        # workers).  See _plan_workers.
+        cpu_cap = max(1, min(ncpu - 1, len(wavs), 8))
+        nworkers = _plan_workers(self.model_size, ncpu, len(wavs))
+        if nworkers < cpu_cap:
+            self._log(f"  Using {nworkers} worker(s) (not {cpu_cap}) so the "
+                      f"{self.model_size} model fits in available RAM.", "info")
         # One ctranslate2 thread per worker: nworkers models otherwise each grab
         # every core (N× oversubscription that erases the parallelism win).
         ctx = mp.get_context("spawn")

@@ -3014,22 +3014,27 @@ def _load_wav(path, want_stereo, np):
 
 def _fit(a, length, np, fade_ms=5.0):
     """Truncate / zero-pad *a* to exactly *length* samples, with a short
-    raised-cosine fade to zero on the tail of the actual audio (the
-    truncation point, or the last real sample before the zero padding).
+    raised-cosine fade from zero at the head and to zero at the tail of the
+    actual audio (the truncation point, or the last real sample before the
+    zero padding).
 
-    Every caller feeds user replacement audio, and a replacement that ends
-    non-zero — hard-trimmed to fill the slot, or carrying DC offset — is a
-    step the machine renders as an audible click at the end of the callout
-    (monkeybug, real-HW; stock sounds end at silence so stock never
-    clicked).  ~5 ms is below an audible fade but removes the step."""
+    Every caller feeds user replacement audio, and audio whose edge is
+    non-zero — cut mid-waveform, or carrying DC offset — is a step the
+    machine renders as an audible click at that edge of the callout
+    (monkeybug, real-HW, both ends; stock sounds start and end at silence so
+    stock never clicked).  The symmetric fade also lands looping music at
+    zero on both sides of the loop point.  ~5 ms is below an audible fade
+    but removes the step."""
     a = np.asarray(a, np.int64)
     if len(a) > length:
         a = a[:length]
-    n = min(len(a), int(round(fade_ms * 44.1)))
+    # Halve on short clips so head + tail fades can't overlap.
+    n = min(len(a) // 2, int(round(fade_ms * 44.1)))
     if n > 1:
         ramp = 0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi, n))
         a = np.concatenate(
-            [a[:len(a) - n],
+            [np.round(a[:n] * ramp[::-1]).astype(np.int64),
+             a[n:len(a) - n],
              np.round(a[len(a) - n:] * ramp).astype(np.int64)])
     if len(a) < length:
         a = np.concatenate([a, np.zeros(length - len(a), np.int64)])

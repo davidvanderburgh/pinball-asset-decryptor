@@ -460,15 +460,22 @@ class App:
         return self._settings.setdefault("manufacturers", {})
 
     def _load_manufacturer_paths(self, key):
+        # Saved paths go through resolve_mapped_drive: a path saved as
+        # "W:\…" in a normal session stops resolving when the app is later
+        # run elevated (drive mappings are per logon session — monkeybug),
+        # so restore its UNC equivalent instead of a dead letter.
+        from .core.admin import resolve_mapped_drive as _rmd
         section = self._manufacturers_section().get(key, {})
-        self.window.extract_input_var.set(section.get("extract_input", ""))
-        self.window.extract_output_var.set(section.get("extract_output", ""))
+        self.window.extract_input_var.set(
+            _rmd(section.get("extract_input", "")))
+        self.window.extract_output_var.set(
+            _rmd(section.get("extract_output", "")))
         # Output before original: setting the original fires the fill-empty-
         # Output-Folder default (window._maybe_default_write_output), and a
         # restore that then wrote "" over it would throw the default away.
-        self.window.write_output_var.set(section.get("write_output", ""))
-        self.window.write_upd_var.set(section.get("write_original", ""))
-        self.window.write_assets_var.set(section.get("write_assets", ""))
+        self.window.write_output_var.set(_rmd(section.get("write_output", "")))
+        self.window.write_upd_var.set(_rmd(section.get("write_original", "")))
+        self.window.write_assets_var.set(_rmd(section.get("write_assets", "")))
         # Extract-tab checkbox state (auto-name / categories / JJP filters) —
         # per manufacturer, so the ticks stick across sessions (monkeybug).
         # apply_manufacturer() re-applies this after it rebuilds the dynamic

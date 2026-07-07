@@ -19,6 +19,11 @@ when needed (the Docker path) or works at user-level (native
 debugfs reading the user's own drive) — so we report "elevated"
 when the effective UID is 0 and otherwise let the runtime ``sudo``
 prompts handle it.
+
+:func:`resolve_mapped_drive` also lives here because it exists purely
+as an elevation side effect: mapped network drives are per logon
+session, so paths saved as ``W:\\…`` break the moment the app runs
+elevated.
 """
 
 import sys
@@ -43,6 +48,60 @@ def is_admin():
         return os.geteuid() == 0
     except (AttributeError, OSError):
         return False
+
+
+def _drive_visible(letter):
+    """True if drive *letter* exists in THIS logon session (Windows).
+
+    Uses the GetLogicalDrives bitmask — a pure in-memory lookup, so an
+    unreachable NAS behind a mapped letter can't stall the GUI thread the
+    way an ``os.path.exists`` probe of the drive root would."""
+    try:
+        import ctypes
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        return bool(mask >> (ord(letter.upper()) - ord("A")) & 1)
+    except Exception:
+        return True     # can't tell — leave the path alone
+
+
+def _persistent_mapping(letter):
+    """The UNC target of the user's persistent drive mapping for *letter*
+    (``HKCU\\Network\\<letter>\\RemotePath``), or None."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            "Network\\" + letter.upper()) as k:
+            remote, _ = winreg.QueryValueEx(k, "RemotePath")
+        return remote or None
+    except OSError:
+        return None
+
+
+def resolve_mapped_drive(path):
+    """Translate a mapped-network-drive path to its UNC target when the
+    drive letter isn't visible in this session (Windows).
+
+    Mapped drive letters are per-logon-session: an elevated ("Run as
+    administrator") process runs under a separate token whose session has
+    no drive mappings, so a saved ``W:\\mods`` stops resolving under
+    elevation even though ``\\\\server\\share`` is reachable (monkeybug,
+    running PAD elevated for flash-image).  The persistent mapping lives
+    per-USER in the registry (``HKCU\\Network\\<letter>\\RemotePath``),
+    which both sessions share — translate through it.  Anything that
+    doesn't fit (non-Windows, no drive letter, letter visible in this
+    session, no persistent mapping) returns *path* unchanged."""
+    if sys.platform != "win32" or not path:
+        return path
+    p = path.strip()
+    if (len(p) < 2 or p[1] != ":" or not p[0].isalpha()
+            or (len(p) > 2 and p[2] not in "\\/")):
+        return path
+    if _drive_visible(p[0]):
+        return path
+    remote = _persistent_mapping(p[0])
+    if not remote:
+        return path
+    return remote.rstrip("\\/") + p[2:]
 
 
 def relaunch_as_admin():

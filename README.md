@@ -343,6 +343,14 @@ Download the latest `Pinball_Asset_Decryptor_v*_Windows.exe` from the
 and run it. The installer bundles a Python runtime so nothing else is needed
 to launch the GUI.
 
+The installed shortcuts start the app **as Administrator** (one standard
+UAC prompt per launch) — the SD-card and Direct-SSD write paths need
+elevation, and forgetting the old right-click → *Run as administrator*
+used to fail halfway through a run. Paths on mapped network drives
+(`W:\…`) keep working in the elevated session: Windows hides mapped
+letters from elevated processes, so the app translates them to their
+`\\server\share` form automatically.
+
 After install, run **Install Prerequisites** from the Start Menu — it asks
 which manufacturers you'll actually use and installs only the tools those
 plugins need (see [Per-manufacturer prerequisites](#per-manufacturer-prerequisites)

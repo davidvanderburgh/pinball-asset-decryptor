@@ -2458,23 +2458,25 @@ class MainWindow:
         # collects the image + target card and confirms before the write runs
         # through the normal status area.
         self._flash_frame = ttk.LabelFrame(f, text="Flash Image to SD Card")
-        # Two rows: the buttons right-aligned on their own row, and the
-        # description on a full-width row below.  An earlier single-row layout
-        # (label left, button right) truncated the description once a second
-        # button ("Card diagnostics…") was added — the two buttons ate the
-        # width budget the paragraph needed, clipping it mid-sentence.  A
-        # dedicated full-width description row can't be squeezed.
-        btn_row = ttk.Frame(self._flash_frame)
-        btn_row.pack(fill=tk.X, padx=8, pady=(4, 0))
+        # Description left, buttons in a right-side column vertically centered
+        # against it (monkeybug: matches the other label-left/button-right
+        # rows).  An earlier single-row attempt clipped the description
+        # mid-sentence because its wraplength was fixed; the <Configure>
+        # re-wrap below sizes the paragraph to the width the label actually
+        # gets, so the side-by-side layout just wraps taller instead.  A
+        # second button ("Card diagnostics…") stacks under the first inside
+        # the column rather than eating the paragraph's width.
+        self._flash_btns = ttk.Frame(self._flash_frame)
+        self._flash_btns.pack(side=tk.RIGHT, padx=8, pady=6)
         self._flash_btn = ttk.Button(
-            btn_row, text="Flash image to SD card…",
+            self._flash_btns, text="Flash image to SD card…",
             command=self._open_flash_dialog)
-        self._flash_btn.pack(side=tk.RIGHT)
+        self._flash_btn.pack(fill=tk.X)
         # "Card diagnostics…" — only for manufacturers implementing
         # diagnose_card (CGC): reads the on-machine installer's log back off
         # a failed card (read-only).  Packed/hidden in apply_manufacturer().
         self._diagnose_btn = ttk.Button(
-            btn_row, text="Card diagnostics…",
+            self._flash_btns, text="Card diagnostics…",
             command=self._open_diagnose_dialog)
         _flash_lbl = ttk.Label(
             self._flash_frame,
@@ -2483,8 +2485,8 @@ class MainWindow:
                   "to restore a backup. The whole card is erased and replaced, "
                   "and the built-in size check refuses an image too big for the "
                   "card. Requires Administrator."),
-            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=760)
-        _flash_lbl.pack(side=tk.TOP, fill=tk.X, expand=True, padx=8,
+            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=560)
+        _flash_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8,
                         pady=(2, 6), anchor=tk.W)
         # Re-wrap to the width actually allocated so the full paragraph always
         # shows (taller when narrow) instead of clipping.
@@ -7120,9 +7122,10 @@ class MainWindow:
             self._flash_frame.pack_forget()
         # Card diagnostics — manufacturers that can read a failed install's
         # on-card log back (CGC's diagnose_card).  Lives inside the flash
-        # frame, so it can only show when that frame is visible.
+        # frame's button column, so it can only show when that frame is
+        # visible; fill=X keeps the stacked buttons the same width.
         if caps.flash_image and getattr(mfr, "diagnose_card", None):
-            self._diagnose_btn.pack(side=tk.RIGHT, padx=(8, 0), anchor=tk.N,
+            self._diagnose_btn.pack(fill=tk.X, pady=(6, 0),
                                     after=self._flash_btn)
         else:
             self._diagnose_btn.pack_forget()
@@ -7712,17 +7715,38 @@ class MainWindow:
         same textvariable wiring (typing + traces unchanged), plus a dropdown
         of this manufacturer's recent paths for *field*.  Values refresh on
         every open (``postcommand``) so a path recorded mid-session appears
-        without any explicit widget update."""
+        without any explicit widget update.
+
+        A typed or picked path on a mapped drive letter the current session
+        can't see (running elevated — mappings are per logon session) is
+        rewritten to its UNC target once the box is left, so the action
+        buttons get a path that actually resolves.  On focus-out rather
+        than per keystroke: rewriting under the caret while the user is
+        still typing "W:\\…" would fight them mid-word."""
         combo = ttk.Combobox(parent, textvariable=var)
         combo.configure(postcommand=lambda c=combo, f=field: c.configure(
             values=tuple(self._path_history.get(f, ()))))
+
+        def _unmap(_e=None, v=var):
+            from ..core.admin import resolve_mapped_drive
+            cur = v.get()
+            fixed = resolve_mapped_drive(cur)
+            if fixed != cur:
+                v.set(fixed)
+        combo.bind("<FocusOut>", _unmap)
+        combo.bind("<<ComboboxSelected>>", _unmap)
         return combo
 
     def set_path_history(self, history):
         """Swap in the current manufacturer's recent-paths dict
         (``{field_key: [paths]}``).  Called by the App on mfr switch and
-        after it records a new path."""
-        self._path_history = dict(history or {})
+        after it records a new path.  Entries on a mapped drive letter this
+        session can't see (elevated process) are shown pre-translated to
+        their UNC target so picking one just works."""
+        from ..core.admin import resolve_mapped_drive
+        self._path_history = {
+            f: [resolve_mapped_drive(p) for p in paths]
+            for f, paths in (history or {}).items()}
 
     def _browse_extract_input(self):
         path = filedialog.askopenfilename(

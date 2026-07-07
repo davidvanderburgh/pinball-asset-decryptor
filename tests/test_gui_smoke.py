@@ -167,6 +167,43 @@ def test_audio_group_duplicates_checkbox_only_for_cgc(
     assert win._audio_dup_group_cb.winfo_manager() == ""
 
 
+def test_audio_declick_checkbox_only_for_stern(app, manufacturers_by_key):
+    """'Auto-fade + cap audio replacements' is packed only for Stern — its env
+    var is read solely by the Spike 2 encoder, so other plugins must not show
+    an inert toggle."""
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert win._audio_declick_cb.winfo_manager() == "pack"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert win._audio_declick_cb.winfo_manager() == ""
+
+
+def test_audio_declick_toggle_persists_and_sets_env(
+        app, manufacturers_by_key, monkeypatch):
+    """The toggle is on by default (env var unset).  Unticking it persists
+    audio_declick=False and sets PAD_STERN_AUDIO_RAW=1 so the next Write's
+    encode workers inherit it; re-ticking clears both."""
+    import os
+    monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    assert win.audio_declick_var.get() is True
+    assert "PAD_STERN_AUDIO_RAW" not in os.environ
+
+    win.audio_declick_var.set(False)
+    win._on_audio_declick_toggle()
+    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
+    assert app._settings["audio_declick"] is False
+
+    win.audio_declick_var.set(True)
+    win._on_audio_declick_toggle()
+    assert "PAD_STERN_AUDIO_RAW" not in os.environ
+    assert app._settings["audio_declick"] is True
+
+
 def test_audio_group_duplicates_renders_two_level_tree(
         app, manufacturers_by_key):
     """With 'Group duplicates' on and a warm group cache, the audio list

@@ -3023,8 +3023,11 @@ def _fit(a, length, np, fade_ms=5.0):
     machine renders as an audible click at that edge of the callout
     (monkeybug, real-HW, both ends; stock sounds start and end at silence so
     stock never clicked).  The symmetric fade also lands looping music at
-    zero on both sides of the loop point.  ~5 ms is below an audible fade
-    but removes the step."""
+    zero on both sides of the loop point.  Landing the edge at zero isn't
+    enough on real HW — a 5 ms slam from zero to a hot sample still pops,
+    where stock eases in over 40-77 ms — so the callers pass a stock-length
+    *fade_ms* by default (see :func:`_declick_params`); ~5 ms is the legacy
+    minimum, used only when the user unticks auto-fade."""
     a = np.asarray(a, np.int64)
     if len(a) > length:
         a = a[:length]
@@ -3050,6 +3053,31 @@ def _amplitude_fit(samples, rng, np, headroom=0.97):
 
 _MONO_RANGE = 11147
 _STEREO_RANGE = 21452
+
+# "Auto-fade + cap audio replacements" (Write/Audio tab toggle, on by default).
+# A user replacement cut mid-waveform slams from silence to a hot sample in a
+# few ms; stock callouts ease in over 40-77 ms, so ours pop at that edge on real
+# hardware (monkeybug, Led Zeppelin LE: clicks at BOTH edges, click volume
+# tracks the cabinet's master knob, and a deliberately silent clip never clicks
+# -- i.e. the step is in the signal we ship, not a Stern anti-tamper "watermark"
+# that couldn't be removed).  ON lands a stock-length raised-cosine fade on both
+# edges and normalizes to a lower ceiling so replacements sit nearer stock
+# loudness (his sources were hotter than stock, and a louder edge = a louder
+# click).  OFF (PAD_STERN_AUDIO_RAW=1, set by the GUI when the box is unticked)
+# restores the prior minimal 5 ms fade + 0.97 ceiling.  The env var rides the
+# spawn boundary into the encode workers, so serial and parallel writes agree
+# without threading a flag through every signature.
+_DECLICK_FADE_MS = 40.0
+_DECLICK_HEADROOM = 0.80
+
+
+def _declick_params():
+    """``(fade_ms, headroom)`` for an audio replacement's edge fade + level cap.
+    Auto-fade + cap is on unless the GUI unticked it (``PAD_STERN_AUDIO_RAW=1``),
+    which restores the pre-v0.49 behavior."""
+    if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
+        return 5.0, 0.97
+    return _DECLICK_FADE_MS, _DECLICK_HEADROOM
 
 
 class _BodyOverlay:
@@ -3141,19 +3169,23 @@ def _encode_mono(emu, gr, p, wav_path, np):
     # at the loop point of looping music).
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
+    fade_ms, headroom = _declick_params()
     s = _load_wav(wav_path, False, np)
-    s = _amplitude_fit(s, _MONO_RANGE, np)
-    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np)
+    s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
+    tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     return gr.encode_sound(p, tgt)
 
 
 def _encode_stereo(emu, sr, p, wav_path, np):
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
+    fade_ms, headroom = _declick_params()
     a = _load_wav(wav_path, True, np)
-    a = _amplitude_fit(a, _STEREO_RANGE, np)
-    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np)
-    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np)
+    a = _amplitude_fit(a, _STEREO_RANGE, np, headroom=headroom)
+    L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
+             fade_ms=fade_ms)
+    R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
+             fade_ms=fade_ms)
     return sr.encode_sound(p, L, R)
 
 

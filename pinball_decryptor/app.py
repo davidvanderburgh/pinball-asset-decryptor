@@ -72,6 +72,10 @@ class App:
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
+        # Apply the saved "Auto-fade + cap audio replacements" pref before any
+        # Write can spawn encode workers (they inherit this env var).  Default on.
+        self._apply_audio_declick_env(
+            bool(self._settings.get("audio_declick", True)))
 
         # First-launch disclaimer.  Boolean flag, unversioned: once the
         # user accepts, they never see it again — including across app
@@ -157,6 +161,9 @@ class App:
                 self._on_admin_warning_collapsed_change),
             initial_voice_quality=self._settings.get("voice_quality"),
             on_voice_quality_change=self._on_voice_quality_change,
+            initial_audio_declick=bool(
+                self._settings.get("audio_declick", True)),
+            on_audio_declick_change=self._on_audio_declick_change,
         )
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
@@ -2658,6 +2665,25 @@ class App:
         """Persist whether the admin-warning body is collapsed so a returning
         user who's read it once keeps it minimised (monkeybug)."""
         self._settings["admin_warning_collapsed"] = bool(collapsed)
+        self._save_settings()
+
+    def _apply_audio_declick_env(self, enabled):
+        """Reflect the "Auto-fade + cap audio replacements" toggle into the env
+        var the Stern spike2 encoder reads.  On (default) leaves it unset; off
+        sets ``PAD_STERN_AUDIO_RAW=1``.  Spawned encode workers inherit
+        os.environ at pool-creation time, so setting it here (the process that
+        runs Write) reaches both the serial and the parallel encode paths."""
+        if enabled:
+            os.environ.pop("PAD_STERN_AUDIO_RAW", None)
+        else:
+            os.environ["PAD_STERN_AUDIO_RAW"] = "1"
+
+    def _on_audio_declick_change(self, enabled):
+        """Persist the audio auto-fade + cap toggle and apply it to the encoder
+        env var so the next Write uses it."""
+        enabled = bool(enabled)
+        self._settings["audio_declick"] = enabled
+        self._apply_audio_declick_env(enabled)
         self._save_settings()
 
     def _on_voice_quality_change(self, model_size):

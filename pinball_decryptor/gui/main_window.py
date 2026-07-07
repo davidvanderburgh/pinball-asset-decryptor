@@ -950,7 +950,9 @@ class MainWindow:
                  initial_admin_warning_collapsed=False,
                  on_admin_warning_collapsed_change=None,
                  initial_voice_quality=None,
-                 on_voice_quality_change=None):
+                 on_voice_quality_change=None,
+                 initial_audio_declick=True,
+                 on_audio_declick_change=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -1006,6 +1008,14 @@ class MainWindow:
             vq = VOICE_QUALITY_CHOICES[0][0]
         self.voice_quality_var = tk.StringVar(value=vq)
         self._on_voice_quality_change = on_voice_quality_change
+        # "Auto-fade + cap audio replacements" — smooths the start/end of
+        # each replacement and caps its level so it can't pop on real hardware
+        # (monkeybug's callout clicks).  Persisted in settings.json via
+        # ``on_audio_declick_change``; the App also mirrors it into the Stern
+        # encoder's env var.  On by default.
+        self.audio_declick_var = tk.BooleanVar(
+            value=bool(initial_audio_declick))
+        self._on_audio_declick_change = on_audio_declick_change
         self._app_title = app_title
 
         self._current_mfr = None
@@ -2863,6 +2873,27 @@ class MainWindow:
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
         self._audio_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+
+        # Auto-fade + cap: land a stock-length fade on both edges of every
+        # replacement and cap its level, so a hot clip cut mid-waveform can't
+        # pop on real hardware (monkeybug's callout clicks).  On by default;
+        # only meaningful for the Spike 2 re-encode path, so apply_manufacturer
+        # shows it for Stern and hides it elsewhere.
+        self._audio_declick_cb = ttk.Checkbutton(
+            f, text="Auto-fade + cap audio replacements",
+            variable=self.audio_declick_var,
+            command=self._on_audio_declick_toggle)
+        self._audio_declick_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
+        self._audio_declick_tip = _Tooltip(
+            self._audio_declick_cb,
+            "On by default. Smooths the very start and end of each replacement "
+            "and gently caps its level, so a clip cut mid-waveform or louder "
+            "than the game's own audio can't click or pop on the real machine "
+            "(some callouts otherwise click at both ends).\n\nStock sounds ease "
+            "in and out; hot, hard-cut replacements don't, which is what causes "
+            "the click. Leave this on unless a replacement sounds wrong with "
+            "it — turning it off uses your audio exactly as provided.",
+            lambda: self._current_theme)
 
         # No explicit "stage" step: the replacements you assign are applied
         # (converted + written into the assets folder) automatically when you
@@ -5911,6 +5942,12 @@ class MainWindow:
                     "as-is.")
         return forces
 
+    def _on_audio_declick_toggle(self):
+        """Forward the Auto-fade + cap toggle to the App (persist + apply to
+        the encoder).  A no-op when the App didn't wire a handler (e.g. tests)."""
+        if self._on_audio_declick_change:
+            self._on_audio_declick_change(bool(self.audio_declick_var.get()))
+
     def _save_staged_changes(self):
         """Persist the current Replace assignments for the active assets folder.
 
@@ -6878,6 +6915,18 @@ class MainWindow:
         # whose answer is per-extract (CGC) reports its default; the lock is
         # re-applied against the real folder after an audio scan.
         self._apply_audio_trim_lock(mfr)
+        # Auto-fade + cap only drives the Spike 2 in-place re-encode (its env
+        # var is read solely by the Stern engine's audio encoder), so show the
+        # checkbox for Stern and hide it elsewhere rather than offer an inert
+        # toggle.  Packed just under the Trim/pad row.
+        if hasattr(self, "_audio_declick_cb"):
+            if mfr.key == "stern":
+                if not self._audio_declick_cb.winfo_ismapped():
+                    self._audio_declick_cb.pack(
+                        anchor=tk.W, padx=12, pady=(4, 0),
+                        after=self._audio_length_note_lbl)
+            else:
+                self._audio_declick_cb.pack_forget()
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}

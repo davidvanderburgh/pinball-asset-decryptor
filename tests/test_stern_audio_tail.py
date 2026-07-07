@@ -122,6 +122,56 @@ def test_fit_fades_audio_edges_to_zero():
     assert list(_fit(np.array([5], np.int64), 1, np)) == [5]
 
 
+def test_declick_params_toggle(monkeypatch):
+    """The GUI 'Auto-fade + cap audio replacements' box maps to one env var:
+    default (unset) = a stock-length fade + lower ceiling; unticked
+    (PAD_STERN_AUDIO_RAW=1) = the legacy 5 ms fade + 0.97 ceiling."""
+    from pinball_decryptor.plugins.stern.engine import _declick_params
+    monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+    assert _declick_params() == (40.0, 0.80)
+    monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+    assert _declick_params() == (5.0, 0.97)
+
+
+def test_encoders_apply_declick_fade(monkeypatch):
+    """_encode_mono actually consumes _declick_params (the toggle's only effect):
+    declick-on lays a ~40 ms edge fade and caps to a lower peak; the raw mode
+    restores the ~5 ms fade + hotter 0.97 normalization."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    length = 8000
+    monkeypatch.setattr(
+        E, "_load_wav",
+        lambda path, stereo, np_: np.ones(length, np.int64) * 1000)
+
+    class Cap:
+        def encode_sound(self, pp, tgt):
+            self.tgt = np.asarray(tgt)
+            return b""
+
+    def run(raw):
+        if raw:
+            monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+        else:
+            monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+        c = Cap()
+        E._encode_mono(None, c, {"length": length, "chan": 1}, "x.wav", np)
+        peak = int(np.abs(c.tgt).max())
+        assert peak > 0
+        # First sample that reaches full level = the length of the head fade-in.
+        return int(np.argmax(np.abs(c.tgt) >= peak)), peak
+
+    lead_on, peak_on = run(raw=False)
+    lead_raw, peak_raw = run(raw=True)
+    # ~40 ms (1764 samples) vs ~5 ms (220): the ramp reaches full level far later
+    # when declick is on.
+    assert lead_on > 1500
+    assert lead_raw < 400
+    # ...and declick caps to a lower ceiling (0.80) than the legacy hot 0.97.
+    assert peak_on < peak_raw
+
+
 def _card_path(title):
     return os.path.join(IMG_DIR, CARDS[title])
 

@@ -490,6 +490,49 @@ def test_iss_repairs_python_permissions():
         "which is the whole point of moving the fix into the installer.")
 
 
+LAUNCHER_VBS = INSTALLER / "launcher.vbs"
+
+
+def test_windows_launcher_always_elevates():
+    """Regression guard — always-run-as-Administrator launch.
+
+    Direct-SSD / SD-card operations need Administrator, and the app used
+    to rely on the user remembering right-click → "Run as administrator"
+    every single launch — forgetting it surfaced halfway through a run
+    as WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK.  launcher.vbs (the target
+    of every installed shortcut AND the installer's post-install launch)
+    must start pythonw with the ShellExecute "runas" verb so every
+    launch elevates behind a standard one-click UAC prompt.
+    """
+    src = LAUNCHER_VBS.read_text(encoding="utf-8", errors="replace")
+    assert "ShellExecute" in src and '"runas"' in src, (
+        "launcher.vbs no longer launches the app with the ShellExecute "
+        "'runas' verb — installed users are back to remembering "
+        "right-click → Run as administrator, and Direct-SSD runs fail "
+        "halfway through with WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK.")
+    assert "On Error Resume Next" in src, (
+        "launcher.vbs must swallow the ShellExecute error raised when "
+        "the user declines the UAC prompt — otherwise declining shows a "
+        "cryptic Windows Script Host error dialog.")
+
+
+def test_iss_shortcuts_route_through_launcher():
+    """Every app shortcut the installer creates must point at
+    launcher.vbs — a shortcut aimed straight at pythonw.exe would
+    silently bypass the launcher's self-elevation, resurrecting the
+    right-click → Run as administrator dance for that entry point."""
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    app_icon_lines = [ln for ln in iss.splitlines()
+                      if ln.startswith("Name:") and "icon.ico" in ln]
+    assert app_icon_lines, (
+        "no app shortcuts found in the .iss [Icons] section — has the "
+        "shortcut layout changed?")
+    for ln in app_icon_lines:
+        assert "launcher.vbs" in ln, (
+            f"installer shortcut bypasses launcher.vbs (and with it the "
+            f"always-run-as-Administrator elevation): {ln}")
+
+
 DOCKERFILES = sorted((REPO / "pinball_decryptor" / "plugins").glob("*/Dockerfile"))
 
 

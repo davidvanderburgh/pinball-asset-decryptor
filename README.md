@@ -479,9 +479,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    too — they're re-encoded back into `.cdmd` at the original frame
    count so they stay in sync with their sound.
 7. **Write tab** — pick the original file, the (now-modified) assets
-   folder, and an output folder; click *Build update*. You get an
-   installable file that's ready for a USB drive (SD-card plugins name
-   it `…-modified.raw` so it can't be mistaken for the stock image).
+   folder, an output folder, and a **File Name** for the build; click
+   *Build update*. The File Name box pre-fills with `…-modified` and
+   states the extension the build must carry right beside it (Stern
+   Spike 2 = `.raw`, CGC = `.img`), so a renamed build can never come
+   out extensionless or in the wrong format for your flashing tools.
+   You get an installable file that's ready for a USB drive (SD-card
+   plugins default the name to `…-modified.raw` so it can't be
+   mistaken for the stock image).
    Any Replace Audio / Video assignments are applied automatically
    here — no extra step. The assets folder *is* your project: your picks and built
    changes persist there across app restarts, so you extract once and

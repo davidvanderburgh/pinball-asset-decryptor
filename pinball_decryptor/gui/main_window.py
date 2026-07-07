@@ -1074,6 +1074,14 @@ class MainWindow:
         self.write_upd_var = tk.StringVar()
         self.write_assets_var = tk.StringVar()
         self.write_output_var = tk.StringVar()
+        # Editable name for the file Write builds.  Defaults to the original's
+        # name plus the plugin's distinguishing suffix (e.g. "…-modified.raw"),
+        # but the user can rename it to keep several builds side by side in one
+        # folder.  ``_write_filename_auto`` remembers the last auto-filled
+        # default so we keep tracking the original until the user types a name
+        # of their own (then we stop clobbering it).
+        self.write_filename_var = tk.StringVar()
+        self._write_filename_auto = ""
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -1351,6 +1359,11 @@ class MainWindow:
             "write", lambda *_: self._update_write_filename())
         self.write_output_var.trace_add(
             "write", lambda *_: self._update_write_filename())
+        # A user edit to the name box only affects the collision hint — the
+        # default-fill logic in _update_write_filename backs off once the box
+        # diverges from the auto value, so this never fights the typing.
+        self.write_filename_var.trace_add(
+            "write", lambda *_: self._update_write_filename_hint())
         # Re-scan the Modified Files Preview whenever the assets
         # folder changes, but only if the user is actually looking at
         # the SSD-mode Write tab — otherwise we'd be churning hashing
@@ -2337,6 +2350,29 @@ class MainWindow:
         ttk.Button(self._write_output_row_ref, text="Browse...",
                    command=self._browse_write_output).pack(
             side=tk.LEFT, padx=(8, 0))
+
+        # Editable name for the built file.  Shown/hidden alongside the Output
+        # Folder row (both are meaningless in Direct-SSD mode, where the medium
+        # itself is the destination).  The hint label below flags a name that
+        # would overwrite an existing file.
+        self._write_filename_row = ttk.Frame(f)
+        self._write_filename_row.pack(fill=tk.X, **pad)
+        _fn_lbl = ttk.Label(self._write_filename_row,
+                            text="File Name:", width=16, anchor=tk.W)
+        _fn_lbl.pack(side=tk.LEFT)
+        self._write_col_labels.append(_fn_lbl)
+        # Static reminder of the extension the build is forced to carry, at the
+        # right edge of the row, so it's explicit what the file will be even
+        # before the user finishes typing (Stern Spike 2 = .raw, CGC = .img).
+        # Packed before the entry so it reserves the right edge and the entry
+        # fills the middle; blank for plugins that pin no extension.
+        self._write_ext_lbl = ttk.Label(
+            self._write_filename_row, text="",
+            foreground="#888888", font=(_SANS_FONT, 9, "italic"))
+        self._write_ext_lbl.pack(side=tk.RIGHT, padx=(6, 0))
+        self._write_filename_entry = ttk.Entry(
+            self._write_filename_row, textvariable=self.write_filename_var)
+        self._write_filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
@@ -6993,6 +7029,10 @@ class MainWindow:
                 self._write_output_row_ref.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._write_filename_lbl)
+            if getattr(self, "_write_filename_row", None) is not None:
+                self._write_filename_row.pack(
+                    fill=tk.X, padx=10, pady=4,
+                    before=self._write_filename_lbl)
 
         # Show/hide the per-category Extract filters (JJP).  Packed
         # just below the output-folder warning so it sits above the
@@ -7148,6 +7188,11 @@ class MainWindow:
         # If we're entering a direct_ssd plugin in SSD mode without
         # admin, make sure the Extract / Apply buttons are disabled.
         self._refresh_ssd_run_buttons()
+
+        # Populate / refresh the File Name box for the newly-applied plugin:
+        # its suffix (and thus the default build name) may differ from the
+        # previous one even when the original is unchanged.
+        self._update_write_filename()
 
     def _update_autoname_state(self):
         """Gray out the Auto-name call-outs / music options when the Audio
@@ -7948,9 +7993,11 @@ class MainWindow:
                                  "Apply Modifications"))
                 self._refresh_drives_async("write")
                 # SSD-write doesn't produce an output file — the SSD
-                # IS the output.  Hide the Output Folder row.
+                # IS the output.  Hide the Output Folder + File Name rows.
                 if hasattr(self, "_write_output_row_ref"):
                     self._write_output_row_ref.pack_forget()
+                if getattr(self, "_write_filename_row", None) is not None:
+                    self._write_filename_row.pack_forget()
                 # Kick a preview scan in the background so the user
                 # sees the modified files without a separate click.
                 self._scan_write_preview()
@@ -7975,6 +8022,10 @@ class MainWindow:
                                  "Build update"))
                 if hasattr(self, "_write_output_row_ref"):
                     self._write_output_row_ref.pack(
+                        fill=tk.X, padx=10, pady=4,
+                        before=self._write_filename_lbl)
+                if getattr(self, "_write_filename_row", None) is not None:
+                    self._write_filename_row.pack(
                         fill=tk.X, padx=10, pady=4,
                         before=self._write_filename_lbl)
                 # Modified Files Preview in ISO mode too — useful for
@@ -9883,47 +9934,136 @@ class MainWindow:
             if parent and os.path.isdir(parent):
                 self.write_output_var.set(parent)
 
-    def _update_write_filename(self):
-        # SD-card-image plugins (Stern / CGC, capabilities.flash_image) already
-        # show the Output Folder; the extra "Output: …/name.raw" line just
-        # repeats it (monkeybug 4.6), so keep it blank there — UNLESS the
-        # plugin renames the build (write_output_suffix), where the distinct
-        # name is exactly what the user needs to see.  The label widget
-        # itself stays as the layout anchor other rows pack `before=`.
+    def _default_write_filename(self):
+        """The name Write gives the built file before the user renames it: the
+        original's basename plus the plugin's distinguishing suffix
+        (``write_output_suffix``, e.g. Stern's "-modified").  ``flash_image``
+        plugins build a raw card image the user flashes themselves, so the name
+        carries no meaning to the machine — those get a "-modified" default even
+        when the plugin set no explicit suffix, so the default never silently
+        collides with the original sitting in the same folder."""
+        upd = self.write_upd_var.get().strip()
+        if not upd:
+            return ""
+        name = os.path.basename(upd)
         mfr = getattr(self, "_current_mfr", None)
         suffix = getattr(mfr, "write_output_suffix", "") if mfr else ""
-        if mfr is not None and getattr(mfr.capabilities, "flash_image", False):
-            upd = self.write_upd_var.get().strip()
-            if suffix and upd:
-                stem, ext = os.path.splitext(os.path.basename(upd))
-                self._write_filename_lbl.configure(
-                    text=f"Builds: {stem}{suffix}{ext}")
-            else:
-                self._write_filename_lbl.configure(text="")
+        if (not suffix and mfr is not None
+                and getattr(mfr.capabilities, "flash_image", False)):
+            suffix = "-modified"
+        if suffix:
+            stem, ext = os.path.splitext(name)
+            name = f"{stem}{suffix}{ext}"
+        # Pin the plugin's required extension (Stern Spike 2 = .raw, CGC = .img)
+        # so the default lands in the right format even when the original was
+        # named differently (e.g. a .img card image builds as …-modified.raw).
+        if mfr is not None:
+            name = mfr.force_write_ext(name)
+        return name
+
+    def _target_write_path(self):
+        """Absolute path Write will build to given the Output Folder + File Name
+        boxes, or "" when either is empty or not applicable (Direct-SSD).
+        Mirrors the resolution in ``app.WriteApp._start_write`` so the collision
+        hint and the actual build always agree on the destination."""
+        if (getattr(self, "write_input_source_var", None) is not None
+                and self.write_input_source_var.get() == "ssd"):
+            return ""
+        out = self.write_output_var.get().strip()
+        name = self.write_filename_var.get().strip()
+        if not out or not name:
+            return ""
+        mfr = getattr(self, "_current_mfr", None)
+        # Same extension forcing the actual build applies, so the collision
+        # hint reflects the real destination (…/name.raw, not …/name).
+        if mfr is not None:
+            name = mfr.force_write_ext(name)
+        spec_ext = ""
+        if mfr is not None and mfr.input_spec.extensions:
+            spec_ext = mfr.input_spec.extensions[0].lower()
+        # Legacy: a full file path typed into the Output Folder box is honoured
+        # as the destination directly (the File Name box is then moot).
+        if spec_ext and out.lower().endswith(spec_ext):
+            return os.path.abspath(out)
+        return os.path.abspath(os.path.join(out, name))
+
+    def _maybe_default_write_filename(self):
+        """Keep the File Name box tracking ``original + suffix`` until the user
+        types a name of their own.  Refill while the box is empty or still holds
+        the last value we auto-filled; back off the instant it diverges so we
+        never clobber a custom name."""
+        default = self._default_write_filename()
+        if not default:
             return
+        current = self.write_filename_var.get().strip()
+        if not current or current == self._write_filename_auto:
+            self._write_filename_auto = default
+            if default != current:
+                self.write_filename_var.set(default)
+
+    def _update_write_filename(self):
         # Direct-SD write has no output file (the card itself is the
-        # destination) and the file-mode "Original" input row is hidden, so
-        # don't surface its (possibly stale, e.g. a prior session's) filename.
+        # destination), so there's no name to manage there.
         if (getattr(self, "write_input_source_var", None) is not None
                 and self.write_input_source_var.get() == "ssd"):
             self._write_filename_lbl.configure(text="")
             return
-        upd = self.write_upd_var.get().strip()
-        out = self.write_output_var.get().strip()
-        name = os.path.basename(upd) if upd else ""
-        if name and suffix:
-            stem, ext = os.path.splitext(name)
-            name = f"{stem}{suffix}{ext}"
-        if name and out:
-            spec_ext = (self._current_mfr.input_spec.extensions[0].lower()
-                        if self._current_mfr else ".upd")
-            full = out if out.lower().endswith(spec_ext) else os.path.join(
-                out, name)
-            self._write_filename_lbl.configure(text=f"Output: {full}")
-        elif name:
-            self._write_filename_lbl.configure(text=f"Filename: {name}")
+        self._update_write_ext_label()
+        self._maybe_default_write_filename()
+        self._update_write_filename_hint()
+
+    def _update_write_ext_label(self):
+        """Show the extension the current plugin forces on the build (e.g.
+        ".raw") beside the File Name box, or blank when it pins none — so the
+        user always sees what the file will be, even before typing a name."""
+        lbl = getattr(self, "_write_ext_lbl", None)
+        if lbl is None:
+            return
+        mfr = getattr(self, "_current_mfr", None)
+        ext = ""
+        if mfr is not None:
+            try:
+                ext = mfr.write_output_ext() or ""
+            except Exception:
+                ext = ""
+        lbl.configure(text=(f"saved as {ext}" if ext else ""))
+
+    def _update_write_filename_hint(self):
+        """Amber warning under the File Name box when the chosen name would
+        overwrite an existing file (or the original itself); blank otherwise —
+        the Output Folder + File Name boxes already say where the build lands,
+        so a redundant "Output: …" line was noise (monkeybug 4.6).  The label
+        stays put as the layout anchor other rows pack ``before=``."""
+        lbl = getattr(self, "_write_filename_lbl", None)
+        if lbl is None:
+            return
+        target = self._target_write_path()
+        if not target:
+            lbl.configure(text="")
+            return
+        original = self.write_upd_var.get().strip()
+        if original and os.path.abspath(original) == target:
+            lbl.configure(
+                text="⚠ This name matches the original — rename the build or "
+                     "the folder so it isn't overwritten.",
+                foreground="#d04040")
+        elif os.path.exists(target):
+            lbl.configure(
+                text=f"⚠ {os.path.basename(target)} already exists here — "
+                     "Build will overwrite it.",
+                foreground="#d04040")
         else:
-            self._write_filename_lbl.configure(text="")
+            # Explicit-extension feedback: when Write will add or change the
+            # typed name's extension to satisfy the plugin's required format,
+            # spell out the exact file it will build so the user isn't surprised
+            # by a name that differs from what they typed.
+            typed = self.write_filename_var.get().strip()
+            final = os.path.basename(target)
+            if typed and final != typed:
+                lbl.configure(text=f"Will build: {final}",
+                              foreground="#888888")
+            else:
+                lbl.configure(text="")
 
     # ------------------------------------------------------------------
     # Log

@@ -865,9 +865,9 @@ def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         app, manufacturers_by_key):
     """monkeybug Write-tab rework: Build/Revert moved into the Modified Files
     toolbar, the standalone Cancel widget is gone (Build doubles as a live
-    Cancel), and the redundant "Output: <full path>" line is gone for
-    SD-card-image plugins — it shows only the distinct build name when the
-    plugin renames its builds (write_output_suffix), else nothing."""
+    Cancel), and the built file's name lives in an editable File Name box
+    pre-filled with the original + the plugin's suffix; the hint line under it
+    stays blank unless the chosen name would overwrite an existing file."""
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     app.window.extract_input_var.set("")
@@ -880,16 +880,18 @@ def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         assert not hasattr(w, "_write_cancel_btn")
         # Build button is a descendant of the preview frame (its toolbar).
         assert str(w._write_btn).startswith(str(w._write_preview_frame) + ".")
-        # Redundant "Output: <full path>" line suppressed for flash_image
-        # plugins; with an original picked, Stern's -modified suffix shows
-        # as a bare "Builds: <name>" instead.
+        # The build name lives in the editable File Name box, pre-filled with
+        # the original + Stern's -modified suffix; the hint line stays blank
+        # while there's no collision.
         w.write_upd_var.set("")
         w._update_write_filename()
+        assert w.write_filename_var.get() == ""
         assert w._write_filename_lbl.cget("text") == ""
         w.write_upd_var.set("C:/cards/game-1_0_0.sdcard.raw")
         w._update_write_filename()
-        assert (str(w._write_filename_lbl.cget("text"))
-                == "Builds: game-1_0_0.sdcard-modified.raw")
+        assert (w.write_filename_var.get()
+                == "game-1_0_0.sdcard-modified.raw")
+        assert w._write_filename_lbl.cget("text") == ""
         w.write_upd_var.set("")
         # Build ⇄ Cancel fold: flips to a live Cancel mid-run, restores after.
         idle = w._write_btn.cget("text")
@@ -898,6 +900,126 @@ def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         assert w._write_btn.cget("text") == "Cancel"
         w.set_running(False, mode="write")
         assert w._write_btn.cget("text") == idle
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_write_filename_box_editable_and_flags_collisions(
+        app, manufacturers_by_key, tmp_path):
+    """The Write tab's File Name box pre-fills with original + suffix, keeps
+    tracking the original until the user types a name of their own, and the
+    hint line goes amber when the chosen name would overwrite an existing
+    file in the Output Folder."""
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.window.extract_input_var.set("")
+    stern.set_era("spike2")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    w = app.window
+    try:
+        out_dir = tmp_path / "builds"
+        out_dir.mkdir()
+        w.write_output_var.set(str(out_dir))
+        # Default name = original basename + Stern's -modified suffix.
+        w.write_upd_var.set("C:/cards/game-1_0_0.sdcard.raw")
+        w._update_write_filename()
+        assert w.write_filename_var.get() == "game-1_0_0.sdcard-modified.raw"
+        # No file there yet -> no collision warning.
+        assert w._write_filename_lbl.cget("text") == ""
+
+        # Create the colliding build; the hint turns into an amber warning.
+        (out_dir / "game-1_0_0.sdcard-modified.raw").write_bytes(b"old")
+        w._update_write_filename_hint()
+        assert "already exists" in w._write_filename_lbl.cget("text")
+        assert str(w._write_filename_lbl.cget("foreground")) == "#d04040"
+
+        # A user edit to a free name clears the warning and is NOT clobbered
+        # when the original changes again (box has diverged from the default).
+        w.write_filename_var.set("my-build.raw")
+        assert w._write_filename_lbl.cget("text") == ""
+        w.write_upd_var.set("C:/cards/other-2_0_0.sdcard.raw")
+        w._update_write_filename()
+        assert w.write_filename_var.get() == "my-build.raw"
+    finally:
+        app._on_back_to_picker()
+        app._on_manufacturer_change(manufacturers_by_key["spooky"])
+        app.root.update()
+
+
+def test_write_output_ext_forces_correct_extension(manufacturers_by_key):
+    """Flash-image plugins pin the extension their built image must carry, so a
+    user-typed File Name can never come out extensionless or in the wrong
+    format: Stern Spike 2 = .raw, CGC = .img.  Whitestar (capture-only) and
+    plugins whose build name is looked up by the machine pin nothing."""
+    stern = manufacturers_by_key["stern"]
+    stern.set_era("spike2")
+    try:
+        assert stern.write_output_ext() == ".raw"
+        # Extensionless -> appended; a recognised card extension -> swapped in
+        # place (not stacked into ".img.raw"); an already-correct name -> kept.
+        assert stern.force_write_ext("my_mod") == "my_mod.raw"
+        assert stern.force_write_ext("game.img") == "game.raw"
+        assert stern.force_write_ext("game.bin") == "game.raw"
+        assert stern.force_write_ext("game.raw") == "game.raw"
+        # An unrecognised trailing extension is appended to, not clobbered, so a
+        # dotted name never silently loses a part.
+        assert stern.force_write_ext("v1.2.3") == "v1.2.3.raw"
+        # Whitestar is MAME capture-only: no build, so no forced extension.
+        stern.set_era("whitestar")
+        assert stern.write_output_ext() == ""
+        assert stern.force_write_ext("whatever") == "whatever"
+    finally:
+        stern.set_era("spike2")
+
+    cgc = manufacturers_by_key["cgc"]
+    assert cgc.write_output_ext() == ".img"
+    assert cgc.force_write_ext("installer") == "installer.img"
+    assert cgc.force_write_ext("installer.img") == "installer.img"
+
+    # Plugins whose installer looks the file up by name pin nothing.
+    for key in ("jjp", "bof"):
+        mfr = manufacturers_by_key.get(key)
+        if mfr is not None:
+            assert mfr.write_output_ext() == ""
+            assert mfr.force_write_ext("update") == "update"
+
+
+def test_write_filename_forces_raw_extension_and_states_it(
+        app, manufacturers_by_key, tmp_path):
+    """Stern Spike 2 builds a raw card image (.raw): the default name lands as
+    .raw even when the original was a .img, the forced extension is stated
+    beside the box, and an extensionless typed name is forced to .raw with a
+    'Will build:' line spelling out the resulting file."""
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    app.window.extract_input_var.set("")
+    stern.set_era("spike2")
+    app.window.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    w = app.window
+    try:
+        out_dir = tmp_path / "builds"
+        out_dir.mkdir()
+        w.write_output_var.set(str(out_dir))
+        # The forced extension is stated beside the File Name box.
+        assert w._write_ext_lbl.cget("text") == "saved as .raw"
+        # A .img original still defaults to a .raw build name.
+        w.write_upd_var.set("C:/cards/game-1_0_0.sdcard.img")
+        w._update_write_filename()
+        assert w.write_filename_var.get() == "game-1_0_0.sdcard-modified.raw"
+        # A user-typed extensionless name is forced to .raw, and the hint spells
+        # out the resulting file so the added extension is explicit.
+        w.write_filename_var.set("my_mod")
+        w._update_write_filename_hint()
+        assert w._write_filename_lbl.cget("text") == "Will build: my_mod.raw"
+        assert w._target_write_path().endswith("my_mod.raw")
+        # A name that already carries the right extension -> no surprise line.
+        w.write_filename_var.set("my_mod.raw")
+        w._update_write_filename_hint()
+        assert w._write_filename_lbl.cget("text") == ""
     finally:
         app._on_back_to_picker()
         app._on_manufacturer_change(manufacturers_by_key["spooky"])

@@ -265,6 +265,13 @@ class SternManufacturer(Manufacturer):
         # raw extension would otherwise produce.
         return "ROM zip" if self._era == "whitestar" else "Card image"
 
+    def write_output_ext(self):
+        # Spike 2 ships on a raw SD-card image, so a built image must be ".raw"
+        # for the user's flashing tools (and the app's own re-detect) — regard-
+        # less of whether the original was named .img/.bin/.raw.  Whitestar is
+        # MAME capture-only (no build), so it pins nothing.
+        return ".raw" if self._era == "spike2" else ""
+
     def write_intro(self):
         return ("Re-pack your modified assets back onto the card — build a new "
                 "SD-card image, or write the changes straight to the SD card.")

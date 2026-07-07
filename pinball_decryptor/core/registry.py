@@ -7,6 +7,7 @@ import time.  :func:`load_plugins` imports every known plugin so its
 """
 
 import importlib
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
@@ -332,6 +333,36 @@ class Manufacturer(ABC):
     # card image you flash yourself); leave "" when the game/installer looks
     # the file up by name (e.g. BOF's .fun updates).
     write_output_suffix: str = ""
+
+    # Extension (lower-case, leading dot, e.g. ".raw") the built file MUST
+    # carry.  "" means the plugin pins nothing — the File Name box is used
+    # verbatim.  Flash-image plugins build a raw card image the machine reads by
+    # content, not by name, but the file still needs the extension the user's
+    # imaging tools (and the app's own re-detection) expect — so they pin it
+    # here (Stern Spike 2 = ".raw", CGC = ".img").  The GUI states this next to
+    # the File Name box and Write forces it on, so a user-typed name can never
+    # come out extensionless.  Era-aware plugins override as a method/property
+    # (Stern only pins it for Spike 2, not the capture-only Whitestar era).
+    def write_output_ext(self):
+        return ""
+
+    def force_write_ext(self, name):
+        """Return *name* guaranteed to end with :meth:`write_output_ext`.
+
+        Appends the extension when the name has none (the reported bug: an
+        extensionless build), swaps a recognised input extension for the
+        required one (so ``.img`` typed for a Spike 2 card becomes ``.raw``,
+        not ``.img.raw``), and leaves a correctly-suffixed name untouched.  A
+        no-op when the plugin pins no extension (``write_output_ext`` == "")."""
+        ext = (self.write_output_ext() or "").lower()
+        if not ext or not name or name.lower().endswith(ext):
+            return name
+        stem, cur = os.path.splitext(name)
+        known = {e.lower() for e in self.input_spec.extensions
+                 if e and e != "*"}
+        if cur and cur.lower() in known:
+            return stem + ext
+        return name + ext
 
     # Action-button captions on the Write tab, one per destination mode, so
     # the button restates the chosen action instead of a generic "Apply".

@@ -1033,26 +1033,60 @@ class App:
                 "Please select an output folder.")
             return
 
-        # Resolve the output filename: the original's name (plus the plugin's
-        # distinguishing suffix, e.g. Stern's "-modified") in the chosen
-        # folder.  Allow the user to point output at an explicit filename too.
-        original_name = os.path.basename(original)
-        suffix = getattr(self._current_mfr, "write_output_suffix", "")
-        if suffix:
-            stem, ext = os.path.splitext(original_name)
-            original_name = f"{stem}{suffix}{ext}"
+        # Resolve the output filename.  The Write tab's File Name box carries
+        # the built file's name — pre-filled with the original's name plus the
+        # plugin's distinguishing suffix (e.g. Stern's "-modified"), editable by
+        # the user.  Fall back to that same default here if the box is somehow
+        # empty (older settings, scripted call).  A full file path typed into
+        # the Output Folder box is still honoured directly.
+        build_name = ""
+        name_var = getattr(self.window, "write_filename_var", None)
+        if name_var is not None:
+            build_name = name_var.get().strip()
+        if os.sep in build_name or (os.altsep and os.altsep in build_name):
+            messagebox.showwarning("Invalid File Name",
+                "The build's File Name can't contain a folder separator.\n\n"
+                "Set the destination folder in Output Folder and keep File "
+                "Name to a plain file name.")
+            return
+        if not build_name:
+            build_name = os.path.basename(original)
+            suffix = getattr(self._current_mfr, "write_output_suffix", "")
+            if not suffix and getattr(
+                    self._current_mfr.capabilities, "flash_image", False):
+                suffix = "-modified"
+            if suffix:
+                stem, ext = os.path.splitext(build_name)
+                build_name = f"{stem}{suffix}{ext}"
+        # Force the plugin's required output extension (e.g. Stern Spike 2's
+        # ".raw", CGC's ".img") so a user-typed name is never extensionless or
+        # in the wrong format for the machine's imaging tools.
+        build_name = self._current_mfr.force_write_ext(build_name)
         primary_ext = (self._current_mfr.input_spec.extensions[0].lower()
                        if self._current_mfr.input_spec.extensions else "")
         if primary_ext and output_dir.lower().endswith(primary_ext):
             output_path = output_dir
         else:
-            output_path = os.path.join(output_dir, original_name)
+            output_path = os.path.join(output_dir, build_name)
 
         if os.path.abspath(output_path) == os.path.abspath(original):
             messagebox.showerror("Same File",
-                "Output path would overwrite the original file.\n\n"
-                "Choose a different output folder.")
+                "The build's name matches the original file.\n\n"
+                "Rename the build (File Name) or choose a different output "
+                "folder so it doesn't overwrite the original.")
             return
+
+        # Collision check: warn before clobbering an existing build with the
+        # same name (a re-build, or a name the user picked that's already
+        # taken).  Overwriting the original is caught above; everything else is
+        # the user's call.
+        if os.path.exists(output_path):
+            if not messagebox.askyesno("File Exists",
+                f"A file named:\n\n    {os.path.basename(output_path)}\n\n"
+                f"already exists in:\n{os.path.dirname(output_path)}\n\n"
+                "Building will overwrite it.  Continue?",
+                icon="warning"):
+                return
 
         # Catch the silent "assigned replacements for one folder, then pointed
         # Build at another" trap: the Write flow's folder-match guard would

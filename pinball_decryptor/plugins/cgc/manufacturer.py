@@ -61,6 +61,12 @@ class CGCManufacturer(Manufacturer):
         "completely. Power the machine off and keep a backup of the original "
         "card/drive before flashing.")
 
+    def write_output_ext(self):
+        # CGC builds a whole installer disk image the user flashes to a card /
+        # USB drive; ".img" is the extension their imaging tools expect, so a
+        # user-typed build name can never come out extensionless.
+        return ".img"
+
     # "Card diagnostics…" (gui.diagnose_dialog, gated on this attribute):
     # after a failed on-machine install (SHELL ERROR), the installer leaves
     # its copy log (procstat.txt) on the card's ext4 rootfs, which users

@@ -16,5 +16,8 @@ installer/Output/
 installer/get-pip.py
 installer/python-embed.zip
 
+# Local planning scratch (not part of the shipped app)
+plans/
+
 # Claude Code runtime state
 .claude/

@@ -172,6 +172,67 @@ def test_encoders_apply_declick_fade(monkeypatch):
     assert peak_on < peak_raw
 
 
+def test_save_firmware_for_support(tmp_path):
+    """When a firmware build can't be codec-mapped, extract copies it next to
+    the output so the user can send it in for a locator fix; a bad destination
+    degrades to None (logged) and never raises."""
+    from pinball_decryptor.plugins.stern import engine as E
+    gr = tmp_path / "game_real"
+    gr.write_bytes(b"\x7fELF" + b"stern-firmware-bytes" * 8)
+    out = tmp_path / "out"
+    out.mkdir()
+    logs = []
+    dst = E._save_firmware_for_support(str(gr), str(out), lambda *a: logs.append(a))
+    assert dst == str(out / "firmware_game_real.bin")
+    assert (out / "firmware_game_real.bin").read_bytes() == gr.read_bytes()
+    # Un-writable destination (parent dir doesn't exist) -> None, no exception.
+    dst2 = E._save_firmware_for_support(
+        str(gr), str(tmp_path / "nope" / "deep"), lambda *a: logs.append(a))
+    assert dst2 is None
+
+
+def test_rbtree_increment_walks_in_order_and_terminates():
+    """RB.increment must yield the in-order successor and return the header at
+    the end so a begin()!=end() walk terminates.  The harness previously stubbed
+    the imported ``std::_Rb_tree_increment`` to return 0, so any build that
+    iterated a non-empty registry map (Led Zeppelin LE 1.22.0's master-directory
+    decode) looped off node 0 forever."""
+    import struct
+    from pinball_decryptor.plugins.stern.spike2 import rbtree as RB
+
+    class Mem:
+        def __init__(self):
+            self.b = bytearray(0x200)
+
+        def mem_read(self, a, n):
+            return bytes(self.b[a:a + n])
+
+        def mem_write(self, a, d):
+            self.b[a:a + len(d)] = d
+
+    mu = Mem()
+
+    def wr(a, *vals):                      # node layout: color,parent,left,right,key
+        for i, v in enumerate(vals):
+            mu.mem_write(a + 4 * i, struct.pack("<I", v & 0xffffffff))
+
+    HDR, n20, n10, n30 = 0x10, 0x40, 0x60, 0x80
+    wr(HDR, 0, n20, n10, n30)              # header: parent=root, left/right = ends
+    wr(n20, RB.BLACK, HDR, n10, n30, 20)
+    wr(n10, RB.RED, n20, 0, 0, 10)
+    wr(n30, RB.RED, n20, 0, 0, 30)
+
+    order, node, steps = [], n10, 0
+    while node != HDR and steps < 10:
+        order.append(struct.unpack("<I", mu.mem_read(node + 0x10, 4))[0])
+        node = RB.increment(mu, node)
+        steps += 1
+    assert order == [10, 20, 30]
+    assert node == HDR                     # walk stopped at the header sentinel
+    assert RB.decrement(mu, n30) == n20
+    assert RB.decrement(mu, n20) == n10
+
+
 def _card_path(title):
     return os.path.join(IMG_DIR, CARDS[title])
 

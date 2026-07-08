@@ -173,6 +173,22 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     return params
 
 
+def _save_firmware_for_support(gr_path, output_dir, log):
+    """Copy the extracted firmware ELF next to the output so a user who hits an
+    unmappable build can hand it to the developer for a locator fix (the work
+    dir the firmware lives in is deleted when the extract returns).  Returns the
+    saved path, or ``None`` if the copy couldn't be made."""
+    import shutil
+    try:
+        dst = os.path.join(output_dir, "firmware_game_real.bin")
+        shutil.copyfile(gr_path, dst)
+        return dst
+    except Exception as e:
+        log("Could not save a copy of the firmware for support (%s)." % e,
+            "info")
+        return None
+
+
 # --------------------------------------------------------------------------
 # locating + extracting the card's game_real / image.bin
 # --------------------------------------------------------------------------
@@ -1132,9 +1148,32 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
             phase(5)  # Checksums
             return 0
         log("Booting firmware codec engine...", "info")
-        emu = Spike2Emu(gr_path, img_path)
-        emu.boot()
-        params = _load_or_derive_params(emu, gr_path, img_path, log, progress)
+        try:
+            emu = Spike2Emu(gr_path, img_path)
+            emu.boot()
+            params = _load_or_derive_params(emu, gr_path, img_path, log, progress)
+        except Exception as e:
+            # A newer / unrecognised firmware build the codec locator can't map:
+            # skip audio but keep the video / image / text extract that already
+            # succeeded (mirrors the audio_decode_supported early-out above), and
+            # save the firmware next to the output so the user can send it in for
+            # a locator fix -- the work dir it lives in is deleted on return.
+            if emu is not None:
+                try:
+                    emu.close()
+                except Exception:
+                    pass
+                emu = None
+            saved = _save_firmware_for_support(gr_path, output_dir, log)
+            log("Audio couldn't be extracted from this card: the engine could "
+                "not map this firmware build's audio codec (%s). This is "
+                "usually a newer game update than this version of the app "
+                "recognises -- video, images and text extracted normally.%s"
+                % (e, (" The firmware was saved to %s -- send that file to the "
+                       "developer to get this build's audio supported in a "
+                       "future update." % saved) if saved else ""), "warning")
+            phase(5)  # Checksums
+            return 0
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 

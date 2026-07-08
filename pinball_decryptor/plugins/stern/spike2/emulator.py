@@ -242,6 +242,10 @@ class Spike2Emu:
         self.fds = {}; self.nextfd = 10
         self.faults = []; self.ondemand = 0
         self.extra = {}; self.log = []
+        # Optional per-instruction watchdog (set only during params derivation).
+        # The global code hook calls it each instruction so a mis-located build
+        # can bail early instead of burning the whole instruction cap.
+        self._watchdog = None
         self._hooks()
 
         # decode scratch (set up lazily by setup_decode)
@@ -325,6 +329,9 @@ class Spike2Emu:
         # runs at full JIT speed instead of paying a Python callback on every
         # one of its ~13k instructions per block (~100x faster decode).
         def code(mu, addr, size, ud):
+            w = self._watchdog
+            if w is not None:
+                w()
             if addr in self._atomic_pcs:
                 self._emu_atomic(addr)
                 return
@@ -483,6 +490,17 @@ class Spike2Emu:
         if (nm.startswith("_ZSt29_Rb_tree_insert_and_rebalance")
                 or nm.startswith("std::_Rb_tree_insert_and_rebalance")):
             self._rbinsert_regs(); return
+        # std::_Rb_tree_increment / _decrement (in-order successor / predecessor)
+        # -- both overloads (P... and PK... = const) mangle with this prefix.
+        # Needed by builds that iterate a non-empty registry map during the
+        # master-directory decode (Led Zeppelin LE 1.22.0); the old ret-0 stub
+        # made that iteration loop forever off node 0.
+        if (nm.startswith("_ZSt18_Rb_tree_increment")
+                or nm.startswith("std::_Rb_tree_increment")):
+            self._ret(RB.increment(mu, r0)); return
+        if (nm.startswith("_ZSt18_Rb_tree_decrement")
+                or nm.startswith("std::_Rb_tree_decrement")):
+            self._ret(RB.decrement(mu, r0)); return
         # std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned n) const
         # returns the next prime >= n for a std::unordered_map's bucket count.
         # Returning 0 (the default stub) leaves bucket_count==0, so a later
@@ -685,6 +703,7 @@ class Spike2Emu:
             if cap["mddst"] is None:
                 cap["mddst"] = eng.mu.reg_read(UC_ARM_REG_R0)
                 cap["nrec"] = eng.mu.reg_read(UC_ARM_REG_R5)
+                eng._watchdog = None      # located OK -> stop the fail-fast count
 
         def at_bb(eng):
             if cap["state"] is None:
@@ -711,13 +730,35 @@ class Spike2Emu:
         # only bounds the master-directory decode.  Big catalogs (e.g. D&D's
         # ~10.5k sounds across image-scNN segments) need more than the ~120M a
         # ~2k-sound card uses.
-        self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
-        self.extra.pop(self.MASTERDIR_MALLOC, None)
-        self.extra.pop(self.BANDLOOP, None)
+        #
+        # Fail-fast watchdog: the record-array malloc (MASTERDIR_MALLOC, caught
+        # by at_md) sits at the very top of the decode on every mapped build, so
+        # mddst is set within the first instructions regardless of catalog size.
+        # If a newer/unrecognised build's addresses locate to the wrong PCs the
+        # hook never fires, and without this the emulation would burn the whole
+        # 600M-instruction cap (~19 min on real HW) before failing.  at_md clears
+        # the watchdog the moment it fires, so a good build pays ~nothing; a bad
+        # one bails after a wide margin (~1-2 min) with the error below.
+        wd = {"n": 0}
+
+        def _wd():
+            wd["n"] += 1
+            if wd["n"] >= 40_000_000 and cap["mddst"] is None:
+                mu.emu_stop()
+        self._watchdog = _wd
+        try:
+            self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
+        finally:
+            self._watchdog = None
+            self.extra.pop(self.MASTERDIR_MALLOC, None)
+            self.extra.pop(self.BANDLOOP, None)
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:
-            raise RuntimeError("Spike 2 params: registration did not reach "
-                               "band-build (cap=%r)" % ({k: v for k, v in cap.items()
-                                                         if k != "state"},))
+            raise RuntimeError(
+                "Spike 2 params: registration did not reach band-build "
+                "(cap=%r). The engine could not map this firmware build's audio "
+                "codec -- most likely a newer game update than this version of "
+                "the app recognises." % ({k: v for k, v in cap.items()
+                                          if k != "state"},))
         nrec = cap["nrec"]
         self._ensure_range(cap["mddst"], nrec * 24)
         md = bytes(mu.mem_read(cap["mddst"], nrec * 24))

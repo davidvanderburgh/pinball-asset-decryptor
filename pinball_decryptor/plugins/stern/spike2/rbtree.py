@@ -55,6 +55,51 @@ def _set_right(mu, n, v):
     _p(mu, n + 0xc, v)
 
 
+def increment(mu, x):
+    """``std::_Rb_tree_increment`` -- the in-order successor of node ``x``.
+
+    Returns the header node when ``x`` is the last element, which is what ends a
+    ``begin() != end()`` iteration.  Without this the harness returned 0 for the
+    imported symbol, so any build that actually *iterates* a non-empty registry
+    map (e.g. Led Zeppelin LE 1.22.0's master-directory decode) walked off node
+    0 forever instead of stopping at the header.  The ``n`` guards are a defensive
+    cap: a valid tree's depth is tiny, so they never trip on real data but stop a
+    malformed tree from hanging (the derive then fails cleanly via its watchdog).
+    """
+    if _right(mu, x) != 0:
+        x = _right(mu, x)
+        n = 0
+        while _left(mu, x) != 0 and n < 1_000_000:
+            x = _left(mu, x); n += 1
+    else:
+        y = _parent(mu, x)
+        n = 0
+        while x == _right(mu, y) and n < 1_000_000:
+            x = y; y = _parent(mu, y); n += 1
+        if _right(mu, x) != y:
+            x = y
+    return x
+
+
+def decrement(mu, x):
+    """``std::_Rb_tree_decrement`` -- the in-order predecessor of node ``x``
+    (mirrors :func:`increment`; the same defensive depth cap applies)."""
+    if _color(mu, x) == RED and _parent(mu, _parent(mu, x)) == x:
+        # x is the header (its grandparent is itself): predecessor = rightmost.
+        return _right(mu, x)
+    if _left(mu, x) != 0:
+        y = _left(mu, x)
+        n = 0
+        while _right(mu, y) != 0 and n < 1_000_000:
+            y = _right(mu, y); n += 1
+        return y
+    y = _parent(mu, x)
+    n = 0
+    while x == _left(mu, y) and n < 1_000_000:
+        x = y; y = _parent(mu, y); n += 1
+    return y
+
+
 def _rotate_left(mu, x, header):
     y = _right(mu, x)
     _set_right(mu, x, _left(mu, y))

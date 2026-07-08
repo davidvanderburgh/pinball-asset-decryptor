@@ -126,10 +126,10 @@ def test_stern_enables_replace_image_with_a_note():
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
     mfr = SternManufacturer()
     assert mfr.capabilities.replace_image is True
-    # The note is now a one-liner pointing at the "?" help (monkeybug); the
-    # per-store fitting rules moved into help_dialog's Replace Images tab.
-    note = mfr.image_note()
-    assert note and "help" in note.lower()
+    # The inline note is now empty (monkeybug: the tab read as cluttered); the
+    # auto-fit / per-store fitting rules live entirely in help_dialog's Replace
+    # Images tab.
+    assert mfr.image_note() == ""
     from pinball_decryptor.gui.help_dialog import HELP_CONTENT
     img_help = " ".join(t + " " + b for t, b in HELP_CONTENT["Replace Images"])
-    assert "byte" in img_help.lower()
+    assert "byte" in img_help.lower() and "auto-fit" in img_help.lower()

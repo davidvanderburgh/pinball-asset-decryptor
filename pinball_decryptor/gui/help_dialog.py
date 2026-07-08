@@ -72,6 +72,11 @@ HELP_CONTENT = {
          "wav, ogg, flac, m4a, …); it doesn't need to match the original, "
          "it's converted and fitted (length / sample rate / volume) "
          "automatically when you build."),
+        ("Assets folder + applying",
+         "The assets folder is the one Extract produced — the same folder the "
+         "Write tab reads. There's no separate \"stage\" step: the "
+         "replacements you assign are applied automatically when you build the "
+         "update on the Write tab."),
         ("Change markers",
          "Green = assigned this session (staged when you build). "
          "\"✓ changed on disk\" = the file already differs from the extract "
@@ -99,6 +104,11 @@ HELP_CONTENT = {
          "original's format, resolution and frame rate is used as-is; "
          "anything else is auto-re-encoded to match (transparency is kept "
          "where the original has it)."),
+        ("Assets folder + applying",
+         "The assets folder is the one Extract produced — the same folder the "
+         "Write tab reads. There's no separate \"stage\" step: the "
+         "replacements you assign are applied automatically when you build the "
+         "update on the Write tab."),
         ("Size limits",
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
@@ -118,6 +128,12 @@ HELP_CONTENT = {
          "the original's pixel dimensions and converted to the slot's "
          "format (transparency is kept where the original has it). Keep "
          "the original resolution for best results."),
+        ("Assets folder + applying",
+         "The assets folder is the one Extract produced — the same folder the "
+         "Write tab reads. There's no separate \"stage\" step: each "
+         "replacement you assign is auto-fit to its slot (scaled, "
+         "format-converted, size-matched) and applied automatically when you "
+         "build the update on the Write tab."),
         ("Where images come from",
          "The Source column tells the four stores apart. \"File\" = a "
          "plain image file on the card (menus, apron/test art). \"Scene "
@@ -163,9 +179,11 @@ HELP_CONTENT = {
     ],
     "Replace Text": [
         ("Scan and edit",
-         "Scan loads the game's editable display strings. Pick a row and "
-         "type the new text in the edit panel — the original is always kept "
-         "alongside for reference."),
+         "Scan loads the game's editable display strings from the assets "
+         "folder Extract produced — the same folder the Write tab reads. Pick "
+         "a row and type the new text in the edit panel — the original is "
+         "always kept alongside for reference. Edits are saved straight into "
+         "the manifest and patched in on the next Write."),
         ("Length limits",
          "Replacements live in the original string's slot: same-length or "
          "shorter is padded automatically; over-long text is rejected."),

@@ -313,11 +313,10 @@ class SternManufacturer(Manufacturer):
                 "clip. Tick “Trim / pad” to also match the original length.")
 
     def image_note(self):
-        # One line on the tab; the full per-store fitting rules moved into
-        # the "?" help window (monkeybug: the paragraph read as clutter).
-        return ("Each replacement is auto-fit to its slot in place — "
-                "scaled, format-converted and size-matched. The per-store "
-                "rules are in the ? help.")
+        # No inline note — the auto-fit / per-store fitting rules live in the
+        # "?" help window (monkeybug: the tab read as cluttered; the earlier
+        # one-line summary went too).
+        return ""
 
     def detect(self, path):
         # Route by extension: MAME ROM zip => classic Whitestar (capture

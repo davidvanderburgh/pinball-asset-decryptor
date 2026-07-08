@@ -1347,10 +1347,15 @@ class MainWindow:
         self._prereq_indicators = {}
 
         # Replace-tab Scan/Browse buttons (tab_key -> ttk.Button), registered
-        # as each tab is built so _set_tab_scanning() can disable + relabel them
-        # while a (possibly slow, network-share) scan runs.
+        # as each tab is built so _set_tab_scanning() can blank the list, run a
+        # scanning animation, and turn Scan into Cancel while a (possibly slow,
+        # network-share) scan runs.
         self._scan_buttons = {}
         self._browse_buttons = {}
+        self._scan_cmds = {}            # tab_key -> Scan command (restore after Cancel)
+        self._scan_spinner_after = {}   # tab_key -> after-id of the running spinner
+        self._scan_msgs = {}            # tab_key -> message the spinner animates
+        self._scan_empty_font = {}      # tab_key -> normal empty-label font to restore
 
         # Intro/description labels whose wraplength tracks the window width so
         # they reflow wider instead of leaving dead space when the window grows
@@ -2730,9 +2735,6 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "audio",
                                        self._scan_audio_slots_async)
-        ttk.Label(f, text="(the folder Extract produced — shared with the "
-                          "Write tab)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         # Search + sort toolbar.
         tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
@@ -2901,17 +2903,6 @@ class MainWindow:
             "the click. Leave this on unless a replacement sounds wrong with "
             "it — turning it off uses your audio exactly as provided.",
             lambda: self._current_theme)
-
-        # No explicit "stage" step: the replacements you assign are applied
-        # (converted + written into the assets folder) automatically when you
-        # build the update on the Write tab.
-        ttk.Label(
-            f,
-            text="Assigned replacements are applied automatically when you "
-                 "build the update on the Write tab — no extra step.",
-            font=(_SANS_FONT, 9), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=12, pady=(8, 8))
 
         self._refresh_audio_ffmpeg_warning()
 
@@ -4149,9 +4140,6 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "video",
                                        self._scan_video_slots_async)
-        ttk.Label(f, text="(the folder Extract produced — shared with the "
-                          "Write tab)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         # Search + sort toolbar.
         tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
@@ -4258,13 +4246,6 @@ class MainWindow:
         # "No conversion" is on (reflects any restored staged state too).
         self._update_video_trim_enabled()
 
-        ttk.Label(
-            f,
-            text="Assigned replacements are applied automatically when you "
-                 "build the update on the Write tab — no extra step.",
-            font=(_SANS_FONT, 9), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=12, pady=(8, 8))
 
         self._refresh_video_ffmpeg_warning()
 
@@ -4922,9 +4903,6 @@ class MainWindow:
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "image",
                                        self._scan_image_slots_async)
-        ttk.Label(f, text="(the folder Extract produced — shared with the "
-                          "Write tab)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         # Search + sort toolbar.
         tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
@@ -5054,13 +5032,6 @@ class MainWindow:
             foreground="#888888", wraplength=720, justify=tk.LEFT)
         self._image_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
 
-        ttk.Label(
-            f,
-            text="Assigned replacements are applied automatically when you "
-                 "build the update on the Write tab — no extra step.",
-            font=(_SANS_FONT, 9), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=12, pady=(8, 8))
 
         self._refresh_image_pillow_warning()
 
@@ -5344,9 +5315,13 @@ class MainWindow:
             if len(cols) < 2:
                 continue
             card_dir = cols[1].rsplit("/", 1)[0] if "/" in cols[1] else ""
-            label = card_dir or "(root)"
+            folder = card_dir or "(root)"
+            # Display without the manifest's leading "/" (monkeybug: the other
+            # tabs show no leading slash) — the group KEY keeps the slash so
+            # names saved under the old key still match.
+            label = folder.lstrip("/") or "(root)"
             groups.setdefault("images/" + cols[0],
-                              ("dir::" + label, label, idx))
+                              ("dir::" + folder, label, idx))
 
         return groups, occ
 
@@ -5447,7 +5422,10 @@ class MainWindow:
                 res = "…"  # metadata still loading
             else:
                 res = s.resolution_str()
-            tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
+            # In grouped mode the parent row already names the folder, so show
+            # just the filename (monkeybug); flat mode keeps the full path.
+            disp = os.path.basename(s.rel_path) if parent else s.rel_path
+            tree.insert(parent, tk.END, iid=s.rel_path, text=disp,
                         values=("", res, s.format_summary(),
                                 self._image_source_label(s.rel_path),
                                 rep_disp),
@@ -6430,9 +6408,6 @@ class MainWindow:
         self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
-        ttk.Label(f, text="(the folder Extract produced — shared with the "
-                          "Write tab)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         # Search + status toolbar.
         tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
@@ -7352,7 +7327,15 @@ class MainWindow:
         self._image_clear_preview()
         self._refresh_image_list()
         if hasattr(self, "_image_note_lbl"):
-            self._image_note_lbl.configure(text=mfr.image_note() or "")
+            note = mfr.image_note() or ""
+            self._image_note_lbl.configure(text=note)
+            # Hide the row entirely when there's no note, so the tab doesn't
+            # carry an empty gap (monkeybug: the fitting-rules line moved to
+            # Help).  Plugins that DO return a note still show it.
+            if note:
+                self._image_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
+            else:
+                self._image_note_lbl.pack_forget()
 
         # BOF-only Extract callout — pack just below the Extract tab's
         # warning label so users see it before they hit Extract.  Other
@@ -9393,22 +9376,120 @@ class MainWindow:
         scan.pack(side=tk.LEFT, padx=(4, 0))
         self._browse_buttons[tab_key] = browse
         self._scan_buttons[tab_key] = scan
+        self._scan_cmds[tab_key] = scan_cmd   # restore after a Cancel
+
+    _SCAN_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"     # braille frames for the scanning animation
 
     def _set_tab_scanning(self, tab_key, active):
-        """Disable + relabel a Replace tab's Scan/Browse buttons while its scan
-        runs (mirrors the Write-preview Refresh button) so a slow scan over a
-        network share can't look idle — the very glitch monkeybug hit.  Tolerant
-        of tabs/layouts where a button doesn't exist."""
+        """Toggle a Replace tab into / out of its scanning state.
+
+        While a scan runs the list is blanked, a big animated indicator shows
+        over it, and the Scan button turns into Cancel (monkeybug) — so a slow
+        scan over a network share can't look idle and can be aborted.  Tolerant
+        of tabs/layouts where a widget doesn't exist."""
+        if active:
+            self._begin_scan_ui(tab_key)
+        else:
+            self._end_scan_ui(tab_key)
+
+    def _begin_scan_ui(self, tab_key):
+        tree = getattr(self, "_%s_tree" % tab_key, None)
+        empty = getattr(self, "_%s_empty" % tab_key, None)
+        if tree is not None:
+            try:                       # blank the list so a cancel can't leave
+                tree.delete(*tree.get_children())   # it looking half-filled
+            except tk.TclError:
+                pass
+        if empty is not None:
+            try:
+                self._scan_empty_font.setdefault(
+                    tab_key, str(empty.cget("font")))
+                self._scan_msgs[tab_key] = empty.cget("text") or "Scanning…"
+                empty.configure(font=(_SANS_FONT, 18, "bold"))
+                empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            except tk.TclError:
+                pass
+        self._start_scan_spinner(tab_key)
+        self._toggle_scan_button(tab_key, scanning=True)
+
+    def _end_scan_ui(self, tab_key):
+        self._stop_scan_spinner(tab_key)
+        empty = getattr(self, "_%s_empty" % tab_key, None)
+        if empty is not None:
+            try:                       # restore the normal (small) label font
+                empty.configure(font=self._scan_empty_font.get(tab_key, ""))
+            except tk.TclError:
+                pass
+        self._toggle_scan_button(tab_key, scanning=False)
+
+    def _toggle_scan_button(self, tab_key, scanning):
         scan = self._scan_buttons.get(tab_key)
         browse = self._browse_buttons.get(tab_key)
         try:
             if scan is not None:
-                scan.configure(text="⏳  Scanning…" if active else "Scan",
-                               state=tk.DISABLED if active else tk.NORMAL)
+                if scanning:
+                    scan.configure(
+                        text="✕  Cancel", state=tk.NORMAL,
+                        command=lambda k=tab_key: self._cancel_scan(k))
+                else:
+                    scan.configure(text="Scan", state=tk.NORMAL,
+                                   command=self._scan_cmds.get(tab_key))
             if browse is not None:
-                browse.configure(state=tk.DISABLED if active else tk.NORMAL)
+                browse.configure(state=tk.DISABLED if scanning else tk.NORMAL)
         except tk.TclError:
             pass
+
+    def _start_scan_spinner(self, tab_key):
+        """Animate the tab's empty-state label with a braille spinner so a
+        long scan visibly moves."""
+        self._stop_scan_spinner(tab_key)
+
+        def _tick(i=0):
+            empty = getattr(self, "_%s_empty" % tab_key, None)
+            if empty is None:
+                return
+            try:
+                frame = self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)]
+                empty.configure(text="%s  %s" % (
+                    frame, self._scan_msgs.get(tab_key, "Scanning…")))
+            except tk.TclError:
+                return
+            self._scan_spinner_after[tab_key] = self._tk_root().after(
+                90, _tick, i + 1)
+
+        _tick()
+
+    def _stop_scan_spinner(self, tab_key):
+        aid = self._scan_spinner_after.pop(tab_key, None)
+        if aid is not None:
+            try:
+                self._tk_root().after_cancel(aid)
+            except Exception:
+                pass
+
+    def _cancel_scan(self, tab_key):
+        """Cancel-button handler: invalidate the running scan (its result is
+        dropped by the scan-id guard when the worker returns) and reset the tab
+        to idle with a blank list."""
+        attr = "_%s_scan_id" % tab_key
+        setattr(self, attr, getattr(self, attr, 0) + 1)
+        self._stop_scan_spinner(tab_key)
+        tree = getattr(self, "_%s_tree" % tab_key, None)
+        if tree is not None:
+            try:
+                tree.delete(*tree.get_children())
+            except tk.TclError:
+                pass
+        empty = getattr(self, "_%s_empty" % tab_key, None)
+        if empty is not None:
+            try:
+                empty.configure(
+                    font=self._scan_empty_font.get(tab_key, ""),
+                    text="Scan cancelled — click Scan to try again.")
+                empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            except tk.TclError:
+                pass
+        self._toggle_scan_button(tab_key, scanning=False)
 
     def _set_preview_scanning(self, active):
         """Toggle the preview Refresh button between idle and a disabled

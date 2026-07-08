@@ -818,19 +818,45 @@ def test_set_tab_scanning_toggles_button_state(app):
     scan = w._scan_buttons["audio"]
     browse = w._browse_buttons["audio"]
 
+    # Scanning: the Scan button becomes an ENABLED Cancel (monkeybug), Browse
+    # is disabled, and a spinner animation is scheduled.
+    w._audio_empty.configure(text="Scanning for audio files…")
     w._set_tab_scanning("audio", True)
-    assert "Scanning" in scan.cget("text")
-    assert str(scan.cget("state")) == "disabled"
+    assert "Cancel" in scan.cget("text")
+    assert str(scan.cget("state")) == "normal"
     assert str(browse.cget("state")) == "disabled"
+    assert "audio" in w._scan_spinner_after          # animation running
 
     w._set_tab_scanning("audio", False)
     assert scan.cget("text") == "Scan"
     assert str(scan.cget("state")) == "normal"
     assert str(browse.cget("state")) == "normal"
+    assert "audio" not in w._scan_spinner_after       # animation stopped
+
+
+def test_scan_blanks_list_and_cancel_resets(app):
+    w = app.window
+    w._audio_tree.insert("", "end", iid="stale", text="old row")
+    before = w._audio_scan_id
+
+    # Scan start blanks the list so a cancel can't leave it half-filled.
+    w._audio_empty.configure(text="Scanning for audio files…")
+    w._set_tab_scanning("audio", True)
+    assert not w._audio_tree.get_children()
+
+    # Cancel bumps the scan id (drops the in-flight worker), restores the
+    # button, and shows a cancelled message.
+    w._cancel_scan("audio")
+    assert w._audio_scan_id == before + 1
+    assert w._scan_buttons["audio"].cget("text") == "Scan"
+    assert str(w._browse_buttons["audio"].cget("state")) == "normal"
+    assert "cancelled" in w._audio_empty.cget("text").lower()
+    assert "audio" not in w._scan_spinner_after
 
 
 def test_set_tab_scanning_tolerates_unknown_tab(app):
     app.window._set_tab_scanning("nope", True)   # no raise
+    app.window._cancel_scan("nope")              # no raise
 
 
 def test_column_width_change_persists_and_is_idempotent(app):
@@ -1464,8 +1490,10 @@ def test_image_group_scan_parses_manifests(tmp_path):
     rel3 = "images/scene_textures/radimg_8x8_00000003.png"
     assert groups[rel3] == (key, "Char_Select · a1b2c3d4", 300)
     assert occ[rel1] == 1
+    # Group KEY keeps the manifest's leading slash (so saved tags match); the
+    # display LABEL drops it for consistency with the other tabs (monkeybug).
     assert groups["images/loose/logo.png"] == (
-        "dir::/game/assets/loose", "/game/assets/loose", 0)
+        "dir::/game/assets/loose", "game/assets/loose", 0)
     empty = tmp_path / "no_manifests"
     empty.mkdir()
     assert MainWindow._scan_image_groups(str(empty)) == ({}, {})

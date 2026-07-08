@@ -53,6 +53,15 @@ _ATOMIC = {0x01900090: (False, 4), 0x01d00090: (False, 1), 0x01f00090: (False, 2
 def _atomic_kind(w):
     return _ATOMIC.get(w & 0x0FF000F0) if (w >> 28) == 0xE else None
 
+
+def _rotimm(w):
+    """Value of an ARM data-processing modified immediate (the low 12 bits of
+    *w*): an 8-bit constant rotated right by twice the 4-bit rotate field."""
+    imm8 = w & 0xFF
+    rot = ((w >> 8) & 0xF) * 2
+    return ((imm8 >> rot) | (imm8 << (32 - rot))) & 0xFFFFFFFF if rot else imm8
+
+
 PAGE = 0x1000
 
 
@@ -202,6 +211,15 @@ class Spike2Emu:
         mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
         self.mu = mu
         self._atomic_pcs = set()
+        # ELF PLT thunk entries (`add ip, pc, #.. ; [add ip, ip, #..] ; ldr pc,
+        # [ip, #..]!`) -> the absolute GOT slot the thunk loads PC from.  unicorn
+        # mistranslates the `ldr pc` terminator on some builds (it returns to the
+        # caller AND clobbers r0 instead of loading the GOT), silently no-op'ing
+        # every call through that thunk (e.g. Led Zeppelin LE 1.22.0's boot-time
+        # memcpy that fills the sound catalog).  We intercept at the *entry* and
+        # branch through the precomputed GOT ourselves, so the bad instruction
+        # never runs -- see _plt_branch + _hooks.
+        self._plt_entry = {}
         for vaddr, off, filesz, memsz in segs:
             b = vaddr & ~0xfff
             e = _algn(vaddr + memsz)
@@ -211,8 +229,24 @@ class Spike2Emu:
             # (the firmware's C++ runtime uses atomics heavily; unicorn has no
             # exclusive monitor, so without this they raise and abort the boot).
             for i in range(0, filesz & ~3, 4):
-                if _atomic_kind(_u32(raw, off + i)):
+                w = _u32(raw, off + i)
+                if _atomic_kind(w):
                     self._atomic_pcs.add(vaddr + i)
+                    continue
+                # `ldr pc, [ip, #imm]!` terminating a thunk: walk the preceding
+                # `add ip, ip` chain back to the `add ip, pc` entry and fold the
+                # (constant) immediates into the absolute GOT address.
+                if (w & 0xFFFFF000) != 0xE5BCF000:
+                    continue
+                j = i - 4
+                while j >= 0 and (_u32(raw, off + j) & 0xFFFFF000) == 0xE28CC000:
+                    j -= 4
+                if j < 0 or (_u32(raw, off + j) & 0xFFFFF000) != 0xE28FC000:
+                    continue
+                got = (vaddr + j + 8) & 0xFFFFFFFF
+                for k in range(j, i, 4):
+                    got = (got + _rotimm(_u32(raw, off + k))) & 0xFFFFFFFF
+                self._plt_entry[vaddr + j] = (got + (w & 0xFFF)) & 0xFFFFFFFF
         mu.mem_map(self.STK, self.STKSZ)
         mu.mem_map(self.HEAP, self.HEAPSZ)
         mu.mem_map(self.IMPORT & ~0xfff, 0x4000)
@@ -349,6 +383,14 @@ class Spike2Emu:
         self._narrow = False
         self._extra_handles = {}
 
+        # PLT-thunk fixup: a persistent narrow hook over the thunk-entry region
+        # so it runs under BOTH the global boot hook and the narrow decode hooks.
+        # Registered after the global hook so, at an entry, the global hook
+        # (which does nothing there) runs first.
+        if self._plt_entry:
+            mu.hook_add(UC_HOOK_CODE, self._plt_branch,
+                        begin=min(self._plt_entry), end=max(self._plt_entry) + 4)
+
         def inv(mu, t, addr, sz, val, u):
             self.ondemand += 1
             if len(self.faults) < 200:
@@ -375,6 +417,25 @@ class Spike2Emu:
         fn = self.extra.get(addr)
         if fn:
             fn(self)
+
+    def _plt_branch(self, mu, addr, size, ud):
+        """Take over an ELF PLT thunk at its entry: load PC from the thunk's GOT
+        slot ourselves and jump there, so unicorn never executes the thunk's
+        ``ldr pc`` -- which it mistranslates on some builds into a bare return
+        that also clobbers r0, silently no-op'ing the imported call (e.g. Led
+        Zeppelin LE 1.22.0's boot-time ``memcpy`` that fills the sound catalog).
+        The thunk only leaves ip (r12, a scratch reg) holding the GOT address, so
+        setting that + PC reproduces the thunk's whole effect; on builds unicorn
+        handles correctly this lands on the same target, so it's a no-op."""
+        got = self._plt_entry.get(addr)
+        if got is None:
+            return
+        try:
+            tgt = struct.unpack("<I", bytes(mu.mem_read(got, 4)))[0]
+        except UcError:
+            return
+        mu.reg_write(UC_ARM_REG_R12, got)
+        mu.reg_write(UC_ARM_REG_PC, tgt)
 
     def _switch_to_narrow_hooks(self):
         """Drop the global per-instruction code hook and replace it with hooks

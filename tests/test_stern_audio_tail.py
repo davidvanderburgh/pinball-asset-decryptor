@@ -22,6 +22,9 @@ IMG_DIR = os.path.join(REPO, "images", "Stern", "spike2")
 CARDS = {
     "turtles": "turtles_pro-1_58_0.Release.8G.sdcard.raw",      # validated build
     "led_zeppelin": "led_zeppelin_le-1_20_0.Release.8G.sdcard.raw",  # generic build
+    # LE 1.22.0: a build whose PLT thunks unicorn mistranslates -- exercises the
+    # _plt_branch entry-intercept (without it, derive_params can't map the codec).
+    "led_zeppelin_122": "led_zeppelin_le-1_22_0.Release.8G.sdcard.raw",
 }
 
 
@@ -189,6 +192,17 @@ def test_save_firmware_for_support(tmp_path):
     dst2 = E._save_firmware_for_support(
         str(gr), str(tmp_path / "nope" / "deep"), lambda *a: logs.append(a))
     assert dst2 is None
+
+
+def test_rotimm_arm_modified_immediate():
+    """_rotimm decodes the ARM data-processing modified immediate the PLT-thunk
+    scanner folds into a GOT address (see Spike2Emu._plt_entry / _plt_branch)."""
+    from pinball_decryptor.plugins.stern.spike2.emulator import _rotimm
+    assert _rotimm(0x605) == 0x500000   # add ip, pc, #0x500000
+    assert _rotimm(0xa50) == 0x50000    # add ip, ip, #0x50000
+    assert _rotimm(0xa42) == 0x42000    # add ip, ip, #0x42000
+    assert _rotimm(0x0ff) == 0xff       # rotate 0 -> the raw byte
+    assert _rotimm(0x000) == 0
 
 
 def test_rbtree_increment_walks_in_order_and_terminates():

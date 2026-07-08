@@ -67,7 +67,7 @@ so we never again ship a tag where `__version__` lags the tag string
    on WHAT the user sees, not WHAT files changed.  Mention any
    feedback contributors by name (e.g. "joe_blasi feedback").>
 
-   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
    ```
    Use a HEREDOC for the commit body so newlines + apostrophes survive.
 
@@ -120,6 +120,21 @@ so we never again ship a tag where `__version__` lags the tag string
    )"
    ```
    Print the resulting URL.
+
+10. **Draft a message for the tester / user.**
+
+    After the release is published, write a SHORT, plain-text message the user can forward to whoever tests or requested the changes (e.g. monkeybug).  This is separate from the GitHub release notes — it's a casual DM, not documentation.
+
+    Rules (this is text the USER sends onward, see `feedback_no_emdash_short_messages.md`):
+    - **No em dashes.**  Keep it to a few lines.
+    - Plain text, no markdown headings.
+    - Lead with what's new that *they* care about and what to try next.  Name the version.
+    - If a fix addressed their specific report, say so by name.
+
+    Present it in its own copy-pasteable fenced block, clearly labelled so the user knows it's the forward-to-tester message (distinct from the release-summary in "What to report back" below).  Example shape:
+    ```
+    Shipped v0.50.0. New Partition Explorer tab lets you browse a card image and pull files or folders out without mounting it. And your renamed image-group names now survive re-extracting the same card. Give the explorer a try and tell me if a folder ever opens empty.
+    ```
 
 ## Conventions to match the existing release history
 

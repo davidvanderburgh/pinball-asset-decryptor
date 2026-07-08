@@ -2788,7 +2788,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         raise copy_err[0]
     if writes is None:                      # cancelled mid-compute
         _safe_remove(output_path)
-        return 0
+        return (0, 0, 0, 0)
 
     # the copy is already on disk; patch the changed bytes in place
     with open(output_path, "r+b") as out:
@@ -2803,7 +2803,9 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
-    return n_audio + n_video + n_image + n_text
+    # Return the per-type breakdown (not just the total) so the completion
+    # dialog can name what actually changed instead of always saying "sound(s)".
+    return counts
 
 
 def _grow_video_slots(image_or_device, grow_plan, log):
@@ -3017,7 +3019,7 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
             disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
             dest_is_device=True)
     if writes is None:                          # cancelled mid-compute
-        return 0
+        return (0, 0, 0, 0)
 
     phase(2)  # Write to SD card
     log("Writing changes directly to the SD card (in place)...", "info")
@@ -3030,7 +3032,9 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     log("Wrote to SD card: %d sound(s), %d video(s), %d image(s), "
         "%d display string(s)."
         % (n_audio, n_video, n_image, n_text), "success")
-    return n_audio + n_video + n_image + n_text
+    # Return the per-type breakdown (see write_image) so the completion dialog
+    # names what changed rather than a bare total.
+    return counts
 
 
 # --------------------------------------------------------------------------

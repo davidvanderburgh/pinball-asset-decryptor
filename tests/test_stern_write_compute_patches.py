@@ -102,7 +102,7 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_apply_writes", fake_apply)
 
     n = engine.write_image(str(src), str(tmp_path), str(out), log=_log)
-    assert n == 3
+    assert n == (3, 0, 0, 0)          # per-type breakdown (audio, video, image, text)
     assert out.exists()
     assert seen["writes"] == {19: b"PATCHED!"}
     data = out.read_bytes()
@@ -118,7 +118,7 @@ def test_write_image_cancel_discards_output(tmp_path, monkeypatch):
                         lambda *a, **k: (None, None, None))  # cancelled mid-compute
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch on cancel"))
-    assert engine.write_image(str(src), str(tmp_path), str(out), log=_log) == 0
+    assert engine.write_image(str(src), str(tmp_path), str(out), log=_log) == (0, 0, 0, 0)
     assert not out.exists()                                # pristine copy discarded
 
 
@@ -185,3 +185,25 @@ def test_write_image_waits_for_slow_copy_before_patching(tmp_path, monkeypatch):
     assert data[:19] == b"ORIGINAL-CARD-BYTES"   # the slow copy completed first
     assert data[19:27] == b"PATCHED!"            # then the patch was applied
     assert len(data) == len(src.read_bytes())    # full image, not a truncated race
+
+
+# --- completion-dialog wording: name the types that actually changed ---------
+# The engine returns a (audio, video, image, text) breakdown; the pipeline must
+# label the write by what it touched, not always say "sound(s)" (flippermeister:
+# two replaced images were reported as two replaced sounds).
+
+def test_write_summary_names_the_changed_type():
+    from pinball_decryptor.plugins.stern.pipeline import _write_summary
+    # flippermeister's exact case: image-only write must not say "sound(s)".
+    assert _write_summary((0, 0, 2, 0)) == "2 image(s)"
+    assert _write_summary((3, 0, 0, 0)) == "3 sound(s)"
+    assert _write_summary((0, 5, 0, 0)) == "5 video(s)"
+    assert _write_summary((0, 0, 0, 4)) == "4 display string(s)"
+
+
+def test_write_summary_joins_multiple_types_and_handles_empty():
+    from pinball_decryptor.plugins.stern.pipeline import _write_summary
+    assert _write_summary((1, 0, 2, 0)) == "1 sound(s) and 2 image(s)"
+    assert (_write_summary((1, 2, 3, 4))
+            == "1 sound(s), 2 video(s), 3 image(s) and 4 display string(s)")
+    assert _write_summary((0, 0, 0, 0)) == "no changes"  # cancelled / nothing edited

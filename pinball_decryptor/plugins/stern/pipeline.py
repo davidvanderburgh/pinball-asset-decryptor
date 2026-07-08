@@ -74,6 +74,24 @@ def _extract_summary(n, output_dir, flags, *, source=""):
     return "%s%s -> %s" % (lead, source, output_dir)
 
 
+def _write_summary(counts):
+    """Name the asset types a Write actually changed, for the completion dialog.
+
+    ``write_image`` / ``write_device`` return the ``(audio, video, image,
+    text)`` breakdown -- a Write may touch any mix of those (or just one type),
+    so the old bare "N replaced sound(s)" mislabeled an image-only or
+    video-only write (flippermeister: two replaced images reported as two
+    sounds).  List only the categories with a non-zero count; fall back to "no
+    changes" when nothing changed."""
+    parts = ["%d %s" % (n, noun) for n, noun in zip(counts, (
+        "sound(s)", "video(s)", "image(s)", "display string(s)")) if n]
+    if not parts:
+        return "no changes"
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 class SternExtractPipeline(BasePipeline):
     """Decode every packed sound in a Spike 2 card image to a per-sound WAV."""
 
@@ -159,12 +177,13 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(1)  # Stage
         _require_engine()
         self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
-        n = engine.write_image(
+        counts = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             label=display_for_key(key, self.original_path))
         self._set_phase(3)  # Patch image
-        self._done(True, "Wrote %d replaced sound(s) to %s" % (n, self.output_path))
+        self._done(True, "Wrote %s to %s"
+                   % (_write_summary(counts), self.output_path))
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
@@ -257,12 +276,13 @@ class SternDirectSsdWritePipeline(BasePipeline):
                 "not a file path (got %r). Pick the card from the Game SD "
                 "dropdown." % self.device_path)
         _require_engine()
-        n = engine.write_device(
+        counts = engine.write_device(
             self.device_path, self.assets_dir,
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
-        self._done(True, "Wrote %d change(s) directly to the SD card." % n)
+        self._done(True, "Wrote %s directly to the SD card."
+                   % _write_summary(counts))
 
 
 class SternRevertPipeline(BasePipeline):

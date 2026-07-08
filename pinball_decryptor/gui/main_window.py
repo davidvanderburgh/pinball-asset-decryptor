@@ -6235,17 +6235,31 @@ class MainWindow:
         self._pex_populated.add(parent_iid)
 
     def _pex_on_tree_open(self, _event=None):
-        """Lazily populate any open directory node that hasn't loaded yet."""
-        tree = self._pex_tree
+        """Lazily populate a just-expanded directory node.
+
+        Deferred to ``after_idle``: on some Tk builds the ``<<TreeviewOpen>>``
+        handler runs BEFORE the node's ``-open`` state is committed, so reading
+        it synchronously would skip the folder the user just expanded and leave
+        its blank placeholder row showing."""
+        self._tk_root().after_idle(self._pex_fill_open_dirs)
+
+    def _pex_fill_open_dirs(self):
+        """Populate every open, not-yet-loaded directory node."""
+        tree = getattr(self, "_pex_tree", None)
+        if tree is None:
+            return
         stack = list(tree.get_children(""))
         while stack:
             iid = stack.pop()
-            is_open = bool(tree.item(iid, "open"))
-            if (iid in self._pex_dirs and iid not in self._pex_populated
-                    and is_open):
+            try:
+                is_open = str(tree.item(iid, "open")).lower() in ("1", "true")
+            except tk.TclError:
+                continue          # node vanished (folder switched mid-expand)
+            if not is_open:
+                continue
+            if iid in self._pex_dirs and iid not in self._pex_populated:
                 self._pex_populate_dir(iid, iid)     # iid == fs path
-            if is_open:
-                stack.extend(tree.get_children(iid))
+            stack.extend(tree.get_children(iid))
 
     def _pex_on_tree_select(self, _event=None):
         sel = self._pex_tree.selection()

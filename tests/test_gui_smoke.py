@@ -1753,7 +1753,7 @@ def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
     kids = tree.get_children("/etc")
     assert len(kids) == 1 and kids[0].endswith(_PEX_PLACEHOLDER)
     tree.item("/etc", open=True)
-    w._pex_on_tree_open()
+    w._pex_fill_open_dirs()     # the after_idle worker _pex_on_tree_open defers to
     assert [tree.item(i, "text") for i in tree.get_children("/etc")] == ["init.d"]
 
     # Select a text file -> preview; select a dir -> preview clears.

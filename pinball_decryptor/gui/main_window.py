@@ -64,6 +64,10 @@ VOICE_QUALITY_CHOICES = (
 # prefix guarantees a group header's iid can't collide with any slot.
 _IMG_GROUP_IID = "::grp::"
 
+# Partition Explorer: suffix marking a directory node's lazy-load placeholder
+# child (a NUL can't appear in a real POSIX path, so it never collides).
+_PEX_PLACEHOLDER = "\x00__lazy__"
+
 # Replace-Audio "Group duplicates" parent-row iid prefix — same collision
 # guarantee as _IMG_GROUP_IID (slot iids are relative paths, never ::-led).
 _AUD_DUP_GROUP_IID = "::dupgrp::"
@@ -1637,6 +1641,7 @@ class MainWindow:
         self._tab_text = ttk.Frame(self._notebook)
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
+        self._tab_partition = ttk.Frame(self._notebook)
 
         self._notebook.add(self._tab_extract, text="  Extract  ")
         self._notebook.add(self._tab_audio, text="  Replace Audio  ")
@@ -1645,6 +1650,7 @@ class MainWindow:
         self._notebook.add(self._tab_text, text="  Replace Text  ")
         self._notebook.add(self._tab_write, text="  Write  ")
         self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
+        self._notebook.add(self._tab_partition, text="  Partition Explorer  ")
 
         self._build_extract_tab()
         self._build_audio_tab()
@@ -1653,6 +1659,7 @@ class MainWindow:
         self._build_text_tab()
         self._build_write_tab()
         self._build_modpack_tab()
+        self._build_partition_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -6036,6 +6043,350 @@ class MainWindow:
     # matching string in place (size-neutral).
     # ==================================================================
 
+    # ==================================================================
+    # Partition Explorer tab — read-only browse of a raw card image's MBR
+    # partitions + ext4 filesystem(s), with file/folder extract to disk.
+    # For pulling radium/.sh files out of an old modded card, or dumping
+    # folders to diff a modded card vs stock, without a mount+map cycle
+    # (monkeybug).  Composes plugins.stern.explorer.CardImage; nothing on
+    # the card is written.
+    # ==================================================================
+
+    def _build_partition_tab(self):
+        """Build the read-only 'Partition Explorer' tab: pick a raw card image,
+        pick a partition, browse its ext4 tree (lazily), preview small text
+        files, and extract any file or folder to disk."""
+        f = self._tab_partition
+        self._pex_card = None            # the open CardImage (browse handle)
+        self._pex_image_path = None
+        self._pex_part_index = None
+        self._pex_dirs = set()           # tree iids that are directories
+        self._pex_populated = set()      # dir iids whose children were loaded
+        self._pex_busy = False           # an extract is running
+        self._pex_part_labels = {}       # combobox label -> Partition
+        self.partition_image_var = tk.StringVar()
+        self.partition_part_var = tk.StringVar()
+        self.partition_status_var = tk.StringVar(value="")
+
+        ttk.Label(
+            f, text="Browse a raw Stern card image (.raw / .img) read-only: view "
+                    "its partitions and files, and extract any file or folder to "
+                    "disk. Nothing on the card is changed.",
+            font=(_SANS_FONT, 9, "italic"), wraplength=720,
+            justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=4)
+
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        ttk.Label(row, text="Card Image:", width=12, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ent = ttk.Entry(row, textvariable=self.partition_image_var)
+        ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ent.bind("<Return>", lambda _e: self._pex_open_image())
+        ttk.Button(row, text="Browse…", command=self._pex_browse_image).pack(
+            side=tk.LEFT, padx=(6, 0))
+        ttk.Button(row, text="Open", command=self._pex_open_image).pack(
+            side=tk.LEFT, padx=(6, 0))
+
+        prow = ttk.Frame(f); prow.pack(fill=tk.X, padx=10, pady=(2, 4))
+        ttk.Label(prow, text="Partition:", width=12, anchor=tk.W).pack(
+            side=tk.LEFT)
+        self._pex_part_combo = ttk.Combobox(
+            prow, textvariable=self.partition_part_var, state="readonly",
+            width=46)
+        self._pex_part_combo.pack(side=tk.LEFT)
+        self._pex_part_combo.bind(
+            "<<ComboboxSelected>>", lambda _e: self._pex_on_partition_select())
+        ttk.Label(prow, textvariable=self.partition_status_var,
+                  font=(_SANS_FONT, 9)).pack(side=tk.RIGHT)
+
+        body = ttk.Frame(f); body.pack(fill=tk.BOTH, expand=True, padx=10,
+                                       pady=(2, 4))
+        left = ttk.Frame(body); left.pack(side=tk.LEFT, fill=tk.BOTH,
+                                          expand=True)
+        self._pex_tree = ttk.Treeview(
+            left, columns=("size", "type"), height=10, selectmode="browse")
+        self._pex_tree.heading("#0", text="Name", anchor=tk.W)
+        self._pex_tree.heading("size", text="Size", anchor=tk.E)
+        self._pex_tree.heading("type", text="Type", anchor=tk.W)
+        self._pex_tree.column("#0", width=320, minwidth=160)
+        self._pex_tree.column("size", width=90, minwidth=60, anchor=tk.E,
+                              stretch=False)
+        self._pex_tree.column("type", width=160, minwidth=90, anchor=tk.W,
+                              stretch=False)
+        vs = ttk.Scrollbar(left, orient="vertical",
+                           command=self._pex_tree.yview)
+        self._pex_tree.configure(yscrollcommand=vs.set)
+        self._pex_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vs.pack(side=tk.LEFT, fill=tk.Y)
+        self._pex_tree.bind("<<TreeviewOpen>>", self._pex_on_tree_open)
+        self._pex_tree.bind("<<TreeviewSelect>>", self._pex_on_tree_select)
+
+        right = ttk.Frame(body); right.pack(side=tk.LEFT, fill=tk.BOTH,
+                                            padx=(8, 0))
+        ttk.Label(right, text="Preview", font=(_SANS_FONT, 9, "bold")).pack(
+            anchor=tk.W)
+        self._pex_preview = tk.Text(right, width=46, height=10, wrap="none",
+                                    state="disabled", font=(_MONO_FONT, 9))
+        self._pex_preview.pack(fill=tk.BOTH, expand=True)
+
+        arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
+        self._pex_extract_btn = ttk.Button(
+            arow, text="Extract Selected…", command=self._pex_extract_selected,
+            state=tk.DISABLED)
+        self._pex_extract_btn.pack(side=tk.LEFT)
+        self._pex_extract_part_btn = ttk.Button(
+            arow, text="Extract Whole Partition…",
+            command=self._pex_extract_partition, state=tk.DISABLED)
+        self._pex_extract_part_btn.pack(side=tk.LEFT, padx=(6, 0))
+
+    # ---- Partition Explorer: open + partitions -----------------------
+
+    def _pex_browse_image(self):
+        cur = (self.partition_image_var.get() or "").strip()
+        path = filedialog.askopenfilename(
+            title="Select a card image",
+            filetypes=[("Card image", "*.raw *.img *.bin"),
+                       ("All files", "*.*")],
+            initialdir=(os.path.dirname(cur) if cur else None))
+        if path:
+            self.partition_image_var.set(os.path.normpath(path))
+            self._pex_open_image()
+
+    def _pex_open_image(self):
+        """Open the card image at the current path and fill the partition combo,
+        selecting the first browsable ext partition."""
+        path = (self.partition_image_var.get() or "").strip()
+        if not path:
+            return
+        if not os.path.isfile(path):
+            self.partition_status_var.set("File not found.")
+            return
+        self._pex_close_card()
+        try:
+            from ..plugins.stern.explorer import CardImage
+            card = CardImage(path)
+        except Exception as e:
+            self.partition_status_var.set("Could not open: %s" % e)
+            return
+        self._pex_card = card
+        self._pex_image_path = path
+        parts = card.partitions()
+        self._pex_part_labels = {}
+        labels = []
+        for p in parts:
+            label = "Partition %d — %s (%s)%s" % (
+                p.index, p.label, self._pex_human(p.size),
+                "" if p.browsable else " — not browsable")
+            self._pex_part_labels[label] = p
+            labels.append(label)
+        self._pex_part_combo["values"] = labels
+        first = next((lbl for lbl, p in self._pex_part_labels.items()
+                      if p.browsable), None)
+        if first:
+            self.partition_part_var.set(first)
+            self._pex_on_partition_select()
+            self.partition_status_var.set(
+                "%d partition%s" % (len(parts), "" if len(parts) == 1 else "s"))
+        else:
+            self.partition_part_var.set(labels[0] if labels else "")
+            self._clear_pex_tree()
+            self.partition_status_var.set(
+                "No browsable ext filesystem on this image.")
+
+    def _pex_on_partition_select(self):
+        p = self._pex_part_labels.get(self.partition_part_var.get())
+        if p is None or self._pex_card is None:
+            return
+        self._clear_pex_tree()
+        if not p.browsable:
+            self.partition_status_var.set(
+                "This partition isn't a browsable ext filesystem.")
+            return
+        self._pex_part_index = p.index
+        self._pex_extract_part_btn.config(state=tk.NORMAL)
+        self._pex_populate_dir("", "/")     # the partition root's children
+
+    # ---- Partition Explorer: tree ------------------------------------
+
+    def _pex_populate_dir(self, parent_iid, path):
+        """Insert *path*'s children under the tree node *parent_iid* (``""`` for
+        the partition root).  Each directory gets a placeholder child so it
+        shows an expander and loads lazily on open."""
+        tree = self._pex_tree
+        for c in tree.get_children(parent_iid):
+            if c.endswith(_PEX_PLACEHOLDER):
+                tree.delete(c)
+        try:
+            entries = self._pex_card.list_dir(self._pex_part_index, path)
+        except Exception as e:
+            self.partition_status_var.set("Error: %s" % e)
+            return
+        for e in entries:
+            iid = e.path
+            if e.is_dir:
+                tree.insert(parent_iid, tk.END, iid=iid, text=e.name,
+                            values=("", "folder"))
+                tree.insert(iid, tk.END, iid=iid + _PEX_PLACEHOLDER, text="")
+                self._pex_dirs.add(iid)
+            else:
+                typ = ("symlink → " + (e.link_target or "?")
+                       if e.is_symlink else "file")
+                tree.insert(parent_iid, tk.END, iid=iid, text=e.name,
+                            values=(self._pex_human(e.size), typ))
+        self._pex_populated.add(parent_iid)
+
+    def _pex_on_tree_open(self, _event=None):
+        """Lazily populate any open directory node that hasn't loaded yet."""
+        tree = self._pex_tree
+        stack = list(tree.get_children(""))
+        while stack:
+            iid = stack.pop()
+            is_open = bool(tree.item(iid, "open"))
+            if (iid in self._pex_dirs and iid not in self._pex_populated
+                    and is_open):
+                self._pex_populate_dir(iid, iid)     # iid == fs path
+            if is_open:
+                stack.extend(tree.get_children(iid))
+
+    def _pex_on_tree_select(self, _event=None):
+        sel = self._pex_tree.selection()
+        if not sel:
+            self._pex_extract_btn.config(state=tk.DISABLED)
+            return
+        iid = sel[0]
+        self._pex_extract_btn.config(
+            state=(tk.DISABLED if self._pex_busy else tk.NORMAL))
+        if iid in self._pex_dirs:
+            self._pex_set_preview("")
+            return
+        try:
+            data = self._pex_card.preview(self._pex_part_index, iid)
+        except Exception as e:
+            self._pex_set_preview("(error: %s)" % e)
+            return
+        if data is None:
+            self._pex_set_preview(
+                "(binary or too large to preview — extract it to view)")
+        else:
+            self._pex_set_preview(self._pex_decode_preview(data))
+
+    @staticmethod
+    def _pex_decode_preview(data):
+        sample = data[:4096]
+        nonprint = sum(1 for b in sample if b < 9 or 13 < b < 32)
+        if sample and nonprint > len(sample) * 0.02:
+            return "(binary file — %d bytes; extract it to view)" % len(data)
+        return data.decode("utf-8", "replace")
+
+    def _pex_set_preview(self, text):
+        w = self._pex_preview
+        w.config(state="normal")
+        w.delete("1.0", tk.END)
+        w.insert("1.0", text)
+        w.config(state="disabled")
+
+    # ---- Partition Explorer: extract ---------------------------------
+
+    def _pex_extract_selected(self):
+        if self._pex_busy or self._pex_card is None:
+            return
+        sel = self._pex_tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        if iid in self._pex_dirs:
+            out_dir = filedialog.askdirectory(
+                title="Choose a folder to extract this directory into")
+            if out_dir:
+                self._pex_run_extract("dir", iid, out_dir)
+        else:
+            out = filedialog.asksaveasfilename(
+                title="Extract file as…",
+                initialfile=(os.path.basename(iid) or "file"))
+            if out:
+                self._pex_run_extract("file", iid, out)
+
+    def _pex_extract_partition(self):
+        if self._pex_busy or self._pex_part_index is None:
+            return
+        out_dir = filedialog.askdirectory(
+            title="Choose a folder to extract the whole partition into")
+        if out_dir:
+            self._pex_run_extract("dir", "/", out_dir)
+
+    def _pex_do_extract(self, kind, path, dest, progress=None):
+        """Synchronous extract over a FRESH card handle (isolated from the
+        browse handle so a long extract can't race the tree's reads).  Returns a
+        human result string."""
+        from ..plugins.stern.explorer import CardImage
+        part = self._pex_part_index
+        with CardImage(self._pex_image_path) as c:
+            if kind == "file":
+                n = c.extract_file(part, path, dest)
+                return "Extracted %s (%s)." % (os.path.basename(dest),
+                                               self._pex_human(n))
+            nf, nb = c.extract_tree(part, path, dest, progress=progress)
+            return "Extracted %d file%s (%s) to %s." % (
+                nf, "" if nf == 1 else "s", self._pex_human(nb), dest)
+
+    def _pex_run_extract(self, kind, path, dest):
+        self._pex_busy = True
+        self._pex_extract_btn.config(state=tk.DISABLED)
+        self._pex_extract_part_btn.config(state=tk.DISABLED)
+        self.partition_status_var.set("Extracting…")
+
+        def _prog(nf, _nb, _rel):
+            if nf % 50 == 0:
+                self._tk_root().after(
+                    0, lambda n=nf: self.partition_status_var.set(
+                        "Extracting… %d files" % n))
+
+        def _work():
+            try:
+                msg = self._pex_do_extract(kind, path, dest, progress=_prog)
+            except Exception as e:
+                msg = "Extract failed: %s" % e
+            self._tk_root().after(0, lambda: self._pex_finish_extract(msg))
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _pex_finish_extract(self, msg):
+        self._pex_busy = False
+        self.partition_status_var.set(msg)
+        self.append_log(msg, "info")
+        if self._pex_tree.selection():
+            self._pex_extract_btn.config(state=tk.NORMAL)
+        if self._pex_part_index is not None:
+            self._pex_extract_part_btn.config(state=tk.NORMAL)
+
+    # ---- Partition Explorer: lifecycle -------------------------------
+
+    def _pex_close_card(self):
+        if self._pex_card is not None:
+            try:
+                self._pex_card.close()
+            except Exception:
+                pass
+        self._pex_card = None
+        self._pex_part_index = None
+        self._clear_pex_tree()
+
+    def _clear_pex_tree(self):
+        self._pex_tree.delete(*self._pex_tree.get_children(""))
+        self._pex_dirs.clear()
+        self._pex_populated.clear()
+        self._pex_set_preview("")
+        self._pex_extract_btn.config(state=tk.DISABLED)
+        self._pex_extract_part_btn.config(state=tk.DISABLED)
+
+    @staticmethod
+    def _pex_human(n):
+        size = float(n)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if size < 1024 or unit == "TB":
+                return ("%d %s" % (int(size), unit) if unit == "B"
+                        else "%.1f %s" % (size, unit))
+            size /= 1024.0
+
     def _build_text_tab(self):
         """Build the 'Replace Text' tab: a searchable list of the editable
         on-screen strings from ``text/strings.tsv``, each with an in-place
@@ -6887,6 +7238,8 @@ class MainWindow:
         self._configure_tab("Replace Text", caps.replace_text)
         self._configure_tab("Write", caps.write)
         self._configure_tab("Mod Pack", caps.modpack)
+        self._configure_tab("Partition Explorer",
+                            getattr(caps, "partition_explorer", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.

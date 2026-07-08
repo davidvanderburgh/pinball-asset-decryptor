@@ -113,6 +113,10 @@ class SternManufacturer(Manufacturer):
         # a user carry their Replace edits from an old extract to a new one
         # (audio matched by sound content, since idxNNNN indices can shift).
         mod_transfer=True,
+        # Partition Explorer: browse a raw card image's partitions + ext4 tree
+        # read-only and extract files/folders — pull radium/.sh files out of an
+        # old modded card or dump folders to diff vs stock (monkeybug).
+        partition_explorer=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.

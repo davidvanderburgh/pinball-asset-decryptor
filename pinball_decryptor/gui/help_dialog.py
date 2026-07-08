@@ -202,6 +202,29 @@ HELP_CONTENT = {
          "survives renumbered slots and renamed files; anything that can't "
          "be matched is reported instead of silently dropped."),
     ],
+    "Partition Explorer": [
+        ("What it's for",
+         "Browse a raw card image (.raw / .img) the way a file manager would — "
+         "read-only. Handy for pulling a file (a radium scene, a boot script) "
+         "out of an old modded card to reuse, or dumping a folder to compare a "
+         "modded card against a stock one. Nothing on the card is ever "
+         "changed."),
+        ("Open a card",
+         "Point \"Card Image\" at a card image and press Open. The app reads "
+         "the disk's partitions and picks the first browsable Linux (ext4) one; "
+         "switch partitions with the dropdown. FAT and extended partitions are "
+         "listed but not browsable."),
+        ("Browse + preview",
+         "Expand folders in the tree to walk the filesystem — children load as "
+         "you open each folder, so even a full card opens instantly. Selecting "
+         "a small text file shows it in the Preview pane; larger or binary "
+         "files say to extract them instead."),
+        ("Extract",
+         "\"Extract Selected\" saves the highlighted file, or the highlighted "
+         "folder's whole subtree, to a location you pick. \"Extract Whole "
+         "Partition\" dumps the entire filesystem — useful for diffing two "
+         "cards."),
+    ],
 }
 
 # Appended to every tab's sections — app-wide behaviours users ask about.

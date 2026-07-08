@@ -1725,6 +1725,66 @@ def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
     assert len(grp_b) == 1
 
 
+def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
+                                               tmp_path, monkeypatch):
+    """Open a card image, list partitions, browse the ext4 tree (lazy expand),
+    preview a text file, and extract one file (monkeybug wishlist #3)."""
+    from pinball_decryptor.gui.main_window import _PEX_PLACEHOLDER
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch)
+    img = write_fake_card(tmp_path / "card.raw")
+
+    w.partition_image_var.set(img)
+    w._pex_open_image()
+
+    labels = list(w._pex_part_combo["values"])
+    assert any("Partition 1" in l and "not browsable" not in l for l in labels)
+    assert sum("not browsable" in l for l in labels) == 3   # FAT, bad ext, ext'd
+
+    tree = w._pex_tree
+    assert [tree.item(i, "text") for i in tree.get_children("")] == [
+        "etc", "spk", "zeta", "game", "readme.txt"]
+
+    # /etc starts with only its lazy placeholder; opening it loads real children.
+    kids = tree.get_children("/etc")
+    assert len(kids) == 1 and kids[0].endswith(_PEX_PLACEHOLDER)
+    tree.item("/etc", open=True)
+    w._pex_on_tree_open()
+    assert [tree.item(i, "text") for i in tree.get_children("/etc")] == ["init.d"]
+
+    # Select a text file -> preview; select a dir -> preview clears.
+    tree.selection_set("/readme.txt")
+    w._pex_on_tree_select()
+    assert w._pex_preview.get("1.0", "end").strip() == "hello world"
+
+    out = tmp_path / "out.txt"
+    msg = w._pex_do_extract("file", "/readme.txt", str(out))
+    assert out.read_bytes() == b"hello world" and "Extracted" in msg
+
+
+def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
+    """The Partition Explorer tab shows for Stern (card image) and hides for a
+    plugin without the capability."""
+    w = app.window
+
+    def _state(label):
+        for tid in w._notebook.tabs():
+            if w._notebook.tab(tid, "text").strip() == label:
+                return str(w._notebook.tab(tid, "state"))
+        return None
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _state("Partition Explorer") == "normal"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert _state("Partition Explorer") == "hidden"
+
+
 def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
                                                  tmp_path, monkeypatch):
     """Clicking a sortable column header fast registers as <Double-1> too;

@@ -206,6 +206,14 @@ class Capabilities:
     # Spike 2, whose audio is index-numbered (idxNNNN.wav) and must be matched by
     # sound content, not index.  Off elsewhere (the section is hidden).
     mod_transfer: bool = False
+    # Partition-explorer path: surfaces a read-only "Partition Explorer" tab that
+    # opens a raw card image (.raw/.img), lists its MBR partitions, browses the
+    # ext4 filesystem(s), previews small text files, and extracts files/folders
+    # to disk.  For pulling radium/script files out of an old modded card, or
+    # dumping folders to diff a modded card vs stock without a mount+map cycle
+    # (monkeybug).  Set True only for plugins whose medium is a partitioned card
+    # image the app can read (Stern Spike 2 via plugins.stern.explorer).
+    partition_explorer: bool = False
 
 
 @dataclass(frozen=True)

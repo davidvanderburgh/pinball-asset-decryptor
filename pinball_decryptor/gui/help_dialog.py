@@ -119,14 +119,16 @@ HELP_CONTENT = {
          "format (transparency is kept where the original has it). Keep "
          "the original resolution for best results."),
         ("Where images come from",
-         "The Source column tells the three stores apart. \"File\" = a "
+         "The Source column tells the four stores apart. \"File\" = a "
          "plain image file on the card (menus, apron/test art). \"Scene "
          "texture\" = artwork decoded out of the game's compiled display "
          "scenes — many are frames of an animation or sprite sheets. "
          "\"Radium\" = images embedded inside the scene descriptions "
-         "themselves (song-title banners and similar). All three replace "
-         "the same way; the Source dropdown in the toolbar narrows the "
-         "list to one store, and clicking the Source header sorts by it."),
+         "themselves (song-title banners and similar). \"Glyph\" = a single "
+         "character sliced out of a font atlas (see Font atlases below). "
+         "All four replace the same way; the Source dropdown in the toolbar "
+         "narrows the list to one store, and clicking the Source header "
+         "sorts by it."),
         ("Scene groups",
          "\"Group by scene\" nests each image under the scene / animation "
          "it belongs to, in play order. Right-click a group header to "
@@ -137,9 +139,16 @@ HELP_CONTENT = {
          "assets folder and is matched by Search."),
         ("Font atlases",
          "Some scene textures are font/glyph maps — a grid of characters "
-         "the game draws text from. You can re-style them, but keep every "
-         "glyph in its original position: the game blits fixed rectangles, "
-         "so moving or resizing glyphs scrambles on-screen text."),
+         "the game draws text from. You can re-style the whole grid, but "
+         "keep every glyph in its original position: the game blits fixed "
+         "rectangles, so moving or resizing glyphs scrambles on-screen text."),
+        ("Editing one letter (Glyph source)",
+         "To restyle a single character without touching the grid, set the "
+         "Source dropdown to \"Glyph\": the app slices each font atlas into "
+         "one image per character (named by its letter, e.g. \"U+0041 A\") "
+         "and drops your replacement back into that character's exact "
+         "rectangle — so you can redraw just the \"S\" and leave the rest "
+         "alone. These sit under scene_textures/glyphs/ in the extract."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

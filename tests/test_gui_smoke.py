@@ -1675,6 +1675,56 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     assert not staged_changes.load(assets).get("image_group_tags")
 
 
+def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
+                                            tmp_path, monkeypatch):
+    """A group name given one extract is restored when the SAME card is
+    re-extracted to a fresh folder (monkeybug: tags lost on re-extract).  The
+    per-card library is keyed by the source card's file name, so only the
+    same-version card seeds; the fresh folder's sidecar also gets the name so
+    it rides Mod Transfer / reopen."""
+    from pinball_decryptor.core import (extract_source, staged_changes,
+                                        tag_library)
+    monkeypatch.setattr(tag_library, "LIBRARY_FILE",
+                        str(tmp_path / "settings" / "group_tags.json"))
+    card = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    card.write_bytes(b"\x00" * 32)
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    # First extract: rename a group -> lands in sidecar AND the card library.
+    a = _seed_image_assets(tmp_path / "A")
+    extract_source.write_extract_source(a, str(card))
+    w.write_assets_var.set(a)
+    _scan_images(w, a)
+    w.image_group_by_scene_var.set(True)
+    grp = [t for t in w._image_tree.get_children()
+           if "Char_Select" in w._image_tree.item(t, "text")][0]
+    monkeypatch.setattr("tkinter.simpledialog.askstring",
+                        lambda *a, **k: "Boss Intro")
+    w._image_group_rename(grp)
+    key = "rad::/game/scenes/a1b2c3d4e5f6/scene.radium"
+    assert tag_library.load() == {
+        "turtles_pro-1_59_0.release.8g.sdcard.raw": {key: "Boss Intro"}}
+
+    # Second extract of the same card to a blank folder: name comes back.
+    b = _seed_image_assets(tmp_path / "B")
+    extract_source.write_extract_source(b, str(card))
+    assert not staged_changes.load(b).get("image_group_tags")  # starts blank
+    w.write_assets_var.set(b)
+    _scan_images(w, b)
+    assert w._image_group_tags.get(key) == "Boss Intro"
+    # Seeded name is written back into the fresh folder's own sidecar.
+    assert staged_changes.load(b).get("image_group_tags") == {key: "Boss Intro"}
+    tree = w._image_tree
+    w.image_group_by_scene_var.set(True)
+    w._refresh_image_list()
+    grp_b = [t for t in tree.get_children()
+             if "Boss Intro" in tree.item(t, "text")]
+    assert len(grp_b) == 1
+
+
 def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
                                                  tmp_path, monkeypatch):
     """Clicking a sortable column header fast registers as <Double-1> too;

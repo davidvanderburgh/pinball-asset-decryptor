@@ -5157,6 +5157,7 @@ class MainWindow:
                 {str(k): str(v).strip()[:50] for k, v in tags.items()
                  if str(v).strip()}
                 if isinstance(tags, dict) else {})
+            self._seed_group_tags_from_library(scan_dir)
             srcf = staged.get("image_source_filter")
             if srcf in ("All sources", "File", "Scene texture", "Radium",
                         "Glyph"):
@@ -5877,6 +5878,34 @@ class MainWindow:
         from ..core import staged_changes
         return staged_changes.load(assets_dir)
 
+    def _seed_group_tags_from_library(self, scan_dir):
+        """Fill in group names the user gave a PREVIOUS extract of this same
+        card (the per-folder sidecar is blank on a fresh extract).
+
+        The library is scoped by the source card's file name (game + version),
+        so only same-version re-extracts are seeded — cross-version carry-over
+        stays Mod Transfer's job.  The folder's own sidecar always wins; the
+        library only fills groups that have no name yet.  Seeded names are
+        written straight back into this folder's sidecar so they also ride a
+        later Mod Transfer / reopen, not just this session.  Best-effort."""
+        try:
+            from ..core import staged_changes, tag_library
+            present = {self._image_group_of(s.rel_path)[0]
+                       for s in self._image_slots}
+            seeded = tag_library.seed_tags(scan_dir, present)
+            added = False
+            for key, name in seeded.items():
+                if key not in self._image_group_tags:
+                    self._image_group_tags[key] = name
+                    added = True
+            if added:
+                data = staged_changes.load(scan_dir)
+                data["image_group_tags"] = {
+                    k: v for k, v in self._image_group_tags.items() if v}
+                staged_changes.save(scan_dir, data)
+        except Exception:
+            pass
+
     def _audio_trim_forced(self):
         """True when the Trim/pad checkbox is force-disabled for this plugin
         (size-neutral formats like Spike 2) — so a restore must not flip it."""
@@ -5986,6 +6015,17 @@ class MainWindow:
             data["image_group_tags"] = {
                 k: v for k, v in self._image_group_tags.items() if v}
             data["image_source_filter"] = self.image_source_filter_var.get()
+            # Mirror the names into the per-card library so a fresh re-extract
+            # of this same card can restore them (see tag_library).
+            try:
+                from ..core import tag_library
+                known = {self._image_group_of(s.rel_path)[0]
+                         for s in self._image_slots}
+                known |= set(self._image_group_tags)
+                tag_library.remember(
+                    assets_dir, self._image_group_tags, known)
+            except Exception:
+                pass
         staged_changes.save(assets_dir, data)
 
     # ==================================================================

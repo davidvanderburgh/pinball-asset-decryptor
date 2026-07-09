@@ -334,6 +334,14 @@ aborting if anything doesn't match, so a bad flash is caught on your PC
 instead of at the machine. (This roughly doubles the flash time; the
 progress bar shows a separate "Verify card" phase.)
 
+Flashing writes raw disk sectors, which needs administrator access — but
+you no longer have to launch the whole app elevated for it. If the app
+isn't already running as an administrator, the flash asks for approval at
+the moment you start it and elevates just the write: a UAC prompt on
+Windows, your login password on macOS (the way Etcher does it). On
+Windows the Start Menu shortcut already elevates at launch, so you won't
+see a second prompt there.
+
 ## Install
 
 ### Windows

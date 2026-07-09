@@ -6,8 +6,7 @@ fail.  This shim launches the app with the proper absolute import path.
 """
 
 import multiprocessing
-
-from pinball_decryptor.app import App
+import sys
 
 
 if __name__ == "__main__":
@@ -15,4 +14,12 @@ if __name__ == "__main__":
     # (Stern Spike 2 parallel audio decode) bootstrap instead of re-running the
     # app.  Must be the first thing the frozen entry does.
     multiprocessing.freeze_support()
+
+    # Elevated flash-helper re-invocation (see core.elevated_flash): the frozen
+    # binary re-execs itself as root to run the raw card write, with no GUI.
+    if "--flash-helper" in sys.argv:
+        from pinball_decryptor.core.elevated_flash import run_helper_main
+        sys.exit(run_helper_main(sys.argv))
+
+    from pinball_decryptor.app import App
     App().run()

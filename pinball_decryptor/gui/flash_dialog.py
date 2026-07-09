@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ..core.admin import is_admin
+from ..core.elevated_flash import can_self_elevate as _self_elevates
 from .theme import THEMES, platform_font
 
 
@@ -121,16 +122,20 @@ class FlashImageDialog:
             justify="left")
         self._readout.pack(anchor="w", pady=(8, 2))
 
-        # Administrator gate (Windows): the flash needs an elevated process.
-        self._admin_note = tk.Label(
-            body,
-            text=("⚠ Flashing needs Administrator. Close the app, right-click "
-                  "the shortcut, choose \"Run as administrator\", and reopen "
-                  "this dialog."),
-            bg=th["bg"], fg=th["error"], font=(self._sans, 9),
-            wraplength=560, justify="left", anchor="w")
+        # A flash writes raw sectors, which needs elevation — but the app no
+        # longer has to be launched elevated.  When it isn't already
+        # Administrator/root, the flash elevates just the write on its own (a
+        # UAC prompt on Windows, the macOS password dialog, pkexec on Linux),
+        # so we only forewarn the user rather than blocking here.
         if not is_admin():
-            self._admin_note.pack(fill="x", pady=(2, 0))
+            note = ("You may be asked to approve administrator access when the "
+                    "flash starts." if _self_elevates()
+                    else "Flashing needs administrator access. Re-launch the "
+                         "app as an administrator, then reopen this dialog.")
+            tk.Label(
+                body, text=note, bg=th["bg"], fg=th["gray"],
+                font=(self._sans, 9), wraplength=560, justify="left",
+                anchor="w").pack(fill="x", pady=(2, 0))
 
         # Buttons.
         btn_row = ttk.Frame(body)
@@ -290,13 +295,11 @@ class FlashImageDialog:
                 "Pick a target card from the dropdown. If it's empty, connect "
                 "the card and click Refresh.", parent=self._dlg)
             return
-        if not is_admin():
-            messagebox.showerror(
-                "Administrator required",
-                "Flashing writes raw disk sectors, which needs Administrator. "
-                "Re-launch the app as administrator and try again.",
-                parent=self._dlg)
-            return
+        # No admin gate here: the flash pipeline elevates just the write when
+        # the app isn't already running as Administrator/root (see
+        # core.elevated_flash).  On a platform with no self-elevation path
+        # (Linux without pkexec) the flash surfaces a clear "re-launch as root"
+        # error instead of writing.
         if card.size_bytes and os.path.getsize(img) > card.size_bytes:
             messagebox.showerror(
                 "Image too big",

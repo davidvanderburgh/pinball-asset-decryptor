@@ -17,9 +17,9 @@ from ...core.checksums import generate_checksums
 from ...core.pipeline_base import BasePipeline, PipelineError
 from ...core.staged_originals import discard as discard_snapshots
 from .formats import detect_game, display_for_key, linux_partitions
+from ...core.elevated_flash import flash_image_with_privileges
 from ...core.rawdevice import (FlashCancelled, FlashError, RawDeviceFile,
-                              flash_image_to_device, format_size,
-                              is_device_path)
+                              format_size, is_device_path)
 
 try:                                   # engine import is optional during bring-up
     from . import engine
@@ -372,7 +372,7 @@ class SternFlashImagePipeline(BasePipeline):
 
         self._set_phase(1)  # Write image
         try:
-            written = flash_image_to_device(
+            written = flash_image_with_privileges(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled,

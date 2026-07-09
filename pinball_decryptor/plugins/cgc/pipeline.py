@@ -34,8 +34,8 @@ from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
                                md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
-from ...core.rawdevice import (FlashCancelled, FlashError,
-                              flash_image_to_device, format_size,
+from ...core.elevated_flash import flash_image_with_privileges
+from ...core.rawdevice import (FlashCancelled, FlashError, format_size,
                               is_device_path)
 from ...core.staged_originals import ORIG_DIR
 from ...core.transcribe import CALLOUTS_CSV
@@ -1387,7 +1387,7 @@ class FlashImagePipeline(BasePipeline):
 
         self._set_phase(1)  # Write image
         try:
-            written = flash_image_to_device(
+            written = flash_image_with_privileges(
                 self.image_path, self.device_path,
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled,

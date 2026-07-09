@@ -196,8 +196,11 @@ HELP_CONTENT = {
         ("What a build does",
          "Build copies the pristine original and repacks every file in the "
          "assets folder that differs from the extract baseline — including "
-         "changes from earlier sessions, not just today's. The Modified "
-         "Files list previews exactly what will go in before you click."),
+         "changes from earlier sessions, not just today's. Changed sounds "
+         "are re-encoded and replaced videos / images / text are patched in "
+         "size-neutrally, so the built file is a drop-in replacement for "
+         "the original. The Modified Files list previews exactly what will "
+         "go in before you click."),
         ("Output name",
          "Built images get a distinct default name (e.g. \"…-modified.raw\", "
          "where supported) so they can't be mistaken for the stock file. "
@@ -210,10 +213,13 @@ HELP_CONTENT = {
          "changes straight to the physical media. Remove the media from the "
          "machine first and always keep a backup image."),
         ("Flash image",
-         "\"Flash image\" (where available) writes a complete pre-built "
-         "image onto a card, erasing everything on it — for restoring a "
-         "backup or writing a built image without a separate imaging tool. "
-         "Requires Administrator."),
+         "\"Flash image to SD card…\" (where available, beside Build) "
+         "writes a complete pre-built image onto a card — for putting the "
+         "image you just built onto the card, or restoring a backup, "
+         "without a separate imaging tool. The whole card is erased and "
+         "replaced; a size check refuses an image too big for the card. "
+         "The dialog pre-fills with the image the Output Folder + File "
+         "Name boxes point at once it exists. Requires Administrator."),
     ],
     "Mod Pack": [
         ("Export",

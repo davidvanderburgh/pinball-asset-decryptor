@@ -1268,6 +1268,9 @@ class App:
         # Show the flash-specific phase row (Check card / Write image / Flush).
         self.window.set_write_phases(getattr(mfr, "flash_phases", ()))
         self.window.set_running(True, mode="write")
+        # The Flash button doubles as this run's live Cancel (set_running
+        # restores it when the run ends, whatever way it ends).
+        self.window.set_flash_running(True)
         self.window.reset_steps(mode="write")
 
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()

@@ -36,7 +36,8 @@ def _fmt_size(n):
 class FlashImageDialog:
     """Modal collecting (image, target card) for a whole-card flash."""
 
-    def __init__(self, parent, manufacturer, theme_name, on_flash):
+    def __init__(self, parent, manufacturer, theme_name, on_flash,
+                 initial_image=None):
         self._parent = parent
         self._mfr = manufacturer
         self._on_flash = on_flash
@@ -47,6 +48,11 @@ class FlashImageDialog:
         self._enum_id = 0            # bump-counter to drop stale enumerations
 
         self._build()
+        # Pre-fill with the image the Write tab would build (Output Folder +
+        # File Name) when it exists on disk — flashing the image just built is
+        # the 90% case (monkeybug batch 8); Browse still overrides.
+        if initial_image and os.path.isfile(initial_image):
+            self._image_var.set(initial_image)
         self._refresh_drives()
         self._update_readout()
 
@@ -242,8 +248,10 @@ class FlashImageDialog:
         card_size = card.size_bytes if card else None
 
         if img_size is None:
-            self._readout.configure(
-                text="Pick an image file to flash.", foreground=th["gray"])
+            # No instructive text — the empty Image-file box + Browse button
+            # say it already, and the Flash-click validation still nags
+            # (monkeybug batch 8: the line was redundant).
+            self._readout.configure(text="", foreground=th["gray"])
             return
         if card is None:
             self._readout.configure(

@@ -1353,6 +1353,7 @@ class MainWindow:
         self._scan_buttons = {}
         self._browse_buttons = {}
         self._scan_cmds = {}            # tab_key -> Scan command (restore after Cancel)
+        self._scan_idle_labels = {}     # tab_key -> idle button label (default "Scan")
         self._scan_spinner_after = {}   # tab_key -> after-id of the running spinner
         self._scan_msgs = {}            # tab_key -> message the spinner animates
         self._scan_empty_font = {}      # tab_key -> normal empty-label font to restore
@@ -2161,10 +2162,10 @@ class MainWindow:
         f = self._tab_write
         pad = {"padx": 10, "pady": 4}
 
-        # NOTE: a static per-manufacturer intro label (mfr.write_intro()) used
-        # to lead this tab, but it doubled up with the mode-aware description
-        # below the source toggle (_write_desc) — one paragraph of guidance on
-        # the tab is enough; the rest lives in the "?" tips window (monkeybug).
+        # NOTE: a static per-manufacturer intro label (mfr.write_intro()) and
+        # then a mode-aware description below the source toggle used to lead
+        # this tab; both are gone — all of that guidance lives in the "?" tips
+        # window now (monkeybug, batches 4 + 8: reduce the tab's footprint).
 
         # Write-destination toggle (hidden for plugins without
         # direct_ssd).  Action-oriented language here — writes have
@@ -2243,18 +2244,6 @@ class MainWindow:
         # Same macOS FDA warning as Extract.
         self._write_macos_fda_frame = (
             self._build_macos_fda_warning_frame(f))
-
-        # Per-mode description that swaps text when the radio flips.
-        # In ISO mode it explains the USB-install flow; in SSD mode
-        # it spells out the in-place encrypt + audio trim/pad
-        # behaviour the JJP standalone called out specifically.  This
-        # is the kind of cue users read before clicking the button.
-        self._write_desc = ttk.Label(
-            f,
-            text="Re-pack modified assets into an installable update file.",
-            foreground="#888888",
-            font=(_SANS_FONT, 9),
-            wraplength=720, justify=tk.LEFT)
 
         # "Detected: …" badge — indented with a width-16 spacer so it lines
         # up with the entry fields (which follow width-16 labels), matching
@@ -2420,13 +2409,22 @@ class MainWindow:
         # file-watching); monkeybug 4.3/4.5 also moved the primary Build +
         # Revert actions up here — right-aligned as Build ▸ Revert ▸ Refresh —
         # so every "act on these changes" control is grouped in one place
-        # instead of a separate button row below the frame.
+        # instead of a separate button row below the frame.  The Flash-image
+        # action (below) joins the same row on the left (monkeybug batch 8).
         preview_toolbar = ttk.Frame(self._write_preview_frame)
         preview_toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
+        self._write_preview_toolbar = preview_toolbar
         self._write_preview_refresh_btn = ttk.Button(
-            preview_toolbar, text="🔄  Refresh",
+            preview_toolbar, text="Refresh",
             command=self._scan_write_preview)
         self._write_preview_refresh_btn.pack(side=tk.RIGHT)
+        # Register with the shared scan-state machinery so the preview scan
+        # gets the same treatment as the Replace tabs — list blanked, big
+        # animated spinner, Refresh flips to a live Cancel (monkeybug batch 8:
+        # the old disabled "⏳ Scanning…" button looked like nothing else).
+        self._scan_buttons["write_preview"] = self._write_preview_refresh_btn
+        self._scan_cmds["write_preview"] = self._scan_write_preview
+        self._scan_idle_labels["write_preview"] = "Refresh"
         # The single Build button doubles as a live Cancel while a build runs
         # (monkeybug 4.4 — no separate Cancel widget any more); its label and
         # command are driven by _set_write_button_running.
@@ -2514,47 +2512,30 @@ class MainWindow:
         # Flash-image — gated by capabilities.flash_image in
         # apply_manufacturer().  A dd-style whole-image write so users can put a
         # pre-built (or backed-up) card image straight onto a card without a
-        # separate imaging tool.  Distinct from Build/Write above: those modify
+        # separate imaging tool.  Distinct from Build/Write: those modify
         # assets; this replaces the entire card.  Opens a small modal that
         # collects the image + target card and confirms before the write runs
-        # through the normal status area.
-        self._flash_frame = ttk.LabelFrame(f, text="Flash Image to SD Card")
-        # Description left, buttons in a right-side column vertically centered
-        # against it (monkeybug: matches the other label-left/button-right
-        # rows).  An earlier single-row attempt clipped the description
-        # mid-sentence because its wraplength was fixed; the <Configure>
-        # re-wrap below sizes the paragraph to the width the label actually
-        # gets, so the side-by-side layout just wraps taller instead.  A
-        # second button ("Card diagnostics…") stacks under the first inside
-        # the column rather than eating the paragraph's width.
-        self._flash_btns = ttk.Frame(self._flash_frame)
-        self._flash_btns.pack(side=tk.RIGHT, padx=8, pady=6)
+        # through the normal status area.  Lives on the LEFT of the preview
+        # toolbar, sharing the row with Build/Revert/Refresh — its old
+        # LabelFrame + description paragraph moved to the "?" tips window
+        # (monkeybug batch 8: tighter footprint, the actions group logically).
+        # While a flash runs the button doubles as its live Cancel — see
+        # set_flash_running.
         self._flash_btn = ttk.Button(
-            self._flash_btns, text="Flash image to SD card…",
+            preview_toolbar, text="Flash image to SD card…",
             command=self._open_flash_dialog)
-        self._flash_btn.pack(fill=tk.X)
+        self._flash_btn_tip = _Tooltip(
+            self._flash_btn,
+            "Write a complete, pre-built SD-card image (.img / .raw) onto a "
+            "card — handy after a build, or to restore a backup. The whole "
+            "card is erased and replaced. Requires Administrator.",
+            lambda: self._current_theme)
         # "Card diagnostics…" — only for manufacturers implementing
         # diagnose_card (CGC): reads the on-machine installer's log back off
         # a failed card (read-only).  Packed/hidden in apply_manufacturer().
         self._diagnose_btn = ttk.Button(
-            self._flash_btns, text="Card diagnostics…",
+            preview_toolbar, text="Card diagnostics…",
             command=self._open_diagnose_dialog)
-        _flash_lbl = ttk.Label(
-            self._flash_frame,
-            text=("Write a complete, pre-built SD-card image (.img / .raw) "
-                  "directly onto a card — handy after Build SD-card image, or "
-                  "to restore a backup. The whole card is erased and replaced, "
-                  "and the built-in size check refuses an image too big for the "
-                  "card. Requires Administrator."),
-            font=(_SANS_FONT, 9), justify=tk.LEFT, wraplength=560)
-        _flash_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8,
-                        pady=(2, 6), anchor=tk.W)
-        # Re-wrap to the width actually allocated so the full paragraph always
-        # shows (taller when narrow) instead of clipping.
-        _flash_lbl.bind(
-            "<Configure>",
-            lambda e, lbl=_flash_lbl: lbl.configure(
-                wraplength=max(200, e.width - 4)))
 
     def _build_modpack_tab(self):
         f = self._tab_modpack
@@ -7430,9 +7411,6 @@ class MainWindow:
             self._write_admin_frame.pack_forget()
             self._write_admin_unc_hint.pack_forget()
             self._write_macos_fda_frame.pack_forget()
-            # The per-mode description is JJP-specific; hide it for
-            # plugins whose Write tab is the ISO-build flow.
-            self._write_desc.pack_forget()
             # Modified Files Preview — shown for every plugin that can
             # build an update (JJP also gets it in SSD mode, handled in the
             # direct_ssd branch above) so modders can see exactly which
@@ -7596,18 +7574,18 @@ class MainWindow:
         else:
             self._install_frame.pack_forget()
 
-        # Flash-image action (Stern Spike 2) — write a whole pre-built image
-        # onto a card.  Independent of the Build/Write destination toggle.
+        # Flash-image action (Stern Spike 2, CGC) — write a whole pre-built
+        # image onto a card.  Independent of the Build/Write destination
+        # toggle; sits at the left end of the Modified Files toolbar.
         if caps.flash_image:
-            self._flash_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+            self._flash_btn.pack(side=tk.LEFT, padx=(0, 6))
         else:
-            self._flash_frame.pack_forget()
+            self._flash_btn.pack_forget()
         # Card diagnostics — manufacturers that can read a failed install's
-        # on-card log back (CGC's diagnose_card).  Lives inside the flash
-        # frame's button column, so it can only show when that frame is
-        # visible; fill=X keeps the stacked buttons the same width.
+        # on-card log back (CGC's diagnose_card).  Beside Flash, so it can
+        # only show when flashing does too.
         if caps.flash_image and getattr(mfr, "diagnose_card", None):
-            self._diagnose_btn.pack(fill=tk.X, pady=(6, 0),
+            self._diagnose_btn.pack(side=tk.LEFT, padx=(0, 6),
                                     after=self._flash_btn)
         else:
             self._diagnose_btn.pack_forget()
@@ -8381,7 +8359,6 @@ class MainWindow:
             self._write_admin_unc_hint.pack_forget()
             self._write_macos_fda_frame.pack_forget()
             self._write_badge_row.pack_forget()
-            self._write_desc.pack_forget()
             self._write_preview_frame.pack_forget()
             if source == "ssd":
                 # SSD layout matches the standalone JJP decryptor:
@@ -8417,14 +8394,6 @@ class MainWindow:
                     self._write_admin_unc_hint.pack(
                         anchor=tk.W, padx=10, pady=(0, 4),
                         before=self._write_filename_lbl)
-                # SSD mode: explain in-place write behaviour so users
-                # know what to expect before they click Apply
-                # Modifications.  Per-manufacturer (medium-aware) wording.
-                self._write_desc.configure(
-                    text=self._current_mfr.direct_write_description())
-                self._write_desc.pack(
-                    anchor=tk.W, padx=10, pady=(2, 6),
-                    before=self._write_filename_lbl)
                 # Modified Files Preview (shown in both ISO and SSD
                 # modes; the ISO branch packs its own copy below).
                 self._write_preview_frame.pack(
@@ -8453,11 +8422,6 @@ class MainWindow:
                     before=self._write_assets_row())
                 self._write_badge_row.pack(
                     fill=tk.X, padx=10, pady=(0, 2),
-                    before=self._write_assets_row())
-                self._write_desc.configure(
-                    text=self._current_mfr.build_write_description())
-                self._write_desc.pack(
-                    anchor=tk.W, padx=10, pady=(2, 6),
                     before=self._write_assets_row())
                 self._write_btn.configure(
                     text=getattr(self._current_mfr, "write_build_button",
@@ -8901,6 +8865,27 @@ class MainWindow:
                 text=self._current_write_button_label(),
                 command=self._on_write_clicked, state=tk.NORMAL)
 
+    def set_flash_running(self, running):
+        """While a flash run is in flight, the "Flash image to SD card…"
+        button doubles as its live Cancel, same as the Build and Extract
+        buttons (monkeybug batch 8).  The app flips this on when it starts a
+        flash pipeline; ``set_running(False)`` restores the opener
+        unconditionally, so an aborted run can't leave a stuck Cancel."""
+        self._flash_running = running
+        btn = getattr(self, "_flash_btn", None)
+        if btn is None:
+            return
+        try:
+            if running:
+                btn.configure(text="Cancel", command=self._on_write_cancel,
+                              state=tk.NORMAL)
+            else:
+                btn.configure(text="Flash image to SD card…",
+                              command=self._open_flash_dialog,
+                              state=tk.NORMAL)
+        except tk.TclError:
+            pass
+
     def _have_extract_input(self):
         """True when the Extract tab has a source selected — a file in ISO/image
         mode, or a drive in Direct-SSD mode."""
@@ -9017,14 +9002,19 @@ class MainWindow:
         import threading
 
         assets_path = (self.write_assets_var.get() or "").strip()
-        # Clear whatever's there from a prior scan.
-        self._write_preview_tree.delete(
-            *self._write_preview_tree.get_children())
 
         # Bump the scan-id up front so any older in-flight scan stops posting
         # results AND the pending rows below share the id with the on-disk scan.
         self._write_preview_scan_id += 1
         scan_id = self._write_preview_scan_id
+
+        # Enter the shared scanning state (same treatment as the Replace tabs
+        # — monkeybug batch 8): blanks the tree, overlays the big animated
+        # spinner, and flips Refresh into a live Cancel.  Any pending rows
+        # added just below hide the overlay again, same as rows trickling in.
+        self._write_preview_empty.configure(
+            text="Scanning for modified files…")
+        self._set_tab_scanning("write_preview", True)
 
         # In-memory Replace-Audio / Replace-Video assignments are staged onto
         # disk only at build time, so the MD5 scan below can't see them yet.
@@ -9033,11 +9023,10 @@ class MainWindow:
         # nothing's changed).
         pending_n = self._add_pending_preview_rows(assets_path, scan_id)
 
-        # We just superseded any in-flight scan (its finish is now guarded
-        # out), so nothing else will restore the button — idle it on every
-        # path that returns without launching the worker.
+        # Every early return below leaves no worker running — drop back out of
+        # the scanning state and show the right placeholder instead.
         if not assets_path or not os.path.isdir(assets_path):
-            self._set_preview_scanning(False)
+            self._set_tab_scanning("write_preview", False)
             if not pending_n:
                 self._write_preview_empty.configure(
                     text="Select your modified assets folder above to preview "
@@ -9047,7 +9036,7 @@ class MainWindow:
             return
         checksums_file = os.path.join(assets_path, ".checksums.md5")
         if not os.path.isfile(checksums_file):
-            self._set_preview_scanning(False)
+            self._set_tab_scanning("write_preview", False)
             if not pending_n:
                 self._write_preview_empty.configure(
                     text=("Pick a folder produced by Extract first "
@@ -9055,12 +9044,6 @@ class MainWindow:
                 self._write_preview_empty.place(
                     relx=0.5, rely=0.5, anchor=tk.CENTER)
             return
-
-        if not pending_n:
-            self._write_preview_empty.configure(
-                text="Scanning for modified files…")
-            self._write_preview_empty.place(
-                relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         def _scan():
             # ``.checksums.md5`` ships in two flavours depending on
@@ -9162,11 +9145,8 @@ class MainWindow:
                     0, self._finish_write_preview_scan,
                     len(changed), scan_id)
 
-        # Flip the Refresh button to a disabled "Scanning…" state so the
-        # walk is visibly in progress — over a network share the per-file
-        # MD5 trickles rows in slowly, which without this looks frozen
-        # (monkeybug saw rows appear with no indication anything was running).
-        self._set_preview_scanning(True)
+        # The scanning UI (spinner + Cancel button) has been active since the
+        # top of this method — just launch the walk.
         threading.Thread(target=_scan, daemon=True).start()
 
     def _add_pending_preview_rows(self, assets_path, scan_id):
@@ -9432,8 +9412,10 @@ class MainWindow:
                         text="✕  Cancel", state=tk.NORMAL,
                         command=lambda k=tab_key: self._cancel_scan(k))
                 else:
-                    scan.configure(text="Scan", state=tk.NORMAL,
-                                   command=self._scan_cmds.get(tab_key))
+                    scan.configure(
+                        text=self._scan_idle_labels.get(tab_key, "Scan"),
+                        state=tk.NORMAL,
+                        command=self._scan_cmds.get(tab_key))
             if browse is not None:
                 browse.configure(state=tk.DISABLED if scanning else tk.NORMAL)
         except tk.TclError:
@@ -9485,33 +9467,20 @@ class MainWindow:
             try:
                 empty.configure(
                     font=self._scan_empty_font.get(tab_key, ""),
-                    text="Scan cancelled — click Scan to try again.")
+                    text="Scan cancelled — click %s to try again."
+                         % self._scan_idle_labels.get(tab_key, "Scan"))
                 empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             except tk.TclError:
                 pass
         self._toggle_scan_button(tab_key, scanning=False)
 
-    def _set_preview_scanning(self, active):
-        """Toggle the preview Refresh button between idle and a disabled
-        "Scanning…" state so a slow (e.g. network-share) scan is visibly
-        in progress.  Tolerant of layouts where the button doesn't exist."""
-        btn = getattr(self, "_write_preview_refresh_btn", None)
-        if btn is None:
-            return
-        try:
-            if active:
-                btn.configure(text="⏳  Scanning…", state=tk.DISABLED)
-            else:
-                btn.configure(text="🔄  Refresh", state=tk.NORMAL)
-        except tk.TclError:
-            pass
-
     def _finish_write_preview_scan(self, n_changed, scan_id):
         """End-of-scan housekeeping (main-thread only)."""
         if self._write_preview_scan_id != scan_id:
             return
-        # Latest scan finished — restore the Refresh button.
-        self._set_preview_scanning(False)
+        # Latest scan finished — leave the scanning state (spinner stops,
+        # Cancel flips back to Refresh).
+        self._set_tab_scanning("write_preview", False)
         # Base the empty state on the actual tree contents — pending
         # Replace-Audio/Video rows count too, so "No modified files" only
         # shows when truly nothing (on disk or staged) is going to change.
@@ -10043,12 +10012,18 @@ class MainWindow:
                 "dialog anyway?",
                 icon="warning"):
                 return
+        # Pre-fill the dialog with the image the Output Folder + File Name
+        # boxes point at, when it's already been built — flashing what you
+        # just built is the overwhelmingly common case (monkeybug batch 8).
+        target = self._target_write_path()
+        initial = target if (target and os.path.isfile(target)) else None
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
             manufacturer=self._current_mfr,
             theme_name=self._current_theme,
-            on_flash=self._on_flash_image)
+            on_flash=self._on_flash_image,
+            initial_image=initial)
 
     def _open_diagnose_dialog(self):
         """Open the read-only card-diagnostics modal (mfr.diagnose_card).
@@ -10804,9 +10779,12 @@ class MainWindow:
         only when the job actually stops, via ``set_running(False)``."""
         # The single Extract / Build buttons are showing "Cancel" right now —
         # freeze both and flag the in-progress stop; set_running(False)
-        # restores their idle labels.
+        # restores their idle labels.  The Flash button only shows Cancel
+        # during a flash run — freeze it too then.
         self._extract_btn.configure(state=tk.DISABLED, text="Cancelling…")
         self._write_btn.configure(state=tk.DISABLED, text="Cancelling…")
+        if getattr(self, "_flash_running", False):
+            self._flash_btn.configure(state=tk.DISABLED, text="Cancelling…")
         self.set_status("Cancelling...")
 
     def set_running(self, running, mode="extract"):
@@ -10816,6 +10794,11 @@ class MainWindow:
         if running:
             # New run → new namespace for in-place keyed log lines.
             self._log_line_run += 1
+            # Replace the previous run's terminal status ("Complete!" /
+            # "Failed") right away — it used to linger well into the new run
+            # until the first progress callback, which read as "already done"
+            # (monkeybug batch 8).
+            self.set_status("Starting…")
             # (Re-theming is a heavy synchronous re-style; the ⚙ menu greys
             # out its theme entry while running so clicks can't queue up.)
             self._set_extract_button_running(True)
@@ -10847,6 +10830,9 @@ class MainWindow:
         else:
             self._set_extract_button_running(False)
             self._set_write_button_running(False)
+            # Unconditional: restores the Flash opener whether or not this run
+            # was a flash (no-op otherwise).
+            self.set_flash_running(False)
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()

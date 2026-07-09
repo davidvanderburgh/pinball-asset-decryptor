@@ -896,10 +896,12 @@ def test_register_responsive_wrap_applies_current_width(app):
     assert len(w._responsive_wrap_labels) >= 4
 
 
-def test_flash_frame_shown_for_stern_hidden_otherwise(
+def test_flash_button_shown_for_stern_hidden_otherwise(
         app, manufacturers_by_key):
-    # winfo_manager() == "pack" means the Flash-image frame is laid out on the
-    # Write tab (winfo_ismapped() reads 0 unless that tab is raised).
+    # winfo_manager() == "pack" means the Flash-image button is laid out in
+    # the Modified Files toolbar (winfo_ismapped() reads 0 unless the Write
+    # tab is raised).  monkeybug batch 8 moved it out of its own LabelFrame
+    # onto the Build row.
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     # Pin the Spike 2 era: a saved Whitestar MAME-zip Extract input would flip
@@ -910,18 +912,69 @@ def test_flash_frame_shown_for_stern_hidden_otherwise(
     stern.set_era("spike2")
     app.window.apply_manufacturer(stern, reset_era=False)
     app.root.update()
-    assert app.window._flash_frame.winfo_manager() == "pack"
+    assert app.window._flash_btn.winfo_manager() == "pack"
+    # Same row as Build (the preview-frame toolbar), not a separate frame.
+    assert (app.window._flash_btn.master
+            is app.window._write_btn.master)
 
-    # Whitestar (MAME capture) era has no flash capability → frame hidden.
+    # Whitestar (MAME capture) era has no flash capability → button hidden.
     stern.set_era("whitestar")
     app.window.apply_manufacturer(stern, reset_era=False)
     app.root.update()
-    assert app.window._flash_frame.winfo_manager() == ""
+    assert app.window._flash_btn.winfo_manager() == ""
 
     app._on_back_to_picker()
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
-    assert app.window._flash_frame.winfo_manager() == ""
+    assert app.window._flash_btn.winfo_manager() == ""
+
+
+def test_write_preview_scan_uses_shared_scan_state(app, manufacturers_by_key):
+    """monkeybug batch 8: the Modified Files scan gets the same treatment as
+    the Replace tabs — Refresh flips to a live (enabled) Cancel while a scan
+    runs instead of the old disabled hourglass button, and cancelling
+    invalidates the in-flight scan and restores a plain "Refresh"."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    # Registered with the shared scan-state machinery under its own tab key.
+    assert w._scan_buttons["write_preview"] is w._write_preview_refresh_btn
+    assert w._scan_idle_labels["write_preview"] == "Refresh"
+    w._set_tab_scanning("write_preview", True)
+    try:
+        assert "Cancel" in w._write_preview_refresh_btn.cget("text")
+        assert str(w._write_preview_refresh_btn.cget("state")) != "disabled"
+        before = w._write_preview_scan_id
+        w._cancel_scan("write_preview")
+        assert w._write_preview_scan_id == before + 1
+        # Idle label is "Refresh" (no icon), and the cancelled-state hint
+        # names the right button.
+        assert w._write_preview_refresh_btn.cget("text") == "Refresh"
+        assert "Refresh" in w._write_preview_empty.cget("text")
+    finally:
+        w._set_tab_scanning("write_preview", False)
+
+
+def test_flash_button_folds_cancel_and_status_resets_on_run_start(
+        app, manufacturers_by_key):
+    """monkeybug batch 8: (a) starting any run replaces the previous run's
+    terminal status ("Complete!") immediately instead of letting it linger
+    until the first progress callback; (b) during a flash run the Flash
+    button doubles as its live Cancel and is restored by set_running(False)
+    however the run ends."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    w.set_status("Complete!")
+    w.set_running(True, mode="write")
+    try:
+        assert w._status_label.cget("text") == "Starting…"
+        w.set_flash_running(True)
+        assert w._flash_btn.cget("text") == "Cancel"
+    finally:
+        w.set_running(False, mode="write")
+    assert w._flash_btn.cget("text").startswith("Flash image")
+    assert not getattr(w, "_flash_running", False)
 
 
 def test_write_build_button_folds_cancel_and_lives_in_toolbar(

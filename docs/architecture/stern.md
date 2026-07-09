@@ -171,7 +171,7 @@ A chained **auto-name** pass runs after a successful extract when the boxes are 
 4. **Fit video / image** to the original's byte size (`_prepare_video_patches`/`_prepare_image_patches` — [engine.py:742](../../pinball_decryptor/plugins/stern/engine.py#L742), [engine.py:888](../../pinball_decryptor/plugins/stern/engine.py#L888)): a clip/image `<=` its slot is padded up (a trailing MP4/MOV `free` box, or trailing zero bytes for an image, both ignored by decoders); a larger one is re-encoded/re-compressed down to the byte budget; one that still won't fit is skipped with a warning.
 5. **Flatten + apply.** Every patch resolves to absolute `(disk_offset, bytes)` writes via `Ext4Reader.disk_ranges` (cat-0 audio bodies inside `image.bin`'s inode; music songs inside their own `image-scNN.bin` inode; videos/images over their own inode). `write_image` copies the original image to the output, then applies the writes in place (`_apply_writes` — [engine.py:1156](../../pinball_decryptor/plugins/stern/engine.py#L1156)). A video/image-only write **skips the firmware emulator entirely**.
 
-`build_write_description()` ([manufacturer.py:128](../../pinball_decryptor/plugins/stern/manufacturer.py#L128)) describes this in the GUI.
+The GUI describes this flow in the Write tab's "?" tips window (`gui/help_dialog.py`).
 
 ---
 
@@ -184,7 +184,7 @@ Direct-SD points the *same* reader + size-neutral patcher at the physical card i
 - **Extract:** `SternDirectSsdExtractPipeline._run()` ([pipeline.py:126](../../pinball_decryptor/plugins/stern/pipeline.py#L126)) confirms the device is a Spike card + resolves its ext partitions (`engine.device_partitions` — [engine.py:1203](../../pinball_decryptor/plugins/stern/engine.py#L1203)), then calls `extract_all` with `open_disk=lambda: RawDeviceFile(dev)`. Everything downstream is identical to the file path (game_real + image.bin still stream to a temp dir, then decode).
 - **Write:** `SternDirectSsdWritePipeline._run()` ([pipeline.py:178](../../pinball_decryptor/plugins/stern/pipeline.py#L178)) → `engine.write_device()` ([engine.py:1242](../../pinball_decryptor/plugins/stern/engine.py#L1242)) computes the *same* patch set via `_compute_patches` (cat-0 audio + music banks + video + images) and applies those exact byte ranges to the card with a writable `RawDeviceFile` (no image copy).
 
-**Safety:** `device_partitions` verifies the Spike 2 partition signature first and **refuses to extract/write the wrong drive** (or one it can't read — e.g. without Administrator, with a message that says so). **No disk-offline/dismount is needed for writes:** every patched byte lives in the **ext4** data partition, for which Windows has no filesystem driver — so it is not a mounted volume, and Windows only blocks raw writes to sectors belonging to a *mounted* volume (the FAT boot partition, which is never touched). An Administrator handle may patch the ext sectors in place. The GUI shows the medium-aware description from `direct_write_description()` ([manufacturer.py:133](../../pinball_decryptor/plugins/stern/manufacturer.py#L133)).
+**Safety:** `device_partitions` verifies the Spike 2 partition signature first and **refuses to extract/write the wrong drive** (or one it can't read — e.g. without Administrator, with a message that says so). **No disk-offline/dismount is needed for writes:** every patched byte lives in the **ext4** data partition, for which Windows has no filesystem driver — so it is not a mounted volume, and Windows only blocks raw writes to sectors belonging to a *mounted* volume (the FAT boot partition, which is never touched). An Administrator handle may patch the ext sectors in place. The GUI describes direct writes in the Write tab's "?" tips window (`gui/help_dialog.py`).
 
 > **Hardware status:** the offline byte-equivalence is unit-tested (applying the patch list through a `RawDeviceFile` is byte-identical to patching an image copy). Direct-SD **extract** is verified on a real card (read-from-card == read-from-image); the round-trip **write** to a real card is the last item pending a hardware confirmation.
 
@@ -240,7 +240,7 @@ Why online for music: the song→`idx` (master-directory position) binding lives
 
 ## Key files
 
-- **`manufacturer.py`** ([manufacturer.py:1](../../pinball_decryptor/plugins/stern/manufacturer.py#L1)) — `SternManufacturer`: capabilities, InputSpec, phase labels, prereqs, the medium-aware wording hooks (`write_intro`/`build_write_description`/`direct_write_description`/`*_note`), pipeline factories, `detect()`.
+- **`manufacturer.py`** ([manufacturer.py:1](../../pinball_decryptor/plugins/stern/manufacturer.py#L1)) — `SternManufacturer`: capabilities, InputSpec, phase labels, prereqs, the medium-aware wording hooks (`audio_length_note` and friends), pipeline factories, `detect()`.
 - **`games.py`** ([games.py:1](../../pinball_decryptor/plugins/stern/games.py#L1)) — `GAME_DB` (26 titles, display + filename hints).
 - **`formats.py`** ([formats.py:1](../../pinball_decryptor/plugins/stern/formats.py#L1)) — Spike-card detection + MBR/partition helpers (byte-level + path-level).
 - **`ext4.py`** ([ext4.py:1](../../pinball_decryptor/plugins/stern/ext4.py#L1)) — pure-Python read-only ext4 reader + `disk_ranges` (the in-place-patch enabler).

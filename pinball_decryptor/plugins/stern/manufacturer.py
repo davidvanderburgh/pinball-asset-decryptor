@@ -276,21 +276,6 @@ class SternManufacturer(Manufacturer):
         # MAME capture-only (no build), so it pins nothing.
         return ".raw" if self._era == "spike2" else ""
 
-    def write_intro(self):
-        return ("Re-pack your modified assets back onto the card — build a new "
-                "SD-card image, or write the changes straight to the SD card.")
-
-    def build_write_description(self):
-        return ("Re-encode changed sounds and patch the replaced videos / "
-                "images into a copy of the SD-card image (size-neutral). Write "
-                "the resulting image back to a card with your imaging tool.")
-
-    def direct_write_description(self):
-        return ("Re-encode changed sounds and patch the replaced videos / "
-                "images directly into the SD card, in place. Each replacement "
-                "is fit to its original's size — audio is trimmed or padded to "
-                "the original length; video/images are size-matched.")
-
     def audio_forces_length_match(self, assets_dir=None):
         # Spike 2 audio is a size-neutral codec patch: each sound is re-encoded
         # to its original slot length (longer trimmed, shorter padded) and the

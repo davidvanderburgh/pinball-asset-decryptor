@@ -9,7 +9,9 @@ interface to run those commands on all three platforms:
 - Linux: Native execution (sudo or root)
 """
 
+import hashlib
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -165,15 +167,68 @@ class WslExecutor(CommandExecutor):
             with self._lock:
                 self._current_proc = None
 
+    # UNC network shares (\\server\share\...) are never automounted by WSL —
+    # they must be drvfs-mounted explicitly.  Mounted shares are tracked at
+    # class level so every pipeline in the process reuses the same mounts.
+    _unc_lock = threading.Lock()
+    _unc_mounts = {}   # (server, share) lowercased -> WSL mount point
+
+    @staticmethod
+    def _unc_mount_name(name):
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", name).lower()
+        if safe != name.lower():
+            # Disambiguate names that could collide after sanitization
+            safe += "-" + hashlib.md5(name.lower().encode("utf-8")).hexdigest()[:6]
+        return safe
+
+    def _unc_exec_path(self, path):
+        """Map //server/share/rest to an on-demand drvfs mount inside WSL."""
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 2:
+            return path  # bare //server with no share — let callers fail loudly
+        server, share = parts[0], parts[1]
+        # drvfs accepts the //server/share form, which — unlike backslashes —
+        # survives the extra bash parse wsl.exe applies to `wsl -- bash -c`.
+        unc_src = f"//{server}/{share}"
+        unc_label = f"\\\\{server}\\{share}"
+        if "'" in unc_src:
+            raise CommandError("mount -t drvfs", -1,
+                               f"Unsupported network share name: {unc_label}")
+        key = (server.lower(), share.lower())
+        with self._unc_lock:
+            mount_point = self._unc_mounts.get(key)
+            if mount_point is None:
+                mount_point = (f"/mnt/unc/{self._unc_mount_name(server)}/"
+                               f"{self._unc_mount_name(share)}")
+                try:
+                    self.run(
+                        f"findmnt -n '{mount_point}' >/dev/null 2>&1 || "
+                        f"{{ mkdir -p '{mount_point}' && "
+                        f"mount -t drvfs '{unc_src}' '{mount_point}'; }}",
+                        timeout=60,
+                    )
+                except CommandError as e:
+                    raise CommandError(e.cmd, e.returncode, (
+                        f"Cannot access network share {unc_label} from WSL:\n"
+                        f"{e.output}\n\n"
+                        f"Check that the share opens in File Explorer, or copy "
+                        f"the file to a local drive and try again.")) from e
+                self._unc_mounts[key] = mount_point
+        rest = "/".join(parts[2:])
+        return f"{mount_point}/{rest}" if rest else mount_point
+
     def to_exec_path(self, host_path):
         """Convert a Windows path to a WSL path.
 
         e.g. C:\\Users\\david\\file.img -> /mnt/c/Users/david/file.img
+        UNC network paths (\\\\server\\share\\...) are drvfs-mounted on demand.
         """
         path = host_path.replace("\\", "/")
         if len(path) >= 2 and path[1] == ":":
             drive = path[0].lower()
             return f"/mnt/{drive}{path[2:]}"
+        if path.startswith("//"):
+            return self._unc_exec_path(path)
         return path
 
     def check_path_accessible(self, host_path):
@@ -182,6 +237,12 @@ class WslExecutor(CommandExecutor):
         WSL2 only automounts drives present at WSL startup.
         """
         path = host_path.replace("\\", "/")
+        if path.startswith("//"):
+            try:
+                self._unc_exec_path(path)
+            except CommandError as e:
+                return False, e.output
+            return True, ""
         if len(path) < 2 or path[1] != ":":
             return True, ""
         drive = path[0].lower()

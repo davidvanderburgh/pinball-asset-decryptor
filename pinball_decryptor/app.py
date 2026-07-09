@@ -72,8 +72,9 @@ class App:
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
-        # Apply the saved "Auto-fade + cap audio replacements" pref before any
-        # Write can spawn encode workers (they inherit this env var).  Default on.
+        # Apply the saved "Match audio replacements to the game's callouts" pref
+        # before any Write can spawn encode workers (they inherit this env var).
+        # Default on.
         self._apply_audio_declick_env(
             bool(self._settings.get("audio_declick", True)))
 
@@ -2680,9 +2681,9 @@ class App:
         self._save_settings()
 
     def _apply_audio_declick_env(self, enabled):
-        """Reflect the "Auto-fade + cap audio replacements" toggle into the env
-        var the Stern spike2 encoder reads.  On (default) leaves it unset; off
-        sets ``PAD_STERN_AUDIO_RAW=1``.  Spawned encode workers inherit
+        """Reflect the "Match audio replacements to the game's callouts" toggle
+        into the env var the Stern spike2 encoder reads.  On (default) leaves it
+        unset; off sets ``PAD_STERN_AUDIO_RAW=1``.  Spawned encode workers inherit
         os.environ at pool-creation time, so setting it here (the process that
         runs Write) reaches both the serial and the parallel encode paths."""
         if enabled:
@@ -2691,7 +2692,7 @@ class App:
             os.environ["PAD_STERN_AUDIO_RAW"] = "1"
 
     def _on_audio_declick_change(self, enabled):
-        """Persist the audio auto-fade + cap toggle and apply it to the encoder
+        """Persist the match-to-callouts toggle and apply it to the encoder
         env var so the next Write uses it."""
         enabled = bool(enabled)
         self._settings["audio_declick"] = enabled

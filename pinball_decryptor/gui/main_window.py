@@ -1018,9 +1018,11 @@ class MainWindow:
             vq = VOICE_QUALITY_CHOICES[0][0]
         self.voice_quality_var = tk.StringVar(value=vq)
         self._on_voice_quality_change = on_voice_quality_change
-        # "Auto-fade + cap audio replacements" — smooths the start/end of
-        # each replacement and caps its level so it can't pop on real hardware
-        # (monkeybug's callout clicks).  Persisted in settings.json via
+        # "Match audio replacements to the game's callouts" — fades the
+        # start/end of each replacement, caps its level, and band-limits it to
+        # the stock callout bandwidth (~5 kHz low-pass) so it can't click on
+        # real hardware (monkeybug's callout clicks; the band-limit is the
+        # firmware-RE-motivated part).  Persisted in settings.json via
         # ``on_audio_declick_change``; the App also mirrors it into the Stern
         # encoder's env var.  On by default.
         self.audio_declick_var = tk.BooleanVar(
@@ -2874,25 +2876,28 @@ class MainWindow:
             foreground="#888888", wraplength=720, justify=tk.LEFT)
         self._audio_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
 
-        # Auto-fade + cap: land a stock-length fade on both edges of every
-        # replacement and cap its level, so a hot clip cut mid-waveform can't
-        # pop on real hardware (monkeybug's callout clicks).  On by default;
-        # only meaningful for the Spike 2 re-encode path, so apply_manufacturer
-        # shows it for Stern and hides it elsewhere.
+        # Match-to-callouts: land a stock-length fade on both edges of every
+        # replacement, cap its level, and band-limit it to the stock callout
+        # bandwidth (~5 kHz), so a hot/bright clip can't click on real hardware
+        # (monkeybug's callout clicks).  On by default; only meaningful for the
+        # Spike 2 re-encode path, so apply_manufacturer shows it for Stern and
+        # hides it elsewhere.
         self._audio_declick_cb = ttk.Checkbutton(
-            f, text="Auto-fade + cap audio replacements",
+            f, text="Match audio replacements to the game's callouts",
             variable=self.audio_declick_var,
             command=self._on_audio_declick_toggle)
         self._audio_declick_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
         self._audio_declick_tip = _Tooltip(
             self._audio_declick_cb,
-            "On by default. Smooths the very start and end of each replacement "
-            "and gently caps its level, so a clip cut mid-waveform or louder "
-            "than the game's own audio can't click or pop on the real machine "
-            "(some callouts otherwise click at both ends).\n\nStock sounds ease "
-            "in and out; hot, hard-cut replacements don't, which is what causes "
-            "the click. Leave this on unless a replacement sounds wrong with "
-            "it — turning it off uses your audio exactly as provided.",
+            "On by default. Shapes each replacement to behave like the game's "
+            "own callouts so it can't click on the real machine: it smooths "
+            "the very start and end, gently caps the level, and rolls off the "
+            "high treble above 5 kHz.\n\nThe machine's stock callouts are "
+            "band-limited speech. A brighter or hotter replacement (a music "
+            "clip carries far more treble than a spoken callout) is what clicks "
+            "on the cabinet speaker; the roll-off is the part that targets it. "
+            "Leave this on unless a replacement sounds too dull with it — "
+            "turning it off uses your audio exactly as provided.",
             lambda: self._current_theme)
 
         self._refresh_audio_ffmpeg_warning()

@@ -168,9 +168,9 @@ def test_audio_group_duplicates_checkbox_only_for_cgc(
 
 
 def test_audio_declick_checkbox_only_for_stern(app, manufacturers_by_key):
-    """'Auto-fade + cap audio replacements' is packed only for Stern — its env
-    var is read solely by the Spike 2 encoder, so other plugins must not show
-    an inert toggle."""
+    """'Match audio replacements to the game's callouts' is packed only for
+    Stern — its env var is read solely by the Spike 2 encoder, so other plugins
+    must not show an inert toggle."""
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update(); app.root.update()

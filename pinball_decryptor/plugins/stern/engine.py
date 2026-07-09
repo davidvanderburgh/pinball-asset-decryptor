@@ -2704,6 +2704,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
 
+        # Auto-disable Stern's game self/asset validator (validation_exec) so the
+        # modded card boots without the "#N UPDATE SD CARD" tamper errors.  The
+        # game validates itself, so a single bx-lr at that routine's entry stops
+        # the asset checks, the self-check and the tamper flags (see valpatch).
+        # Best-effort: a title without the validator, or any failure, is a no-op.
+        try:
+            from . import valpatch
+            writes += valpatch.compute_writes(reader, log)
+        except Exception as e:
+            log("Validation bypass skipped (%s)." % e, "warning")
+
         # Grown videos aren't flat disk writes — they're copied in by the ext4
         # driver after the in-place writes land.  Hand them back to the caller
         # (with the data-partition offset) as a separate plan.

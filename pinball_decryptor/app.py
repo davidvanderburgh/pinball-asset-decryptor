@@ -164,6 +164,7 @@ class App:
             initial_audio_declick=bool(
                 self._settings.get("audio_declick", True)),
             on_audio_declick_change=self._on_audio_declick_change,
+            on_partition_image_opened=self._on_partition_image_opened,
         )
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
@@ -516,6 +517,14 @@ class App:
                     if os.path.normcase(p) != os.path.normcase(path)]
             hist[field] = [path] + keep[:self._PATH_HISTORY_MAX - 1]
         self.window.set_path_history(hist)
+
+    def _on_partition_image_opened(self, path):
+        """A card image the Partition Explorer actually opened joins the
+        field's recent-paths dropdown (monkeybug: the same "last 5" memory
+        as the Extract screen).  Saved immediately — this isn't tied to a
+        run, so there's no later _save_settings() to ride on."""
+        self._record_path_history(partition_image=path)
+        self._save_settings()
 
     def _save_manufacturer_paths(self, key):
         # Don't clobber a manufacturer's previously-saved input path with a

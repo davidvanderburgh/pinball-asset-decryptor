@@ -202,14 +202,17 @@ class CardImage:
         return node["size"]
 
     def extract_tree(self, part_index, path, out_dir, progress=None,
-                     max_depth=64):
+                     max_depth=64, chunk_progress=None):
         """Extract *path* (a file or directory) under *out_dir*, mirroring the
         card's layout beneath a folder named after *path*'s basename (``root``
         for the whole partition).
 
         Returns ``(n_files, n_bytes)``.  Only regular files are written
         (symlinks/devices are skipped).  *progress* is called
-        ``(n_files, n_bytes, current_rel_path)`` after each file."""
+        ``(n_files, n_bytes, current_rel_path)`` after each file;
+        *chunk_progress* is forwarded to each file's streaming extract
+        (``(written, size)`` per chunk) so a caller can cancel mid-file
+        instead of waiting out a 700 MB image.bin."""
         reader = self._reader(part_index)
         res = self._resolve(reader, path)
         if res is None:
@@ -220,7 +223,8 @@ class CardImage:
 
         if m == S_IFREG:
             out = os.path.join(out_dir, os.path.basename(base) or "file")
-            n = self.extract_file(part_index, base, out)
+            n = self.extract_file(part_index, base, out,
+                                  progress=chunk_progress)
             if progress:
                 progress(1, n, base)
             return 1, n
@@ -236,7 +240,7 @@ class CardImage:
             parent = os.path.dirname(out)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            reader.extract_file(fnode, out)
+            reader.extract_file(fnode, out, progress=chunk_progress)
             n_files += 1
             n_bytes += fnode["size"]
             if progress:

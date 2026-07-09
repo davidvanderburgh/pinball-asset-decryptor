@@ -1847,6 +1847,109 @@ def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
     assert out.read_bytes() == b"hello world" and "Extracted" in msg
 
 
+def test_partition_explorer_threaded_extract_and_cancel(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """The real button path: _pex_run_extract runs on a worker thread, flips
+    the launching button to a live Cancel + shows the spinner overlay, and
+    restores everything when it lands.  Regression for monkeybug's lockup —
+    a missing ``threading`` import killed the launch after the buttons were
+    disabled, and the old synchronous-only test never went through here."""
+    import os
+    import threading as threading_mod
+    import time
+    from tests._ext4_fake import (FakeExt4Reader, install_fake_reader,
+                                  write_fake_card)
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch)
+    img = write_fake_card(tmp_path / "card.raw")
+    w.partition_image_var.set(img)
+    w._pex_open_image()
+
+    def _pump_until(cond, timeout=10.0):
+        deadline = time.time() + timeout
+        while not cond() and time.time() < deadline:
+            app.root.update()
+            time.sleep(0.01)
+        assert cond()
+
+    # Hold the worker at a gate inside every file write so the mid-run UI
+    # state (and later the Cancel click) can be asserted without racing it.
+    orig_extract = FakeExt4Reader.extract_file
+    gates = {"g": threading_mod.Event()}
+
+    def gated(self, node, out_path, progress=None):
+        assert gates["g"].wait(10)
+        return orig_extract(self, node, out_path, progress=progress)
+
+    monkeypatch.setattr(FakeExt4Reader, "extract_file", gated)
+
+    # --- single-file extract completes and restores the buttons ---
+    out = tmp_path / "out.txt"
+    w._pex_run_extract("file", "/readme.txt", str(out), w._pex_extract_btn)
+    assert w._pex_busy
+    assert "Cancel" in str(w._pex_extract_btn["text"])
+    assert str(w._pex_extract_part_btn["state"]) == "disabled"
+    assert w._pex_busy_lbl.winfo_manager() == "place"   # spinner overlay up
+    gates["g"].set()
+    _pump_until(lambda: not w._pex_busy)
+    assert out.read_bytes() == b"hello world"
+    assert "Extracted" in w.partition_status_var.get()
+    assert str(w._pex_extract_btn["text"]) == "Extract Selected…"
+    assert str(w._pex_extract_part_btn["state"]) == "normal"
+    assert w._pex_busy_lbl.winfo_manager() == ""        # overlay gone
+
+    # --- whole-partition extract, cancelled mid-run ---
+    gates["g"] = threading_mod.Event()
+    dump = tmp_path / "dump"
+    w._pex_run_extract("dir", "/", str(dump), w._pex_extract_part_btn)
+    assert "Cancel" in str(w._pex_extract_part_btn["text"])
+    w._pex_extract_part_btn.invoke()                    # the live Cancel
+    assert "Cancelling" in str(w._pex_extract_part_btn["text"])
+    gates["g"].set()   # worker resumes, sees the cancel at its next tick
+    _pump_until(lambda: not w._pex_busy)
+    assert "cancelled" in w.partition_status_var.get().lower()
+    assert str(w._pex_extract_part_btn["text"]) == "Extract Whole Partition…"
+    assert str(w._pex_extract_part_btn["state"]) == "normal"
+
+
+def test_partition_explorer_defaults_and_history(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Entering the tab with a blank Card Image defaults to (and opens) the
+    Extract tab's image, a successful open lands in the field's recent-paths
+    history, and the Extract/Write phase strip hides on this tab
+    (monkeybug's Partition Explorer feedback batch)."""
+    import os
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch)
+    img = write_fake_card(tmp_path / "card.raw")
+
+    w.extract_input_var.set(img)
+    assert not (w.partition_image_var.get() or "").strip()
+
+    for tid in w._notebook.tabs():
+        if w._notebook.tab(tid, "text").strip() == "Partition Explorer":
+            w._notebook.select(tid)
+            break
+    app.root.update()
+
+    assert w.partition_image_var.get() == os.path.normpath(img)
+    assert list(w._pex_part_combo["values"])   # opened, not just prefilled
+    assert w._extract_phases_frame.winfo_manager() == ""
+    assert w._write_phases_frame.winfo_manager() == ""
+    # The open was recorded into the recent-paths history backing the
+    # Card Image dropdown (same "last N" memory as the Extract screen).
+    assert (app._settings["path_history"]["stern"]["partition_image"]
+            == [os.path.normpath(img)])
+    assert w._path_history["partition_image"] == [os.path.normpath(img)]
+
+
 def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
     """The Partition Explorer tab shows for Stern (card image) and hides for a
     plugin without the capability."""

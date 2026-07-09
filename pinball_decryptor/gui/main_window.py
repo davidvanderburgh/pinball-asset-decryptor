@@ -68,6 +68,11 @@ _IMG_GROUP_IID = "::grp::"
 # child (a NUL can't appear in a real POSIX path, so it never collides).
 _PEX_PLACEHOLDER = "\x00__lazy__"
 
+
+class _PexCancelled(Exception):
+    """Partition Explorer extract cancelled — raised inside the worker's
+    progress callbacks so the ext4 walk unwinds at its next tick."""
+
 # Replace-Audio "Group duplicates" parent-row iid prefix — same collision
 # guarantee as _IMG_GROUP_IID (slot iids are relative paths, never ::-led).
 _AUD_DUP_GROUP_IID = "::dupgrp::"
@@ -956,7 +961,8 @@ class MainWindow:
                  initial_voice_quality=None,
                  on_voice_quality_change=None,
                  initial_audio_declick=True,
-                 on_audio_declick_change=None):
+                 on_audio_declick_change=None,
+                 on_partition_image_opened=None):
         self.root = root
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
@@ -1020,6 +1026,10 @@ class MainWindow:
         self.audio_declick_var = tk.BooleanVar(
             value=bool(initial_audio_declick))
         self._on_audio_declick_change = on_audio_declick_change
+        # Fired with the image path when the Partition Explorer successfully
+        # opens a card — the App records it into the field's recent-paths
+        # dropdown (monkeybug: same "last 5" memory as the Extract screen).
+        self._on_partition_image_opened = on_partition_image_opened
         self._app_title = app_title
 
         self._current_mfr = None
@@ -6027,19 +6037,28 @@ class MainWindow:
         self.partition_part_var = tk.StringVar()
         self.partition_status_var = tk.StringVar(value="")
 
-        ttk.Label(
+        intro = ttk.Label(
             f, text="Browse a raw Stern card image (.raw / .img) read-only: view "
                     "its partitions and files, and extract any file or folder to "
                     "disk. Nothing on the card is changed.",
-            font=(_SANS_FONT, 9, "italic"), wraplength=720,
-            justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=4)
+            font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
+        intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
+        # Rewrap to the actual window width instead of a fixed 720px
+        # (monkeybug: "the text should flow into that area").
+        intro.bind("<Configure>", lambda e: intro.configure(
+            wraplength=max(300, e.width - 8)))
 
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(row, text="Card Image:", width=12, anchor=tk.W).pack(
             side=tk.LEFT)
-        ent = ttk.Entry(row, textvariable=self.partition_image_var)
+        ent = self._path_combo(row, self.partition_image_var,
+                               "partition_image")
         ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ent.bind("<Return>", lambda _e: self._pex_open_image())
+        # Picking a recent path opens it right away (typed paths still go
+        # through Return / the Open button).
+        ent.bind("<<ComboboxSelected>>",
+                 lambda _e: self._pex_open_image(), add="+")
         ttk.Button(row, text="Browse…", command=self._pex_browse_image).pack(
             side=tk.LEFT, padx=(6, 0))
         ttk.Button(row, text="Open", command=self._pex_open_image).pack(
@@ -6078,6 +6097,10 @@ class MainWindow:
         vs.pack(side=tk.LEFT, fill=tk.Y)
         self._pex_tree.bind("<<TreeviewOpen>>", self._pex_on_tree_open)
         self._pex_tree.bind("<<TreeviewSelect>>", self._pex_on_tree_select)
+        # Big animated "Extracting…" overlay, placed over the tree while an
+        # extract runs — the same large spinner the Replace tabs' scans use
+        # (monkeybug: "the same large swirly font as the other screens").
+        self._pex_busy_lbl = ttk.Label(left, font=(_SANS_FONT, 18, "bold"))
 
         right = ttk.Frame(body); right.pack(side=tk.LEFT, fill=tk.BOTH,
                                             padx=(8, 0))
@@ -6099,6 +6122,19 @@ class MainWindow:
 
     # ---- Partition Explorer: open + partitions -----------------------
 
+    def _pex_default_from_extract(self):
+        """A blank Card Image box defaults to the Extract tab's input image
+        and opens it right away (monkeybug: "defaults to the raw image
+        selected on the Extract screen").  Never overrides a path the user
+        already put here."""
+        if self._pex_busy or (self.partition_image_var.get() or "").strip():
+            return
+        src = (self.extract_input_var.get() or "").strip()
+        if (src and src.lower().endswith((".raw", ".img", ".bin"))
+                and os.path.isfile(src)):
+            self.partition_image_var.set(os.path.normpath(src))
+            self._pex_open_image()
+
     def _pex_browse_image(self):
         cur = (self.partition_image_var.get() or "").strip()
         path = filedialog.askopenfilename(
@@ -6113,6 +6149,10 @@ class MainWindow:
     def _pex_open_image(self):
         """Open the card image at the current path and fill the partition combo,
         selecting the first browsable ext partition."""
+        if self._pex_busy:
+            self.partition_status_var.set(
+                "Extract in progress — cancel it first.")
+            return
         path = (self.partition_image_var.get() or "").strip()
         if not path:
             return
@@ -6128,6 +6168,9 @@ class MainWindow:
             return
         self._pex_card = card
         self._pex_image_path = path
+        if self._on_partition_image_opened:
+            # Only real, opened images enter the recent-paths dropdown.
+            self._on_partition_image_opened(path)
         parts = card.partitions()
         self._pex_part_labels = {}
         labels = []
@@ -6152,6 +6195,14 @@ class MainWindow:
                 "No browsable ext filesystem on this image.")
 
     def _pex_on_partition_select(self):
+        if self._pex_busy:
+            # Mid-extract the action buttons are Cancel / waiting — don't
+            # let a partition switch clear the tree under them; snap back.
+            cur = next((lbl for lbl, p in self._pex_part_labels.items()
+                        if p.index == self._pex_part_index), None)
+            if cur:
+                self.partition_part_var.set(cur)
+            return
         p = self._pex_part_labels.get(self.partition_part_var.get())
         if p is None or self._pex_card is None:
             return
@@ -6223,11 +6274,12 @@ class MainWindow:
     def _pex_on_tree_select(self, _event=None):
         sel = self._pex_tree.selection()
         if not sel:
-            self._pex_extract_btn.config(state=tk.DISABLED)
+            if not self._pex_busy:      # while busy the button is Cancel
+                self._pex_extract_btn.config(state=tk.DISABLED)
             return
         iid = sel[0]
-        self._pex_extract_btn.config(
-            state=(tk.DISABLED if self._pex_busy else tk.NORMAL))
+        if not self._pex_busy:
+            self._pex_extract_btn.config(state=tk.NORMAL)
         if iid in self._pex_dirs:
             self._pex_set_preview("")
             return
@@ -6270,13 +6322,15 @@ class MainWindow:
             out_dir = filedialog.askdirectory(
                 title="Choose a folder to extract this directory into")
             if out_dir:
-                self._pex_run_extract("dir", iid, out_dir)
+                self._pex_run_extract("dir", iid, out_dir,
+                                      self._pex_extract_btn)
         else:
             out = filedialog.asksaveasfilename(
                 title="Extract file as…",
                 initialfile=(os.path.basename(iid) or "file"))
             if out:
-                self._pex_run_extract("file", iid, out)
+                self._pex_run_extract("file", iid, out,
+                                      self._pex_extract_btn)
 
     def _pex_extract_partition(self):
         if self._pex_busy or self._pex_part_index is None:
@@ -6284,52 +6338,125 @@ class MainWindow:
         out_dir = filedialog.askdirectory(
             title="Choose a folder to extract the whole partition into")
         if out_dir:
-            self._pex_run_extract("dir", "/", out_dir)
+            self._pex_run_extract("dir", "/", out_dir,
+                                  self._pex_extract_part_btn)
 
-    def _pex_do_extract(self, kind, path, dest, progress=None):
+    def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
+                        tree_prog=None, file_prog=None, chunk_prog=None):
         """Synchronous extract over a FRESH card handle (isolated from the
-        browse handle so a long extract can't race the tree's reads).  Returns a
-        human result string."""
+        browse handle so a long extract can't race the tree's reads) — runs on
+        the worker thread and never touches Tk.  *part*/*image_path* are
+        snapshotted at click time so switching partition or image mid-extract
+        can't redirect the run.  Returns a human result string."""
         from ..plugins.stern.explorer import CardImage
-        part = self._pex_part_index
-        with CardImage(self._pex_image_path) as c:
+        part = self._pex_part_index if part is None else part
+        image_path = image_path or self._pex_image_path
+        with CardImage(image_path) as c:
             if kind == "file":
-                n = c.extract_file(part, path, dest)
+                n = c.extract_file(part, path, dest, progress=file_prog)
                 return "Extracted %s (%s)." % (os.path.basename(dest),
                                                self._pex_human(n))
-            nf, nb = c.extract_tree(part, path, dest, progress=progress)
+            nf, nb = c.extract_tree(part, path, dest, progress=tree_prog,
+                                    chunk_progress=chunk_prog)
             return "Extracted %d file%s (%s) to %s." % (
                 nf, "" if nf == 1 else "s", self._pex_human(nb), dest)
 
-    def _pex_run_extract(self, kind, path, dest):
-        self._pex_busy = True
-        self._pex_extract_btn.config(state=tk.DISABLED)
-        self._pex_extract_part_btn.config(state=tk.DISABLED)
-        self.partition_status_var.set("Extracting…")
+    def _pex_run_extract(self, kind, path, dest, btn):
+        """Extract on a worker thread with a live Cancel.
 
-        def _prog(nf, _nb, _rel):
-            if nf % 50 == 0:
-                self._tk_root().after(
-                    0, lambda n=nf: self.partition_status_var.set(
-                        "Extracting… %d files" % n))
+        The worker NEVER touches Tk: cross-thread ``after(0, ...)`` raises
+        "main thread is not in main loop" whenever the main thread is busy,
+        and one raise kills the worker (see _run_probe_pass).  Instead the
+        worker reports through a plain dict that a main-thread after()-loop
+        polls — the same loop animates the big spinner overlay."""
+        import threading
+        self._pex_busy = True
+        cancel = threading.Event()
+        self._pex_cancel = cancel
+        self._pex_cancel_btn = btn
+        part = self._pex_part_index          # snapshot against mid-run switches
+        image_path = self._pex_image_path
+        state = {"note": "", "done": None}   # worker → poll-loop mailbox
+
+        def _check_cancel():
+            if cancel.is_set():
+                raise _PexCancelled()
+
+        def _tree_prog(nf, nb, _rel):        # per extracted file
+            _check_cancel()
+            state["note"] = "%d file%s (%s)" % (
+                nf, "" if nf == 1 else "s", self._pex_human(nb))
+
+        def _file_prog(written, size):       # per chunk of a single file
+            _check_cancel()
+            state["note"] = "%s / %s" % (self._pex_human(written),
+                                         self._pex_human(size))
 
         def _work():
             try:
-                msg = self._pex_do_extract(kind, path, dest, progress=_prog)
+                msg = self._pex_do_extract(
+                    kind, path, dest, part, image_path,
+                    tree_prog=_tree_prog, file_prog=_file_prog,
+                    chunk_prog=lambda _w, _s: _check_cancel())
+            except _PexCancelled:
+                msg = "Extract cancelled — partial files may remain."
             except Exception as e:
                 msg = "Extract failed: %s" % e
-            self._tk_root().after(0, lambda: self._pex_finish_extract(msg))
+            state["done"] = msg
+
+        # The launching button flips to a live Cancel; the other one waits.
+        other = (self._pex_extract_part_btn if btn is self._pex_extract_btn
+                 else self._pex_extract_btn)
+        other.config(state=tk.DISABLED)
+        btn.config(text="✕  Cancel", state=tk.NORMAL,
+                   command=self._pex_cancel_extract)
+        self.partition_status_var.set("")
+        self._pex_busy_lbl.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         threading.Thread(target=_work, daemon=True).start()
+        self._pex_extract_tick(state, 0)
+
+    def _pex_cancel_extract(self):
+        cancel = getattr(self, "_pex_cancel", None)
+        if cancel is not None:
+            cancel.set()
+        # The worker notices at its next progress tick; freeze the button so
+        # a second click can't do anything.
+        try:
+            self._pex_cancel_btn.config(text="Cancelling…",
+                                        state=tk.DISABLED)
+        except tk.TclError:
+            pass
+
+    def _pex_extract_tick(self, state, i):
+        """Main-thread poll loop while an extract runs: animates the spinner
+        overlay with the worker's latest progress note and lands its result."""
+        if state["done"] is not None:
+            self._pex_finish_extract(state["done"])
+            return
+        frame = self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)]
+        note = state["note"]
+        try:
+            self._pex_busy_lbl.configure(text="%s  Extracting…%s" % (
+                frame, ("  " + note) if note else ""))
+            self._tk_root().after(90, self._pex_extract_tick, state, i + 1)
+        except tk.TclError:
+            pass                             # window torn down mid-extract
 
     def _pex_finish_extract(self, msg):
         self._pex_busy = False
+        self._pex_busy_lbl.place_forget()
+        self._pex_extract_btn.config(
+            text="Extract Selected…", command=self._pex_extract_selected,
+            state=(tk.NORMAL if self._pex_tree.selection() else tk.DISABLED))
+        self._pex_extract_part_btn.config(
+            text="Extract Whole Partition…",
+            command=self._pex_extract_partition,
+            state=(tk.NORMAL if self._pex_part_index is not None
+                   else tk.DISABLED))
         self.partition_status_var.set(msg)
-        self.append_log(msg, "info")
-        if self._pex_tree.selection():
-            self._pex_extract_btn.config(state=tk.NORMAL)
-        if self._pex_part_index is not None:
-            self._pex_extract_part_btn.config(state=tk.NORMAL)
+        self.append_log(
+            msg, "error" if msg.startswith("Extract failed") else "info")
 
     # ---- Partition Explorer: lifecycle -------------------------------
 
@@ -6918,6 +7045,12 @@ class MainWindow:
             self._write_phases_frame.pack_forget()
             self._default_assets_from_extract()
             self._maybe_rescan_text()
+        elif text == "Partition Explorer":
+            # Read-only browse — the Extract/Write phase strip doesn't apply
+            # here (monkeybug asked what it was for on this tab: nothing).
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._pex_default_from_extract()
         else:
             # Extract / Capture etc. -- no preview player of their own
             # (any audio/video playback was stopped above).

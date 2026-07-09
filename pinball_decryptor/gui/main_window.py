@@ -2416,20 +2416,19 @@ class MainWindow:
             f, text=" Modified Files ", padding=4)
         # Pack-managed by apply_manufacturer + _on_input_source_change.
 
-        # Toolbar across the top of the preview frame.  The Refresh button
-        # re-scans when the user edits assets in another window (cheaper than
-        # file-watching); monkeybug 4.3/4.5 also moved the primary Build +
-        # Revert actions up here — right-aligned as Build ▸ Revert ▸ Refresh —
-        # so every "act on these changes" control is grouped in one place
-        # instead of a separate button row below the frame.  The Flash-image
-        # action (below) joins the same row on the left (monkeybug batch 8).
+        # Toolbar across the top of the preview frame, grouped by role
+        # (monkeybug batch 9): the SCAN control (Refresh + its live activity
+        # text) sits on the LEFT; every "act on these changes" action —
+        # Flash ▸ Revert ▸ Build — is grouped on the RIGHT.  Keeping the scan
+        # Cancel physically apart from the run Cancel stops the two reading
+        # as duplicates when both are active at once.
         preview_toolbar = ttk.Frame(self._write_preview_frame)
         preview_toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
         self._write_preview_toolbar = preview_toolbar
         self._write_preview_refresh_btn = ttk.Button(
             preview_toolbar, text="Refresh",
             command=self._scan_write_preview)
-        self._write_preview_refresh_btn.pack(side=tk.RIGHT)
+        self._write_preview_refresh_btn.pack(side=tk.LEFT)
         # Register with the shared scan-state machinery so the preview scan
         # gets the same treatment as the Replace tabs — list blanked, big
         # animated spinner, Refresh flips to a live Cancel (monkeybug batch 8:
@@ -2443,14 +2442,14 @@ class MainWindow:
         self._write_btn = ttk.Button(
             preview_toolbar, text="Build update",
             command=self._on_write_clicked)
-        self._write_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._write_btn.pack(side=tk.RIGHT)
         # Revert is gated to plugins with a Replace surface in
         # apply_manufacturer, which re-packs it just left of Build.
         self._revert_all_btn = ttk.Button(
             preview_toolbar, text="Revert all changes…",
             command=self._revert_all_clicked)
         self._revert_all_btn.pack(
-            side=tk.RIGHT, padx=(0, 6), before=self._write_btn)
+            side=tk.RIGHT, padx=(0, 6), after=self._write_btn)
 
         preview_inner = ttk.Frame(self._write_preview_frame)
         preview_inner.pack(fill=tk.BOTH, expand=True)
@@ -2492,6 +2491,24 @@ class MainWindow:
         self._write_preview_empty.place(
             relx=0.5, rely=0.5, anchor=tk.CENTER)
 
+        # Status strip under the tree (monkeybug batch 9).  Left: live
+        # scan-activity text — pending rows hide the tree's big spinner
+        # overlay as soon as they land, which left a long MD5 walk (network
+        # shares especially) with NO visible sign anything was still running,
+        # so the Cancel button just looked stuck; the shared spinner ticker
+        # animates this label until the walk finishes or is cancelled.
+        # Right: "Total changes: N" — a running tally of every Modified +
+        # Pending row so the user doesn't have to count/scroll the list
+        # (blank when empty; the placeholder already covers that state).
+        preview_status_row = ttk.Frame(self._write_preview_frame)
+        preview_status_row.pack(fill=tk.X, padx=4, pady=(2, 0))
+        self._write_preview_scan_status = ttk.Label(
+            preview_status_row, text="", font=(_SANS_FONT, 9))
+        self._write_preview_scan_status.pack(side=tk.LEFT)
+        self._write_preview_count_lbl = ttk.Label(
+            preview_status_row, text="", font=(_SANS_FONT, 9))
+        self._write_preview_count_lbl.pack(side=tk.RIGHT)
+
         # Bump-counter to invalidate in-flight scans when the user
         # changes the assets folder before a previous scan finishes.
         self._write_preview_scan_id = 0
@@ -2527,10 +2544,11 @@ class MainWindow:
         # separate imaging tool.  Distinct from Build/Write: those modify
         # assets; this replaces the entire card.  Opens a small modal that
         # collects the image + target card and confirms before the write runs
-        # through the normal status area.  Lives on the LEFT of the preview
-        # toolbar, sharing the row with Build/Revert/Refresh — its old
-        # LabelFrame + description paragraph moved to the "?" tips window
-        # (monkeybug batch 8: tighter footprint, the actions group logically).
+        # through the normal status area.  Joins the right-hand action group
+        # of the preview toolbar, left of Revert/Build (monkeybug batch 9) —
+        # its old LabelFrame + description paragraph moved to the "?" tips
+        # window (monkeybug batch 8: tighter footprint, actions group
+        # logically).
         # While a flash runs the button doubles as its live Cancel — see
         # set_flash_running.
         self._flash_btn = ttk.Button(
@@ -7714,16 +7732,20 @@ class MainWindow:
 
         # Flash-image action (Stern Spike 2, CGC) — write a whole pre-built
         # image onto a card.  Independent of the Build/Write destination
-        # toggle; sits at the left end of the Modified Files toolbar.
+        # toggle; joins the right-hand action group of the Modified Files
+        # toolbar (monkeybug batch 9: actions grouped together on the right,
+        # scan control alone on the left).  `after=` on a side=RIGHT pack
+        # places it visually LEFT of Build (and of Revert, packed below).
         if caps.flash_image:
-            self._flash_btn.pack(side=tk.LEFT, padx=(0, 6))
+            self._flash_btn.pack(side=tk.RIGHT, padx=(0, 6),
+                                 after=self._write_btn)
         else:
             self._flash_btn.pack_forget()
         # Card diagnostics — manufacturers that can read a failed install's
         # on-card log back (CGC's diagnose_card).  Beside Flash, so it can
         # only show when flashing does too.
         if caps.flash_image and getattr(mfr, "diagnose_card", None):
-            self._diagnose_btn.pack(side=tk.LEFT, padx=(0, 6),
+            self._diagnose_btn.pack(side=tk.RIGHT, padx=(0, 6),
                                     after=self._flash_btn)
         else:
             self._diagnose_btn.pack_forget()
@@ -7734,7 +7756,7 @@ class MainWindow:
                        or caps.replace_image or caps.replace_text)
         if has_replace and self._on_revert_all is not None:
             self._revert_all_btn.pack(
-                side=tk.RIGHT, padx=(0, 6), before=self._write_btn)
+                side=tk.RIGHT, padx=(0, 6), after=self._write_btn)
         else:
             self._revert_all_btn.pack_forget()
 
@@ -8953,20 +8975,32 @@ class MainWindow:
         """True when a pipeline is mid-flight (either tab)."""
         return getattr(self, "_running", False)
 
-    def _set_extract_button_running(self, running):
+    def _set_extract_button_running(self, running, active=True):
         """Drive the single Extract/Cancel button.
 
-        While a job is in flight the Extract button doubles as a live Cancel
-        (there's no separate Cancel widget any more); otherwise it's "Extract",
-        enabled only when the inputs are ready (see _refresh_extract_enabled).
+        While an extract is in flight the Extract button doubles as a live
+        Cancel (there's no separate Cancel widget any more); otherwise it's
+        "Extract", enabled only when the inputs are ready (see
+        _refresh_extract_enabled).  *active* says whether the running job is
+        the Extract one: only the tab that STARTED the run gets the Cancel —
+        monkeybug hit "Cancel" on the Write tab during an extract and killed
+        the extract (batch 9), so the other tab's button now just greys out
+        with its idle label.
         """
-        if running:
+        if running and active:
             self._extract_btn.configure(
                 text="Cancel", command=self._on_extract_cancel,
                 state=tk.NORMAL)
             self._extract_btn_tip.text = (
                 "Cancel the operation in progress — it stops as soon as it's "
                 "safe to.")
+        elif running:
+            self._extract_btn.configure(
+                text="Extract", command=self._on_extract,
+                state=tk.DISABLED)
+            self._extract_btn_tip.text = (
+                "Another operation is running — cancel it or let it finish "
+                "first.")
         else:
             self._extract_btn.configure(
                 text="Extract", command=self._on_extract)
@@ -8986,18 +9020,25 @@ class MainWindow:
             return getattr(mfr, "write_direct_button", "Apply Modifications")
         return getattr(mfr, "write_build_button", "Build update")
 
-    def _set_write_button_running(self, running):
+    def _set_write_button_running(self, running, active=True):
         """Drive the single Build/Cancel button.
 
         Mirrors _set_extract_button_running: while a build/write runs the
         Build button doubles as a live Cancel (monkeybug 4.4 — there's no
         separate Cancel widget any more); otherwise it shows the mode's build
-        label and re-arms the write action.
+        label and re-arms the write action.  *active* is False when the
+        running job belongs to the Extract tab — the Build button then keeps
+        its idle label but greys out, instead of becoming a second "Cancel"
+        that kills someone else's run (monkeybug batch 9).
         """
-        if running:
+        if running and active:
             self._write_btn.configure(
                 text="Cancel", command=self._on_write_cancel,
                 state=tk.NORMAL)
+        elif running:
+            self._write_btn.configure(
+                text=self._current_write_button_label(),
+                command=self._on_write_clicked, state=tk.DISABLED)
         else:
             self._write_btn.configure(
                 text=self._current_write_button_label(),
@@ -9017,6 +9058,11 @@ class MainWindow:
             if running:
                 btn.configure(text="Cancel", command=self._on_write_cancel,
                               state=tk.NORMAL)
+                # A flash starts via set_running(mode="write"), which armed
+                # the Build button as the run's Cancel — but the Flash button
+                # owns that role now.  Park Build disabled on its idle label
+                # so there's exactly one Cancel on screen (monkeybug batch 9).
+                self._set_write_button_running(True, active=False)
             else:
                 btn.configure(text="Flash image to SD card…",
                               command=self._open_flash_dialog,
@@ -9243,6 +9289,12 @@ class MainWindow:
                 # hashing a backup copy of every edited asset.
                 dirs[:] = [d for d in dirs if d != ORIG_DIR]
                 for name in files:
+                    # Superseded (re-scan or Cancel) → stop hashing NOW.  The
+                    # old check only ran when a changed file turned up, so a
+                    # cancelled clean scan kept grinding through the whole
+                    # tree (minutes on a network share).
+                    if self._write_preview_scan_id != scan_id:
+                        return
                     if (name.startswith(".")
                             or name == "fl_decrypted.dat"
                             or name.endswith(".img")
@@ -9376,6 +9428,20 @@ class MainWindow:
         # A row means there's something to revert — light the button up now
         # (don't wait for the scan to finish).
         self._update_revert_btn_state()
+        self._update_write_preview_count()
+
+    def _update_write_preview_count(self):
+        """Keep the "Total changes: N" readout in step with the preview tree
+        (monkeybug batch 9).  Blank when the tree is empty — the placeholder
+        text already covers that state."""
+        lbl = getattr(self, "_write_preview_count_lbl", None)
+        if lbl is None:
+            return
+        try:
+            n = len(self._write_preview_tree.get_children())
+            lbl.configure(text=f"Total changes: {n}" if n else "")
+        except tk.TclError:
+            pass
 
     def _persist_tree_columns(self, tree, tree_key, col_ids):
         """Restore *tree*'s saved column widths and keep them saved as the user
@@ -9518,6 +9584,8 @@ class MainWindow:
                 tree.delete(*tree.get_children())   # it looking half-filled
             except tk.TclError:
                 pass
+            if tab_key == "write_preview":
+                self._update_write_preview_count()
         if empty is not None:
             try:
                 self._scan_empty_font.setdefault(
@@ -9546,8 +9614,13 @@ class MainWindow:
         try:
             if scan is not None:
                 if scanning:
+                    # "Cancel scan", not a bare "Cancel": the run buttons
+                    # (Extract / Build / Flash) also read "Cancel" mid-run,
+                    # and monkeybug hit both at once with no way to tell
+                    # which cancelled what (batch 9; the ✕ glyph also read
+                    # as inconsistent with every other button).
                     scan.configure(
-                        text="✕  Cancel", state=tk.NORMAL,
+                        text="Cancel scan", state=tk.NORMAL,
                         command=lambda k=tab_key: self._cancel_scan(k))
                 else:
                     scan.configure(
@@ -9570,8 +9643,16 @@ class MainWindow:
                 return
             try:
                 frame = self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)]
-                empty.configure(text="%s  %s" % (
-                    frame, self._scan_msgs.get(tab_key, "Scanning…")))
+                text = "%s  %s" % (
+                    frame, self._scan_msgs.get(tab_key, "Scanning…"))
+                empty.configure(text=text)
+                # Tabs with a toolbar scan-status label (write_preview) get
+                # the same animated text there — rows landing in the tree
+                # hide the big overlay, and without this the rest of a long
+                # scan has no visible activity at all (monkeybug batch 9).
+                status = getattr(self, "_%s_scan_status" % tab_key, None)
+                if status is not None:
+                    status.configure(text=text)
             except tk.TclError:
                 return
             self._scan_spinner_after[tab_key] = self._tk_root().after(
@@ -9585,6 +9666,13 @@ class MainWindow:
             try:
                 self._tk_root().after_cancel(aid)
             except Exception:
+                pass
+        # Scan over (finished or cancelled) — blank the toolbar activity text.
+        status = getattr(self, "_%s_scan_status" % tab_key, None)
+        if status is not None:
+            try:
+                status.configure(text="")
+            except tk.TclError:
                 pass
 
     def _cancel_scan(self, tab_key):
@@ -9600,6 +9688,8 @@ class MainWindow:
                 tree.delete(*tree.get_children())
             except tk.TclError:
                 pass
+            if tab_key == "write_preview":
+                self._update_write_preview_count()
         empty = getattr(self, "_%s_empty" % tab_key, None)
         if empty is not None:
             try:
@@ -9619,6 +9709,7 @@ class MainWindow:
         # Latest scan finished — leave the scanning state (spinner stops,
         # Cancel flips back to Refresh).
         self._set_tab_scanning("write_preview", False)
+        self._update_write_preview_count()
         # Base the empty state on the actual tree contents — pending
         # Replace-Audio/Video rows count too, so "No modified files" only
         # shows when truly nothing (on disk or staged) is going to change.
@@ -10911,18 +11002,24 @@ class MainWindow:
     # ------------------------------------------------------------------
 
     def set_cancelling(self):
-        """User clicked Cancel: disable BOTH cancel buttons (one press is
+        """User clicked Cancel: freeze the run's Cancel button (one press is
         enough — the press cancels the running job and every queued follow-up)
         and show feedback.  The action buttons stay disabled; they're re-enabled
         only when the job actually stops, via ``set_running(False)``."""
-        # The single Extract / Build buttons are showing "Cancel" right now —
-        # freeze both and flag the in-progress stop; set_running(False)
-        # restores their idle labels.  The Flash button only shows Cancel
-        # during a flash run — freeze it too then.
-        self._extract_btn.configure(state=tk.DISABLED, text="Cancelling…")
-        self._write_btn.configure(state=tk.DISABLED, text="Cancelling…")
-        if getattr(self, "_flash_running", False):
-            self._flash_btn.configure(state=tk.DISABLED, text="Cancelling…")
+        # Only the initiating side's button shows "Cancel" (the others are
+        # parked disabled on their idle labels) — flip just that one to
+        # "Cancelling…" so idle labels don't get clobbered; set_running(False)
+        # restores everything.
+        for btn in (self._extract_btn, self._write_btn,
+                    getattr(self, "_flash_btn", None)):
+            if btn is None:
+                continue
+            try:
+                if str(btn.cget("text")) == "Cancel":
+                    btn.configure(text="Cancelling…")
+                btn.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
         self.set_status("Cancelling...")
 
     def set_running(self, running, mode="extract"):
@@ -10939,8 +11036,11 @@ class MainWindow:
             self.set_status("Starting…")
             # (Re-theming is a heavy synchronous re-style; the ⚙ menu greys
             # out its theme entry while running so clicks can't queue up.)
-            self._set_extract_button_running(True)
-            self._set_write_button_running(True)
+            # Only the initiating side's button becomes the live Cancel; the
+            # other greys out with its idle label (monkeybug batch 9 — two
+            # simultaneous "Cancel"s, and the Write one killed his extract).
+            self._set_extract_button_running(True, active=(mode == "extract"))
+            self._set_write_button_running(True, active=(mode == "write"))
             if hasattr(self, "_revert_all_btn"):
                 self._revert_all_btn.configure(state=tk.DISABLED)
             # Lock the Back button while work is in flight - we don't want

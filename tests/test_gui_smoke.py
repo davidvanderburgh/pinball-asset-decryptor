@@ -1756,6 +1756,152 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     assert not staged_changes.load(assets).get("image_group_tags")
 
 
+# ---------------------------------------------------------------------------
+# monkeybug batch 9: mode-aware Cancel buttons, "Cancel scan" labelling,
+# Write-toolbar grouping, live scan-activity text, Total-changes readout
+# ---------------------------------------------------------------------------
+
+def test_scan_cancel_button_says_cancel_scan(app):
+    """The scan buttons' running label is "Cancel scan" — context so it can't
+    be confused with a run's "Cancel", and no ✕ glyph (monkeybug batch 9)."""
+    w = app.window
+    w._audio_empty.configure(text="Scanning for audio files…")
+    w._set_tab_scanning("audio", True)
+    try:
+        assert w._scan_buttons["audio"].cget("text") == "Cancel scan"
+        assert "✕" not in w._scan_buttons["audio"].cget("text")
+    finally:
+        w._set_tab_scanning("audio", False)
+    assert w._scan_buttons["audio"].cget("text") == "Scan"
+
+
+def test_run_cancel_only_on_initiating_side_extract(app):
+    """During an extract run only the Extract button becomes Cancel; the Write
+    tab's Build button greys out with its idle label instead of becoming a
+    second Cancel that would kill the extract (monkeybug batch 9 — he clicked
+    it and cancelled his extract)."""
+    w = app.window
+    idle = w._write_btn.cget("text")
+    w.set_running(True, mode="extract")
+    try:
+        assert w._extract_btn.cget("text") == "Cancel"
+        assert str(w._extract_btn.cget("state")) == "normal"
+        assert w._write_btn.cget("text") == idle
+        assert str(w._write_btn.cget("state")) == "disabled"
+    finally:
+        w.set_running(False, mode="extract")
+    assert w._extract_btn.cget("text") == "Extract"
+    assert w._write_btn.cget("text") == idle
+    assert str(w._write_btn.cget("state")) == "normal"
+
+
+def test_run_cancel_only_on_initiating_side_write(app):
+    """Mirror case: during a build/write run the Extract button is parked
+    disabled on its idle label while Build is the live Cancel."""
+    w = app.window
+    w.set_running(True, mode="write")
+    try:
+        assert w._write_btn.cget("text") == "Cancel"
+        assert str(w._write_btn.cget("state")) == "normal"
+        assert w._extract_btn.cget("text") == "Extract"
+        assert str(w._extract_btn.cget("state")) == "disabled"
+    finally:
+        w.set_running(False, mode="write")
+    assert w._write_btn.cget("text") != "Cancel"
+
+
+def test_flash_run_has_exactly_one_cancel(app, manufacturers_by_key):
+    """A flash run arms the Flash button as the live Cancel and parks the
+    Build button (which set_running(mode="write") had armed) disabled on its
+    idle label — one Cancel on screen, not two (monkeybug batch 9)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    idle = w._write_btn.cget("text")
+    w.set_running(True, mode="write")
+    try:
+        w.set_flash_running(True)
+        assert w._flash_btn.cget("text") == "Cancel"
+        assert w._write_btn.cget("text") == idle
+        assert str(w._write_btn.cget("state")) == "disabled"
+    finally:
+        w.set_running(False, mode="write")
+    assert w._flash_btn.cget("text").startswith("Flash image")
+    assert w._write_btn.cget("text") == idle
+    assert str(w._write_btn.cget("state")) == "normal"
+
+
+def test_set_cancelling_only_relabels_live_cancel(app):
+    """set_cancelling flips only the button that reads "Cancel" to
+    "Cancelling…"; the parked other-side button keeps its idle label (it was
+    never a Cancel) — both end up disabled."""
+    w = app.window
+    idle = w._write_btn.cget("text")
+    w.set_running(True, mode="extract")
+    try:
+        w.set_cancelling()
+        assert w._extract_btn.cget("text") == "Cancelling…"
+        assert w._write_btn.cget("text") == idle
+        assert str(w._write_btn.cget("state")) == "disabled"
+    finally:
+        w.set_running(False, mode="extract")
+
+
+def test_write_toolbar_groups_scan_left_actions_right(
+        app, manufacturers_by_key):
+    """Modified Files toolbar grouping (monkeybug batch 9): Refresh (the scan
+    control) sits on the left; Flash / Revert / Build are grouped on the
+    right."""
+    w = app.window
+    stern = manufacturers_by_key["stern"]
+    app._on_manufacturer_change(stern)
+    w.extract_input_var.set("")
+    stern.set_era("spike2")
+    w.apply_manufacturer(stern, reset_era=False)
+    app.root.update()
+    assert w._write_preview_refresh_btn.pack_info()["side"] == "left"
+    for btn in (w._write_btn, w._revert_all_btn, w._flash_btn):
+        assert btn.pack_info()["side"] == "right"
+    app._on_back_to_picker()
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+
+def test_write_preview_scan_status_ticks_and_clears(app):
+    """The toolbar scan-activity label animates while the Modified Files scan
+    runs (pending rows hide the tree overlay, so this is the only sign a long
+    walk is still going) and blanks when the scan ends or is cancelled."""
+    w = app.window
+    w._write_preview_empty.configure(text="Scanning for modified files…")
+    w._set_tab_scanning("write_preview", True)
+    try:
+        assert "Scanning for modified files" in \
+            w._write_preview_scan_status.cget("text")
+    finally:
+        w._set_tab_scanning("write_preview", False)
+    assert w._write_preview_scan_status.cget("text") == ""
+    # Cancel path clears it too.
+    w._set_tab_scanning("write_preview", True)
+    w._cancel_scan("write_preview")
+    assert w._write_preview_scan_status.cget("text") == ""
+
+
+def test_write_preview_total_changes_readout(app):
+    """"Total changes: N" tracks the preview tree's row count and goes blank
+    when the list empties (monkeybug batch 9)."""
+    w = app.window
+    sid = w._write_preview_scan_id
+    w._add_write_preview_row("audio/one.wav", "wav", "Modified", sid)
+    w._add_write_preview_row("audio/two.wav", "wav",
+                             "Pending (Replace Audio)", sid, tag="pending")
+    assert w._write_preview_count_lbl.cget("text") == "Total changes: 2"
+    # A new scan blanks the tree — the readout follows.
+    w._set_tab_scanning("write_preview", True)
+    assert w._write_preview_count_lbl.cget("text") == ""
+    w._cancel_scan("write_preview")
+    assert w._write_preview_count_lbl.cget("text") == ""
+
+
 def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
                                             tmp_path, monkeypatch):
     """A group name given one extract is restored when the SAME card is

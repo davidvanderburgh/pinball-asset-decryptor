@@ -3124,6 +3124,23 @@ _STEREO_RANGE = 21452
 _DECLICK_FADE_MS = 40.0
 _DECLICK_HEADROOM = 0.80
 
+# Band-limit to the stock callout's bandwidth (2026-07-09 firmware RE + spectral
+# measurement).  The edge-fade + cap shipped in v0.49 did NOT fix monkeybug's HW
+# clicks -- and reverse-engineering the firmware's symboled audio path (cabal's
+# Ghidra DBs) plus measuring the audio explained why.  The callouts are mixed by
+# Stern's own FIQ sound-script engine (sys_dac_c_handler_pdi: sums the cat-0
+# tracks, *saturates* the sum, runs a DSP filter, then amp_write -- NOT the
+# SoLoud path that carries music, which ramps/fades every gain).  Stock callouts
+# are band-limited SPEECH (spectral centroid ~620 Hz, essentially nothing above
+# 4 kHz); monkeybug's music-excerpt replacements measured ~2000 Hz centroid with
+# 10x the energy above 8 kHz (Immigrant Song: 6400 Hz centroid, 28% in 8-12 kHz).
+# That HF content -- cymbals / sibilance a speech-tuned cabinet speaker never
+# reproduces, driven into the saturating FIQ mix -- is the click, and a fade + a
+# peak cap can't touch bandwidth (which is why v0.49 didn't help).  A ~5 kHz
+# low-pass pulls the profile back onto stock's (centroid ~820 Hz, zero energy
+# above 8 kHz).  Rides the same toggle as the fade/cap; RAW mode skips it.
+_DECLICK_LOWPASS_HZ = 5000.0
+
 
 def _declick_params():
     """``(fade_ms, headroom)`` for an audio replacement's edge fade + level cap.
@@ -3132,6 +3149,52 @@ def _declick_params():
     if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
         return 5.0, 0.97
     return _DECLICK_FADE_MS, _DECLICK_HEADROOM
+
+
+def _declick_lowpass_hz():
+    """Low-pass cutoff (Hz) for band-limiting a replacement to stock callout
+    bandwidth, or ``None`` in RAW mode (same toggle as :func:`_declick_params`)."""
+    if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
+        return None
+    return _DECLICK_LOWPASS_HZ
+
+
+def _lowpass(samples, cutoff_hz, np, fs=44100.0):
+    """Zero-phase 2nd-order Butterworth low-pass (applied forward + reverse, so
+    4th-order effective with no phase shift and, being IIR, no pre-echo that an
+    FFT brick-wall would smear backward into a transient).  Dependency-free
+    (numpy only -- the plugin never pulls scipy).  Returns int64 samples.
+
+    Used to band-limit an audio replacement to the stock callout's spectral
+    envelope; see :data:`_DECLICK_LOWPASS_HZ` for why."""
+    x = np.asarray(samples, np.float64)
+    if cutoff_hz is None or len(x) < 12 or cutoff_hz >= fs * 0.5:
+        return np.asarray(samples, np.int64)
+    import math
+    w0 = 2.0 * math.pi * cutoff_hz / fs
+    cw, sw = math.cos(w0), math.sin(w0)
+    alpha = sw / math.sqrt(2.0)              # Butterworth Q = 1/sqrt(2)
+    a0 = 1.0 + alpha
+    b0 = (1.0 - cw) / 2.0 / a0
+    b1 = (1.0 - cw) / a0
+    b2 = b0
+    a1 = (-2.0 * cw) / a0
+    a2 = (1.0 - alpha) / a0
+
+    def _iir(sig):
+        y = np.empty_like(sig)
+        x1 = x2 = y1 = y2 = 0.0
+        for i in range(len(sig)):
+            xi = sig[i]
+            yi = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2, x1 = x1, xi
+            y2, y1 = y1, yi
+            y[i] = yi
+        return y
+
+    y = _iir(x)                              # forward
+    y = _iir(y[::-1])[::-1]                   # reverse -> zero phase
+    return np.round(y).astype(np.int64)
 
 
 class _BodyOverlay:
@@ -3225,6 +3288,9 @@ def _encode_mono(emu, gr, p, wav_path, np):
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     s = _load_wav(wav_path, False, np)
+    # Band-limit to stock callout bandwidth BEFORE the peak-normalize so the cap
+    # targets the audible (post-filter) peak, not HF we're about to remove.
+    s = _lowpass(s, _declick_lowpass_hz(), np)
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     return gr.encode_sound(p, tgt)
@@ -3234,7 +3300,10 @@ def _encode_stereo(emu, sr, p, wav_path, np):
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
+    lp = _declick_lowpass_hz()
     a = _load_wav(wav_path, True, np)
+    # Band-limit each channel before the peak-normalize (see _encode_mono).
+    a = np.stack([_lowpass(a[:, 0], lp, np), _lowpass(a[:, 1], lp, np)], axis=1)
     a = _amplitude_fit(a, _STEREO_RANGE, np, headroom=headroom)
     L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)

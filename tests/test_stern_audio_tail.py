@@ -136,6 +136,81 @@ def test_declick_params_toggle(monkeypatch):
     assert _declick_params() == (5.0, 0.97)
 
 
+def test_declick_lowpass_toggle(monkeypatch):
+    """The band-limit rides the same toggle as the fade/cap: on by default,
+    off (None) in RAW mode."""
+    from pinball_decryptor.plugins.stern.engine import (
+        _declick_lowpass_hz, _DECLICK_LOWPASS_HZ)
+    monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+    assert _declick_lowpass_hz() == _DECLICK_LOWPASS_HZ
+    monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+    assert _declick_lowpass_hz() is None
+
+
+def test_lowpass_removes_hf_and_raw_is_noop():
+    """_lowpass strips energy above its cutoff (the RE-implicated click driver:
+    stock callouts are ~5 kHz-limited speech, music replacements carry 10x the
+    HF), while a None cutoff (RAW mode) passes samples through untouched."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _lowpass
+
+    sr = 44100
+    t = np.arange(sr // 2) / sr
+    low = np.sin(2 * np.pi * 500 * t)          # 500 Hz (kept)
+    high = np.sin(2 * np.pi * 11000 * t)       # 11 kHz (removed by a 5 kHz LP)
+    sig = ((low + high) * 8000).astype(np.int64)
+
+    def hf_frac(a):
+        a = np.asarray(a, np.float64)
+        spec = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1.0 / sr)
+        return spec[f >= 8000].sum() / (spec.sum() + 1e-9)
+
+    filt = _lowpass(sig, 5000.0, np)
+    assert hf_frac(sig) > 0.3          # the raw mix is HF-heavy
+    assert hf_frac(filt) < 0.01        # the 11 kHz tone is gone
+    # The 500 Hz tone survives (RMS is still substantial).
+    assert np.sqrt(np.mean(filt.astype(np.float64) ** 2)) > 3000
+    # None cutoff (RAW) is a bit-exact passthrough.
+    assert np.array_equal(_lowpass(sig, None, np), sig)
+
+
+def test_encoder_band_limits_unless_raw(monkeypatch):
+    """_encode_mono band-limits the replacement to stock bandwidth when declick
+    is on, and leaves the HF intact in RAW mode -- the encoder actually consumes
+    the new lowpass lever."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    sr = 44100
+    length = sr // 4
+    t = np.arange(length) / sr
+    hf = ((np.sin(2 * np.pi * 400 * t) + np.sin(2 * np.pi * 12000 * t))
+          * 4000).astype(np.int64)
+    monkeypatch.setattr(E, "_load_wav", lambda p, stereo, np_: hf.copy())
+
+    class Cap:
+        def encode_sound(self, pp, tgt):
+            self.tgt = np.asarray(tgt, np.float64)
+            return b""
+
+    def hf_frac(a):
+        spec = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1.0 / sr)
+        return spec[f >= 8000].sum() / (spec.sum() + 1e-9)
+
+    monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+    c_on = Cap()
+    E._encode_mono(None, c_on, {"length": length, "chan": 1}, "x.wav", np)
+
+    monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+    c_raw = Cap()
+    E._encode_mono(None, c_raw, {"length": length, "chan": 1}, "x.wav", np)
+
+    assert hf_frac(c_on.tgt) < 0.02         # band-limited to stock profile
+    assert hf_frac(c_raw.tgt) > 0.2         # RAW keeps the 12 kHz tone
+
+
 def test_encoders_apply_declick_fade(monkeypatch):
     """_encode_mono actually consumes _declick_params (the toggle's only effect):
     declick-on lays a ~40 ms edge fade and caps to a lower peak; the raw mode

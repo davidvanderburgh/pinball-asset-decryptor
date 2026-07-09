@@ -357,7 +357,9 @@ elevation, and forgetting the old right-click → *Run as administrator*
 used to fail halfway through a run. Paths on mapped network drives
 (`W:\…`) keep working in the elevated session: Windows hides mapped
 letters from elevated processes, so the app translates them to their
-`\\server\share` form automatically.
+`\\server\share` form automatically. Network paths work in the
+WSL-backed pipelines too — the app mounts the share inside WSL on its
+own when an extract or write needs it.
 
 After install, run **Install Prerequisites** from the Start Menu — it asks
 which manufacturers you'll actually use and installs only the tools those

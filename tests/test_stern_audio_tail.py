@@ -82,6 +82,78 @@ def test_encoders_fit_target_to_emitted_length(monkeypatch):
     assert captured["L"] == captured["R"] == want
 
 
+def test_encode_sound_preserves_stock_words_beyond_emitted_range():
+    """encode_sound must seed the body from the ORIGINAL card bytes, not zeros.
+    The encode only covers the emitted range (length - BLOCK); the lead-out
+    block past it can't be re-encoded (keystream recovery captures nothing
+    there), and shipping raw 0x0000 words in it made the real machine play a
+    deterministic noise burst right after every replaced callout (monkeybug's
+    LZ end-click, diagnosed from his cabinet recording — stock bodies are
+    encoded to the last word and never click)."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import GenRecover
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)                       # 400
+    stock = (np.arange(length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    gr = object.__new__(GenRecover)
+    gr.emu = types.SimpleNamespace(mm=MM())
+    gr._calibrate = lambda p: (0, 0, 0)                    # delta = 0
+    gr.recover_block = lambda p, cursor, n=200: (
+        np.zeros(n, np.int64), np.zeros(n, np.int64))
+    gr.encode_block = lambda seg, K, rb: (
+        np.full(len(seg), 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 1, "scale": 3}
+    body = np.frombuffer(
+        gr.encode_sound(p, np.zeros(emitted, np.int64)), dtype="<u2")
+    assert len(body) == length
+    assert (body[:emitted] == 0xBEEF).all()                # target covered
+    assert (body[emitted:] == stock[emitted:]).all()       # tail = stock words
+    assert body[emitted:].all()                            # no raw zero words
+
+
+def test_encode_sound_stereo_preserves_stock_frames_beyond_emitted_range():
+    """Stereo variant of the tail-click guard: uncovered interleaved frames
+    keep the original card's words instead of raw zeros."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import StereoRecover
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)                       # 400
+    stock = (np.arange(2 * length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    sr = object.__new__(StereoRecover)
+    sr.emu = types.SimpleNamespace(mm=MM())
+    sr._calibrate = lambda p: 0                            # delta = 0
+    sr.recover_block = lambda p, cursor, nf=200: {"m": nf}
+    sr.encode_block = lambda L, R, rec: (
+        np.full(2 * rec["m"], 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 2, "scale": 3}
+    z = np.zeros(emitted, np.int64)
+    body = np.frombuffer(sr.encode_sound(p, z, z), dtype="<u2")
+    assert len(body) == 2 * length
+    assert (body[:2 * emitted] == 0xBEEF).all()            # frames covered
+    assert (body[2 * emitted:] == stock[2 * emitted:]).all()   # tail = stock
+    assert body[2 * emitted:].all()                        # no raw zero words
+
+
 def test_fit_fades_audio_edges_to_zero():
     """_fit must land BOTH edges of the actual audio at zero via a short
     fade: audio that starts or ends non-zero (cut mid-waveform, DC offset)

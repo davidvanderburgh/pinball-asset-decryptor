@@ -273,7 +273,20 @@ class GenRecover:
         length = p["length"]
         _a, _r, delta = self._calibrate(p)
         tgt = np.asarray(target, np.int64)
-        body = np.zeros(length, np.uint16)
+        # Seed the body with the ORIGINAL card words, not zeros.  The encode
+        # below only covers the emitted range (callers fit the user's audio to
+        # length - BLOCK, and keystream recovery captures nothing for the
+        # lead-out block past it), so a zero-seeded body shipped ~200 raw
+        # 0x0000 words at the tail where stock is encoded to the last word.
+        # The real machine touches that region even though our emulated decode
+        # emits nothing for it -- on hardware those zero words produced a
+        # deterministic noise burst right after every replaced callout ended
+        # (monkeybug's LZ click, diagnosed from his lz_click.mp4 recording).
+        # Keeping stock's own words there makes the tail behave exactly as the
+        # click-free stock sound does, whatever the firmware does with it.
+        body = np.frombuffer(
+            self.emu.mm[p["body_off"]:p["body_off"] + 2 * length],
+            dtype="<u2").copy()
         for k in range((length + 199) // 200):
             g0 = 200 * k
             seg = tgt[g0:g0 + 200]
@@ -420,7 +433,13 @@ class StereoRecover:
         length = p["length"]
         delta = self._calibrate(p)
         L = np.asarray(targetL, np.int64); R = np.asarray(targetR, np.int64)
-        body = np.zeros(2 * length, np.uint16)   # interleaved u0, u1
+        # Seed with the original card frames -- same tail-click guard as the
+        # mono encoder (see GenRecover.encode_sound): the lead-out block past
+        # the emitted range can't be re-encoded, and leaving it as raw zeros
+        # clicked on hardware; stock's own frames there are proven silent.
+        body = np.frombuffer(
+            self.emu.mm[p["body_off"]:p["body_off"] + 4 * length],
+            dtype="<u2").copy()          # interleaved u0, u1
         for k in range((length + 199) // 200):
             g0 = 200 * k
             segL = L[g0:g0 + 200]

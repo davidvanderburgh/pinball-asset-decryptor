@@ -172,6 +172,57 @@ def test_jjp_write_wrapper_fl_dat_absent_is_none(manufacturers_by_key, tmp_path)
     assert wrapper.fl_dat_path is None
 
 
+def test_jjp_iso_write_not_blocked_by_missing_native_debugfs():
+    """Regression guard — macOS ISO Write dies at Scan with
+    "Missing prerequisites: debugfs" (tonyscoots report, v0.57.0).
+
+    On macOS check_prerequisites reports debugfs against the NATIVE
+    Homebrew binary, which only enables the Direct-SSD no-copy path.
+    The ISO Write runs entirely inside the Docker container (whose
+    image ships e2fsprogs), so a missing native debugfs must not block
+    it — while genuine container failures still must.
+    """
+    from pinball_decryptor.plugins.jjp.executor import DockerExecutor
+    from pinball_decryptor.plugins.jjp.pipeline import _mod_blocking_prereqs
+
+    docker = DockerExecutor()
+
+    macos_results = [
+        ("Docker", True, "Available"),
+        ("partclone", True, "Available (in container)"),
+        ("xorriso", True, "Available (in container)"),
+        ("debugfs", False,
+         "Not installed. Run: brew install e2fsprogs\n"
+         "  (enables direct SSD access without copying)"),
+    ]
+    assert _mod_blocking_prereqs(docker, macos_results) == [], (
+        "A missing native (Homebrew) debugfs must not block the macOS "
+        "ISO Write — the Docker image carries its own debugfs.")
+
+    container_broken = [
+        ("Docker", True, "Available"),
+        ("partclone", False, "Container check failed: boom"),
+        ("xorriso", False, "Container check failed: boom"),
+        ("debugfs", False, "Not installed."),
+    ]
+    blocked = [n for n, _ in _mod_blocking_prereqs(docker, container_broken)]
+    assert blocked == ["partclone", "xorriso"]
+
+
+def test_jjp_wsl_write_still_requires_debugfs():
+    """On Windows/Linux the Write edits ext4 through the executor's own
+    debugfs, so a missing debugfs there must still block the run."""
+    from pinball_decryptor.plugins.jjp.pipeline import _mod_blocking_prereqs
+
+    results = [
+        ("WSL2", True, "Available"),
+        ("debugfs", False,
+         "Not installed. Run: wsl -u root -- apt install e2fsprogs"),
+    ]
+    blocked = _mod_blocking_prereqs(object(), results)
+    assert [n for n, _ in blocked] == ["debugfs"]
+
+
 def test_jjp_capabilities_match_expected(manufacturers_by_key):
     jjp = manufacturers_by_key["jjp"]
     caps = jjp.capabilities

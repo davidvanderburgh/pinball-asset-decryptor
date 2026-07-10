@@ -3954,8 +3954,7 @@ class StandaloneModPipeline(ModPipeline):
 
             # Check all prerequisites before starting
             prereq_results = check_prerequisites(self.executor, standalone=True)
-            missing = [(name, msg) for name, passed, msg in prereq_results
-                       if not passed]
+            missing = _mod_blocking_prereqs(self.executor, prereq_results)
             if missing:
                 # Surface the per-prereq detail — on macOS partclone/xorriso
                 # live inside the Docker image, so a "missing" here usually
@@ -8712,6 +8711,22 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None):
 
     log(f"Imported {total} file(s) into {assets_folder}", "success")
     return total
+
+
+def _mod_blocking_prereqs(executor, prereq_results):
+    """Filter prereq failures down to the ones that block an ISO Write.
+
+    On macOS the whole ISO Write runs inside the Docker container, whose
+    image carries its own debugfs (e2fsprogs / e2fsprogs-extra in the
+    Dockerfile).  The debugfs entry check_prerequisites reports there is
+    the *native* Homebrew binary, which only enables the Direct-SSD
+    no-copy path — its absence must not abort an ISO Write.
+    """
+    from .executor import DockerExecutor
+    optional = ({"debugfs"} if isinstance(executor, DockerExecutor)
+                else set())
+    return [(name, msg) for name, passed, msg in prereq_results
+            if not passed and name not in optional]
 
 
 def check_prerequisites(executor, standalone=False):

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections import deque
 
 # Prevent console windows from flashing when launched via pythonw.exe on Windows
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -129,11 +130,18 @@ class WslExecutor(CommandExecutor):
         with self._lock:
             self._current_proc = proc
         try:
+            tail = deque(maxlen=50)
             for line in proc.stdout:
-                yield line.rstrip("\n\r")
+                line = line.rstrip("\n\r")
+                if line:
+                    tail.append(line[-1000:])
+                yield line
             proc.wait(timeout=timeout)
             if proc.returncode != 0:
-                raise CommandError(bash_cmd, proc.returncode, "")
+                # Carry the last output lines — a bare exit code loses the
+                # actual error (streamed lines are gone once yielded).
+                raise CommandError(bash_cmd, proc.returncode,
+                                   "\n".join(tail).strip())
         except subprocess.TimeoutExpired:
             proc.kill()
             raise CommandError(bash_cmd, -1, f"Timed out after {timeout}s")
@@ -280,11 +288,18 @@ class NativeExecutor(CommandExecutor):
         with self._lock:
             self._current_proc = proc
         try:
+            tail = deque(maxlen=50)
             for line in proc.stdout:
-                yield line.rstrip("\n\r")
+                line = line.rstrip("\n\r")
+                if line:
+                    tail.append(line[-1000:])
+                yield line
             proc.wait(timeout=timeout)
             if proc.returncode != 0:
-                raise CommandError(bash_cmd, proc.returncode, "")
+                # Carry the last output lines — a bare exit code loses the
+                # actual error (streamed lines are gone once yielded).
+                raise CommandError(bash_cmd, proc.returncode,
+                                   "\n".join(tail).strip())
         except subprocess.TimeoutExpired:
             proc.kill()
             raise CommandError(bash_cmd, -1, f"Timed out after {timeout}s")
@@ -351,11 +366,18 @@ class MacExecutor(CommandExecutor):
         with self._lock:
             self._current_proc = proc
         try:
+            tail = deque(maxlen=50)
             for line in proc.stdout:
-                yield line.rstrip("\n\r")
+                line = line.rstrip("\n\r")
+                if line:
+                    tail.append(line[-1000:])
+                yield line
             proc.wait(timeout=timeout)
             if proc.returncode != 0:
-                raise CommandError(bash_cmd, proc.returncode, "")
+                # Carry the last output lines — a bare exit code loses the
+                # actual error (streamed lines are gone once yielded).
+                raise CommandError(bash_cmd, proc.returncode,
+                                   "\n".join(tail).strip())
         except subprocess.TimeoutExpired:
             proc.kill()
             raise CommandError(bash_cmd, -1, f"Timed out after {timeout}s")

@@ -581,6 +581,15 @@ class DecryptionPipeline:
         if self.cancelled:
             raise PipelineError("Cancelled", "Operation cancelled by user.")
 
+    def _timed(self, label, phase_fn):
+        """Run a phase and log its wall-clock duration — field reports of
+        "it took forever" need to say WHICH phase ate the time."""
+        t0 = time.monotonic()
+        phase_fn()
+        dt = int(time.monotonic() - t0)
+        if dt >= 5:
+            self.log(f"[{label}] phase took {dt // 60}m {dt % 60:02d}s", "info")
+
     def _generate_checksums(self, wsl_out=None):
         """Write .checksums.md5 for asset tracking (host-side, parallel).
 
@@ -771,6 +780,30 @@ class DecryptionPipeline:
                     self.log(f"  Docker: {out.strip()}", "info")
             except Exception:
                 self.log("  Docker: (could not detect)", "info")
+
+            # Docker Desktop VM resources vs the host — an underprovisioned
+            # VM (the default is often half the cores) directly throttles
+            # the compress/decompress phases.
+            try:
+                rc, out, _ = self.executor.run_host(
+                    "docker info --format '{{.NCPU}} {{.MemTotal}}'",
+                    timeout=10)
+                rc2, host_cpus, _ = self.executor.run_host(
+                    "sysctl -n hw.ncpu", timeout=5)
+                if rc == 0 and rc2 == 0 and out.strip():
+                    vm_cpus, vm_mem = out.split()
+                    vm_cpus, host_cpus = int(vm_cpus), int(host_cpus.strip())
+                    vm_gb = int(vm_mem) / (1024 ** 3)
+                    self.log(
+                        f"  Docker VM: {vm_cpus} of {host_cpus} host CPUs, "
+                        f"{vm_gb:.1f} GB RAM", "info")
+                    if vm_cpus < host_cpus:
+                        self.log(
+                            f"  Tip: raising Docker Desktop's CPU limit "
+                            f"(Settings > Resources) to {host_cpus} CPUs "
+                            f"speeds up ISO builds.", "info")
+            except Exception:
+                pass
 
         # Tool versions inside executor (WSL, Docker, or native)
         # Skip tool checks if Docker container isn't running yet —
@@ -2349,7 +2382,7 @@ class ModPipeline(DecryptionPipeline):
                 return
 
             self.on_phase(1)  # Extract
-            self._phase_extract()
+            self._timed("Extract", self._phase_extract)
             self._check_cancel()
 
             self.on_phase(2)  # Mount
@@ -2369,16 +2402,16 @@ class ModPipeline(DecryptionPipeline):
             self._check_cancel()
 
             self.on_phase(6)  # Encrypt
-            self._phase_encrypt()
+            self._timed("Encrypt", self._phase_encrypt)
 
             # Convert and Build ISO only when input is an ISO
             if self._is_iso():
                 self.on_phase(7)  # Convert
-                self._phase_convert()
+                self._timed("Convert", self._phase_convert)
                 self._check_cancel()
 
                 self.on_phase(8)  # Build ISO
-                self._phase_build_iso()
+                self._timed("Build ISO", self._phase_build_iso)
                 self._check_cancel()
 
             self._succeeded = True
@@ -3274,7 +3307,9 @@ class ModPipeline(DecryptionPipeline):
                 clean = line.strip()
                 if not clean:
                     continue
-                if "FAILURE" in clean or "sorry" in clean.lower():
+                if re.search(r"FAILURE|SORRY|FATAL|ABORT|error|cannot|"
+                             r"No space|not found|Killed",
+                             clean, re.IGNORECASE):
                     self.log(f"  xorriso: {clean}", "error")
                 # xorriso native mode: "Writing:  1234s    12.3%"
                 m = re.search(r'(\d+\.\d+)%', clean)
@@ -3290,8 +3325,17 @@ class ModPipeline(DecryptionPipeline):
                 self.log(f"Build script was:\n{script_content}", "info")
             except CommandError:
                 pass
+            detail = (e.output or "").strip() or "(no output captured)"
+            hint = ""
+            if e.returncode == 137:
+                hint = ("\n\nExit 137 means the process was killed — usually "
+                        "the container ran out of memory. Increase the "
+                        "Docker Desktop memory limit and try again.")
+            elif "no space left" in detail.lower():
+                hint = ("\n\nThe output drive is full. Free up disk space "
+                        "and try again.")
             raise PipelineError("Build ISO",
-                f"xorriso failed: {e.output}") from e
+                f"xorriso failed (exit {e.returncode}):\n{detail}{hint}") from e
 
         # Verify output and compare size with original
         try:
@@ -3995,7 +4039,7 @@ class StandaloneModPipeline(ModPipeline):
                 return
 
             self.on_phase(1)  # Extract
-            self._phase_extract()
+            self._timed("Extract", self._phase_extract)
             self._check_cancel()
 
             self.on_phase(2)  # Mount
@@ -4003,16 +4047,16 @@ class StandaloneModPipeline(ModPipeline):
             self._check_cancel()
 
             self.on_phase(3)  # Encrypt
-            self._phase_encrypt_standalone()
+            self._timed("Encrypt", self._phase_encrypt_standalone)
             self._check_cancel()
 
             if self._is_iso():
                 self.on_phase(4)  # Convert
-                self._phase_convert_standalone()
+                self._timed("Convert", self._phase_convert_standalone)
                 self._check_cancel()
 
                 self.on_phase(5)  # Build ISO
-                self._phase_build_iso()
+                self._timed("Build ISO", self._phase_build_iso)
                 self._check_cancel()
 
             self._succeeded = True

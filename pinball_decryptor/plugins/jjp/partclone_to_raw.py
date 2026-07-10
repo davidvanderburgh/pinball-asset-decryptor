@@ -145,34 +145,67 @@ def convert_partclone_to_raw(input_parts, output_path):
     print(f"\nWriting raw image to {output_path}...")
     print(f"Raw image size will be: {raw_size} bytes ({raw_size / (1024**3):.2f} GiB)")
 
-    zero_block = b"\x00" * block_size
+    # Expand the bitmap to one byte per block (0/1), then collapse it into
+    # runs of consecutive same-state blocks.  A per-block Python loop over
+    # tens of millions of blocks was the extraction bottleneck; runs let us
+    # read/write multi-megabyte spans per call and seek over free space (the
+    # output becomes sparse — same logical bytes, holes read back as zeros).
+    if bitmap_mode == 1:  # BM_BIT — LSB-first within each byte
+        table = [bytes(((byte >> i) & 1) for i in range(8)) for byte in range(256)]
+        bits = b"".join(table[b] for b in bitmap)[:total_blocks]
+    else:  # BM_BYTE — normalize nonzero to 1
+        bits = bytes(1 if b else 0 for b in bitmap[:total_blocks])
+
+    runs = []  # (is_used, block_count)
+    pos = 0
+    while pos < total_blocks:
+        cur = bits[pos]
+        nxt = bits.find(b"\x00" if cur else b"\x01", pos)
+        if nxt == -1:
+            nxt = total_blocks
+        runs.append((cur, nxt - pos))
+        pos = nxt
+
+    max_io_blocks = max(1, (32 * 1024 * 1024) // block_size)
     data_blocks_read = 0
+    blocks_done = 0
+    report_every = total_blocks // 50 or 1  # ~every 2%
+    next_report = report_every
 
     with open(output_path, "wb") as out:
-        for block_idx in range(total_blocks):
-            # Check bitmap
-            if bitmap_mode == 1:
-                byte_idx = block_idx // 8
-                bit_idx = block_idx % 8
-                is_used = (bitmap[byte_idx] >> bit_idx) & 1
+        def report():
+            nonlocal next_report
+            if blocks_done >= next_report:
+                pct = blocks_done / total_blocks * 100
+                print(f"  Progress: {pct:.1f}% ({blocks_done}/{total_blocks}, {data_blocks_read} data blocks read)", flush=True)
+                next_report = blocks_done + report_every
+
+        for is_used, count in runs:
+            if not is_used:
+                out.seek(count * block_size, 1)
+                blocks_done += count
+                report()
             else:
-                is_used = bitmap[block_idx]
-
-            if is_used:
-                block_data = read_exact(f, block_size)
-                out.write(block_data)
-                data_blocks_read += 1
-
-                # Read checksum after every blocks_per_checksum data blocks
-                if checksum_size > 0 and blocks_per_checksum > 0:
-                    if data_blocks_read % blocks_per_checksum == 0:
+                remaining = count
+                while remaining:
+                    take = min(remaining, max_io_blocks)
+                    # Never read across a checksum boundary: partclone
+                    # interleaves a checksum after every blocks_per_checksum
+                    # data blocks (counting data blocks only).
+                    if checksum_size > 0 and blocks_per_checksum > 0:
+                        until_ck = blocks_per_checksum - (
+                            data_blocks_read % blocks_per_checksum)
+                        take = min(take, until_ck)
+                    out.write(read_exact(f, take * block_size))
+                    data_blocks_read += take
+                    remaining -= take
+                    blocks_done += take
+                    if (checksum_size > 0 and blocks_per_checksum > 0
+                            and data_blocks_read % blocks_per_checksum == 0):
                         read_exact(f, checksum_size)  # skip checksum
-            else:
-                out.write(zero_block)
-
-            if (block_idx + 1) % 100000 == 0:
-                pct = (block_idx + 1) / total_blocks * 100
-                print(f"  Progress: {pct:.1f}% ({block_idx + 1}/{total_blocks}, {data_blocks_read} data blocks read)", flush=True)
+                    report()
+        # Trailing free blocks were seek()ed over — pin the logical size.
+        out.truncate(raw_size)
 
     print(f"\nDone! Read {data_blocks_read} data blocks (expected {used_blocks}).")
     print(f"Output size: {os.path.getsize(output_path)} bytes")

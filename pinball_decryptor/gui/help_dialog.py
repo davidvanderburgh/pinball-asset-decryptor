@@ -204,7 +204,7 @@ HELP_CONTENT = {
         ("Output name",
          "Built images get a distinct default name (e.g. \"…-modified.raw\", "
          "where supported) so they can't be mistaken for the stock file. "
-         "Typing a full filename into Output Folder overrides it."),
+         "Typing a full filename into Build Location overrides it."),
         ("Undo",
          "\"Revert all changes…\" restores every changed asset back to its "
          "extract original (the build inputs, not any card)."),
@@ -218,7 +218,7 @@ HELP_CONTENT = {
          "image you just built onto the card, or restoring a backup, "
          "without a separate imaging tool. The whole card is erased and "
          "replaced; a size check refuses an image too big for the card. "
-         "The dialog pre-fills with the image the Output Folder + File "
+         "The dialog pre-fills with the image the Build Location + File "
          "Name boxes point at once it exists. Requires Administrator."),
     ],
     "Mod Pack": [

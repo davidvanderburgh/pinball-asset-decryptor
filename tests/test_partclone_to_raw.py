@@ -141,3 +141,15 @@ def test_large_run_crosses_io_and_checksum_batches(tmp_path, monkeypatch):
     out = tmp_path / "raw.img"
     p2r.convert_partclone_to_raw([str(p)], str(out))
     assert out.read_bytes() == legacy_expected(used)
+
+
+def test_pipeline_finder_locates_bundled_converter():
+    # The extract phase falls back to this converter when partclone is
+    # unavailable; the finder silently returning a nonexistent path made
+    # it dead code for months (field logs showed "Python converter not
+    # found" on every install).
+    from pinball_decryptor.plugins.jjp.pipeline import _find_project_file
+
+    path = _find_project_file("partclone_to_raw.py")
+    assert Path(path).is_file()
+    assert Path(path).resolve() == SCRIPT

@@ -283,23 +283,28 @@ def _find_native_debugfs():
 
 
 def _find_project_file(filename):
-    """Locate a project-level file (e.g. partclone_to_raw.py).
+    """Locate a file shipped with this plugin (e.g. partclone_to_raw.py).
 
-    Works for both source installs and macOS PyInstaller .app bundles,
-    where __file__ is inside Contents/Frameworks/ but --add-data files
-    land in Contents/Resources/.  Uses realpath() to resolve symlinks
-    so Docker bind-mounts see the real file, not a dangling symlink.
+    The file lives inside this package (plugins/jjp/) in source installs,
+    and the frozen builds --add-data it to the same package-relative path,
+    so the directory of this module is the authoritative location.  The
+    parent-dir and Contents/Resources candidates are legacy layouts kept
+    as fallbacks.  Uses realpath() to resolve symlinks so Docker
+    bind-mounts see the real file, not a dangling symlink.
     """
     pkg_dir = os.path.dirname(os.path.realpath(__file__))
-    # Source install: file is one level above the package
-    candidate = os.path.join(os.path.dirname(pkg_dir), filename)
+    candidate = os.path.join(pkg_dir, filename)
     if os.path.isfile(candidate):
         return os.path.realpath(candidate)
-    # macOS .app bundle: check Contents/Resources/
+    # Legacy layout: file one level above the package
+    parent = os.path.join(os.path.dirname(pkg_dir), filename)
+    if os.path.isfile(parent):
+        return os.path.realpath(parent)
+    # Legacy macOS .app bundle layout: Contents/Resources/
     resources = os.path.join(pkg_dir, "..", "Resources", filename)
     if os.path.isfile(resources):
         return os.path.realpath(resources)
-    return candidate  # fall back to original (will fail with clear error)
+    return candidate  # fall back (caller checks isfile and reports)
 
 
 def _stage_project_file(filename, cache_dir):
@@ -1001,43 +1006,47 @@ class DecryptionPipeline:
             "info",
         )
 
-        # Use the proven Python converter (partclone_to_raw.py) as primary method.
-        # It correctly reconstructs the full raw image including empty blocks.
-        # Fall back to native partclone.restore only if Python script is unavailable.
+        # Native partclone.restore is the primary converter — it's what every
+        # field install has actually been running (the Docker image ships it;
+        # WSL gets a one-time apt install).  The bundled Python converter
+        # (partclone_to_raw.py) is the fallback for environments where
+        # partclone is missing and can't be installed (e.g. offline WSL).
         self._check_cancel()
 
-        script_path = _find_project_file("partclone_to_raw.py")
+        has_partclone = False
+        try:
+            self.executor.run("which partclone.restore", timeout=5)
+            has_partclone = True
+        except CommandError:
+            pass
 
-        if os.path.isfile(script_path):
-            self._extract_with_python(parts, script_path)
-        else:
-            self.log("Python converter not found, trying partclone.restore...", "info")
-            has_partclone = False
+        if not has_partclone:
+            self.log("Installing partclone (one-time setup)...", "info")
             try:
-                self.executor.run("which partclone.restore", timeout=5)
+                self.executor.run(
+                    "DEBIAN_FRONTEND=noninteractive apt-get install -y partclone 2>&1",
+                    timeout=120,
+                )
                 has_partclone = True
+                self.log("partclone installed.", "success")
             except CommandError:
                 pass
 
-            if not has_partclone:
-                self.log("Installing partclone (one-time setup)...", "info")
-                try:
-                    self.executor.run(
-                        "DEBIAN_FRONTEND=noninteractive apt-get install -y partclone 2>&1",
-                        timeout=120,
-                    )
-                    has_partclone = True
-                    self.log("partclone installed.", "success")
-                except CommandError:
-                    pass
-
-            if has_partclone:
-                self._extract_with_partclone(parts)
+        if has_partclone:
+            self._extract_with_partclone(parts)
+        else:
+            script_path = _find_project_file("partclone_to_raw.py")
+            if os.path.isfile(script_path):
+                self.log(
+                    "partclone unavailable, using bundled Python converter...",
+                    "info")
+                self._extract_with_python(parts, script_path)
             else:
                 raise PipelineError("Extract",
                     "No extraction method available.\n"
-                    "Ensure partclone_to_raw.py is in the project directory, or\n"
-                    "install partclone: wsl -u root -- apt install partclone")
+                    "partclone could not be installed and the bundled\n"
+                    "partclone_to_raw.py converter is missing.\n"
+                    "Install partclone manually: wsl -u root -- apt install partclone")
 
         # Verify the output
         try:
@@ -1133,7 +1142,7 @@ class DecryptionPipeline:
             pass  # If we can't extend, mount will fail with a clear error
 
     def _extract_with_python(self, parts, script_path=None):
-        """Use the proven Python partclone converter."""
+        """Use the bundled Python partclone converter (partclone_to_raw.py)."""
         self.log("Using Python partclone converter...", "info")
         # Docker: use the pre-staged copy in /tmp (avoids /Applications mount)
         from .executor import DockerExecutor

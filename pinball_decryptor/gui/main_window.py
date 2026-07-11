@@ -2363,8 +2363,10 @@ class MainWindow:
 
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
+        # "Build Location", not "Output Folder" — monkeybug read "Output" as
+        # ambiguous next to the build's File Name (batch 11).
         _out_lbl = ttk.Label(self._write_output_row_ref,
-                             text="Output Folder:", width=16, anchor=tk.W)
+                             text="Build Location:", width=16, anchor=tk.W)
         _out_lbl.pack(side=tk.LEFT)
         self._write_col_labels.append(_out_lbl)
         self._path_combo(self._write_output_row_ref,
@@ -3205,6 +3207,10 @@ class MainWindow:
         for sib in siblings:
             self._audio_assignments[sib] = rep
         self._save_staged_changes()
+        self.append_log(
+            "Replace Audio: applied %s to %d duplicate cop%s of %s"
+            % (os.path.basename(rep), len(siblings),
+               "y" if len(siblings) == 1 else "ies", rel), "info")
         self._refresh_audio_list()
         self.audio_status_var.set(
             "Applied to %d duplicate copy%s of this sound."
@@ -3605,6 +3611,10 @@ class MainWindow:
             return
         self._audio_assignments[rel] = path
         self._save_staged_changes()
+        # Staged replacements get a log line so the run can be double-checked
+        # afterwards (monkeybug batch 11).
+        self.append_log("Replace Audio: %s ← %s"
+                        % (rel, os.path.basename(path)), "info")
         self._refresh_audio_list()
         if rel == self._audio_current_rel:
             self._audio_load_rep_pane(rel)  # show the new pick right away
@@ -3642,10 +3652,15 @@ class MainWindow:
         self._audio_load_track(rel)  # shows both seek bars, no play
 
     def _audio_on_tree_double(self, _event=None):
+        # Double-click = choose a replacement, same as the Images tab (playback
+        # lives on the right-click menu + the preview panes' transport buttons;
+        # single click still previews).  Monkeybug batch 11: double-click did
+        # replace-dialog on images/text but PLAYED on audio/video.  The first
+        # click of the double already selected the row.
         if not self._double_click_on_rows(self._audio_tree, _event):
             return
         self._cancel_audio_select_job()
-        self._audio_play_original()
+        self._audio_assign_selected()
 
     def _audio_on_tree_click(self, event):
         # A click in the Replacement column opens the picker (the column is a
@@ -3840,6 +3855,8 @@ class MainWindow:
         if rel is not None and rel in self._audio_assignments:
             del self._audio_assignments[rel]
             self._save_staged_changes()
+            self.append_log("Replace Audio: cleared replacement for %s" % rel,
+                            "info")
             self._refresh_audio_list()
             if rel == self._audio_current_rel:
                 self._audio_load_rep_pane(rel)  # back to "no replacement"
@@ -3871,6 +3888,9 @@ class MainWindow:
         if restored:
             self._audio_changed_on_disk.discard(rel)
         self._save_staged_changes()
+        if had_assignment or restored:
+            self.append_log("Replace Audio: reverted %s to the extracted "
+                            "original" % rel, "info")
         self._refresh_audio_list()
         if rel == self._audio_current_rel:
             # Both sides may have changed: the assignment is gone AND the
@@ -4663,6 +4683,8 @@ class MainWindow:
             return
         self._video_assignments[rel] = path
         self._save_staged_changes()
+        self.append_log("Replace Video: %s ← %s"
+                        % (rel, os.path.basename(path)), "info")
         self._refresh_video_list()
         if rel == self._video_current_rel:
             self._video_load_rep_pane(rel)  # show the new pick right away
@@ -4698,10 +4720,17 @@ class MainWindow:
         self._video_load_track(rel)  # posters both panes, no play
 
     def _video_on_tree_double(self, _event=None):
+        # Double-click = choose a replacement (see _audio_on_tree_double).
         if not self._double_click_on_rows(self._video_tree, _event):
             return
         self._cancel_video_select_job()
-        self._video_play_original()
+        rel = self._video_selected_rel()
+        if rel is None:
+            messagebox.showinfo(
+                "No Slot Selected",
+                "Select a clip in the list first, then choose a replacement.")
+            return
+        self._video_assign_rel(rel)
 
     def _video_on_tree_click(self, event):
         tree = self._video_tree
@@ -4755,6 +4784,8 @@ class MainWindow:
         if rel is not None and rel in self._video_assignments:
             del self._video_assignments[rel]
             self._save_staged_changes()
+            self.append_log("Replace Video: cleared replacement for %s" % rel,
+                            "info")
             self._refresh_video_list()
             if rel == self._video_current_rel:
                 self._video_load_rep_pane(rel)  # back to "no replacement"
@@ -5538,6 +5569,8 @@ class MainWindow:
             return
         self._image_assignments[rel] = path
         self._save_staged_changes()
+        self.append_log("Replace Images: %s ← %s"
+                        % (rel, os.path.basename(path)), "info")
         self._refresh_image_list()
         if rel == self._image_current_rel:
             self._image_render_preview(rel)
@@ -5707,6 +5740,11 @@ class MainWindow:
         if not changed_any:
             return
         self._save_staged_changes()
+        self.append_log(
+            "Replace Images: %s %d slot(s) in group"
+            % ("cleared" if rep_path is None
+               else "assigned %s to" % os.path.basename(rep_path),
+               len(rels)), "info")
         self._refresh_image_list()
         if self._image_current_rel in set(rels):
             self._image_render_preview(self._image_current_rel)
@@ -5778,6 +5816,8 @@ class MainWindow:
         if rel is not None and rel in self._image_assignments:
             del self._image_assignments[rel]
             self._save_staged_changes()
+            self.append_log("Replace Images: cleared replacement for %s" % rel,
+                            "info")
             self._refresh_image_list()
             if rel == self._image_current_rel:
                 self._image_render_preview(rel)
@@ -6944,6 +6984,12 @@ class MainWindow:
         for rr in targets:
             rr["replacement"] = eff
         self._save_text_manifest()
+        if eff:
+            self.append_log(
+                'Replace Text: "%s" → "%s"%s'
+                % (self._ellipsize(orig), self._ellipsize(eff),
+                   " (%d copies)" % len(targets) if len(targets) > 1 else ""),
+                "info")
         self._refresh_text_list()
         try:
             self._text_tree.selection_set(iid)
@@ -6970,6 +7016,11 @@ class MainWindow:
         for rr in targets:
             rr["replacement"] = ""
         self._save_text_manifest()
+        self.append_log(
+            'Replace Text: reverted "%s"%s'
+            % (self._ellipsize(orig),
+               " (%d copies)" % len(targets) if len(targets) > 1 else ""),
+            "info")
         self.text_new_var.set(orig)
         self._refresh_text_list()
         try:
@@ -6979,8 +7030,14 @@ class MainWindow:
             pass
         self._text_update_budget()
 
+    @staticmethod
+    def _ellipsize(s, n=40):
+        """Trim a string for a one-line log message."""
+        return s if len(s) <= n else s[:n - 1] + "…"
+
     def _text_clear_all(self):
-        if not any(r["replacement"] for r in self._text_rows):
+        n_edited = sum(1 for r in self._text_rows if r["replacement"])
+        if not n_edited:
             return
         if not messagebox.askyesno(
                 "Clear all edits",
@@ -6989,6 +7046,8 @@ class MainWindow:
         for r in self._text_rows:
             r["replacement"] = ""
         self._save_text_manifest()
+        self.append_log("Replace Text: cleared all %d edit(s)" % n_edited,
+                        "info")
         self._refresh_text_list()
         if self._text_current_iid is not None:
             try:

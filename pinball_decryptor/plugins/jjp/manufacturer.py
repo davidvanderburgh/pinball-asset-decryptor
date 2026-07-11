@@ -323,7 +323,7 @@ class JJPManufacturer(Manufacturer):
                 "(Windows) / Docker (macOS) with partclone, debugfs, xorriso.")
 
     def write_install_help(self):
-        return ("1. The modified ISO is written to the chosen Output Folder.\n"
+        return ("1. The modified ISO is written to the chosen Build Location.\n"
                 "2. Burn it to a USB drive with Rufus / Etcher.\n"
                 "3. Boot the JJP machine from the USB to flash the new game "
                 "image.")

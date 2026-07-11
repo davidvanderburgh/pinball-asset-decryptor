@@ -1063,7 +1063,7 @@ class App:
         if os.sep in build_name or (os.altsep and os.altsep in build_name):
             messagebox.showwarning("Invalid File Name",
                 "The build's File Name can't contain a folder separator.\n\n"
-                "Set the destination folder in Output Folder and keep File "
+                "Set the destination folder in Build Location and keep File "
                 "Name to a plain file name.")
             return
         if not build_name:

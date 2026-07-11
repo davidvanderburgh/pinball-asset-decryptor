@@ -2191,3 +2191,83 @@ def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
     # A row double-click still opens the picker for the selected slot.
     w._image_on_tree_double(_RowEv)
     assert assigns == [rel] and popups == []
+
+
+def test_double_click_opens_picker_on_audio_and_video(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Double-click = choose-a-replacement on EVERY Replace tab (monkeybug
+    batch 11): audio/video used to PLAY the original on double-click while
+    images opened the picker.  Playback stays on the right-click menu and
+    the preview panes' transport buttons."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    class _RowEv:
+        x, y = 5, 40
+
+    # --- audio: real seeded rows ---
+    assets = _seed_audio_assets(tmp_path)
+    w.write_assets_var.set(assets)
+    _scan_audio(w, assets)
+    tree = w._audio_tree
+    rel = tree.get_children()[0]
+    tree.selection_set(rel)
+    monkeypatch.setattr(tree, "identify_region", lambda x, y: "tree")
+    assigns, plays = [], []
+    monkeypatch.setattr(w, "_audio_assign_rel", assigns.append)
+    monkeypatch.setattr(w, "_audio_play_original",
+                        lambda *a, **k: plays.append("audio"))
+    w._audio_on_tree_double(_RowEv)
+    assert assigns == [rel] and plays == []
+
+    # --- video: selection stubbed (no video seed helper needed) ---
+    vtree = w._video_tree
+    monkeypatch.setattr(vtree, "identify_region", lambda x, y: "tree")
+    vassigns = []
+    monkeypatch.setattr(w, "_video_selected_rel", lambda: "video/clip.mp4")
+    monkeypatch.setattr(w, "_video_assign_rel", vassigns.append)
+    monkeypatch.setattr(w, "_video_play_original",
+                        lambda *a, **k: plays.append("video"))
+    w._video_on_tree_double(_RowEv)
+    assert vassigns == ["video/clip.mp4"] and plays == []
+
+
+def test_assign_and_clear_write_log_lines(app, manufacturers_by_key,
+                                          tmp_path, monkeypatch):
+    """Staging or clearing a replacement writes a log line so a session can
+    be double-checked afterwards (monkeybug batch 11: 'the log does not
+    record any replaced video or audio')."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+
+    assets = _seed_audio_assets(tmp_path)
+    rep = tmp_path / "new_song.wav"
+    rep.write_bytes(b"RIFF\x00\x00\x00\x00")
+    w.write_assets_var.set(assets)
+    _scan_audio(w, assets)
+
+    monkeypatch.setattr(
+        "pinball_decryptor.gui.main_window.filedialog.askopenfilename",
+        lambda *a, **k: str(rep))
+    w._audio_tree.selection_set("audio/idx0001.wav")
+    w._audio_assign_rel("audio/idx0001.wav")
+    log = w._log_text.get("1.0", "end-1c")
+    assert "Replace Audio: audio/idx0001.wav ← new_song.wav" in log
+
+    w._audio_clear_selected()
+    log = w._log_text.get("1.0", "end-1c")
+    assert "cleared replacement for audio/idx0001.wav" in log
+
+
+def test_write_tab_output_label_says_build_location(app, manufacturers_by_key):
+    """The Write tab's destination row reads "Build Location:", not the
+    ambiguous "Output Folder:" (monkeybug batch 11)."""
+    from tkinter import ttk as _ttk
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    labels = [c for c in w._write_output_row_ref.winfo_children()
+              if isinstance(c, _ttk.Label)]
+    assert any(str(l.cget("text")) == "Build Location:" for l in labels)

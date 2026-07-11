@@ -117,7 +117,7 @@ STEREO:  u0 = ROL16( invG(L) ^ KL, rbL )
          u1 = ROL16( invG(R) ^ KR ^ ROR16(u0, aR), bR )
 ```
 
-`encode_sound` does this per 200-sample block over the whole sound and returns size-neutral body bytes ([codec.py:254](../../pinball_decryptor/plugins/stern/spike2/codec.py#L254), [codec.py:372](../../pinball_decryptor/plugins/stern/spike2/codec.py#L372)).
+`encode_sound` does this per 200-sample block over the whole sound and returns `(start_off, bytes)` — the size-neutral window the hardware actually reads. On `delta = -1` keys that window starts one word/frame *below* `body_off`, so the trigger-time first sample is written too instead of leaving the stock word there (the start-of-callout click fix) ([codec.py:254](../../pinball_decryptor/plugins/stern/spike2/codec.py#L254), [codec.py:372](../../pinball_decryptor/plugins/stern/spike2/codec.py#L372)).
 
 ### Two per-build calibrations (why it generalises)
 

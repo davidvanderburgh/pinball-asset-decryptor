@@ -176,6 +176,13 @@ class GenRecover:
         fill = struct.pack("<H", pv)
         marg = min(R, 0x80)
         mu.mem_write(emu.BB + R - marg, fill * ((marg + 0x1000) // 2))
+        if R == 0:
+            # First block: base == BB, so the margin must sit BELOW the buffer
+            # (delta=-1 keys read word base-1 for sample 0).  Without it that
+            # sample's keystream was recovered from stale memory and the clip
+            # in encode_sound had to discard enc[0] as garbage.
+            emu.ensure_bb_margin()
+            mu.mem_write(emu.BB - 0x80, fill * (0x80 // 2))
         mu.mem_write(emu.BB + R, arr.tobytes())
         mu.mem_write(emu.OBJ_VA, emu._build_obj(p))
         mu.mem_write(emu.VOICE_VA, emu._voice(1))
@@ -267,26 +274,37 @@ class GenRecover:
         return body16, err
 
     def encode_sound(self, p, target):
-        """Full size-neutral mono body bytes that re-decode to ``target``:
-        per-block keystream recovery + analytic encode, written at the build's
-        body-word offset (see :meth:`_calibrate`)."""
+        """Full size-neutral mono body bytes that re-decode to ``target``.
+
+        Returns ``(start_off, bytes)``: the byte window the hardware actually
+        READS for this sound — ``body_off + 2*delta`` for ``delta < 0`` keys
+        (output sample ``i`` reads body word ``i + delta``, so sample 0's word
+        sits one word BELOW ``body_off`` on delta=-1 builds), ``body_off``
+        otherwise.  Writing that whole window kills two real-machine clicks
+        our emulated round-trips could never see (monkeybug, LZ cabinet
+        recordings):
+
+        * TAIL: the encode only covers the emitted range (length - BLOCK);
+          the lead-out block past it can't be re-encoded, so the window is
+          seeded from the ORIGINAL card bytes — raw zeros there decoded as a
+          noise burst right after every replaced callout (lz_click.mp4).
+        * HEAD: on delta=-1 keys the old fixed-at-``body_off`` window CLIPPED
+          enc[0], leaving the stock word at ``body_off - 1`` — the machine
+          decoded it as one full-amplitude stock sample right at the trigger,
+          a per-slot tick in front of the replacement's fade-in
+          (lz_click2.mp4: click follows the slot, never the content).  The
+          shifted window writes that word.  Note it overlaps the LAST word of
+          an adjacent predecessor's window (sounds are packed back-to-back):
+          that word sits 200 samples into the predecessor's faded lead-out,
+          where a one-sample change is inaudible — the loud, silence-adjacent
+          trigger tick is the audible end of that trade."""
         length = p["length"]
         _a, _r, delta = self._calibrate(p)
+        d = min(delta, 0)
+        start = p["body_off"] + 2 * d
         tgt = np.asarray(target, np.int64)
-        # Seed the body with the ORIGINAL card words, not zeros.  The encode
-        # below only covers the emitted range (callers fit the user's audio to
-        # length - BLOCK, and keystream recovery captures nothing for the
-        # lead-out block past it), so a zero-seeded body shipped ~200 raw
-        # 0x0000 words at the tail where stock is encoded to the last word.
-        # The real machine touches that region even though our emulated decode
-        # emits nothing for it -- on hardware those zero words produced a
-        # deterministic noise burst right after every replaced callout ended
-        # (monkeybug's LZ click, diagnosed from his lz_click.mp4 recording).
-        # Keeping stock's own words there makes the tail behave exactly as the
-        # click-free stock sound does, whatever the firmware does with it.
         body = np.frombuffer(
-            self.emu.mm[p["body_off"]:p["body_off"] + 2 * length],
-            dtype="<u2").copy()
+            self.emu.mm[start:start + 2 * length], dtype="<u2").copy()
         for k in range((length + 199) // 200):
             g0 = 200 * k
             seg = tgt[g0:g0 + 200]
@@ -295,22 +313,11 @@ class GenRecover:
             K, rb = self.recover_block(p, 200 + 200 * k, n=len(seg))
             m = len(K)
             enc, _ = self.encode_block(seg[:m], K, rb)
-            lo = g0 + delta
-            s = max(0, -lo); e = min(m, length - lo)   # clip words out of range
+            lo = g0 + delta - d          # window-relative index of enc[0]
+            s = max(0, -lo); e = min(m, length - lo)  # clip words out of range
             if s < e:
                 body[lo + s:lo + e] = enc[s:e]
-        # On a delta=-1 key the clip above drops enc[0]: the word the hardware
-        # reads for output sample 0 sits at body_off - 1 word, OUTSIDE this
-        # sound's window.  Verified on real LZ 1.22.0 data (21/549 sounds, all
-        # stereo there but the mono clip is identical): stock cards keep the
-        # previous region's unrelated last word at that spot, so stock playback
-        # renders the same single-sample artifact a re-encode does -- and
-        # writing our own word there would cross into the previous sound's
-        # window on a mixed-delta card.  Deliberately left unwritten: replaced
-        # sounds start exactly as stock does.  (Not the source of monkeybug's
-        # 2026-07 start-of-callout click -- his were all delta=0, where the
-        # first word round-trips bit-exact.)
-        return body.tobytes()
+        return start, body.tobytes()
 
 
 class StereoRecover:
@@ -400,6 +407,10 @@ class StereoRecover:
         first = body_bytes[:4] if len(body_bytes) >= 4 else b"\x00\x00\x00\x00"
         marg = min(R, 0x80)
         mu.mem_write(emu.BB + R - marg, first * (marg // 4))
+        if R == 0:
+            # First block: the margin must sit BELOW BB (see the mono driver).
+            emu.ensure_bb_margin()
+            mu.mem_write(emu.BB - 0x80, first * (0x80 // 4))
         mu.mem_write(emu.BB + R, b"\x00" * 0x2000)
         mu.mem_write(emu.BB + R, body_bytes)
         mu.mem_write(emu.OBJ_VA, OBJ); mu.mem_write(emu.VOICE_VA, VOICE)
@@ -438,18 +449,22 @@ class StereoRecover:
         return delta
 
     def encode_sound(self, p, targetL, targetR):
-        """Full size-neutral stereo body bytes (interleaved u0/u1 per frame) that
-        re-decode to ``(targetL, targetR)``, written at the build's body-frame
-        offset (see :meth:`_calibrate`)."""
+        """Full size-neutral stereo body bytes (interleaved u0/u1 per frame)
+        that re-decode to ``(targetL, targetR)``.
+
+        Returns ``(start_off, bytes)`` — the frame window the hardware reads,
+        ``body_off + 4*delta`` on delta<0 keys so frame 0 (the trigger-time
+        sample the machine plays FIRST) is actually written; see
+        :meth:`GenRecover.encode_sound` for the head/tail click story (the 21
+        delta=-1 sounds on LZ 1.22.0 are all stereo, so this path is where
+        monkeybug's start-of-callout tick actually lived)."""
         length = p["length"]
         delta = self._calibrate(p)
+        d = min(delta, 0)
+        start = p["body_off"] + 4 * d
         L = np.asarray(targetL, np.int64); R = np.asarray(targetR, np.int64)
-        # Seed with the original card frames -- same tail-click guard as the
-        # mono encoder (see GenRecover.encode_sound): the lead-out block past
-        # the emitted range can't be re-encoded, and leaving it as raw zeros
-        # clicked on hardware; stock's own frames there are proven silent.
         body = np.frombuffer(
-            self.emu.mm[p["body_off"]:p["body_off"] + 4 * length],
+            self.emu.mm[start:start + 4 * length],
             dtype="<u2").copy()          # interleaved u0, u1
         for k in range((length + 199) // 200):
             g0 = 200 * k
@@ -460,13 +475,11 @@ class StereoRecover:
             m = rec["m"]
             frame, _ = self.encode_block(L[g0:g0 + m], R[g0:g0 + m], rec)
             fr = frame.reshape(-1, 2)          # [m, 2] -> (u0, u1) per frame
-            lo = g0 + delta
+            lo = g0 + delta - d          # window-relative index of frame 0
             s = max(0, -lo); e = min(m, length - lo)   # clip frames out of range
             if s < e:
                 body[2 * (lo + s):2 * (lo + e)] = fr[s:e].ravel()
-        # delta=-1 drops frame 0 here just like the mono path -- deliberate;
-        # see the note at the end of GenRecover.encode_sound.
-        return body.tobytes()
+        return start, body.tobytes()
 
     def recover_block(self, p, cursor, nf=200):
         key = (p["scale"], p["chan"])

@@ -972,6 +972,22 @@ class Spike2Emu:
                                      self.st["k"]))
         m.reg_write(UC_ARM_REG_PC, m.reg_read(UC_ARM_REG_LR))
 
+    def ensure_bb_margin(self):
+        """Map one page immediately BELOW the body buffer.  On builds whose
+        body pointer is ``base - 1`` (the delta=-1 keys, see
+        ``GenRecover._calibrate``), the first output sample of the FIRST block
+        reads one word/frame below ``BB`` — real hardware reads the card word
+        below ``body_off`` there, so the emulation needs that address mapped
+        (and filled by the caller) instead of faulting or reading stale
+        memory."""
+        if getattr(self, "_bb_margin", False):
+            return
+        try:
+            self.mu.mem_map(self.BB - PAGE, PAGE)
+        except UcError:
+            pass                       # already mapped (or overlapping) — fine
+        self._bb_margin = True
+
     def _ensure_body(self, span):
         # Grow the body buffer with ONE bulk mem_map.  Mapping page-by-page here
         # is O(pages^2) -- unicorn inserts each region in O(region-count), so a
@@ -1182,6 +1198,16 @@ class Spike2Emu:
         span = _algn(min(bodysz + 0x4000, 0x10000000))
         self._ensure_body(span)
         mu.mem_write(self.BB, self.mm[bo:bo + span])
+        # Mirror the card bytes just BELOW the window too: on delta=-1 keys the
+        # first sample of the first block reads one word/frame below the body,
+        # and the real machine sees the actual card byte there (this is where
+        # monkeybug's start-of-callout click lived — the word is part of the
+        # sound's true read window).  Keeps extraction + the re-encode
+        # self-test hardware-faithful at the boundary.
+        self.ensure_bb_margin()
+        pre = min(bo, 0x80)
+        if pre:
+            mu.mem_write(self.BB - pre, self.mm[bo - pre:bo])
         r1 = self.ACC + 0x80
         nmax = length if max_secs is None else min(int(44100 * max_secs), length)
         Ls = []; Rs = []; cur = 200

@@ -68,13 +68,13 @@ def test_encoders_fit_target_to_emitted_length(monkeypatch):
     class FakeGR:
         def encode_sound(self, pp, tgt):
             captured["mono"] = len(tgt)
-            return b""
+            return 0, b""
 
     class FakeSR:
         def encode_sound(self, pp, L, R):
             captured["L"] = len(L)
             captured["R"] = len(R)
-            return b""
+            return 0, b""
 
     E._encode_mono(None, FakeGR(), {"length": length, "chan": 1}, "x.wav", np)
     E._encode_stereo(None, FakeSR(), {"length": length, "chan": 2}, "x.wav", np)
@@ -113,8 +113,9 @@ def test_encode_sound_preserves_stock_words_beyond_emitted_range():
         np.full(len(seg), 0xBEEF, np.uint16), 0)
 
     p = {"length": length, "body_off": 0, "chan": 1, "scale": 3}
-    body = np.frombuffer(
-        gr.encode_sound(p, np.zeros(emitted, np.int64)), dtype="<u2")
+    off, raw = gr.encode_sound(p, np.zeros(emitted, np.int64))
+    body = np.frombuffer(raw, dtype="<u2")
+    assert off == 0                                        # delta=0: unshifted
     assert len(body) == length
     assert (body[:emitted] == 0xBEEF).all()                # target covered
     assert (body[emitted:] == stock[emitted:]).all()       # tail = stock words
@@ -147,11 +148,85 @@ def test_encode_sound_stereo_preserves_stock_frames_beyond_emitted_range():
 
     p = {"length": length, "body_off": 0, "chan": 2, "scale": 3}
     z = np.zeros(emitted, np.int64)
-    body = np.frombuffer(sr.encode_sound(p, z, z), dtype="<u2")
+    off, raw = sr.encode_sound(p, z, z)
+    body = np.frombuffer(raw, dtype="<u2")
+    assert off == 0                                        # delta=0: unshifted
     assert len(body) == 2 * length
     assert (body[:2 * emitted] == 0xBEEF).all()            # frames covered
     assert (body[2 * emitted:] == stock[2 * emitted:]).all()   # tail = stock
     assert body[2 * emitted:].all()                        # no raw zero words
+
+
+def test_encode_sound_writes_first_word_on_shifted_builds():
+    """delta=-1 keys: output sample 0 reads the word BELOW body_off, and the
+    machine plays it at the trigger.  encode_sound must return a window
+    shifted one word down with enc[0] written at its head — the old
+    fixed-at-body_off window clipped enc[0] and left the stock word there,
+    which real hardware rendered as a one-sample stock-amplitude tick right
+    in front of the replacement's fade-in (monkeybug's start-of-callout
+    click, lz_click2.mp4: the click followed the slot, never the content)."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import (
+        GenRecover, StereoRecover)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)                       # 400
+    body_off = 64
+
+    # --- mono ---
+    stock = (np.arange(body_off // 2 + length, dtype=np.uint32)
+             % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    gr = object.__new__(GenRecover)
+    gr.emu = types.SimpleNamespace(mm=MM())
+    gr._calibrate = lambda p: (0, 0, -1)                   # delta = -1
+    gr.recover_block = lambda p, cursor, n=200: (
+        np.zeros(n, np.int64), np.zeros(n, np.int64))
+    gr.encode_block = lambda seg, K, rb: (
+        np.full(len(seg), 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": body_off, "chan": 1, "scale": 3}
+    off, raw = gr.encode_sound(p, np.zeros(emitted, np.int64))
+    body = np.frombuffer(raw, dtype="<u2")
+    assert off == body_off - 2                 # window shifted one word down
+    assert len(body) == length                 # still size-neutral
+    assert (body[:emitted] == 0xBEEF).all()    # enc[0] AT THE HEAD, not clipped
+    # lead-out = the stock words the hardware actually reads (shifted window)
+    w0 = (body_off - 2) // 2
+    assert (body[emitted:] == stock[w0 + emitted:w0 + length]).all()
+
+    # --- stereo ---
+    stock2 = (np.arange(body_off // 2 + 2 * length, dtype=np.uint32)
+              % 60000 + 1).astype("<u2")
+    stock2_bytes = stock2.tobytes()
+
+    class MM2:
+        def __getitem__(self, sl):
+            return stock2_bytes[sl]
+
+    sr = object.__new__(StereoRecover)
+    sr.emu = types.SimpleNamespace(mm=MM2())
+    sr._calibrate = lambda p: -1                           # delta = -1
+    sr.recover_block = lambda p, cursor, nf=200: {"m": nf}
+    sr.encode_block = lambda L, R, rec: (
+        np.full(2 * rec["m"], 0xBEEF, np.uint16), 0)
+
+    p2 = {"length": length, "body_off": body_off, "chan": 2, "scale": 3}
+    z = np.zeros(emitted, np.int64)
+    off2, raw2 = sr.encode_sound(p2, z, z)
+    body2 = np.frombuffer(raw2, dtype="<u2")
+    assert off2 == body_off - 4                # one frame down
+    assert len(body2) == 2 * length
+    assert (body2[:2 * emitted] == 0xBEEF).all()   # frame 0 written
+    f0 = (body_off - 4) // 2
+    assert (body2[2 * emitted:] == stock2[f0 + 2 * emitted:f0 + 2 * length]).all()
 
 
 def test_fit_fades_audio_edges_to_zero():
@@ -264,7 +339,7 @@ def test_encoder_band_limits_unless_raw(monkeypatch):
     class Cap:
         def encode_sound(self, pp, tgt):
             self.tgt = np.asarray(tgt, np.float64)
-            return b""
+            return 0, b""
 
     def hf_frac(a):
         spec = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
@@ -298,7 +373,7 @@ def test_encoders_apply_declick_fade(monkeypatch):
     class Cap:
         def encode_sound(self, pp, tgt):
             self.tgt = np.asarray(tgt)
-            return b""
+            return 0, b""
 
     def run(raw):
         if raw:
@@ -472,17 +547,17 @@ def test_decode_length_and_tail_roundtrip(title):
         tgtL = L.copy(); tgtL[-tail:] = ramp
         if chan == 2:
             tgtR = R.copy(); tgtR[-tail:] = -ramp
-            body = sr.encode_sound(p, tgtL, tgtR)
+            off, body = sr.encode_sound(p, tgtL, tgtR)
         else:
             tgtR = None
-            body = gr.encode_sound(p, tgtL)
+            off, body = gr.encode_sound(p, tgtL)
 
         # patch the one body in-memory (the patched sound's own params don't
         # shift -- the masterdir chain is forward-only -- so decoding it with the
         # same params is faithful, exactly as _recovery_valid relies on).
         if not isinstance(emu.mm, _BodyOverlay):
             emu.mm = _BodyOverlay(emu.mm)
-        emu.mm.patch = (p["body_off"], bytes(body))
+        emu.mm.patch = (off, bytes(body))
         try:
             out2 = emu.decode(p)
         finally:

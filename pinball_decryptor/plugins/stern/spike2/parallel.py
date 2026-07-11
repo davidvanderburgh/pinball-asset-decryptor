@@ -105,9 +105,11 @@ def encode_probe():
 
 
 def encode_one(task):
-    """task = idx (int).  Returns ``(idx, body_off, body_bytes_or_None, valid)``:
-    ``valid`` False (body None) means the sound's codec variant can't re-encode
-    bit-exact and must be left unchanged — exactly the serial path's skip."""
+    """task = idx (int).  Returns ``(idx, write_off, body_bytes_or_None, valid)``
+    — ``write_off`` is encode_sound's window start (one word below body_off on
+    delta=-1 keys); ``valid`` False (body None) means the sound's codec variant
+    can't re-encode bit-exact and must be left unchanged — exactly the serial
+    path's skip."""
     global _ENC_GR, _ENC_SR
     import numpy as np
 
@@ -124,10 +126,10 @@ def encode_one(task):
     if not _recovery_valid(_ENC_EMU, _ENC_GR, _ENC_SR, p, np):
         return (idx, p["body_off"], None, False)
     if p["chan"] == 2:
-        body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np)
+        off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np)
     else:
-        body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np)
-    return (idx, p["body_off"], bytes(body), True)
+        off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np)
+    return (idx, off, bytes(body), True)
 
 
 def decode_to_wav(task):

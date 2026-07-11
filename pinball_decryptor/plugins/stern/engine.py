@@ -3254,12 +3254,12 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
         # bytes a full Write would lay down.
         cmp_n = nb * 200
         if stereo:
-            body = sr.encode_sound(p, L0[:cmp_n], R0[:cmp_n])
+            off, body = sr.encode_sound(p, L0[:cmp_n], R0[:cmp_n])
         else:
-            body = gr.encode_sound(p, L0[:cmp_n])
+            off, body = gr.encode_sound(p, L0[:cmp_n])
         if not isinstance(emu.mm, _BodyOverlay):
             emu.mm = _BodyOverlay(emu.mm)
-        emu.mm.patch = (p["body_off"], bytes(body))
+        emu.mm.patch = (off, bytes(body))
         try:
             out1 = emu.decode(p, max_secs=secs)
         finally:
@@ -3280,6 +3280,8 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
 
 
 def _encode_mono(emu, gr, p, wav_path, np):
+    # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
+    # one word below body_off on delta=-1 codec keys (the start-click fix).
     # Fit to the codec's TRUE emitted sample count (length - BLOCK), not the raw
     # header length: encode_sound only writes that many samples, so fitting to
     # the full length would silently drop the user's last ~200 samples (a click
@@ -3375,9 +3377,9 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 log("idx %d: re-encode isn't bit-exact for this sound's codec "
                     "(skipped -- left unchanged in the output)." % idx, "warning")
                 continue
-            body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
-                    else _encode_mono(emu, gr, p, wav, np))
-            patches[p["body_off"]] = body
+            off, body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
+                         else _encode_mono(emu, gr, p, wav, np))
+            patches[off] = body
             log("Re-encoded idx %d (%s, %d samples)."
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),
                 "info")
@@ -3683,9 +3685,9 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
             if not _recovery_valid(emu, gr, sr, p, np):
                 skipped.append((cid, idx))
                 continue
-            body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
-                    else _encode_mono(emu, gr, p, wav, np))
-            patches.append((cid, idx, p["body_off"], bytes(body)))
+            off, body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
+                         else _encode_mono(emu, gr, p, wav, np))
+            patches.append((cid, idx, off, bytes(body)))
     finally:
         emu.close()
     # The bank's MASTERDIR_DECODE is the same forward-chained pass as cat-0

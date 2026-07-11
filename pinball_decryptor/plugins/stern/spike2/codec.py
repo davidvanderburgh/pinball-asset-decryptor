@@ -299,6 +299,17 @@ class GenRecover:
             s = max(0, -lo); e = min(m, length - lo)   # clip words out of range
             if s < e:
                 body[lo + s:lo + e] = enc[s:e]
+        # On a delta=-1 key the clip above drops enc[0]: the word the hardware
+        # reads for output sample 0 sits at body_off - 1 word, OUTSIDE this
+        # sound's window.  Verified on real LZ 1.22.0 data (21/549 sounds, all
+        # stereo there but the mono clip is identical): stock cards keep the
+        # previous region's unrelated last word at that spot, so stock playback
+        # renders the same single-sample artifact a re-encode does -- and
+        # writing our own word there would cross into the previous sound's
+        # window on a mixed-delta card.  Deliberately left unwritten: replaced
+        # sounds start exactly as stock does.  (Not the source of monkeybug's
+        # 2026-07 start-of-callout click -- his were all delta=0, where the
+        # first word round-trips bit-exact.)
         return body.tobytes()
 
 
@@ -453,6 +464,8 @@ class StereoRecover:
             s = max(0, -lo); e = min(m, length - lo)   # clip frames out of range
             if s < e:
                 body[2 * (lo + s):2 * (lo + e)] = fr[s:e].ravel()
+        # delta=-1 drops frame 0 here just like the mono path -- deliberate;
+        # see the note at the end of GenRecover.encode_sound.
         return body.tobytes()
 
     def recover_block(self, p, cursor, nf=200):

@@ -2286,6 +2286,13 @@ class App:
                 "undone." % (assets_dir, "\n".join(bullets))):
             return
 
+        # Say so in the log right away — the first worker line ("Checking for
+        # edits made before snapshots existed…") read like scan noise, and
+        # monkeybug concluded the button did nothing (batch 10).
+        self.msg_queue.put(LogMsg(
+            "Reverting all changes in %s…" % assets_dir, "info"))
+        self.window.begin_revert_view()
+
         # 1) Clear the in-memory + on-disk assignment state and text edits.
         self.window.clear_replace_assignments(assets_dir)
         try:

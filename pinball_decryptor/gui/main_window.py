@@ -6058,7 +6058,6 @@ class MainWindow:
         self._pex_part_labels = {}       # combobox label -> Partition
         self.partition_image_var = tk.StringVar()
         self.partition_part_var = tk.StringVar()
-        self.partition_status_var = tk.StringVar(value="")
 
         intro = ttk.Label(
             f, text="Browse a raw Stern card image (.raw / .img) read-only: view "
@@ -6078,13 +6077,12 @@ class MainWindow:
                                "partition_image")
         ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ent.bind("<Return>", lambda _e: self._pex_open_image())
-        # Picking a recent path opens it right away (typed paths still go
-        # through Return / the Open button).
+        # Picking a recent path opens it right away (typed paths go through
+        # Return), and Browse… opens whatever it picks — a separate Open
+        # button read as "what does this do?" (monkeybug batch 10).
         ent.bind("<<ComboboxSelected>>",
                  lambda _e: self._pex_open_image(), add="+")
         ttk.Button(row, text="Browse…", command=self._pex_browse_image).pack(
-            side=tk.LEFT, padx=(6, 0))
-        ttk.Button(row, text="Open", command=self._pex_open_image).pack(
             side=tk.LEFT, padx=(6, 0))
 
         prow = ttk.Frame(f); prow.pack(fill=tk.X, padx=10, pady=(2, 4))
@@ -6096,8 +6094,8 @@ class MainWindow:
         self._pex_part_combo.pack(side=tk.LEFT)
         self._pex_part_combo.bind(
             "<<ComboboxSelected>>", lambda _e: self._pex_on_partition_select())
-        ttk.Label(prow, textvariable=self.partition_status_var,
-                  font=(_SANS_FONT, 9)).pack(side=tk.RIGHT)
+        # (No partition-count label here — the dropdown already shows every
+        # partition; extract results land next to the extract buttons below.)
 
         body = ttk.Frame(f); body.pack(fill=tk.BOTH, expand=True, padx=10,
                                        pady=(2, 4))
@@ -6142,6 +6140,12 @@ class MainWindow:
             arow, text="Extract Whole Partition…",
             command=self._pex_extract_partition, state=tk.DISABLED)
         self._pex_extract_part_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # Extract results show right next to the buttons that made them
+        # (they used to land top-right by the partition combo, where they
+        # read as unrelated — monkeybug batch 10).
+        self._pex_action_status = ttk.Label(arow, text="",
+                                            font=(_SANS_FONT, 9))
+        self._pex_action_status.pack(side=tk.LEFT, padx=(10, 0))
 
     # ---- Partition Explorer: open + partitions -----------------------
 
@@ -6173,21 +6177,29 @@ class MainWindow:
         """Open the card image at the current path and fill the partition combo,
         selecting the first browsable ext partition."""
         if self._pex_busy:
-            self.partition_status_var.set(
-                "Extract in progress — cancel it first.")
+            messagebox.showinfo(
+                "Extract in progress",
+                "An extract is still running — cancel it before opening "
+                "another image.")
             return
         path = (self.partition_image_var.get() or "").strip()
         if not path:
             return
         if not os.path.isfile(path):
-            self.partition_status_var.set("File not found.")
+            self.append_log("Could not open %s: file not found." % path,
+                            "error")
+            messagebox.showerror("File not found", "No file at:\n\n%s" % path)
             return
         self._pex_close_card()
         try:
             from ..plugins.stern.explorer import CardImage
             card = CardImage(path)
         except Exception as e:
-            self.partition_status_var.set("Could not open: %s" % e)
+            self.append_log("Could not open %s: %s" % (path, e), "error")
+            messagebox.showerror(
+                "Not a card image",
+                "Couldn't open this file as a raw card image:\n\n%s\n\n%s"
+                % (path, e))
             return
         self._pex_card = card
         self._pex_image_path = path
@@ -6206,16 +6218,20 @@ class MainWindow:
         self._pex_part_combo["values"] = labels
         first = next((lbl for lbl, p in self._pex_part_labels.items()
                       if p.browsable), None)
+        self.append_log(
+            "Opened %s — %d partition%s."
+            % (path, len(parts), "" if len(parts) == 1 else "s"), "info")
         if first:
             self.partition_part_var.set(first)
             self._pex_on_partition_select()
-            self.partition_status_var.set(
-                "%d partition%s" % (len(parts), "" if len(parts) == 1 else "s"))
         else:
             self.partition_part_var.set(labels[0] if labels else "")
             self._clear_pex_tree()
-            self.partition_status_var.set(
-                "No browsable ext filesystem on this image.")
+            self.append_log(
+                "No browsable ext filesystem on this image.", "warning")
+            messagebox.showwarning(
+                "Nothing to browse",
+                "This image has no browsable ext filesystem.")
 
     def _pex_on_partition_select(self):
         if self._pex_busy:
@@ -6231,9 +6247,10 @@ class MainWindow:
             return
         self._clear_pex_tree()
         if not p.browsable:
-            self.partition_status_var.set(
-                "This partition isn't a browsable ext filesystem.")
+            self._pex_action_status.configure(
+                text="This partition isn't a browsable ext filesystem.")
             return
+        self._pex_action_status.configure(text="")
         self._pex_part_index = p.index
         self._pex_extract_part_btn.config(state=tk.NORMAL)
         self._pex_populate_dir("", "/")     # the partition root's children
@@ -6251,7 +6268,8 @@ class MainWindow:
         try:
             entries = self._pex_card.list_dir(self._pex_part_index, path)
         except Exception as e:
-            self.partition_status_var.set("Error: %s" % e)
+            self.append_log("Could not list %s: %s" % (path, e), "error")
+            self._pex_action_status.configure(text="Error: %s" % e)
             return
         for e in entries:
             iid = e.path
@@ -6361,11 +6379,16 @@ class MainWindow:
         out_dir = filedialog.askdirectory(
             title="Choose a folder to extract the whole partition into")
         if out_dir:
-            self._pex_run_extract("dir", "/", out_dir,
-                                  self._pex_extract_part_btn)
+            # Land under "<dest>\Partition N", not a generic "root" — two
+            # partitions extracted into one folder used to mix together
+            # there (monkeybug batch 10).
+            self._pex_run_extract(
+                "dir", "/", out_dir, self._pex_extract_part_btn,
+                top_name="Partition %d" % self._pex_part_index)
 
     def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
-                        tree_prog=None, file_prog=None, chunk_prog=None):
+                        tree_prog=None, file_prog=None, chunk_prog=None,
+                        top_name=None):
         """Synchronous extract over a FRESH card handle (isolated from the
         browse handle so a long extract can't race the tree's reads) — runs on
         the worker thread and never touches Tk.  *part*/*image_path* are
@@ -6380,11 +6403,13 @@ class MainWindow:
                 return "Extracted %s (%s)." % (os.path.basename(dest),
                                                self._pex_human(n))
             nf, nb = c.extract_tree(part, path, dest, progress=tree_prog,
-                                    chunk_progress=chunk_prog)
+                                    chunk_progress=chunk_prog,
+                                    top_name=top_name)
+            shown = os.path.join(dest, top_name) if top_name else dest
             return "Extracted %d file%s (%s) to %s." % (
-                nf, "" if nf == 1 else "s", self._pex_human(nb), dest)
+                nf, "" if nf == 1 else "s", self._pex_human(nb), shown)
 
-    def _pex_run_extract(self, kind, path, dest, btn):
+    def _pex_run_extract(self, kind, path, dest, btn, top_name=None):
         """Extract on a worker thread with a live Cancel.
 
         The worker NEVER touches Tk: cross-thread ``after(0, ...)`` raises
@@ -6420,7 +6445,8 @@ class MainWindow:
                 msg = self._pex_do_extract(
                     kind, path, dest, part, image_path,
                     tree_prog=_tree_prog, file_prog=_file_prog,
-                    chunk_prog=lambda _w, _s: _check_cancel())
+                    chunk_prog=lambda _w, _s: _check_cancel(),
+                    top_name=top_name)
             except _PexCancelled:
                 msg = "Extract cancelled — partial files may remain."
             except Exception as e:
@@ -6428,12 +6454,18 @@ class MainWindow:
             state["done"] = msg
 
         # The launching button flips to a live Cancel; the other one waits.
+        # Plain "Cancel" — the ✕ glyph read as inconsistent with every other
+        # button (monkeybug batch 10, same call as the scan buttons got).
         other = (self._pex_extract_part_btn if btn is self._pex_extract_btn
                  else self._pex_extract_btn)
         other.config(state=tk.DISABLED)
-        btn.config(text="✕  Cancel", state=tk.NORMAL,
+        btn.config(text="Cancel", state=tk.NORMAL,
                    command=self._pex_cancel_extract)
-        self.partition_status_var.set("")
+        self._pex_action_status.configure(text="")
+        self.append_log(
+            "Extracting %s to %s…"
+            % (top_name if top_name
+               else "%s from Partition %s" % (path, part), dest), "info")
         self._pex_busy_lbl.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -6477,7 +6509,7 @@ class MainWindow:
             command=self._pex_extract_partition,
             state=(tk.NORMAL if self._pex_part_index is not None
                    else tk.DISABLED))
-        self.partition_status_var.set(msg)
+        self._pex_action_status.configure(text=msg)
         self.append_log(
             msg, "error" if msg.startswith("Extract failed") else "info")
 
@@ -9185,6 +9217,14 @@ class MainWindow:
         import re as _re
         import threading
 
+        # One live Cancel at a time: while a run (build / flash / revert /
+        # extract) is in flight, its button is the Cancel — starting a scan
+        # would put a second "Cancel scan" next to it (monkeybug batch 10).
+        # Defer to when the run finishes (set_running(False) re-fires this).
+        if self._is_running():
+            self._rescan_preview_after_run = True
+            return
+
         assets_path = (self.write_assets_var.get() or "").strip()
 
         # Bump the scan-id up front so any older in-flight scan stops posting
@@ -9701,6 +9741,30 @@ class MainWindow:
             except tk.TclError:
                 pass
         self._toggle_scan_button(tab_key, scanning=False)
+
+    def begin_revert_view(self):
+        """Blank the Modified Files list the moment a revert starts — its
+        rows are about to become stale one by one, and leaving them up read
+        as "nothing happened" (monkeybug batch 10).  The end-of-revert
+        rescan repopulates whatever genuinely remains."""
+        if not hasattr(self, "_write_preview_tree"):
+            return
+        if "write_preview" in self._scan_spinner_after:
+            self._cancel_scan("write_preview")
+        else:
+            self._write_preview_scan_id += 1    # drop queued scan results
+            try:
+                self._write_preview_tree.delete(
+                    *self._write_preview_tree.get_children())
+            except tk.TclError:
+                pass
+            self._update_write_preview_count()
+        try:
+            self._write_preview_empty.configure(text="Reverting…")
+            self._write_preview_empty.place(relx=0.5, rely=0.5,
+                                            anchor=tk.CENTER)
+        except tk.TclError:
+            pass
 
     def _finish_write_preview_scan(self, n_changed, scan_id):
         """End-of-scan housekeeping (main-thread only)."""
@@ -11043,6 +11107,25 @@ class MainWindow:
             self._set_write_button_running(True, active=(mode == "write"))
             if hasattr(self, "_revert_all_btn"):
                 self._revert_all_btn.configure(state=tk.DISABLED)
+            # One live Cancel at a time: kill any in-flight Modified Files
+            # scan (its "Cancel scan" would sit next to the run's "Cancel" —
+            # monkeybug batch 10) and grey Refresh for the run's duration.
+            # The scan re-fires when the run ends.
+            if "write_preview" in self._scan_spinner_after:
+                self._cancel_scan("write_preview")
+                self._rescan_preview_after_run = True
+                try:
+                    self._write_preview_empty.configure(
+                        text="Scan paused — it re-runs when this "
+                             "operation finishes.")
+                except tk.TclError:
+                    pass
+            scan_btn = self._scan_buttons.get("write_preview")
+            if scan_btn is not None:
+                try:
+                    scan_btn.configure(state=tk.DISABLED)
+                except tk.TclError:
+                    pass
             # Lock the Back button while work is in flight - we don't want
             # the user navigating away from a running pipeline.
             self.set_back_enabled(False)
@@ -11074,6 +11157,17 @@ class MainWindow:
             # Revert button tracks the change count, not a blanket re-enable —
             # disabled when there's nothing to revert (see _update_revert_btn_state).
             self._update_revert_btn_state()
+            # Restore the Modified Files Refresh button and re-fire any scan
+            # the run pre-empted (or that was requested mid-run).
+            scan_btn = self._scan_buttons.get("write_preview")
+            if scan_btn is not None:
+                try:
+                    scan_btn.configure(state=tk.NORMAL)
+                except tk.TclError:
+                    pass
+            if getattr(self, "_rescan_preview_after_run", False):
+                self._rescan_preview_after_run = False
+                self._maybe_rescan_write_preview()
             self.set_back_enabled(True)
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")

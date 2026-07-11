@@ -89,3 +89,14 @@ def test_extract_tree_whole_partition_skips_symlinks(card, tmp_path):
     assert (tmp_path / "all" / "root" / "spk" / "index"
             / "turtles.sidx").exists()
     assert not (tmp_path / "all" / "root" / "game").exists()
+
+
+def test_extract_tree_top_name_override(card, tmp_path):
+    """A whole-partition extract can land under a caller-chosen folder
+    ("Partition 1") instead of the generic "root" — two partitions extracted
+    into one destination used to mix together (monkeybug batch 10)."""
+    n_files, _ = card.extract_tree(1, "/", str(tmp_path / "all"),
+                                   top_name="Partition 1")
+    assert n_files == 5
+    assert (tmp_path / "all" / "Partition 1" / "readme.txt").exists()
+    assert not (tmp_path / "all" / "root").exists()

@@ -202,10 +202,12 @@ class CardImage:
         return node["size"]
 
     def extract_tree(self, part_index, path, out_dir, progress=None,
-                     max_depth=64, chunk_progress=None):
+                     max_depth=64, chunk_progress=None, top_name=None):
         """Extract *path* (a file or directory) under *out_dir*, mirroring the
-        card's layout beneath a folder named after *path*'s basename (``root``
-        for the whole partition).
+        card's layout beneath a folder named after *path*'s basename —
+        overridable via *top_name*, so a whole-partition extract can land in
+        e.g. ``Partition 2`` instead of a generic ``root`` (two partitions
+        extracted into the same folder used to mix together there).
 
         Returns ``(n_files, n_bytes)``.  Only regular files are written
         (symlinks/devices are skipped).  *progress* is called
@@ -231,7 +233,7 @@ class CardImage:
         if m != S_IFDIR:
             raise ValueError("not a file or directory: %s" % path)
 
-        top = os.path.basename(base) or "root"
+        top = top_name or os.path.basename(base) or "root"
         n_files = n_bytes = 0
         for rel_path, _fino, fnode in reader.iter_regular_files(
                 root_ino=ino, max_depth=max_depth, min_size=0):

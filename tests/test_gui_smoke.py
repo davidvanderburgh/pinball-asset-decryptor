@@ -1902,6 +1902,40 @@ def test_write_preview_total_changes_readout(app):
     assert w._write_preview_count_lbl.cget("text") == ""
 
 
+def test_run_preempts_preview_scan(app):
+    """One live Cancel at a time (monkeybug batch 10): starting a run kills an
+    in-flight Modified Files scan (no "Cancel scan" next to the run's
+    "Cancel"), greys Refresh for the run, and re-fires the scan afterwards."""
+    w = app.window
+    w._set_tab_scanning("write_preview", True)
+    assert "write_preview" in w._scan_spinner_after
+    w.set_running(True, mode="write")
+    try:
+        assert "write_preview" not in w._scan_spinner_after   # scan cancelled
+        assert str(w._write_preview_refresh_btn["state"]) == "disabled"
+        assert w._rescan_preview_after_run
+        # A scan requested mid-run defers instead of starting.
+        w._scan_write_preview()
+        assert "write_preview" not in w._scan_spinner_after
+    finally:
+        w.set_running(False)
+    assert str(w._write_preview_refresh_btn["state"]) == "normal"
+    assert not w._rescan_preview_after_run                    # flag consumed
+
+
+def test_begin_revert_view_blanks_preview(app):
+    """Revert blanks the Modified Files list immediately — its rows are about
+    to go stale — and says so in place (monkeybug batch 10)."""
+    w = app.window
+    sid = w._write_preview_scan_id
+    w._add_write_preview_row("audio/one.wav", "wav", "Modified", sid)
+    assert w._write_preview_tree.get_children()
+    w.begin_revert_view()
+    assert not w._write_preview_tree.get_children()
+    assert w._write_preview_count_lbl.cget("text") == ""
+    assert "Reverting" in w._write_preview_empty.cget("text")
+
+
 def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
                                             tmp_path, monkeypatch):
     """A group name given one extract is restored when the SAME card is
@@ -2042,7 +2076,7 @@ def test_partition_explorer_threaded_extract_and_cancel(
     gates["g"].set()
     _pump_until(lambda: not w._pex_busy)
     assert out.read_bytes() == b"hello world"
-    assert "Extracted" in w.partition_status_var.get()
+    assert "Extracted" in str(w._pex_action_status["text"])
     assert str(w._pex_extract_btn["text"]) == "Extract Selected…"
     assert str(w._pex_extract_part_btn["state"]) == "normal"
     assert w._pex_busy_lbl.winfo_manager() == ""        # overlay gone
@@ -2056,7 +2090,7 @@ def test_partition_explorer_threaded_extract_and_cancel(
     assert "Cancelling" in str(w._pex_extract_part_btn["text"])
     gates["g"].set()   # worker resumes, sees the cancel at its next tick
     _pump_until(lambda: not w._pex_busy)
-    assert "cancelled" in w.partition_status_var.get().lower()
+    assert "cancelled" in str(w._pex_action_status["text"]).lower()
     assert str(w._pex_extract_part_btn["text"]) == "Extract Whole Partition…"
     assert str(w._pex_extract_part_btn["state"]) == "normal"
 

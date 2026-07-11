@@ -455,9 +455,10 @@ class StereoRecover:
         Returns ``(start_off, bytes)`` — the frame window the hardware reads,
         ``body_off + 4*delta`` on delta<0 keys so frame 0 (the trigger-time
         sample the machine plays FIRST) is actually written; see
-        :meth:`GenRecover.encode_sound` for the head/tail click story (the 21
-        delta=-1 sounds on LZ 1.22.0 are all stereo, so this path is where
-        monkeybug's start-of-callout tick actually lived)."""
+        :meth:`GenRecover.encode_sound` for the head/tail click story (every
+        delta=-1 sound observed on LZ 1.22.0 is stereo — scales 22/23/30 —
+        so this path is where monkeybug's start-of-callout tick lived; their
+        stock word below body_off decodes at 4k-16.5k of ~21.5k full scale)."""
         length = p["length"]
         delta = self._calibrate(p)
         d = min(delta, 0)

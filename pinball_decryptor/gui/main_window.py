@@ -4609,9 +4609,19 @@ class MainWindow:
                 self._scan_write_preview()
             except tk.TclError:
                 pass
-        # The Replace Text tab reads straight from the manifest; reload it.
+        # The Replace Text tab reads straight from the manifest, which the
+        # revert just wiped.  If it had been scanned, actively reload it now —
+        # only clearing the scan marker (the old behaviour) left the "New Text"
+        # column showing the reverted edits until the user left and returned to
+        # the tab.  Blank the marker too so a lazy re-scan still fires if the
+        # active reload can't run (tab not built yet).
         if getattr(self, "_text_scan_dir", ""):
             self._text_scan_dir = ""
+            if getattr(self, "_text_tree", None) is not None:
+                try:
+                    self._scan_text_strings()
+                except tk.TclError:
+                    pass
 
     def _reveal_menu_label(self):
         """OS-appropriate wording for the 'show this file in the file manager'

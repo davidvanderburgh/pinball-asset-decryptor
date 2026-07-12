@@ -1521,6 +1521,25 @@ class App:
                 "No .checksums.md5 found.  Extract first.")
             return
 
+        # Same trap as Build: assignments made against a different folder
+        # than the one being exported would silently stay out of the pack.
+        mismatches = self.window.replacement_folder_mismatches(assets_dir)
+        if mismatches:
+            lines = "\n".join(
+                f"  • {n} {label} replacement(s) — assigned for:\n        {folder}"
+                for label, n, folder in mismatches)
+            if not messagebox.askyesno(
+                "Replacements won't be included",
+                "You assigned replacement(s) on the Replace tab(s), but they "
+                "were made against a different folder than the \"Modified "
+                "assets folder\" you're exporting:\n\n"
+                f"{lines}\n\n"
+                f"Exporting now produces a mod pack WITHOUT those changes.  "
+                f"To include them, point the assets folder at the path above "
+                f"(or re-assign for this folder).\n\n"
+                "Export anyway?"):
+                return
+
         zip_path = filedialog.asksaveasfilename(
             title="Save Mod Pack As",
             defaultextension=".zip",
@@ -1531,27 +1550,52 @@ class App:
             return
 
         self.window.append_log("Exporting mod pack...", "info")
+        threading.Thread(target=self._export_worker,
+                         args=(assets_dir, zip_path), daemon=True).start()
 
-        def _run():
-            try:
-                n, path = modpack.export_mod_pack(
-                    assets_dir, zip_path,
-                    log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
-                    progress_cb=lambda c, t, d="": self.msg_queue.put(
-                        ProgressMsg(c, t, d)),
-                )
-                self.msg_queue.put(LogMsg(
-                    f"Mod pack: {n} file(s) → {path}", "success"))
-                self.root.after(0, lambda: messagebox.showinfo(
-                    "Export Complete",
-                    f"Mod pack saved to:\n{path}\n\n"
-                    f"Contains {n} modified file(s)."))
-            except Exception as e:
-                self.msg_queue.put(LogMsg(f"Export failed: {e}", "error"))
-                self.root.after(0, lambda: messagebox.showerror(
-                    "Export Failed", str(e)))
+    def _export_worker(self, assets_dir, zip_path):
+        """Worker-thread body of Export Mod Pack.
 
-        threading.Thread(target=_run, daemon=True).start()
+        Replace-tab assignments materialize on disk only at build time, so
+        the export must stage them first — otherwise assigning replacements
+        and exporting straight away (no build in between) fails with "No
+        modified files found" even though the Write preview lists them all
+        as Pending."""
+        try:
+            pend_a = self._stage_pending_audio(assets_dir)
+            pend_v = self._stage_pending_video(assets_dir)
+            pend_i = self._stage_pending_image(assets_dir)
+            pending = pend_a[0] + pend_v[0] + pend_i[0]
+            staged = pend_a[1] + pend_v[1] + pend_i[1]
+            failures = pend_a[2] + pend_v[2] + pend_i[2]
+            if pending and not staged:
+                raise ValueError(
+                    f"None of your {pending} assigned replacement(s) "
+                    f"could be applied, so the pack would not contain "
+                    f"them.  This is almost always a missing ffmpeg "
+                    f"(every replacement is re-encoded to the game's "
+                    f"exact audio format, which needs it).  Click "
+                    f"\"Install Missing\" above the tabs, restart, and "
+                    f"try again.")
+            n, path = modpack.export_mod_pack(
+                assets_dir, zip_path,
+                log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
+                progress_cb=lambda c, t, d="": self.msg_queue.put(
+                    ProgressMsg(c, t, d)),
+            )
+            skipped = (f"\n\n{len(failures)} assigned replacement(s) "
+                       f"couldn't be converted and are NOT in the pack "
+                       f"(see the log)." if failures else "")
+            self.msg_queue.put(LogMsg(
+                f"Mod pack: {n} file(s) → {path}", "success"))
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Export Complete",
+                f"Mod pack saved to:\n{path}\n\n"
+                f"Contains {n} modified file(s).{skipped}"))
+        except Exception as e:
+            self.msg_queue.put(LogMsg(f"Export failed: {e}", "error"))
+            self.root.after(0, lambda e=e: messagebox.showerror(
+                "Export Failed", str(e)))
 
     def _start_import(self):
         if not self._current_mfr.capabilities.modpack:
@@ -2160,8 +2204,8 @@ class App:
         from .core.audio_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
-            f"Applying {len(assignments)} audio replacement(s) before "
-            f"repack...", "info"))
+            f"Applying {len(assignments)} audio replacement(s) to the "
+            f"assets folder...", "info"))
         try:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, trim_to_length=trim, log_cb=log_cb,
@@ -2191,8 +2235,8 @@ class App:
         from .core.video_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
-            f"Applying {len(assignments)} video replacement(s) before "
-            f"repack...", "info"))
+            f"Applying {len(assignments)} video replacement(s) to the "
+            f"assets folder...", "info"))
         try:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, trim_to_length=trim,
@@ -2223,8 +2267,8 @@ class App:
         from .core.image_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
-            f"Applying {len(assignments)} image replacement(s) before "
-            f"repack...", "info"))
+            f"Applying {len(assignments)} image replacement(s) to the "
+            f"assets folder...", "info"))
         try:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, log_cb=log_cb, assets_dir=assets_dir)

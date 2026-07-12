@@ -7,7 +7,7 @@ shared :mod:`core.checksums` module.
 import os
 import zipfile
 
-from .checksums import CHECKSUMS_FILE, md5_file, read_checksums
+from .checksums import CHECKSUMS_FILE, md5_file, read_baseline_any
 
 
 def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
@@ -15,13 +15,22 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
 
     Returns ``(count, zip_path)``.
     """
-    baseline = read_checksums(assets_folder)
+    # read_baseline_any, not read_checksums: the baseline ships in two
+    # flavours (md5sum-style for JJP, path\tmd5 for BOF/Stern) and the
+    # tab-only parser silently returns {} for the md5sum form — which
+    # here read as "no baseline, extract first" on a valid JJP extract.
+    baseline = read_baseline_any(assets_folder)
     if not baseline:
         raise FileNotFoundError(
             f"No {CHECKSUMS_FILE} found in {assets_folder}. Extract first.")
 
+    if log_cb:
+        log_cb(f"Comparing {len(baseline)} file(s) against the extract "
+               f"baseline...", "info")
     changed = []
-    for rel, orig_md5 in baseline.items():
+    for i, (rel, orig_md5) in enumerate(baseline.items()):
+        if progress_cb:
+            progress_cb(i, len(baseline), rel)
         abs_path = os.path.join(assets_folder, rel)
         if not os.path.isfile(abs_path):
             continue

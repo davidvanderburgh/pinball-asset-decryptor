@@ -24,6 +24,7 @@ this in via ``make_transcribe_pipeline``.
 
 import csv
 import os
+import re
 import shutil
 import sys
 
@@ -801,12 +802,23 @@ def _wav_seconds(path):
         return None
 
 
+# A decode WAV that already carries a name suffix — either a prior transcript
+# or a Sound-Test-menu SFX name the extractor applied (``idx0007 - SE FX ...``).
+# Whisper skips these: they're already titled, they're SFX/music beds with no
+# speech to transcribe, and re-appending a transcript would double the suffix.
+_NAMED_DECODE_RE = re.compile(
+    r"^(?:\d+m\d+s\d+ - )?(?:idx\d+|music_cat\d+_\d+) - .+\.wav$", re.IGNORECASE)
+
+
 def _find_wavs(root):
-    """Walk *root* and return sorted absolute paths of every .wav."""
+    """Walk *root* and return sorted absolute paths of every un-named decode
+    ``.wav`` (bare ``idx####`` / ``music_catNN_####`` files).  Already-named
+    files — prior transcripts and menu-named SFX — are skipped."""
     found = []
     for dirpath, _, filenames in os.walk(root):
         for fn in filenames:
-            if fn.lower().endswith(".wav") and not fn.startswith("."):
+            if (fn.lower().endswith(".wav") and not fn.startswith(".")
+                    and not _NAMED_DECODE_RE.match(fn)):
                 found.append(os.path.join(dirpath, fn))
     found.sort()
     return found

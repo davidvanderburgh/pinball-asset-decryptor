@@ -258,6 +258,183 @@ def test_locked_volumes_is_noop_for_file_paths():
     assert ran == [True]
 
 
+# ---- macOS raw-disk handling ------------------------------------------------
+# (Platform-gated code paths exercised by patching rd.sys.platform; the pure
+# helpers run as-is.  Real /dev nodes are never touched.)
+
+def test_rdisk_path_translation():
+    assert rd._rdisk_path("/dev/disk9") == "/dev/rdisk9"
+    assert rd._rdisk_path("/dev/disk9s1") == "/dev/rdisk9s1"
+    assert rd._rdisk_path("/dev/rdisk9") == "/dev/rdisk9"    # already raw
+    assert rd._rdisk_path("/dev/sdb") == "/dev/sdb"          # Linux untouched
+    assert rd._rdisk_path("") == ""
+    assert rd._rdisk_path(None) == ""
+
+
+def test_fda_guidance_names_path_and_fix():
+    msg = rd._fda_guidance("/dev/rdisk9")
+    assert "/dev/rdisk9" in msg
+    assert "Full Disk Access" in msg
+    assert "Pinball Asset Decryptor" in msg
+    assert "Cmd+Q" in msg                     # the quit-and-reopen step
+
+
+def test_parse_diskutil_total_size():
+    plist = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
+             b'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+             b'"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+             b'<plist version="1.0"><dict>'
+             b'<key>DeviceIdentifier</key><string>disk9</string>'
+             b'<key>TotalSize</key><integer>15931539456</integer>'
+             b'</dict></plist>')
+    assert rd._parse_diskutil_total_size(plist) == 15931539456
+    assert rd._parse_diskutil_total_size(b"not a plist") is None
+    assert rd._parse_diskutil_total_size(b"") is None
+    # A plist without a size key (diskutil against a nonsense arg).
+    empty = plist.replace(b"TotalSize", b"SomethingElse")
+    assert rd._parse_diskutil_total_size(empty) is None
+
+
+def test_open_backend_uses_rdisk_on_macos(monkeypatch):
+    seen = {}
+
+    class _FakeIO:
+        def __init__(self, path, writable):
+            seen["path"] = path
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd, "_FdIO", _FakeIO)
+    rd._open_backend("/dev/disk9", True)
+    assert seen["path"] == "/dev/rdisk9"
+    # File paths (tests, card images) must not be rewritten.
+    rd._open_backend("/tmp/card.img", True)
+    assert seen["path"] == "/tmp/card.img"
+
+
+def test_fdio_root_eperm_enriched_with_fda_guidance(monkeypatch):
+    """A root EPERM on a mac disk node (TCC denial) must try authopen, then
+    fail with the Full Disk Access recipe — not the bare 'Operation not
+    permitted' flippermeister got."""
+    real_open = rd.os.open
+
+    def _deny(path, flags, *a, **k):
+        if str(path).startswith("/dev/"):
+            raise PermissionError(1, "Operation not permitted", path)
+        return real_open(path, flags, *a, **k)
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(rd.os, "open", _deny)
+    authopen_calls = []
+
+    def _no_authopen(path, flags):
+        authopen_calls.append(path)
+        return None
+    monkeypatch.setattr(rd, "_authopen_fd", _no_authopen)
+    with pytest.raises(PermissionError, match="Full Disk Access"):
+        rd._FdIO("/dev/rdisk9", writable=True)
+    assert authopen_calls == ["/dev/rdisk9"]
+
+
+def test_fdio_adopts_authopen_fd(monkeypatch, tmp_path):
+    """When authopen hands back an fd, _FdIO must use it transparently."""
+    import os as _os
+    backing = tmp_path / "disk"
+    backing.write_bytes(b"\xEE" * 1024)
+    real_open = rd.os.open
+
+    def _deny(path, flags, *a, **k):
+        if str(path).startswith("/dev/"):
+            raise PermissionError(1, "Operation not permitted", path)
+        return real_open(path, flags, *a, **k)
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(rd.os, "open", _deny)
+    monkeypatch.setattr(
+        rd, "_authopen_fd",
+        lambda p, f: real_open(str(backing), _os.O_RDONLY | rd._O_BINARY))
+    io = rd._FdIO("/dev/rdisk9", writable=False)
+    try:
+        assert io.read(4) == b"\xEE" * 4
+    finally:
+        io.close()
+
+
+def test_fdio_nonroot_eperm_stays_plain(monkeypatch):
+    """Unprivileged EPERM means 'needs elevation', not TCC — no authopen, no
+    FDA message (the GUI preflight must not pop password prompts)."""
+    real_open = rd.os.open
+
+    def _deny(path, flags, *a, **k):
+        if str(path).startswith("/dev/"):
+            raise PermissionError(1, "Operation not permitted", path)
+        return real_open(path, flags, *a, **k)
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd.os, "geteuid", lambda: 501, raising=False)
+    monkeypatch.setattr(rd.os, "open", _deny)
+
+    def _boom(*a, **k):
+        raise AssertionError("authopen must not run unprivileged")
+    monkeypatch.setattr(rd, "_authopen_fd", _boom)
+    with pytest.raises(PermissionError) as exc:
+        rd._FdIO("/dev/rdisk9", writable=False)
+    assert "Full Disk Access" not in str(exc.value)
+
+
+def test_disk_offline_unmounts_on_macos(monkeypatch):
+    calls = []
+
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _R()
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd.subprocess, "run", _fake_run)
+    logs = []
+    with rd._disk_offline_for_write(
+            "/dev/disk9", log=lambda m, l="info": logs.append(m)):
+        pass
+    assert calls == [["diskutil", "unmountDisk", "/dev/disk9"]]
+    assert any("Unmounting" in m for m in logs)
+    # File paths must not shell out even on darwin.
+    calls.clear()
+    with rd._disk_offline_for_write("/tmp/card.img"):
+        pass
+    assert calls == []
+
+
+def test_device_size_macos_falls_back_to_diskutil(monkeypatch):
+    """With the raw open denied (unprivileged preflight / TCC), the capacity
+    check must still work via diskutil info -plist."""
+    real_open = rd.os.open
+
+    def _deny(path, flags, *a, **k):
+        if str(path).startswith("/dev/"):
+            raise PermissionError(1, "Operation not permitted", path)
+        return real_open(path, flags, *a, **k)
+    monkeypatch.setattr(rd.sys, "platform", "darwin")
+    monkeypatch.setattr(rd.os, "open", _deny)
+    monkeypatch.setattr(rd, "_diskutil_total_size",
+                        lambda p: 15931539456 if p == "/dev/disk9" else None)
+    assert rd.device_size("/dev/disk9") == 15931539456
+
+
+def test_flash_permission_error_becomes_flash_error(tmp_path, monkeypatch):
+    """flash_image_to_device must convert a denied device open into a
+    FlashError (clean dialog message), not leak a PermissionError that the
+    helper renders as a traceback."""
+    img = tmp_path / "i.img"
+    img.write_bytes(_pattern(1024))
+
+    def _deny(path, writable):
+        raise PermissionError(1, "Operation not permitted", path)
+    monkeypatch.setattr(rd, "_open_backend", _deny)
+    with pytest.raises(FlashError, match="Operation not permitted"):
+        rd.flash_image_to_device(str(img), str(tmp_path / "card.dev"))
+
+
 # ---- pipeline --------------------------------------------------------------
 
 def test_flash_pipeline_rejects_file_path():

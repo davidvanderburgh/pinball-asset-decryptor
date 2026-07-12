@@ -68,6 +68,90 @@ def is_device_path(path):
 
 
 # ---------------------------------------------------------------------------
+# macOS raw-disk access.
+#
+# Three quirks make a /dev/diskN open that works fine on Windows/Linux fail on
+# a Mac (flippermeister's flash-helper EPERM, the first real-hardware run of
+# the elevated flash):
+#   * Sonoma+ TCC blocks raw block-device opens with EPERM even as *root*
+#     unless the responsible app is on the Full Disk Access list — the same
+#     wall the JJP Direct-SSD debugfs path hit (see the FDA banner in
+#     main_window).  Apple's blessed door is ``/usr/libexec/authopen``, which
+#     performs the open itself and passes the fd back over a socket; root gets
+#     its authorization silently (no extra dialog).  We try that before
+#     surfacing the one-time FDA recipe as the error.
+#   * The buffered ``/dev/diskN`` node writes an order of magnitude slower
+#     than the raw ``/dev/rdiskN`` node, which is why every imaging tool uses
+#     rdisk.  rdisk demands whole-sector aligned I/O — exactly what
+#     :class:`RawDeviceFile` already guarantees — so device opens are
+#     translated to the raw node here.
+#   * macOS auto-mounts the card's FAT partition, and a mounted volume blocks
+#     a write open with EBUSY; ``diskutil unmountDisk`` before the flash is
+#     the standard fix (the macOS mirror of the Windows offline+lock dance in
+#     :func:`_disk_offline_for_write`).
+# ---------------------------------------------------------------------------
+
+
+def _rdisk_path(path):
+    """``/dev/diskN[sM]`` -> ``/dev/rdiskN[sM]`` (macOS raw node); anything
+    else — including an already-raw ``/dev/rdiskN`` — is returned unchanged."""
+    return re.sub(r"^/dev/disk", "/dev/rdisk", path or "")
+
+
+def _fda_guidance(path):
+    """Actionable message for a root EPERM on a macOS disk node (TCC denial)."""
+    return (
+        "macOS blocked raw access to %s (Operation not permitted). This is "
+        "the Full Disk Access privacy protection, not a problem with the "
+        "card or the app. One-time fix: open System Settings > Privacy & "
+        "Security > Full Disk Access, click +, add Pinball Asset "
+        "Decryptor.app, and toggle it ON. Then fully quit the app (Cmd+Q), "
+        "reopen it, and flash again." % path)
+
+
+def _authopen_fd(path, flags):
+    """Open *path* via ``/usr/libexec/authopen`` and return the fd (macOS).
+
+    authopen opens the device node itself (an Apple system binary the TCC
+    layer trusts) and hands the open fd back over a Unix-socket pair via
+    SCM_RIGHTS, sidestepping the Full-Disk-Access check that makes a plain
+    ``open()`` fail with EPERM even as root on Sonoma+.  Callers are root
+    (the elevated flash helper), so authopen's authorization is pre-granted
+    and no password dialog appears.  Returns ``None`` on any failure —
+    missing binary, denied authorization, protocol hiccup — and the caller
+    falls back to its own error path.
+    """
+    import socket
+    if not hasattr(socket, "recv_fds"):
+        return None
+    try:
+        ours, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    except (OSError, AttributeError):
+        return None
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            ["/usr/libexec/authopen", "-stdoutpipe", "-o", str(int(flags)),
+             path],
+            stdout=theirs, stderr=subprocess.DEVNULL)
+        theirs.close()
+        ours.settimeout(30)
+        _msg, fds, _flags, _addr = socket.recv_fds(ours, 16, 1)
+        proc.wait(timeout=30)
+        return fds[0] if fds else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    finally:
+        if proc is not None and proc.poll() is None:
+            with contextlib.suppress(OSError):
+                proc.kill()
+        with contextlib.suppress(OSError):
+            ours.close()
+        with contextlib.suppress(OSError):
+            theirs.close()
+
+
+# ---------------------------------------------------------------------------
 # Low-level byte-stream backends.
 #
 # POSIX (and any *file* path on Windows) uses plain ``os`` fd I/O.  But writing
@@ -87,7 +171,24 @@ class _FdIO:
     def __init__(self, path, writable):
         self.path = path
         flags = (os.O_RDWR if writable else os.O_RDONLY) | _O_BINARY
-        self.fd = os.open(path, flags)
+        try:
+            self.fd = os.open(path, flags)
+        except PermissionError as e:
+            # macOS TCC denies raw-disk opens with EPERM even as root unless
+            # the app is on the Full Disk Access list.  authopen (Apple's own
+            # disk-open broker) is exempt and silent for root, so try it
+            # before turning the failure into one-time setup instructions.
+            # Non-root opens keep the plain error: there EPERM just means
+            # "needs elevation", which the callers already handle.
+            euid = getattr(os, "geteuid", lambda: -1)()
+            if not (sys.platform == "darwin" and is_device_path(path)
+                    and euid == 0):
+                raise
+            fd = _authopen_fd(path, flags)
+            if fd is None:
+                raise PermissionError(e.errno, _fda_guidance(path),
+                                      path) from e
+            self.fd = fd
 
     def seek(self, pos):
         os.lseek(self.fd, pos, os.SEEK_SET)
@@ -265,6 +366,11 @@ def _open_backend(path, writable):
     """
     if (sys.platform == "win32" and writable and is_device_path(path)):
         return _Win32IO(path, writable)
+    if sys.platform == "darwin" and is_device_path(path):
+        # Use the raw node: the buffered /dev/diskN crawls on bulk writes, and
+        # rdisk's whole-sector alignment requirement is already satisfied by
+        # RawDeviceFile's aligned reads/writes.
+        path = _rdisk_path(path)
     return _FdIO(path, writable)
 
 
@@ -490,10 +596,48 @@ def device_size(device_path):
             return io.size()
         finally:
             io.close()
+    if sys.platform == "darwin" and is_device_path(device_path):
+        try:
+            with RawDeviceFile(device_path, writable=False) as f:
+                if f.size:
+                    return f.size
+        except OSError:
+            pass
+        # The raw open was denied (unprivileged GUI preflight, or TCC without
+        # Full Disk Access) or SEEK_END came back empty — diskutil reports the
+        # size without touching the device node, so the capacity check still
+        # works.
+        return _diskutil_total_size(device_path)
     try:
         with RawDeviceFile(device_path, writable=False) as f:
             return f.size
     except OSError:
+        return None
+
+
+def _diskutil_total_size(device_path):
+    """Disk byte length via ``diskutil info -plist`` (macOS), or ``None``."""
+    try:
+        r = subprocess.run(["diskutil", "info", "-plist", device_path],
+                           capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout:
+        return None
+    return _parse_diskutil_total_size(r.stdout)
+
+
+def _parse_diskutil_total_size(plist_bytes):
+    """``TotalSize`` (bytes) out of a ``diskutil info -plist`` document."""
+    import plistlib
+    try:
+        info = plistlib.loads(plist_bytes)
+    except Exception:
+        return None
+    size = info.get("TotalSize") or info.get("Size")
+    try:
+        return int(size) if size else None
+    except (TypeError, ValueError):
         return None
 
 
@@ -543,12 +687,18 @@ def _disk_offline_for_write(device_path, log=None):
     thing dd/imaging tools do under the hood.  Best-effort: a failure here is
     logged and we proceed (the write itself then surfaces any access error).
 
-    No-op on non-Windows and for non-``PHYSICALDRIVE`` paths (e.g. a backing
-    file in tests) — POSIX users unmount the card's auto-mounted partitions
-    themselves; we log a hint.
+    On macOS the card's auto-mounted volumes are unmounted with ``diskutil
+    unmountDisk`` first — a mounted volume blocks the whole-disk write open
+    with EBUSY, same idea as the Windows lock/dismount.  There is no "online"
+    step to undo afterwards: DiskArbitration re-probes the disk by itself once
+    the flash finishes.  On Linux (no elevation-safe unmount tool we can rely
+    on) we log a hint.  No-op for non-device paths (e.g. a backing file in
+    tests).
     """
     if sys.platform != "win32":
-        if log is not None and (device_path or "").startswith("/dev/"):
+        if sys.platform == "darwin" and is_device_path(device_path):
+            _macos_unmount_disk(device_path, log)
+        elif log is not None and (device_path or "").startswith("/dev/"):
             log("If the write fails as busy, unmount the card's partitions "
                 "first (they may have been auto-mounted).", "info")
         yield
@@ -580,6 +730,28 @@ def _disk_offline_for_write(device_path, log=None):
         if log is not None:
             log("Bringing disk %d back online." % n, "info")
         _ps("Set-Disk -Number %d -IsOffline $false" % n)
+
+
+def _macos_unmount_disk(device_path, log=None):
+    """``diskutil unmountDisk`` every volume on *device_path* (best-effort).
+
+    Failure is logged and we press on — the write open itself surfaces any
+    real block (EBUSY), matching the Windows helpers' best-effort contract."""
+    if log is not None:
+        log("Unmounting the card's volumes so the whole card can be "
+            "written (diskutil unmountDisk)…", "info")
+    try:
+        r = subprocess.run(["diskutil", "unmountDisk", device_path],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        if log is not None:
+            log("Couldn't unmount the card's volumes (%s) — continuing." % e,
+                "warning")
+        return
+    if r.returncode != 0 and log is not None:
+        log("diskutil unmountDisk reported: %s — continuing; the write "
+            "itself will surface any real block."
+            % (r.stderr or r.stdout or "unknown error").strip(), "warning")
 
 
 def _volume_disk_number(letter):
@@ -698,26 +870,34 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
             "check. Make sure the card is at least %s." % format_size(img_size),
             "warning")
 
-    with _disk_offline_for_write(device_path, log), \
-            _locked_volumes(device_path, log):
-        with RawDeviceFile(device_path, writable=True) as dev:
-            with open(image_path, "rb") as src:
-                written = dev.copy_image_onto(
-                    src, img_size, progress=progress, cancel=cancel)
-            dev.flush()
-        # Read the card back and confirm it byte-for-byte matches the image.
-        # A raw flash has no other integrity check, and a silently-bad write
-        # (flaky card/reader) produces a card the machine can't install from
-        # -- on CGC, a corrupt journal region got replayed on the machine and
-        # reverted the payload to a SHELL ERROR, indistinguishable from a good
-        # card until it failed on the hardware.  Verify here, with a fresh
-        # read handle (post-flush, post-close) so we compare what actually
-        # landed, not a write-cache echo.
-        if verify:
-            if on_verify_start is not None:
-                on_verify_start()
-            _verify_flash_readback(device_path, image_path, img_size,
-                                   log=log, progress=progress, cancel=cancel)
+    try:
+        with _disk_offline_for_write(device_path, log), \
+                _locked_volumes(device_path, log):
+            with RawDeviceFile(device_path, writable=True) as dev:
+                with open(image_path, "rb") as src:
+                    written = dev.copy_image_onto(
+                        src, img_size, progress=progress, cancel=cancel)
+                dev.flush()
+            # Read the card back and confirm it byte-for-byte matches the
+            # image.  A raw flash has no other integrity check, and a
+            # silently-bad write (flaky card/reader) produces a card the
+            # machine can't install from -- on CGC, a corrupt journal region
+            # got replayed on the machine and reverted the payload to a SHELL
+            # ERROR, indistinguishable from a good card until it failed on
+            # the hardware.  Verify here, with a fresh read handle
+            # (post-flush, post-close) so we compare what actually landed,
+            # not a write-cache echo.
+            if verify:
+                if on_verify_start is not None:
+                    on_verify_start()
+                _verify_flash_readback(device_path, image_path, img_size,
+                                       log=log, progress=progress,
+                                       cancel=cancel)
+    except PermissionError as e:
+        # Surface a denied device open (macOS TCC without Full Disk Access,
+        # or a genuinely unelevated run) as a FlashError so the dialog shows
+        # the remedy instead of a helper traceback.
+        raise FlashError(str(e)) from e
     if progress is not None:
         progress(img_size, img_size, "Flash complete")
     if log is not None:

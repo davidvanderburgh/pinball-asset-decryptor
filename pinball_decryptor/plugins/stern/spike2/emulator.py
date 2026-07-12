@@ -193,7 +193,6 @@ class Spike2Emu:
 
     def __init__(self, game_real_path, image_path):
         raw = open(game_real_path, "rb").read()
-        self._gr_path = game_real_path   # re-read on demand for SFX-name mining
         segs, relocs = parse_elf(raw)
         self._segs = segs   # (vaddr, off, filesz, memsz) — for fn-ptr validation
         # Firmware addresses: the validated (TMNT) build uses the hardcoded
@@ -859,13 +858,6 @@ class Spike2Emu:
                     pred16=_u16(obj, 0x18), seed_a=_u32(obj, 0x14),
                     band0_keyoff_rel=(_u32(obj, 0x0c) - self.VF2_VA) & 0xffffffff,
                     stride=obj[0x1a], chan=obj[0x1b], scale=obj[0x1d])
-                # Sound-container identity key snapshotted at the skipped find
-                # (generic builds only) — pairs this idx with the play-time
-                # descriptor for SFX auto-naming (spike2.sfx_names).  None on the
-                # validated TMNT path (no find-skip) and any record whose read
-                # faulted; naming degrades to unnamed for those.
-                fk = getattr(self, "_last_find_key", None)
-                row["key0"] = _u32(fk, 0) if fk and len(fk) >= 4 else None
                 if self._generic:
                     # The generic decode replays the raw band-build obj verbatim
                     # (no per-build field reassembly), with body_off / length /
@@ -922,20 +914,8 @@ class Spike2Emu:
         # only *writes* the codec-obj fields into the node (never reads the
         # template), so a blank node is bit-exact (validated on TMNT too).
         find_skip = self._generic and self.FIND_BL is not None
-        self._last_find_key = None
         if find_skip:
             def at_find(eng):
-                # The skipped `bl` is the sound-container find/insert: r2 points at
-                # the 8-byte identity key the firmware later uses to look this
-                # sound up from a play-time descriptor (op11 payload).  Snapshot it
-                # (read-only, before the skip) so a caller can pair each record's
-                # idx with its key for the SFX-name mapping (see spike2.sfx_names);
-                # it has no effect on the codec-obj the decode consumes.
-                try:
-                    eng._last_find_key = bytes(eng.mu.mem_read(
-                        eng.mu.reg_read(UC_ARM_REG_R2), 8))
-                except UcError:
-                    eng._last_find_key = None
                 eng.mu.reg_write(UC_ARM_REG_R0, self._blank_node)
                 eng.mu.reg_write(UC_ARM_REG_PC, self.FIND_BL + 4)
             self.extra[self.FIND_BL] = at_find

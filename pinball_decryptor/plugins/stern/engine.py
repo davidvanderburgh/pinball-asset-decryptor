@@ -141,12 +141,8 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     if os.path.exists(cache):
         try:
             params = pickle.load(open(cache, "rb"))
-            # Re-derive a pre-SFX-naming cache (no ``key0``) so the container-key
-            # snapshot the name mapping needs is present; harmless for decode.
-            if params and "key0" in params[0]:
-                log("Loaded cached codec parameters (%d sounds)."
-                    % len(params), "info")
-                return params
+            log("Loaded cached codec parameters (%d sounds)." % len(params), "info")
+            return params
         except Exception:
             pass
     log("Deriving codec parameters from the firmware (one-time per card, "
@@ -1017,77 +1013,6 @@ def _remove_renamed_audio_twins(audio_dir, log=None, duration_names=False):
             "run again if enabled)." % removed, "info")
 
 
-def _sfx_names_cache_path(fp):
-    """Sibling of the params cache holding the ``{idx: name}`` SFX-name map."""
-    return os.path.join(os.path.dirname(_cache_path(fp)), fp[:32] + ".sfxnames.json")
-
-
-def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
-    """``{idx: "SE FX <NAME>"}`` for the sounds the game's Sound Test menu names.
-
-    Mines the menu name table from the firmware and drives its asset resolver to
-    map each name onto the extraction idx (see :mod:`.spike2.sfx_names`).  Cached
-    per card next to the params.  Best-effort: ``{}`` for older menu-less titles
-    or any build whose resolver can't be located — the extract keeps plain idx
-    names.  *emu* must be booted and *params* must carry ``key0``."""
-    import json
-    fp = _fingerprint(game_real_path, image_path)
-    cache = _sfx_names_cache_path(fp)
-    if os.path.exists(cache):
-        try:
-            return {int(k): v for k, v in json.load(open(cache)).items()}
-        except Exception:
-            pass
-    try:
-        from .spike2 import sfx_names as _sfxn
-        name_map = _sfxn.build_name_map(emu, params)
-    except Exception as e:
-        log("Sound-effect auto-naming unavailable (%s)." % e, "info")
-        name_map = {}
-    try:
-        json.dump({str(k): v for k, v in name_map.items()}, open(cache, "w"))
-    except Exception:
-        pass
-    if name_map and log:
-        log("Matched %d sound effect(s) to their Sound Test menu name(s)."
-            % len(name_map), "success")
-    return name_map
-
-
-_ILLEGAL_FN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
-def _apply_sfx_names(audio_dir, name_map, params, duration_names, log=None):
-    """Rename each decoded ``idx####.wav`` to ``idx#### - <STERN NAME>.wav`` for
-    the SFX the Sound Test menu names.  Runs after decode; a missing bare file
-    (a sound that failed to decode) is skipped.  Returns the count renamed."""
-    if not name_map or not os.path.isdir(audio_dir):
-        return 0
-    by_idx = {p["idx"]: p for p in params}
-    renamed = 0
-    for idx, name in name_map.items():
-        p = by_idx.get(idx)
-        if p is None:
-            continue
-        base = _wav_basename(p, duration_names)
-        src = os.path.join(audio_dir, base)
-        if not os.path.isfile(src):
-            continue
-        safe = _ILLEGAL_FN.sub("", name).strip().rstrip(".")[:80] or "sound"
-        dst = os.path.join(audio_dir, base[:-4] + " - " + safe + ".wav")
-        if os.path.abspath(dst) == os.path.abspath(src):
-            continue
-        try:
-            os.replace(src, dst)
-            renamed += 1
-        except OSError:
-            pass
-    if renamed and log:
-        log("Named %d sound effect(s) from the Sound Test menu." % renamed,
-            "success")
-    return renamed
-
-
 # --------------------------------------------------------------------------
 def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 cancel=None, phase=None, open_disk=None, log_line=None,
@@ -1249,11 +1174,6 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                        "future update." % saved) if saved else ""), "warning")
             phase(5)  # Checksums
             return 0
-        # Map the game's Sound Test menu names onto the sounds while the codec
-        # emu is still booted (mines the firmware menu + drives its resolver).
-        # Best-effort + cached; {} for titles without the menu.
-        sfx_name_map = _load_or_build_sfx_names(
-            emu, gr_path, img_path, params, log)
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 
@@ -1292,8 +1212,6 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                 "video, images and text extracted normally." % total, "error")
         else:
             log("Decoded %d/%d sounds to %s" % (ok, total, audio_dir), "success")
-            # Title the decoded SFX with their Sound Test menu names (no-op {}).
-            _apply_sfx_names(audio_dir, sfx_name_map, params, duration_names, log)
         if music_banks and not cancel():
             if emu is not None:
                 emu.close(); emu = None    # free the cat-0 emu before booting CatEmu

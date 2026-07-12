@@ -80,7 +80,6 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.codec" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.parallel" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.category" \
-    --hidden-import "pinball_decryptor.plugins.stern.spike2.sfx_names" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \

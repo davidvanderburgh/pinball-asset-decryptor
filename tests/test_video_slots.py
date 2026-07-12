@@ -138,6 +138,64 @@ def test_dp_video_slot_dirs_excludes_decoded_videos(manufacturers_by_key, tmp_pa
     assert rels == ["assets/real.mp4"]  # the decoded scene is excluded
 
 
+# ---- encode timeout + codec args (no ffmpeg needed) -----------------------
+
+def test_encode_timeout_scales_with_duration():
+    # The wall-clock cap exists to catch a hung ffmpeg, not a slow one — it
+    # must grow with the clip so a full-song VP9 encode isn't killed (the
+    # old flat 900s did exactly that on a 9-minute GNR webm).
+    from pinball_decryptor.core.video import _encode_timeout
+    assert _encode_timeout(0) == 3600           # unknown length
+    assert _encode_timeout(10) == 900           # short clip: floor
+    assert _encode_timeout(564) == 564 * 20     # a full song scales up
+    assert _encode_timeout(10_000) == 4 * 3600  # bounded
+
+
+def test_webm_codec_args_use_fast_vp9():
+    from pinball_decryptor.core.video import _video_codec_args
+    for alpha in (False, True):
+        vargs, aargs = _video_codec_args(".webm", alpha)
+        assert "libvpx-vp9" in vargs
+        assert "-row-mt" in vargs and "-cpu-used" in vargs
+        assert aargs == ["-c:a", "libopus"]
+
+
+def test_transcode_abort_reports_friendly_errors(monkeypatch, tmp_path):
+    # A killed encode must not surface a raw ffmpeg command dump; each abort
+    # reason maps to a human-readable detail ("cancelled" stays terse so the
+    # log reads naturally).
+    from pinball_decryptor.core import video
+
+    monkeypatch.setattr(video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(video, "probe_duration", lambda p: 5.0)
+
+    for abort, needle in (("timeout", "timed out"),
+                          ("stall", "no output"),
+                          ("cancelled", "cancelled")):
+        monkeypatch.setattr(video, "_run_ffmpeg_watched",
+                            lambda cmd, limit, cancel_cb=None, a=abort:
+                            (None, b"", a))
+        ok, detail = video.transcode_video_to(
+            str(tmp_path / "in.mp4"), str(tmp_path / "out.webm"), None)
+        assert ok is False
+        assert needle in detail
+        assert "-c:v" not in detail  # no raw command dump
+
+
+def test_stage_replacements_stops_on_cancel(tmp_path):
+    # A truthy cancel_cb stops before any staging work — nothing staged,
+    # nothing reported as a failure (the user asked to stop, they didn't
+    # break anything).
+    (tmp_path / "a.mp4").write_bytes(b"\x00")
+    (tmp_path / "rep.mp4").write_bytes(b"\x00")
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     probe=False)}
+    staged, failures = stage_replacements(
+        slots, {"a.mp4": str(tmp_path / "rep.mp4")}, cancel_cb=lambda: True)
+    assert staged == 0 and failures == []
+    assert (tmp_path / "a.mp4").read_bytes() == b"\x00"  # untouched
+
+
 # ---- staging (needs ffmpeg) ----------------------------------------------
 
 def test_stage_reencodes_to_slot_format_and_resolution(tmp_path):
@@ -163,6 +221,32 @@ def test_stage_reencodes_to_slot_format_and_resolution(tmp_path):
     assert after is not None
     assert after.width == 160 and after.height == 120  # scaled to the slot
     assert after.duration > 1.5                        # full length kept
+
+
+def test_stage_reencodes_to_webm_slot(tmp_path):
+    # The GNR-shaped path: a non-matching replacement re-encoded into a .webm
+    # slot.  Exercises the real libvpx-vp9 invocation (speed + constant-
+    # quality flags) — a flag ffmpeg rejects would exit non-zero here.
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "song.webm")
+    if not _make_testsrc(slot, seconds=1.0, width=160, height=120, ext="webm"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=320, height=240, ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(
+        str(tmp_path), roots=[str(tmp_path / "clips")], exts=(".webm",))}
+    rel = "clips/song.webm"
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert staged == 1 and failures == []
+    after = detect_video_info(slot)
+    assert after is not None and after.vcodec == "vp9"
+    assert after.width == 160 and after.height == 120
 
 
 def test_stage_copies_through_when_already_matching(tmp_path):

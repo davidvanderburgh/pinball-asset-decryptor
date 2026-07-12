@@ -28,6 +28,7 @@ def _make_app():
     a = appmod.App.__new__(appmod.App)   # skip Tk/window construction
     a.msg_queue = queue.Queue()
     a._staging_failures = []
+    a._cancel_requested = False
     a.pipeline = _FakePipeline()
     return a
 
@@ -41,7 +42,8 @@ def _drain(q):
 
 def _set_staging(monkeypatch, a, audio, video=(0, 0, []), image=(0, 0, [])):
     monkeypatch.setattr(a, "_stage_pending_audio", lambda d: audio)
-    monkeypatch.setattr(a, "_stage_pending_video", lambda d: video)
+    monkeypatch.setattr(a, "_stage_pending_video",
+                        lambda d, cancel_cb=None: video)
     monkeypatch.setattr(a, "_stage_pending_image", lambda d: image)
 
 
@@ -87,6 +89,22 @@ def test_no_assignments_builds_normally(monkeypatch):
 
     assert a.pipeline.ran is True
     assert a._staging_failures == []
+
+
+def test_cancel_during_staging_skips_build_and_error_dialog(monkeypatch):
+    # User pressed Cancel while a (long) replacement was still staging: the
+    # run must end as a plain "Cancelled." — no build, and no scary "none of
+    # your replacements could be applied" dialog for a deliberate stop.
+    a = _make_app()
+    a._cancel_requested = True
+    _set_staging(monkeypatch, a, audio=(1, 0, [("video: x.webm", "cancelled")]))
+    a._run_pipeline_with_audio("ASSETS")
+
+    assert a.pipeline.ran is False
+    dones = [m for m in _drain(a.msg_queue) if isinstance(m, DoneMsg)]
+    assert dones and dones[0].success is False
+    assert "NOT built" not in dones[0].summary
+    assert "Cancelled" in dones[0].summary
 
 
 def test_mixed_surfaces_some_staged_runs(monkeypatch):

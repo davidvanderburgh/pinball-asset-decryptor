@@ -20,6 +20,8 @@ ffmpeg / ffprobe discovery (and the no-console-window flag) is shared with
 import json
 import os
 import subprocess
+import threading
+import time
 
 from .audio import (_CREATE_FLAGS, find_ffmpeg, find_ffprobe, probe_duration)
 
@@ -352,10 +354,16 @@ def _video_codec_args(ext, alpha):
                      "-pix_fmt", "yuva444p10le"], ["-c:a", "pcm_s16le"])
         return (["-c:v", "libx264", "-pix_fmt", "yuv420p"], ["-c:a", "aac"])
     if ext == ".webm":
+        # libvpx-vp9 at its defaults (cpu-used 1, single-threaded rows)
+        # encodes long clips at a small fraction of realtime — a full-song
+        # 1360x768 video can take the better part of an hour.  good/4 with
+        # row multithreading is several times faster at near-identical
+        # quality for this material.
+        speed = ["-deadline", "good", "-cpu-used", "4", "-row-mt", "1"]
         if alpha:
-            return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p"],
+            return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p"] + speed,
                     ["-c:a", "libopus"])
-        return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p"],
+        return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p"] + speed,
                 ["-c:a", "libopus"])
     if ext == ".ogv":
         return (["-c:v", "libtheora", "-q:v", "7"], ["-c:a", "libvorbis"])
@@ -364,16 +372,106 @@ def _video_codec_args(ext, alpha):
     return (None, None)
 
 
+def _encode_timeout(duration):
+    """Wall-clock cap in seconds for one ffmpeg encode of a *duration*-second
+    clip.
+
+    The cap exists only to catch a truly hung ffmpeg — it must never kill an
+    encode that is merely slow.  A flat 900s did exactly that: VP9 on a slow
+    machine can run well below realtime, so a full-song replacement (a
+    9-minute GNR webm) legitimately needs more than 15 minutes.  Scale with
+    the clip length (20x realtime is far slower than any working encode),
+    bounded to [15 minutes, 4 hours]; unknown length gets a flat hour.
+    """
+    if not duration or duration <= 0:
+        return 3600
+    return max(900, min(int(duration * 20), 4 * 3600))
+
+
+def _timeout_error(seconds):
+    """Human-readable failure detail for an encode that hit the wall-clock
+    cap (str(TimeoutExpired) would dump the whole ffmpeg command line)."""
+    return (f"re-encode timed out after {seconds // 60} minutes — ffmpeg was "
+            f"found and ran, but converting this clip is too slow on this "
+            f"machine.  Try a shorter clip, or supply one already in the "
+            f"slot's exact format (container/codec/resolution/fps) so it "
+            f"copies through without re-encoding")
+
+
+# An encoding ffmpeg prints stats to stderr every ~half second, so a long
+# silence means it's wedged (source on a dropped network share, cloud file
+# that won't download), not slow.  This catches a hung ffmpeg in minutes
+# even though the wall-clock cap above is sized for hours-long slow encodes.
+_STALL_LIMIT = 300
+
+
+def _stall_error():
+    return (f"ffmpeg produced no output for {_STALL_LIMIT // 60} minutes and "
+            f"was stopped — the replacement file may be unreadable (network "
+            f"drive dropped?  cloud placeholder not downloaded?).  Check it "
+            f"plays in a video player, then try again")
+
+
+def _run_ffmpeg_watched(cmd, limit, cancel_cb=None):
+    """Run an ffmpeg encode under a watchdog instead of one blocking wait.
+
+    Returns ``(returncode, stderr_tail, abort)`` where *abort* is ``None``
+    for a normal exit, or ``"cancelled"`` / ``"stall"`` / ``"timeout"`` when
+    the process was killed (user cancel, no stderr activity for
+    :data:`_STALL_LIMIT` seconds, or *limit* seconds total).  Distinguishing
+    stalled from slow is what lets the wall-clock cap be generous: a working
+    encode streams stats to stderr continuously, a wedged one goes silent.
+    """
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                            creationflags=_CREATE_FLAGS)
+    tail = bytearray()
+    last_activity = [time.monotonic()]
+
+    def _drain():
+        try:
+            for chunk in iter(lambda: proc.stderr.read1(4096), b""):
+                last_activity[0] = time.monotonic()
+                tail.extend(chunk)
+                if len(tail) > 131072:      # keep only the recent stderr
+                    del tail[:-65536]
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=_drain, daemon=True)
+    reader.start()
+    start = time.monotonic()
+    abort = None
+    while proc.poll() is None:
+        now = time.monotonic()
+        if cancel_cb is not None and cancel_cb():
+            abort = "cancelled"
+        elif now - last_activity[0] > _STALL_LIMIT:
+            abort = "stall"
+        elif now - start > limit:
+            abort = "timeout"
+        if abort:
+            proc.kill()
+            proc.wait()
+            break
+        time.sleep(0.25)
+    reader.join(timeout=5)
+    return proc.returncode, bytes(tail), abort
+
+
 def transcode_video_to(src_path, dst_path, original_info,
-                       match_length=False):
+                       match_length=False, cancel_cb=None):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
     Resolution, frame rate, and (where the format allows) the alpha channel
     are matched to *original_info* so the result drops into the slot it
     replaces.  When *match_length* is set, the result is trimmed or padded to
-    the original's duration.  Returns ``(ok, actions)`` — *actions* is a short
-    human-readable summary; on failure *ok* is False and *actions* is an error.
+    the original's duration.  *cancel_cb* (returns truthy to abort) is polled
+    during the encode so a user Cancel stops ffmpeg promptly.  Returns
+    ``(ok, actions)`` — *actions* is a short human-readable summary; on
+    failure *ok* is False and *actions* is an error.
 
     Requires ffmpeg.
     """
@@ -403,17 +501,22 @@ def transcode_video_to(src_path, dst_path, original_info,
 
     cmd = [ffmpeg, "-y", "-i", src_path]
 
-    # Length matching: trim a longer source, pad a shorter one.
+    # Length matching: trim a longer source, pad a shorter one.  enc_dur is
+    # how many seconds of video the encode will actually produce — it drives
+    # the wall-clock cap below.
+    src_dur = probe_duration(src_path)
+    enc_dur = src_dur
     cap_to = None
     if match_length and original_info and original_info.duration > 0:
-        src_dur = probe_duration(src_path)
         target = original_info.duration
         if src_dur > target + 0.05:
             cap_to = target
+            enc_dur = target
             actions.append(f"trim {src_dur:.1f}s→{target:.1f}s")
         elif src_dur and src_dur < target - 0.05:
             vf.append(
                 f"tpad=stop_mode=clone:stop_duration={target - src_dur:.3f}")
+            enc_dur = target
             actions.append(f"pad {src_dur:.1f}s→{target:.1f}s")
 
     if vf:
@@ -421,25 +524,37 @@ def transcode_video_to(src_path, dst_path, original_info,
     if original_info and original_info.fps > 0:
         cmd += ["-r", f"{original_info.fps:.4f}"]
     cmd += vargs
+    if "libvpx-vp9" in vargs:
+        # Pin constant-quality mode: with no explicit rate control the
+        # libvpx-vp9 default varies by ffmpeg build (older ones target
+        # 256kbps — visibly blocky at slot resolutions).  This path has no
+        # byte budget; shrink_video_to_size sets its own -b:v.
+        cmd += ["-crf", "32", "-b:v", "0"]
     cmd += aargs
     if cap_to is not None:
         cmd += ["-t", f"{cap_to:.3f}"]
     cmd.append(dst_path)
 
+    limit = _encode_timeout(enc_dur)
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=900,
-                           creationflags=_CREATE_FLAGS)
-    except (subprocess.TimeoutExpired, OSError) as e:
+        rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
+    except OSError as e:
         return False, str(e)
-    if r.returncode == 0 and os.path.isfile(dst_path) \
+    if abort == "cancelled":
+        return False, "cancelled"
+    if abort == "stall":
+        return False, _stall_error()
+    if abort == "timeout":
+        return False, _timeout_error(limit)
+    if rc == 0 and os.path.isfile(dst_path) \
             and os.path.getsize(dst_path) > 0:
         return True, ", ".join(a for a in actions if a)
-    err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-    return False, (err[-1] if err else f"ffmpeg failed (code {r.returncode})")
+    err = stderr.decode("utf-8", "replace").strip().splitlines()
+    return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
 
 
 def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
-                         attempts=3):
+                         attempts=3, cancel_cb=None):
     """Re-encode *src_path* into *dst_path* (same container/codec/resolution)
     targeting a muxed file no larger than *max_bytes*.
 
@@ -496,17 +611,23 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
         else:
             cmd += ["-an"]
         cmd.append(dst_path)
+        limit = _encode_timeout(dur)
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=900,
-                               creationflags=_CREATE_FLAGS)
-        except (subprocess.TimeoutExpired, OSError) as e:
+            rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
+        except OSError as e:
             return False, str(e)
-        if r.returncode == 0 and os.path.isfile(dst_path):
+        if abort == "cancelled":
+            return False, "cancelled"
+        if abort == "stall":
+            return False, _stall_error()
+        if abort == "timeout":
+            return False, _timeout_error(limit)
+        if rc == 0 and os.path.isfile(dst_path):
             sz = os.path.getsize(dst_path)
             if 0 < sz <= max_bytes:
                 return True, str(sz)
             last_err = f"re-encode landed at {sz} > {max_bytes} bytes"
         else:
-            err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-            last_err = err[-1] if err else f"ffmpeg failed (code {r.returncode})"
+            err = stderr.decode("utf-8", "replace").strip().splitlines()
+            last_err = err[-1] if err else f"ffmpeg failed (code {rc})"
     return False, last_err or "could not shrink to fit"

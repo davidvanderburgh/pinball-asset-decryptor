@@ -306,7 +306,8 @@ def video_to_cdmd(src_video, dst_path, canvas_w, canvas_h, nframes):
     if nframes <= 0:
         return False, "original cdmd has no frames to match"
 
-    from ...core.video import probe_video_duration
+    from ...core.video import (_encode_timeout, _timeout_error,
+                               probe_video_duration)
     dur = probe_video_duration(src_video)
     fps_out = (nframes / dur) if (dur and dur > 0) else float(DEFAULT_FPS)
     fps_out = max(0.1, fps_out)
@@ -314,10 +315,13 @@ def video_to_cdmd(src_video, dst_path, canvas_w, canvas_h, nframes):
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", src_video,
            "-vf", f"scale={canvas_w}:{canvas_h},fps={fps_out:.6f}",
            "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+    limit = _encode_timeout(dur)
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=900,
+        r = subprocess.run(cmd, capture_output=True, timeout=limit,
                            creationflags=_NO_WINDOW)
-    except (subprocess.TimeoutExpired, OSError) as e:
+    except subprocess.TimeoutExpired:
+        return False, _timeout_error(limit)
+    except OSError as e:
         return False, str(e)
     if r.returncode != 0 or not r.stdout:
         err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()

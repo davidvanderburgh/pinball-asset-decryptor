@@ -182,7 +182,8 @@ def _already_matches(slot: VideoSlot, replacement_path: str, rep_ext: str,
 
 
 def stage_replacement(slot: VideoSlot, replacement_path: str,
-                      trim_to_length: bool = False, no_conversion: bool = False):
+                      trim_to_length: bool = False, no_conversion: bool = False,
+                      cancel_cb=None):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -249,7 +250,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
         elif find_ffmpeg():
             ok, detail = transcode_video_to(
                 replacement_path, tmp, slot.info,
-                match_length=trim_to_length)
+                match_length=trim_to_length, cancel_cb=cancel_cb)
             if not ok:
                 if os.path.exists(tmp):
                     try:
@@ -282,7 +283,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        assignments: Dict[str, str],
                        trim_to_length: bool = False,
                        no_conversion: bool = False,
-                       log_cb=None, progress_cb=None, assets_dir=None):
+                       log_cb=None, progress_cb=None, assets_dir=None,
+                       cancel_cb=None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
@@ -293,6 +295,10 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     *assets_dir*, when given, snapshots each slot's pristine bytes under
     ``.orig/`` before the first overwrite so the edit can be reverted without a
     full re-extract (see :mod:`core.staged_originals`).
+
+    *cancel_cb* (returns truthy to abort) stops before the next item and is
+    also polled inside each re-encode, so a user Cancel takes effect within
+    seconds even mid-encode of a long clip.
     """
     from .checksums import read_baseline_any
     from . import staged_originals
@@ -305,6 +311,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
 
     for i, (rel, rep) in enumerate(items):
+        if cancel_cb is not None and cancel_cb():
+            if log_cb:
+                log_cb("Cancelled — skipping the remaining video "
+                       "replacement(s).", "error")
+            break
         slot = slots_by_rel[rel]
         if progress_cb:
             progress_cb(i, total, rel)
@@ -313,7 +324,8 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
-                                       no_conversion=no_conversion)
+                                       no_conversion=no_conversion,
+                                       cancel_cb=cancel_cb)
         if ok:
             staged += 1
             if log_cb:

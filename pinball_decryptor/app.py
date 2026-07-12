@@ -1572,11 +1572,8 @@ class App:
                 raise ValueError(
                     f"None of your {pending} assigned replacement(s) "
                     f"could be applied, so the pack would not contain "
-                    f"them.  This is almost always a missing ffmpeg "
-                    f"(every replacement is re-encoded to the game's "
-                    f"exact audio format, which needs it).  Click "
-                    f"\"Install Missing\" above the tabs, restart, and "
-                    f"try again.")
+                    f"them.\n\n{self._failure_lines(failures)}\n\n"
+                    f"{self._noop_stage_hint()}")
             n, path = modpack.export_mod_pack(
                 assets_dir, zip_path,
                 log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
@@ -2065,6 +2062,35 @@ class App:
     # Replace Audio / Video — auto-applied as part of Write (no manual step)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _failure_lines(failures):
+        """Bulleted per-file error list for the 'nothing could be applied'
+        dialogs (capped so a huge batch doesn't overflow the messagebox)."""
+        detail = "\n".join(f"  • {rel}: {err}" for rel, err in failures[:20])
+        if len(failures) > 20:
+            detail += f"\n  • ... and {len(failures) - 20} more"
+        return detail
+
+    @staticmethod
+    def _noop_stage_hint():
+        """Tail text for the 'nothing could be applied' dialogs.
+
+        Historically this always blamed a missing ffmpeg, which sent users
+        chasing "Install Missing" even when ffmpeg was present and the real
+        reason (e.g. a re-encode timeout) was sitting in the per-file
+        errors.  Only blame ffmpeg when it is actually missing."""
+        from .core.audio import find_ffmpeg
+        if not find_ffmpeg():
+            return (
+                "This is almost always a missing ffmpeg (every replacement "
+                "is re-encoded to the game's exact format, which needs it). "
+                " Click \"Install Missing\" above the tabs, restart, and "
+                "try again.")
+        return (
+            "ffmpeg is installed, so this is NOT the usual missing-ffmpeg "
+            "case — the per-file error(s) above say what actually went "
+            "wrong.")
+
     def _run_pipeline_with_audio(self, assets_dir):
         """Worker-thread entry for a Write run: apply any Replace-Audio,
         Replace-Video and Replace-Image assignments into the assets folder
@@ -2077,28 +2103,29 @@ class App:
         We stop loudly instead.  Partial failures are remembered so the
         success dialog can flag which replacements were skipped."""
         pend_a = self._stage_pending_audio(assets_dir)
-        pend_v = self._stage_pending_video(assets_dir)
+        pend_v = self._stage_pending_video(
+            assets_dir, cancel_cb=lambda: self._cancel_requested)
         pend_i = self._stage_pending_image(assets_dir)
         pending = pend_a[0] + pend_v[0] + pend_i[0]
         staged = pend_a[1] + pend_v[1] + pend_i[1]
         failures = pend_a[2] + pend_v[2] + pend_i[2]
         self._staging_failures = failures
 
+        if self._cancel_requested:
+            # The user cancelled during staging — don't dress the partial
+            # staging up as a failure, and don't start the pipeline just to
+            # have it notice the cancel.  _on_done shows the Cancelled state.
+            self.msg_queue.put(DoneMsg(False, "Cancelled."))
+            return
+
         if pending and not staged:
-            detail = "\n".join(f"  • {rel}: {err}"
-                               for rel, err in failures[:20])
-            if len(failures) > 20:
-                detail += f"\n  • ... and {len(failures) - 20} more"
             msg = (
                 f"None of your {pending} assigned replacement(s) could be "
                 f"applied, so the update was NOT built — the output would have "
                 f"been an unmodified copy of the original image (it boots fine "
                 f"but shows none of your changes).\n\n"
-                f"{detail}\n\n"
-                f"This is almost always a missing/!unfound ffmpeg (every "
-                f"replacement is re-encoded to the game's exact audio format, "
-                f"which needs it).  Click \"Install Missing\" above the tabs, "
-                f"restart, and try again.")
+                f"{self._failure_lines(failures)}\n\n"
+                f"{self._noop_stage_hint()}")
             self.msg_queue.put(LogMsg(
                 "Aborting build: none of the assigned replacements could be "
                 "applied, so the output would be unmodified.", "error"))
@@ -2222,11 +2249,15 @@ class App:
                 f"Audio replacement failed: {e}", "error"))
             return (len(assignments), 0, [("audio replacements", str(e))])
 
-    def _stage_pending_video(self, assets_dir):
+    def _stage_pending_video(self, assets_dir, cancel_cb=None):
         """Re-encode + write the user's assigned replacement clips over the
         matching files in *assets_dir* (so the Write pipeline that follows
         repacks them).  Runs on the write worker thread; logs via the queue.
-        Returns ``(pending, staged, failures)`` — see _stage_pending_audio."""
+        Returns ``(pending, staged, failures)`` — see _stage_pending_audio.
+
+        *cancel_cb* is polled between clips AND inside each re-encode (long
+        clips can take many minutes), so the Write flow's Cancel button works
+        during staging."""
         pend = (self.window.pending_video_assignments(assets_dir)
                 or self._sidecar_pending(assets_dir, "video"))
         if not pend:
@@ -2241,7 +2272,7 @@ class App:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, trim_to_length=trim,
                 no_conversion=no_conversion, log_cb=log_cb,
-                assets_dir=assets_dir)
+                assets_dir=assets_dir, cancel_cb=cancel_cb)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."
@@ -2531,18 +2562,14 @@ class App:
                     # couldn't be applied — surface them so the user knows
                     # those slots still play their original asset (instead of
                     # quietly shipping a partially-unmodified image).
-                    detail = "\n".join(f"  • {rel}: {err}"
-                                       for rel, err in fails[:20])
-                    if len(fails) > 20:
-                        detail += f"\n  • ... and {len(fails) - 20} more"
                     messagebox.showwarning(
                         "Update built — some replacements were skipped",
                         f"{summary}\n\n"
                         f"⚠ {len(fails)} assigned replacement(s) could NOT be "
                         f"applied and were left unchanged (those slots will "
-                        f"play/show their original asset):\n\n{detail}\n\n"
-                        f"This is usually a missing ffmpeg — install it (the "
-                        f"\"Install Missing\" button), then rebuild.")
+                        f"play/show their original asset):\n\n"
+                        f"{self._failure_lines(fails)}\n\n"
+                        f"{self._noop_stage_hint()}")
                 else:
                     messagebox.showinfo("Write Complete", summary)
         else:

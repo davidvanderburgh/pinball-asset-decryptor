@@ -342,6 +342,13 @@ Windows, your login password on macOS (the way Etcher does it). On
 Windows the Start Menu shortcut already elevates at launch, so you won't
 see a second prompt there.
 
+On macOS the first flash can additionally stop with a **Full Disk
+Access** message: recent macOS versions block raw SD-card access — even
+with your password — until the app is granted Full Disk Access under
+System Settings → Privacy & Security. It's a one-time setup; the error
+message in the app spells out the exact steps. Quit (⌘Q) and reopen the
+app after granting it, then flash again.
+
 ## Install
 
 ### Windows

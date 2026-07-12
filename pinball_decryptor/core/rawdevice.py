@@ -754,6 +754,61 @@ def _macos_unmount_disk(device_path, log=None):
             % (r.stderr or r.stdout or "unknown error").strip(), "warning")
 
 
+def _eject_device(device_path, log=None):
+    """Unmount + eject the just-flashed card so it's safe to pull without a manual
+    OS eject (balenaEtcher-style — flippermeister feedback).
+
+    Best-effort and non-fatal: the flash has already completed AND read-back
+    verified before this runs, so the card's data is safe regardless; a failed
+    eject only means the user ejects it themselves.  No-op for non-device paths
+    (a backing file in tests).
+
+      * macOS  — ``diskutil eject`` (unmounts every volume + releases the disk).
+      * Windows — ``Set-Disk -IsOffline`` dismounts every volume so the drive
+        letters go away and the card is safe to remove (a true media-eject isn't
+        reliable across USB card readers; offline is the same safe state Explorer
+        reaches via "Safely Remove Hardware").
+      * Linux  — ``udisksctl power-off`` (or ``eject``) to spin it down + detach.
+    """
+    if not is_device_path(device_path):
+        return
+    ok = False
+    try:
+        if sys.platform == "darwin":
+            # the write open uses /dev/rdiskN; eject the /dev/diskN whole-disk.
+            disk = device_path.replace("/dev/rdisk", "/dev/disk")
+            r = subprocess.run(["diskutil", "eject", disk],
+                               capture_output=True, text=True, timeout=60)
+            ok = r.returncode == 0
+        elif sys.platform == "win32":
+            n = _physicaldrive_number(device_path)
+            if n is not None:
+                r = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     "Set-Disk -Number %d -IsOffline $true" % n],
+                    capture_output=True, text=True, timeout=30,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                ok = r.returncode == 0
+        else:
+            for cmd in (["udisksctl", "power-off", "-b", device_path],
+                        ["eject", device_path]):
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True,
+                                       timeout=30)
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                if r.returncode == 0:
+                    ok = True
+                    break
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    if log is not None:
+        log("Card ejected — safe to remove." if ok else
+            "Couldn't auto-eject the card — eject it through your OS before "
+            "removing it (the flash itself completed and verified).",
+            "success" if ok else "info")
+
+
 def _volume_disk_number(letter):
     """Windows: the physical-disk number backing drive ``letter`` (e.g. ``E``),
     or ``None`` if the letter isn't a single-disk volume we can query."""
@@ -832,7 +887,8 @@ def _locked_volumes(device_path, log=None):
 
 
 def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
-                          cancel=None, verify=True, on_verify_start=None):
+                          cancel=None, verify=True, on_verify_start=None,
+                          eject=True):
     """dd-style raw copy of *image_path* onto the physical *device_path*.
 
     Refuses (``FlashError``) when the image is larger than the target card — a
@@ -851,6 +907,11 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
     locked + dismounted for the duration (a flash overwrites the mounted FAT
     boot partition too); see :func:`_disk_offline_for_write` and
     :func:`_locked_volumes`.
+
+    With *eject* (default True) the card is unmounted/ejected once the verified
+    write finishes, so it's safe to pull without a manual OS eject (balenaEtcher
+    behaviour; flippermeister feedback).  Best-effort — a failed eject never
+    fails the flash.
     """
     img_size = os.path.getsize(image_path)
     # Probe the capacity read-only and guard BEFORE taking the disk offline, so a
@@ -904,6 +965,11 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
         log("Wrote %s to %s%s." % (
             format_size(written), device_path,
             " (verified)" if verify else ""), "success")
+    # Auto-eject so the user can pull the card without a manual OS eject (matches
+    # balenaEtcher; flippermeister feedback).  Runs only after a fully-verified
+    # write, and never fails the flash.
+    if eject:
+        _eject_device(device_path, log)
     return written
 
 

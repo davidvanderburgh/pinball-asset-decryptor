@@ -534,3 +534,48 @@ def test_flash_capability_off_for_whitestar_era():
     assert mfr.capabilities.flash_image is False
     mfr.set_era("spike2")
     assert mfr.capabilities.flash_image is True
+
+
+# ---- auto-eject after a verified flash (flippermeister feedback) ------------
+
+def test_eject_is_noop_on_file_path(tmp_path, monkeypatch):
+    # A backing file isn't a device -> no eject subprocess is spawned, no crash.
+    ran = []
+    monkeypatch.setattr(rd.subprocess, "run",
+                        lambda *a, **k: ran.append(a))
+    rd._eject_device(str(tmp_path / "card.dev"))
+    assert ran == []
+
+
+def test_eject_best_effort_never_raises(monkeypatch):
+    # On a real device path a failing eject is logged, not raised (the flash has
+    # already completed + verified, so the card is safe regardless).
+    monkeypatch.setattr(rd, "is_device_path", lambda p: True)
+    monkeypatch.setattr(rd, "_physicaldrive_number", lambda p: 9)
+
+    def _boom(*a, **k):
+        raise OSError("no eject here")
+    monkeypatch.setattr(rd.subprocess, "run", _boom)
+    logs = []
+    rd._eject_device("/dev/disk9", log=lambda t, l="info": logs.append((l, t)))
+    assert logs and any("eject" in t.lower() for _, t in logs)
+
+
+def test_flash_auto_ejects_by_default(tmp_path, monkeypatch):
+    img = tmp_path / "src.img"; img.write_bytes(_pattern(3000))
+    card = tmp_path / "card.dev"; card.write_bytes(b"\x00" * 8192)
+    ejected = []
+    monkeypatch.setattr(rd, "_eject_device",
+                        lambda dp, log=None: ejected.append(dp))
+    rd.flash_image_to_device(str(img), str(card))          # eject defaults True
+    assert ejected == [str(card)]                          # ejected after verify
+
+
+def test_flash_eject_can_be_disabled(tmp_path, monkeypatch):
+    img = tmp_path / "src.img"; img.write_bytes(_pattern(3000))
+    card = tmp_path / "card.dev"; card.write_bytes(b"\x00" * 8192)
+    ejected = []
+    monkeypatch.setattr(rd, "_eject_device",
+                        lambda dp, log=None: ejected.append(dp))
+    rd.flash_image_to_device(str(img), str(card), eject=False)
+    assert ejected == []

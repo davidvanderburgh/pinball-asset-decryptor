@@ -96,15 +96,22 @@ HELP_CONTENT = {
          "box filters by name — with auto-naming on, that includes the "
          "transcribed call-out text and matched song titles. The Type "
          "dropdown (shown when the folder classifies) filters to one kind "
-         "of audio: Music, Sound FX (named by the game's own Sound Test "
-         "menu), Callouts (speech), or Other."),
+         "of audio: Music (song/bank tracks plus anything at least 20 "
+         "seconds long — some pins store songs as Sound-Test-named "
+         "sequences), Sound FX (named by the game's own Sound Test menu), "
+         "Callouts (speech — needs Auto-name call-outs to have run), or "
+         "Other."),
         ("Renaming",
          "Right-click a slot → \"Rename…\" to correct its name (e.g. a "
          "call-out the auto-transcriber mis-heard). The name is remembered "
          "by the sound's content, so a future extract — same card or a "
          "newer firmware carrying the same sound — reapplies it before "
-         "transcription runs. Blank restores the stock name and forgets "
-         "it."),
+         "transcription runs, and the slot keeps its Type bucket. Blank "
+         "restores the stock name and forgets it. Where the extract wrote "
+         "sound_test_names.csv (Stern), the dialog offers the game's own "
+         "Sound Test menu names as suggestions — play a number on the "
+         "machine's Sound Test menu, then pick that entry (type its number "
+         "to find it) for the slot that played."),
     ],
     "Replace Video": [
         ("Scan and assign",

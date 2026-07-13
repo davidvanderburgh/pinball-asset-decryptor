@@ -11,6 +11,7 @@ Shape:
 
 import base64
 import os
+import re
 import sys
 import time
 import tkinter as tk
@@ -2774,11 +2775,13 @@ class MainWindow:
             "<<ComboboxSelected>>", lambda _e: self._refresh_audio_list())
         _Tooltip(
             self._audio_type_combo,
-            "Show only one kind of audio. The types come from the Auto-name "
-            "passes: Music = the game's song/bank tracks, Sound FX = effects "
-            "named by the game's own Sound Test menu, Callouts = spoken "
-            "lines, Other = everything not classified (mostly short unnamed "
-            "effects).",
+            "Show only one kind of audio. Music = the game's song/bank "
+            "tracks plus anything at least 20 seconds long (some pins store "
+            "their songs as Sound-Test-named sequences, so a long \"SE FX\" "
+            "track shows under both Music and Sound FX). Sound FX = effects "
+            "named by the game's own Sound Test menu. Callouts = spoken "
+            "lines found by Auto-name call-outs. Other = the rest — short "
+            "unnamed effects.",
             lambda: self._current_theme)
         # "Group duplicates" — created here, packed per-manufacturer next to
         # the sort hint (apply_manufacturer, CGC only).
@@ -3515,12 +3518,19 @@ class MainWindow:
         query = (self.audio_search_var.get() or "").strip().lower()
         type_key = self._audio_type_filter()
         cats = self._audio_categories
+        from ..core import audio_categories as _ac
 
         def _passes(s):
             if query and query not in s.rel_path.lower():
                 return False
-            return (type_key is None
-                    or cats.get(s.rel_path, "other") == type_key)
+            if type_key is None:
+                return True
+            # Duration from the probed header, else instantly from a
+            # Length-prefix name — the Music filter is duration-aware.
+            dur = s.duration or _ac.name_duration_seconds(
+                os.path.basename(s.rel_path)) or 0.0
+            return _ac.matches_filter(
+                cats.get(s.rel_path, "other"), dur, type_key)
 
         slots = [s for s in self._audio_slots if _passes(s)]
         col, desc = self._audio_sort
@@ -3639,9 +3649,19 @@ class MainWindow:
                 f"{changed_total} of {total} slots changed{extra}")
             if shown == 0:
                 # Everything filtered out — say so, or an empty list reads
-                # like a failed scan.
-                self._audio_empty.configure(
-                    text="Nothing matches the Search / Type filter.")
+                # like a failed scan.  An empty category that an Auto-name
+                # pass would populate says which one (David's LZ extract:
+                # blank Callouts pane because transcription never ran).
+                hint = "Nothing matches the Search / Type filter."
+                if not query and type_key == "callouts":
+                    hint = ("No call-outs identified in this folder yet.\n"
+                            "Tick \"Auto-name call-outs\" on the Extract tab "
+                            "to transcribe and name the speech files.")
+                elif not query and type_key == "music":
+                    hint = ("No music identified in this folder — no music "
+                            "banks, no track 20 seconds or longer, and no "
+                            "Auto-name music results.")
+                self._audio_empty.configure(text=hint)
                 self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             else:
                 self._audio_empty.place_forget()
@@ -3949,6 +3969,75 @@ class MainWindow:
             except tk.TclError:
                 pass
 
+    def _load_sound_test_suggestions(self):
+        """The game's own Sound-Test menu names from the assets folder's
+        ``sound_test_names.csv`` (written by Extract), for the Rename dialog's
+        suggestion list.  [] when the folder has none (non-Stern, older
+        extract)."""
+        import csv
+        path = os.path.join(self._audio_scan_dir or "", "sound_test_names.csv")
+        if not self._audio_scan_dir or not os.path.isfile(path):
+            return []
+        rows = []
+        try:
+            with open(path, encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    nm = (row.get("name") or "").strip()
+                    num = (row.get("sound_number") or "").strip()
+                    if nm:
+                        rows.append((int(num) if num.isdigit() else 10**9,
+                                     nm))
+        except Exception:
+            return []
+        # Numeric menu order; the "#num" lead means typing "87" jumps to the
+        # entry you just played on the machine's Sound Test.
+        return ["#%d  %s" % (n, nm) if n < 10**9 else nm
+                for n, nm in sorted(rows)]
+
+    def _ask_audio_name(self, prompt, initial, suggestions):
+        """Modal rename prompt with a suggestion dropdown: an editable combo
+        seeded with the game's Sound-Test menu names (pick one or type your
+        own).  Returns the entered text, or None on cancel."""
+        root = self._tk_root()
+        dlg = tk.Toplevel(root)
+        dlg.title("Rename Audio")
+        dlg.transient(root)
+        dlg.resizable(False, False)
+        ttk.Label(dlg, text=prompt, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(12, 4))
+        ttk.Label(
+            dlg, text="Pick one of the game's own Sound Test names, or type "
+                      "anything:", font=(_SANS_FONT, 8, "italic")).pack(
+            anchor=tk.W, padx=12)
+        var = tk.StringVar(value=initial)
+        combo = ttk.Combobox(dlg, textvariable=var, values=suggestions,
+                             width=52)
+        combo.pack(fill=tk.X, padx=12, pady=(2, 8))
+        result = []
+
+        def _ok(_e=None):
+            text = var.get()
+            # A picked suggestion carries its "#num  " prefix — strip it; the
+            # number is for finding the entry, not part of the name.
+            m = re.match(r"^#\d+\s+(.*)$", text)
+            result.append(m.group(1) if m else text)
+            dlg.destroy()
+
+        def _cancel(_e=None):
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(0, 12))
+        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=_cancel).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        dlg.bind("<Return>", _ok)
+        dlg.bind("<Escape>", _cancel)
+        combo.focus_set()
+        dlg.grab_set()
+        root.wait_window(dlg)
+        return result[0] if result else None
+
     def _audio_rename_slot(self, rel):
         """Right-click → Rename…: set the name after the slot's decode index.
 
@@ -3969,11 +4058,15 @@ class MainWindow:
         if parts is None:
             return
         prefix, label, ext = parts
-        name = simpledialog.askstring(
-            "Rename Audio",
-            "Name for this sound — remembered for future extracts\n"
-            "(blank restores \"%s\" and forgets it):" % (prefix + ext),
-            initialvalue=label, parent=self._tk_root())
+        prompt = ("Name for this sound — remembered for future extracts\n"
+                  "(blank restores \"%s\" and forgets it):" % (prefix + ext))
+        suggestions = self._load_sound_test_suggestions()
+        if suggestions:
+            name = self._ask_audio_name(prompt, label, suggestions)
+        else:
+            name = simpledialog.askstring(
+                "Rename Audio", prompt,
+                initialvalue=label, parent=self._tk_root())
         if name is None:
             return                            # cancelled
         new_label = name_memory.sanitize_label(name)
@@ -4002,7 +4095,11 @@ class MainWindow:
             return
         rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
         if md5:
-            name_memory.remember(md5, new_label)   # blank forgets
+            # Record the slot's CURRENT bucket with the name, so the renamed
+            # file keeps its Type (an SFX he renames stays under Sound FX —
+            # monkeybug's report of a rename turning into a "callout").
+            name_memory.remember(md5, new_label,   # blank forgets
+                                 category=self._audio_categories.get(rel))
         # Re-key every bit of session state pinned to the old rel, then let a
         # same-folder rescan rebuild the slot list (it keeps assignments and
         # probed metadata; the dup-group cache self-invalidates).

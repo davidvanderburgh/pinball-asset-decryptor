@@ -70,8 +70,10 @@ def sanitize_label(text):
     return cleaned.rstrip(". ")
 
 
-def load():
-    """The whole store ``{md5: label}`` — ``{}`` on missing/corrupt/foreign."""
+def _load_raw():
+    """Raw store — values are either a bare label string (v0.63.0) or a
+    ``{"label":..., "cat":...}`` dict (v0.63.1, so a rename keeps its Type
+    bucket — monkeybug renamed an SFX and watched it turn into a callout)."""
     try:
         with open(AUDIO_NAMES_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -81,10 +83,30 @@ def load():
         return {}
     out = {}
     for k, v in data.items():
-        label = sanitize_label(str(v))
-        if label and re.fullmatch(r"[0-9a-f]{32}", str(k).lower()):
-            out[str(k).lower()] = label
+        if not re.fullmatch(r"[0-9a-f]{32}", str(k).lower()):
+            continue
+        if isinstance(v, dict):
+            label = sanitize_label(str(v.get("label", "")))
+            cat = str(v.get("cat", "")).strip().lower() or None
+        else:
+            label, cat = sanitize_label(str(v)), None
+        if label:
+            entry = {"label": label}
+            if cat:
+                entry["cat"] = cat
+            out[str(k).lower()] = entry
     return out
+
+
+def load():
+    """``{md5: label}`` — ``{}`` on missing/corrupt/foreign."""
+    return {k: v["label"] for k, v in _load_raw().items()}
+
+
+def load_categories():
+    """``{md5: category}`` for the entries that recorded one (the Type bucket
+    the slot had when the user renamed it)."""
+    return {k: v["cat"] for k, v in _load_raw().items() if "cat" in v}
 
 
 def _save(data):
@@ -97,17 +119,22 @@ def _save(data):
         pass
 
 
-def remember(md5, label):
-    """Store *label* for content *md5*; a blank label forgets the entry."""
+def remember(md5, label, category=None):
+    """Store *label* (and optionally the slot's Type *category*) for content
+    *md5*; a blank label forgets the entry."""
     if not md5:
         return
     md5 = str(md5).lower()
     label = sanitize_label(label)
-    data = load()
+    data = _load_raw()
     if label:
-        if data.get(md5) == label:
+        entry = {"label": label}
+        cat = str(category or "").strip().lower()
+        if cat:
+            entry["cat"] = cat
+        if data.get(md5) == entry:
             return
-        data[md5] = label
+        data[md5] = entry
     elif md5 in data:
         del data[md5]
     else:

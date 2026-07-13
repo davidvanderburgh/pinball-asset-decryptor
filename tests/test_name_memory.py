@@ -44,6 +44,24 @@ def test_remember_load_forget_roundtrip(tmp_path, monkeypatch):
     assert NM.load() == {}
 
 
+def test_remember_with_category(tmp_path, monkeypatch):
+    monkeypatch.setattr(NM, "AUDIO_NAMES_FILE",
+                        str(tmp_path / "audio_names.json"))
+    md5 = "b" * 32
+    NM.remember(md5, "Ramp exit swoosh", category="sfx")
+    assert NM.load() == {md5: "Ramp exit swoosh"}
+    assert NM.load_categories() == {md5: "sfx"}
+    # Re-remember without a category drops it (the caller knows best).
+    NM.remember(md5, "Ramp exit swoosh 2")
+    assert NM.load_categories() == {}
+    # Legacy plain-string store entries still load.
+    import json
+    (tmp_path / "audio_names.json").write_text(
+        json.dumps({"c" * 32: "Old style"}), encoding="utf-8")
+    assert NM.load() == {"c" * 32: "Old style"}
+    assert NM.load_categories() == {}
+
+
 def _write_baseline(assets, entries):
     with open(os.path.join(assets, CHECKSUMS_FILE), "w",
               encoding="utf-8") as f:

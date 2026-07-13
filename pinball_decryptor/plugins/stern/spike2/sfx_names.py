@@ -226,28 +226,75 @@ def _try_resolve(emu, addr, out, sid):
     return desc if desc and desc[0] == 5 else None
 
 
-def _op11_key(desc):
-    """The container key (op11 payload lo32) candidates from a descriptor.
+# Records at least this long are music beds/masters, not effects — never give
+# one an event name off the weak (broad-scan) evidence path.  Matches the
+# music threshold the transcribe / music-ID passes use.
+_MUSIC_MIN_SECONDS = 20.0
 
-    op11 (opcode 0x0b) carries the 8-byte band value; its low word is the
-    container key.  The op-stream has two observed layouts putting op11 at
-    offset 10 or 28 (payload lo32 at 14 / 32).  Anchor on the actual opcode
-    byte to avoid matching a stray 0x0b in the data, then fall back to the two
-    structural offsets."""
-    seen = []
-    # Precise: op11 opcode observed at offset 10 or 28 (payload lo32 at 14 / 32).
+
+def _descriptor_refs(desc, key0_to_idx):
+    """The extraction records a descriptor references.
+
+    Returns ``("anchored", idx)``, ``("broad", frozenset_of_idx)`` or
+    ``(None, None)``.  op11 (opcode 0x0b) carries the 8-byte band value whose
+    low word is the container key; the two fixed layouts anchor the opcode at
+    offset 10 or 28 (payload lo32 at 14 / 32) — a key found there is the
+    entry's own primary asset.  Without an anchor, every 0x0b byte is scanned
+    and ALL known-key matches are returned: event/sequence descriptors embed
+    references to several assets (their sting plus the music bed they play
+    into), so a lone scan hit is a reference, not necessarily ownership."""
     if len(desc) >= 18 and desc[10] == 0x0B:
-        seen.append(_u32(desc, 14))
+        idx = key0_to_idx.get(_u32(desc, 14))
+        if idx is not None:
+            return "anchored", idx
     if len(desc) >= 36 and desc[28] == 0x0B:
-        seen.append(_u32(desc, 32))
-    # Broaden: op11 can sit elsewhere when earlier ops vary in length — take the
-    # word after any op-boundary 0x0b.  Precise hits above are tried first so a
-    # stray 0x0b that coincidentally matches another sound's key never wins over
-    # a real op11 payload.
+        idx = key0_to_idx.get(_u32(desc, 32))
+        if idx is not None:
+            return "anchored", idx
+    hits = set()
     for o in range(1, len(desc) - 7):
         if desc[o] == 0x0B:
-            seen.append(_u32(desc, o + 4))
-    return seen
+            idx = key0_to_idx.get(_u32(desc, o + 4))
+            if idx is not None:
+                hits.add(idx)
+    return ("broad", frozenset(hits)) if hits else (None, None)
+
+
+def _select_names(entries, seconds_by_idx):
+    """``{idx: name}`` from resolved menu *entries*, naming only what is safe.
+
+    *entries* = ``[(sid, name, kind, ref)]`` in menu-table order, where
+    ``ref`` is an idx for kind "anchored" or a frozenset for "broad".
+
+    Anchored bindings name unconditionally — the opcode-anchored op11 is the
+    firmware's own answer for that entry (verified coherent: every Led
+    Zeppelin blip lands right).  Broad-scan bindings are weak evidence, so
+    one names a record only when the record is (a) that descriptor's sole
+    reference, (b) referenced by NO other menu entry, and (c) shorter than
+    the music threshold.
+
+    (b) and (c) are what David's mislabel report exposed: LZ has no music
+    banks — shot and mode events all play into a handful of shared full-song
+    masters, so many entries reference the same long record ("LEFT RAMP
+    EXIT" and "ZEPPELIN AWARD" both reference the same 4:45 track).  No
+    single event name is correct for a shared music master; leaving it bare
+    lets the music-ID pass title the actual song.  The old
+    take-the-first-scan-hit logic is how v0.61.2 put "SE FX SEQ BALL SAVE
+    LIT" on an 8-minute track (and produced monkeybug's LE dual-labels)."""
+    census = {}
+    for _sid, _name, kind, ref in entries:
+        for i in ((ref,) if kind == "anchored" else ref):
+            census[i] = census.get(i, 0) + 1
+    out = {}
+    for _sid, name, kind, ref in entries:
+        if kind == "anchored":
+            out.setdefault(ref, name)
+        elif len(ref) == 1:
+            idx = next(iter(ref))
+            if (census[idx] == 1
+                    and seconds_by_idx.get(idx, 0.0) < _MUSIC_MIN_SECONDS):
+                out.setdefault(idx, name)
+    return out
 
 
 def build_name_map(emu, params):
@@ -275,16 +322,18 @@ def _build_name_map(emu, params):
     resolver, out = _find_resolver(emu, fw)
     if resolver is None:
         return {}
-    result = {}
+    from .emulator import emitted_length
+    seconds_by_idx = {p["idx"]: emitted_length(p.get("length", 0)) / 44100.0
+                      for p in params}
+    entries = []
     for sid, name in names:
         desc = _try_resolve(emu, resolver, out, sid)
         if desc is None:
             continue
-        for k in _op11_key(desc):
-            idx = key0_to_idx.get(k)
-            if idx is not None:
-                result.setdefault(idx, name)
-                break
+        kind, ref = _descriptor_refs(desc, key0_to_idx)
+        if kind is not None:
+            entries.append((sid, name, kind, ref))
+    result = _select_names(entries, seconds_by_idx)
     # Safety gate: the "... NOTE n" entries are musical note stings, so a correct
     # mapping lands them on TONAL sounds.  A wrong sid base (the v0.61.0 bug)
     # lands them on speech/other and they read as non-tonal.  If there are

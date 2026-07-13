@@ -17,7 +17,8 @@ from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
                             PrereqMsg, ProgressMsg)
 from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
-from .core.updater import check_for_update
+from .core.updater import (check_for_update, download_installer,
+                           launch_installer_windows)
 from .gui.main_window import MainWindow
 
 
@@ -151,6 +152,7 @@ class App:
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
+            on_install_update=self._install_update,
             initial_fda_acknowledged=bool(
                 self._settings.get("macos_fda_acknowledged", False)),
             on_fda_acknowledge=self._on_fda_acknowledge,
@@ -2646,8 +2648,8 @@ class App:
         """Main-thread continuation of the update check."""
         self.window.set_update_check_running(False)
         if result:
-            version, url, _notes = result
-            self.window.show_update_banner(version, url)
+            version, url, _notes, installer = result
+            self.window.show_update_banner(version, url, installer=installer)
             self.window.append_log(
                 f"Update available: v{version} (you're on v{__version__}).",
                 "success")
@@ -2669,6 +2671,81 @@ class App:
                 f"You're on the latest version (v{__version__}).", "info")
             if show_up_to_date_toast:
                 self.window.show_up_to_date_toast()
+
+    def _install_update(self, version, installer):
+        """Banner/gear "Install update" click (Windows only).
+
+        Downloads the release's setup exe ourselves and runs it silently.
+        The app download carries no Mark-of-the-Web, so SmartScreen never
+        fires (a browser download of the same unsigned exe re-runs the
+        "Windows protected your PC" gauntlet on every release), and the
+        app already runs elevated via launcher.vbs so there's no UAC
+        prompt either.  The installer's /RELAUNCH=1 hook reopens the app
+        when the silent install-over-the-top finishes (jim-beam: "is
+        there a smarter way" than the per-update security pass).
+        """
+        import tempfile
+        dest = os.path.join(tempfile.gettempdir(), installer["name"])
+        cancel = threading.Event()
+        dialog = self.window.open_update_download_dialog(version, cancel.set)
+        total = int(installer.get("size") or 0)
+
+        def _progress(done):
+            self.root.after(0, dialog.set_progress, done, total)
+
+        def _run():
+            try:
+                download_installer(
+                    installer["url"], dest,
+                    expected_sha256=installer.get("sha256"),
+                    progress_cb=_progress, cancel_cb=cancel.is_set)
+            except InterruptedError:
+                self.root.after(0, dialog.close)  # user cancelled — quiet
+                return
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+                self.root.after(0, self._install_update_failed, dialog, err)
+                return
+            self.root.after(
+                0, self._launch_downloaded_installer, dialog, dest, version)
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _install_update_failed(self, dialog, err):
+        """Main-thread continuation when the installer download fails."""
+        dialog.close()
+        self.window.append_log(f"Update download failed — {err}.", "error")
+        messagebox.showerror(
+            "Update failed",
+            "Couldn't download the update installer.\n\n"
+            f"Details: {err}\n\n"
+            "You can still update manually via the banner's "
+            "Release notes button (opens the GitHub release page).")
+
+    def _launch_downloaded_installer(self, dialog, path, version):
+        """Main-thread continuation: hand off to the silent installer.
+
+        On a successful launch the app must get out of the way
+        immediately — the installer overwrites {app}\\python while we're
+        running from it (its /FORCECLOSEAPPLICATIONS makes any straggler
+        harmless, but exiting cleanly here saves settings first).
+        """
+        dialog.close()
+        try:
+            ok = launch_installer_windows(path)
+        except Exception:
+            ok = False
+        if not ok:
+            self.window.append_log(
+                "Couldn't start the update installer.", "error")
+            messagebox.showerror(
+                "Update failed",
+                "The update downloaded but its installer couldn't be "
+                "started.\n\nYou can run it yourself from:\n" + str(path))
+            return
+        self.window.append_log(
+            f"Installing v{version} — the app will close and reopen "
+            f"updated.", "info")
+        self._on_close()
 
     # ------------------------------------------------------------------
     # Settings

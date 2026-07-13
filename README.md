@@ -601,10 +601,22 @@ Clonezilla extract doesn't wall on a too-small WSL volume.
 
 The app polls the GitHub releases API on launch. If a newer release
 exists it shows a banner at the top of the window, puts a ● notification
-on the ⚙ settings gear (with a *Download update* entry in its menu), and
-logs a clickable download link. The check is non-blocking; the outcome
-("update available" / "you're on the latest" / "check failed") is always
-mirrored into the log, and a manual check lives in the ⚙ menu.
+on the ⚙ settings gear, and logs a clickable download link. The check is
+non-blocking; the outcome ("update available" / "you're on the latest" /
+"check failed") is always mirrored into the log, and a manual check lives
+in the ⚙ menu.
+
+On Windows the banner offers a one-click **Install update**: the app
+downloads the release installer itself and runs it silently, then reopens
+updated. Because the app downloads the file (not a browser), Windows does
+not tag it with the Mark-of-the-Web, so the SmartScreen "Windows
+protected your PC" prompt never appears, and since the app already runs
+elevated there's no UAC prompt either. The whole update is one click with
+no security passes. Installing over the top keeps your `settings.json`.
+The download is verified against the release asset's SHA-256 before it
+runs. On macOS and Linux the banner keeps the plain *Download* button
+that opens the release page (their .dmg / AppImage have no silent-install
+path).
 
 The release tag format is `vMAJOR.MINOR.PATCH`; see
 [core/updater.py](pinball_decryptor/core/updater.py) for the

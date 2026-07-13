@@ -953,6 +953,7 @@ class MainWindow:
                  on_back=None,
                  on_theme_change=None, initial_theme=None,
                  on_check_updates=None,
+                 on_install_update=None,
                  initial_fda_acknowledged=False,
                  on_fda_acknowledge=None,
                  initial_column_widths=None,
@@ -982,6 +983,9 @@ class MainWindow:
         self._on_transfer_mods = on_transfer_mods
         self._on_theme_change = on_theme_change
         self._on_check_updates = on_check_updates
+        # In-app "Install update" (Windows): app.py downloads the setup
+        # exe and runs it silently — set only where that flow exists.
+        self._on_install_update = on_install_update
         # Per-tree column widths the user dragged, persisted across restarts via
         # ``on_column_widths_change`` (settings.json).  ``{tree_key: {col: px}}``.
         self._saved_column_widths = dict(initial_column_widths or {})
@@ -10456,10 +10460,16 @@ class MainWindow:
         # A found update leads the menu (matches the ● on the gear) so it's
         # still reachable after the banner is dismissed.
         if self._update_available:
-            version, url = self._update_available
-            menu.add_command(
-                label=f"● Download update v{version}…",
-                command=lambda u=url: webbrowser.open(u))
+            version, url, installer = self._update_available
+            if installer and self._on_install_update:
+                # One-click silent install (see _build_update_banner).
+                menu.add_command(
+                    label=f"● Install update v{version}…",
+                    command=self._install_update_clicked)
+            else:
+                menu.add_command(
+                    label=f"● Download update v{version}…",
+                    command=lambda u=url: webbrowser.open(u))
             menu.add_separator()
 
         # Theme — a dynamic verb label (monkeybug: the bare ☀/☽ glyph wasn't
@@ -11567,17 +11577,33 @@ class MainWindow:
             anchor=tk.W)
         self._update_banner_text.pack(
             side=tk.LEFT, padx=0, pady=4, fill=tk.X, expand=True)
+        # Install button — Windows in-app update: the app downloads the
+        # setup exe itself (no browser download => no Mark-of-the-Web =>
+        # no SmartScreen "Windows protected your PC" pass on every
+        # release) and runs it silently.  Built here but packed only by
+        # show_update_banner when the release actually carries a Windows
+        # installer asset and app.py wired the flow (jim-beam).
+        self._update_install_btn = tk.Button(
+            self._update_banner, text="Install update",
+            bg="#3794ff", fg="#ffffff",
+            activebackground="#5fa5ff", activeforeground="#ffffff",
+            relief="flat", padx=10, pady=2, borderwidth=0,
+            cursor="hand2",
+            command=self._install_update_clicked,
+        )
         # Download button — opens the release page in the browser.
+        # Relabelled "Release notes" when the Install button is shown.
         # tk.Button (not ttk) so its bg color sticks; ttk's themed
         # blue would clash with the banner background on light mode.
-        tk.Button(
+        self._update_download_btn = tk.Button(
             self._update_banner, text="Download",
             bg="#3794ff", fg="#ffffff",
             activebackground="#5fa5ff", activeforeground="#ffffff",
             relief="flat", padx=10, pady=2, borderwidth=0,
             cursor="hand2",
             command=self._open_update_url,
-        ).pack(side=tk.LEFT, padx=4, pady=4)
+        )
+        self._update_download_btn.pack(side=tk.LEFT, padx=4, pady=4)
         # Dismiss × — closes the banner for this session.
         tk.Button(
             self._update_banner, text="✕",
@@ -11591,7 +11617,7 @@ class MainWindow:
         # Populated by show_update_banner.
         self._update_banner_url = None
 
-    def show_update_banner(self, version, url):
+    def show_update_banner(self, version, url, installer=None):
         """Display the 'update available' banner.
 
         Called from :meth:`App._check_for_update` on the main thread
@@ -11599,12 +11625,27 @@ class MainWindow:
         reports a newer version.  Idempotent — re-calling with the
         same args just re-shows / updates the banner; the user can
         still dismiss it after.
+
+        ``installer`` (updater._pick_installer_asset dict) enables the
+        one-click "Install update" button; without it the banner keeps
+        the plain open-the-release-page Download button.
         """
         from pinball_decryptor import __version__ as _current
         self._update_banner_url = url
+        can_auto = bool(installer and self._on_install_update)
         # The gear carries a ● notification too, so the news survives a
-        # dismissed banner (its menu gets a "Download update…" entry).
-        self._update_available = (version, url)
+        # dismissed banner (its menu gets an install/download entry).
+        self._update_available = (version, url,
+                                  installer if can_auto else None)
+        if can_auto:
+            if not self._update_install_btn.winfo_ismapped():
+                self._update_install_btn.pack(
+                    side=tk.LEFT, padx=4, pady=4,
+                    before=self._update_download_btn)
+            self._update_download_btn.configure(text="Release notes")
+        else:
+            self._update_install_btn.pack_forget()
+            self._update_download_btn.configure(text="Download")
         self._refresh_gear_badge()
         self._update_banner_text.configure(
             text=f"Pinball Asset Decryptor v{version} is available "
@@ -11632,6 +11673,80 @@ class MainWindow:
             return
         import webbrowser
         webbrowser.open(self._update_banner_url)
+
+    def _install_update_clicked(self):
+        """Banner / gear "Install update" — hand off to app.py's flow."""
+        if not (self._update_available and self._on_install_update):
+            return
+        version, _url, installer = self._update_available
+        if installer:
+            self._on_install_update(version, installer)
+
+    def open_update_download_dialog(self, version, on_cancel):
+        """Small 'Downloading update…' progress window.
+
+        Returns a handle with ``set_progress(done, total)`` and
+        ``close()`` — both main-thread only (app.py marshals its worker
+        thread's progress through ``root.after``).  Closing the window
+        or clicking Cancel calls ``on_cancel`` (the download loop then
+        aborts and app.py closes the dialog).
+        """
+        from types import SimpleNamespace
+        c = THEMES[self._current_theme]
+        win = tk.Toplevel(self.root)
+        win.title("Downloading update")
+        win.configure(bg=c["bg"])
+        win.transient(self.root)
+        win.resizable(False, False)
+        label = tk.Label(
+            win, text=f"Downloading Pinball Asset Decryptor v{version}…",
+            bg=c["bg"], fg=c["fg"], font=(_SANS_FONT, 10))
+        label.pack(padx=16, pady=(14, 6))
+        bar = ttk.Progressbar(win, length=380, mode="indeterminate")
+        bar.pack(padx=16, pady=2)
+        bar.start(12)
+        detail = tk.Label(win, text="Starting download…",
+                          bg=c["bg"], fg=c["gray"], font=(_SANS_FONT, 9))
+        detail.pack(padx=16, pady=(2, 4))
+        state = {"cancelled": False, "determinate": False}
+
+        def _cancel():
+            if state["cancelled"]:
+                return
+            state["cancelled"] = True
+            detail.configure(text="Cancelling…")
+            on_cancel()
+
+        cancel_btn = ttk.Button(win, text="Cancel", command=_cancel)
+        cancel_btn.pack(pady=(2, 12))
+        win.protocol("WM_DELETE_WINDOW", _cancel)
+        # Center over the main window.
+        win.update_idletasks()
+        px, py = self.root.winfo_rootx(), self.root.winfo_rooty()
+        pw, ph = self.root.winfo_width(), self.root.winfo_height()
+        w, h = win.winfo_width(), win.winfo_height()
+        win.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+        def set_progress(done, total):
+            if state["cancelled"] or not win.winfo_exists():
+                return
+            if total > 0:
+                if not state["determinate"]:
+                    state["determinate"] = True
+                    bar.stop()
+                    bar.configure(mode="determinate", maximum=100)
+                bar.configure(value=done * 100 / total)
+                detail.configure(
+                    text=f"{done / 1048576:.0f} of "
+                         f"{total / 1048576:.0f} MB")
+            else:
+                detail.configure(text=f"{done / 1048576:.0f} MB")
+
+        def close():
+            if win.winfo_exists():
+                win.destroy()
+
+        return SimpleNamespace(set_progress=set_progress, close=close)
 
     # ------------------------------------------------------------------
     # "Source image changed" banner

@@ -101,6 +101,15 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545
 
 Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
 
+; --- In-app update relaunch ----------------------------------------------
+; The app's "Install update" flow runs this installer silently
+; (/SILENT /RELAUNCH=1) and exits; the postinstall entry above is
+; skipifsilent, so without this the silent upgrade would end with
+; nothing on screen.  Routed through launcher.vbs like every other
+; entry point (self-elevation), and gated on the /RELAUNCH=1 flag so a
+; plain silent install (e.g. mass deployment) stays hands-off.
+Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Flags: nowait; Check: RelaunchRequested
+
 [UninstallDelete]
 ; Wipe Python bytecode caches so the install dir is clean before removal.
 Type: filesandordirs; Name: "{app}\pinball_decryptor\__pycache__"
@@ -114,6 +123,13 @@ Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\jjp\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\plugins\dp\__pycache__"
 
 [Code]
+{ True when the app's in-app updater launched this install
+  (/RELAUNCH=1 on the command line) — see the [Run] relaunch entry. }
+function RelaunchRequested(): Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
 function InitializeSetup(): Boolean;
 var
   Version: TWindowsVersion;

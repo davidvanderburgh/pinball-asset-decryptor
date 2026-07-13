@@ -1368,11 +1368,27 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         # A found update puts a ● on the gear, a Download entry at the top
         # of the menu, and the outcome in the log (David).
         app._handle_update_check_result(
-            ("99.0.0", "https://example.com/release", ""), False)
+            ("99.0.0", "https://example.com/release", "", None), False)
         assert "●" in w._gear_btn.cget("text")
         upd_menu = w._build_settings_menu()
         assert "Download update v99.0.0" in upd_menu.entrycget(0, "label")
         assert "Update available: v99.0.0" in w._log_text.get("1.0", "end-1c")
+        # No installer asset -> browser flow: Install button hidden,
+        # Download button keeps its plain label.
+        assert not w._update_install_btn.winfo_ismapped()
+        assert w._update_download_btn.cget("text") == "Download"
+        # A release that DOES carry a Windows installer asset flips the
+        # banner to the one-click flow (jim-beam): Install button shown,
+        # browser button demoted to Release notes, gear entry = Install.
+        fake_asset = {"name": "setup.exe", "url": "https://x/w.exe",
+                      "size": 1, "sha256": None}
+        app._handle_update_check_result(
+            ("99.0.0", "https://example.com/release", "", fake_asset), False)
+        app.root.update_idletasks()
+        assert w._update_install_btn.winfo_ismapped()
+        assert w._update_download_btn.cget("text") == "Release notes"
+        upd_menu = w._build_settings_menu()
+        assert "Install update v99.0.0" in upd_menu.entrycget(0, "label")
         # The dropdown itself builds (this is the code a real ⚙ click runs —
         # nothing else exercises it) and carries the expected entries.
         menu = w._build_settings_menu()

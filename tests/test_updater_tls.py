@@ -47,7 +47,8 @@ def test_check_for_update_routes_through_net_urlopen(monkeypatch):
     monkeypatch.setattr(net, "urlopen", fake_urlopen)
     result = updater.check_for_update("0.1.0")
     assert calls and "api.github.com" in calls[0]
-    assert result == ("99.0.0", "https://example.com/rel", "notes")
+    # No assets in the fake payload -> no auto-installer entry.
+    assert result == ("99.0.0", "https://example.com/rel", "notes", None)
 
 
 def test_musicid_default_opener_is_pinned():

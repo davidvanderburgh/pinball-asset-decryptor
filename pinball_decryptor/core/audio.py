@@ -15,6 +15,7 @@ file to auto-convert it so the game accepts it without issues.
 """
 
 import os
+import re
 import struct
 import shutil
 import subprocess
@@ -740,11 +741,46 @@ def _ffmpeg_convert_wav(path, info, target_channels=None, target_sample_rate=Non
     return False
 
 
+def _ffmpeg_banner(path):
+    """The metadata banner ``ffmpeg -i <path>`` prints to stderr, or ``""``.
+
+    The fallback prober for installs that have ffmpeg but no ffprobe: the
+    frozen macOS/Linux apps bundle ffmpeg via imageio-ffmpeg, whose wheel
+    ships ONLY the ffmpeg binary -- so every ffprobe-based readout (preview
+    durations, video Length/Resolution) came up empty there.  ffmpeg exits
+    non-zero because no output file is requested; the banner is complete
+    regardless, so the exit code is deliberately ignored."""
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg or not path or not os.path.isfile(path):
+        return ""
+    try:
+        r = subprocess.run([ffmpeg, "-hide_banner", "-i", path],
+                           capture_output=True, text=True, errors="replace",
+                           timeout=30, creationflags=_CREATE_FLAGS)
+        return r.stderr or ""
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+
+
+_BANNER_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+
+
+def parse_banner_duration(text):
+    """Duration in seconds from an ffmpeg stderr banner, else 0.0
+    (``Duration: N/A`` and malformed banners both land here)."""
+    m = _BANNER_DURATION_RE.search(text or "")
+    if not m:
+        return 0.0
+    h, mnt, sec = m.groups()
+    return int(h) * 3600 + int(mnt) * 60 + float(sec)
+
+
 def _ffmpeg_get_duration(path):
-    """Get audio duration via ffprobe."""
+    """Get audio duration via ffprobe (ffmpeg-banner fallback when only
+    ffmpeg is installed -- see :func:`_ffmpeg_banner`)."""
     ffprobe = find_ffprobe()
     if not ffprobe:
-        return 0.0
+        return parse_banner_duration(_ffmpeg_banner(path))
 
     try:
         result = subprocess.run(

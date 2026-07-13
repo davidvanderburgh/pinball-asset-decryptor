@@ -19,11 +19,13 @@ ffmpeg / ffprobe discovery (and the no-console-window flag) is shared with
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
 
-from .audio import (_CREATE_FLAGS, find_ffmpeg, find_ffprobe, probe_duration)
+from .audio import (_CREATE_FLAGS, _ffmpeg_banner, find_ffmpeg, find_ffprobe,
+                    parse_banner_duration, probe_duration)
 
 # Video containers we treat as replaceable slots.
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".webm", ".ogv", ".avi", ".mkv")
@@ -162,9 +164,14 @@ def detect_video_info(path):
     if backend is not None:
         return backend.info(path)
 
-    ffprobe = find_ffprobe()
-    if not ffprobe or not path or not os.path.isfile(path):
+    if not path or not os.path.isfile(path):
         return None
+    ffprobe = find_ffprobe()
+    if not ffprobe:
+        # ffmpeg-only install (the frozen macOS/Linux apps bundle ffmpeg via
+        # imageio-ffmpeg, whose wheel ships no ffprobe) -- parse the metadata
+        # banner ``ffmpeg -i`` prints to stderr instead.
+        return parse_video_banner(_ffmpeg_banner(path), path)
     try:
         r = subprocess.run(
             [ffprobe, "-v", "quiet", "-print_format", "json",
@@ -204,6 +211,49 @@ def detect_video_info(path):
         duration=dur,
         has_audio=has_audio,
         has_alpha=has_alpha,
+        pix_fmt=pix_fmt,
+        container=os.path.splitext(path)[1].lstrip(".").lower(),
+    )
+
+
+# The video-stream line of an ffmpeg stderr banner, e.g.
+#   Stream #0:0[0x1](und): Video: h264 (High) (avc1 / ...), yuv420p(tv,
+#       bt709), 1920x1080 [SAR 1:1 DAR 16:9], 4276 kb/s, 29.97 fps, ...
+_BANNER_VIDEO_RE = re.compile(r"Stream #[^\n]*?:\s*Video:\s*([^\n]+)")
+_BANNER_SIZE_RE = re.compile(r",\s*(\d{2,5})x(\d{2,5})\b")
+_BANNER_FPS_RE = re.compile(r"(\d+(?:\.\d+)?)\s+fps")
+_BANNER_TBR_RE = re.compile(r"(\d+(?:\.\d+)?)\s+tbr")
+
+
+def parse_video_banner(text, path):
+    """Build a :class:`VideoInfo` from an ffmpeg stderr banner, or ``None``
+    when the banner has no video stream.  Fallback prober for ffmpeg-only
+    installs (no ffprobe); the banner carries everything the slot list and
+    the transcoder need — codec, pix_fmt, WxH, fps, duration, audio."""
+    m = _BANNER_VIDEO_RE.search(text or "")
+    if not m:
+        return None
+    line = m.group(1)
+    # First comma-field is the codec chunk ("h264 (High) (avc1 / ...)"),
+    # second is the pix_fmt ("yuv420p(tv, bt709, progressive)").
+    fields = line.split(",")
+    vcodec = fields[0].split()[0].strip() if fields[0].split() else ""
+    pix_fmt = ""
+    if len(fields) > 1:
+        pm = re.match(r"\s*([A-Za-z0-9]+)", fields[1])
+        if pm:
+            pix_fmt = pm.group(1)
+    sm = _BANNER_SIZE_RE.search(line)
+    fm = _BANNER_FPS_RE.search(line) or _BANNER_TBR_RE.search(line)
+    return VideoInfo(
+        path=path,
+        vcodec=vcodec,
+        width=int(sm.group(1)) if sm else 0,
+        height=int(sm.group(2)) if sm else 0,
+        fps=float(fm.group(1)) if fm else 0.0,
+        duration=parse_banner_duration(text),
+        has_audio=": Audio:" in (text or ""),
+        has_alpha=pix_fmt in _ALPHA_PIX_FMTS,
         pix_fmt=pix_fmt,
         container=os.path.splitext(path)[1].lstrip(".").lower(),
     )

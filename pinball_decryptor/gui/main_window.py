@@ -1113,6 +1113,12 @@ class MainWindow:
         # user assign a replacement track per slot; staging writes the
         # converted replacements over the originals so Write repacks them.
         self.audio_search_var = tk.StringVar()
+        # "Type" filter (All types / Music / Sound FX / Callouts / Other) —
+        # monkeybug: "I am working on callouts so I want to hide everything
+        # else".  Categories are derived per scan (core.audio_categories);
+        # the dropdown hides itself for folders where nothing classifies.
+        self.audio_type_var = tk.StringVar(value="All types")
+        self._audio_categories = {}      # rel_path -> music/sfx/callouts/other
         # Click-header sort state: (column_id, descending).  Defaults to the
         # name column ascending — matches the old "Name" dropdown default.
         self._audio_sort = ("#0", False)
@@ -2754,6 +2760,26 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.audio_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
+        # "Type" filter — packed by _refresh_audio_type_filter only when the
+        # scanned folder actually classifies (a folder with no Auto-name
+        # artifacts is all "Other", so the dropdown would do nothing).
+        self._audio_type_frame = ttk.Frame(tools)
+        ttk.Label(self._audio_type_frame, text="Type:").pack(side=tk.LEFT)
+        self._audio_type_combo = ttk.Combobox(
+            self._audio_type_frame, textvariable=self.audio_type_var,
+            state="readonly", width=9,
+            values=("All types", "Music", "Sound FX", "Callouts", "Other"))
+        self._audio_type_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._audio_type_combo.bind(
+            "<<ComboboxSelected>>", lambda _e: self._refresh_audio_list())
+        _Tooltip(
+            self._audio_type_combo,
+            "Show only one kind of audio. The types come from the Auto-name "
+            "passes: Music = the game's song/bank tracks, Sound FX = effects "
+            "named by the game's own Sound Test menu, Callouts = spoken "
+            "lines, Other = everything not classified (mostly short unnamed "
+            "effects).",
+            lambda: self._current_theme)
         # "Group duplicates" — created here, packed per-manufacturer next to
         # the sort hint (apply_manufacturer, CGC only).
         self._audio_dup_group_cb = ttk.Checkbutton(
@@ -2954,6 +2980,8 @@ class MainWindow:
         if not assets_path or not os.path.isdir(assets_path):
             self._audio_slots = []
             self._audio_slots_by_rel = {}
+            self._audio_categories = {}
+            self._refresh_audio_type_filter()
             self._refresh_audio_list()
             self._audio_empty.configure(
                 text="Pick your extracted assets folder above, then click Scan.")
@@ -2988,20 +3016,33 @@ class MainWindow:
                                          probe=False)
             except Exception:
                 slots = []
+            # Type-filter categories: filename rules + the two Auto-name CSVs
+            # (two small reads — done here so a slow folder never stalls Tk).
+            try:
+                from ..core import audio_categories
+                cats = audio_categories.classify(
+                    assets_path, [s.rel_path for s in slots])
+            except Exception:
+                cats = {}
             if self._audio_scan_id != scan_id:
                 return
             self._tk_root().after(
                 0, self._populate_audio_after_scan,
-                slots, scan_id, assets_path)
+                slots, scan_id, assets_path, cats)
 
         self._set_tab_scanning("audio", True)
         threading.Thread(target=_work, daemon=True).start()
 
-    def _populate_audio_after_scan(self, slots, scan_id, scan_dir):
+    def _populate_audio_after_scan(self, slots, scan_id, scan_dir, cats=None):
         """Main-thread: store scan results and refresh the list."""
         if self._audio_scan_id != scan_id:
             return
         self._set_tab_scanning("audio", False)
+        self._audio_categories = cats or {}
+        if scan_dir != self._audio_scan_dir:
+            # A different folder's filter pick means nothing here.
+            self.audio_type_var.set("All types")
+        self._refresh_audio_type_filter()
         # Same-folder rescan: carry over already-probed metadata for
         # unchanged files so a rescan (transcribe renames, manual Scan)
         # doesn't reset every Length cell to "—" and re-read every header.
@@ -3428,6 +3469,28 @@ class MainWindow:
         for col_id, base, _d in config:
             tree.heading(col_id, text=(base + arrow) if col_id == col else base)
 
+    _AUDIO_TYPE_KEYS = {"Music": "music", "Sound FX": "sfx",
+                        "Callouts": "callouts", "Other": "other"}
+
+    def _audio_type_filter(self):
+        """The active Type filter's internal key, or None for "All types"."""
+        return self._AUDIO_TYPE_KEYS.get(self.audio_type_var.get())
+
+    def _refresh_audio_type_filter(self):
+        """Show the Type dropdown only when the scanned folder classifies —
+        an extract with no Auto-name artifacts is all "Other", and a filter
+        that can't split anything is just clutter."""
+        frame = getattr(self, "_audio_type_frame", None)
+        if frame is None:
+            return
+        useful = any(c != "other" for c in self._audio_categories.values())
+        if useful and not frame.winfo_ismapped():
+            frame.pack(side=tk.LEFT, before=self._audio_sort_hint_lbl)
+        elif not useful and frame.winfo_ismapped():
+            frame.pack_forget()
+        if not useful:
+            self.audio_type_var.set("All types")
+
     def _refresh_audio_list(self):
         """Apply the search filter + sort and repopulate the slot tree — flat,
         or two-level when "Group duplicates" is on and the bank duplicate scan
@@ -3450,8 +3513,16 @@ class MainWindow:
         tree.delete(*tree.get_children())
 
         query = (self.audio_search_var.get() or "").strip().lower()
-        slots = [s for s in self._audio_slots
-                 if not query or query in s.rel_path.lower()]
+        type_key = self._audio_type_filter()
+        cats = self._audio_categories
+
+        def _passes(s):
+            if query and query not in s.rel_path.lower():
+                return False
+            return (type_key is None
+                    or cats.get(s.rel_path, "other") == type_key)
+
+        slots = [s for s in self._audio_slots if _passes(s)]
         col, desc = self._audio_sort
 
         changed = self._audio_changed_on_disk
@@ -3519,8 +3590,7 @@ class MainWindow:
                     self._audio_dup_groups):
                 members = [self._audio_slots_by_rel[r] for r in rels
                            if r in self._audio_slots_by_rel]
-                visible = [m for m in members
-                           if not query or query in m.rel_path.lower()]
+                visible = [m for m in members if _passes(m)]
                 if len(members) < 2 or not visible:
                     continue
                 in_groups.update(m.rel_path for m in visible)
@@ -3567,7 +3637,14 @@ class MainWindow:
             extra = f"  ({shown} shown)" if shown != total else ""
             self.audio_status_var.set(
                 f"{changed_total} of {total} slots changed{extra}")
-            self._audio_empty.place_forget()
+            if shown == 0:
+                # Everything filtered out — say so, or an empty list reads
+                # like a failed scan.
+                self._audio_empty.configure(
+                    text="Nothing matches the Search / Type filter.")
+                self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            else:
+                self._audio_empty.place_forget()
         # Fit-to-content column widths (the toggle columns stay fixed).
         self._autosize_tree_columns(tree, "audio", ("#0", "len", "fmt", "rep"))
 
@@ -3812,6 +3889,13 @@ class MainWindow:
                          command=self._audio_play_original)
         menu.add_command(label="Choose replacement…",
                          command=lambda r=row: self._audio_assign_rel(r))
+        # Rename: only decode-shaped names (idx#### / music_cat##_####) — the
+        # index prefix is preserved so Write still maps the slot; every other
+        # plugin keys audio by its full path, which a rename would break.
+        from ..core import name_memory as _nmem
+        if _nmem.split_decode_name(os.path.basename(row)):
+            menu.add_command(label="Rename…",
+                             command=lambda r=row: self._audio_rename_slot(r))
         has_assignment = bool(self._audio_assignments.get(row))
         is_built = row in self._audio_changed_on_disk
         if has_assignment:
@@ -3864,6 +3948,83 @@ class MainWindow:
                 self._audio_tree.selection_set(rel)
             except tk.TclError:
                 pass
+
+    def _audio_rename_slot(self, rel):
+        """Right-click → Rename…: set the name after the slot's decode index.
+
+        The label is also remembered against the sound's FACTORY content hash
+        (the extract baseline md5), so the next extract of this sound —
+        same card or a newer firmware that carries the bytes over — reapplies
+        it before Whisper ever listens (monkeybug: Whisper mis-names the same
+        file on every extract).  Blank restores the stock decode name and
+        forgets the remembered one."""
+        from tkinter import simpledialog
+        from ..core import name_memory
+        from ..core.audio_slots import replace_with_retry
+        from ..core.checksums import rename_in_baseline
+        slot = self._audio_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        parts = name_memory.split_decode_name(os.path.basename(rel))
+        if parts is None:
+            return
+        prefix, label, ext = parts
+        name = simpledialog.askstring(
+            "Rename Audio",
+            "Name for this sound — remembered for future extracts\n"
+            "(blank restores \"%s\" and forgets it):" % (prefix + ext),
+            initialvalue=label, parent=self._tk_root())
+        if name is None:
+            return                            # cancelled
+        new_label = name_memory.sanitize_label(name)
+        if new_label == label:
+            return
+        new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
+                    else prefix + ext)
+        folder = rel.rpartition("/")[0]
+        new_rel = (folder + "/" + new_base) if folder else new_base
+        dst = os.path.join(os.path.dirname(slot.abs_path), new_base)
+        if os.path.exists(dst):
+            messagebox.showerror(
+                "Rename Audio",
+                "A file named\n%s\nalready exists in that folder." % new_base)
+            return
+        # The factory hash BEFORE the baseline entry moves; also release any
+        # preview handle on the file so the rename can't hit a sharing lock.
+        md5 = name_memory.baseline_md5(self._audio_scan_dir, rel)
+        if md5 is None and rel not in self._audio_changed_on_disk:
+            md5 = name_memory.file_md5(slot.abs_path)
+        self._audio_stop_playback()
+        try:
+            replace_with_retry(slot.abs_path, dst)
+        except OSError as e:
+            messagebox.showerror("Rename Audio", "Rename failed:\n%s" % e)
+            return
+        rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
+        if md5:
+            name_memory.remember(md5, new_label)   # blank forgets
+        # Re-key every bit of session state pinned to the old rel, then let a
+        # same-folder rescan rebuild the slot list (it keeps assignments and
+        # probed metadata; the dup-group cache self-invalidates).
+        for d in (self._audio_assignments, self._audio_loop_flags,
+                  self._audio_keep_full_flags):
+            if rel in d:
+                d[new_rel] = d.pop(rel)
+        if rel in self._audio_changed_on_disk:
+            self._audio_changed_on_disk.discard(rel)
+            self._audio_changed_on_disk.add(new_rel)
+        if self._audio_current_rel == rel:
+            self._audio_clear_preview()        # reselecting reloads the pane
+        self._save_staged_changes()
+        if not md5:
+            note = " (not remembered: the slot is modded and has no baseline)"
+        elif new_label:
+            note = " (remembered for future extracts)"
+        else:
+            note = " (forgotten)"
+        self.append_log("Replace Audio: renamed %s → %s%s"
+                        % (rel, new_base, note), "info")
+        self._scan_audio_slots_async()
 
     def _audio_revert_selected(self):
         """Revert the selected slot to its extracted original.

@@ -94,7 +94,17 @@ HELP_CONTENT = {
         ("Finding things",
          "Click any column header to sort (click again to flip). The search "
          "box filters by name — with auto-naming on, that includes the "
-         "transcribed call-out text and matched song titles."),
+         "transcribed call-out text and matched song titles. The Type "
+         "dropdown (shown when the folder classifies) filters to one kind "
+         "of audio: Music, Sound FX (named by the game's own Sound Test "
+         "menu), Callouts (speech), or Other."),
+        ("Renaming",
+         "Right-click a slot → \"Rename…\" to correct its name (e.g. a "
+         "call-out the auto-transcriber mis-heard). The name is remembered "
+         "by the sound's content, so a future extract — same card or a "
+         "newer firmware carrying the same sound — reapplies it before "
+         "transcription runs. Blank restores the stock name and forgets "
+         "it."),
     ],
     "Replace Video": [
         ("Scan and assign",

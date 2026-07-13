@@ -64,18 +64,42 @@ def test_resolve_client_key_precedence(monkeypatch):
     assert M.resolve_client_key(None) == (M.DEFAULT_CLIENT_KEY or "")
 
 
-def test_pipeline_identifies_and_renames(tmp_path, monkeypatch):
+def test_already_named_gate():
+    """Files a naming pass already titled are never fingerprint-candidates —
+    on a band pin a long Sound-Test SFX carries a song riff, so AcoustID
+    happily double-labels it (monkeybug's "SE FX ZEPPELIN AWARD - Immigrant
+    Song"); a re-run must also not stack a second title."""
+    assert M._already_named("idx0384 - SE FX ZEPPELIN AWARD.wav")
+    assert M._already_named("idx0100 - Welcome to the machine.wav")
+    assert M._already_named("01m22s235 - idx0100 - Some name.wav")
+    assert M._already_named("idx0021 - music - Led Zeppelin - Kashmir.wav")
+    # Still candidates: bare decodes, the bare "music" isolation tag, and
+    # anything that isn't a decode-shaped name at all.
+    assert not M._already_named("idx0139.wav")
+    assert not M._already_named("01m22s235 - idx0139.wav")
+    assert not M._already_named("idx0021 - music.wav")
+    assert not M._already_named("music_cat01_0002.wav")
+    assert not M._already_named("SOME_OTHER_TRACK.wav")
+
+
+def _write_tone_wav(path, seconds=22):
     import wave
     import numpy as np
+    sr = 22050
+    pcm = (0.1 * np.sin(np.arange(sr * seconds) * 0.05)).astype("<f4")
+    pcm16 = (np.clip(pcm, -1, 1) * 32767).astype("<i2").tobytes()
+    w = wave.open(str(path), "wb")
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+    w.writeframes(pcm16); w.close()
+
+
+def test_pipeline_identifies_and_renames(tmp_path, monkeypatch):
     assets = tmp_path / "assets"
     assets.mkdir()
     # a >=20s WAV so it passes the music gate
-    sr = 22050
-    pcm = (0.1 * np.sin(np.arange(sr * 22) * 0.05)).astype("<f4")
-    pcm16 = (np.clip(pcm, -1, 1) * 32767).astype("<i2").tobytes()
-    w = wave.open(str(assets / "idx0139.wav"), "wb")
-    w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
-    w.writeframes(pcm16); w.close()
+    _write_tone_wav(assets / "idx0139.wav")
+    # a long Sound-Test-named SFX: must be skipped, not re-titled
+    _write_tone_wav(assets / "idx0384 - SE FX ZEPPELIN AWARD.wav")
 
     monkeypatch.setattr(M, "fingerprint_file", lambda p: ("FP", 22))
     monkeypatch.setattr(M, "lookup", lambda fp, d, k, **kw: _SAMPLE)
@@ -94,6 +118,8 @@ def test_pipeline_identifies_and_renames(tmp_path, monkeypatch):
     names = sorted(p_ for p_ in __import__("os").listdir(assets))
     assert "idx0139 - Led Zeppelin - Communication Breakdown.wav" in names, names
     assert M.MUSIC_IDS_CSV in names
+    # The Sound-Test-named SFX kept its game name — no appended song title.
+    assert "idx0384 - SE FX ZEPPELIN AWARD.wav" in names, names
 
 
 def test_pipeline_errors_without_key(tmp_path, monkeypatch):

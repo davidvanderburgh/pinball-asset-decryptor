@@ -19,6 +19,7 @@ match — that music isn't in any database — so callers should fall back to th
 import gzip
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -43,6 +44,30 @@ DEFAULT_CLIENT_KEY = "GpHGLK0jmy"
 DEFAULT_MIN_MUSIC_SECONDS = 20.0
 # AcoustID match scores run 0..1; below this we treat it as "no confident id".
 DEFAULT_MIN_SCORE = 0.50
+
+# A decode WAV that already carries a name label ("idx0384 - SE FX ZEPPELIN
+# AWARD.wav", "idx0100 - Welcome to the machine.wav"), with the optional
+# play-length prefix.  The bare " - music" isolation tag is the one label that
+# stays a candidate — it marks exactly the clips this pipeline exists to title.
+_LABELED_DECODE_RE = re.compile(
+    r"^(?:\d+m\d+s\d+ - )?(?:idx\d+|music_cat\d+_\d+) - (?P<label>.+)\.wav$",
+    re.IGNORECASE)
+
+
+def _already_named(fn):
+    """True when *fn* already has a real name and must not be fingerprinted.
+
+    On a band pin, long SFX carry song riffs, so AcoustID happily "titles" a
+    Sound-Test-named effect too — monkeybug's Led Zeppelin extract grew names
+    like "idx0384 - SE FX ZEPPELIN AWARD - Immigrant Song.wav" (the game's own
+    name AND the song of the riff inside it, both true but read as a
+    double-label bug).  It also stops a re-run from stacking a second title
+    onto an already-titled track.  Files that don't look like decode outputs
+    at all are left as candidates (other plugins name their audio freely)."""
+    m = _LABELED_DECODE_RE.match(fn)
+    if not m:
+        return False
+    return m.group("label").strip().lower() != "music"
 
 NO_KEY_HINT = (
     "Online music ID needs a free AcoustID application key.\n\n"
@@ -233,13 +258,21 @@ class MusicIdPipeline(BasePipeline):
             raise PipelineError("Identify music",
                 "Assets folder not found: %s" % self.assets_dir)
         music = []
+        skipped_named = 0
         for dp, _dn, fns in os.walk(self.assets_dir):
             for fn in fns:
                 if fn.lower().endswith(".wav") and not fn.startswith("."):
+                    if _already_named(fn):
+                        skipped_named += 1
+                        continue
                     p = os.path.join(dp, fn)
                     if self._wav_seconds(p) >= self.min_music_seconds:
                         music.append(p)
         music.sort()
+        if skipped_named:
+            self._log("  Skipping %d already-named file(s) — Sound-Test "
+                      "SFX and call-outs keep their names." % skipped_named,
+                      "info")
         if not music:
             raise PipelineError("Identify music",
                 "No WAV >= %.0fs found under %s.\nRun Extract first, or lower "

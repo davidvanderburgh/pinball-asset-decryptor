@@ -217,6 +217,14 @@ class TranscribePipeline(BasePipeline):
             raise PipelineError("Transcribe",
                 f"Assets folder not found: {self.assets_dir}")
 
+        # The user's own remembered names go on FIRST (matched by factory
+        # content hash), so a manual correction beats Whisper mis-hearing the
+        # same clip on every extract — the renamed files are then skipped
+        # below as already-named (monkeybug).
+        if self.rename_after:
+            from . import name_memory
+            name_memory.apply_saved_names(self.assets_dir, self._log)
+
         wavs = _find_wavs(self.assets_dir)
         if not wavs:
             raise PipelineError("Transcribe",

@@ -946,8 +946,11 @@ class ModifyPipeline(_BasePipeline):
           (which the game would reject as "not newer").
 
         The arithmetic is done in Python — the executor's ``date`` is GNU on
-        WSL/Linux but BSD on macOS, and ``date -d '+1 day'`` isn't portable;
-        ``sed`` is.
+        WSL/Linux but BSD on macOS, and ``date -d '+1 day'`` isn't portable.
+        The in-place edit uses ``sed -i.bak`` (+ rm of the backup): bare
+        ``sed -i '<script>'`` is GNU-only — BSD sed takes the next argument
+        as the backup extension, swallows the script, and then chokes
+        parsing the *file path* as a script ("undefined label").
         """
         import datetime as _dt
 
@@ -1000,8 +1003,10 @@ class ModifyPipeline(_BasePipeline):
             # Replace line 2 wholesale, preserving the original "# <date> "
             # shape (trailing space) the BOF template uses.
             try:
+                bak = f"{path}.bak"
                 self.executor.run(
-                    f"sed -i '2s|.*|# {new_str} |' {path!r}", timeout=15)
+                    f"sed -i.bak '2s|.*|# {new_str} |' {path!r} "
+                    f"&& rm -f {bak!r}", timeout=15)
             except CommandError as e:
                 self._log(
                     f"  Warning: could not bump version in {fname}: "

@@ -6628,9 +6628,12 @@ class MainWindow:
         self.partition_part_var = tk.StringVar()
 
         intro = ttk.Label(
-            f, text="Browse a raw Stern card image (.raw / .img) read-only: view "
-                    "its partitions and files, and extract any file or folder to "
-                    "disk. Nothing on the card is changed.",
+            f, text="Browse a raw Stern card image (.raw / .img): view its "
+                    "partitions and files, extract any file or folder to disk, "
+                    "and (right-click) replace a file in place with an "
+                    "exact-size stand-in — validation records are refreshed "
+                    "automatically. Browsing never changes the card; only an "
+                    "explicit Replace writes to it.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         # Rewrap to the actual window width instead of a fixed 720px
@@ -6664,6 +6667,21 @@ class MainWindow:
             "<<ComboboxSelected>>", lambda _e: self._pex_on_partition_select())
         # (No partition-count label here — the dropdown already shows every
         # partition; extract results land next to the extract buttons below.)
+        # Find-in-partition: substring over full paths, Enter / "Find Next"
+        # cycles matches and reveals each in the lazy tree (monkeybug
+        # batch 10 wishlist: PE search).
+        self.partition_search_var = tk.StringVar()
+        self._pex_find_btn = ttk.Button(prow, text="Find Next",
+                                        command=self._pex_find_next,
+                                        state=tk.DISABLED)
+        self._pex_find_btn.pack(side=tk.RIGHT)
+        find_ent = ttk.Entry(prow, textvariable=self.partition_search_var,
+                             width=22)
+        find_ent.pack(side=tk.RIGHT, padx=(12, 6))
+        find_ent.bind("<Return>", lambda _e: self._pex_find_next())
+        ttk.Label(prow, text="Find:").pack(side=tk.RIGHT)
+        self._pex_search_cache = None      # (image, part) -> sorted paths
+        self._pex_search_state = ("", -1)  # (query, last match index)
 
         body = ttk.Frame(f); body.pack(fill=tk.BOTH, expand=True, padx=10,
                                        pady=(2, 4))
@@ -6834,9 +6852,69 @@ class MainWindow:
         self._pex_action_status.configure(text="")
         self._pex_part_index = p.index
         self._pex_extract_part_btn.config(state=tk.NORMAL)
+        self._pex_find_btn.config(state=tk.NORMAL)
         if any(q.browsable for q in self._pex_part_labels.values()):
             self._pex_extract_all_btn.config(state=tk.NORMAL)
         self._pex_populate_dir("", "/")     # the partition root's children
+
+    # ---- Partition Explorer: find ------------------------------------
+
+    def _pex_find_next(self):
+        """Find the next full-path substring match in the current partition
+        and reveal it — the path list is walked once per (image, partition)
+        and cached, so repeated Find Next presses are instant."""
+        if self._pex_card is None or self._pex_part_index is None:
+            return
+        query = (self.partition_search_var.get() or "").strip().lower()
+        if not query:
+            return
+        key = (self._pex_image_path, self._pex_part_index)
+        cache = self._pex_search_cache
+        if not cache or cache[0] != key:
+            reader = self._pex_card.reader(self._pex_part_index)
+            paths = []
+            try:
+                for rel, _ino, _node in reader.iter_regular_files(
+                        max_depth=64, min_size=0):
+                    paths.append("/" + rel.strip("/"))
+            except Exception:
+                pass
+            paths.sort()
+            self._pex_search_cache = cache = (key, paths)
+        paths = cache[1]
+        last_q, last_i = self._pex_search_state
+        start = last_i + 1 if last_q == query else 0
+        order = list(range(start, len(paths))) + list(range(0, start))
+        for i in order:
+            if query in paths[i].lower():
+                self._pex_search_state = (query, i)
+                self._pex_reveal(paths[i])
+                self._pex_action_status.configure(text="")
+                return
+        self._pex_search_state = (query, -1)
+        self._pex_action_status.configure(
+            text="No file path contains “%s”."
+                 % self.partition_search_var.get().strip())
+
+    def _pex_reveal(self, path):
+        """Expand the lazy tree down to *path* and select it."""
+        tree = self._pex_tree
+        parts = [p for p in path.strip("/").split("/") if p]
+        fs = ""
+        for name in parts[:-1]:
+            fs = fs + "/" + name
+            if fs in self._pex_dirs and fs not in self._pex_populated:
+                self._pex_populate_dir(fs, fs)
+            try:
+                tree.item(fs, open=True)
+            except tk.TclError:
+                return
+        try:
+            tree.selection_set(path)
+            tree.see(path)
+            tree.focus(path)
+        except tk.TclError:
+            pass
 
     # ---- Partition Explorer: tree ------------------------------------
 
@@ -7011,12 +7089,19 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Extract…",
                              command=self._pex_extract_selected)
+            if row not in self._pex_dirs:
+                menu.add_command(
+                    label="Replace with… (exact size)",
+                    command=lambda r=row: self._pex_replace_selected(r))
         menu.tk_popup(event.x_root, event.y_root)
 
     def _pex_show_properties(self, iid):
         """Small read-only Properties view: the file's full on-card path (the
         path it has when the partition is mounted — for lining PAD edits up
-        with hand-mount workflows), device-style partition, size and type."""
+        with hand-mount workflows), device-style partition, size and type.
+        Folders get their recursive size, computed on a worker (batch 10
+        wishlist: folder sizes)."""
+        import threading
         dev = ("sda%d" % (self._pex_part_index + 1)
                if self._pex_part_index is not None else "?")
         try:
@@ -7024,17 +7109,127 @@ class MainWindow:
             ftype = self._pex_tree.set(iid, "type")
         except tk.TclError:
             size = ftype = ""
-        kind = "Folder" if iid in self._pex_dirs else (ftype or "File")
-        lines = ["Name:       %s" % (os.path.basename(iid) or iid),
-                 "Kind:       %s" % kind]
-        if size:
-            lines.append("Size:       %s" % size)
-        lines += ["Partition:  %s" % dev,
-                  "Path:       %s" % iid,
-                  "Mounted at: <mount point>%s" % iid]
-        messagebox.showinfo("Properties — %s"
-                            % (os.path.basename(iid) or iid),
-                            "\n".join(lines))
+        is_dir = iid in self._pex_dirs
+        kind = "Folder" if is_dir else (ftype or "File")
+
+        def _show(size_line):
+            lines = ["Name:       %s" % (os.path.basename(iid) or iid),
+                     "Kind:       %s" % kind]
+            if size_line:
+                lines.append("Size:       %s" % size_line)
+            lines += ["Partition:  %s" % dev,
+                      "Path:       %s" % iid,
+                      "Mounted at: <mount point>%s" % iid]
+            messagebox.showinfo("Properties — %s"
+                                % (os.path.basename(iid) or iid),
+                                "\n".join(lines))
+
+        if not is_dir:
+            _show(size)
+            return
+        # Recursive folder size on a worker (a deep tree walk over a network
+        # image shouldn't freeze Tk); the dialog opens when it lands.
+        card, part = self._pex_card, self._pex_part_index
+        self._pex_action_status.configure(text="Sizing %s…"
+                                          % (os.path.basename(iid) or iid))
+
+        def _work():
+            try:
+                n, b = card.dir_stats(part, iid)
+                line = "%s in %d file%s" % (self._pex_human(b), n,
+                                            "" if n == 1 else "s")
+            except Exception as e:
+                line = "(unavailable: %s)" % e
+
+            def _done():
+                self._pex_action_status.configure(text="")
+                _show(line)
+            try:
+                self._tk_root().after(0, _done)
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _pex_replace_selected(self, iid):
+        """Right-click → Replace with…: exact-size in-place write of one file
+        into the card image, with the Spike 2 .sidx record refreshed (the
+        monkeybug wishlist item this whole tab started from)."""
+        if self._pex_busy or self._pex_card is None or iid in self._pex_dirs:
+            return
+        try:
+            cur_size = self._pex_tree.set(iid, "size")
+        except tk.TclError:
+            cur_size = ""
+        src = filedialog.askopenfilename(
+            title="Replace %s (must be the exact same size)"
+                  % (os.path.basename(iid) or iid),
+            initialdir=self.last_browse_dir("pex_replace"))
+        if not src:
+            return
+        self.remember_browse_dir("pex_replace", src)
+        if not messagebox.askyesno(
+                "Replace on card",
+                "This WRITES to the card image:\n\n  %s\n\nreplacing\n\n"
+                "  %s  (%s)\n\nwith\n\n  %s\n\nThe file's validation record "
+                "is refreshed automatically.  Keep a backup of the image if "
+                "it's precious.\n\nReplace it?"
+                % (os.path.normpath(self.partition_image_var.get() or ""),
+                   iid, cur_size or "size unknown", os.path.normpath(src)),
+                icon="warning"):
+            return
+        self._pex_run_replace(iid, src)
+
+    def _pex_run_replace(self, iid, src):
+        """Worker-thread in-place replace with the shared busy overlay.  No
+        mid-run Cancel: the extent writes are quick and interrupting a
+        half-written file is worse than finishing it."""
+        import threading
+        self._pex_busy = True
+        part = self._pex_part_index
+        image_path = self._pex_image_path
+        state = {"note": "", "done": None}
+        for b in (self._pex_extract_btn, self._pex_extract_part_btn,
+                  self._pex_extract_all_btn):
+            b.config(state=tk.DISABLED)
+        self._pex_action_status.configure(text="")
+        self.append_log("Replacing %s on partition sda%s…"
+                        % (iid, (part + 1) if part is not None else "?"),
+                        "info")
+        self._pex_busy_lbl.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        def _work():
+            try:
+                from ..plugins.stern.explorer import CardImage
+                with CardImage(image_path) as c:
+                    n, refreshed = c.replace_file(part, iid, src)
+                state["done"] = (
+                    "Replaced %s (%s)%s." % (
+                        iid, self._pex_human(n),
+                        ", validation record refreshed" if refreshed
+                        else "; not in the validation manifest — no record "
+                             "to refresh"))
+            except Exception as e:
+                state["done"] = "Replace failed: %s" % e
+
+        def _tick(i):
+            if state["done"] is not None:
+                msg = state["done"]
+                self._pex_finish_extract(msg)
+                if not msg.startswith("Replace failed"):
+                    # Re-open the card so the browse handle, preview and any
+                    # cached reads see the new bytes.
+                    self._pex_open_image()
+                return
+            frame = self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)]
+            try:
+                self._pex_busy_lbl.configure(text="%s  Replacing…" % frame)
+                self._tk_root().after(90, _tick, i + 1)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+        _tick(0)
 
     def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
                         tree_prog=None, file_prog=None, chunk_prog=None,
@@ -7186,7 +7381,8 @@ class MainWindow:
                 else tk.DISABLED))
         self._pex_action_status.configure(text=msg)
         self.append_log(
-            msg, "error" if msg.startswith("Extract failed") else "info")
+            msg, "error" if ("failed" in msg.split(":")[0].lower())
+            else "info")
 
     # ---- Partition Explorer: lifecycle -------------------------------
 
@@ -7208,6 +7404,9 @@ class MainWindow:
         self._pex_extract_btn.config(state=tk.DISABLED)
         self._pex_extract_part_btn.config(state=tk.DISABLED)
         self._pex_extract_all_btn.config(state=tk.DISABLED)
+        self._pex_find_btn.config(state=tk.DISABLED)
+        self._pex_search_cache = None
+        self._pex_search_state = ("", -1)
 
     @staticmethod
     def _pex_human(n):

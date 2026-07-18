@@ -6,10 +6,14 @@ files or whole subtrees to disk.  monkeybug's use cases: pull radium files out
 of an old modded card to transfer into a new stock version, read/copy the boot
 ``.sh`` scripts, and dump partitions/folders to diff a modded card vs stock.
 
-This is the pure read side — it composes the existing size-neutral machinery
-(:mod:`.formats` for the MBR + :class:`.ext4.Ext4Reader` for read-only ext4) and
-never writes to the card.  Editing a file back in place is a separate,
-SIDX-aware step owned by the engine's Write path.
+Browsing composes the existing size-neutral machinery (:mod:`.formats` for the
+MBR + :class:`.ext4.Ext4Reader` for read-only ext4).  The one write the
+explorer offers is :meth:`CardImage.replace_file` — an EXACT-SIZE in-place
+replacement of a single file through the ext4 extent map, refreshing the
+file's Spike 2 ``.sidx`` validation record (monkeybug batch 14 wishlist:
+swap a radium/script file straight into a card without a full Write cycle).
+Anything that would change the filesystem's shape (sizes, allocation,
+names) stays out of scope — that's the engine's Write path.
 
 ``Ext4Reader``/``formats`` are referenced as module globals so tests can swap in
 a lightweight fake filesystem.
@@ -73,9 +77,11 @@ class CardImage:
         if hasattr(source, "read") and hasattr(source, "seek"):
             self._f = source
             self._owns = False
+            self._source_path = None       # replace_file needs a real path
         else:
             self._f = open(source, "rb")
             self._owns = True
+            self._source_path = source
         self._readers = {}                 # partition index -> Ext4Reader
         try:
             self._parts = self._scan_partitions()
@@ -254,6 +260,94 @@ class CardImage:
             if progress:
                 progress(n_files, n_bytes, rel_path)
         return n_files, n_bytes
+
+    def dir_stats(self, part_index, path, max_depth=64):
+        """``(n_files, n_bytes)`` of every regular file at/under directory
+        *path* — recursive folder sizes for the Properties view."""
+        reader = self._reader(part_index)
+        res = self._resolve(reader, path)
+        if res is None:
+            raise FileNotFoundError(path)
+        ino, node = res
+        if (node["mode"] & S_IFMT) != S_IFDIR:
+            return 1, node["size"]
+        n = b = 0
+        for _rel, _fino, fnode in reader.iter_regular_files(
+                root_ino=ino, max_depth=max_depth, min_size=0):
+            n += 1
+            b += fnode["size"]
+        return n, b
+
+    # ---- in-place replace ----------------------------------------------------
+    def replace_file(self, part_index, path, src_path):
+        """Replace the regular file *path* with the EXACT-SIZE contents of
+        *src_path*, in place through the ext4 extent map, and refresh the
+        file's ``.sidx`` validation record when the manifest indexes it.
+
+        Same-size only: rewriting content into the file's own allocated
+        blocks touches no filesystem metadata (no inode, allocation or
+        checksum changes), which is what makes this safe on a real card —
+        the exact discipline the engine's size-neutral Write uses.  Raises
+        ``ValueError`` on a size mismatch or when the card was opened from a
+        stream rather than an image file.
+
+        Returns ``(n_bytes, sidx_refreshed)``."""
+        from . import sidx
+        if not self._source_path:
+            raise ValueError(
+                "replace requires a card image file (not a raw stream)")
+        reader = self._reader(part_index)
+        res = self._resolve(reader, path)
+        if res is None:
+            raise FileNotFoundError(path)
+        _ino, node = res
+        if (node["mode"] & S_IFMT) != S_IFREG:
+            raise IsADirectoryError(path)
+        with open(src_path, "rb") as f:
+            new = f.read()
+        if len(new) != node["size"]:
+            raise ValueError(
+                "size mismatch: the replacement is %d bytes but %s is %d "
+                "bytes on the card — in-place replace must be exact-size "
+                "(pad or trim the file, or use the Write tab's flows)"
+                % (len(new), path, node["size"]))
+
+        def _writes_for(target_node, file_off, buf):
+            out = []
+            pos = 0
+            for doff, n in reader.disk_ranges(target_node, file_off, len(buf)):
+                out.append((doff, buf[pos:pos + n]))
+                pos += n
+            return out
+
+        writes = _writes_for(node, 0, new) if new else []
+
+        # Refresh the file's validation record (HMAC-SHA1 + MD5) so the card
+        # still passes Stern's SD validation.  Files the manifest doesn't
+        # index (or a card with no manifest at all) need nothing.
+        refreshed = False
+        try:
+            sidx_path, sidx_node = sidx.find_sidx(reader)
+        except Exception:
+            sidx_path, sidx_node = None, None
+        if sidx_node is not None:
+            sdata = reader.read_file_bytes(sidx_node)
+            recs, _crc, fmt = sidx.parse_records(sdata)
+            rel = self._norm(path).lstrip("/")
+            po = recs.get(rel)
+            if po is not None:
+                hm, md = sidx.digests(new)
+                for foff, b in sidx.record_field_writes(po, hm, md, fmt):
+                    writes.extend(_writes_for(sidx_node, foff, b))
+                refreshed = True
+
+        # All extents resolved before the first byte is written — a mapping
+        # failure can't leave a half-replaced file.
+        with open(self._source_path, "r+b") as wf:
+            for doff, chunk in writes:
+                wf.seek(doff)
+                wf.write(chunk)
+        return len(new), refreshed
 
     # ---- lifecycle ----------------------------------------------------------
     def close(self):

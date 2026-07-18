@@ -2050,6 +2050,54 @@ def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
     assert out.read_bytes() == b"hello world" and "Extracted" in msg
 
 
+def test_partition_explorer_find_and_replace(app, manufacturers_by_key,
+                                             tmp_path, monkeypatch):
+    """Find Next reveals matches in the lazy tree; right-click Replace writes
+    an exact-size stand-in through the extent map (batch-14 wishlist)."""
+    import time
+    from tests._ext4_fake import (install_fake_reader, materialize_files,
+                                  write_fake_card)
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch)
+    img = write_fake_card(tmp_path / "card.raw")
+    placed = materialize_files(img)
+
+    w.partition_image_var.set(img)
+    w._pex_open_image()
+    tree = w._pex_tree
+
+    # Find: reveals + selects the nested match, then cycles on repeat.
+    w.partition_search_var.set("game")
+    w._pex_find_next()
+    assert tree.selection() == ("/etc/init.d/game",)
+    assert str(tree.item("/etc", "open")) in ("1", "True", "true")
+    w.partition_search_var.set("zzz-nope")
+    w._pex_find_next()
+    assert "No file path" in str(w._pex_action_status["text"])
+
+    # Replace: same-size stand-in lands at the file's disk offset; the GUI
+    # flow (confirm + picker) is monkeypatched to say yes.
+    src = tmp_path / "new_game.sh"
+    src.write_bytes(b"#!/bin/sh\necho HI\n")           # 18 bytes like the orig
+    from pinball_decryptor.gui import main_window as mw
+    monkeypatch.setattr(mw.filedialog, "askopenfilename",
+                        lambda **k: str(src))
+    monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: True)
+    w._pex_replace_selected("/etc/init.d/game")
+    deadline = time.time() + 10
+    while w._pex_busy and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.02)
+    assert not w._pex_busy
+    off, _old = placed["/etc/init.d/game"]
+    with open(img, "rb") as f:
+        f.seek(off)
+        assert f.read(18) == b"#!/bin/sh\necho HI\n"
+
+
 def test_partition_explorer_threaded_extract_and_cancel(
         app, manufacturers_by_key, tmp_path, monkeypatch):
     """The real button path: _pex_run_extract runs on a worker thread, flips

@@ -28,13 +28,24 @@ GOOD_LBA = 24576                 # the browsable ext partition's start LBA
 GOOD_OFF = GOOD_LBA * 512        # ...and its byte offset
 
 
+# Where the fake's regular files "live" on the card, for disk_ranges: each
+# regular file gets a fixed span starting here, in build order.
+FAKE_DATA_BASE = GOOD_LBA * 512 + 0x10000
+
+
 class FakeExt4Reader:
-    """Minimal stand-in for Ext4Reader over a nested-dict *spec*."""
+    """Minimal stand-in for Ext4Reader over a nested-dict *spec*.
+
+    Regular files also carry a synthetic on-disk location (``_disk_off``,
+    assigned in build order from :data:`FAKE_DATA_BASE`) so
+    ``disk_ranges`` — and therefore ``CardImage.replace_file`` — can be
+    exercised against a real card file (see :func:`materialize_files`)."""
 
     def __init__(self, spec):
         self.block_size = 1024
         self._inodes = {}
         self._next = 3
+        self._data_cursor = FAKE_DATA_BASE
         self._build(2, spec)
 
     def _build(self, ino, spec):
@@ -56,7 +67,17 @@ class FakeExt4Reader:
                     else str(val).encode()
                 self._inodes[cino] = {"mode": S_IFREG, "size": len(data),
                                      "i_block": b"\x00" * 60,
-                                     "_data": bytes(data)}
+                                     "_data": bytes(data),
+                                     "_disk_off": self._data_cursor}
+                # 1 KB alignment keeps the spans disjoint and readable.
+                self._data_cursor += max(1024, len(data))
+
+    def disk_ranges(self, inode, file_off, length):
+        """One contiguous synthetic range per file (mirrors the real API)."""
+        off = inode.get("_disk_off")
+        if off is None or file_off + length > inode["size"]:
+            raise ValueError("file offset not allocated")
+        return [(off + file_off, length)]
 
     def read_inode(self, ino):
         return self._inodes[ino]
@@ -139,3 +160,32 @@ def write_fake_card(path, entries=STD_ENTRIES):
     with open(path, "wb") as f:
         f.write(make_mbr(entries) + b"\x00" * 4096)
     return str(path)
+
+
+def materialize_files(card_path, spec=SAMPLE_TREE):
+    """Grow *card_path* and write each regular file's bytes at the same
+    synthetic disk offsets a ``FakeExt4Reader(spec)`` assigns — so
+    ``CardImage.replace_file``'s extent-mapped writes land on real, checkable
+    card bytes.  Returns ``{partition_path: (disk_off, data)}``."""
+    r = FakeExt4Reader(spec)
+    placed = {}
+
+    def _walk(ino, base):
+        node = r._inodes[ino]
+        for name, cino in node.get("_children", {}).items():
+            cn = r._inodes[cino]
+            p = base + "/" + name
+            if "_children" in cn:
+                _walk(cino, p)
+            elif "_data" in cn:
+                placed[p] = (cn["_disk_off"], cn["_data"])
+
+    _walk(2, "")
+    end = max((off + len(d) for off, d in placed.values()), default=0)
+    with open(card_path, "r+b") as f:
+        f.seek(max(end, FAKE_DATA_BASE + 1024))
+        f.write(b"\x00")
+        for off, data in placed.values():
+            f.seek(off)
+            f.write(data)
+    return placed

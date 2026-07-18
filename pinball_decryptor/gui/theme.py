@@ -18,6 +18,7 @@ THEMES = {
         "error": "#f44747", "timestamp": "#808080", "gray": "#808080",
         "trough": "#404040", "border": "#555555", "button": "#404040",
         "tab_selected": "#1e1e1e", "link": "#3794ff",
+        "warning": "#d7ba7d",
         "tooltip_bg": "#404040", "tooltip_fg": "#cccccc",
     },
     "light": {
@@ -26,6 +27,7 @@ THEMES = {
         "error": "#c62828", "timestamp": "#757575", "gray": "#888888",
         "trough": "#d0d0d0", "border": "#bbbbbb", "button": "#e0e0e0",
         "tab_selected": "#ffffff", "link": "#0066cc",
+        "warning": "#9a6700",
         "tooltip_bg": "#ffffe0", "tooltip_fg": "#1e1e1e",
     },
 }

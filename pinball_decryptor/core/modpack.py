@@ -28,9 +28,14 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         log_cb(f"Comparing {len(baseline)} file(s) against the extract "
                f"baseline...", "info")
     changed = []
+    n_base = len(baseline)
     for i, (rel, orig_md5) in enumerate(baseline.items()):
         if progress_cb:
-            progress_cb(i, len(baseline), rel)
+            # The compare pass walks EVERY baseline file (that's how changed
+            # ones are found, whatever their type) — say so, or an audio-only
+            # modder watching video paths scroll by reads it as wasted work.
+            progress_cb(i, n_base,
+                        "Comparing %d of %d: %s" % (i + 1, n_base, rel))
         abs_path = os.path.join(assets_folder, rel)
         if not os.path.isfile(abs_path):
             continue
@@ -47,7 +52,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         for i, rel in enumerate(changed):
             zf.write(os.path.join(assets_folder, rel), rel)
             if progress_cb:
-                progress_cb(i + 1, len(changed), rel)
+                progress_cb(i + 1, len(changed),
+                            "Archiving %d of %d: %s" % (i + 1, len(changed),
+                                                        rel))
 
     return len(changed), zip_path
 

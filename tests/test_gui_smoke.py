@@ -2023,7 +2023,8 @@ def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
     w._pex_open_image()
 
     labels = list(w._pex_part_combo["values"])
-    assert any("Partition 1" in l and "not browsable" not in l for l in labels)
+    # Device-style names: MBR slot N -> sda(N+1) (monkeybug batch 14).
+    assert any("sda2" in l and "not browsable" not in l for l in labels)
     assert sum("not browsable" in l for l in labels) == 3   # FAT, bad ext, ext'd
 
     tree = w._pex_tree

@@ -169,6 +169,11 @@ class App:
             on_audio_declick_change=self._on_audio_declick_change,
             on_partition_image_opened=self._on_partition_image_opened,
         )
+        # Per-picker-type last-used folders (see MainWindow.last_browse_dir).
+        saved_dirs = self._settings.get("browse_dirs")
+        if isinstance(saved_dirs, dict):
+            self.window._last_browse_dirs = {
+                k: v for k, v in saved_dirs.items() if isinstance(v, str)}
         # Tracks whether the run in flight is a Direct-SSD pipeline,
         # so we can auto-acknowledge the macOS FDA banner after a
         # successful run (empirical proof that Full Disk Access is
@@ -1545,11 +1550,13 @@ class App:
         zip_path = filedialog.asksaveasfilename(
             title="Save Mod Pack As",
             defaultextension=".zip",
+            initialdir=self.window.last_browse_dir("mod_pack"),
             initialfile=f"{self._current_mfr.key}_mod_pack.zip",
             filetypes=[("Zip files", "*.zip"), ("All files", "*.*")],
         )
         if not zip_path:
             return
+        self.window.remember_browse_dir("mod_pack", zip_path)
 
         self.window.append_log("Exporting mod pack...", "info")
         threading.Thread(target=self._export_worker,
@@ -1608,10 +1615,12 @@ class App:
 
         zip_path = filedialog.askopenfilename(
             title="Select Mod Pack ZIP",
+            initialdir=self.window.last_browse_dir("mod_pack"),
             filetypes=[("Zip files", "*.zip"), ("All files", "*.*")],
         )
         if not zip_path:
             return
+        self.window.remember_browse_dir("mod_pack", zip_path)
 
         if not messagebox.askyesno(
             "Import Mod Pack",
@@ -2544,7 +2553,14 @@ class App:
             self.window.set_status("Cancelled")
             self.window.append_log("Cancelled.", "info")
         elif success:
-            self.window.set_status("Complete!")
+            # "Completed at 2:45 PM" beats a bare "Complete!" — the status
+            # persists across tab switches, and a timestamp reads as a
+            # finished past event instead of something maybe still running
+            # (monkeybug batch 14).  Park the bar at 100% too; it used to
+            # freeze wherever the last progress callback left it.
+            self.window.set_status(
+                time.strftime("Completed at %I:%M %p").replace(" 0", " "))
+            self.window.set_progress(1, 1, mode=self._active_mode)
             if is_extract:
                 # No modal for extraction — the per-asset progress already
                 # scrolls by in the log, so a blocking popup just gets in the
@@ -2558,6 +2574,13 @@ class App:
                         f"Extract completed. Total time: "
                         f"{h:02d}:{m:02d}:{s:02d}.", "success")
             else:
+                self.window.append_log(summary, "success")
+                if run_elapsed is not None:
+                    h, rem = divmod(int(run_elapsed), 3600)
+                    m, s = divmod(rem, 60)
+                    self.window.append_log(
+                        f"Write completed. Total time: "
+                        f"{h:02d}:{m:02d}:{s:02d}.", "success")
                 fails = self._staging_failures
                 if fails:
                     # The build succeeded but some assigned replacements
@@ -2793,6 +2816,11 @@ class App:
             self._save_manufacturer_paths(self._current_mfr.key)
             self._settings["last_manufacturer"] = self._current_mfr.key
         self._settings["theme"] = self.window._current_theme
+        # Per-picker-type last-used folders (audio/video/image replacements,
+        # mod packs) survive restarts.
+        dirs = getattr(self.window, "_last_browse_dirs", None)
+        if dirs:
+            self._settings["browse_dirs"] = dirs
         # Remember the window size + position for next launch.  Skip odd/tiny
         # geometries (e.g. the 1x1 pre-dialog footprint) so we never persist a
         # window the user can't see.

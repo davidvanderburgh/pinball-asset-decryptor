@@ -77,7 +77,10 @@ class VideoSlot:
         d = self.duration
         if d <= 0:
             return "—"
-        m, s = divmod(int(round(d)), 60)
+        # Floor, don't round: the preview player's readout floors, and the
+        # two disagreeing on the same clip (25.5 s showing 0:26 in the list
+        # but 0:25 in the player) read as a bug (monkeybug batch 14).
+        m, s = divmod(int(d), 60)
         return f"{m}:{s:02d}"
 
 

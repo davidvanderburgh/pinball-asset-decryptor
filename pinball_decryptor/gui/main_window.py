@@ -159,8 +159,13 @@ class _AudioPreviewPane:
         self._hint = ""           # message shown when nothing is loaded
 
         self.frame = ttk.Frame(parent)
-        ttk.Label(self.frame, text=title, font=(_SANS_FONT, 9)).pack(
-            pady=(2, 1))
+        # Title carries the loaded file's name ("Original — idx0258.wav") so
+        # the user always knows exactly what the player is holding (monkeybug
+        # batch 14).
+        self.base_title = title
+        self.title_var = tk.StringVar(value=title)
+        ttk.Label(self.frame, textvariable=self.title_var,
+                  font=(_SANS_FONT, 9)).pack(pady=(2, 1))
         # Spectrogram = the seek bar.  Click or drag anywhere to seek; the
         # playhead tracks playback.  Rendered by ffmpeg, shown via Pillow.
         self.spec_canvas = tk.Canvas(
@@ -197,6 +202,11 @@ class _AudioPreviewPane:
         self.limit = limit
         self.pos = 0.0
         self._hint = ""
+        try:
+            self.title_var.set("%s — %s" % (self.base_title,
+                                            os.path.basename(path)))
+        except Exception:
+            pass
         self._render_spectrogram(path)
         self._update_time()
         if autoplay:
@@ -213,6 +223,10 @@ class _AudioPreviewPane:
         self._render_id += 1  # drop any in-flight render
         self._spec_img = None
         self._hint = hint
+        try:
+            self.title_var.set(self.base_title)
+        except Exception:
+            pass
         self._draw_hint()
         self._update_time()
 
@@ -496,8 +510,13 @@ class _VideoPreviewPane:
         self._hint = ""           # message shown when nothing is loaded
 
         self.frame = ttk.Frame(parent)
-        ttk.Label(self.frame, text=title, font=(_SANS_FONT, 9)).pack(
-            pady=(2, 1))
+        # Title carries the loaded file's name ("Original — idx0258.wav") so
+        # the user always knows exactly what the player is holding (monkeybug
+        # batch 14).
+        self.base_title = title
+        self.title_var = tk.StringVar(value=title)
+        ttk.Label(self.frame, textvariable=self.title_var,
+                  font=(_SANS_FONT, 9)).pack(pady=(2, 1))
         self.canvas = tk.Canvas(
             self.frame, width=self.MAX_W, height=self.MAX_H,
             highlightthickness=1, bd=0, background="#000000")
@@ -535,6 +554,11 @@ class _VideoPreviewPane:
         self.stop_playback()
         self._hint = ""
         self.path = path
+        try:
+            self.title_var.set("%s — %s" % (self.base_title,
+                                            os.path.basename(path)))
+        except Exception:
+            pass
         info = _video.detect_video_info(path)
         self.info = info
         dur = (info.duration if info and info.duration > 0
@@ -564,6 +588,10 @@ class _VideoPreviewPane:
         self._render_id += 1  # drop any in-flight render
         self._frame_img = None
         self._hint = hint
+        try:
+            self.title_var.set(self.base_title)
+        except Exception:
+            pass
         self._draw_hint()
         self.seek_canvas.delete("all")
         self._update_time()
@@ -2538,6 +2566,14 @@ class MainWindow:
         self._write_preview_scan_status = ttk.Label(
             preview_status_row, text="", font=(_SANS_FONT, 9))
         self._write_preview_scan_status.pack(side=tk.LEFT)
+        # One-line legend for the two Status words (monkeybug batch 14 asked
+        # what turns Pending into Modified).
+        legend = ttk.Label(
+            preview_status_row,
+            text="Pending = staged this session, applied when you Build · "
+                 "Modified = file on disk already differs from the extract",
+            font=(_SANS_FONT, 8, "italic"), foreground="#888888")
+        legend.pack(side=tk.LEFT, padx=(12, 0))
         self._write_preview_count_lbl = ttk.Label(
             preview_status_row, text="", font=(_SANS_FONT, 9))
         self._write_preview_count_lbl.pack(side=tk.RIGHT)
@@ -2830,6 +2866,16 @@ class MainWindow:
             tools, textvariable=self.audio_status_var,
             font=(_SANS_FONT, 9))
         self._audio_status_lbl.pack(side=tk.RIGHT)
+        self._audio_csv_btn = ttk.Button(
+            tools, text="Export CSV", command=self._audio_export_csv)
+        self._audio_csv_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        _Tooltip(
+            self._audio_csv_btn,
+            "Save the whole audio table (every slot, not just the filtered "
+            "view) as a CSV — name, length, format, type, replacement and "
+            "changed-on-disk status — for tracking a big replacement project "
+            "in a spreadsheet.",
+            lambda: self._current_theme)
 
         # Slot list.
         list_frame = ttk.Frame(f)
@@ -2896,6 +2942,10 @@ class MainWindow:
         # Selecting a row loads its original into the seek-bar strip (no
         # autoplay), debounced so arrowing through the list doesn't thrash.
         self._audio_tree.bind("<<TreeviewSelect>>", self._audio_on_tree_select)
+        # Spacebar = play/pause, audio-editor style (monkeybug batch 14):
+        # click a row, tap space to listen, arrow on.  "break" stops the
+        # Treeview's own space handling from re-toggling the selection.
+        self._audio_tree.bind("<space>", self._audio_space_toggle)
         # Hover over the Loop column → tooltip explaining the feature.
         self._audio_tree.bind("<Motion>", self._audio_on_tree_motion, add="+")
         self._audio_tree.bind(
@@ -3524,6 +3574,7 @@ class MainWindow:
         has run for this folder: one collapsed parent per group of
         byte-identical factory audio (longest first, the dup scan's order),
         its member slots nested, every unique slot flat below the groups."""
+        from ..core.name_memory import split_decode_name as _split_decode_name
         tree = getattr(self, "_audio_tree", None)
         if tree is None:
             return
@@ -3604,6 +3655,13 @@ class MainWindow:
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
             keep_disp = ("☑" if self._audio_keep_full_flags.get(s.rel_path)
                          else "☐")
+            if not tag:
+                # User-named rows (a label after the decode index) get their
+                # own colour so custom names read at a glance vs stock ones
+                # (monkeybug batch 14).  Staged/changed colours still win.
+                parts = _split_decode_name(os.path.basename(s.rel_path))
+                if parts and parts[1]:
+                    tag = "renamed"
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp, keep_disp),
@@ -3724,12 +3782,14 @@ class MainWindow:
             return
         path = filedialog.askopenfilename(
             title=f"Choose a replacement for {rel}",
+            initialdir=self.last_browse_dir("audio_replacement"),
             filetypes=[("Audio files",
                         "*.wav *.ogg *.mp3 *.flac *.m4a *.aac *.opus "
                         "*.wma *.aiff *.aif"),
                        ("All files", "*.*")])
         if not path:
             return
+        self.remember_browse_dir("audio_replacement", path)
         self._audio_assignments[rel] = path
         self._save_staged_changes()
         # Staged replacements get a log line so the run can be double-checked
@@ -3764,13 +3824,20 @@ class MainWindow:
 
     def _audio_preview_selected(self):
         self._audio_select_job = None
-        if ((self._audio_pane_orig and self._audio_pane_orig.playing)
-                or (self._audio_pane_rep and self._audio_pane_rep.playing)):
-            return  # don't yank a track that's currently playing
         rel = self._audio_selected_rel()
         if rel is None or rel == self._audio_current_rel:
             return
-        self._audio_load_track(rel)  # shows both seek bars, no play
+        # Selecting a different row while something plays stops it and loads
+        # the new row right away (monkeybug batch 14: needing a second click
+        # left the OLD sample in the player, and near the end of a play it
+        # wasn't obvious the new row hadn't loaded).  Resume playing on the
+        # same pane so click-through listening keeps flowing.
+        resume = None
+        if self._audio_pane_orig and self._audio_pane_orig.playing:
+            resume = "orig"
+        elif self._audio_pane_rep and self._audio_pane_rep.playing:
+            resume = "rep"
+        self._audio_load_track(rel, autoplay=resume)
 
     def _audio_on_tree_double(self, _event=None):
         # Double-click = choose a replacement, same as the Images tab (playback
@@ -4124,16 +4191,22 @@ class MainWindow:
             # monkeybug's report of a rename turning into a "callout").
             name_memory.remember(md5, new_label,   # blank forgets
                                  category=self._audio_categories.get(rel))
-        # Re-key every bit of session state pinned to the old rel, then let a
-        # same-folder rescan rebuild the slot list (it keeps assignments and
-        # probed metadata; the dup-group cache self-invalidates).
+        # Re-key every bit of session state pinned to the old rel, then update
+        # the slot IN PLACE and re-sort the visible list.  No folder rescan:
+        # only this one file changed, and the full re-walk both took minutes
+        # on big cards and briefly showed the renamed row at the wrong sort
+        # position until the metadata probe caught up (monkeybug batch 14).
         for d in (self._audio_assignments, self._audio_loop_flags,
-                  self._audio_keep_full_flags):
+                  self._audio_keep_full_flags, self._audio_categories):
             if rel in d:
                 d[new_rel] = d.pop(rel)
         if rel in self._audio_changed_on_disk:
             self._audio_changed_on_disk.discard(rel)
             self._audio_changed_on_disk.add(new_rel)
+        slot.rel_path = new_rel
+        slot.abs_path = dst
+        self._audio_slots_by_rel.pop(rel, None)
+        self._audio_slots_by_rel[new_rel] = slot
         if self._audio_current_rel == rel:
             self._audio_clear_preview()        # reselecting reloads the pane
         self._save_staged_changes()
@@ -4145,7 +4218,60 @@ class MainWindow:
             note = " (forgotten)"
         self.append_log("Replace Audio: renamed %s → %s%s"
                         % (rel, new_base, note), "info")
-        self._scan_audio_slots_async()
+        self._refresh_audio_list()             # re-applies the active sort
+        try:                                   # keep the renamed row in view
+            self._audio_tree.selection_set(new_rel)
+            self._audio_tree.see(new_rel)
+        except tk.TclError:
+            pass
+
+    def _audio_export_csv(self):
+        """Save the audio table as a CSV — every slot with its metadata,
+        type bucket, replacement assignment and changed-on-disk status, so a
+        big replacement project can be tracked in a spreadsheet instead of
+        scrolling the list (monkeybug batch 14)."""
+        import csv
+        if not self._audio_slots:
+            messagebox.showinfo("Export CSV",
+                                "Scan an assets folder first — the audio "
+                                "table is empty.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save audio table as CSV",
+            defaultextension=".csv",
+            initialdir=self.last_browse_dir("audio_csv"),
+            initialfile="audio_slots.csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        self.remember_browse_dir("audio_csv", path)
+        cat_names = {"music": "Music", "sfx": "Sound FX",
+                     "callouts": "Callouts"}
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["Original Track", "Length", "Format", "Type",
+                            "Replacement", "Changed On Disk", "Loop",
+                            "Full Length"])
+                for s in sorted(self._audio_slots, key=lambda q: q.rel_path):
+                    rel = s.rel_path
+                    rep = self._audio_assignments.get(rel, "")
+                    w.writerow([
+                        rel, s.duration_str(), s.format_summary(),
+                        cat_names.get(self._audio_categories.get(rel),
+                                      "Other"),
+                        rep,
+                        "yes" if rel in self._audio_changed_on_disk else "",
+                        "yes" if self._audio_loop_flags.get(rel) else "",
+                        "yes" if self._audio_keep_full_flags.get(rel) else "",
+                    ])
+        except OSError as e:
+            messagebox.showerror("Export CSV", "Couldn't write the CSV:\n%s"
+                                 % e)
+            return
+        self.append_log("Audio table exported: %d slot(s) → %s"
+                        % (len(self._audio_slots), os.path.normpath(path)),
+                        "success")
 
     def _audio_revert_selected(self):
         """Revert the selected slot to its extracted original.
@@ -4247,6 +4373,22 @@ class MainWindow:
         rel = self._audio_selected_rel()
         if rel is not None:
             self._audio_load_track(rel, autoplay=side)
+
+    def _audio_space_toggle(self, _event=None):
+        """Spacebar on the audio list: pause whichever pane is playing, else
+        play the loaded original (loading the selected row first if the
+        select-debounce hasn't fired yet)."""
+        for pane in (self._audio_pane_orig, self._audio_pane_rep):
+            if pane and pane.playing:
+                pane.toggle_play()
+                return "break"
+        rel = self._audio_selected_rel()
+        if rel is not None and rel != self._audio_current_rel:
+            self._cancel_audio_select_job()
+            self._audio_load_track(rel, autoplay="orig")
+        elif self._audio_pane_orig and self._audio_pane_orig.path:
+            self._audio_pane_orig.toggle_play()
+        return "break"
 
     def _draw_audio_icon(self, canvas, kind):
         """Draw a crisp, borderless transport icon (play triangle / pause two
@@ -4967,12 +5109,14 @@ class MainWindow:
             return
         path = filedialog.askopenfilename(
             title=f"Choose a replacement for {rel}",
+            initialdir=self.last_browse_dir("video_replacement"),
             filetypes=[("Video files",
                         "*.mp4 *.mov *.m4v *.webm *.ogv *.avi *.mkv *.mpg "
                         "*.mpeg *.wmv *.flv *.ts *.3gp *.gif"),
                        ("All files", "*.*")])
         if not path:
             return
+        self.remember_browse_dir("video_replacement", path)
         self._video_assignments[rel] = path
         self._save_staged_changes()
         self.append_log("Replace Video: %s ← %s"
@@ -5003,13 +5147,18 @@ class MainWindow:
 
     def _video_preview_selected(self):
         self._video_select_job = None
-        if ((self._video_pane_orig and self._video_pane_orig.playing)
-                or (self._video_pane_rep and self._video_pane_rep.playing)):
-            return  # don't yank a clip that's currently playing
         rel = self._video_selected_rel()
         if rel is None or rel == self._video_current_rel:
             return
-        self._video_load_track(rel)  # posters both panes, no play
+        # Selecting a different row while a clip plays stops it and loads the
+        # new row right away, resuming on the same pane (monkeybug batch 14 —
+        # same flow as the audio tab).
+        resume = None
+        if self._video_pane_orig and self._video_pane_orig.playing:
+            resume = "orig"
+        elif self._video_pane_rep and self._video_pane_rep.playing:
+            resume = "rep"
+        self._video_load_track(rel, autoplay=resume)
 
     def _video_on_tree_double(self, _event=None):
         # Double-click = choose a replacement (see _audio_on_tree_double).
@@ -5856,9 +6005,11 @@ class MainWindow:
         spec = " ".join(f"*{e}" for e in REPLACEMENT_EXTS)
         path = filedialog.askopenfilename(
             title=f"Choose a replacement for {rel}",
+            initialdir=self.last_browse_dir("image_replacement"),
             filetypes=[("Image files", spec), ("All files", "*.*")])
         if not path:
             return
+        self.remember_browse_dir("image_replacement", path)
         self._image_assignments[rel] = path
         self._save_staged_changes()
         self.append_log("Replace Images: %s ← %s"
@@ -6542,8 +6693,11 @@ class MainWindow:
         self._pex_part_labels = {}
         labels = []
         for p in parts:
-            label = "Partition %d — %s (%s)%s" % (
-                p.index, p.label, self._pex_human(p.size),
+            # Linux-style device names (sda1 = MBR slot 0) — the naming users
+            # already know from mounting these cards by hand (monkeybug
+            # batch 14).
+            label = "sda%d — %s (%s)%s" % (
+                p.index + 1, p.label, self._pex_human(p.size),
                 "" if p.browsable else " — not browsable")
             self._pex_part_labels[label] = p
             labels.append(label)
@@ -6711,12 +6865,13 @@ class MainWindow:
         out_dir = filedialog.askdirectory(
             title="Choose a folder to extract the whole partition into")
         if out_dir:
-            # Land under "<dest>\Partition N", not a generic "root" — two
-            # partitions extracted into one folder used to mix together
-            # there (monkeybug batch 10).
+            # Land under "<dest>\sdaN", not a generic "root" — two partitions
+            # extracted into one folder used to mix together there (monkeybug
+            # batch 10); the folder name matches the combo's device-style
+            # partition label (batch 14).
             self._pex_run_extract(
                 "dir", "/", out_dir, self._pex_extract_part_btn,
-                top_name="Partition %d" % self._pex_part_index)
+                top_name="sda%d" % (self._pex_part_index + 1))
 
     def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
                         tree_prog=None, file_prog=None, chunk_prog=None,
@@ -6737,7 +6892,8 @@ class MainWindow:
             nf, nb = c.extract_tree(part, path, dest, progress=tree_prog,
                                     chunk_progress=chunk_prog,
                                     top_name=top_name)
-            shown = os.path.join(dest, top_name) if top_name else dest
+            shown = os.path.normpath(
+                os.path.join(dest, top_name) if top_name else dest)
             return "Extracted %d file%s (%s) to %s." % (
                 nf, "" if nf == 1 else "s", self._pex_human(nb), shown)
 
@@ -6794,10 +6950,14 @@ class MainWindow:
         btn.config(text="Cancel", state=tk.NORMAL,
                    command=self._pex_cancel_extract)
         self._pex_action_status.configure(text="")
+        # normpath: Tk's pickers hand back forward-slash paths that turned
+        # into mixed-slash log lines on Windows, which couldn't be pasted
+        # into Explorer (monkeybug batch 14).
         self.append_log(
             "Extracting %s to %s…"
             % (top_name if top_name
-               else "%s from Partition %s" % (path, part), dest), "info")
+               else "%s from partition %s" % (path, part),
+               os.path.normpath(dest)), "info")
         self._pex_busy_lbl.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -8949,6 +9109,25 @@ class MainWindow:
                 return parent
         return None
 
+    # Per-type "where was I last" for the replacement/mod-pack pickers: audio
+    # picks live in one folder, video in another, mod packs a third — each
+    # picker type reopens on its own last folder instead of the OS MRU
+    # (monkeybug batch 14).  Persisted in settings.json by the app.
+    def last_browse_dir(self, key):
+        d = getattr(self, "_last_browse_dirs", None) or {}
+        v = d.get(key)
+        return v if v and os.path.isdir(v) else None
+
+    def remember_browse_dir(self, key, path):
+        if not path:
+            return
+        folder = path if os.path.isdir(path) else os.path.dirname(path)
+        if not (folder and os.path.isdir(folder)):
+            return
+        if getattr(self, "_last_browse_dirs", None) is None:
+            self._last_browse_dirs = {}
+        self._last_browse_dirs[key] = folder
+
     def _path_combo(self, parent, var, field):
         """An editable path box with a recent-paths dropdown.
 
@@ -10194,10 +10373,28 @@ class MainWindow:
         While a scan runs the list is blanked, a big animated indicator shows
         over it, and the Scan button turns into Cancel (monkeybug) — so a slow
         scan over a network share can't look idle and can be aborted.  Tolerant
-        of tabs/layouts where a widget doesn't exist."""
+        of tabs/layouts where a widget doesn't exist.
+
+        Every scan's start and finish (with its duration) is also logged, so
+        slow scans are traceable after the fact (monkeybug batch 14 — his
+        Write scan crawled after a mod-pack transfer and nothing recorded
+        when or how long)."""
+        names = {"audio": "Audio", "video": "Video", "image": "Images",
+                 "write_preview": "Write change"}
+        label = names.get(tab_key, tab_key)
+        t0s = getattr(self, "_scan_t0", None)
+        if t0s is None:
+            t0s = self._scan_t0 = {}
         if active:
+            if tab_key not in t0s:      # re-entrant starts: keep first t0
+                t0s[tab_key] = time.monotonic()
+                self.append_log("%s scan started." % label, "info")
             self._begin_scan_ui(tab_key)
         else:
+            t0 = t0s.pop(tab_key, None)
+            if t0 is not None:
+                self.append_log("%s scan finished in %.1f s." %
+                                (label, time.monotonic() - t0), "info")
             self._end_scan_ui(tab_key)
 
     def _begin_scan_ui(self, tab_key):
@@ -10355,8 +10552,14 @@ class MainWindow:
         if self._write_preview_scan_id != scan_id:
             return
         # Latest scan finished — leave the scanning state (spinner stops,
-        # Cancel flips back to Refresh).
+        # Cancel flips back to Refresh; the duration is logged there), and
+        # log what it found so slow scans + change counts are traceable.
         self._set_tab_scanning("write_preview", False)
+        total_rows = len(self._write_preview_tree.get_children())
+        self.append_log("Write change scan: %d modified on disk, %d total "
+                        "change(s) for the next build." %
+                        (n_changed, total_rows), "info")
+        self._write_scan_fingerprint = self._current_write_fingerprint()
         self._update_write_preview_count()
         # Base the empty state on the actual tree contents — pending
         # Replace-Audio/Video rows count too, so "No modified files" only
@@ -10400,7 +10603,47 @@ class MainWindow:
                 return
         except (tk.TclError, IndexError):
             return
+        # Skip the re-hash when nothing that feeds the preview has changed
+        # since the last completed scan (monkeybug batch 14: switching tabs
+        # re-ground through a minutes-long MD5 walk every single time).  The
+        # fingerprint covers staged assignments, text edits, per-tab on-disk
+        # change sets, and every finished run; the Refresh button still
+        # always scans (it calls _scan_write_preview directly).
+        fp = self._current_write_fingerprint()
+        if (getattr(self, "_write_scan_fingerprint", None) is not None
+                and fp == self._write_scan_fingerprint):
+            return
         self._scan_write_preview()
+
+    def _current_write_fingerprint(self):
+        """Cheap equality summary of everything that can change the Write
+        change list: the assets folder, staged in-memory/sidecar replacement
+        assignments, on-screen text edits, the Replace tabs' changed-on-disk
+        sets, and a counter bumped after every finished run (build / export /
+        revert all stage or restore files on disk)."""
+        assets_path = (self.write_assets_var.get() or "").strip()
+        parts = [assets_path, getattr(self, "_write_disk_epoch", 0)]
+        for getter in (self.pending_audio_assignments,
+                       self.pending_video_assignments,
+                       self.pending_image_assignments):
+            try:
+                pend = getter(assets_path)
+                parts.append(tuple(sorted((pend[1] or {}).items()))
+                             if pend else ())
+            except Exception:
+                parts.append(None)
+        for attr in ("_audio_changed_on_disk", "_video_changed_on_disk",
+                     "_image_changed_on_disk"):
+            val = getattr(self, attr, None)
+            parts.append(tuple(sorted(val)) if val else ())
+        try:
+            from ..core import text_manifest
+            changed = text_manifest.changed(assets_path)
+            parts.append(sorted((p, list(pairs))
+                                for p, pairs in changed.items()))
+        except Exception:
+            parts.append(None)
+        return parts
 
     def _browse_extract_output(self):
         path = filedialog.askdirectory(
@@ -11678,6 +11921,11 @@ class MainWindow:
         # Authoritative run flag (read by _is_running()); set before any widget
         # state so a re-entrant refresh sees the right value.
         self._running = running
+        if not running:
+            # A finished run may have staged, built, or reverted files on
+            # disk — invalidate the Write change-scan fingerprint so the next
+            # visit to the tab really re-scans.
+            self._write_disk_epoch = getattr(self, "_write_disk_epoch", 0) + 1
         if running:
             # New run → new namespace for in-place keyed log lines.
             self._log_line_run += 1
@@ -12230,6 +12478,11 @@ class MainWindow:
             # Already changed on disk by an earlier build — same hue as the
             # Write tab's "Modified" rows so the two views read as one truth.
             self._audio_tree.tag_configure("changed", foreground=c["link"])
+            # User-named slots (custom label after the decode index) — the
+            # warning hue marks "this name is yours, not stock"; staged /
+            # changed rows keep their colours (the tag is only applied when
+            # neither of those is).
+            self._audio_tree.tag_configure("renamed", foreground=c["warning"])
         for pane in (getattr(self, "_audio_pane_orig", None),
                      getattr(self, "_audio_pane_rep", None)):
             if pane is not None:

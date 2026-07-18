@@ -399,6 +399,18 @@ class Manufacturer(ABC):
     def detect(self, path):
         """Return a :class:`Game` if this manufacturer claims *path*, else None."""
 
+    def image_info(self, path, assets_dir=None):
+        """Platform-specific sections for the Image Info tab, as
+        ``[(section_title, [(name, value), ...]), ...]``.
+
+        Called on a worker thread with the selected input *path* (and the
+        current extracted-assets folder, when one is set) after the generic
+        File/Detection sections; whatever a plugin returns is appended.  Must
+        stay read-only and cheap — a slow probe holds the whole tab on
+        "Reading image…".  The default contributes nothing.
+        """
+        return []
+
     # ------------------------------------------------------------------
     # Pipeline factories — implement those your capabilities advertise.
     # ------------------------------------------------------------------

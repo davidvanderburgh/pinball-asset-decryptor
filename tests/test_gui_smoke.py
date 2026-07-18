@@ -1365,11 +1365,15 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         assert w._update_check_busy
         w.set_update_check_running(False)
         assert not w._update_check_busy
-        # A found update puts a ● on the gear, a Download entry at the top
+        # A found update lights the gear's red notification dot (the gear
+        # is a round canvas icon now), puts a Download entry at the top
         # of the menu, and the outcome in the log (David).
+        assert w._gear_btn.itemcget(
+            w._gear_update_dot, "state") == "hidden"
         app._handle_update_check_result(
             ("99.0.0", "https://example.com/release", "", None), False)
-        assert "●" in w._gear_btn.cget("text")
+        assert w._gear_btn.itemcget(
+            w._gear_update_dot, "state") == "normal"
         upd_menu = w._build_settings_menu()
         assert "Download update v99.0.0" in upd_menu.entrycget(0, "label")
         assert "Update available: v99.0.0" in w._log_text.get("1.0", "end-1c")
@@ -2287,3 +2291,118 @@ def test_write_tab_output_label_says_build_location(app, manufacturers_by_key):
     labels = [c for c in w._write_output_row_ref.winfo_children()
               if isinstance(c, _ttk.Label)]
     assert any(str(l.cget("text")) == "Build Location:" for l in labels)
+
+
+# ---------------------------------------------------------------------------
+# Image Info tab (peanuts)
+# ---------------------------------------------------------------------------
+
+def _pump_until(app, cond, timeout=5.0):
+    """Drive Tk's event loop (after() callbacks + the info worker poll) until
+    *cond* is truthy or *timeout* elapses."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        app.root.update()
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_image_info_window_populates(app, manufacturers_by_key, tmp_path,
+                                     monkeypatch):
+    """The "Info" button beside the Extract picker opens the Image Info
+    window; the worker probe fills the tree with File / Detection /
+    Firmware / Assets on Card / Partitions sections and enables Copy
+    Report (peanuts; window-not-tab per David)."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    from tests.test_image_info import SIDX_TREE
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch, spec=SIDX_TREE)
+    img = write_fake_card(
+        tmp_path / "turtles_le-1_23_0.Release.8G.sdcard.raw")
+
+    w.extract_input_var.set(img)
+    w._open_image_info(w.extract_input_var)
+    assert w._info_win is not None and w._info_win.winfo_exists()
+    assert _pump_until(app, lambda: w._info_tree.get_children(""))
+
+    tree = w._info_tree
+    secs = [tree.item(i, "text") for i in tree.get_children("")]
+    assert secs[:2] == ["File", "Detection"]
+    assert "Firmware" in secs and "Partitions" in secs
+    assert "Assets on Card" in secs
+    fw_iid = tree.get_children("")[secs.index("Firmware")]
+    fw = {tree.item(i, "text"): tree.item(i, "values")[0]
+          for i in tree.get_children(fw_iid)}
+    assert fw["Version"].startswith("1.23.0") and fw["Edition"] == "LE"
+    assert str(w._info_copy_btn["state"]) == "normal"
+
+    # The rendered sections back the Copy Report text verbatim.
+    from pinball_decryptor.core.image_info import as_text
+    assert "Stern Spike 2" in as_text(w._info_sections)
+
+    # Clicking Info again with the same path re-uses the window and the
+    # shown-key skip leaves the tree alone.
+    before = tree.get_children("")
+    win_before = w._info_win
+    w._open_image_info(w.extract_input_var)
+    app.root.update()
+    assert w._info_win is win_before
+    assert tree.get_children("") == before
+
+    w._info_reset()
+    assert w._info_win is None
+
+
+def test_image_info_window_closes_on_mfr_switch(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    import os
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    from tests.test_image_info import SIDX_TREE
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch, spec=SIDX_TREE)
+    img = write_fake_card(tmp_path / "turtles_pro-1_10_0.sdcard.raw")
+
+    w.extract_input_var.set(img)
+    w._open_image_info(w.extract_input_var)
+    assert _pump_until(app, lambda: w._info_tree.get_children(""))
+    assert os.path.normpath(img) == w._info_path
+
+    # Switching manufacturers closes the window (a JJP header must not sit
+    # over Stern card details).
+    app._on_manufacturer_change(manufacturers_by_key["jjp"])
+    app.root.update()
+    assert w._info_win is None
+    assert not w._info_sections
+
+
+def test_image_info_button_without_valid_path(app, manufacturers_by_key,
+                                              monkeypatch):
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    shown = []
+    monkeypatch.setattr(
+        "pinball_decryptor.gui.main_window.messagebox.showinfo",
+        lambda title, msg, **k: shown.append(("info", title)))
+    monkeypatch.setattr(
+        "pinball_decryptor.gui.main_window.messagebox.showerror",
+        lambda title, msg, **k: shown.append(("error", title)))
+
+    w.extract_input_var.set("")
+    w._open_image_info(w.extract_input_var)
+    assert shown[-1] == ("info", "No image selected")
+    assert w._info_win is None
+
+    w.extract_input_var.set(r"C:\nope\gone.raw")
+    w._open_image_info(w.extract_input_var)
+    assert shown[-1] == ("error", "File not found")
+    assert w._info_win is None

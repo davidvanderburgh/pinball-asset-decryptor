@@ -1113,6 +1113,16 @@ class MainWindow:
         # of their own (then we stop clobbering it).
         self.write_filename_var = tk.StringVar()
         self._write_filename_auto = ""
+        # Round icon buttons (ⓘ badges, header home/?/⚙) — plain Canvases,
+        # collected so _apply_theme can re-skin their backdrops.
+        self._round_icons = []
+        # Image Info window state (the round ⓘ badge next to the image
+        # pickers opens one singleton Toplevel, built on demand).
+        self._info_win = None
+        self._info_path = ""
+        self._info_seq = 0           # bump-counter: drops stale worker results
+        self._info_sections = []     # last rendered sections (Copy Report)
+        self._info_shown_key = None  # (path, assets) the tree currently shows
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -1449,11 +1459,9 @@ class MainWindow:
         # (same font/style as the gear — see the glyph comment below), text
         # "⌂" elsewhere.  The tooltip carries the words the icon dropped.
         home_glyph = "" if sys.platform == "win32" else "⌂"
-        self._back_btn = ttk.Button(
-            top, text=home_glyph, width=3, style="Icon.TButton",
-            command=self._handle_back)
-        _Tooltip(self._back_btn, "Back to game selection",
-                 lambda: self._current_theme)
+        self._back_btn = self._make_round_icon(
+            top, home_glyph, "#e67e22", "#ec9540",
+            "Back to game selection", self._handle_back)
         # not packed yet — show_mfr_view() does that
         self._title_lbl = ttk.Label(
             top, text=self._app_title,
@@ -1470,24 +1478,30 @@ class MainWindow:
         # permanent top-bar clutter for things you touch once in a while).
         # Everything app-wide lives in its dropdown: theme, update check, disk
         # space, voice-recognition quality, prerequisites.
-        # Glyphs: on Windows BOTH header icons ("?" tips + gear) come from
-        # Segoe MDL2 Assets — the OS's own Settings gear (U+2699 in Segoe UI
-        # renders as the flowery emoji gear) and its matching Help "?" — one
-        # font + one style so the two buttons are pixel-identical in size
-        # (David).  Elsewhere: text glyphs, ⚙ forced to text presentation.
+        # Glyphs: on Windows the header icons come from Segoe MDL2 Assets —
+        # the OS's own Settings gear (U+2699 in Segoe UI renders as the
+        # flowery emoji gear) and its matching Help "?".  Elsewhere: text
+        # glyphs, ⚙ forced to text presentation.  Each is drawn white on a
+        # _make_round_icon color circle (David: round colorful icons).
         if sys.platform == "win32":
             self._gear_glyph = ""          # MDL2 "Settings" gear
-            self._gear_badge_glyph = ""    # MDL2 "Warning" triangle
             self._help_glyph = ""          # MDL2 "Help" question mark
         else:
             self._gear_glyph = "⚙︎"    # text-presentation ⚙
-            self._gear_badge_glyph = "⚠"    # ⚠
             self._help_glyph = "?"
-        self._gear_btn = ttk.Button(top, text=self._gear_glyph, width=3,
-                                    style="Icon.TButton",
-                                    command=self._open_settings_menu)
+        self._gear_btn = self._make_round_icon(
+            top, self._gear_glyph, "#7e57c2", "#9575cd",
+            "Settings", self._open_settings_menu)
         self._gear_btn.pack(side=tk.RIGHT)
-        _Tooltip(self._gear_btn, "Settings", lambda: self._current_theme)
+        # Notification marks drawn over the gear circle's corners: red dot =
+        # update available, amber dot = staging cleanup pending.  Hidden
+        # until _refresh_gear_badge shows them; the amounts/details live in
+        # the ⚙ menu entries.
+        self._gear_update_dot = self._gear_btn.create_oval(
+            16, 1, 23, 8, fill="#e74c3c", outline="#e74c3c", state="hidden")
+        self._gear_warn_dot = self._gear_btn.create_oval(
+            16, 16, 23, 23, fill="#f39c12", outline="#f39c12",
+            state="hidden")
         # "Check for updates" busy flag — while the GitHub fetch is in flight
         # the menu entry reads "Checking…" and is disabled (the menu is built
         # fresh on every click, so a flag is all the state we need).
@@ -1504,11 +1518,9 @@ class MainWindow:
         # scattered inline tips somewhere a user can pull up on demand).
         # Created here, but packed only in show_mfr_view(): the picker has
         # no tabs so the button would have nothing to explain there.
-        self._help_btn = ttk.Button(top, text=self._help_glyph, width=3,
-                                    style="Icon.TButton",
-                                    command=self._open_tab_help)
-        _Tooltip(self._help_btn, "Tips for this tab",
-                 lambda: self._current_theme)
+        self._help_btn = self._make_round_icon(
+            top, self._help_glyph, "#27ae60", "#44bd7c",
+            "Tips for this tab", self._open_tab_help)
         # The single per-app tips window (monkeybug round 2: "?" used to
         # stack a new window per click).  Created lazily on first "?" click.
         self._help_window = None
@@ -1761,9 +1773,14 @@ class MainWindow:
         self._path_combo(self._extract_input_row,
                          self.extract_input_var, "extract_input").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
+        # ⓘ — round colorful badge opening the Image Info window for the
+        # picked file; sits between the path box and Browse (David).
+        self._make_info_badge(self._extract_input_row,
+                              self.extract_input_var).pack(
+            side=tk.LEFT, padx=(6, 0))
         ttk.Button(self._extract_input_row, text="Browse...",
                    command=self._browse_extract_input).pack(
-            side=tk.LEFT, padx=(8, 0))
+            side=tk.LEFT, padx=(6, 0))
         self._extract_input_row.pack(fill=tk.X, **pad)
 
         # SSD drive-picker row — shown when source == "ssd".  Created
@@ -2226,9 +2243,12 @@ class MainWindow:
         self._path_combo(self._write_upd_row,
                          self.write_upd_var, "write_original").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
+        self._make_info_badge(self._write_upd_row,
+                              self.write_upd_var).pack(
+            side=tk.LEFT, padx=(6, 0))
         ttk.Button(self._write_upd_row, text="Browse...",
                    command=self._browse_write_upd).pack(
-            side=tk.LEFT, padx=(8, 0))
+            side=tk.LEFT, padx=(6, 0))
         self._write_upd_row.pack(fill=tk.X, **pad)
 
         # SSD drive picker.
@@ -6854,6 +6874,236 @@ class MainWindow:
                         else "%.1f %s" % (size, unit))
             size /= 1024.0
 
+    # ---- Image Info dialog ------------------------------------------
+
+    def _make_round_icon(self, parent, glyph, fill, hover, tooltip_text,
+                         command, size=24, font=None):
+        """A round colorful icon button — colored circle, white glyph — the
+        app's icon-button look (David: round colorful icons instead of
+        square glyph buttons; drawn on a Canvas because Tk 8.6 renders no
+        color emoji).  Hover lightens the circle; the hand cursor marks it
+        clickable; *tooltip_text* rides the shared _Tooltip.  The canvas
+        carries ``icon_oval`` / ``icon_fill`` / ``icon_hover`` /
+        ``icon_enabled`` so callers can restyle it (gear notification dots,
+        back-button disable via _set_round_icon_enabled), and registers in
+        _round_icons so _apply_theme keeps its backdrop on the theme."""
+        cv = tk.Canvas(parent, width=size, height=size,
+                       highlightthickness=0, borderwidth=0, cursor="hand2",
+                       bg=THEMES[self._current_theme]["bg"])
+        cv.icon_fill, cv.icon_hover = fill, hover
+        cv.icon_enabled = True
+        cv.icon_oval = cv.create_oval(1, 1, size - 1, size - 1,
+                                      fill=fill, outline=fill)
+        if font is None:
+            # Same glyph fonts the old square Icon.TButtons used: Segoe
+            # MDL2 Assets on Windows, text glyphs elsewhere (negative
+            # size = pixels).
+            font = (("Segoe MDL2 Assets", -13) if sys.platform == "win32"
+                    else (_SANS_FONT, -13))
+        cv.create_text(size // 2, size // 2, text=glyph, fill="#ffffff",
+                       font=font)
+
+        def _set_fill(color):
+            cv.itemconfigure(cv.icon_oval, fill=color, outline=color)
+
+        cv.bind("<Button-1>",
+                lambda _e: command() if cv.icon_enabled else None)
+        cv.bind("<Enter>", lambda _e: (cv.icon_enabled
+                                       and _set_fill(cv.icon_hover)))
+        cv.bind("<Leave>", lambda _e: (cv.icon_enabled
+                                       and _set_fill(cv.icon_fill)))
+        _Tooltip(cv, tooltip_text, lambda: self._current_theme)
+        self._round_icons.append(cv)
+        return cv
+
+    @staticmethod
+    def _set_round_icon_enabled(cv, enabled):
+        """Enable/disable a _make_round_icon canvas: gray circle + arrow
+        cursor while disabled (its click handler checks icon_enabled)."""
+        cv.icon_enabled = bool(enabled)
+        fill = cv.icon_fill if enabled else "#9aa0a6"
+        cv.itemconfigure(cv.icon_oval, fill=fill, outline=fill)
+        cv.configure(cursor="hand2" if enabled else "arrow")
+
+    _INFO_BADGE_FILL = "#2f80ed"     # the classic "info blue"
+    _INFO_BADGE_HOVER = "#5296f2"
+
+    def _make_info_badge(self, parent, var):
+        """The small round ⓘ badge — blue circle, white ``i`` — that opens
+        the Image Info window for the path in *var*."""
+        return self._make_round_icon(
+            parent, "i", self._INFO_BADGE_FILL, self._INFO_BADGE_HOVER,
+            "Technical details about this image",
+            lambda: self._open_image_info(var), size=18,
+            font=("Georgia", 10, "bold italic"))
+
+    def _open_image_info(self, var):
+        """Open (or retarget) the Image Info window for the image path in
+        *var* — everything the app knows about it in one place: file facts,
+        what was detected, the plugin's firmware/partition details, and
+        (after an Extract) asset counts, with a copy-pasteable report for
+        comparing releases and filing bug reports (peanuts).
+
+        A window, not a tab: the notebook was getting wide (David).  One
+        singleton Toplevel, launched from the small "Info" button next to
+        each image picker; an open window is re-pointed at the new path."""
+        path = (var.get() or "").strip()
+        if not path:
+            messagebox.showinfo(
+                "No image selected",
+                "Pick an image in the box next to the Info button first.")
+            return
+        if not os.path.isfile(path):
+            messagebox.showerror("File not found", "No file at:\n\n%s" % path)
+            return
+        self._info_path = os.path.normpath(path)
+        if self._info_win is not None and self._info_win.winfo_exists():
+            self._info_win.deiconify()
+            self._info_win.lift()
+            self._info_win.focus_set()
+            self._info_refresh()
+            return
+        self._build_info_window()
+        self._info_refresh()
+
+    def _build_info_window(self):
+        win = tk.Toplevel(self.root)
+        win.title("Image Info")
+        win.transient(self.root)
+        win.geometry("760x440")
+        win.minsize(520, 300)
+        self._info_win = win
+
+        f = ttk.Frame(win, padding=(10, 8))
+        f.pack(fill=tk.BOTH, expand=True)
+
+        # The file this window currently describes (it can outlive picker
+        # changes, so it must say what it's showing).
+        self._info_path_lbl = ttk.Label(f, text="", font=(_SANS_FONT, 9),
+                                        justify=tk.LEFT)
+        self._info_path_lbl.pack(anchor=tk.W, fill=tk.X, pady=(0, 4))
+        self._info_path_lbl.bind(
+            "<Configure>", lambda e: self._info_path_lbl.configure(
+                wraplength=max(300, e.width - 8)))
+
+        body = ttk.Frame(f)
+        body.pack(fill=tk.BOTH, expand=True)
+        self._info_tree = ttk.Treeview(body, columns=("value",), height=14,
+                                       selectmode="browse")
+        self._info_tree.heading("#0", text="Property", anchor=tk.W)
+        self._info_tree.heading("value", text="Value", anchor=tk.W)
+        self._info_tree.column("#0", width=200, minwidth=140, stretch=False)
+        self._info_tree.column("value", width=480, minwidth=200)
+        self._info_tree.tag_configure("section",
+                                      font=(_SANS_FONT, 9, "bold"))
+        vs = ttk.Scrollbar(body, orient="vertical",
+                           command=self._info_tree.yview)
+        self._info_tree.configure(yscrollcommand=vs.set)
+        self._info_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vs.pack(side=tk.LEFT, fill=tk.Y)
+
+        arow = ttk.Frame(f)
+        arow.pack(fill=tk.X, pady=(6, 0))
+        ttk.Button(arow, text="Refresh",
+                   command=lambda: self._info_refresh(force=True)).pack(
+            side=tk.LEFT)
+        self._info_copy_btn = ttk.Button(
+            arow, text="Copy Report", command=self._info_copy_report,
+            state=tk.DISABLED)
+        self._info_copy_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._info_status = ttk.Label(arow, text="", font=(_SANS_FONT, 9))
+        self._info_status.pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Button(arow, text="Close",
+                   command=self._info_reset).pack(side=tk.RIGHT)
+        win.protocol("WM_DELETE_WINDOW", self._info_reset)
+
+    def _info_assets_dir(self):
+        """The current extracted-assets folder, fed to the plugin's
+        image_info hook (BOF's update-version date lives only in the
+        extract output): the Write tab's folder, else the Extract output."""
+        assets = ((self.write_assets_var.get() or "").strip()
+                  or (self.extract_output_var.get() or "").strip())
+        return assets if assets and os.path.isdir(assets) else None
+
+    def _info_reset(self):
+        """Close the Image Info window and drop its state (window Close, and
+        manufacturer switch — a previous mfr's details must not survive under
+        the new one's name)."""
+        self._info_seq += 1          # invalidate any in-flight probe
+        self._info_sections = []
+        self._info_shown_key = None
+        self._info_path = ""
+        win, self._info_win = self._info_win, None
+        if win is not None:
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+
+    def _info_refresh(self, force=False):
+        """(Re)collect the details for the window's image on a worker thread
+        and render them.  Skips when the tree already shows this exact
+        path + assets pair (the Info button re-fires this on every click);
+        the probe itself never touches Tk — results come back via an
+        after() poll, stale ones dropped by the bump-counter."""
+        import threading
+        from ..core import image_info as _info_mod
+
+        if self._info_win is None or not self._info_win.winfo_exists():
+            return
+        tree = self._info_tree
+        path = self._info_path
+        self._info_path_lbl.configure(text=path)
+        assets = self._info_assets_dir()
+        key = (os.path.normcase(path), assets)
+        if not force and key == self._info_shown_key:
+            return
+        mfr = self._current_mfr
+
+        self._info_seq += 1
+        seq = self._info_seq
+        holder = {}
+
+        def _worker():
+            try:
+                holder["sections"] = _info_mod.collect(mfr, path, assets)
+            except Exception as e:   # never leave the window on "Reading…"
+                holder["sections"] = [("Error", [("Could not read", str(e))])]
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        self._info_status.configure(text="Reading image…")
+
+        def _poll():
+            if seq != self._info_seq:    # superseded / window closed
+                return
+            if t.is_alive():
+                self.root.after(120, _poll)
+                return
+            if self._info_win is None or not self._info_win.winfo_exists():
+                return
+            self._info_shown_key = key
+            self._info_sections = holder.get("sections") or []
+            tree.delete(*tree.get_children())
+            for title, rows in self._info_sections:
+                parent = tree.insert("", tk.END, text=title, open=True,
+                                     tags=("section",))
+                for name, value in rows:
+                    tree.insert(parent, tk.END, text=name, values=(value,))
+            self._info_copy_btn.configure(
+                state=tk.NORMAL if self._info_sections else tk.DISABLED)
+            self._info_status.configure(text="")
+
+        self.root.after(120, _poll)
+
+    def _info_copy_report(self):
+        from ..core import image_info as _info_mod
+        if not self._info_sections:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(_info_mod.as_text(self._info_sections))
+        self._info_status.configure(text="Report copied to clipboard.")
+
     def _build_text_tab(self):
         """Build the 'Replace Text' tab: a searchable list of the editable
         on-screen strings from ``text/strings.tsv``, each with an in-place
@@ -7584,7 +7834,7 @@ class MainWindow:
     def set_back_enabled(self, enabled):
         """Enable / disable the Back button — called by App while a
         pipeline is running so the user can't navigate away mid-extract."""
-        self._back_btn.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+        self._set_round_icon_enabled(self._back_btn, enabled)
 
     def _on_picker_select(self, mfr):
         # Forward to the App; it'll call apply_manufacturer + show_mfr_view.
@@ -7738,6 +7988,9 @@ class MainWindow:
                 self._prefill_transfer_dst()
             else:
                 self._modpack_transfer_frame.pack_forget()
+        # New mfr: close the Image Info window so a previous manufacturer's
+        # report can't sit open under the new one's name.
+        self._info_reset()
         # New mfr: drop any text rows loaded for the previous one so a stale
         # manifest can't leak across a manufacturer switch.
         self._text_rows = []
@@ -10732,18 +10985,16 @@ class MainWindow:
         self._refresh_gear_badge()
 
     def _refresh_gear_badge(self):
-        """Compose the gear button's notification marks: ● when an update is
-        available, the warning glyph when staging cleanup is pending."""
-        text = self._gear_glyph
-        width = 3
-        if self._update_available:
-            text += " ●"
-            width += 2
-        if self._disk_badge_suffix:
-            text += " " + self._gear_badge_glyph
-            width += 2
+        """Show/hide the gear's notification dots: red when an update is
+        available, amber when staging cleanup is pending (the amounts and
+        actions live in the ⚙ menu entries)."""
         try:
-            self._gear_btn.configure(text=text, width=width)
+            self._gear_btn.itemconfigure(
+                self._gear_update_dot,
+                state="normal" if self._update_available else "hidden")
+            self._gear_btn.itemconfigure(
+                self._gear_warn_dot,
+                state="normal" if self._disk_badge_suffix else "hidden")
         except tk.TclError:
             pass
 
@@ -11924,6 +12175,11 @@ class MainWindow:
         self.root.option_add("*TCombobox*Listbox.foreground",      c["fg"])
         self.root.option_add("*TCombobox*Listbox.selectBackground", c["select_bg"])
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        # The round icon buttons (ⓘ badges, header home/?/⚙) are plain
+        # Canvases, invisible to ttk styling — keep their backdrops on the
+        # theme's panel color.
+        for _badge in self._round_icons:
+            _badge.configure(bg=c["bg"])
         style.configure("TNotebook", background=c["bg"], bordercolor=c["border"])
         style.configure("TNotebook.Tab", background=c["button"],
                         foreground=c["fg"], padding=(10, 4))
@@ -12014,20 +12270,8 @@ class MainWindow:
         if hasattr(self, "_era_badge_widgets"):
             self._refresh_era_badges()
 
-        # Header icon buttons ("?" tips + gear settings) — one shared style
-        # so they render pixel-identical (David); on Windows both glyphs come
-        # from Segoe MDL2 Assets.  Negative font size = pixels, keeping the
-        # two fonts' line heights equal.  Hover matches every other button's
-        # accent-blue treatment.
-        icon_font = (("Segoe MDL2 Assets", -14) if sys.platform == "win32"
-                     else (_SANS_FONT, -14))
-        style.configure("Icon.TButton", font=icon_font, padding=(4, 3),
-                        foreground=c["fg"], background=c["button"])
-        style.map("Icon.TButton",
-                  background=[("active", c["accent"]),
-                              ("pressed", c["accent"])],
-                  foreground=[("active", "#ffffff"),
-                              ("pressed", "#ffffff")])
+        # (The header icons are round _make_round_icon canvases now — no
+        # Icon.TButton style needed; their backdrop re-skin is above.)
 
         # An open tips window re-renders with the new palette.
         if self._help_window is not None:

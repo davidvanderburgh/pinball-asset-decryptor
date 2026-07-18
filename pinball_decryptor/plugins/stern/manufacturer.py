@@ -323,6 +323,15 @@ class SternManufacturer(Manufacturer):
                     manufacturer_key="stern", era="spike2",
                     notes="Spike 2 card image")
 
+    def image_info(self, path, assets_dir=None):
+        # Only the Spike 2 card probe — a Whitestar MAME zip gets just the
+        # generic File/Detection sections.  Route on the file, not the era
+        # pill, so the Info tab matches whatever image is actually selected.
+        if path.lower().endswith(".zip"):
+            return []
+        from .info import card_info
+        return card_info(path)
+
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               extract_categories=None, duration_names=False):

@@ -121,6 +121,12 @@ class CardImage:
                              % part_index)
         return r
 
+    def reader(self, part_index):
+        """The read-only :class:`Ext4Reader` for a browsable partition.
+        Raises ``ValueError`` for a partition that isn't browsable ext.
+        Used by the Image Info probe to walk the data partition directly."""
+        return self._reader(part_index)
+
     # ---- browsing -----------------------------------------------------------
     @staticmethod
     def _norm(path):

@@ -277,6 +277,36 @@ HELP_CONTENT = {
     ],
 }
 
+# The Image Info WINDOW (the "Info" button beside the Extract / Write image
+# pickers) — not a notebook tab, so it lives outside the per-tab dict and is
+# appended to the tabs its launch buttons sit on (see _CONTENT_EXTRAS).
+_IMAGE_INFO_SECTIONS = [
+    ("The ⓘ button",
+     "The small ⓘ button next to the image picker opens a read-only window "
+     "with everything the app knows about that image: the file itself, what "
+     "was detected (manufacturer, game, format), firmware details, on-card "
+     "asset counts and the partition layout. Useful for telling firmware "
+     "versions apart, comparing two releases, and reporting problems. Its "
+     "Copy Report button puts a plain-text version on the clipboard, ready "
+     "to paste into a bug report."),
+    ("Where its details come from",
+     "Only from the image itself and its filename — for example a Stern "
+     "card's version number exists only in the vendor's filename, so a "
+     "renamed card won't show one, while the game folder and validated-file "
+     "count are read from inside the card and survive a rename. On Stern "
+     "cards the videos, images and scenes are counted straight off the "
+     "card; sounds are packed inside image.bin, so counting them takes a "
+     "full Extract."),
+]
+
+# Non-tab help appended to the tabs whose UI hosts the feature.
+_CONTENT_EXTRAS = {
+    "Extract": _IMAGE_INFO_SECTIONS,
+    "Write": _IMAGE_INFO_SECTIONS,
+}
+for _tab, _extra in _CONTENT_EXTRAS.items():
+    HELP_CONTENT[_tab] = list(HELP_CONTENT[_tab]) + list(_extra)
+
 # Appended to every tab's sections — app-wide behaviours users ask about.
 GENERAL_CONTENT = [
     ("The ⚙ settings menu",

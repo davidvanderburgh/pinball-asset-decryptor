@@ -147,6 +147,22 @@ class BOFManufacturer(Manufacturer):
         info = GAME_DB[key]
         return Game(key=key, display=info["display"], manufacturer_key="bof")
 
+    def image_info(self, path, assets_dir=None):
+        # The .fun itself is opaque (encrypted PCK); the version date only
+        # becomes readable once the update files are extracted.  The game
+        # applies a .fun only if its date is strictly newer than what's
+        # installed, so both dates matter when comparing releases.
+        if not (assets_dir and os.path.isdir(assets_dir)):
+            return []
+        from .pipeline import peek_next_update_version
+        baseline, next_date = peek_next_update_version(assets_dir)
+        if baseline is None:
+            return []
+        return [("Firmware", [
+            ("Version date", baseline.strftime("%Y.%m.%d")),
+            ("Next Write will stamp", next_date),
+        ])]
+
     def audio_slot_dirs(self, assets_dir):
         """Restrict the Replace-Audio scan to the ``_EDITABLE ASSETS``
         folder(s) — the only audio Write re-imports into the PCK.  Files

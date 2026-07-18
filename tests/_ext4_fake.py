@@ -70,6 +70,10 @@ class FakeExt4Reader:
     def read_file_bytes(self, node):
         return node.get("_data", b"")
 
+    def peek(self, node, n=16):
+        """First *n* bytes, like Ext4Reader.peek (magic sniffing)."""
+        return node.get("_data", b"")[:n]
+
     def extract_file(self, node, out_path, progress=None):
         with open(out_path, "wb") as f:
             f.write(node.get("_data", b""))

@@ -70,6 +70,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.explorer" \
     --hidden-import "pinball_decryptor.plugins.stern.info" \
     --hidden-import "pinball_decryptor.core.image_info" \
+    --hidden-import "pinball_decryptor.core.hashcache" \
     --hidden-import "pinball_decryptor.core.rawdevice" \
     --hidden-import "pinball_decryptor.plugins.stern.radium" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \

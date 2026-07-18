@@ -4028,6 +4028,11 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
         byidx = {r["idx"]: r for r in rows}
         emu.mm = emu._mm_cat          # body source = this bank
         gr = sr = None
+        # Songs are packed back-to-back in the bank just like cat-0 sounds in
+        # image.bin, so a delta<0 song's head frame is the previous song's
+        # final frame — same shared-boundary word, same fix (a miss in this
+        # map, e.g. an aligned/gapped bank, just keeps the enc[0] behavior).
+        ends = _slot_end_map(rows)
         for idx, wav in sorted(edits):
             p = byidx.get(idx)
             if p is None:                 # not a sound in that bank
@@ -4040,8 +4045,10 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
             if not _recovery_valid(emu, gr, sr, p, np):
                 skipped.append((cid, idx))
                 continue
-            off, body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
-                         else _encode_mono(emu, gr, p, wav, np))
+            pred = ends.get(p["body_off"])
+            off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred)
+                         if p["chan"] == 2
+                         else _encode_mono(emu, gr, p, wav, np, pred=pred))
             patches.append((cid, idx, off, bytes(body)))
     finally:
         emu.close()

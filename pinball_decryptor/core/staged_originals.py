@@ -79,6 +79,15 @@ def has_snapshot(assets_dir, rel):
     return bool(assets_dir) and os.path.isfile(_orig_abs(assets_dir, rel))
 
 
+def snapshot_path(assets_dir, rel):
+    """Absolute path of *rel*'s pristine snapshot, or ``None`` if there is
+    none — for previewing the true original of an already-modified slot."""
+    if not assets_dir:
+        return None
+    p = _orig_abs(assets_dir, rel)
+    return p if os.path.isfile(p) else None
+
+
 def snapshot_rels(assets_dir):
     """Set of ``/``-separated rel paths that have a snapshot under ``.orig/``."""
     out = set()

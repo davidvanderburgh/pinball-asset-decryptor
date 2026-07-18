@@ -7,7 +7,8 @@ shared :mod:`core.checksums` module.
 import os
 import zipfile
 
-from .checksums import CHECKSUMS_FILE, md5_file, read_baseline_any
+from . import hashcache
+from .checksums import CHECKSUMS_FILE, read_baseline_any
 
 
 def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
@@ -29,6 +30,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                f"baseline...", "info")
     changed = []
     n_base = len(baseline)
+    # Size+mtime MD5 cache (shared with the Write change scan): unchanged
+    # files skip the re-hash, so an export right after a scan is near-instant.
+    hcache = hashcache.load(assets_folder)
     for i, (rel, orig_md5) in enumerate(baseline.items()):
         if progress_cb:
             # The compare pass walks EVERY baseline file (that's how changed
@@ -39,8 +43,10 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         abs_path = os.path.join(assets_folder, rel)
         if not os.path.isfile(abs_path):
             continue
-        if md5_file(abs_path) != orig_md5:
+        digest = hashcache.md5_for(abs_path, rel, hcache)
+        if digest is not None and digest != orig_md5:
             changed.append(rel)
+    hashcache.save(assets_folder, hcache)
 
     if not changed:
         raise ValueError("No modified files found. Modify some files first.")

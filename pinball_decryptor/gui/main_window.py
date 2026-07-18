@@ -2645,15 +2645,19 @@ class MainWindow:
                   "modified files.",
                   font=(_SANS_FONT, 9, "italic")).pack(anchor=tk.W, **pad)
 
+        # Same label as the Replace tabs — it's the SAME folder (one shared
+        # path variable), and two names for one thing read as two things
+        # (monkeybug batch 14).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
-        ttk.Label(row, text="Mod Folder:", width=12, anchor=tk.W).pack(
+        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
         self._path_combo(row, self.write_assets_var, "write_assets").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse...",
                    command=self._browse_write_assets).pack(
             side=tk.LEFT, padx=(8, 0))
-        ttk.Label(f, text="(shared with the Write tab's Modified Assets path)",
+        ttk.Label(f, text="(the same folder every Replace tab and the Write "
+                          "tab use)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         ttk.Separator(f, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=8)
@@ -2889,7 +2893,7 @@ class MainWindow:
         # `columns` order (vals[3]=loop, vals[4]=keep) regardless of display
         # order.
         self._audio_tree = ttk.Treeview(
-            list_frame, columns=("len", "fmt", "rep", "loop", "keep"),
+            list_frame, columns=("len", "fmt", "rep", "loop", "keep", "type"),
             height=12, selectmode="browse")
         self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
         self._audio_tree.heading("len", text="Length", anchor=tk.W)
@@ -2897,6 +2901,7 @@ class MainWindow:
         self._audio_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._audio_tree.heading("loop", text="Loop", anchor=tk.CENTER)
         self._audio_tree.heading("keep", text="Full", anchor=tk.CENTER)
+        self._audio_tree.heading("type", text="Type", anchor=tk.W)
         # ttk has no horizontal scroll: when the total column width exceeds the
         # widget it clips the rightmost column, and stretch only ever *grows*
         # columns, never shrinks them.  Only the track-name (#0) and
@@ -2913,15 +2918,18 @@ class MainWindow:
                                 stretch=False)
         self._audio_tree.column("keep", width=44, minwidth=40, anchor=tk.CENTER,
                                 stretch=False)
+        self._audio_tree.column("type", width=78, minwidth=64, anchor=tk.W,
+                                stretch=False)
         self._persist_tree_columns(
             self._audio_tree, "audio",
-            ("#0", "len", "fmt", "rep", "loop", "keep"))
+            ("#0", "len", "fmt", "rep", "loop", "keep", "type"))
         # Click-header sort: (col_id, base heading text, default-descending).
         # Numeric columns default to descending (longest/looped first) the way
         # the old "Longest first" option did; text columns ascending.
         self._audio_sort_cfg = [
             ("#0", "Original Track", False), ("len", "Length", True),
-            ("fmt", "Format", False), ("rep", "Replacement", False),
+            ("fmt", "Format", False), ("type", "Type", False),
+            ("rep", "Replacement", False),
             ("loop", "Loop", True), ("keep", "Full", True)]
         self._wire_sort_headings(self._audio_tree, self._audio_sort_cfg,
                                  "_audio_sort", self._refresh_audio_list)
@@ -3578,6 +3586,12 @@ class MainWindow:
         tree = getattr(self, "_audio_tree", None)
         if tree is None:
             return
+
+        _CAT_DISP = {"music": "Music", "sfx": "Sound FX",
+                     "callouts": "Callouts"}
+
+        def _cat_disp(rel):
+            return _CAT_DISP.get(self._audio_categories.get(rel), "Other")
         # Keep the groups the user expanded open across a rebuild (assigning,
         # filtering and sorting all funnel through here).
         open_groups = set()
@@ -3631,6 +3645,8 @@ class MainWindow:
             if col == "keep":
                 return (1 if self._audio_keep_full_flags.get(s.rel_path)
                         else 0,)
+            if col == "type":
+                return (_cat_disp(s.rel_path), s.rel_path.lower())
             return (s.rel_path.lower(),)  # "#0" name/path
 
         self._show_sort_arrows(tree, self._audio_sort_cfg, self._audio_sort)
@@ -3664,7 +3680,8 @@ class MainWindow:
                     tag = "renamed"
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
-                                rep_disp, loop_disp, keep_disp),
+                                rep_disp, loop_disp, keep_disp,
+                                _cat_disp(s.rel_path)),
                         tags=(tag,) if tag else ())
 
         grouped = (bool(self.audio_group_dups_var.get())
@@ -3702,7 +3719,7 @@ class MainWindow:
                     values=(dur_str, "",
                             ("%d of %d modded" % (touched_n, len(members))
                              if touched_n else ""),
-                            "", ""))
+                            "", "", ""))
                 for m in visible:
                     _insert(giid, m)
             rest = [s for s in slots if s.rel_path not in in_groups]
@@ -4085,10 +4102,15 @@ class MainWindow:
         return ["#%d  %s" % (n, nm) if n < 10**9 else nm
                 for n, nm in sorted(rows)]
 
-    def _ask_audio_name(self, prompt, initial, suggestions):
-        """Modal rename prompt with a suggestion dropdown: an editable combo
-        seeded with the game's Sound-Test menu names (pick one or type your
-        own).  Returns the entered text, or None on cancel."""
+    _AUDIO_CAT_NAMES = (("music", "Music"), ("sfx", "Sound FX"),
+                        ("callouts", "Callouts"), ("other", "Other"))
+
+    def _ask_audio_name(self, prompt, initial, suggestions, category="other"):
+        """Modal rename prompt: an editable combo seeded with the game's
+        Sound-Test menu names (pick one or type your own) plus a Type picker
+        so a mis-bucketed slot can be recategorized in the same step
+        (monkeybug batch 14: an SFX classed as a callout).  Returns
+        ``(text, category_key)``, or None on cancel."""
         root = self._tk_root()
         dlg = tk.Toplevel(root)
         dlg.title("Rename Audio")
@@ -4096,14 +4118,28 @@ class MainWindow:
         dlg.resizable(False, False)
         ttk.Label(dlg, text=prompt, justify=tk.LEFT).pack(
             anchor=tk.W, padx=12, pady=(12, 4))
-        ttk.Label(
-            dlg, text="Pick one of the game's own Sound Test names, or type "
-                      "anything:", font=(_SANS_FONT, 8, "italic")).pack(
-            anchor=tk.W, padx=12)
+        if suggestions:
+            ttk.Label(
+                dlg, text="Pick one of the game's own Sound Test names, or "
+                          "type anything:",
+                font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=12)
         var = tk.StringVar(value=initial)
-        combo = ttk.Combobox(dlg, textvariable=var, values=suggestions,
-                             width=52)
+        combo = ttk.Combobox(dlg, textvariable=var,
+                             values=tuple(suggestions or ()), width=52)
         combo.pack(fill=tk.X, padx=12, pady=(2, 8))
+        cat_disp = dict(self._AUDIO_CAT_NAMES)
+        cat_keys = {v: k for k, v in self._AUDIO_CAT_NAMES}
+        cat_row = ttk.Frame(dlg)
+        cat_row.pack(fill=tk.X, padx=12, pady=(0, 8))
+        ttk.Label(cat_row, text="Type:").pack(side=tk.LEFT)
+        cat_var = tk.StringVar(value=cat_disp.get(category, "Other"))
+        ttk.Combobox(cat_row, textvariable=cat_var, state="readonly",
+                     width=10,
+                     values=[v for _k, v in self._AUDIO_CAT_NAMES]).pack(
+            side=tk.LEFT, padx=(6, 0))
+        ttk.Label(cat_row, text="(the Type is remembered with the name)",
+                  font=(_SANS_FONT, 8, "italic")).pack(
+            side=tk.LEFT, padx=(8, 0))
         result = []
 
         def _ok(_e=None):
@@ -4111,7 +4147,8 @@ class MainWindow:
             # A picked suggestion carries its "#num  " prefix — strip it; the
             # number is for finding the entry, not part of the name.
             m = re.match(r"^#\d+\s+(.*)$", text)
-            result.append(m.group(1) if m else text)
+            result.append((m.group(1) if m else text,
+                           cat_keys.get(cat_var.get(), "other")))
             dlg.destroy()
 
         def _cancel(_e=None):
@@ -4138,7 +4175,6 @@ class MainWindow:
         it before Whisper ever listens (monkeybug: Whisper mis-names the same
         file on every extract).  Blank restores the stock decode name and
         forgets the remembered one."""
-        from tkinter import simpledialog
         from ..core import name_memory
         from ..core.audio_slots import replace_with_retry
         from ..core.checksums import rename_in_baseline
@@ -4152,16 +4188,31 @@ class MainWindow:
         prompt = ("Name for this sound — remembered for future extracts\n"
                   "(blank restores \"%s\" and forgets it):" % (prefix + ext))
         suggestions = self._load_sound_test_suggestions()
-        if suggestions:
-            name = self._ask_audio_name(prompt, label, suggestions)
-        else:
-            name = simpledialog.askstring(
-                "Rename Audio", prompt,
-                initialvalue=label, parent=self._tk_root())
-        if name is None:
+        cur_cat = self._audio_categories.get(rel) or "other"
+        res = self._ask_audio_name(prompt, label, suggestions, cur_cat)
+        if res is None:
             return                            # cancelled
+        name, new_cat = res
         new_label = name_memory.sanitize_label(name)
         if new_label == label:
+            if new_cat == cur_cat:
+                return
+            # Type-only change: no file ops.  A custom name is the memory
+            # key, so without one the new bucket lasts this session only.
+            md5 = name_memory.baseline_md5(self._audio_scan_dir, rel)
+            if md5 is None and rel not in self._audio_changed_on_disk:
+                md5 = name_memory.file_md5(slot.abs_path)
+            self._audio_categories[rel] = new_cat
+            if md5 and new_label:
+                name_memory.remember(md5, new_label, category=new_cat)
+                note = " (remembered)"
+            else:
+                note = (" (this session only — give the slot a name to "
+                        "remember its Type across extracts)")
+            self.append_log("Replace Audio: %s Type → %s%s"
+                            % (rel, new_cat, note), "info")
+            self._refresh_audio_type_filter()
+            self._refresh_audio_list()
             return
         new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
                     else prefix + ext)
@@ -4186,11 +4237,12 @@ class MainWindow:
             return
         rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
         if md5:
-            # Record the slot's CURRENT bucket with the name, so the renamed
-            # file keeps its Type (an SFX he renames stays under Sound FX —
-            # monkeybug's report of a rename turning into a "callout").
+            # Record the bucket picked in the dialog with the name, so the
+            # renamed file keeps (or moves to) its Type on future extracts
+            # (an SFX he renames stays under Sound FX — monkeybug's report of
+            # a rename turning into a "callout").
             name_memory.remember(md5, new_label,   # blank forgets
-                                 category=self._audio_categories.get(rel))
+                                 category=new_cat)
         # Re-key every bit of session state pinned to the old rel, then update
         # the slot IN PLACE and re-sort the visible list.  No folder rescan:
         # only this one file changed, and the full re-walk both took minutes
@@ -4203,6 +4255,7 @@ class MainWindow:
         if rel in self._audio_changed_on_disk:
             self._audio_changed_on_disk.discard(rel)
             self._audio_changed_on_disk.add(new_rel)
+        self._audio_categories[new_rel] = new_cat
         slot.rel_path = new_rel
         slot.abs_path = dst
         self._audio_slots_by_rel.pop(rel, None)
@@ -4218,6 +4271,7 @@ class MainWindow:
             note = " (forgotten)"
         self.append_log("Replace Audio: renamed %s → %s%s"
                         % (rel, new_base, note), "info")
+        self._refresh_audio_type_filter()
         self._refresh_audio_list()             # re-applies the active sort
         try:                                   # keep the renamed row in view
             self._audio_tree.selection_set(new_rel)
@@ -4343,9 +4397,19 @@ class MainWindow:
         if rel not in self._audio_slots_by_rel:
             return
         from ..core import audio as _audio
+        from ..core import staged_originals
         self._audio_current_rel = rel
         slot = self._audio_slots_by_rel.get(rel)
         opath = slot.abs_path if slot else None
+        # A slot already changed on disk (built or staged in an earlier
+        # session) holds the REPLACEMENT bytes — playing that as "Original"
+        # made both panes identical (monkeybug batch 14).  The .orig snapshot
+        # taken when the change was staged is the true original; fall back to
+        # the on-disk file when no snapshot exists (pre-snapshot builds).
+        if rel in self._audio_changed_on_disk:
+            snap = staged_originals.snapshot_path(self._audio_scan_dir, rel)
+            if snap:
+                opath = snap
         if opath and os.path.isfile(opath):
             self._audio_pane_orig.load(
                 opath, _audio.probe_duration(opath) or 0.0, None,
@@ -4615,24 +4679,28 @@ class MainWindow:
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
         self._video_tree = ttk.Treeview(
-            list_frame, columns=("len", "res", "fmt", "rep"),
+            list_frame, columns=("len", "res", "fmt", "aud", "rep"),
             height=9, selectmode="browse")
         self._video_tree.heading("#0", text="Original Video", anchor=tk.W)
         self._video_tree.heading("len", text="Length", anchor=tk.W)
         self._video_tree.heading("res", text="Resolution", anchor=tk.W)
         self._video_tree.heading("fmt", text="Format", anchor=tk.W)
+        self._video_tree.heading("aud", text="Audio", anchor=tk.W)
         self._video_tree.heading("rep", text="Replacement", anchor=tk.W)
         self._video_tree.column("#0", width=300, minwidth=160)
         self._video_tree.column("len", width=56, minwidth=46, anchor=tk.W)
         self._video_tree.column("res", width=90, minwidth=70, anchor=tk.W)
         self._video_tree.column("fmt", width=140, minwidth=80)
+        self._video_tree.column("aud", width=104, minwidth=70, anchor=tk.W,
+                                stretch=False)
         self._video_tree.column("rep", width=200, minwidth=110)
         self._persist_tree_columns(
-            self._video_tree, "video", ("#0", "len", "res", "fmt", "rep"))
+            self._video_tree, "video",
+            ("#0", "len", "res", "fmt", "aud", "rep"))
         self._video_sort_cfg = [
             ("#0", "Original Video", False), ("len", "Length", True),
             ("res", "Resolution", True), ("fmt", "Format", False),
-            ("rep", "Replacement", False)]
+            ("aud", "Audio", False), ("rep", "Replacement", False)]
         self._wire_sort_headings(self._video_tree, self._video_sort_cfg,
                                  "_video_sort", self._refresh_video_list)
         video_scroll = ttk.Scrollbar(
@@ -4696,6 +4764,10 @@ class MainWindow:
             variable=self.video_trim_var,
             command=self._save_staged_changes)
         self._video_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        # Hover tooltip — per-plugin guidance is appended in
+        # apply_manufacturer (the visible note label stays blank).
+        self._video_trim_tip = _Tooltip(
+            self._video_trim_cb, "", lambda: self._current_theme)
         self._video_length_note_lbl = ttk.Label(
             f, text="", font=(_SANS_FONT, 8, "italic"),
             foreground="#888888", wraplength=720, justify=tk.LEFT)
@@ -4884,6 +4956,9 @@ class MainWindow:
                 return (wh,)
             if col == "fmt":
                 return (s.format_summary().lower(), s.rel_path.lower())
+            if col == "aud":
+                a = s.info.audio_summary() if s.info else ""
+                return (a.lower(), s.rel_path.lower())
             if col == "rep":
                 rep = self._video_assignments.get(s.rel_path)
                 if rep:
@@ -4905,11 +4980,13 @@ class MainWindow:
             else:
                 rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
-                length, res = "…", "…"  # metadata still loading
+                length, res, aud = "…", "…", "…"  # metadata still loading
             else:
                 length, res = s.duration_str(), s.resolution_str()
+                aud = s.info.audio_summary() if s.info else ""
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(length, res, s.format_summary(), rep_disp),
+                        values=(length, res, s.format_summary(), aud,
+                                rep_disp),
                         tags=(tag,) if tag else ())
 
         total = len(self._video_slots)
@@ -4926,7 +5003,7 @@ class MainWindow:
                 f"{changed_total} of {total} slots changed{extra}")
             self._video_empty.place_forget()
         self._autosize_tree_columns(
-            tree, "video", ("#0", "len", "res", "fmt", "rep"))
+            tree, "video", ("#0", "len", "res", "fmt", "aud", "rep"))
 
     def _default_assets_from_extract(self):
         """Default the (shared) assets folder to the Extract tab's output when
@@ -5178,8 +5255,9 @@ class MainWindow:
         if tree.identify_region(event.x, event.y) != "cell":
             return
         row = tree.identify_row(event.y)
-        col = tree.identify_column(event.x)  # cols=(len,res,fmt,rep) -> #1..#4
-        if row and col == "#4":
+        # cols=(len,res,fmt,aud,rep) -> #1..#5; Replacement is #5.
+        col = tree.identify_column(event.x)
+        if row and col == "#5":
             tree.selection_set(row)
             self._cancel_video_select_job()
             self._video_assign_rel(row)
@@ -5259,9 +5337,16 @@ class MainWindow:
         pane to start ("orig"/"rep"), or None to just poster the frames."""
         if rel not in self._video_slots_by_rel:
             return
+        from ..core import staged_originals
         self._video_current_rel = rel
         slot = self._video_slots_by_rel.get(rel)
         opath = slot.abs_path if slot else None
+        # Already-changed slots hold replacement bytes; the .orig snapshot is
+        # the true original (see _audio_load_track).
+        if rel in getattr(self, "_video_changed_on_disk", ()):
+            snap = staged_originals.snapshot_path(self._video_scan_dir, rel)
+            if snap:
+                opath = snap
         if opath and os.path.isfile(opath):
             self._video_pane_orig.load(opath, autoplay=(autoplay == "orig"))
         else:
@@ -6585,7 +6670,7 @@ class MainWindow:
         left = ttk.Frame(body); left.pack(side=tk.LEFT, fill=tk.BOTH,
                                           expand=True)
         self._pex_tree = ttk.Treeview(
-            left, columns=("size", "type"), height=10, selectmode="browse")
+            left, columns=("size", "type"), height=14, selectmode="browse")
         self._pex_tree.heading("#0", text="Name", anchor=tk.W)
         self._pex_tree.heading("size", text="Size", anchor=tk.E)
         self._pex_tree.heading("type", text="Type", anchor=tk.W)
@@ -6601,6 +6686,10 @@ class MainWindow:
         vs.pack(side=tk.LEFT, fill=tk.Y)
         self._pex_tree.bind("<<TreeviewOpen>>", self._pex_on_tree_open)
         self._pex_tree.bind("<<TreeviewSelect>>", self._pex_on_tree_select)
+        # Right-click → Properties (full on-card path for mount workflows,
+        # size, partition) + quick Extract (monkeybug batch 14).
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self._pex_tree.bind(seq, self._pex_on_tree_right)
         # Big animated "Extracting…" overlay, placed over the tree while an
         # extract runs — the same large spinner the Replace tabs' scans use
         # (monkeybug: "the same large swirly font as the other screens").
@@ -6615,14 +6704,20 @@ class MainWindow:
         self._pex_preview.pack(fill=tk.BOTH, expand=True)
 
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
+        # No trailing "…" on the extract buttons — it read as truncated text
+        # rather than the opens-a-dialog convention (monkeybug batch 14).
         self._pex_extract_btn = ttk.Button(
-            arow, text="Extract Selected…", command=self._pex_extract_selected,
+            arow, text="Extract Selected", command=self._pex_extract_selected,
             state=tk.DISABLED)
         self._pex_extract_btn.pack(side=tk.LEFT)
         self._pex_extract_part_btn = ttk.Button(
-            arow, text="Extract Whole Partition…",
+            arow, text="Extract Whole Partition",
             command=self._pex_extract_partition, state=tk.DISABLED)
         self._pex_extract_part_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._pex_extract_all_btn = ttk.Button(
+            arow, text="Extract All Partitions",
+            command=self._pex_extract_all, state=tk.DISABLED)
+        self._pex_extract_all_btn.pack(side=tk.LEFT, padx=(6, 0))
         # Extract results show right next to the buttons that made them
         # (they used to land top-right by the partition combo, where they
         # read as unrelated — monkeybug batch 10).
@@ -6739,6 +6834,8 @@ class MainWindow:
         self._pex_action_status.configure(text="")
         self._pex_part_index = p.index
         self._pex_extract_part_btn.config(state=tk.NORMAL)
+        if any(q.browsable for q in self._pex_part_labels.values()):
+            self._pex_extract_all_btn.config(state=tk.NORMAL)
         self._pex_populate_dir("", "/")     # the partition root's children
 
     # ---- Partition Explorer: tree ------------------------------------
@@ -6873,6 +6970,72 @@ class MainWindow:
                 "dir", "/", out_dir, self._pex_extract_part_btn,
                 top_name="sda%d" % (self._pex_part_index + 1))
 
+    def _pex_extract_all(self):
+        """Extract every browsable partition into its own ``sdaN`` subfolder
+        of one chosen destination — the one-click dump-the-whole-card flow
+        (monkeybug batch 14)."""
+        if self._pex_busy or self._pex_card is None:
+            return
+        parts = [p for p in self._pex_part_labels.values() if p.browsable]
+        parts.sort(key=lambda p: p.index)
+        if not parts:
+            return
+        out_dir = filedialog.askdirectory(
+            title="Choose a folder to extract all partitions into")
+        if out_dir:
+            self._pex_run_extract("all", parts, out_dir,
+                                  self._pex_extract_all_btn)
+
+    def _pex_on_tree_right(self, event):
+        tree = self._pex_tree
+        row = tree.identify_row(event.y)
+        if not row or row.endswith(_PEX_PLACEHOLDER):
+            return
+        tree.selection_set(row)
+        menu = tk.Menu(tree, tearoff=0)
+        c = THEMES.get(self._current_theme, {})
+        try:
+            menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="Properties…",
+                         command=lambda r=row: self._pex_show_properties(r))
+        menu.add_command(
+            label="Copy path",
+            command=lambda r=row: (self._tk_root().clipboard_clear(),
+                                   self._tk_root().clipboard_append(r)))
+        if not self._pex_busy:
+            menu.add_separator()
+            menu.add_command(label="Extract…",
+                             command=self._pex_extract_selected)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _pex_show_properties(self, iid):
+        """Small read-only Properties view: the file's full on-card path (the
+        path it has when the partition is mounted — for lining PAD edits up
+        with hand-mount workflows), device-style partition, size and type."""
+        dev = ("sda%d" % (self._pex_part_index + 1)
+               if self._pex_part_index is not None else "?")
+        try:
+            size = self._pex_tree.set(iid, "size")
+            ftype = self._pex_tree.set(iid, "type")
+        except tk.TclError:
+            size = ftype = ""
+        kind = "Folder" if iid in self._pex_dirs else (ftype or "File")
+        lines = ["Name:       %s" % (os.path.basename(iid) or iid),
+                 "Kind:       %s" % kind]
+        if size:
+            lines.append("Size:       %s" % size)
+        lines += ["Partition:  %s" % dev,
+                  "Path:       %s" % iid,
+                  "Mounted at: <mount point>%s" % iid]
+        messagebox.showinfo("Properties — %s"
+                            % (os.path.basename(iid) or iid),
+                            "\n".join(lines))
+
     def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
                         tree_prog=None, file_prog=None, chunk_prog=None,
                         top_name=None):
@@ -6889,6 +7052,20 @@ class MainWindow:
                 n = c.extract_file(part, path, dest, progress=file_prog)
                 return "Extracted %s (%s)." % (os.path.basename(dest),
                                                self._pex_human(n))
+            if kind == "all":
+                # *path* = list of browsable Partitions; each lands in its
+                # own device-named subfolder of *dest*.
+                nf = nb = 0
+                for p in path:
+                    f_, b_ = c.extract_tree(
+                        p.index, "/", dest, progress=tree_prog,
+                        chunk_progress=chunk_prog,
+                        top_name="sda%d" % (p.index + 1))
+                    nf += f_; nb += b_
+                return ("Extracted %d partition%s — %d file%s (%s) to %s." % (
+                    len(path), "" if len(path) == 1 else "s",
+                    nf, "" if nf == 1 else "s", self._pex_human(nb),
+                    os.path.normpath(dest)))
             nf, nb = c.extract_tree(part, path, dest, progress=tree_prog,
                                     chunk_progress=chunk_prog,
                                     top_name=top_name)
@@ -6941,23 +7118,24 @@ class MainWindow:
                 msg = "Extract failed: %s" % e
             state["done"] = msg
 
-        # The launching button flips to a live Cancel; the other one waits.
+        # The launching button flips to a live Cancel; the others wait.
         # Plain "Cancel" — the ✕ glyph read as inconsistent with every other
         # button (monkeybug batch 10, same call as the scan buttons got).
-        other = (self._pex_extract_part_btn if btn is self._pex_extract_btn
-                 else self._pex_extract_btn)
-        other.config(state=tk.DISABLED)
+        for b in (self._pex_extract_btn, self._pex_extract_part_btn,
+                  self._pex_extract_all_btn):
+            if b is not btn:
+                b.config(state=tk.DISABLED)
         btn.config(text="Cancel", state=tk.NORMAL,
                    command=self._pex_cancel_extract)
         self._pex_action_status.configure(text="")
         # normpath: Tk's pickers hand back forward-slash paths that turned
         # into mixed-slash log lines on Windows, which couldn't be pasted
         # into Explorer (monkeybug batch 14).
-        self.append_log(
-            "Extracting %s to %s…"
-            % (top_name if top_name
-               else "%s from partition %s" % (path, part),
-               os.path.normpath(dest)), "info")
+        what = ("all %d partitions" % len(path) if kind == "all"
+                else top_name if top_name
+                else "%s from partition %s" % (path, part))
+        self.append_log("Extracting %s to %s…"
+                        % (what, os.path.normpath(dest)), "info")
         self._pex_busy_lbl.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -6994,13 +7172,18 @@ class MainWindow:
         self._pex_busy = False
         self._pex_busy_lbl.place_forget()
         self._pex_extract_btn.config(
-            text="Extract Selected…", command=self._pex_extract_selected,
+            text="Extract Selected", command=self._pex_extract_selected,
             state=(tk.NORMAL if self._pex_tree.selection() else tk.DISABLED))
         self._pex_extract_part_btn.config(
-            text="Extract Whole Partition…",
+            text="Extract Whole Partition",
             command=self._pex_extract_partition,
             state=(tk.NORMAL if self._pex_part_index is not None
                    else tk.DISABLED))
+        self._pex_extract_all_btn.config(
+            text="Extract All Partitions", command=self._pex_extract_all,
+            state=(tk.NORMAL if any(
+                q.browsable for q in self._pex_part_labels.values())
+                else tk.DISABLED))
         self._pex_action_status.configure(text=msg)
         self.append_log(
             msg, "error" if msg.startswith("Extract failed") else "info")
@@ -7024,6 +7207,7 @@ class MainWindow:
         self._pex_set_preview("")
         self._pex_extract_btn.config(state=tk.DISABLED)
         self._pex_extract_part_btn.config(state=tk.DISABLED)
+        self._pex_extract_all_btn.config(state=tk.DISABLED)
 
     @staticmethod
     def _pex_human(n):
@@ -8182,13 +8366,14 @@ class MainWindow:
         # on initial load.
         if hasattr(self, "_audio_tree"):
             if getattr(caps, "audio_loop_inject", False):
-                self._audio_tree["displaycolumns"] = ("len", "fmt", "loop",
-                                                      "rep")
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
+                                                      "loop", "rep")
             elif getattr(caps, "audio_keep_length_override", False):
-                self._audio_tree["displaycolumns"] = ("len", "fmt", "keep",
-                                                      "rep")
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
+                                                      "keep", "rep")
             else:
-                self._audio_tree["displaycolumns"] = ("len", "fmt", "rep")
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
+                                                      "rep")
         # "Group duplicates" checkbox: only for plugins that implement the
         # duplicate scan (CGC).
         if hasattr(self, "_audio_dup_group_cb"):
@@ -8202,8 +8387,11 @@ class MainWindow:
         self._audio_clear_preview()
         self._refresh_audio_list()
         if hasattr(self, "_audio_length_note_lbl"):
-            self._audio_length_note_lbl.configure(
-                text=mfr.audio_length_note() or "")
+            # The per-plugin guidance lives in the Trim checkbox's hover
+            # tooltip (_apply_audio_trim_lock appends it); the label stays
+            # blank as a pure layout anchor — the visible paragraph wrapped
+            # awkwardly and squeezed the log (monkeybug batch 14).
+            self._audio_length_note_lbl.configure(text="")
         # Force the Trim/pad checkbox on + disabled for plugins whose Write
         # always length-matches (e.g. JJP, Spike 2, CGC's Pulp Fiction), so the
         # toggle isn't misleading.  No extract is scanned yet here, so a plugin
@@ -8230,8 +8418,15 @@ class MainWindow:
         self._video_clear_preview()
         self._refresh_video_list()
         if hasattr(self, "_video_length_note_lbl"):
-            self._video_length_note_lbl.configure(
-                text=mfr.video_length_note() or "")
+            # Same treatment as the audio note: guidance moves to the Trim
+            # checkbox's tooltip, the label stays blank (monkeybug batch 14).
+            self._video_length_note_lbl.configure(text="")
+            note = (mfr.video_length_note() or "").strip()
+            self._video_trim_tip.text = (
+                "When on, a replacement longer or shorter than the original "
+                "clip is trimmed or padded to the original length during the "
+                "re-encode. When off, the replacement's own length is kept."
+                + (("\n\n" + note) if note else ""))
         # Same clean slate for the image tab.
         self._image_slots = []
         self._image_slots_by_rel = {}
@@ -9975,7 +10170,6 @@ class MainWindow:
         invalidates any in-flight work so two scans don't race to
         populate the tree.
         """
-        import hashlib
         import os
         import re as _re
         import threading
@@ -10085,6 +10279,12 @@ class MainWindow:
             hide_imported_cache = (
                 current_mfr is not None and current_mfr.key == "bof")
 
+            # Size+mtime MD5 cache: unchanged files skip the re-hash, so a
+            # re-scan of a mostly-unchanged folder takes seconds, not the
+            # minutes of the full hash walk (monkeybug batch 14).
+            from ..core import hashcache
+            hcache = hashcache.load(assets_path)
+
             changed = []
             for root_dir, dirs, files in os.walk(assets_path):
                 # Skip the .orig snapshot mirror (core.staged_originals): its
@@ -10115,17 +10315,11 @@ class MainWindow:
                     if (hide_imported_cache
                             and rel.startswith("pck/.godot/imported/")):
                         continue
-                    h = hashlib.md5()
-                    try:
-                        with open(full, "rb") as fh:
-                            for chunk in iter(
-                                    lambda: fh.read(65536), b""):
-                                h.update(chunk)
-                    except OSError:
-                        continue
-                    if h.hexdigest() == saved[rel]:
+                    digest = hashcache.md5_for(full, rel, hcache)
+                    if digest is None or digest == saved[rel]:
                         continue
                     if self._write_preview_scan_id != scan_id:
+                        hashcache.save(assets_path, hcache)
                         return  # superseded — drop this scan
                     changed.append(rel)
                     ext = os.path.splitext(name)[1].lstrip(".") or "?"
@@ -10133,6 +10327,7 @@ class MainWindow:
                         0, self._add_write_preview_row,
                         rel, ext, "Modified", scan_id)
 
+            hashcache.save(assets_path, hcache)
             if self._write_preview_scan_id == scan_id:
                 self._tk_root().after(
                     0, self._finish_write_preview_scan,
@@ -10905,8 +11100,10 @@ class MainWindow:
     def _on_write_clicked(self):
         """Build-button click.  Warn (but allow) when the preview shows no
         changes — building an unmodified card just makes a copy of the
-        original, which monkeybug flagged as easy to do by accident — then
-        defer to the app's write callback."""
+        original, which monkeybug flagged as easy to do by accident — and
+        confirm an overwrite of an existing output file at the moment it
+        matters instead of only a passive red label (monkeybug batch 14),
+        then defer to the app's write callback."""
         if (not self._is_running()
                 and not self._has_pending_write_changes()):
             if not messagebox.askyesno(
@@ -10915,6 +11112,18 @@ class MainWindow:
                 "of the original image with no changes.\n\nBuild anyway?",
                 icon="warning"):
                 return
+        if not self._is_running():
+            target = self._target_write_path()
+            original = (self.write_upd_var.get() or "").strip()
+            if (target and os.path.exists(target)
+                    and not (original
+                             and os.path.abspath(original) == target)):
+                if not messagebox.askyesno(
+                    "File exists",
+                    "%s already exists in the output folder.\n\n"
+                    "Overwrite it?" % os.path.basename(target),
+                    icon="warning"):
+                    return
         if self._on_write is not None:
             self._on_write()
 
@@ -11687,10 +11896,13 @@ class MainWindow:
                      "the folder so it isn't overwritten.",
                 foreground="#d04040")
         elif os.path.exists(target):
+            # Informational, not alarming: Build now asks before overwriting
+            # (monkeybug batch 14), so the standing label just states the
+            # fact.
             lbl.configure(
-                text=f"⚠ {os.path.basename(target)} already exists here — "
-                     "Build will overwrite it.",
-                foreground="#d04040")
+                text=f"{os.path.basename(target)} already exists here — "
+                     "Build will ask before overwriting.",
+                foreground="#888888")
         else:
             # Explicit-extension feedback: when Write will add or change the
             # typed name's extension to satisfy the plugin's required format,

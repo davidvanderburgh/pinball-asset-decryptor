@@ -1046,11 +1046,13 @@ def test_write_filename_box_editable_and_flags_collisions(
         # No file there yet -> no collision warning.
         assert w._write_filename_lbl.cget("text") == ""
 
-        # Create the colliding build; the hint turns into an amber warning.
+        # Create the colliding build; the hint states the fact (gray,
+        # informational — the Build click now asks before overwriting,
+        # monkeybug batch 14).
         (out_dir / "game-1_0_0.sdcard-modified.raw").write_bytes(b"old")
         w._update_write_filename_hint()
         assert "already exists" in w._write_filename_lbl.cget("text")
-        assert str(w._write_filename_lbl.cget("foreground")) == "#d04040"
+        assert str(w._write_filename_lbl.cget("foreground")) == "#888888"
 
         # A user edit to a free name clears the warning and is NOT clobbered
         # when the original changes again (box has diverged from the default).
@@ -2098,7 +2100,7 @@ def test_partition_explorer_threaded_extract_and_cancel(
     _pump_until(lambda: not w._pex_busy)
     assert out.read_bytes() == b"hello world"
     assert "Extracted" in str(w._pex_action_status["text"])
-    assert str(w._pex_extract_btn["text"]) == "Extract Selected…"
+    assert str(w._pex_extract_btn["text"]) == "Extract Selected"
     assert str(w._pex_extract_part_btn["state"]) == "normal"
     assert w._pex_busy_lbl.winfo_manager() == ""        # overlay gone
 
@@ -2112,7 +2114,7 @@ def test_partition_explorer_threaded_extract_and_cancel(
     gates["g"].set()   # worker resumes, sees the cancel at its next tick
     _pump_until(lambda: not w._pex_busy)
     assert "cancelled" in str(w._pex_action_status["text"]).lower()
-    assert str(w._pex_extract_part_btn["text"]) == "Extract Whole Partition…"
+    assert str(w._pex_extract_part_btn["text"]) == "Extract Whole Partition"
     assert str(w._pex_extract_part_btn["state"]) == "normal"
 
 

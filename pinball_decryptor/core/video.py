@@ -119,7 +119,8 @@ class VideoInfo:
 
     def __init__(self, path, vcodec="", width=0, height=0, fps=0.0,
                  duration=0.0, has_audio=False, has_alpha=False,
-                 pix_fmt="", container="", nframes=0):
+                 pix_fmt="", container="", nframes=0,
+                 audio_rate=0, audio_channels=0):
         self.path = path
         self.vcodec = vcodec          # "h264", "vp9", "theora", "prores", …
         self.width = width
@@ -127,10 +128,30 @@ class VideoInfo:
         self.fps = fps                # frames per second (0.0 if unknown)
         self.duration = duration      # seconds
         self.has_audio = has_audio
+        self.audio_rate = audio_rate          # Hz (0 = unknown)
+        self.audio_channels = audio_channels  # 1 mono / 2 stereo (0 = unknown)
         self.has_alpha = has_alpha    # True for ProRes 4444 / VP9-alpha / …
         self.pix_fmt = pix_fmt
         self.container = container     # extension without the dot ("mp4")
         self.nframes = nframes         # frame count (custom backends; 0=unknown)
+
+    def audio_summary(self):
+        """Human audio-track summary — "44.1 kHz Stereo" — or "" for a silent
+        clip and a bare "Audio" when the track exists but details didn't
+        probe (custom backends, terse banners)."""
+        if not self.has_audio:
+            return ""
+        parts = []
+        if self.audio_rate:
+            khz = self.audio_rate / 1000.0
+            parts.append(("%g kHz" % round(khz, 1)))
+        if self.audio_channels == 1:
+            parts.append("Mono")
+        elif self.audio_channels == 2:
+            parts.append("Stereo")
+        elif self.audio_channels > 2:
+            parts.append("%dch" % self.audio_channels)
+        return " ".join(parts) or "Audio"
 
     def __repr__(self):
         return (f"VideoInfo({self.vcodec}, {self.width}x{self.height}, "
@@ -187,7 +208,9 @@ def detect_video_info(path):
     streams = data.get("streams", []) or []
     vstream = next((s for s in streams
                     if s.get("codec_type") == "video"), None)
-    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+    astream = next((s for s in streams
+                    if s.get("codec_type") == "audio"), None)
+    has_audio = astream is not None
     if vstream is None:
         return None
 
@@ -210,6 +233,8 @@ def detect_video_info(path):
         fps=fps,
         duration=dur,
         has_audio=has_audio,
+        audio_rate=int((astream or {}).get("sample_rate", 0) or 0),
+        audio_channels=int((astream or {}).get("channels", 0) or 0),
         has_alpha=has_alpha,
         pix_fmt=pix_fmt,
         container=os.path.splitext(path)[1].lstrip(".").lower(),
@@ -253,10 +278,40 @@ def parse_video_banner(text, path):
         fps=float(fm.group(1)) if fm else 0.0,
         duration=parse_banner_duration(text),
         has_audio=": Audio:" in (text or ""),
+        audio_rate=_banner_audio_rate(text),
+        audio_channels=_banner_audio_channels(text),
         has_alpha=pix_fmt in _ALPHA_PIX_FMTS,
         pix_fmt=pix_fmt,
         container=os.path.splitext(path)[1].lstrip(".").lower(),
     )
+
+
+_BANNER_AUDIO_RE = re.compile(r"Stream #[^\n]*?:\s*Audio:\s*([^\n]+)")
+
+
+def _banner_audio_rate(text):
+    m = _BANNER_AUDIO_RE.search(text or "")
+    if not m:
+        return 0
+    r = re.search(r"(\d{4,6})\s*Hz", m.group(1))
+    return int(r.group(1)) if r else 0
+
+
+def _banner_audio_channels(text):
+    m = _BANNER_AUDIO_RE.search(text or "")
+    if not m:
+        return 0
+    line = m.group(1).lower()
+    if "mono" in line:
+        return 1
+    if "stereo" in line:
+        return 2
+    r = re.search(r"(\d+)\s+channels", line)
+    if r:
+        return int(r.group(1))
+    if "5.1" in line:
+        return 6
+    return 0
 
 
 def probe_video_duration(path):

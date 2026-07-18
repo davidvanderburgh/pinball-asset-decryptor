@@ -205,17 +205,18 @@ def changed_rels(folder, rels, baseline=None):
     """
     if baseline is None:
         baseline = read_baseline_any(folder)
+    # Shared size+mtime MD5 cache (see core.hashcache): unchanged files skip
+    # the re-hash, which is most of a Replace tab's changed-marks pass.
+    from . import hashcache
+    hcache = hashcache.load(folder)
     out = set()
     for rel in rels:
         abs_path = os.path.join(folder, *rel.split("/"))
         base = baseline.get(rel)
-        try:
-            cur = md5_file(abs_path)
-        except OSError:
+        cur = hashcache.md5_for(abs_path, rel, hcache)
+        if cur is None or base is None or cur != base:
             out.add(rel)
-            continue
-        if base is None or cur != base:
-            out.add(rel)
+    hashcache.save(folder, hcache)
     return out
 
 

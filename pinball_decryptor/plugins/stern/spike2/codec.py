@@ -86,6 +86,50 @@ def _invG(target, qmul):
     return (best & 0xffff), besterr
 
 
+def decode_word(word, r, x, qmul):
+    """The sample a body word renders as in one keystream context:
+    ``(qmul * sxth(ROR16(word, r) ^ x)) >> 16`` — the codec's decode with the
+    per-sample rotate ``r`` and additive keystream (XOR mask) ``x`` folded to
+    scalars.  For stereo u1 words fold the u0 coupling into ``x``
+    (``x = KR ^ ROR16(u0, aR)``)."""
+    s = (_rorv(int(word) & 0xffff, int(r) & 0xf) ^ (int(x) & 0xffff)) & 0xffff
+    v = s - 0x10000 if s & 0x8000 else s
+    return (int(qmul) * v) >> 16
+
+
+def pick_shared_word(pred_ctx, self_ctx, tol=2):
+    """The 16-bit value for storage TWO sounds both render — the head word of
+    a delta<0 encode window, which physically lives in the layout-
+    predecessor's slot, so hardware decodes it once per keystream (see
+    ``engine._resolve_shared_boundary``).
+
+    Contexts are ``(r, x, qmul, target)`` per :func:`decode_word`.  The two
+    decode maps are bit-permuted XORs of each other, so a single word rarely
+    satisfies both exactly; the sides are NOT symmetric though.  The
+    predecessor's sample lands at the end of its faded-out tail, where any
+    residual is a naked pop and nothing more can be done about it — so its
+    error is minimized lexicographically first (within *tol* counts of its
+    optimum, which enumeration makes essentially exact).  Our own sample 0
+    can decode to whatever the remaining freedom allows, because the caller
+    absorbs it by re-encoding the following samples as a short decay ramp.
+
+    Returns ``(word, pred_err, self_val)`` — ``self_val`` is the SIGNED
+    sample our side actually decodes (feed it to the ramp)."""
+    W = np.arange(0x10000, dtype=np.int64)
+
+    def dec(ctx):
+        r, x, qmul, t = ctx
+        S = _rorv(W, int(r) & 0xf) ^ (int(x) & 0xffff)
+        return (int(qmul) * _sxth_vec(S)) >> 16, int(t)
+
+    gp, tp = dec(pred_ctx)
+    ep = np.abs(gp - tp)
+    cand = np.flatnonzero(ep <= int(ep.min()) + int(tol))
+    gs, ts = dec(self_ctx)
+    w = int(cand[int(np.argmin(np.abs(gs[cand] - ts)))])
+    return w, int(ep[w]), int(gs[w])
+
+
 def _asr16_src_regs(ins):
     """Register operands this instruction arithmetic-shifts right by 16 -- the
     codec's ``>>16`` after the volume multiply.  Capstone tags the shifted
@@ -294,10 +338,14 @@ class GenRecover:
           a per-slot tick in front of the replacement's fade-in
           (lz_click2.mp4: click follows the slot, never the content).  The
           shifted window writes that word.  Note it overlaps the LAST word of
-          an adjacent predecessor's window (sounds are packed back-to-back):
-          that word sits 200 samples into the predecessor's faded lead-out,
-          where a one-sample change is inaudible — the loud, silence-adjacent
-          trigger tick is the audible end of that trade."""
+          an adjacent predecessor's slot (sounds are packed back-to-back),
+          which the machine ALSO renders — as the predecessor's final sample,
+          with the predecessor's keystream, under which ``enc[0]`` decodes as
+          a random up-to-full-scale spike (Elvira HoH spinner pair: an
+          audible pop ending every full predecessor playback, even for a
+          silent replacement).  The engine therefore re-picks that word
+          jointly for both keystreams after this returns — see
+          ``engine._resolve_shared_boundary``."""
         length = p["length"]
         _a, _r, delta = self._calibrate(p)
         d = min(delta, 0)

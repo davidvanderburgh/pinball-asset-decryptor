@@ -3431,7 +3431,199 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
         return False
 
 
-def _encode_mono(emu, gr, p, wav_path, np):
+def _slot_end_map(params):
+    """``{slot_end_byte_offset: p}`` — who ends exactly where.  Cat-0 sounds
+    are packed back-to-back, so the sound ending at another's ``body_off`` is
+    the layout predecessor whose tail word(s) a delta<0 encode window
+    overlaps (see :func:`_resolve_shared_boundary`)."""
+    out = {}
+    for q in params:
+        bps = 4 if q.get("chan") == 2 else 2
+        out[q["body_off"] + bps * q["length"]] = q
+    return out
+
+
+def _extended_params(p, extra=400):
+    """*p* with its length grown by *extra* samples — including inside
+    ``_rawobj`` (generic builds replay that obj verbatim, and the firmware's
+    emission gate reads the length stored at +0x10) — so a keystream-recovery
+    drive can reach the tail block real hardware renders past the emulated
+    emitted range.  ``None`` if the raw obj layout isn't the known one."""
+    p2 = dict(p, length=p["length"] + extra)
+    raw = p.get("_rawobj")
+    if raw:
+        raw = bytearray(raw)
+        if struct.unpack_from("<I", raw, 0x10)[0] != p["length"]:
+            return None
+        struct.pack_into("<I", raw, 0x10, p2["length"])
+        p2["_rawobj"] = bytes(raw)
+    return p2
+
+
+def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
+                             gr=None, sr=None, log=None):
+    """Re-pick the head word(s) of a delta<0 encode window — storage the
+    hardware reads TWICE, with two different keystreams.
+
+    On delta<0 keys the window's first word (mono) / frame (stereo) sits below
+    ``body_off``: physically the LAST word(s) of the layout-predecessor's
+    slot.  The machine renders a sound until its body is exhausted — one
+    sample past the lead-out block on delta=-1 builds — so it decodes that
+    storage once as OUR sample 0 (our keystream) and once as the
+    predecessor's final rendered sample(s) (its keystream).  encode_sound
+    writes ``enc[0]`` there: correct for us, but under the predecessor's
+    keystream it decodes as a random up-to-full-scale sample — a pop at the
+    end of every complete predecessor playback, surviving even a silent
+    replacement (Elvira HoH spinner pair idx4447/idx4448: stock -6 became
+    +7383 at idx4447's final sample).  Leaving the stock word (pre-v0.59.0)
+    is the mirror image: clean predecessor, pop at our trigger.
+
+    Neither single-context choice is right, but the sides aren't symmetric
+    either.  The predecessor's contested sample sits at the end of its
+    faded-out tail — any residual there is a naked pop, and none of its other
+    samples are ours to shape.  Our contested sample is sample 0, and every
+    sample AFTER it is ours.  So: pick the word whose decode is essentially
+    exact for the predecessor (target = the STOCK word's decode there — its
+    lead-out stays stock-seeded whether or not it is itself replaced — via
+    :func:`~.spike2.codec.pick_shared_word`), then absorb whatever our
+    sample 0 lands on by re-encoding the head of block 0 as a short decay
+    ramp from that value into the replacement's own (faded) content — a
+    click becomes a ~4 ms inaudible slope.  Any failure returns *body*
+    unchanged (the v0.59.0 behavior).  *tgtL*/*tgtR* are the encode's target
+    sample arrays (R ``None`` for mono)."""
+    if pred is None or start >= p["body_off"]:
+        return body
+    try:
+        from .spike2.codec import (GenRecover, StereoRecover, _rorv,
+                                   decode_word, pick_shared_word)
+
+        def rec_for(chan):
+            nonlocal gr, sr
+            if chan == 2:
+                if sr is None:
+                    sr = getattr(emu, "_boundary_sr", None) or StereoRecover(emu)
+                    emu._boundary_sr = sr
+                return sr
+            if gr is None:
+                gr = getattr(emu, "_boundary_gr", None) or GenRecover(emu)
+                emu._boundary_gr = gr
+            return gr
+
+        def stock_word(abs_off):
+            return struct.unpack("<H", bytes(emu.mm[abs_off:abs_off + 2]))[0]
+
+        pred_ext = _extended_params(pred)
+        if pred_ext is None:
+            return body
+        prec = rec_for(pred["chan"])
+        if pred["chan"] == 2:
+            d_p = min(prec._calibrate(pred), 0)
+        else:
+            d_p = min(prec._calibrate(pred)[2], 0)
+
+        def pred_ctx(abs_off, u0_word):
+            """Predecessor-side ``(r, x, qmul, target)`` for its word at
+            *abs_off* (target = the stock word's decode there).  *u0_word* =
+            the u0 that will actually sit on the card, for the stereo u1
+            coupling."""
+            w = (abs_off - pred["body_off"]) // 2
+            if pred["chan"] == 2:
+                f, sub = w // 2, w % 2
+                i = f - d_p
+                C = 200 * (i // 200) + 200
+                j = i - (C - 200)
+                rec = prec.recover_block(pred_ext, C, nf=j + 1)
+                if rec["m"] <= j:
+                    return None
+                if sub == 0:
+                    r, x = int(rec["rbL"][j]), int(rec["KL"][j])
+                else:
+                    r = int(rec["bR"][j])
+                    x = int(rec["KR"][j]) ^ _rorv(int(u0_word) & 0xffff,
+                                                  int(rec["aR"][j]))
+                q = prec.qmul
+            else:
+                i = w - d_p
+                C = 200 * (i // 200) + 200
+                j = i - (C - 200)
+                K, rb = prec.recover_block(pred_ext, C, n=j + 1)
+                if len(K) <= j:
+                    return None
+                r, x, q = int(rb[j]), int(K[j]), prec.qmul
+            return (r, x, int(q), decode_word(stock_word(abs_off), r, x, q))
+
+        def ramp(tgt, excess, m, rng, ramp_n=176):
+            """Block-0 target with *excess* decayed linearly from sample 1 —
+            continues our (fixed) sample-0 value smoothly into the
+            replacement's own content instead of stepping off a spike."""
+            new_t = np.asarray(tgt[:m], np.int64).copy()
+            n = min(int(ramp_n), m - 1)
+            if n > 0 and excess:
+                i = np.arange(1, n + 1)
+                new_t[1:n + 1] += (int(excess) * (n + 1 - i)) // (n + 1)
+                np.clip(new_t, -rng, rng, out=new_t)
+            return new_t
+
+        out = bytearray(body)
+        srec = rec_for(p["chan"])
+        if p["chan"] == 2:
+            rec0 = srec.recover_block(p, 200, nf=200)
+            m = min(rec0["m"], len(tgtL), len(tgtR))
+            if m < 1:
+                return body
+            pcA = pred_ctx(start, 0)
+            if pcA is None:
+                return body
+            q2 = int(srec.qmul)
+            u0, epA, svL = pick_shared_word(
+                pcA, (int(rec0["rbL"][0]), int(rec0["KL"][0]), q2,
+                      int(tgtL[0])))
+            pcB = pred_ctx(start + 2, u0)
+            if pcB is None:
+                return body
+            u1, epB, svR = pick_shared_word(
+                pcB, (int(rec0["bR"][0]),
+                      int(rec0["KR"][0]) ^ _rorv(u0, int(rec0["aR"][0])),
+                      q2, int(tgtR[0])))
+            struct.pack_into("<HH", out, 0, u0, u1)
+            exL, exR = svL - int(tgtL[0]), svR - int(tgtR[0])
+            if (abs(exL) > 48 or abs(exR) > 48) and m > 1:
+                rec_m = {k: (v[:m] if k in ("KL", "rbL", "KR", "aR", "bR")
+                             else m if k == "m" else v)
+                         for k, v in rec0.items()}
+                frame, _ = srec.encode_block(
+                    ramp(tgtL, exL, m, _STEREO_RANGE),
+                    ramp(tgtR, exR, m, _STEREO_RANGE), rec_m)
+                out[4:4 * m] = np.ascontiguousarray(
+                    frame[2:2 * m], dtype="<u2").tobytes()
+            err = max(epA, epB)
+        else:
+            K, rb = srec.recover_block(p, 200, n=200)
+            m = min(len(K), len(tgtL))
+            if m < 1:
+                return body
+            pc = pred_ctx(start, stock_word(start - 2))
+            if pc is None:
+                return body
+            W, err, sval = pick_shared_word(
+                pc, (int(rb[0]), int(K[0]), int(srec.qmul), int(tgtL[0])))
+            struct.pack_into("<H", out, 0, W)
+            excess = sval - int(tgtL[0])
+            if abs(excess) > 48 and m > 1:
+                enc, _ = srec.encode_block(
+                    ramp(tgtL, excess, m, _MONO_RANGE), K[:m], rb[:m])
+                out[2:2 * m] = np.ascontiguousarray(
+                    enc[1:m], dtype="<u2").tobytes()
+        if log is not None and err > 8:
+            log("idx %d: boundary word shared with idx %d settles at error %d "
+                "counts on the neighbor." % (p["idx"], pred["idx"], err),
+                "info")
+        return bytes(out)
+    except Exception:
+        return body
+
+
+def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
     # one word below body_off on delta=-1 codec keys (the start-click fix).
     # Fit to the codec's TRUE emitted sample count (length - BLOCK), not the raw
@@ -3447,10 +3639,13 @@ def _encode_mono(emu, gr, p, wav_path, np):
     s = _lowpass(s, _declick_lowpass_hz(), np)
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
-    return gr.encode_sound(p, tgt)
+    start, body = gr.encode_sound(p, tgt)
+    body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
+                                    gr=gr, log=log)
+    return start, body
 
 
-def _encode_stereo(emu, sr, p, wav_path, np):
+def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
@@ -3463,7 +3658,10 @@ def _encode_stereo(emu, sr, p, wav_path, np):
              fade_ms=fade_ms)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
-    return sr.encode_sound(p, L, R)
+    start, body = sr.encode_sound(p, L, R)
+    body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
+                                    sr=sr, log=log)
+    return start, body
 
 
 # --------------------------------------------------------------------------
@@ -3512,11 +3710,13 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
     emu.boot()
     patches, skipped = {}, []
     gr = sr = None
+    ends = _slot_end_map(byidx.values())
     try:
         for n, (idx, wav) in enumerate(edits):
             if cancel():
                 return None, None
             p = byidx[idx]
+            pred = ends.get(p["body_off"])
             if progress:
                 progress(10 + int(n * 65 / max(len(edits), 1)), 100,
                          "Re-encoding idx %d" % idx)
@@ -3529,8 +3729,10 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 log("idx %d: re-encode isn't bit-exact for this sound's codec "
                     "(skipped -- left unchanged in the output)." % idx, "warning")
                 continue
-            off, body = (_encode_stereo(emu, sr, p, wav, np) if p["chan"] == 2
-                         else _encode_mono(emu, gr, p, wav, np))
+            off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred, log=log)
+                         if p["chan"] == 2
+                         else _encode_mono(emu, gr, p, wav, np, pred=pred,
+                                           log=log))
             patches[off] = body
             log("Re-encoded idx %d (%s, %d samples)."
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),
@@ -3540,7 +3742,7 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
     return patches, sorted(skipped)
 
 
-def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
+def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
                           log, progress, cancel):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
 
@@ -3559,7 +3761,7 @@ def _encode_cat0_parallel(gr_path, img_path, needed_params, edits, nworkers, np,
         % (len(edits), nworkers), "info")
     ctx = mp.get_context("spawn")
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
-                    initargs=(gr_path, img_path, needed_params))
+                    initargs=(gr_path, img_path, params))
     patches, skipped, done_idx = {}, [], set()
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
@@ -3774,9 +3976,10 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     patches, skipped, remaining = {}, [], edits
     if not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
         try:
-            needed = [byidx[idx] for idx, _ in edits]
+            # Full params, not just the edited sounds': the workers also need
+            # each edit's layout-predecessor for the shared-boundary word.
             patches, skipped, remaining = _encode_cat0_parallel(
-                gr_path, img_path, needed, edits, nworkers, np, log, progress,
+                gr_path, img_path, params, edits, nworkers, np, log, progress,
                 cancel)
             if patches is None:
                 return None, None

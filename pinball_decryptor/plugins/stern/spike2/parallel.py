@@ -86,16 +86,21 @@ def _make_progress_cb(idx, length, chan):
 # ---------------------------------------------------------------------------
 _ENC_EMU = None
 _ENC_BYIDX = None
+_ENC_ENDS = None
 _ENC_GR = None
 _ENC_SR = None
 
 
 def init_encode_worker(game_real_path, image_path, params):
-    global _ENC_EMU, _ENC_BYIDX, _ENC_GR, _ENC_SR
+    global _ENC_EMU, _ENC_BYIDX, _ENC_ENDS, _ENC_GR, _ENC_SR
+    from ..engine import _slot_end_map
     from .emulator import Spike2Emu
     _ENC_EMU = Spike2Emu(game_real_path, image_path)
     _ENC_EMU.boot()
+    # ``params`` is the card's FULL table (not just the edited sounds): the
+    # shared-boundary resolution needs each edit's layout-predecessor too.
     _ENC_BYIDX = {p["idx"]: p for p in params}
+    _ENC_ENDS = _slot_end_map(params)
     _ENC_GR = _ENC_SR = None
 
 
@@ -125,10 +130,12 @@ def encode_one(task):
         _ENC_GR = _ENC_GR or GenRecover(_ENC_EMU)
     if not _recovery_valid(_ENC_EMU, _ENC_GR, _ENC_SR, p, np):
         return (idx, p["body_off"], None, False)
+    pred = _ENC_ENDS.get(p["body_off"]) if _ENC_ENDS else None
     if p["chan"] == 2:
-        off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np)
+        off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np,
+                                   pred=pred)
     else:
-        off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np)
+        off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np, pred=pred)
     return (idx, off, bytes(body), True)
 
 

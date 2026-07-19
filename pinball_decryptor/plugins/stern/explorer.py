@@ -292,6 +292,15 @@ class CardImage:
         stream rather than an image file.
 
         Returns ``(n_bytes, sidx_refreshed)``."""
+        with open(src_path, "rb") as f:
+            new = f.read()
+        return self.replace_file_bytes(part_index, path, new)
+
+    def replace_file_bytes(self, part_index, path, new):
+        """As :meth:`replace_file` but the replacement content is passed
+        directly as *new* (bytes) — used by callers that generate the bytes in
+        memory (e.g. the adjustment-default patcher).  Same exact-size rule and
+        ``.sidx`` refresh.  Returns ``(n_bytes, sidx_refreshed)``."""
         from . import sidx
         if not self._source_path:
             raise ValueError(
@@ -303,8 +312,6 @@ class CardImage:
         _ino, node = res
         if (node["mode"] & S_IFMT) != S_IFREG:
             raise IsADirectoryError(path)
-        with open(src_path, "rb") as f:
-            new = f.read()
         if len(new) != node["size"]:
             raise ValueError(
                 "size mismatch: the replacement is %d bytes but %s is %d "
@@ -348,6 +355,75 @@ class CardImage:
                 wf.seek(doff)
                 wf.write(chunk)
         return len(new), refreshed
+
+    # ---- game firmware (adjustment defaults) ---------------------------------
+    def find_firmwares(self):
+        """Yield ``(part_index, path)`` for every browsable partition's game
+        ELF.  A Spike 2 card carries several ARM ELFs — the small
+        ``spike_menu`` ``game`` on the rootfs and the real ``game_real`` in the
+        data partition's game directory — and only the latter holds the
+        adjustment table, so the caller tries each until one decodes."""
+        for p in self._parts:
+            if not p.browsable:
+                continue
+            reader = self._readers.get(p.index)
+            if reader is None:
+                continue
+            try:
+                _img_ino, fw_ino = reader.find_spike_assets()
+            except Exception:
+                fw_ino = None
+            if fw_ino is None:
+                continue
+            for path, ino, _node in reader.iter_regular_files(
+                    min_size=1, max_depth=20):
+                if ino == fw_ino:
+                    yield p.index, "/" + path.strip("/")
+                    break
+
+    def find_firmware(self):
+        """First ``(part_index, path)`` game ELF, or ``(None, None)``."""
+        for part, path in self.find_firmwares():
+            return part, path
+        return None, None
+
+    def read_firmware(self, part_index, path):
+        """The ELF bytes of the firmware at *part_index*/*path*."""
+        reader = self._reader(part_index)
+        _ino, node = self._resolve(reader, path)
+        return reader.read_file_bytes(node)
+
+    def adjustment_table(self):
+        """Decode the card's adjustment-default table.  Tries each partition's
+        game ELF and returns ``(AdjustmentTable, part_index, path)`` for the
+        first that decodes to a sane table (skips the ``spike_menu`` binary,
+        which has no adjustments).  Raises ``ValueError`` if none decode (an
+        unrecognised build)."""
+        from .adjustments import AdjustmentTable
+        last_err = None
+        found_any = False
+        for part, path in self.find_firmwares():
+            found_any = True
+            try:
+                table = AdjustmentTable(self.read_firmware(part, path))
+            except Exception as e:
+                last_err = e
+                continue
+            if table.sane():
+                return table, part, path
+            last_err = ValueError("decoded table failed the sanity check")
+        if not found_any:
+            raise FileNotFoundError("game firmware not found on this card")
+        raise ValueError("no game firmware on this card exposes an adjustment "
+                         "table (%s)" % (last_err or "unrecognised build"))
+
+    def write_adjustment_defaults(self, part_index, path, table, overrides):
+        """Patch the game ELF's compiled defaults with ``{name: value}`` and
+        write it back in place (exact-size, extent-mapped) with the ``.sidx``
+        record refreshed.  Returns ``(n_settings, sidx_refreshed)``."""
+        new = table.patched_bytes(overrides)
+        _n, refreshed = self.replace_file_bytes(part_index, path, new)
+        return len(overrides), refreshed
 
     # ---- lifecycle ----------------------------------------------------------
     def close(self):

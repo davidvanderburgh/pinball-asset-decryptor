@@ -117,6 +117,10 @@ class SternManufacturer(Manufacturer):
         # read-only and extract files/folders — pull radium/.sh files out of an
         # old modded card or dump folders to diff vs stock (monkeybug).
         partition_explorer=True,
+        # Settings editor: decode the game firmware's compiled operator-
+        # adjustment defaults (free play, volume, pricing, …) and preset them
+        # for a fresh-flash / factory-reset machine (monkeybug).
+        settings_editor=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.

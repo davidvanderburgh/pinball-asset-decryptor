@@ -275,6 +275,33 @@ HELP_CONTENT = {
          "Partition\" dumps the entire filesystem — useful for diffing two "
          "cards."),
     ],
+    "Default Settings": [
+        ("What it's for",
+         "Preset the operator-adjustment DEFAULTS baked into a card image — "
+         "free play, volume, pricing and more — so a machine comes up the way "
+         "you want without adjusting it by hand every time you flash a fresh "
+         "card."),
+        ("Fresh cards only (important)",
+         "A machine uses these defaults on a fresh flash or after a factory "
+         "reset. A machine that has already been set up keeps its own "
+         "settings — Stern stores those on the board, not on the card, so the "
+         "app cannot change a machine that's already configured. Think of this "
+         "as \"how a brand-new card boots\"."),
+        ("Edit + apply",
+         "Point \"Card Image\" at a card image; the app reads the game "
+         "firmware and lists the settings it can preset, each showing its "
+         "current default and valid range. Change the ones you want and press "
+         "\"Apply to Image\" — the change is written straight into the card "
+         "image (with the card's validation record refreshed automatically), "
+         "ready to flash. Keep a backup of the image if it's precious."),
+        ("Presets (set once, reuse everywhere)",
+         "Save a set of values as a named preset with \"Save As…\", then pick "
+         "it from the dropdown any time to fill the form. Tick \"Apply "
+         "automatically to every card I build\" and that preset is baked into "
+         "every card you build on the Write tab, so you never have to revisit "
+         "this tab — only the settings a given game actually has are applied, "
+         "so one preset works across titles."),
+    ],
 }
 
 # The Image Info WINDOW (the "Info" button beside the Extract / Write image

@@ -1318,7 +1318,7 @@ def test_help_button_and_per_tab_content(app, manufacturers_by_key):
     try:
         assert w._help_btn.winfo_manager() == "pack"
         for tab_id in w._notebook.tabs():
-            caption = w._notebook.tab(tab_id, "text").strip()
+            caption = w._tab_key(tab_id)      # stable key, not the short label
             assert caption in HELP_CONTENT, caption
         dlg = show_tab_help(app.root, "Write", w._current_theme)
         try:
@@ -2185,7 +2185,7 @@ def test_partition_explorer_defaults_and_history(
     assert not (w.partition_image_var.get() or "").strip()
 
     for tid in w._notebook.tabs():
-        if w._notebook.tab(tid, "text").strip() == "Partition Explorer":
+        if w._tab_key(tid) == "Partition Explorer":
             w._notebook.select(tid)
             break
     app.root.update()
@@ -2208,7 +2208,7 @@ def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
 
     def _state(label):
         for tid in w._notebook.tabs():
-            if w._notebook.tab(tid, "text").strip() == label:
+            if w._tab_key(tid) == label:
                 return str(w._notebook.tab(tid, "state"))
         return None
 
@@ -2218,6 +2218,91 @@ def test_partition_explorer_tab_gated_by_capability(app, manufacturers_by_key):
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update(); app.root.update()
     assert _state("Partition Explorer") == "hidden"
+
+
+def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
+    """The Settings tab shows only for Stern, its form builds from decoded
+    adjustment rows, and change-detection reports only edited-and-differing
+    settings validated against range."""
+    w = app.window
+
+    def _state(label):
+        for tid in w._notebook.tabs():
+            if w._tab_key(tid) == label:
+                return str(w._notebook.tab(tid, "state"))
+        return None
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _state("Default Settings") == "normal"
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert _state("Default Settings") == "hidden"
+
+    # Build the form directly from synthetic rows (no firmware image needed).
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+
+    class _FakeTable:
+        node = "SYS"
+    w._settings_table = _FakeTable()
+    rows = [
+        {"name": "AD_FREE_PLAY", "label": "Free Play", "kind": "toggle",
+         "help": "", "default": 0, "min": 0, "max": 1},
+        {"name": "AD_SOUND_MASTER_VOLUME_SETTING", "label": "Master Volume",
+         "kind": "number", "help": "", "default": 64, "min": 0, "max": 64},
+    ]
+    w._settings_build_form(rows)
+    assert len(w._settings_rows) == 2
+    assert str(w._settings_apply_btn["state"]) == "normal"
+    assert w._settings_changes() == {}                 # nothing edited yet
+
+    # Edit both; only the differing, in-range values are reported.
+    by = {r["name"]: r for r in w._settings_rows}
+    by["AD_FREE_PLAY"]["var"].set(1)
+    by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(40)
+    assert w._settings_changes() == {"AD_FREE_PLAY": 1,
+                                     "AD_SOUND_MASTER_VOLUME_SETTING": 40}
+
+    # Out-of-range is clamped into range by the change collector (a below-min
+    # volume lands at 0, which differs from the default so it's a real change).
+    by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(-5)
+    assert w._settings_changes()["AD_SOUND_MASTER_VOLUME_SETTING"] == 0
+
+    # Reset restores the image's current defaults.
+    w._settings_reset()
+    assert w._settings_changes() == {}
+
+    # --- presets: save / load / auto-apply / delete ---
+    import tkinter.simpledialog as _sd
+    by["AD_FREE_PLAY"]["var"].set(1)
+    by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(50)
+    monkeypatch.setattr(_sd, "askstring", lambda *a, **k: "My route")
+    w._settings_save_preset()
+    assert w._presets_blob()["presets"]["My route"]["AD_FREE_PLAY"] == 1
+    # persisted through the app's settings
+    assert (app._settings["default_settings_presets"]["presets"]["My route"]
+            ["AD_SOUND_MASTER_VOLUME_SETTING"] == 50)
+
+    # Changing fields then reloading the preset restores its values.
+    by["AD_FREE_PLAY"]["var"].set(0)
+    w._settings_load_preset("My route")
+    assert by["AD_FREE_PLAY"]["var"].get() == 1
+
+    # Marking it auto-apply records it as the active preset (persisted).
+    w.settings_preset_var.set("My route")
+    w.settings_autoapply_var.set(True)
+    w._settings_auto_toggle()
+    assert w._presets_blob()["active"] == "My route"
+    assert app._settings["default_settings_presets"]["active"] == "My route"
+
+    # Delete removes it and clears the active flag.
+    import tkinter.messagebox as _mb
+    monkeypatch.setattr(_mb, "askyesno", lambda *a, **k: True)
+    w.settings_preset_var.set("My route")
+    w._settings_delete_preset()
+    assert "My route" not in w._presets_blob()["presets"]
+    assert w._presets_blob()["active"] is None
 
 
 def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,

@@ -168,6 +168,9 @@ class App:
                 self._settings.get("audio_declick", True)),
             on_audio_declick_change=self._on_audio_declick_change,
             on_partition_image_opened=self._on_partition_image_opened,
+            initial_default_presets=self._settings.get(
+                "default_settings_presets", {}),
+            on_default_presets_change=self._on_default_presets_change,
         )
         # Per-picker-type last-used folders (see MainWindow.last_browse_dir).
         saved_dirs = self._settings.get("browse_dirs")
@@ -2581,6 +2584,9 @@ class App:
                     self.window.append_log(
                         f"Write completed. Total time: "
                         f"{h:02d}:{m:02d}:{s:02d}.", "success")
+                # Bake in the auto-apply Default Settings preset, if any, so a
+                # user who set it up never has to revisit the Defaults tab.
+                self._apply_active_preset_to_build()
                 fails = self._staging_failures
                 if fails:
                     # The build succeeded but some assigned replacements
@@ -2856,6 +2862,53 @@ class App:
         survives a restart (monkeybug).  *widths* is ``{tree_key: {col: px}}``."""
         self._settings["column_widths"] = widths
         self._save_settings()
+
+    def _on_default_presets_change(self, blob):
+        """Persist the Default Settings presets + which one auto-applies.
+        *blob* = ``{"presets": {name: {AD_name: value}}, "active": name}``."""
+        self._settings["default_settings_presets"] = blob
+        self._save_settings()
+
+    def _apply_active_preset_to_build(self):
+        """After a successful Stern build, bake the active Default Settings
+        preset into the output card image (only the adjustments that title
+        actually has, each clamped to its range).  Best-effort + logged; a
+        Direct-SSD device output (not a file) is skipped."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(mfr.capabilities, "settings_editor",
+                                      False):
+            return
+        blob = self._settings.get("default_settings_presets") or {}
+        active = blob.get("active")
+        vals = (blob.get("presets") or {}).get(active)
+        if not vals:
+            return
+        try:
+            out = self.window._target_write_path()
+        except Exception:
+            out = None
+        if not out or not os.path.isfile(out):
+            return
+        try:
+            from .plugins.stern.explorer import CardImage
+            with CardImage(out) as c:
+                table, part, path = c.adjustment_table()
+                overrides = {}
+                for name, v in vals.items():
+                    if name in table.by_name:
+                        e = table.get(name)
+                        overrides[name] = max(e["min"], min(e["max"], int(v)))
+                if overrides:
+                    n, _ref = c.write_adjustment_defaults(
+                        part, path, table, overrides)
+                    self.window.append_log(
+                        "Applied Default Settings preset \"%s\" (%d setting(s)) "
+                        "to the built image." % (active, n), "success")
+        except Exception as e:
+            self.window.append_log(
+                "Couldn't apply the Default Settings preset \"%s\" to the "
+                "build (%s) — you can still set defaults on the Defaults tab."
+                % (active, e), "warning")
 
     def _on_admin_warning_collapsed_change(self, collapsed):
         """Persist whether the admin-warning body is collapsed so a returning

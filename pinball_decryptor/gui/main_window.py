@@ -992,8 +992,14 @@ class MainWindow:
                  on_voice_quality_change=None,
                  initial_audio_declick=True,
                  on_audio_declick_change=None,
-                 on_partition_image_opened=None):
+                 on_partition_image_opened=None,
+                 initial_default_presets=None,
+                 on_default_presets_change=None):
         self.root = root
+        # Default Settings presets: {"presets": {name: {AD_name: value}},
+        # "active": name}.  Persisted via on_default_presets_change.
+        self._default_presets = dict(initial_default_presets or {})
+        self._on_default_presets_change = on_default_presets_change
         self._manufacturers = manufacturers   # list[Manufacturer]
         self._on_manufacturer_change = on_manufacturer_change
         self._on_extract = on_extract
@@ -1711,15 +1717,28 @@ class MainWindow:
         self._tab_write = ttk.Frame(self._notebook)
         self._tab_modpack = ttk.Frame(self._notebook)
         self._tab_partition = ttk.Frame(self._notebook)
+        self._tab_settings = ttk.Frame(self._notebook)
 
-        self._notebook.add(self._tab_extract, text="  Extract  ")
-        self._notebook.add(self._tab_audio, text="  Replace Audio  ")
-        self._notebook.add(self._tab_video, text="  Replace Video  ")
-        self._notebook.add(self._tab_image, text="  Replace Images  ")
-        self._notebook.add(self._tab_text, text="  Replace Text  ")
-        self._notebook.add(self._tab_write, text="  Write  ")
-        self._notebook.add(self._tab_modpack, text="  Mod Pack  ")
-        self._notebook.add(self._tab_partition, text="  Partition Explorer  ")
+        # Order: Extract → the Replace tabs → Default Settings (set defaults
+        # before building) → Write → Mod Pack → Partitions.  Display labels are
+        # short so the strip fits a normal window without sideways scroll; all
+        # tab LOGIC keys off the stable identifiers in ``self._tab_keys`` (see
+        # _tab_key), not the visible text, so labels stay cosmetic.
+        _tabs = [
+            (self._tab_extract, "Extract", "Extract"),
+            (self._tab_audio, "Audio", "Replace Audio"),
+            (self._tab_video, "Video", "Replace Video"),
+            (self._tab_image, "Images", "Replace Images"),
+            (self._tab_text, "Text", "Replace Text"),
+            (self._tab_settings, "Defaults", "Default Settings"),
+            (self._tab_write, "Write", "Write"),
+            (self._tab_modpack, "Mod Pack", "Mod Pack"),
+            (self._tab_partition, "Partitions", "Partition Explorer"),
+        ]
+        self._tab_keys = {}
+        for _frame, _label, _key in _tabs:
+            self._notebook.add(_frame, text=" %s " % _label)
+            self._tab_keys[str(_frame)] = _key
 
         self._build_extract_tab()
         self._build_audio_tab()
@@ -1729,6 +1748,7 @@ class MainWindow:
         self._build_write_tab()
         self._build_modpack_tab()
         self._build_partition_tab()
+        self._build_settings_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -7417,6 +7437,490 @@ class MainWindow:
                         else "%.1f %s" % (size, unit))
             size /= 1024.0
 
+    # ==================================================================
+    # Settings tab — preset the game firmware's compiled operator-adjustment
+    # DEFAULTS (free play, volume, pricing, …) inside a card image.  These
+    # apply on a fresh flash / factory reset; a configured machine keeps its
+    # board-NVRAM values (settings aren't on the card).  Composes
+    # plugins.stern.explorer (find/read/patch game_real + sidx refresh) and
+    # plugins.stern.adjustments (decode the table).  monkeybug wishlist #2.
+    # ==================================================================
+
+    def _build_settings_tab(self):
+        f = self._tab_settings
+        self._settings_image_path = None
+        self._settings_part = None
+        self._settings_fw_path = None
+        self._settings_table = None
+        self._settings_busy = False
+        self._settings_rows = []          # [{name,label,kind,var,default,min,max}]
+        self.settings_image_var = tk.StringVar()
+
+        intro = ttk.Label(
+            f, text="Preset the operator-adjustment DEFAULTS baked into a card "
+                    "image — free play, volume, pricing and more. A machine "
+                    "uses these on a fresh flash or after a factory reset; a "
+                    "machine that has already been set up keeps its own "
+                    "settings (Stern stores those on the board, not the card). "
+                    "Applying writes the change straight into the card image, "
+                    "ready to flash.",
+            font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
+        intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
+        intro.bind("<Configure>", lambda e: intro.configure(
+            wraplength=max(300, e.width - 8)))
+
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        ttk.Label(row, text="Card Image:", width=12, anchor=tk.W).pack(
+            side=tk.LEFT)
+        ent = self._path_combo(row, self.settings_image_var, "settings_image")
+        ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ent.bind("<Return>", lambda _e: self._settings_open_image())
+        ent.bind("<<ComboboxSelected>>",
+                 lambda _e: self._settings_open_image(), add="+")
+        ttk.Button(row, text="Browse…",
+                   command=self._settings_browse_image).pack(
+            side=tk.LEFT, padx=(6, 0))
+
+        # Preset bar: save a set of defaults once and reuse (or auto-apply) it
+        # so a user never has to revisit this tab for every card.
+        self.settings_preset_var = tk.StringVar()
+        self.settings_autoapply_var = tk.BooleanVar()
+        prow = ttk.Frame(f); prow.pack(fill=tk.X, padx=10, pady=(0, 4))
+        ttk.Label(prow, text="Preset:", width=12, anchor=tk.W).pack(
+            side=tk.LEFT)
+        self._settings_preset_combo = ttk.Combobox(
+            prow, textvariable=self.settings_preset_var, state="readonly",
+            width=22, values=[])
+        self._settings_preset_combo.pack(side=tk.LEFT)
+        self._settings_preset_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._settings_load_preset(self.settings_preset_var.get()))
+        ttk.Button(prow, text="Save As…",
+                   command=self._settings_save_preset).pack(
+            side=tk.LEFT, padx=(6, 0))
+        self._settings_preset_del_btn = ttk.Button(
+            prow, text="Delete", command=self._settings_delete_preset)
+        self._settings_preset_del_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._settings_auto_cb = ttk.Checkbutton(
+            prow, text="Apply automatically to every card I build",
+            variable=self.settings_autoapply_var,
+            command=self._settings_auto_toggle)
+        self._settings_auto_cb.pack(side=tk.LEFT, padx=(16, 0))
+        _Tooltip(
+            self._settings_auto_cb,
+            "When on, this preset's defaults are baked into every card you "
+            "build on the Write tab automatically — only the settings a given "
+            "game actually has are applied, so one preset works across titles.",
+            lambda: self._current_theme)
+
+        # Scrollable form of one row per exposed setting.
+        body = ttk.Frame(f); body.pack(fill=tk.BOTH, expand=True, padx=10,
+                                       pady=(4, 4))
+        self._settings_canvas = tk.Canvas(
+            body, highlightthickness=0, bd=0,
+            bg=THEMES.get(self._current_theme, {}).get("bg", "#2d2d2d"))
+        sb = ttk.Scrollbar(body, orient="vertical",
+                           command=self._settings_canvas.yview)
+        self._settings_canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._settings_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._settings_form = ttk.Frame(self._settings_canvas)
+        self._settings_form_win = self._settings_canvas.create_window(
+            (0, 0), window=self._settings_form, anchor="nw")
+        self._settings_form.bind(
+            "<Configure>", lambda e: self._settings_canvas.configure(
+                scrollregion=self._settings_canvas.bbox("all")))
+        self._settings_canvas.bind(
+            "<Configure>", lambda e: self._settings_canvas.itemconfigure(
+                self._settings_form_win, width=e.width))
+        self._settings_empty = ttk.Label(
+            self._settings_form,
+            text="Pick a card image above to edit its default settings.",
+            foreground="#888888")
+        self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
+
+        arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
+        self._settings_apply_btn = ttk.Button(
+            arow, text="Apply to Image", command=self._settings_apply,
+            state=tk.DISABLED)
+        self._settings_apply_btn.pack(side=tk.LEFT)
+        self._settings_reset_btn = ttk.Button(
+            arow, text="Reset Fields", command=self._settings_reset,
+            state=tk.DISABLED)
+        self._settings_reset_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._settings_status = ttk.Label(arow, text="",
+                                          font=(_SANS_FONT, 9))
+        self._settings_status.pack(side=tk.LEFT, padx=(10, 0))
+        self._settings_refresh_presets()
+
+    # ---- Default Settings: presets ----------------------------------
+    def _presets_blob(self):
+        b = self._default_presets
+        b.setdefault("presets", {})
+        b.setdefault("active", None)
+        return b
+
+    def _settings_persist_presets(self):
+        if self._on_default_presets_change:
+            self._on_default_presets_change(self._presets_blob())
+
+    def _settings_refresh_presets(self):
+        b = self._presets_blob()
+        names = sorted(b["presets"])
+        self._settings_preset_combo["values"] = names
+        active = b.get("active")
+        # Reflect the active/auto preset in the dropdown + checkbox.
+        if active in b["presets"]:
+            self.settings_preset_var.set(active)
+            self.settings_autoapply_var.set(True)
+        else:
+            if self.settings_preset_var.get() not in names:
+                self.settings_preset_var.set("")
+            self.settings_autoapply_var.set(False)
+
+    def _settings_load_preset(self, name):
+        vals = self._presets_blob()["presets"].get(name)
+        if not vals or not self._settings_rows:
+            return
+        for r in self._settings_rows:
+            if r["name"] in vals:
+                # Preset holds internal units; show them in display units.
+                self._settings_set_row(
+                    r, int(vals[r["name"]]) // r.get("scale", 1))
+        self._settings_status.configure(
+            text="Loaded preset \"%s\" — review, then Apply to Image." % name)
+
+    def _settings_save_preset(self):
+        from tkinter import simpledialog
+        if not self._settings_rows:
+            messagebox.showinfo(
+                "Save preset", "Load a card image first, then set the values "
+                "you want to save as a preset.")
+            return
+        name = simpledialog.askstring(
+            "Save preset", "Name this preset (e.g. \"My route\"):",
+            parent=self._tk_root())
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        # Store INTERNAL values (display * scale) so a preset means the same
+        # thing across titles and the build-time auto-apply writes it directly.
+        vals = {r["name"]: int(r["var"].get()) * r.get("scale", 1)
+                for r in self._settings_rows}
+        self._presets_blob()["presets"][name] = vals
+        self.settings_preset_var.set(name)
+        self._settings_persist_presets()
+        self._settings_refresh_presets()
+        self._settings_status.configure(
+            text="Saved preset \"%s\" (%d settings)." % (name, len(vals)))
+
+    def _settings_delete_preset(self):
+        name = self.settings_preset_var.get()
+        b = self._presets_blob()
+        if name not in b["presets"]:
+            return
+        if not messagebox.askyesno("Delete preset",
+                                   "Delete preset \"%s\"?" % name):
+            return
+        del b["presets"][name]
+        if b.get("active") == name:
+            b["active"] = None
+        self.settings_preset_var.set("")
+        self._settings_persist_presets()
+        self._settings_refresh_presets()
+        self._settings_status.configure(text="Deleted preset \"%s\"." % name)
+
+    def _settings_auto_toggle(self):
+        b = self._presets_blob()
+        name = self.settings_preset_var.get()
+        if self.settings_autoapply_var.get():
+            if name not in b["presets"]:
+                messagebox.showinfo(
+                    "Auto-apply", "Pick or save a preset first, then tick this "
+                    "to bake it into every card you build.")
+                self.settings_autoapply_var.set(False)
+                return
+            b["active"] = name
+            self._settings_status.configure(
+                text="\"%s\" will be applied to every card you build." % name)
+        else:
+            b["active"] = None
+        self._settings_persist_presets()
+
+    def _settings_browse_image(self):
+        cur = self.settings_image_var.get()
+        path = filedialog.askopenfilename(
+            title="Select a Stern card image",
+            initialdir=(os.path.dirname(cur) if cur else
+                        self.last_browse_dir("settings_image")),
+            filetypes=[("Card image", "*.raw *.img"), ("All files", "*.*")])
+        if path:
+            self.settings_image_var.set(os.path.normpath(path))
+            self.remember_browse_dir("settings_image", path)
+            self._settings_open_image()
+
+    def _settings_open_image(self):
+        path = (self.settings_image_var.get() or "").strip()
+        if not path or not os.path.isfile(path) or self._settings_busy:
+            return
+        self._settings_busy = True
+        self._settings_clear_form()
+        self._settings_empty.configure(text="Reading firmware…")
+        self._settings_empty.grid()
+        self._settings_status.configure(text="")
+        self._settings_apply_btn.config(state=tk.DISABLED)
+        self._settings_reset_btn.config(state=tk.DISABLED)
+        import threading
+        state = {"done": None}
+
+        def _work():
+            try:
+                from ..plugins.stern.explorer import CardImage
+                from ..plugins.stern.adjustments import curated_rows
+                with CardImage(path) as c:
+                    table, part, fw = c.adjustment_table()
+                rows = curated_rows(table)
+                state["done"] = ("ok", table, part, fw, rows, path)
+            except Exception as e:
+                state["done"] = ("err", e)
+
+        def _poll():
+            if state["done"] is None:
+                try:
+                    self._tk_root().after(120, _poll)
+                except tk.TclError:
+                    pass
+                return
+            self._settings_busy = False
+            res = state["done"]
+            # The Card Image box changed while this load ran (a dropped
+            # request) — reload so the form never shows one card's values
+            # under another card's path.
+            live = (self.settings_image_var.get() or "").strip()
+            if live and live != path:
+                self._settings_open_image()
+                return
+            if res[0] == "err":
+                self._settings_table = None
+                self._settings_apply_btn.config(state=tk.DISABLED)
+                self._settings_reset_btn.config(state=tk.DISABLED)
+                self._settings_empty.configure(
+                    text="Couldn't read settings from this image:\n%s\n\n"
+                         "(Pick a Stern Spike 2 card image. Some newer game "
+                         "builds aren't decoded yet.)" % res[1])
+                self._settings_empty.grid()
+                return
+            _ok, table, part, fw, rows, ipath = res
+            self._settings_table = table
+            self._settings_part = part
+            self._settings_fw_path = fw
+            self._settings_image_path = ipath
+            self._settings_build_form(rows)
+
+        threading.Thread(target=_work, daemon=True).start()
+        _poll()
+
+    def _settings_clear_form(self):
+        for w in self._settings_form.winfo_children():
+            if w is not self._settings_empty:
+                w.destroy()
+        self._settings_rows = []
+
+    def _settings_build_form(self, rows):
+        self._settings_clear_form()
+        if not rows:
+            self._settings_empty.configure(
+                text="No editable settings were found in this firmware.")
+            self._settings_empty.grid()
+            return
+        self._settings_empty.grid_remove()
+        hdr = ttk.Label(self._settings_form,
+                        text="Setting", font=(_SANS_FONT, 9, "bold"))
+        hdr.grid(row=0, column=0, sticky="w", padx=6, pady=(2, 4))
+        ttk.Label(self._settings_form, text="Default for a fresh card",
+                  font=(_SANS_FONT, 9, "bold")).grid(
+            row=0, column=1, sticky="w", padx=6, pady=(2, 4))
+        ttk.Label(self._settings_form, text="Range",
+                  font=(_SANS_FONT, 8), foreground="#888888").grid(
+            row=0, column=2, sticky="w", padx=6, pady=(2, 4))
+        for i, r in enumerate(rows, start=1):
+            lbl = ttk.Label(self._settings_form, text=r["label"], anchor="w")
+            lbl.grid(row=i, column=0, sticky="w", padx=6, pady=2)
+            if r["help"]:
+                _Tooltip(lbl, r["help"], lambda: self._current_theme)
+            var = tk.IntVar(value=r["default"])
+            rng = "%d - %d" % (r["min"], r["max"])
+            if r["kind"] == "toggle":
+                w = ttk.Checkbutton(self._settings_form, variable=var,
+                                    text="On")
+                rng = "off / on"
+            elif r["kind"] == "enum" and r.get("labels"):
+                # Dropdown of "N - Label" so the label is friendly but the exact
+                # index the machine stores is never hidden.  The combobox index
+                # maps to value min+index; a hidden IntVar carries the value.
+                labels = r["labels"]
+                opts = ["%d - %s" % (v, labels[v])
+                        for v in range(r["min"], r["max"] + 1)]
+                w = ttk.Combobox(self._settings_form, state="readonly",
+                                 values=opts, width=16)
+                w.current(r["default"] - r["min"])
+
+                def _sel(_e=None, _w=w, _v=var, _lo=r["min"]):
+                    _v.set(_lo + _w.current())
+                w.bind("<<ComboboxSelected>>", _sel)
+                rng = "%d options" % len(opts)
+            else:
+                w = ttk.Spinbox(self._settings_form, from_=r["min"],
+                                to=r["max"], textvariable=var, width=8,
+                                increment=1)
+            w.grid(row=i, column=1, sticky="w", padx=6, pady=2)
+            ttk.Label(self._settings_form, text=rng, font=(_SANS_FONT, 8),
+                      foreground="#888888").grid(
+                row=i, column=2, sticky="w", padx=6, pady=2)
+            self._settings_rows.append(dict(r, var=var, widget=w))
+        self._settings_apply_btn.config(state=tk.NORMAL)
+        self._settings_reset_btn.config(state=tk.NORMAL)
+        self._settings_status.configure(
+            text="%d settings loaded." % len(rows))
+        # If a preset is marked auto-apply, overlay it onto the freshly loaded
+        # form so the user sees (and can Apply) their preset without re-typing.
+        self._settings_refresh_presets()
+        active = self._presets_blob().get("active")
+        if active in self._presets_blob()["presets"]:
+            self._settings_load_preset(active)
+            self._settings_status.configure(
+                text="%d settings loaded; preset \"%s\" applied to the form — "
+                     "click Apply to Image to write it." % (len(rows), active))
+
+    def _settings_set_row(self, r, display_value):
+        """Set a row to a DISPLAY value, keeping an enum's dropdown in sync."""
+        v = max(r["min"], min(r["max"], int(display_value)))
+        r["var"].set(v)
+        w = r.get("widget")
+        if r["kind"] == "enum" and isinstance(w, ttk.Combobox):
+            try:
+                w.current(v - r["min"])
+            except tk.TclError:
+                pass
+
+    def _settings_reset(self):
+        for r in self._settings_rows:
+            self._settings_set_row(r, r["default"])
+        self._settings_status.configure(text="Fields reset to the image's "
+                                             "current defaults.")
+
+    def _settings_changes(self):
+        """``{AD_name: internal_value}`` for rows whose display value differs
+        from the image's current default.  Values are converted from the
+        machine-facing display units back to the firmware's internal units
+        (internal = display * scale) — that's what gets written."""
+        out = {}
+        for r in self._settings_rows:
+            try:
+                v = int(r["var"].get())
+            except (tk.TclError, ValueError):
+                continue
+            v = max(r["min"], min(r["max"], v))
+            if v != r["default"]:
+                out[r["name"]] = v * r.get("scale", 1)
+        return out
+
+    def _settings_apply(self):
+        if self._settings_busy or self._settings_table is None:
+            return
+        changes = self._settings_changes()
+        if not changes:
+            self._settings_status.configure(text="No changes to apply.")
+            return
+
+        def _shown(r):
+            v = int(r["var"].get())
+            if r.get("labels") and v in r["labels"]:
+                return r["labels"][v]
+            if r["kind"] == "toggle":
+                return "On" if v else "Off"
+            return str(v)
+        pretty = "\n".join(
+            "  %s -> %s" % (r["label"], _shown(r))
+            for r in self._settings_rows if r["name"] in changes)
+        if not messagebox.askyesno(
+                "Apply settings to image",
+                "This WRITES to the card image:\n\n  %s\n\nsetting these "
+                "defaults:\n\n%s\n\nThey take effect on a fresh flash or after "
+                "a factory reset. Keep a backup of the image if it's "
+                "precious.\n\nApply?"
+                % (os.path.normpath(self._settings_image_path), pretty),
+                icon="warning"):
+            return
+        self._settings_busy = True
+        self._settings_apply_btn.config(state=tk.DISABLED)
+        self._settings_reset_btn.config(state=tk.DISABLED)
+        self._settings_status.configure(text="Writing…")
+        self.append_log("Settings: writing %d default(s) into %s"
+                        % (len(changes),
+                           os.path.normpath(self._settings_image_path)),
+                        "info")
+        import threading
+        img, part, fw = (self._settings_image_path, self._settings_part,
+                         self._settings_fw_path)
+        table = self._settings_table
+        state = {"done": None}
+
+        def _work():
+            try:
+                from ..plugins.stern.explorer import CardImage
+                with CardImage(img) as c:
+                    n, refreshed = c.write_adjustment_defaults(
+                        part, fw, table, changes)
+                state["done"] = ("ok", n, refreshed)
+            except Exception as e:
+                state["done"] = ("err", e)
+
+        def _poll():
+            if state["done"] is None:
+                try:
+                    self._tk_root().after(120, _poll)
+                except tk.TclError:
+                    pass
+                return
+            self._settings_busy = False
+            self._settings_apply_btn.config(state=tk.NORMAL)
+            self._settings_reset_btn.config(state=tk.NORMAL)
+            res = state["done"]
+            if res[0] == "err":
+                self._settings_status.configure(text="Failed.")
+                self.append_log("Settings write failed: %s" % res[1], "error")
+                messagebox.showerror("Settings", "Couldn't write the image:\n%s"
+                                     % res[1])
+                return
+            _ok, n, refreshed = res
+            # The image now holds the new defaults — reflect them as the
+            # baseline so the fields show "no changes" until edited again.
+            for r in self._settings_rows:
+                if r["name"] in changes:
+                    r["default"] = changes[r["name"]]
+            note = ("" if refreshed else
+                    " (note: no validation manifest on this card)")
+            self._settings_status.configure(
+                text="Applied %d setting(s) at %s%s."
+                % (n, time.strftime("%I:%M %p").lstrip("0"), note))
+            self.append_log(
+                "Settings: applied %d default(s)%s — flash the image to use "
+                "them (fresh card / factory reset)." % (n, note), "success")
+
+        threading.Thread(target=_work, daemon=True).start()
+        _poll()
+
+    def _settings_default_from_partition(self):
+        """When the Partition Explorer already has an image open, offer it as
+        the Settings tab's default (both operate on the same card)."""
+        if (self.settings_image_var.get() or "").strip():
+            return
+        p = (self.partition_image_var.get() or "").strip() if hasattr(
+            self, "partition_image_var") else ""
+        if p and os.path.isfile(p):
+            self.settings_image_var.set(p)
+
     # ---- Image Info dialog ------------------------------------------
 
     def _make_round_icon(self, parent, glyph, fill, hover, tooltip_text,
@@ -8172,9 +8676,7 @@ class MainWindow:
                                 self._write_phases, "write")
 
     def _on_tab_changed(self, _event=None):
-        idx = self._notebook.index(self._notebook.select())
-        tab_id = self._notebook.tabs()[idx]
-        text = self._notebook.tab(tab_id, "text").strip()
+        text = self._current_tab_key()   # stable key, not the short label
         # Switching tabs means leaving whatever preview was playing.  Each tab
         # owns its own player (Replace Audio's spectrogram transport, Replace
         # Video's embedded clip); an ffplay child keeps the sound going under
@@ -8230,6 +8732,24 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
+        elif text == "Default Settings":
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            # Default to the Extract input / Partition Explorer image so the
+            # user rarely re-picks the same card...
+            if not (self.settings_image_var.get() or "").strip():
+                self._settings_default_from_partition()
+                if not (self.settings_image_var.get() or "").strip():
+                    src = (self.extract_input_var.get() or "").strip()
+                    if src and os.path.isfile(src):
+                        self.settings_image_var.set(os.path.normpath(src))
+            # ...and auto-load it, so the settings box isn't an empty white
+            # panel on arrival (the image is already filled in).  Skip if this
+            # exact image is already loaded.
+            img = (self.settings_image_var.get() or "").strip()
+            if (img and os.path.isfile(img) and not self._settings_busy
+                    and img != getattr(self, "_settings_image_path", None)):
+                self._settings_open_image()
         else:
             # Extract / Capture etc. -- no preview player of their own
             # (any audio/video playback was stopped above).
@@ -8522,6 +9042,8 @@ class MainWindow:
         self._configure_tab("Mod Pack", caps.modpack)
         self._configure_tab("Partition Explorer",
                             getattr(caps, "partition_explorer", False))
+        self._configure_tab("Default Settings",
+                            getattr(caps, "settings_editor", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.
@@ -9459,9 +9981,21 @@ class MainWindow:
             except Exception:
                 pass
 
-    def _configure_tab(self, label, visible):
+    def _tab_key(self, tab_id):
+        """Stable identifier for a notebook tab (e.g. "Replace Audio"),
+        independent of its short visible label (e.g. "Audio")."""
+        return self._tab_keys.get(str(tab_id),
+                                  self._notebook.tab(tab_id, "text").strip())
+
+    def _current_tab_key(self):
+        try:
+            return self._tab_key(self._notebook.select())
+        except tk.TclError:
+            return None
+
+    def _configure_tab(self, key, visible):
         for tab_id in self._notebook.tabs():
-            if self._notebook.tab(tab_id, "text").strip() == label:
+            if self._tab_key(tab_id) == key:
                 if visible:
                     self._notebook.tab(tab_id, state="normal")
                 else:
@@ -10990,12 +11524,7 @@ class MainWindow:
             return
         # Only scan if the Write tab is the currently-selected tab —
         # otherwise the user can't see the preview anyway.
-        try:
-            idx = self._notebook.index(self._notebook.select())
-            tab_id = self._notebook.tabs()[idx]
-            if self._notebook.tab(tab_id, "text").strip() != "Write":
-                return
-        except (tk.TclError, IndexError):
+        if self._current_tab_key() != "Write":
             return
         # Skip the re-hash when nothing that feeds the preview has changed
         # since the last completed scan (monkeybug batch 14: switching tabs
@@ -11184,10 +11713,8 @@ class MainWindow:
 
     def _autoscan_active_assets_tab(self):
         """Scan the assets folder for whichever tab is currently visible."""
-        try:
-            idx = self._notebook.index(self._notebook.select())
-            text = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
-        except Exception:
+        text = self._current_tab_key()
+        if text is None:
             return
         self._scan_assets_tab_by_name(text)
 
@@ -11219,7 +11746,7 @@ class MainWindow:
             return
         for tab_id in tabs:
             try:
-                text = self._notebook.tab(tab_id, "text").strip()
+                text = self._tab_key(tab_id)
             except Exception:
                 continue
             self._scan_assets_tab_by_name(text)
@@ -11500,11 +12027,7 @@ class MainWindow:
 
     def _open_tab_help(self):
         """Open (or surface) the tips window for the visible notebook tab."""
-        try:
-            idx = self._notebook.index(self._notebook.select())
-            tab = self._notebook.tab(self._notebook.tabs()[idx], "text").strip()
-        except (tk.TclError, IndexError):
-            tab = "Extract"
+        tab = self._current_tab_key() or "Extract"
         if self._help_window is None:
             from .help_dialog import TabHelpWindow
             self._help_window = TabHelpWindow(
@@ -12839,6 +13362,11 @@ class MainWindow:
         # theme's panel color.
         for _badge in self._round_icons:
             _badge.configure(bg=c["bg"])
+        # The Default Settings scroll canvas is a raw tk.Canvas (ttk can't
+        # host a scrollable frame), so it needs its backdrop set explicitly or
+        # it renders as a big white box in dark mode.
+        if hasattr(self, "_settings_canvas"):
+            self._settings_canvas.configure(bg=c["bg"])
         style.configure("TNotebook", background=c["bg"], bordercolor=c["border"])
         style.configure("TNotebook.Tab", background=c["button"],
                         foreground=c["fg"], padding=(10, 4))

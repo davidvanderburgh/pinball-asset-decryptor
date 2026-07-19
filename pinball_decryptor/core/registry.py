@@ -214,6 +214,13 @@ class Capabilities:
     # (monkeybug).  Set True only for plugins whose medium is a partitioned card
     # image the app can read (Stern Spike 2 via plugins.stern.explorer).
     partition_explorer: bool = False
+    # Settings-editor path: surfaces a "Settings" tab that opens a card image,
+    # decodes the game firmware's compiled operator-adjustment DEFAULTS, and
+    # lets the user preset them (free play, volume, pricing, …) for a fresh
+    # flash / factory-reset machine — the only card-side settings lever, since
+    # a configured machine keeps its board-NVRAM values.  Stern Spike 2 only
+    # (plugins.stern.explorer + plugins.stern.adjustments).
+    settings_editor: bool = False
 
 
 @dataclass(frozen=True)

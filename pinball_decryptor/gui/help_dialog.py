@@ -101,8 +101,8 @@ HELP_CONTENT = {
          "sequences), Sound FX (named by the game's own Sound Test menu), "
          "Callouts (speech — needs Auto-name call-outs to have run), or "
          "Other."),
-        ("Renaming",
-         "Right-click a slot → \"Rename…\" to correct its name (e.g. a "
+        ("Name and type (Properties)",
+         "Right-click a slot → \"Properties…\" to correct its name (e.g. a "
          "call-out the auto-transcriber mis-heard). The name is remembered "
          "by the sound's content, so a future extract — same card or a "
          "newer firmware carrying the same sound — reapplies it before "
@@ -217,7 +217,9 @@ HELP_CONTENT = {
          "are re-encoded and replaced videos / images / text are patched in "
          "size-neutrally, so the built file is a drop-in replacement for "
          "the original. The Modified Files list previews exactly what will "
-         "go in before you click."),
+         "go in before you click — it's only a preview: the build does its "
+         "own full comparison, so there's no need to wait for the scan to "
+         "finish before building."),
         ("Output name",
          "Built images get a distinct default name (e.g. \"…-modified.raw\", "
          "where supported) so they can't be mistaken for the stock file. "
@@ -287,20 +289,25 @@ HELP_CONTENT = {
          "settings — Stern stores those on the board, not on the card, so the "
          "app cannot change a machine that's already configured. Think of this "
          "as \"how a brand-new card boots\"."),
-        ("Edit + apply",
+        ("Edit + save",
          "Point \"Card Image\" at a card image; the app reads the game "
-         "firmware and lists the settings it can preset, each showing its "
-         "current default and valid range. Change the ones you want and press "
-         "\"Apply to Image\" — the change is written straight into the card "
-         "image (with the card's validation record refreshed automatically), "
-         "ready to flash. Keep a backup of the image if it's precious."),
+         "firmware and lists the settings it can preset. \"On card\" is the "
+         "default currently baked into that image (Stern's factory value "
+         "unless it was changed here before); set \"New default\" to what you "
+         "want — a ● marks every row that deviates from the card. Press "
+         "\"Save to Card Image\" and the changes are written straight into "
+         "the card image (with the card's validation record refreshed "
+         "automatically), ready to flash. Keep a backup of the image if it's "
+         "precious."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
-         "it from the dropdown any time to fill the form. Tick \"Apply "
-         "automatically to every card I build\" and that preset is baked into "
-         "every card you build on the Write tab, so you never have to revisit "
-         "this tab — only the settings a given game actually has are applied, "
-         "so one preset works across titles."),
+         "it from the dropdown any time to fill the form. The auto-apply "
+         "checkbox belongs to the selected preset: tick it and that preset is "
+         "baked into every card you build on the Write tab, so you never have "
+         "to revisit this tab — only the settings a given game actually has "
+         "are applied, so one preset works across titles. Use presets without "
+         "auto-apply when different machines need different defaults; tick it "
+         "when one preset fits everything you build."),
     ],
 }
 
@@ -317,13 +324,15 @@ _IMAGE_INFO_SECTIONS = [
      "Copy Report button puts a plain-text version on the clipboard, ready "
      "to paste into a bug report."),
     ("Where its details come from",
-     "Only from the image itself and its filename — for example a Stern "
-     "card's version number exists only in the vendor's filename, so a "
-     "renamed card won't show one, while the game folder and validated-file "
-     "count are read from inside the card and survive a rename. On Stern "
-     "cards the videos, images and scenes are counted straight off the "
-     "card; sounds are packed inside image.bin, so counting them takes a "
-     "full Extract."),
+     "Only from the image itself and its filename. A Stern card's version "
+     "is read from the vendor filename, or — on a renamed card — from the "
+     "card's own update index, and the short Version ID (like VEN106LE) is "
+     "assembled from the title code inside the game firmware. Videos, "
+     "images, scenes, sounds and sound requests are all counted straight "
+     "off the card, no Extract needed: the sound counts are the asset "
+     "container's own header words. \"Sounds\" is what an Extract decodes "
+     "to WAVs; \"Sound requests\" is the (larger) set of sound events the "
+     "game can trigger — several requests can share one recording."),
 ]
 
 # Non-tab help appended to the tabs whose UI hosts the feature.

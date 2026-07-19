@@ -4037,12 +4037,14 @@ class MainWindow:
                          command=self._audio_play_original)
         menu.add_command(label="Choose replacement…",
                          command=lambda r=row: self._audio_assign_rel(r))
-        # Rename: only decode-shaped names (idx#### / music_cat##_####) — the
-        # index prefix is preserved so Write still maps the slot; every other
-        # plugin keys audio by its full path, which a rename would break.
+        # Properties (rename + Type): only decode-shaped names (idx#### /
+        # music_cat##_####) — the index prefix is preserved so Write still
+        # maps the slot; every other plugin keys audio by its full path,
+        # which a rename would break.  Was "Rename…", but the dialog also
+        # recategorizes, which that label hid (monkeybug).
         from ..core import name_memory as _nmem
         if _nmem.split_decode_name(os.path.basename(row)):
-            menu.add_command(label="Rename…",
+            menu.add_command(label="Properties…  (name / type)",
                              command=lambda r=row: self._audio_rename_slot(r))
         has_assignment = bool(self._audio_assignments.get(row))
         is_built = row in self._audio_changed_on_disk
@@ -4133,7 +4135,7 @@ class MainWindow:
         ``(text, category_key)``, or None on cancel."""
         root = self._tk_root()
         dlg = tk.Toplevel(root)
-        dlg.title("Rename Audio")
+        dlg.title("Audio Properties")
         dlg.transient(root)
         dlg.resizable(False, False)
         ttk.Label(dlg, text=prompt, justify=tk.LEFT).pack(
@@ -4187,7 +4189,8 @@ class MainWindow:
         return result[0] if result else None
 
     def _audio_rename_slot(self, rel):
-        """Right-click → Rename…: set the name after the slot's decode index.
+        """Right-click → Properties…: set the name after the slot's decode
+        index and/or its Type bucket.
 
         The label is also remembered against the sound's FACTORY content hash
         (the extract baseline md5), so the next extract of this sound —
@@ -4241,7 +4244,7 @@ class MainWindow:
         dst = os.path.join(os.path.dirname(slot.abs_path), new_base)
         if os.path.exists(dst):
             messagebox.showerror(
-                "Rename Audio",
+                "Audio Properties",
                 "A file named\n%s\nalready exists in that folder." % new_base)
             return
         # The factory hash BEFORE the baseline entry moves; also release any
@@ -4253,7 +4256,7 @@ class MainWindow:
         try:
             replace_with_retry(slot.abs_path, dst)
         except OSError as e:
-            messagebox.showerror("Rename Audio", "Rename failed:\n%s" % e)
+            messagebox.showerror("Audio Properties", "Rename failed:\n%s" % e)
             return
         rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
         if md5:
@@ -4799,12 +4802,45 @@ class MainWindow:
 
         self._refresh_video_ffmpeg_warning()
 
+    def _video_noconv_conflict(self, rel, path):
+        """Why *path* can't be copied through as-is for slot *rel* under
+        'No conversion' (mirrors stage_replacement's rejections), or None
+        if it's fine.  Used to warn at pick/toggle time instead of letting
+        the mismatch surface only as a build-time failure (monkeybug)."""
+        slot = self._video_slots_by_rel.get(rel)
+        if slot is None:
+            return None
+        from ..core.video_slots import backend_for
+        if backend_for(slot.abs_path) is not None:
+            return ("%s is a custom %s format that always needs a re-encode"
+                    % (rel, slot.ext))
+        rep_ext = os.path.splitext(path)[1].lower()
+        if rep_ext != slot.ext:
+            return ("%s needs a %s file, but %s is %s" % (
+                rel, slot.ext, os.path.basename(path),
+                rep_ext or "extension-less"))
+        return None
+
     def _video_on_no_conversion_toggle(self):
         """No-conversion copies the file through verbatim, so trim/pad (a
         re-encode-time option) doesn't apply — grey it out while it's on, then
         persist the choice with the other staged settings."""
         self._update_video_trim_enabled()
         self._save_staged_changes()
+        # Turning it ON with replacements already picked: flag any that the
+        # verbatim copy would reject, now rather than at build time.
+        if self.video_no_conversion_var.get():
+            bad = [w for w in (
+                self._video_noconv_conflict(rel, p)
+                for rel, p in sorted(self._video_assignments.items()))
+                if w is not None]
+            if bad:
+                messagebox.showwarning(
+                    "No conversion is on",
+                    "These assigned replacements can't be used as-is and "
+                    "would be rejected at build time:\n\n%s\n\nUncheck "
+                    "\"No conversion\" to have them converted automatically."
+                    % "\n".join("  • %s" % w for w in bad))
 
     def _update_video_trim_enabled(self):
         """Enable the trim/pad checkbox only when we'll actually re-encode
@@ -5214,6 +5250,25 @@ class MainWindow:
         if not path:
             return
         self.remember_browse_dir("video_replacement", path)
+        # "No conversion" + a file the copy-through would reject used to fail
+        # silently until build time ("✗ … needs a .mov") — monkeybug hit it.
+        # Surface the mismatch here, while the user can still act on it.
+        if self.video_no_conversion_var.get():
+            why = self._video_noconv_conflict(rel, path)
+            if why is not None:
+                if messagebox.askyesno(
+                        "No conversion is on",
+                        "%s.\n\nWith \"No conversion\" checked this file "
+                        "would be rejected at build time.\n\nUncheck \"No "
+                        "conversion\" so replacements are converted "
+                        "automatically?" % why, icon="warning"):
+                    self.video_no_conversion_var.set(False)
+                    self._video_on_no_conversion_toggle()
+                else:
+                    self.append_log(
+                        "Replace Video: %s — %s; it will be REJECTED at "
+                        "build time unless 'No conversion' is unchecked."
+                        % (rel, why), "error")
         self._video_assignments[rel] = path
         self._save_staged_changes()
         self.append_log("Replace Video: %s ← %s"
@@ -7462,8 +7517,8 @@ class MainWindow:
                     "uses these on a fresh flash or after a factory reset; a "
                     "machine that has already been set up keeps its own "
                     "settings (Stern stores those on the board, not the card). "
-                    "Applying writes the change straight into the card image, "
-                    "ready to flash.",
+                    "Save to Card Image writes the changes straight into the "
+                    "image, ready to flash.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         intro.bind("<Configure>", lambda e: intro.configure(
@@ -7501,16 +7556,21 @@ class MainWindow:
         self._settings_preset_del_btn = ttk.Button(
             prow, text="Delete", command=self._settings_delete_preset)
         self._settings_preset_del_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # The checkbox marks WHICH saved preset is the standing default —
+        # it's an attribute of the selected preset, not a parallel feature,
+        # so its label says so and it stays greyed until a preset exists
+        # (monkeybug saw the two as overlapping).
         self._settings_auto_cb = ttk.Checkbutton(
-            prow, text="Apply automatically to every card I build",
+            prow, text="Apply this preset automatically to every card I build",
             variable=self.settings_autoapply_var,
             command=self._settings_auto_toggle)
         self._settings_auto_cb.pack(side=tk.LEFT, padx=(16, 0))
         _Tooltip(
             self._settings_auto_cb,
-            "When on, this preset's defaults are baked into every card you "
-            "build on the Write tab automatically — only the settings a given "
-            "game actually has are applied, so one preset works across titles.",
+            "When on, the selected preset's defaults are baked into every "
+            "card you build on the Write tab automatically — only the "
+            "settings a given game actually has are applied, so one preset "
+            "works across titles. Save a preset first to enable this.",
             lambda: self._current_theme)
 
         # Scrollable form of one row per exposed setting.
@@ -7541,7 +7601,7 @@ class MainWindow:
 
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
         self._settings_apply_btn = ttk.Button(
-            arow, text="Apply to Image", command=self._settings_apply,
+            arow, text="Save to Card Image", command=self._settings_apply,
             state=tk.DISABLED)
         self._settings_apply_btn.pack(side=tk.LEFT)
         self._settings_reset_btn = ttk.Button(
@@ -7577,8 +7637,23 @@ class MainWindow:
             if self.settings_preset_var.get() not in names:
                 self.settings_preset_var.set("")
             self.settings_autoapply_var.set(False)
+        self._settings_update_auto_cb()
+
+    def _settings_update_auto_cb(self):
+        """Auto-apply is a property of the SELECTED preset — grey the
+        checkbox out until one is selected so it can't read as an
+        independent feature."""
+        cb = getattr(self, "_settings_auto_cb", None)
+        if cb is None:
+            return
+        ok = self.settings_preset_var.get() in self._presets_blob()["presets"]
+        try:
+            cb.state(["!disabled"] if ok else ["disabled"])
+        except tk.TclError:
+            pass
 
     def _settings_load_preset(self, name):
+        self._settings_update_auto_cb()
         vals = self._presets_blob()["presets"].get(name)
         if not vals or not self._settings_rows:
             return
@@ -7588,7 +7663,8 @@ class MainWindow:
                 self._settings_set_row(
                     r, int(vals[r["name"]]) // r.get("scale", 1))
         self._settings_status.configure(
-            text="Loaded preset \"%s\" — review, then Apply to Image." % name)
+            text="Loaded preset \"%s\" — review, then Save to Card Image."
+                 % name)
 
     def _settings_save_preset(self):
         from tkinter import simpledialog
@@ -7726,6 +7802,15 @@ class MainWindow:
                 w.destroy()
         self._settings_rows = []
 
+    @staticmethod
+    def _settings_fmt_value(r, v):
+        """A row's value the way the operator menu shows it."""
+        if r["kind"] == "toggle":
+            return "On" if v else "Off"
+        if r.get("labels") and v in r["labels"]:
+            return "%d - %s" % (v, r["labels"][v])
+        return str(v)
+
     def _settings_build_form(self, rows):
         self._settings_clear_form()
         if not rows:
@@ -7734,25 +7819,46 @@ class MainWindow:
             self._settings_empty.grid()
             return
         self._settings_empty.grid_remove()
-        hdr = ttk.Label(self._settings_form,
-                        text="Setting", font=(_SANS_FONT, 9, "bold"))
-        hdr.grid(row=0, column=0, sticky="w", padx=6, pady=(2, 4))
-        ttk.Label(self._settings_form, text="Default for a fresh card",
-                  font=(_SANS_FONT, 9, "bold")).grid(
-            row=0, column=1, sticky="w", padx=6, pady=(2, 4))
-        ttk.Label(self._settings_form, text="Range",
-                  font=(_SANS_FONT, 8), foreground="#888888").grid(
-            row=0, column=2, sticky="w", padx=6, pady=(2, 4))
-        for i, r in enumerate(rows, start=1):
-            lbl = ttk.Label(self._settings_form, text=r["label"], anchor="w")
-            lbl.grid(row=i, column=0, sticky="w", padx=6, pady=2)
+        form = self._settings_form
+        # Wrap the form into side-by-side column groups so a long settings
+        # list uses the tab's width instead of scrolling early (monkeybug).
+        ncols = min(3, max(1, -(-len(rows) // 8)))
+        per = -(-len(rows) // ncols)
+        accent = THEMES.get(self._current_theme, {}).get("link", "#d78f2c")
+        for g in range(ncols):
+            base = g * 6
+            for col, txt, tip in (
+                    (0, "Setting", None),
+                    (1, "On card", "The default currently baked into this "
+                        "image — Stern's factory value unless it was changed "
+                        "here before."),
+                    (2, "New default", "What the machine will use on a fresh "
+                        "flash or after a factory reset, once saved to the "
+                        "image.")):
+                h = ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold"))
+                h.grid(row=0, column=base + col, sticky="w", padx=6,
+                       pady=(2, 4))
+                if tip:
+                    _Tooltip(h, tip, lambda: self._current_theme)
+            ttk.Label(form, text="Range", font=(_SANS_FONT, 8),
+                      foreground="#888888").grid(
+                row=0, column=base + 4, sticky="w", padx=6, pady=(2, 4))
+            if g < ncols - 1:
+                form.grid_columnconfigure(base + 5, minsize=30)
+        for i, r in enumerate(rows):
+            g, ri = divmod(i, per)
+            base, grow = g * 6, ri + 1
+            lbl = ttk.Label(form, text=r["label"], anchor="w")
+            lbl.grid(row=grow, column=base, sticky="w", padx=6, pady=2)
             if r["help"]:
                 _Tooltip(lbl, r["help"], lambda: self._current_theme)
+            ttk.Label(form, text=self._settings_fmt_value(r, r["default"]),
+                      foreground="#888888").grid(
+                row=grow, column=base + 1, sticky="w", padx=6, pady=2)
             var = tk.IntVar(value=r["default"])
             rng = "%d - %d" % (r["min"], r["max"])
             if r["kind"] == "toggle":
-                w = ttk.Checkbutton(self._settings_form, variable=var,
-                                    text="On")
+                w = ttk.Checkbutton(form, variable=var, text="On")
                 rng = "off / on"
             elif r["kind"] == "enum" and r.get("labels"):
                 # Dropdown of "N - Label" so the label is friendly but the exact
@@ -7761,8 +7867,7 @@ class MainWindow:
                 labels = r["labels"]
                 opts = ["%d - %s" % (v, labels[v])
                         for v in range(r["min"], r["max"] + 1)]
-                w = ttk.Combobox(self._settings_form, state="readonly",
-                                 values=opts, width=16)
+                w = ttk.Combobox(form, state="readonly", values=opts, width=16)
                 w.current(r["default"] - r["min"])
 
                 def _sel(_e=None, _w=w, _v=var, _lo=r["min"]):
@@ -7770,13 +7875,27 @@ class MainWindow:
                 w.bind("<<ComboboxSelected>>", _sel)
                 rng = "%d options" % len(opts)
             else:
-                w = ttk.Spinbox(self._settings_form, from_=r["min"],
-                                to=r["max"], textvariable=var, width=8,
-                                increment=1)
-            w.grid(row=i, column=1, sticky="w", padx=6, pady=2)
-            ttk.Label(self._settings_form, text=rng, font=(_SANS_FONT, 8),
+                w = ttk.Spinbox(form, from_=r["min"], to=r["max"],
+                                textvariable=var, width=8, increment=1)
+            w.grid(row=grow, column=base + 2, sticky="w", padx=6, pady=2)
+            # "●" lights up while the field deviates from the on-card value —
+            # the at-a-glance answer to "am I changing anything here?".
+            mark = ttk.Label(form, text=" ", foreground=accent, width=2)
+            mark.grid(row=grow, column=base + 3, sticky="w", pady=2)
+
+            def _remark(*_a, _r=r, _v=var, _m=mark):
+                try:
+                    changed = int(_v.get()) != _r["default"]
+                except (tk.TclError, ValueError):
+                    changed = False
+                try:
+                    _m.configure(text="●" if changed else " ")
+                except tk.TclError:
+                    pass
+            var.trace_add("write", _remark)
+            ttk.Label(form, text=rng, font=(_SANS_FONT, 8),
                       foreground="#888888").grid(
-                row=i, column=2, sticky="w", padx=6, pady=2)
+                row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
         self._settings_apply_btn.config(state=tk.NORMAL)
         self._settings_reset_btn.config(state=tk.NORMAL)
@@ -7790,7 +7909,8 @@ class MainWindow:
             self._settings_load_preset(active)
             self._settings_status.configure(
                 text="%d settings loaded; preset \"%s\" applied to the form — "
-                     "click Apply to Image to write it." % (len(rows), active))
+                     "click Save to Card Image to write it."
+                     % (len(rows), active))
 
     def _settings_set_row(self, r, display_value):
         """Set a row to a DISPLAY value, keeping an enum's dropdown in sync."""
@@ -7844,11 +7964,11 @@ class MainWindow:
             "  %s -> %s" % (r["label"], _shown(r))
             for r in self._settings_rows if r["name"] in changes)
         if not messagebox.askyesno(
-                "Apply settings to image",
+                "Save settings to card image",
                 "This WRITES to the card image:\n\n  %s\n\nsetting these "
                 "defaults:\n\n%s\n\nThey take effect on a fresh flash or after "
                 "a factory reset. Keep a backup of the image if it's "
-                "precious.\n\nApply?"
+                "precious.\n\nSave?"
                 % (os.path.normpath(self._settings_image_path), pretty),
                 icon="warning"):
             return
@@ -8017,7 +8137,10 @@ class MainWindow:
         win = tk.Toplevel(self.root)
         win.title("Image Info")
         win.transient(self.root)
-        win.geometry("760x440")
+        # Starts tall enough for a typical report; _info_fit_height then
+        # grows the window to the collected content (screen-capped) so a
+        # full Spike 2 report needs no vertical scrolling (peanuts).
+        win.geometry("780x560")
         win.minsize(520, 300)
         self._info_win = win
 
@@ -8035,7 +8158,7 @@ class MainWindow:
 
         body = ttk.Frame(f)
         body.pack(fill=tk.BOTH, expand=True)
-        self._info_tree = ttk.Treeview(body, columns=("value",), height=14,
+        self._info_tree = ttk.Treeview(body, columns=("value",), height=26,
                                        selectmode="browse")
         self._info_tree.heading("#0", text="Property", anchor=tk.W)
         self._info_tree.heading("value", text="Value", anchor=tk.W)
@@ -8140,8 +8263,40 @@ class MainWindow:
             self._info_copy_btn.configure(
                 state=tk.NORMAL if self._info_sections else tk.DISABLED)
             self._info_status.configure(text="")
+            self._info_fit_height()
 
         self.root.after(120, _poll)
+
+    def _info_fit_height(self):
+        """Grow the Image Info window so the whole report is visible without
+        vertical scrolling (peanuts), capped to the screen.  Only ever grows —
+        a user who shrank the window keeps their size for shorter reports."""
+        win, tree = self._info_win, self._info_tree
+        if win is None or not win.winfo_exists():
+            return
+        win.update_idletasks()
+        rows = 0
+        for sec in tree.get_children(""):
+            rows += 1 + len(tree.get_children(sec))
+        first = tree.get_children("")
+        bb = tree.bbox(first[0]) if first else None
+        rowheight = bb[3] if bb else 20
+        # +1 row of slack for the heading; everything around the tree (path
+        # label, buttons, padding) keeps its measured height.
+        need = (rows + 1) * rowheight + 24 - tree.winfo_height()
+        if need <= 0:
+            return
+        screen_h = win.winfo_screenheight()
+        new_h = min(win.winfo_height() + need, screen_h - 80)
+        if new_h <= win.winfo_height():
+            return
+        # Keep the grown window fully on-screen: pull it up if its bottom
+        # would run past the display (48px ≈ titlebar + taskbar slack).
+        y = win.winfo_rooty()
+        if y + new_h > screen_h - 48:
+            y = max(8, screen_h - new_h - 48)
+        win.geometry("%dx%d+%d+%d"
+                     % (win.winfo_width(), new_h, win.winfo_rootx(), y))
 
     def _info_copy_report(self):
         from ..core import image_info as _info_mod
@@ -11817,6 +11972,12 @@ class MainWindow:
         """
         tree = getattr(self, "_write_preview_tree", None)
         if tree is None:
+            return True
+        # A preview scan still in flight hasn't listed on-disk edits yet —
+        # assume changes so building mid-scan never trips a false "nothing
+        # modified" alarm (the build stages/diffs everything itself; the scan
+        # is only the preview).
+        if "write_preview" in getattr(self, "_scan_t0", {}):
             return True
         try:
             return bool(tree.get_children())

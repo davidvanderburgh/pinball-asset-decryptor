@@ -113,8 +113,10 @@ def test_as_text_report(tmp_path):
 # plugins.stern.info — the Spike 2 card probe
 # ---------------------------------------------------------------------------
 
-from pinball_decryptor.plugins.stern.info import (card_info,
-                                                  version_from_filename)
+from pinball_decryptor.plugins.stern.info import (card_info, container_counts,
+                                                  title_code_from_firmware,
+                                                  version_from_filename,
+                                                  version_id)
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -182,6 +184,94 @@ def test_card_info_probe(tmp_path, monkeypatch):
     parts = dict(sections["Partitions"])
     assert len(parts) == 4 and "FAT (boot)" in parts["Partition 0"]
     assert dict(sections["Sound System"])["Sample rate"] == "44,100 Hz"
+
+
+def _container_header(requests, sounds):
+    """A minimal valid image.bin header: size word 0xb0 + the two plaintext
+    count words the probe reads (sound requests @0x5c, sounds @0x60)."""
+    b = bytearray(0xB0)
+    struct.pack_into("<Q", b, 0, 0xB0)
+    struct.pack_into("<I", b, 0x5C, requests)
+    struct.pack_into("<I", b, 0x60, sounds)
+    return bytes(b)
+
+
+def test_container_counts():
+    assert container_counts(_container_header(578, 549)) == (578, 549)
+    # Metallica's bigger header (0x4d0) keeps the counts at the same offsets.
+    big = bytearray(_container_header(5832, 2991))
+    struct.pack_into("<Q", big, 0, 0x4D0)
+    assert container_counts(bytes(big)) == (5832, 2991)
+    # Unaligned/absurd header-size word, non-zero pad word, requests <
+    # sounds, short buffer: all refuse rather than report a junk number.
+    bad = bytearray(_container_header(578, 549))
+    struct.pack_into("<Q", bad, 0, 0xB1)
+    assert container_counts(bytes(bad)) == (None, None)
+    bad = bytearray(_container_header(578, 549))
+    struct.pack_into("<I", bad, 0x58, 7)
+    assert container_counts(bytes(bad)) == (None, None)
+    assert container_counts(_container_header(10, 20)) == (None, None)
+    assert container_counts(b"\x01" * 2048) == (None, None)
+    assert container_counts(b"") == (None, None)
+
+
+def test_title_code_from_firmware():
+    # The real code dominates the OB_/FG_ namespace (VEN 102 vs BEAT 20 on
+    # the Venom card); SYS is the shared system namespace and never counts.
+    fw = b"OB_TUR_A\x00" * 20 + b"FG_TUR_B\x00" * 10 + \
+         b"OB_SYS_C\x00" * 40 + b"OB_LEFT_D\x00" * 5
+    assert title_code_from_firmware(fw) == "TUR"
+    # No clear winner (top < 3x runner-up) or too few hits: refuse.
+    assert title_code_from_firmware(
+        b"OB_AAA_X\x00" * 30 + b"OB_BBB_Y\x00" * 15) is None
+    assert title_code_from_firmware(b"OB_TUR_A\x00" * 5) is None
+    assert title_code_from_firmware(b"") is None
+
+
+def test_version_id():
+    assert version_id("VEN", "1.06.0", "LE") == "VEN106LE"
+    assert version_id("STR", "1.13.0", "LE") == "STR113LE"
+    assert version_id("TUR", "1.58.1", "Pro") == "TUR158PRO"
+    assert version_id("ZIL", "0.96.0", "Premium") == "ZIL096PREM"
+    assert version_id("BAT", "1.13.0", None) == "BAT113"
+    assert version_id(None, "1.06.0", "LE") is None
+    assert version_id("VEN", None, "LE") is None
+    assert version_id("VEN", "1", "LE") is None
+
+
+# A card whose image.bin has a real (synthetic) container header, a game ELF
+# next to it, a music bank, and a version-carrying sidx name — everything the
+# probe can mine.  The card FILE is renamed (no version in its name), so the
+# version must come from the on-card sidx.
+_FAKE_ELF = b"\x7fELF" + b"OB_TUR_HIT\x00" * 30 + b"OB_SYS_X\x00" * 5
+COUNTED_TREE = {
+    "spk": {"index": {"turtles_pro-1_58_0.sidx": _make_sidx(
+        ["turtles_pro/image.bin", "turtles_pro/game"])}},
+    "turtles_pro": {
+        "image.bin": _container_header(578, 549),
+        "game": _FAKE_ELF,
+        "image-sc09.bin": b"\x00" * 64,
+        "assets": {"0a1b2c": {"scene.radium": b"RAD"}},
+    },
+}
+
+
+def test_card_info_counts_version_id_and_sidx_version(tmp_path, monkeypatch):
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    install_fake_reader(monkeypatch, spec=COUNTED_TREE)
+    img = write_fake_card(tmp_path / "backup_of_my_card.raw")
+
+    sections = dict(card_info(img))
+    fw = dict(sections["Firmware"])
+    # Renamed card: the version + edition come from the on-card sidx name.
+    assert fw["Version"] == "1.58.0  (from the card's update index)"
+    assert fw["Edition"] == "Pro"
+    # Title code mined from the ELF + version + edition = Stern's short id.
+    assert fw["Version ID"] == "TUR158PRO"
+    assets = dict(sections["Assets on Card"])
+    assert assets["Sounds"].startswith("549 — ")
+    assert assets["Sound requests"].startswith("578 — ")
+    assert assets["Music banks"].startswith("1 ")
 
 
 def test_card_info_unopenable_image_degrades(tmp_path):

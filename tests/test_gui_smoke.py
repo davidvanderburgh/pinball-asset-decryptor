@@ -2256,6 +2256,8 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     assert len(w._settings_rows) == 2
     assert str(w._settings_apply_btn["state"]) == "normal"
     assert w._settings_changes() == {}                 # nothing edited yet
+    # Auto-apply belongs to a preset — greyed out while none is selected.
+    assert "disabled" in w._settings_auto_cb.state()
 
     # Edit both; only the differing, in-range values are reported.
     by = {r["name"]: r for r in w._settings_rows}
@@ -2280,6 +2282,8 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     monkeypatch.setattr(_sd, "askstring", lambda *a, **k: "My route")
     w._settings_save_preset()
     assert w._presets_blob()["presets"]["My route"]["AD_FREE_PLAY"] == 1
+    # Saving selected the preset, so auto-apply is now available.
+    assert "disabled" not in w._settings_auto_cb.state()
     # persisted through the app's settings
     assert (app._settings["default_settings_presets"]["presets"]["My route"]
             ["AD_SOUND_MASTER_VOLUME_SETTING"] == 50)
@@ -2303,6 +2307,41 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     w._settings_delete_preset()
     assert "My route" not in w._presets_blob()["presets"]
     assert w._presets_blob()["active"] is None
+    assert "disabled" in w._settings_auto_cb.state()
+
+
+def test_video_noconv_conflict_helper(app, manufacturers_by_key):
+    """'No conversion' + a container the verbatim copy would reject is
+    flagged at pick/toggle time (monkeybug hit it only at build time)."""
+    import types
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    w._video_slots_by_rel = {
+        "video/AttractMode.mov": types.SimpleNamespace(
+            abs_path="C:/x/video/AttractMode.mov", ext=".mov"),
+    }
+    why = w._video_noconv_conflict("video/AttractMode.mov", "C:/y/clip.mp4")
+    assert why and ".mov" in why and ".mp4" in why
+    assert w._video_noconv_conflict(
+        "video/AttractMode.mov", "C:/y/clip.MOV") is None
+    assert w._video_noconv_conflict("unknown/slot.mov", "C:/y/c.mp4") is None
+
+
+def test_write_preview_scan_in_flight_counts_as_changes(
+        app, manufacturers_by_key):
+    """Build during a still-running preview scan must not trip the
+    "nothing modified" warning — an in-flight scan means "unknown, assume
+    changes" (the build diffs everything itself)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    w._write_preview_tree.delete(*w._write_preview_tree.get_children())
+    w._scan_t0 = {}
+    assert not w._has_pending_write_changes()
+    w._scan_t0 = {"write_preview": 1.0}
+    assert w._has_pending_write_changes()
+    w._scan_t0 = {}
 
 
 def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,

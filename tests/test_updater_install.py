@@ -180,9 +180,13 @@ def test_launch_uses_unattended_inno_switches(tmp_path):
     (verb, path, args), = calls
     assert verb == "open" and path.endswith("setup.exe")
     # The full unattended recipe: silent, never reboot, tolerate our
-    # own process still holding files, and relaunch the app after.
+    # own process still holding files, relaunch the app after, and skip
+    # the prerequisites pass (Inno remembers a first-install "Install
+    # prerequisites" tick per AppId and would re-run WSL2/partclone/gpg
+    # on every silent update otherwise).
     for switch in ("/SILENT", "/NORESTART",
-                   "/FORCECLOSEAPPLICATIONS", "/RELAUNCH=1"):
+                   "/FORCECLOSEAPPLICATIONS", "/RELAUNCH=1",
+                   '/MERGETASKS="!runprereqs"'):
         assert switch in args.split()
 
 
@@ -223,3 +227,19 @@ def test_iss_relaunches_after_silent_update():
         assert "launcher.vbs" in ln, (
             f"the relaunch entry must go through launcher.vbs "
             f"(self-elevation), not straight at the exe: {ln}")
+
+
+def test_iss_prereq_task_name_matches_mergetasks_switch():
+    """updater.INSTALLER_ARGS deselects the prereq task by name.
+
+    If the .iss ever renames the ``runprereqs`` task, the
+    /MERGETASKS="!runprereqs" switch would silently stop matching and
+    every in-app update would re-run the full prerequisites pass again
+    (the original clickless-update complaint).  Pin the name on both
+    sides.
+    """
+    assert '/MERGETASKS="!runprereqs"' in updater.INSTALLER_ARGS
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    assert 'Name: "runprereqs"' in iss, (
+        "the .iss prereq task was renamed/removed — update "
+        "updater.INSTALLER_ARGS' /MERGETASKS switch to match.")

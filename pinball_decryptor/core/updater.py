@@ -156,7 +156,17 @@ def download_installer(url, dest_path, *, expected_sha256=None,
 #                             this makes the race harmless)
 #   /RELAUNCH=1               custom flag the .iss reads to reopen the
 #                             app when the silent install finishes
-INSTALLER_ARGS = "/SILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1"
+#   /MERGETASKS="!runprereqs" Inno remembers task selections per AppId,
+#                             so a user who ticked "Install prerequisites"
+#                             on their first install would silently re-run
+#                             the whole WSL2/partclone/gpg pass on every
+#                             in-app update.  Force it off here (the app
+#                             probes prereqs at runtime and offers
+#                             "Install Missing" if any are actually gone);
+#                             MERGETASKS keeps the user's other remembered
+#                             choices (e.g. desktop icon) intact.
+INSTALLER_ARGS = ('/SILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
+                  '/MERGETASKS="!runprereqs"')
 
 
 def launch_installer_windows(path, shell_execute=None):

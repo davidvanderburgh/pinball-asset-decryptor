@@ -612,7 +612,10 @@ updated. Because the app downloads the file (not a browser), Windows does
 not tag it with the Mark-of-the-Web, so the SmartScreen "Windows
 protected your PC" prompt never appears, and since the app already runs
 elevated there's no UAC prompt either. The whole update is one click with
-no security passes. Installing over the top keeps your `settings.json`.
+no security passes. Installing over the top keeps your `settings.json`,
+and the update never re-runs the prerequisites installer (the app checks
+for missing prerequisites at runtime and offers **Install Missing** if
+any actually are).
 The download is verified against the release asset's SHA-256 before it
 runs. On macOS and Linux the banner keeps the plain *Download* button
 that opens the release page (their .dmg / AppImage have no silent-install

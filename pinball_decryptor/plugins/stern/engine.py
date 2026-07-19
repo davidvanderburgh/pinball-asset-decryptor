@@ -2961,8 +2961,17 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # Grow any oversized video slots (kept full-quality, not crushed) by copying
     # the replacements in through the ext4 driver — done AFTER the in-place
     # writes so the filesystem it mounts is already consistent.
-    _grow_video_slots(output_path, grow_plan, log)
+    n_grown = _grow_video_slots(output_path, grow_plan, log)
     n_audio, n_video, n_image, n_text = counts
+    n_planned = len(grow_plan["jobs"]) if grow_plan else 0
+    if n_grown < n_planned:
+        # The summary must not claim videos that never landed: every grow job
+        # that failed left its slot with the STOCK content.
+        n_video -= (n_planned - n_grown)
+        counts = (n_audio, n_video, n_image, n_text)
+        log("%d of %d replaced video(s) could NOT be written — those slots "
+            "still hold the game's stock videos. Fix the issue above and run "
+            "the Write again." % (n_planned - n_grown, n_planned), "error")
     log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
@@ -2975,17 +2984,20 @@ def _grow_video_slots(image_or_device, grow_plan, log):
     """Copy oversized replacement videos into their (grown) slots via the ext4
     driver.  A growth failure is surfaced loudly but does NOT discard the rest
     of the write — the in-place edits already landed, and the un-grown videos
-    simply keep their stock content until the user retries."""
+    simply keep their stock content until the user retries.  Returns the
+    number of videos actually grown so the caller can report honest counts."""
     if not grow_plan or not grow_plan.get("jobs"):
-        return
+        return 0
     from ...core import ext4_grow
     try:
-        ext4_grow.grow_files(image_or_device, grow_plan["offset"],
-                             grow_plan["jobs"], log=log)
+        return ext4_grow.grow_files(image_or_device, grow_plan["offset"],
+                                    grow_plan["jobs"], log=log)
     except ext4_grow.Ext4GrowUnavailable as e:
         log("Could not grow the full-size videos: %s" % e, "warning")
+        return 0
     except ext4_grow.Ext4GrowError as e:
         log("Video growth failed: %s" % e, "error")
+        return getattr(e, "grown", 0)
 
 
 def revert_assets(source_path, assets_dir, rels, log=None, progress=None,

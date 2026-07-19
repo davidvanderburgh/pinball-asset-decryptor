@@ -52,15 +52,13 @@ def test_available_on_macos_requires_e2fsprogs(monkeypatch):
 
     monkeypatch.setattr(
         ext4_grow, "_find_e2fsprogs",
-        lambda: {"debugfs": "/x/debugfs", "dumpe2fs": "/x/dumpe2fs",
-                 "e2fsck": "/x/e2fsck"})
+        lambda: {"debugfs": "/x/debugfs", "e2fsck": "/x/e2fsck"})
     ok, msg = ext4_grow.available()
     assert ok
 
 
 def _fake_tools():
-    return {"debugfs": "/x/debugfs", "dumpe2fs": "/x/dumpe2fs",
-            "e2fsck": "/x/e2fsck"}
+    return {"debugfs": "/x/debugfs", "e2fsck": "/x/e2fsck"}
 
 
 def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
@@ -74,7 +72,10 @@ def test_debugfs_grow_sequence_and_fsck(monkeypatch, tmp_path):
     def fake_run_tool(argv, timeout, what):
         calls.append(argv)
         tool = os.path.basename(argv[0])
-        if tool == "dumpe2fs":
+        # Free space comes from debugfs stats, NOT dumpe2fs (whose 1.47.x
+        # device resolution chokes on the ?offset= suffix).
+        assert tool != "dumpe2fs"
+        if "stats -h" in argv:
             return 0, "Block size:               4096\n" \
                       "Free blocks:              8282\n"
         if tool == "e2fsck":
@@ -107,8 +108,7 @@ def test_debugfs_grow_enospc_fails_before_writing(monkeypatch, tmp_path):
     src.write_bytes(b"x" * 5000)
 
     def fake_run_tool(argv, timeout, what):
-        tool = os.path.basename(argv[0])
-        if tool == "dumpe2fs":
+        if "stats -h" in argv:
             return 0, "Block size:               1024\n" \
                       "Free blocks:              1\n"    # 1 KiB free
         if any(a.startswith("stat ") for a in argv):
@@ -138,7 +138,7 @@ def test_debugfs_grow_partial_failure_reports_grown_count(monkeypatch,
     def fake_run_tool(argv, timeout, what):
         tool = os.path.basename(argv[0])
         joined = " ".join(argv)
-        if tool == "dumpe2fs":
+        if "stats -h" in argv:
             return 0, "Block size: 4096\nFree blocks: 999999\n"
         if tool == "e2fsck":
             state["fsck"] += 1

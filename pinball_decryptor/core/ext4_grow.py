@@ -51,15 +51,19 @@ class Ext4GrowUnavailable(Ext4GrowError):
 def _find_e2fsprogs():
     """Locate macOS e2fsprogs binaries (Homebrew keg-only, so not on PATH).
 
-    Returns ``{"debugfs": path, "dumpe2fs": path, "e2fsck": path}`` or ``None``
-    if any of the three is missing.
+    Returns ``{"debugfs": path, "e2fsck": path}`` or ``None`` if either is
+    missing.  dumpe2fs is deliberately NOT used: 1.47.x resolves its device
+    argument through blkid WITHOUT first splitting the ``?offset=`` suffix
+    (unlike e2fsck, which does), so ``dumpe2fs image.raw?offset=N`` dies with
+    "Unable to resolve '-h'" — free space is read via ``debugfs stats -h``
+    instead, which never goes through blkid.
     """
     import shutil
     dirs = ("/opt/homebrew/opt/e2fsprogs/sbin",     # Homebrew ARM
             "/usr/local/opt/e2fsprogs/sbin",        # Homebrew Intel
             "/opt/local/sbin")                      # MacPorts
     tools = {}
-    for name in ("debugfs", "dumpe2fs", "e2fsck"):
+    for name in ("debugfs", "e2fsck"):
         for d in dirs:
             p = os.path.join(d, name)
             if os.path.isfile(p):
@@ -279,9 +283,11 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         "info")
 
     # Free-space guard: fail clearly up front instead of ENOSPC mid-write
-    # (which would leave a partially-written asset).
+    # (which would leave a partially-written asset).  Read via debugfs, not
+    # dumpe2fs — see _find_e2fsprogs for why dumpe2fs chokes on ?offset=.
     import re
-    rc, head = _run_tool([tools["dumpe2fs"], "-h", dev], 60, "dumpe2fs")
+    rc, head = _run_tool([tools["debugfs"], "-R", "stats -h", dev], 60,
+                         "debugfs stats")
     mf = re.search(r"^Free blocks:\s*(\d+)", head, re.M)
     mb = re.search(r"^Block size:\s*(\d+)", head, re.M)
     if rc != 0 or not (mf and mb):

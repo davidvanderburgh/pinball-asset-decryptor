@@ -3460,6 +3460,22 @@ def _extended_params(p, extra=400):
     return p2
 
 
+# The decay ramp absorbing our forced sample 0 is only the right tool for
+# SMALL residuals.  The two keystream maps can conflict by thousands of counts,
+# and stock cards ship exactly that: on EHOH idx5103 the stock frame-0 words
+# render (+2925, -6274) under the sound's own keystream — a naked one-frame
+# impulse Stern accepted, and real hardware provably does not click on it.  A
+# 4 ms ramp seeded from a residual that size carries ~60x the impulse's energy
+# spread across fully audible samples (the thump the wool still heard after
+# v0.64.2), so past this threshold we keep the stock geometry instead: sample 0
+# lands where it lands, samples 1+ are the caller's untouched (faded) content.
+_RAMP_MAX_EXCESS = 512
+
+
+def _ramp_excess(excess):
+    return excess if abs(excess) <= _RAMP_MAX_EXCESS else 0
+
+
 def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
                              gr=None, sr=None, log=None):
     """Re-pick the head word(s) of a delta<0 encode window — storage the
@@ -3488,9 +3504,11 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
     :func:`~.spike2.codec.pick_shared_word`), then absorb whatever our
     sample 0 lands on by re-encoding the head of block 0 as a short decay
     ramp from that value into the replacement's own (faded) content — a
-    click becomes a ~4 ms inaudible slope.  Any failure returns *body*
-    unchanged (the v0.59.0 behavior).  *tgtL*/*tgtR* are the encode's target
-    sample arrays (R ``None`` for mono)."""
+    click becomes a ~4 ms inaudible slope.  Large residuals are left as a
+    naked one-frame impulse instead, matching stock cards (see
+    ``_RAMP_MAX_EXCESS``).  Any failure returns *body* unchanged (the
+    v0.59.0 behavior).  *tgtL*/*tgtR* are the encode's target sample arrays
+    (R ``None`` for mono)."""
     if pred is None or start >= p["body_off"]:
         return body
     try:
@@ -3521,11 +3539,19 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
         else:
             d_p = min(prec._calibrate(pred)[2], 0)
 
-        def pred_ctx(abs_off, u0_word):
+        def pred_ctx(abs_off, u0_word, u0_stock=None):
             """Predecessor-side ``(r, x, qmul, target)`` for its word at
-            *abs_off* (target = the stock word's decode there).  *u0_word* =
-            the u0 that will actually sit on the card, for the stereo u1
-            coupling."""
+            *abs_off* (target = what the STOCK CARD rendered there).  *u0_word*
+            = the u0 that will actually sit on the card after our write, for
+            the stereo u1 coupling of candidate words; *u0_stock* = the u0 in
+            effect on the stock card, for the target.  They differ only when
+            the caller rewrites the L word of the same frame (stereo self):
+            folding the new u0 into the target too would aim at the stock
+            word's decode under a coupling that never played — a value up to
+            full-scale off the true stock render, i.e. a pop at the
+            predecessor's natural end that pick_shared_word then faithfully
+            reproduces while reporting near-zero error (EHOH spinner
+            idx5102/idx5103: stock R 7 shipped as 3357)."""
             w = (abs_off - pred["body_off"]) // 2
             if pred["chan"] == 2:
                 f, sub = w // 2, w % 2
@@ -3537,10 +3563,13 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
                     return None
                 if sub == 0:
                     r, x = int(rec["rbL"][j]), int(rec["KL"][j])
+                    tx = x
                 else:
                     r = int(rec["bR"][j])
-                    x = int(rec["KR"][j]) ^ _rorv(int(u0_word) & 0xffff,
-                                                  int(rec["aR"][j]))
+                    kr, ar = int(rec["KR"][j]), int(rec["aR"][j])
+                    x = kr ^ _rorv(int(u0_word) & 0xffff, ar)
+                    u0s = u0_word if u0_stock is None else u0_stock
+                    tx = kr ^ _rorv(int(u0s) & 0xffff, ar)
                 q = prec.qmul
             else:
                 i = w - d_p
@@ -3550,7 +3579,8 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
                 if len(K) <= j:
                     return None
                 r, x, q = int(rb[j]), int(K[j]), prec.qmul
-            return (r, x, int(q), decode_word(stock_word(abs_off), r, x, q))
+                tx = x
+            return (r, x, int(q), decode_word(stock_word(abs_off), r, tx, q))
 
         def ramp(tgt, excess, m, rng, ramp_n=176):
             """Block-0 target with *excess* decayed linearly from sample 1 —
@@ -3578,7 +3608,7 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
             u0, epA, svL = pick_shared_word(
                 pcA, (int(rec0["rbL"][0]), int(rec0["KL"][0]), q2,
                       int(tgtL[0])))
-            pcB = pred_ctx(start + 2, u0)
+            pcB = pred_ctx(start + 2, u0, u0_stock=stock_word(start))
             if pcB is None:
                 return body
             u1, epB, svR = pick_shared_word(
@@ -3586,7 +3616,8 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
                       int(rec0["KR"][0]) ^ _rorv(u0, int(rec0["aR"][0])),
                       q2, int(tgtR[0])))
             struct.pack_into("<HH", out, 0, u0, u1)
-            exL, exR = svL - int(tgtL[0]), svR - int(tgtR[0])
+            exL = _ramp_excess(svL - int(tgtL[0]))
+            exR = _ramp_excess(svR - int(tgtR[0]))
             if (abs(exL) > 48 or abs(exR) > 48) and m > 1:
                 rec_m = {k: (v[:m] if k in ("KL", "rbL", "KR", "aR", "bR")
                              else m if k == "m" else v)
@@ -3608,7 +3639,7 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
             W, err, sval = pick_shared_word(
                 pc, (int(rb[0]), int(K[0]), int(srec.qmul), int(tgtL[0])))
             struct.pack_into("<H", out, 0, W)
-            excess = sval - int(tgtL[0])
+            excess = _ramp_excess(sval - int(tgtL[0]))
             if abs(excess) > 48 and m > 1:
                 enc, _ = srec.encode_block(
                     ramp(tgtL, excess, m, _MONO_RANGE), K[:m], rb[:m])

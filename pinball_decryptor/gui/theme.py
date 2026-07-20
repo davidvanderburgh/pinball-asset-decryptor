@@ -33,6 +33,29 @@ THEMES = {
 }
 
 
+def dark_titlebar(win, is_dark):
+    """Match a window's Windows title bar to the theme (DWM immersive dark).
+
+    Tk paints a Toplevel's client area but never its title bar, so in dark
+    mode every secondary window opened with a light bar while the main window
+    had a dark one (monkeybug batch 16: "dark mode isn't 100% on popups").
+    No-op off Windows and on Windows 10 builds without the attribute."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        win.update_idletasks()          # the HWND must exist
+        value = ctypes.c_int(1 if is_dark else 0)
+        # winfo_id() is the inner client-area HWND; its parent owns the bar.
+        inner = win.winfo_id()
+        hwnd = ctypes.windll.user32.GetParent(inner) or inner
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20,                   # DWMWA_USE_IMMERSIVE_DARK_MODE
+            ctypes.byref(value), ctypes.sizeof(value))
+    except Exception:
+        pass
+
+
 def detect_system_theme():
     if sys.platform == "win32":
         try:

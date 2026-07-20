@@ -26,7 +26,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..core import host_temp, wsl_disk
-from .theme import THEMES, platform_font
+from .theme import THEMES, dark_titlebar, platform_font
 
 _LOC_WSL = "wsl"
 _LOC_HOST = "host"
@@ -74,6 +74,7 @@ class DiskManagerDialog:
         self._dlg = dlg
         dlg.title("Manage disk space")
         dlg.configure(bg=th["bg"])
+        dark_titlebar(dlg, th is THEMES["dark"])
         dlg.transient(self._parent)
         dlg.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -644,6 +645,7 @@ class DiskManagerDialog:
         win = tk.Toplevel(self._dlg)
         win.title("Resize WSL disk")
         win.configure(bg=th["bg"])
+        dark_titlebar(win, th is THEMES["dark"])
         win.transient(self._dlg)
         frm = ttk.Frame(win, padding=16)
         frm.pack(fill="both", expand=True)

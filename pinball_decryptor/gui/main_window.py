@@ -22,7 +22,8 @@ from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import stale_source_message
 from ..core.staged_originals import ORIG_DIR
-from .theme import THEMES, detect_system_theme, platform_font
+from .theme import (THEMES, dark_titlebar, detect_system_theme,
+                    platform_font)
 
 # PIL lazy-imported on demand for the live DMD preview — keeping the
 # import here so a missing Pillow doesn't break the rest of the GUI.
@@ -1167,6 +1168,10 @@ class MainWindow:
         # else".  Categories are derived per scan (core.audio_categories);
         # the dropdown hides itself for folders where nothing classifies.
         self.audio_type_var = tk.StringVar(value="All types")
+        # "Changed only" — the same toggle the Images tab has had; monkeybug
+        # asked for it on audio + video too ("show only modified files").
+        # Persisted per assets folder with the other Replace toggles.
+        self.audio_changed_only_var = tk.BooleanVar(value=False)
         self._audio_categories = {}      # rel_path -> music/sfx/callouts/other
         # Click-header sort state: (column_id, descending).  Defaults to the
         # name column ascending — matches the old "Name" dropdown default.
@@ -1217,11 +1222,15 @@ class MainWindow:
         self._audio_current_rel = None   # the slot loaded in the preview panes
         self.audio_search_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
+        self.audio_changed_only_var.trace_add(
+            "write", lambda *a: self._refresh_audio_list())
         # Replace-Video tab state (capabilities.replace_video plugins).
         # Mirrors the audio tab, but the preview is an embedded player: a
         # decode thread streams raw frames from ffmpeg to a canvas while
         # ffplay carries the sound, both seeked together.
         self.video_search_var = tk.StringVar()
+        # "Changed only" — mirrors the audio + image toggle (monkeybug).
+        self.video_changed_only_var = tk.BooleanVar(value=False)
         self._video_sort = ("#0", False)  # (column_id, descending)
         self.video_trim_var = tk.BooleanVar(value=False)
         # "No conversion": copy the replacement through as-is (it must already be
@@ -1241,6 +1250,8 @@ class MainWindow:
         self._video_select_job = None    # debounce: load preview on select
         self._video_current_rel = None   # slot loaded in the preview panes
         self.video_search_var.trace_add(
+            "write", lambda *a: self._refresh_video_list())
+        self.video_changed_only_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
         # Replace-Image tab state (capabilities.replace_image plugins).
         # Mirrors the video tab, but the preview is a single static thumbnail
@@ -2882,10 +2893,19 @@ class MainWindow:
             "assign a replacement to one copy, then right-click it and "
             "choose \"Apply to all copies\".",
             lambda: self._current_theme)
-        self._audio_sort_hint_lbl = ttk.Label(
-            tools, text="(click a column header to sort)",
-            font=(_SANS_FONT, 8, "italic"))
-        self._audio_sort_hint_lbl.pack(side=tk.LEFT)
+        # "Changed only" — same toggle as the Images tab (monkeybug batch 16).
+        # It is always visible, so it doubles as the stable `before=` anchor
+        # for the optional Type / Group-duplicates widgets packed later.
+        self._audio_changed_only_cb = ttk.Checkbutton(
+            tools, text="Changed only",
+            variable=self.audio_changed_only_var,
+            command=self._save_staged_changes)
+        self._audio_changed_only_cb.pack(side=tk.LEFT)
+        _Tooltip(
+            self._audio_changed_only_cb,
+            "Show only the slots with a pending replacement or already "
+            "changed on disk by a previous build.",
+            lambda: self._current_theme)
         self._audio_status_lbl = ttk.Label(
             tools, textvariable=self.audio_status_var,
             font=(_SANS_FONT, 9))
@@ -3017,15 +3037,11 @@ class MainWindow:
         self._audio_trim_cb = ttk.Checkbutton(
             f, text="Trim / pad replacements to the original slot length",
             variable=self.audio_trim_var, command=self._save_staged_changes)
-        self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
         # Hover tooltip — its text is set per-manufacturer in apply_manufacturer
         # (esp. WHY it's disabled for size-neutral formats like Spike 2).
         self._audio_trim_tip = _Tooltip(
             self._audio_trim_cb, "", lambda: self._current_theme)
-        self._audio_length_note_lbl = ttk.Label(
-            f, text="", font=(_SANS_FONT, 8, "italic"),
-            foreground="#888888", wraplength=720, justify=tk.LEFT)
-        self._audio_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
 
         # Match-to-callouts: land a stock-length fade on both edges of every
         # replacement, cap its level, and band-limit it to the stock callout
@@ -3037,7 +3053,7 @@ class MainWindow:
             f, text="Match audio replacements to the game's callouts",
             variable=self.audio_declick_var,
             command=self._on_audio_declick_toggle)
-        self._audio_declick_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
+        self._audio_declick_cb.pack(anchor=tk.W, padx=12, pady=(0, 4))
         self._audio_declick_tip = _Tooltip(
             self._audio_declick_cb,
             "On by default. Shapes each replacement to behave like the game's "
@@ -3179,6 +3195,9 @@ class MainWindow:
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
+            if "audio_changed_only" in staged:
+                self.audio_changed_only_var.set(
+                    bool(staged["audio_changed_only"]))
             # "Group duplicates" is NOT persisted/restored: it's off by
             # default and opt-in per session, so a new folder never
             # auto-kicks the (~10 s) bank scan on load.
@@ -3590,7 +3609,7 @@ class MainWindow:
             return
         useful = any(c != "other" for c in self._audio_categories.values())
         if useful and not frame.winfo_ismapped():
-            frame.pack(side=tk.LEFT, before=self._audio_sort_hint_lbl)
+            frame.pack(side=tk.LEFT, before=self._audio_changed_only_cb)
         elif not useful and frame.winfo_ismapped():
             frame.pack_forget()
         if not useful:
@@ -3628,9 +3647,15 @@ class MainWindow:
         type_key = self._audio_type_filter()
         cats = self._audio_categories
         from ..core import audio_categories as _ac
+        # "Changed only": a pending assignment OR already changed on disk by a
+        # previous build — the same set the status line counts.
+        touched = (set(self._audio_assignments) | self._audio_changed_on_disk
+                   if self.audio_changed_only_var.get() else None)
 
         def _passes(s):
             if query and query not in s.rel_path.lower():
+                return False
+            if touched is not None and s.rel_path not in touched:
                 return False
             if type_key is None:
                 return True
@@ -4079,10 +4104,20 @@ class MainWindow:
             menu.add_command(
                 label=self._reveal_menu_label(),
                 command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
+            self._add_find_in_partition_item(menu, "audio", row)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _add_find_in_partition_item(self, menu, kind, rel):
+        """Add "Find in Partition Explorer" to a Replace-tab row menu, for the
+        plugins whose extracts record on-card locations (Stern Spike 2)."""
+        if not self._tab_visible("Partition Explorer"):
+            return
+        menu.add_command(
+            label="Find in Partition Explorer",
+            command=lambda k=kind, r=rel: self._asset_find_in_partition(k, r))
 
     def _audio_clear_selected(self):
         rel = self._audio_selected_rel()
@@ -4138,6 +4173,7 @@ class MainWindow:
         dlg.title("Audio Properties")
         dlg.transient(root)
         dlg.resizable(False, False)
+        self._theme_toplevel(dlg)
         ttk.Label(dlg, text=prompt, justify=tk.LEFT).pack(
             anchor=tk.W, padx=12, pady=(12, 4))
         if suggestions:
@@ -4691,12 +4727,30 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.video_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        ttk.Label(tools, text="(click a column header to sort)",
-                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
+        self._video_changed_only_cb = ttk.Checkbutton(
+            tools, text="Changed only",
+            variable=self.video_changed_only_var,
+            command=self._save_staged_changes)
+        self._video_changed_only_cb.pack(side=tk.LEFT)
+        _Tooltip(
+            self._video_changed_only_cb,
+            "Show only the slots with a pending replacement or already "
+            "changed on disk by a previous build.",
+            lambda: self._current_theme)
         self._video_status_lbl = ttk.Label(
             tools, textvariable=self.video_status_var,
             font=(_SANS_FONT, 9))
         self._video_status_lbl.pack(side=tk.RIGHT)
+        self._video_csv_btn = ttk.Button(
+            tools, text="Export CSV", command=self._video_export_csv)
+        self._video_csv_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        _Tooltip(
+            self._video_csv_btn,
+            "Save the whole video table (every slot, not just the filtered "
+            "view) as a CSV — name, length, resolution, format, audio, "
+            "replacement and changed-on-disk status — for tracking a big "
+            "replacement project in a spreadsheet.",
+            lambda: self._current_theme)
 
         # Slot list.
         list_frame = ttk.Frame(f)
@@ -4772,7 +4826,7 @@ class MainWindow:
                     "the original's format)",
             variable=self.video_no_conversion_var,
             command=self._video_on_no_conversion_toggle)
-        self._video_no_conversion_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        self._video_no_conversion_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
         _Tooltip(
             self._video_no_conversion_cb,
             "Skip re-encoding: the replacement is copied in byte-for-byte, so "
@@ -4786,19 +4840,14 @@ class MainWindow:
             f, text="Trim / pad replacements to the original clip length",
             variable=self.video_trim_var,
             command=self._save_staged_changes)
-        self._video_trim_cb.pack(anchor=tk.W, padx=12, pady=(6, 0))
+        self._video_trim_cb.pack(anchor=tk.W, padx=12, pady=(0, 4))
         # Hover tooltip — per-plugin guidance is appended in
-        # apply_manufacturer (the visible note label stays blank).
+        # apply_manufacturer.
         self._video_trim_tip = _Tooltip(
             self._video_trim_cb, "", lambda: self._current_theme)
-        self._video_length_note_lbl = ttk.Label(
-            f, text="", font=(_SANS_FONT, 8, "italic"),
-            foreground="#888888", wraplength=720, justify=tk.LEFT)
-        self._video_length_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
         # Trim/pad only applies during a re-encode, so grey it out when
         # "No conversion" is on (reflects any restored staged state too).
         self._update_video_trim_enabled()
-
 
         self._refresh_video_ffmpeg_warning()
 
@@ -4820,6 +4869,41 @@ class MainWindow:
                 rel, slot.ext, os.path.basename(path),
                 rep_ext or "extension-less"))
         return None
+
+    def _video_conversion_note(self, rel, path):
+        """Short note on what Write will DO to *path* for slot *rel*: copy it
+        through untouched, or re-encode it.
+
+        monkeybug batch 16: "I imported video I think was already in the right
+        format but I can't tell if PAD converted it."  The staging detail only
+        appears at build time, so mirror stage_replacement's branch order here
+        and say so at pick time.  Returns "" when it can't be determined
+        (no ffprobe / unreadable file) rather than guessing."""
+        slot = self._video_slots_by_rel.get(rel)
+        if slot is None:
+            return ""
+        from ..core.video_slots import (_already_matches, backend_for,
+                                        find_ffmpeg)
+        rep_ext = os.path.splitext(path)[1].lower()
+        if self.video_no_conversion_var.get():
+            # A rejectable pick is reported by the caller's own warning.
+            return ("will be copied in as-is — no conversion"
+                    if self._video_noconv_conflict(rel, path) is None else "")
+        if backend_for(slot.abs_path) is not None:
+            return "will be converted to the game's %s format" % slot.ext
+        try:
+            matches = _already_matches(
+                slot, path, rep_ext,
+                match_length=bool(self.video_trim_var.get()))
+        except Exception:
+            return ""
+        if matches:
+            return "already matches this slot — will be copied in, no re-encode"
+        if find_ffmpeg():
+            return "will be re-encoded to match this slot"
+        if rep_ext == slot.ext:
+            return "will be copied in unchanged (no ffmpeg — not re-encoded)"
+        return ""
 
     def _video_on_no_conversion_toggle(self):
         """No-conversion copies the file through verbatim, so trim/pad (a
@@ -4941,6 +5025,9 @@ class MainWindow:
             if "video_no_conversion" in staged:
                 self.video_no_conversion_var.set(
                     bool(staged["video_no_conversion"]))
+            if "video_changed_only" in staged:
+                self.video_changed_only_var.set(
+                    bool(staged["video_changed_only"]))
             self._update_video_trim_enabled()
         else:
             self._video_assignments = {
@@ -5000,6 +5087,9 @@ class MainWindow:
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in self._video_slots
                  if not query or query in s.rel_path.lower()]
+        if self.video_changed_only_var.get():
+            touched = set(self._video_assignments) | self._video_changed_on_disk
+            slots = [s for s in slots if s.rel_path in touched]
         col, desc = self._video_sort
 
         changed = self._video_changed_on_disk
@@ -5060,6 +5150,46 @@ class MainWindow:
             self._video_empty.place_forget()
         self._autosize_tree_columns(
             tree, "video", ("#0", "len", "res", "fmt", "aud", "rep"))
+
+    def _video_export_csv(self):
+        """Save the video table as a CSV — the audio tab's Export CSV, mirrored
+        for video (monkeybug batch 16)."""
+        import csv
+        if not self._video_slots:
+            messagebox.showinfo("Export CSV",
+                                "Scan an assets folder first — the video "
+                                "table is empty.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save video table as CSV",
+            defaultextension=".csv",
+            initialdir=self.last_browse_dir("video_csv"),
+            initialfile="video_slots.csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        self.remember_browse_dir("video_csv", path)
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["Original Video", "Length", "Resolution", "Format",
+                            "Audio", "Replacement", "Changed On Disk"])
+                for s in sorted(self._video_slots, key=lambda q: q.rel_path):
+                    rel = s.rel_path
+                    w.writerow([
+                        rel, s.duration_str(), s.resolution_str(),
+                        s.format_summary(),
+                        s.info.audio_summary() if s.info else "",
+                        self._video_assignments.get(rel, ""),
+                        "yes" if rel in self._video_changed_on_disk else "",
+                    ])
+        except OSError as e:
+            messagebox.showerror("Export CSV", "Couldn't write the CSV:\n%s"
+                                 % e)
+            return
+        self.append_log("Video table exported: %d slot(s) → %s"
+                        % (len(self._video_slots), os.path.normpath(path)),
+                        "success")
 
     def _default_assets_from_extract(self):
         """Default the (shared) assets folder to the Extract tab's output when
@@ -5271,8 +5401,10 @@ class MainWindow:
                         % (rel, why), "error")
         self._video_assignments[rel] = path
         self._save_staged_changes()
-        self.append_log("Replace Video: %s ← %s"
-                        % (rel, os.path.basename(path)), "info")
+        note = self._video_conversion_note(rel, path)
+        self.append_log("Replace Video: %s ← %s%s"
+                        % (rel, os.path.basename(path),
+                           ("  (%s)" % note) if note else ""), "info")
         self._refresh_video_list()
         if rel == self._video_current_rel:
             self._video_load_rep_pane(rel)  # show the new pick right away
@@ -5368,6 +5500,7 @@ class MainWindow:
             menu.add_command(
                 label=self._reveal_menu_label(),
                 command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
+            self._add_find_in_partition_item(menu, "video", row)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -5592,8 +5725,6 @@ class MainWindow:
             "(in play order), so a whole animation can be reviewed — or "
             "bulk-replaced via right-click — as one unit.",
             lambda: self._current_theme)
-        ttk.Label(tools, text="(click a column header to sort)",
-                  font=(_SANS_FONT, 8, "italic")).pack(side=tk.LEFT)
         self._image_status_lbl = ttk.Label(
             tools, textvariable=self.image_status_var,
             font=(_SANS_FONT, 9))
@@ -6281,6 +6412,7 @@ class MainWindow:
                     label=self._reveal_menu_label(),
                     command=lambda p=slot.abs_path:
                         self._reveal_in_file_manager(p))
+                self._add_find_in_partition_item(menu, "image", row)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -6296,19 +6428,17 @@ class MainWindow:
         the staged-changes sidecar; a blank (or unchanged-generic) entry
         restores the manifest name.  The rename also becomes the group's
         sort key and a Search match."""
-        from tkinter import simpledialog
         key = group_iid[len(_IMG_GROUP_IID):]
         generic = next(
             (label for gkey, label, _o in self._image_groups.values()
              if gkey == key), "")
         if not generic and key.startswith("dir::"):
             generic = key[len("dir::"):]      # folder-fallback groups
-        name = simpledialog.askstring(
+        name = self._ask_text(
             "Rename Group",
             "Display name for this group\n"
             "(blank restores \"%s\"):" % (generic or "the original name"),
-            initialvalue=self._image_group_tags.get(key, generic),
-            parent=self._tk_root())
+            initialvalue=self._image_group_tags.get(key, generic))
         if name is None:
             return                            # cancelled
         name = " ".join(name.split())[:50]
@@ -6643,11 +6773,15 @@ class MainWindow:
             data["audio_loop"] = dict(self._audio_loop_flags)
             data["audio_keep"] = dict(self._audio_keep_full_flags)
             data["audio_trim"] = bool(self.audio_trim_var.get())
+            data["audio_changed_only"] = bool(
+                self.audio_changed_only_var.get())
         if _live(self._video_scan_dir):
             data["video"] = dict(self._video_assignments)
             data["video_trim"] = bool(self.video_trim_var.get())
             data["video_no_conversion"] = bool(
                 self.video_no_conversion_var.get())
+            data["video_changed_only"] = bool(
+                self.video_changed_only_var.get())
         if _live(self._image_scan_dir):
             data["image"] = dict(self._image_assignments)
             data["image_changed_only"] = bool(
@@ -6792,8 +6926,18 @@ class MainWindow:
                                             padx=(8, 0))
         ttk.Label(right, text="Preview", font=(_SANS_FONT, 9, "bold")).pack(
             anchor=tk.W)
+        # Raw tk.Text, so it needs explicit colours — ttk styling doesn't
+        # reach it and it otherwise renders as a white panel inside the dark
+        # tab.  _apply_theme re-colours it on a live theme switch.
+        _pc = THEMES[self._current_theme]
         self._pex_preview = tk.Text(right, width=46, height=10, wrap="none",
-                                    state="disabled", font=(_MONO_FONT, 9))
+                                    state="disabled", font=(_MONO_FONT, 9),
+                                    bg=_pc["field_bg"], fg=_pc["fg"],
+                                    insertbackground=_pc["fg"],
+                                    selectbackground=_pc["select_bg"],
+                                    highlightthickness=1,
+                                    highlightbackground=_pc["border"],
+                                    relief=tk.FLAT)
         self._pex_preview.pack(fill=tk.BOTH, expand=True)
 
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
@@ -6970,6 +7114,117 @@ class MainWindow:
         self._pex_action_status.configure(
             text="No file path contains “%s”."
                  % self.partition_search_var.get().strip())
+
+    # ---- Find in Partition Explorer (from a Replace tab) ---------------
+
+    def _pex_partition_paths(self, part_index):
+        """Sorted absolute file paths in *part_index*, using the same walk +
+        cache Find Next uses (one walk per image+partition)."""
+        key = (self._pex_image_path, part_index)
+        cache = self._pex_search_cache
+        if cache and cache[0] == key:
+            return cache[1]
+        paths = []
+        try:
+            reader = self._pex_card.reader(part_index)
+            for rel, _ino, _node in reader.iter_regular_files(max_depth=64,
+                                                              min_size=0):
+                paths.append("/" + rel.strip("/"))
+        except Exception:
+            return []
+        paths.sort()
+        self._pex_search_cache = (key, paths)
+        return paths
+
+    def _asset_find_in_partition(self, kind, rel):
+        """Jump from a Replace-tab row to the file it came from on the card.
+
+        Opens the Partition Explorer on the extract's own source image,
+        selects the partition holding the file and expands the tree down to
+        it.  Sounds and radium-embedded images aren't standalone files on the
+        card, so those reveal their CONTAINER and say so (monkeybug batch 16).
+        """
+        from ..core import card_paths
+        assets_dir = ""
+        if kind == "audio":
+            assets_dir = self._audio_scan_dir
+        elif kind == "video":
+            assets_dir = self._video_scan_dir
+        else:
+            assets_dir = self._image_scan_dir
+
+        # Resolve the row to something findable on the card.
+        want_basename = None
+        if kind == "video":
+            target, note = card_paths.video_card_path(assets_dir, rel)
+        elif kind == "image":
+            target, note = card_paths.image_card_path(assets_dir, rel)
+        else:
+            want_basename, note = card_paths.audio_card_hint(rel)
+            target = None
+            if want_basename is None:
+                messagebox.showinfo("Find in Partition Explorer", note)
+                return
+        if kind in ("video", "image") and target is None:
+            messagebox.showinfo("Find in Partition Explorer", note)
+            return
+
+        # Make sure an image is open (defaults to the Extract tab's input).
+        self._notebook.select(self._tab_partition)
+        if self._pex_card is None:
+            self._pex_default_from_extract()
+        if self._pex_card is None:
+            messagebox.showinfo(
+                "Find in Partition Explorer",
+                "Pick the card image these assets were extracted from "
+                "(the Card Image box at the top of this tab), then try "
+                "again.")
+            return
+
+        # Search the current partition first, then the rest — Stern keeps the
+        # game assets on the data partition, but don't hard-code that.
+        order = [p.index for p in self._pex_part_labels.values() if p.browsable]
+        if self._pex_part_index in order:
+            order.remove(self._pex_part_index)
+            order.insert(0, self._pex_part_index)
+        hit = hit_part = None
+        for idx in order:
+            paths = self._pex_partition_paths(idx)
+            if target is not None:
+                if target in paths:
+                    hit, hit_part = target, idx
+                    break
+            else:
+                match = next((p for p in paths
+                              if os.path.basename(p) == want_basename), None)
+                if match:
+                    hit, hit_part = match, idx
+                    break
+        if hit is None:
+            missing = target or want_basename
+            self.append_log(
+                "Find in Partition: %s isn't on %s."
+                % (missing, os.path.basename(self._pex_image_path or "")),
+                "warning")
+            messagebox.showinfo(
+                "Find in Partition Explorer",
+                "Couldn't find\n\n%s\n\non %s.\n\nThe open card image may be a "
+                "different game or firmware than these assets were extracted "
+                "from." % (missing, os.path.basename(
+                    self._pex_image_path or "this image")))
+            return
+
+        if hit_part != self._pex_part_index:
+            label = next((lbl for lbl, p in self._pex_part_labels.items()
+                          if p.index == hit_part), None)
+            if label:
+                self.partition_part_var.set(label)
+                self._pex_on_partition_select()
+        self._pex_reveal(hit)
+        self._pex_action_status.configure(text=note or "")
+        self.append_log("Find in Partition: %s → %s%s"
+                        % (rel, hit, ("  (%s)" % note) if note else ""),
+                        "info")
 
     def _pex_reveal(self, path):
         """Expand the lazy tree down to *path* and select it."""
@@ -7667,15 +7922,13 @@ class MainWindow:
                  % name)
 
     def _settings_save_preset(self):
-        from tkinter import simpledialog
         if not self._settings_rows:
             messagebox.showinfo(
                 "Save preset", "Load a card image first, then set the values "
                 "you want to save as a preset.")
             return
-        name = simpledialog.askstring(
-            "Save preset", "Name this preset (e.g. \"My route\"):",
-            parent=self._tk_root())
+        name = self._ask_text(
+            "Save preset", "Name this preset (e.g. \"My route\"):")
         if not name or not name.strip():
             return
         name = name.strip()
@@ -8142,6 +8395,7 @@ class MainWindow:
         # full Spike 2 report needs no vertical scrolling (peanuts).
         win.geometry("780x560")
         win.minsize(520, 300)
+        self._theme_toplevel(win)
         self._info_win = win
 
         f = ttk.Frame(win, padding=(10, 8))
@@ -9279,17 +9533,11 @@ class MainWindow:
                 if not self._audio_dup_group_cb.winfo_ismapped():
                     self._audio_dup_group_cb.pack(
                         side=tk.LEFT, padx=(0, 12),
-                        before=self._audio_sort_hint_lbl)
+                        before=self._audio_changed_only_cb)
             else:
                 self._audio_dup_group_cb.pack_forget()
         self._audio_clear_preview()
         self._refresh_audio_list()
-        if hasattr(self, "_audio_length_note_lbl"):
-            # The per-plugin guidance lives in the Trim checkbox's hover
-            # tooltip (_apply_audio_trim_lock appends it); the label stays
-            # blank as a pure layout anchor — the visible paragraph wrapped
-            # awkwardly and squeezed the log (monkeybug batch 14).
-            self._audio_length_note_lbl.configure(text="")
         # Force the Trim/pad checkbox on + disabled for plugins whose Write
         # always length-matches (e.g. JJP, Spike 2, CGC's Pulp Fiction), so the
         # toggle isn't misleading.  No extract is scanned yet here, so a plugin
@@ -9304,8 +9552,8 @@ class MainWindow:
             if mfr.key == "stern":
                 if not self._audio_declick_cb.winfo_ismapped():
                     self._audio_declick_cb.pack(
-                        anchor=tk.W, padx=12, pady=(4, 0),
-                        after=self._audio_length_note_lbl)
+                        anchor=tk.W, padx=12, pady=(0, 4),
+                        after=self._audio_trim_cb)
             else:
                 self._audio_declick_cb.pack_forget()
         # Same clean slate for the video tab.
@@ -9315,10 +9563,10 @@ class MainWindow:
         self._video_scan_dir = ""
         self._video_clear_preview()
         self._refresh_video_list()
-        if hasattr(self, "_video_length_note_lbl"):
-            # Same treatment as the audio note: guidance moves to the Trim
-            # checkbox's tooltip, the label stays blank (monkeybug batch 14).
-            self._video_length_note_lbl.configure(text="")
+        if hasattr(self, "_video_trim_tip"):
+            # Per-plugin length guidance lives in the Trim checkbox's hover
+            # tooltip (the old visible note label wrapped awkwardly and
+            # squeezed the log — monkeybug batches 14 and 16).
             note = (mfr.video_length_note() or "").strip()
             self._video_trim_tip.text = (
                 "When on, a replacement longer or shorter than the original "
@@ -10179,6 +10427,18 @@ class MainWindow:
                     self._notebook.tab(tab_id, state="hidden")
                 return
 
+    def _tab_visible(self, key):
+        """Whether the tab *key* is currently shown for this manufacturer —
+        the read side of _configure_tab, so features that cross-link to
+        another tab can hide themselves when it isn't there."""
+        for tab_id in self._notebook.tabs():
+            if self._tab_key(tab_id) == key:
+                try:
+                    return self._notebook.tab(tab_id, "state") != "hidden"
+                except tk.TclError:
+                    return False
+        return False
+
     # ------------------------------------------------------------------
     # Browse helpers (file-filter pulled from current manufacturer)
     # ------------------------------------------------------------------
@@ -10576,6 +10836,59 @@ class MainWindow:
         # ``self.master`` or the title label both work; pick a known-
         # existing widget that's created before any threaded work.
         return self._title_lbl.winfo_toplevel()
+
+    def _theme_toplevel(self, win):
+        """Paint a Toplevel's own background with the active theme.
+
+        ttk children are styled by _apply_theme, but the Toplevel itself is a
+        raw Tk widget: without this its system-default (light) background
+        bleeds through every padx/pady margin and flashes on open/resize
+        (monkeybug batch 16: "dark mode isn't 100% on popups").  Windows also
+        needs the DWM call to darken the title bar."""
+        try:
+            win.configure(bg=THEMES[self._current_theme]["bg"])
+        except tk.TclError:
+            return
+        dark_titlebar(win, self._current_theme == "dark")
+
+    def _ask_text(self, title, prompt, initialvalue="", width=44):
+        """Themed replacement for tkinter.simpledialog.askstring.
+
+        simpledialog builds plain tk widgets with no styling hooks, so in dark
+        mode it opens as a white box with black text (monkeybug batch 16).
+        Same contract: returns the string, or None if cancelled."""
+        root = self._tk_root()
+        dlg = tk.Toplevel(root)
+        dlg.title(title)
+        dlg.transient(root)
+        dlg.resizable(False, False)
+        self._theme_toplevel(dlg)
+        ttk.Label(dlg, text=prompt, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(12, 4))
+        var = tk.StringVar(value=initialvalue or "")
+        entry = ttk.Entry(dlg, textvariable=var, width=width)
+        entry.pack(fill=tk.X, padx=12, pady=(0, 8))
+        result = []
+
+        def _ok(_e=None):
+            result.append(var.get())
+            dlg.destroy()
+
+        def _cancel(_e=None):
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(0, 12))
+        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=_cancel).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        dlg.bind("<Return>", _ok)
+        dlg.bind("<Escape>", _cancel)
+        entry.focus_set()
+        entry.selection_range(0, tk.END)
+        dlg.grab_set()
+        root.wait_window(dlg)
+        return result[0] if result else None
 
     def _apply_drives(self, mode, drives, pick):
         """Main-thread continuation of _refresh_drives_async.
@@ -13630,6 +13943,22 @@ class MainWindow:
             self._text_tree.tag_configure("assigned", foreground=c["success"])
             # Refresh the byte-budget readout's normal colour for the new theme.
             self._text_update_budget()
+
+        # Partition Explorer's preview is a raw tk.Text (see _build_partition_tab).
+        if getattr(self, "_pex_preview", None) is not None:
+            self._pex_preview.configure(
+                bg=c["field_bg"], fg=c["fg"], insertbackground=c["fg"],
+                selectbackground=c["select_bg"],
+                highlightbackground=c["border"])
+
+        # Any open Image Info window keeps its own bg (raw Toplevel).
+        _info = getattr(self, "_info_win", None)
+        if _info is not None:
+            try:
+                if _info.winfo_exists():
+                    self._theme_toplevel(_info)
+            except tk.TclError:
+                pass
 
         self.root.configure(background=c["bg"])
         # Re-skin EVERY cached per-mfr log widget — not just the currently-

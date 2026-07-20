@@ -25,6 +25,11 @@ from pinball_decryptor.core.messages import LogMsg
 
 # --- baseline parsing: export_mod_pack accepts BOTH .checksums.md5 flavours ---
 
+def _assets(zf):
+    """The zip's asset entries — everything but the .modpack.json manifest."""
+    return [n for n in zf.namelist() if n != modpack.MANIFEST_NAME]
+
+
 def _write(path, data=b"data"):
     with open(path, "wb") as f:
         f.write(data)
@@ -46,7 +51,7 @@ def test_export_reads_tab_flavour_baseline(tmp_path):
     n, _ = modpack.export_mod_pack(str(tmp_path), str(tmp_path / "pack.zip"))
     assert n == 1
     with zipfile.ZipFile(tmp_path / "pack.zip") as zf:
-        assert zf.namelist() == ["a.wav"]
+        assert _assets(zf) == ["a.wav"]
 
 
 def test_export_reads_md5sum_flavour_baseline(tmp_path):
@@ -73,6 +78,85 @@ def test_export_missing_baseline_raises(tmp_path):
     _write(tmp_path / "a.wav", b"orig")
     with pytest.raises(FileNotFoundError):
         modpack.export_mod_pack(str(tmp_path), str(tmp_path / "pack.zip"))
+
+
+def test_export_skips_pipeline_scratch_files(tmp_path):
+    """A rebuilt fl_decrypted.dat / .img is baselined and "modified", but it
+    is pipeline scratch, not a card asset — packing it turned an audio-only
+    mod pack into hundreds of MB (monkeybug batch 16)."""
+    files = {"a.wav": b"orig", "fl_decrypted.dat": b"orig",
+             "build/card.img": b"orig"}
+    os.makedirs(tmp_path / "build", exist_ok=True)
+    for name, data in files.items():
+        _write(tmp_path / name, data)
+    (tmp_path / ".checksums.md5").write_text(
+        "".join(f"{n}\t{_md5(d)}\n" for n, d in files.items()),
+        encoding="utf-8")
+    for name in files:                       # every one of them changes
+        _write(tmp_path / name, b"CHANGED")
+
+    n, _ = modpack.export_mod_pack(str(tmp_path), str(tmp_path / "pack.zip"))
+    assert n == 1
+    with zipfile.ZipFile(tmp_path / "pack.zip") as zf:
+        assert _assets(zf) == ["a.wav"]
+
+
+def test_export_writes_manifest_and_import_reads_it(tmp_path):
+    """The pack records the extract it came from (the help text has always
+    said so) and Import round-trips it without unpacking it as an asset."""
+    import json
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write(src / "a.wav", b"orig")
+    (src / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    (src / ".extract_source.json").write_text(
+        json.dumps({"input_name": "turtles_pro-1_59_0.Release.8G.sdcard.raw"}),
+        encoding="utf-8")
+    _write(src / "a.wav", b"CHANGED")
+
+    zip_path = str(tmp_path / "pack.zip")
+    modpack.export_mod_pack(str(src), zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        man = json.loads(zf.read(modpack.MANIFEST_NAME).decode("utf-8"))
+    assert man["version_hint"] == "1.59.0 (Release)"
+    assert man["files"] == ["a.wav"]
+    assert man["file_count"] == 1
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    n = modpack.import_mod_pack(zip_path, str(dest))
+    assert n == 1                                  # the manifest isn't an asset
+    assert (dest / "a.wav").read_bytes() == b"CHANGED"
+    assert not (dest / modpack.MANIFEST_NAME).exists()
+
+
+def test_import_warns_on_version_mismatch(tmp_path):
+    import json
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write(src / "a.wav", b"orig")
+    (src / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    (src / ".extract_source.json").write_text(
+        json.dumps({"input_name": "turtles_pro-1_59_0.Release.8G.sdcard.raw"}),
+        encoding="utf-8")
+    _write(src / "a.wav", b"CHANGED")
+    zip_path = str(tmp_path / "pack.zip")
+    modpack.export_mod_pack(str(src), zip_path)
+
+    dest = tmp_path / "dest"                       # a DIFFERENT firmware
+    dest.mkdir()
+    (dest / ".extract_source.json").write_text(
+        json.dumps({"input_name": "turtles_pro-1_58_1.Release.8G.sdcard.raw"}),
+        encoding="utf-8")
+    logs = []
+    modpack.import_mod_pack(zip_path, str(dest),
+                            log_cb=lambda t, lvl: logs.append((lvl, t)))
+    assert any(lvl == "warning" and "1.58.1" in t and "1.59.0" in t
+               for lvl, t in logs)
 
 
 # --- the fix: App._export_worker stages pending replacements before diffing ---
@@ -121,7 +205,7 @@ def test_export_worker_stages_pending_then_packs(tmp_path, monkeypatch):
 
     assert os.path.isfile(zip_path), "export should have produced a zip"
     with zipfile.ZipFile(zip_path) as zf:
-        assert zf.namelist() == ["a.wav"]
+        assert _assets(zf) == ["a.wav"]
     logs = [m.text for m in _drain(a.msg_queue) if isinstance(m, LogMsg)]
     assert any("Mod pack: 1 file" in t for t in logs)
 

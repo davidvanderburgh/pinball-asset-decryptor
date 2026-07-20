@@ -20,7 +20,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ..core.admin import is_admin
-from .theme import THEMES, platform_font
+from .theme import THEMES, dark_titlebar, platform_font
 
 
 class DiagnoseCardDialog:
@@ -54,6 +54,7 @@ class DiagnoseCardDialog:
         self._dlg = dlg
         dlg.title("Card diagnostics")
         dlg.configure(bg=th["bg"])
+        dark_titlebar(dlg, th is THEMES["dark"])
         dlg.transient(self._parent)
         dlg.protocol("WM_DELETE_WINDOW", self._close)
 

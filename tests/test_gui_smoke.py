@@ -1759,8 +1759,8 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     w.image_group_by_scene_var.set(True)
     grp = [t for t in tree.get_children()
            if "Char_Select" in tree.item(t, "text")][0]
-    monkeypatch.setattr("tkinter.simpledialog.askstring",
-                        lambda *a, **k: "Boss Intro")
+    monkeypatch.setattr(type(w), "_ask_text",
+                        lambda self, *a, **k: "Boss Intro")
     w._image_group_rename(grp)
     assert "Boss Intro" in tree.item(grp, "text")
     assert tree.item(grp, "values")[0] == "3 images"
@@ -1771,8 +1771,7 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     assert len(tops) == 1 and len(tree.get_children(tops[0])) == 3
     w.image_search_var.set("")
     # A blank rename restores the manifest label and drops the tag.
-    monkeypatch.setattr("tkinter.simpledialog.askstring",
-                        lambda *a, **k: "")
+    monkeypatch.setattr(type(w), "_ask_text", lambda self, *a, **k: "")
     w._image_group_rename(grp)
     assert "Char_Select · a1b2c3d4" in tree.item(grp, "text")
     assert not staged_changes.load(assets).get("image_group_tags")
@@ -1984,8 +1983,8 @@ def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
     w.image_group_by_scene_var.set(True)
     grp = [t for t in w._image_tree.get_children()
            if "Char_Select" in w._image_tree.item(t, "text")][0]
-    monkeypatch.setattr("tkinter.simpledialog.askstring",
-                        lambda *a, **k: "Boss Intro")
+    monkeypatch.setattr(type(w), "_ask_text",
+                        lambda self, *a, **k: "Boss Intro")
     w._image_group_rename(grp)
     key = "rad::/game/scenes/a1b2c3d4e5f6/scene.radium"
     assert tag_library.load() == {
@@ -2276,10 +2275,10 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     assert w._settings_changes() == {}
 
     # --- presets: save / load / auto-apply / delete ---
-    import tkinter.simpledialog as _sd
     by["AD_FREE_PLAY"]["var"].set(1)
     by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(50)
-    monkeypatch.setattr(_sd, "askstring", lambda *a, **k: "My route")
+    monkeypatch.setattr(type(w), "_ask_text",
+                        lambda self, *a, **k: "My route")
     w._settings_save_preset()
     assert w._presets_blob()["presets"]["My route"]["AD_FREE_PLAY"] == 1
     # Saving selected the preset, so auto-apply is now available.

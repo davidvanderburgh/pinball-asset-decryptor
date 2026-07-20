@@ -17,7 +17,7 @@ grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
 import tkinter as tk
 from tkinter import ttk
 
-from .theme import THEMES, platform_font
+from .theme import THEMES, dark_titlebar, platform_font
 
 
 # (title, body) sections per notebook-tab name.  Keys match the tab captions
@@ -100,7 +100,17 @@ HELP_CONTENT = {
          "seconds long — some pins store songs as Sound-Test-named "
          "sequences), Sound FX (named by the game's own Sound Test menu), "
          "Callouts (speech — needs Auto-name call-outs to have run), or "
-         "Other."),
+         "Other. \"Changed only\" narrows the list to the slots you've "
+         "replaced or that already differ from the extract, so you can "
+         "review a big mod without scrolling past the untouched slots. "
+         "Export CSV saves the whole table (every slot, not just the "
+         "filtered view) for tracking a large project in a spreadsheet."),
+        ("Where is this on the card?",
+         "Right-click a slot → \"Find in Partition Explorer\" opens the "
+         "card image at the file the asset came from, expanding the tree "
+         "down to it. Sounds aren't separate files on a Spike 2 card — "
+         "they're decoded out of a bank — so an audio row reveals that "
+         "bank (image.bin, or the image-scNN.bin for music) and says so."),
         ("Name and type (Properties)",
          "Right-click a slot → \"Properties…\" to correct its name (e.g. a "
          "call-out the auto-transcriber mis-heard). The name is remembered "
@@ -120,7 +130,11 @@ HELP_CONTENT = {
          "players before building. A clip that already matches the "
          "original's format, resolution and frame rate is used as-is; "
          "anything else is auto-re-encoded to match (transparency is kept "
-         "where the original has it)."),
+         "where the original has it). The log says which one happened the "
+         "moment you pick the file — \"already matches this slot — will be "
+         "copied in, no re-encode\" or \"will be re-encoded to match this "
+         "slot\" — so you never have to guess whether your clip was "
+         "converted."),
         ("Assets folder + applying",
          "The assets folder is the one Extract produced — the same folder the "
          "Write tab reads. There's no separate \"stage\" step: the "
@@ -243,7 +257,13 @@ HELP_CONTENT = {
     "Mod Pack": [
         ("Export",
          "Export bundles everything you've changed (versus the extract "
-         "baseline) into a single shareable mod-pack file."),
+         "baseline) into a single shareable mod-pack file. That means ALL "
+         "your changes to this folder since you last extracted it — not "
+         "just the ones made this session — so a mod built over many "
+         "sittings exports in one go. Re-running Extract into a folder "
+         "makes its current contents the new baseline, so export before "
+         "you re-extract, and keep each firmware version in its own "
+         "folder."),
         ("Import",
          "Import applies a mod pack onto a matching extract — the pack "
          "records which game/version it was made from."),
@@ -470,6 +490,7 @@ class TabHelpWindow:
         dlg, text = self._dlg, self._text
         dlg.title(f"Tips — {tab_name}" if tab_name else "Tips")
         dlg.configure(bg=th["bg"])
+        dark_titlebar(dlg, th is THEMES["dark"])
         # (Re)apply theme colors every render so an open window follows a
         # light/dark switch instead of keeping the stale palette.
         text.configure(state=tk.NORMAL, bg=th["bg"], fg=th["fg"],

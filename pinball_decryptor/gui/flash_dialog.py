@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from ..core.admin import is_admin
 from ..core.elevated_flash import can_self_elevate as _self_elevates
-from .theme import THEMES, platform_font
+from .theme import THEMES, dark_titlebar, platform_font
 
 
 def _fmt_size(n):
@@ -65,6 +65,7 @@ class FlashImageDialog:
         self._dlg = dlg
         dlg.title("Flash image to %s" % noun)
         dlg.configure(bg=th["bg"])
+        dark_titlebar(dlg, th is THEMES["dark"])
         dlg.transient(self._parent)
         dlg.resizable(False, False)
         dlg.protocol("WM_DELETE_WINDOW", self._cancel)

@@ -11,7 +11,7 @@ dialog returns False so the caller can exit cleanly.
 
 import tkinter as tk
 
-from .theme import THEMES, platform_font
+from .theme import THEMES, dark_titlebar, platform_font
 
 
 DISCLAIMER_TITLE = "Important — Read Before Use"
@@ -74,6 +74,7 @@ def show_disclaimer_dialog(parent, theme_name="light"):
     dlg = tk.Toplevel(parent)
     dlg.title(DISCLAIMER_TITLE)
     dlg.configure(bg=theme["bg"])
+    dark_titlebar(dlg, theme is THEMES["dark"])
     dlg.transient(parent)
     dlg.resizable(False, False)
 

@@ -14,6 +14,31 @@ and mod-pack workflow. Each manufacturer is a plugin under
 lives in [pinball_decryptor/core/](pinball_decryptor/core/) and
 [pinball_decryptor/gui/](pinball_decryptor/gui/).
 
+## What it looks like
+
+Pick a manufacturer on launch — each card lists every supported game:
+
+![The manufacturer picker: one card per manufacturer with its supported games and input formats](docs/screenshots/picker.png)
+
+Point the Extract tab at a card image (or the SD card itself) and pull
+the assets out — here a Stern Jaws LE card:
+
+![The Extract tab with a Stern Jaws LE SD-card image detected and per-type extract checkboxes](docs/screenshots/stern-extract.png)
+
+Replace Audio lists every sound slot with side-by-side seekable
+spectrograms to A/B the original against your replacement; Replace
+Images searches the card's 12,000+ images with live previews:
+
+<p>
+  <a href="docs/screenshots/replace-audio.png"><img src="docs/screenshots/replace-audio.png" width="49%" alt="The Replace Audio tab: 1,733 sound slots from a Jaws LE card with a spectrogram preview of the selected sound"></a>
+  <a href="docs/screenshots/replace-images.png"><img src="docs/screenshots/replace-images.png" width="49%" alt="The Replace Images tab: searching 12,873 on-card images for 'logo' with a preview of the game-logo art"></a>
+</p>
+
+And the read-only Partition Explorer browses the raw card image's ext4
+filesystem directly — no mounting, no WSL:
+
+![The Partition Explorer tab browsing the 13.5 GB game partition of a Jaws LE card image](docs/screenshots/partition-explorer.png)
+
 ## Disclaimer
 
 This project is an independent interoperability utility. It is **not

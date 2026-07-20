@@ -2504,7 +2504,11 @@ def test_image_info_window_populates(app, manufacturers_by_key, tmp_path,
     w.extract_input_var.set(img)
     w._open_image_info(w.extract_input_var)
     assert w._info_win is not None and w._info_win.winfo_exists()
+    # While the probe worker runs, the big "Reading image…" overlay sits
+    # over the blanked tree (the window looked hung on slow images).
+    assert w._info_empty.winfo_manager() == "place"
     assert _pump_until(app, lambda: w._info_tree.get_children(""))
+    assert w._info_empty.winfo_manager() == ""
 
     tree = w._info_tree
     secs = [tree.item(i, "text") for i in tree.get_children("")]

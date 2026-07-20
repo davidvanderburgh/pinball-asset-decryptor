@@ -8172,6 +8172,14 @@ class MainWindow:
         self._info_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vs.pack(side=tk.LEFT, fill=tk.Y)
 
+        # Loading overlay: the collect() probe can take a while on big
+        # images / network shares, and a blank tree looked hung — float the
+        # same big animated indicator the Replace tabs' scans use over it.
+        self._info_empty = ttk.Label(body, text="",
+                                     font=(_SANS_FONT, 18, "bold"),
+                                     foreground="#888888",
+                                     anchor=tk.CENTER, justify=tk.CENTER)
+
         arow = ttk.Frame(f)
         arow.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(arow, text="Refresh",
@@ -8232,6 +8240,10 @@ class MainWindow:
 
         self._info_seq += 1
         seq = self._info_seq
+        # A probe is now in flight — the tree no longer shows anything
+        # trustworthy, so a retarget back to the old path must re-probe
+        # rather than skip onto the blanked list.
+        self._info_shown_key = None
         holder = {}
 
         def _worker():
@@ -8242,16 +8254,26 @@ class MainWindow:
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
+        tree.delete(*tree.get_children())
+        self._info_copy_btn.configure(state=tk.DISABLED)
         self._info_status.configure(text="Reading image…")
+        self._info_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        def _poll():
+        def _poll(i=0):
             if seq != self._info_seq:    # superseded / window closed
                 return
             if t.is_alive():
-                self.root.after(120, _poll)
+                try:                     # animate the overlay so a long
+                    self._info_empty.configure(   # probe visibly moves
+                        text="%s  Reading image…"
+                             % self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)])
+                except tk.TclError:
+                    return
+                self.root.after(120, _poll, i + 1)
                 return
             if self._info_win is None or not self._info_win.winfo_exists():
                 return
+            self._info_empty.place_forget()
             self._info_shown_key = key
             self._info_sections = holder.get("sections") or []
             tree.delete(*tree.get_children())

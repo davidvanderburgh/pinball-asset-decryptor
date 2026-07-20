@@ -111,15 +111,42 @@ so we never again ship a tag where `__version__` lags the tag string
    git push origin vN.N.N
    ```
 
-9. **Publish the GitHub release.**
+9. **Create the GitHub release as a DRAFT.**  A published release is
+   visible to `releases/latest` the instant it's created, but the
+   installer assets upload from the four `Build Release Installers` CI
+   jobs minutes later — apps in the field saw the v0.69.5 update banner
+   while the release page had zero downloads on it.  Draft-first keeps
+   the release invisible to every update checker (including old app
+   versions that predate the client-side asset gate) until the assets
+   are actually there.
    ```
-   gh release create vN.N.N --title "vN.N.N — <short title>" --notes "$(cat <<'EOF'
+   gh release create vN.N.N --draft --title "vN.N.N — <short title>" --notes "$(cat <<'EOF'
    <markdown release notes — can be more elaborate than the tag body;
    include screenshots / links / highlights / requirements>
    EOF
    )"
    ```
-   Print the resulting URL.
+   Create the draft IMMEDIATELY after pushing the tag — the installer
+   workflow's fallback (`gh release view || gh release create
+   --generate-notes`) creates a NON-draft release if none exists yet,
+   and `gh release view`/`upload` resolve drafts by tag name fine, so
+   an early draft is what keeps that fallback from firing.
+
+9b. **Wait for the installer workflow, then publish.**  Watch the
+    `Build Release Installers` run for the tag (same 503-tolerant
+    polling as step 7b if GitHub is having a day).  If an upload step
+    fails on a transient GitHub error, `gh run rerun <id> --failed` —
+    the builds are per-job, so only the failed uploads redo.  When the
+    run is green, verify all four assets are attached, then flip the
+    draft live:
+    ```
+    gh release view vN.N.N --json assets --jq '.assets[].name'
+    # expect: *_Windows.exe, *_macOS_AppleSilicon.dmg,
+    #         *_macOS_Intel.dmg, *_Linux_x86_64.AppImage
+    gh release edit vN.N.N --draft=false
+    ```
+    Print the resulting URL.  Do NOT publish with missing assets — a
+    dead download link is exactly what draft-first exists to prevent.
 
 10. **Draft a message for the tester / user.**
 

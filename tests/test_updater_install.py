@@ -34,13 +34,18 @@ ISS = REPO / "installer" / "pinball_decryptor.iss"
 # Asset picking
 # ---------------------------------------------------------------------------
 
+# Real asset names as CI uploads them (build_macos.sh's per-arch DMG
+# labels, build.ps1/ISCC's exe, the AppImage) — _release_ready matches
+# on these, so the fixture must use the genuine naming convention.
 ASSETS = [
-    {"name": "Pinball_Asset_Decryptor_v9.0.0_macOS_arm64.dmg",
-     "browser_download_url": "https://example.com/mac.dmg", "size": 1},
+    {"name": "Pinball_Asset_Decryptor_v9.0.0_macOS_AppleSilicon.dmg",
+     "browser_download_url": "https://example.com/mac_arm.dmg", "size": 1},
+    {"name": "Pinball_Asset_Decryptor_v9.0.0_macOS_Intel.dmg",
+     "browser_download_url": "https://example.com/mac_intel.dmg", "size": 1},
     {"name": "Pinball_Asset_Decryptor_v9.0.0_Windows.exe",
      "browser_download_url": "https://example.com/win.exe", "size": 42,
      "digest": "sha256:" + "ab" * 32},
-    {"name": "Pinball_Asset_Decryptor_v9.0.0_Linux.AppImage",
+    {"name": "Pinball_Asset_Decryptor_v9.0.0_Linux_x86_64.AppImage",
      "browser_download_url": "https://example.com/linux", "size": 1},
 ]
 
@@ -67,8 +72,10 @@ def test_pick_installer_asset_non_windows_gets_none(platform):
 
 
 def test_pick_installer_asset_no_windows_asset():
-    assert updater._pick_installer_asset(
-        [ASSETS[0], ASSETS[2]], platform="win32") is None
+    non_windows = [a for a in ASSETS
+                   if not a["name"].lower().endswith("_windows.exe")]
+    assert updater._pick_installer_asset(non_windows,
+                                         platform="win32") is None
     assert updater._pick_installer_asset(None, platform="win32") is None
 
 
@@ -93,6 +100,61 @@ def test_check_for_update_carries_installer(monkeypatch):
         assert installer and installer["url"].endswith("win.exe")
     else:
         assert installer is None
+
+
+# ---------------------------------------------------------------------------
+# Release-readiness gate (v0.69.5: the release row + notes appear the
+# moment the tag is published, but the four installers upload from
+# independent CI jobs minutes later — the update banner must not point
+# at a release page with no download for this platform on it).
+# ---------------------------------------------------------------------------
+
+
+def test_release_ready_per_platform():
+    data = {"body": "notes", "assets": ASSETS}
+    assert updater._release_ready(data, platform="win32")
+    assert updater._release_ready(data, platform="linux")
+    assert updater._release_ready(data, platform="darwin", machine="arm64")
+    assert updater._release_ready(data, platform="darwin", machine="x86_64")
+
+
+def test_release_ready_gates_on_own_platform_asset():
+    no_win = [a for a in ASSETS
+              if not a["name"].lower().endswith("_windows.exe")]
+    assert not updater._release_ready(
+        {"body": "notes", "assets": no_win}, platform="win32")
+    assert updater._release_ready(
+        {"body": "notes", "assets": no_win}, platform="linux")
+    # The two DMGs upload from separate jobs — each arch waits for its own.
+    no_intel = [a for a in ASSETS if "Intel" not in a["name"]]
+    assert updater._release_ready(
+        {"body": "notes", "assets": no_intel},
+        platform="darwin", machine="arm64")
+    assert not updater._release_ready(
+        {"body": "notes", "assets": no_intel},
+        platform="darwin", machine="x86_64")
+
+
+def test_release_ready_requires_notes():
+    assert not updater._release_ready(
+        {"body": "", "assets": ASSETS}, platform="win32")
+    assert not updater._release_ready(
+        {"body": "   ", "assets": ASSETS}, platform="win32")
+    assert not updater._release_ready({"assets": ASSETS}, platform="win32")
+
+
+def test_check_for_update_withheld_until_assets_ready(monkeypatch):
+    withheld = []
+    body = json.dumps({
+        "tag_name": "v99.0.0",
+        "html_url": "https://example.com/rel",
+        "body": "notes",
+        "assets": [],           # release published, uploads still running
+    }).encode()
+    monkeypatch.setattr(net, "urlopen", lambda req, timeout: _FakeResp(body))
+    assert updater.check_for_update(
+        "0.1.0", not_ready_cb=withheld.append) is None
+    assert withheld == ["99.0.0"]
 
 
 # ---------------------------------------------------------------------------

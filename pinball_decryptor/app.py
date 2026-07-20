@@ -2658,8 +2658,10 @@ class App:
         self.window.append_log("Checking for updates...", "info")
 
         def _run():
-            try:
-                result = check_for_update(__version__, repo=mfr_repo)
+            publishing = []      # version withheld because assets are
+            try:                 # still uploading (see _release_ready)
+                result = check_for_update(__version__, repo=mfr_repo,
+                                          not_ready_cb=publishing.append)
                 failed = None
             except Exception as e:
                 # Keep the real error — v0.41 and earlier reduced every
@@ -2669,11 +2671,12 @@ class App:
                 result, failed = None, f"{type(e).__name__}: {e}"
             self.root.after(
                 0, self._handle_update_check_result,
-                result, show_up_to_date_toast, failed)
+                result, show_up_to_date_toast, failed,
+                publishing[0] if publishing else None)
         threading.Thread(target=_run, daemon=True).start()
 
     def _handle_update_check_result(self, result, show_up_to_date_toast,
-                                    failed=None):
+                                    failed=None, publishing=None):
         """Main-thread continuation of the update check."""
         self.window.set_update_check_running(False)
         if result:
@@ -2695,6 +2698,20 @@ class App:
                     "Couldn't reach GitHub to check for updates.\n"
                     "Check your internet connection and try again.\n\n"
                     f"Details: {failed}")
+        elif publishing:
+            # A newer release exists but its installers are still
+            # uploading — don't banner a download that isn't there, and
+            # don't claim "up to date" either.
+            self.window.append_log(
+                f"Update v{publishing} is being published — the download "
+                "isn't ready yet. The app will announce it once it is.",
+                "info")
+            if show_up_to_date_toast:
+                messagebox.showinfo(
+                    "Update on its way",
+                    f"Version {publishing} was just published and its "
+                    "installers are still uploading.\n\n"
+                    "Check again in a few minutes.")
         else:
             self.window.append_log(
                 f"You're on the latest version (v{__version__}).", "info")

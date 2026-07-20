@@ -31,6 +31,42 @@ _CHUNK = 256 * 1024
 # OutputBaseFilename).
 _WINDOWS_ASSET_SUFFIX = "_windows.exe"
 
+# Lowercased name suffix of the release asset each platform downloads
+# (build_macos.sh names DMGs by arch; PyInstaller can't cross-build, so
+# an Apple Silicon user must wait for the AppleSilicon DMG specifically).
+_MAC_ARM_SUFFIX = "_macos_applesilicon.dmg"
+_MAC_INTEL_SUFFIX = "_macos_intel.dmg"
+_LINUX_ASSET_SUFFIX = ".appimage"
+
+
+def _release_ready(data, platform=None, machine=None):
+    """True when the latest release is complete enough to announce to
+    *this* platform: it has release notes and the installer asset this
+    platform would download.
+
+    The GitHub release row exists the moment the tag + notes are
+    published, but CI uploads the installers minutes later (longer when
+    an upload fails and needs a re-run) — v0.69.5's banner pointed at a
+    release page with no downloads on it.  Each platform gates on its
+    own asset because the four installers upload from independent CI
+    jobs that finish (or fail) separately.
+    """
+    if not (data.get("body") or "").strip():
+        return False
+    plat = platform if platform is not None else sys.platform
+    if plat == "win32":
+        suffix = _WINDOWS_ASSET_SUFFIX
+    elif plat == "darwin":
+        import platform as _plat_mod
+        mach = (machine if machine is not None
+                else _plat_mod.machine()).lower()
+        suffix = _MAC_ARM_SUFFIX if mach == "arm64" else _MAC_INTEL_SUFFIX
+    else:
+        suffix = _LINUX_ASSET_SUFFIX
+    return any((asset.get("name") or "").lower().endswith(suffix)
+               and asset.get("browser_download_url")
+               for asset in data.get("assets") or [])
+
 
 def _parse_version(version_str):
     v = version_str.strip().lstrip("v")
@@ -65,13 +101,19 @@ def _pick_installer_asset(assets, platform=None):
     return None
 
 
-def check_for_update(current_version, repo=None):
+def check_for_update(current_version, repo=None, not_ready_cb=None):
     """Return (latest_version, download_url, notes, installer) if newer,
     else None.
 
     ``installer`` is :func:`_pick_installer_asset`'s dict when this
     platform can auto-install the release, else ``None`` (the GUI then
     falls back to the plain open-in-browser Download button).
+
+    A newer release whose installers haven't finished uploading (see
+    :func:`_release_ready`) is treated as "no update yet" — the banner
+    must never point at a download that isn't there.  ``not_ready_cb``,
+    when given, is called with the withheld version string so the app
+    can log/say "publishing now" instead of a false "up to date".
 
     Raises on network/API failure (URLError, timeout, bad JSON) so the
     caller can tell "couldn't check" apart from "checked, no newer
@@ -100,6 +142,10 @@ def check_for_update(current_version, repo=None):
     latest = _parse_version(tag)
     current = _parse_version(current_version)
     if latest and current and latest > current:
+        if not _release_ready(data):
+            if not_ready_cb:
+                not_ready_cb(tag.lstrip("v"))
+            return None
         return (tag.lstrip("v"), html_url, data.get("body", "") or "",
                 _pick_installer_asset(data.get("assets")))
     return None

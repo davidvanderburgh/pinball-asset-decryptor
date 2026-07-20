@@ -41,14 +41,27 @@ def test_check_for_update_routes_through_net_urlopen(monkeypatch):
             "tag_name": "v99.0.0",
             "html_url": "https://example.com/rel",
             "body": "notes",
+            # Every platform's installer present so the readiness gate
+            # (v0.69.5) doesn't withhold the result this test is about.
+            "assets": [
+                {"name": "X_macOS_AppleSilicon.dmg",
+                 "browser_download_url": "https://example.com/a.dmg"},
+                {"name": "X_macOS_Intel.dmg",
+                 "browser_download_url": "https://example.com/i.dmg"},
+                {"name": "X_Windows.exe",
+                 "browser_download_url": "https://example.com/w.exe"},
+                {"name": "X_Linux_x86_64.AppImage",
+                 "browser_download_url": "https://example.com/l.AppImage"},
+            ],
         }).encode()
         return FakeResp(body)
 
     monkeypatch.setattr(net, "urlopen", fake_urlopen)
     result = updater.check_for_update("0.1.0")
     assert calls and "api.github.com" in calls[0]
-    # No assets in the fake payload -> no auto-installer entry.
-    assert result == ("99.0.0", "https://example.com/rel", "notes", None)
+    version, url, notes, _installer = result
+    assert (version, url, notes) == (
+        "99.0.0", "https://example.com/rel", "notes")
 
 
 def test_musicid_default_opener_is_pinned():

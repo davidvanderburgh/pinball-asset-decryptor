@@ -29,15 +29,15 @@ import struct
 _AD_RE = re.compile(rb"AD_[A-Z0-9_]{2,80}\x00")
 OFF_DEFAULT, OFF_MIN, OFF_MAX, OFF_STEP = 0x04, 0x08, 0x0c, 0x10
 
-# Some settings are stored in finer internal units than the operator menu
-# shows, so the raw compiled value doesn't match the machine.  The one that
-# matters here is the master volume: it runs 0..64 internally but the menu
-# shows 0..16, i.e. internal = display * VOLUME_SCALE (reverse-engineered from
-# the firmware's flag-distinguished volume group + the on-machine range; if a
-# future title proves a different divisor, this constant is the only change).
-# Driven per-curated-setting rather than by a flags offset, since the flags
-# field moves with the (build-varying) descriptor size.
-VOLUME_SCALE = 4
+# Values are shown in the firmware's own internal units.  We previously
+# assumed the master volume displayed as internal/4 (a 0-16 menu scale), but
+# monkeybug's hardware test (LZ LE 1.22, 2026-07-20) disproved it: his
+# machine's Guided Setup shows raw values (default 30 on a raw scale) that
+# don't come from this compiled default at all, so the display transform —
+# and whether the default even reaches the operator's volume on wizard
+# titles — is title-dependent and unconfirmed.  Until that's properly RE'd,
+# no scale is applied anywhere and the volume row's help says so.  The
+# per-row ``scale`` plumbing stays (presets store internal units through it).
 
 # Enum value -> label for the enum settings we expose.  The stored value is an
 # index; the machine shows the label.  Language index 0 = English is confirmed
@@ -230,7 +230,9 @@ CURATED = [
     ("AD_FREE_PLAY", "Free Play", "toggle",
      "Boot the game in free play (no credits needed).", 1),
     ("AD_SOUND_MASTER_VOLUME_SETTING", "Master Volume", "number",
-     "Default master volume, on the machine's 0-16 scale.", VOLUME_SCALE),
+     "Default master volume, in the firmware's own 0-64 units. UNVERIFIED "
+     "on real machines: titles with a first-boot setup wizard (Guided "
+     "Setup) pick their own volume and may ignore this default.", 1),
     ("AD_LANGUAGE", "Language", "enum",
      "Default menu / game language.", 1),
     ("AD_REPLAY_PERCENTAGE", "Replay Percentage", "number",

@@ -309,16 +309,19 @@ HELP_CONTENT = {
          "settings — Stern stores those on the board, not on the card, so the "
          "app cannot change a machine that's already configured. Think of this "
          "as \"how a brand-new card boots\"."),
-        ("Edit + save",
+        ("Edit + apply",
          "Point \"Card Image\" at a card image; the app reads the game "
          "firmware and lists the settings it can preset. \"On card\" is the "
          "default currently baked into that image (Stern's factory value "
          "unless it was changed here before); set \"New default\" to what you "
          "want — a ● marks every row that deviates from the card. Press "
-         "\"Save to Card Image\" and the changes are written straight into "
-         "the card image (with the card's validation record refreshed "
-         "automatically), ready to flash. Keep a backup of the image if it's "
-         "precious."),
+         "\"Apply at Next Build\" and the changes are staged with your "
+         "assets folder like any other mod: the next card you Build gets "
+         "them baked in (validation record refreshed automatically) while "
+         "your master image stays untouched. \"Write into This Image Now…\" "
+         "is the advanced alternative — it edits the picked image in place, "
+         "for when you want to change that exact file without rebuilding; "
+         "keep a backup if it's precious."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
          "it from the dropdown any time to fill the form. The auto-apply "

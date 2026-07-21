@@ -80,3 +80,36 @@ def test_live_assignments_drops_missing_replacement(tmp_path):
 
 def test_live_assignments_handles_none():
     assert staged_changes.live_assignments(None, {}) == {}
+
+
+# --- dropped_assignments: the loud-warning side of live_assignments ---------
+# A disconnected NAS (missing replacement file) or a re-extract that renamed
+# slots must be REPORTED, not silently built without (monkeybug lost 190
+# audio changes to a silent drop looking exactly like "nothing assigned").
+
+def test_dropped_assignments_reports_both_reasons(tmp_path):
+    present = tmp_path / "present.wav"
+    present.write_bytes(b"\x00" * 16)
+    saved = {
+        "a.wav": str(present),                       # fine — not reported
+        "b.wav": str(tmp_path / "deleted.wav"),      # replacement file gone
+        "audio/gone.wav": str(present),              # slot vanished
+    }
+    slots = {"a.wav": object(), "b.wav": object()}
+    dropped = staged_changes.dropped_assignments(saved, slots)
+    by_rel = {rel: (path, why) for rel, path, why in dropped}
+    assert set(by_rel) == {"b.wav", "audio/gone.wav"}
+    assert "missing" in by_rel["b.wav"][1]
+    assert "slot" in by_rel["audio/gone.wav"][1]
+    # live + dropped together cover every real (non-empty) saved entry
+    live = staged_changes.live_assignments(saved, slots)
+    assert set(live) | set(by_rel) == set(saved)
+
+
+def test_dropped_assignments_skips_empty_entries(tmp_path):
+    saved = {"a.wav": None, "b.wav": ""}
+    assert staged_changes.dropped_assignments(saved, {}) == []
+
+
+def test_dropped_assignments_handles_none():
+    assert staged_changes.dropped_assignments(None, {}) == []

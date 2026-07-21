@@ -9,6 +9,7 @@ import os
 import zipfile
 
 from . import hashcache
+from . import staged_originals
 from .checksums import CHECKSUMS_FILE, TRACKING_SIDECARS, read_baseline_any
 from .extract_source import read_extract_source, version_hint_from_name
 
@@ -165,7 +166,18 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None):
                                "\"Transfer Mods to New Version\" instead."
                                % (here, hint), "warning")
             log_cb(f"Importing {len(names)} file(s)...", "info")
+        # Snapshot each pristine original into .orig/ before it's overwritten
+        # (same backup staging takes), so an imported change previews its true
+        # original and "Revert" can undo it without a re-extract.  snapshot()
+        # verifies against the baseline md5, so a file that already diverged
+        # (or a pack entry not in the baseline) is left un-snapshotted rather
+        # than captured wrong.
+        baseline = read_baseline_any(assets_folder)
         for i, name in enumerate(names):
+            rel = name.replace("\\", "/")
+            md5 = baseline.get(rel)
+            if md5 is not None:
+                staged_originals.snapshot(assets_folder, rel, md5)
             zf.extract(name, assets_folder)
             if progress_cb:
                 progress_cb(i + 1, len(names), name)

@@ -101,10 +101,12 @@ def test_curated_rows_display_units_and_labels():
     # Free play is an on/off toggle.
     assert rows["AD_FREE_PLAY"]["kind"] == "toggle"
     assert rows["AD_FREE_PLAY"]["labels"] == {0: "Off", 1: "On"}
-    # Master volume is shown on the machine's 0-16 scale (internal 0-64 / 4).
+    # Master volume is shown in raw firmware units — the old /4 display
+    # assumption was disproved on hardware (Guided Setup titles show raw
+    # values and set their own volume; see adjustments.py header note).
     mv = rows["AD_SOUND_MASTER_VOLUME_SETTING"]
-    assert mv["scale"] == 4
-    assert (mv["default"], mv["min"], mv["max"]) == (16, 0, 16)
+    assert mv["scale"] == 1
+    assert (mv["default"], mv["min"], mv["max"]) == (64, 0, 64)
     # Plain numeric is 1:1.
     cl = rows["AD_CREDIT_LIMIT"]
     assert cl["scale"] == 1 and (cl["default"], cl["min"], cl["max"]) == (30, 4,

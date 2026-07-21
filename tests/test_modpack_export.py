@@ -132,6 +132,54 @@ def test_export_writes_manifest_and_import_reads_it(tmp_path):
     assert not (dest / modpack.MANIFEST_NAME).exists()
 
 
+def test_import_snapshots_pristine_originals(tmp_path):
+    """Import backs up each still-pristine original into .orig/ before
+    overwriting (same backup staging takes), so the imported change can be
+    previewed against its true original and reverted — but never captures a
+    file that already diverged from the baseline, and never one the baseline
+    doesn't know (a wrong snapshot would 'revert' to wrong bytes)."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig-a")                 # pristine
+    _write(dest / "b.wav", b"already-modified")       # diverged before import
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig-a')}\nb.wav\t{_md5(b'orig-b')}\n",
+        encoding="utf-8")
+
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("a.wav", b"MODDED-A")
+        zf.writestr("b.wav", b"MODDED-B")
+        zf.writestr("extra.wav", b"NOT-IN-BASELINE")
+
+    n = modpack.import_mod_pack(str(zip_path), str(dest))
+    assert n == 3
+    assert (dest / "a.wav").read_bytes() == b"MODDED-A"
+    # pristine original captured; divergent + unknown files are not
+    assert (dest / ".orig" / "a.wav").read_bytes() == b"orig-a"
+    assert not (dest / ".orig" / "b.wav").exists()
+    assert not (dest / ".orig" / "extra.wav").exists()
+
+
+def test_import_never_clobbers_existing_snapshot(tmp_path):
+    """A second import must keep the FIRST snapshot — it is the true
+    original; the now-modified file must not replace it."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig-a")
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig-a')}\n", encoding="utf-8")
+
+    for payload in (b"MOD-ONE", b"MOD-TWO"):
+        zip_path = tmp_path / "pack.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("a.wav", payload)
+        modpack.import_mod_pack(str(zip_path), str(dest))
+
+    assert (dest / "a.wav").read_bytes() == b"MOD-TWO"
+    assert (dest / ".orig" / "a.wav").read_bytes() == b"orig-a"
+
+
 def test_import_warns_on_version_mismatch(tmp_path):
     import json
 

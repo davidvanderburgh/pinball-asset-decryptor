@@ -1190,6 +1190,12 @@ class MainWindow:
         self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
+        # Folder each tab's in-memory assignments were made against, kept
+        # across invalidate_asset_scans() (which clears the scan stamps but
+        # not the assignments).  Lets the Build/Export folder-mismatch check
+        # name the real folder instead of "(unknown)" — and recognise a
+        # same-folder re-extract as a match (monkeybug).
+        self._scan_dir_prev = {"audio": "", "video": "", "image": ""}
         # "Group duplicates" (CGC banks): cluster slots that carry
         # byte-identical factory audio under one parent row.  The grouping
         # comes from the plugin's duplicate scan (~10 s on a full PF
@@ -3192,6 +3198,8 @@ class MainWindow:
             staged = self._load_staged_changes(scan_dir)
             self._audio_assignments = staged_changes.live_assignments(
                 staged.get("audio"), self._audio_slots_by_rel)
+            self._warn_dropped_assignments(
+                "audio", staged.get("audio"), self._audio_slots_by_rel)
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
@@ -4465,10 +4473,19 @@ class MainWindow:
         # made both panes identical (monkeybug batch 14).  The .orig snapshot
         # taken when the change was staged is the true original; fall back to
         # the on-disk file when no snapshot exists (pre-snapshot builds).
+        snap_used = False
         if rel in self._audio_changed_on_disk:
             snap = staged_originals.snapshot_path(self._audio_scan_dir, rel)
             if snap:
                 opath = snap
+                snap_used = True
+        # Honest title: with no snapshot, an already-changed slot's on-disk
+        # bytes ARE the replacement — don't call them "Original" (monkeybug
+        # read his imported mod as a missing replacement).
+        self._audio_pane_orig.base_title = (
+            "Current file (already modified)"
+            if rel in self._audio_changed_on_disk and not snap_used
+            else "Original")
         if opath and os.path.isfile(opath):
             self._audio_pane_orig.load(
                 opath, _audio.probe_duration(opath) or 0.0, None,
@@ -4481,14 +4498,28 @@ class MainWindow:
         """(Re)load the Replacement pane for *rel* — after a track change or
         an assign/clear/revert of the currently-loaded slot."""
         from ..core import audio as _audio
+        from ..core import staged_originals
         rpath = self._audio_assignments.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             rdur = _audio.probe_duration(rpath) or 0.0
             self._audio_pane_rep.load(
                 rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
                 autoplay=autoplay)
-        else:
-            self._audio_pane_rep.clear("no replacement assigned")
+            return
+        # No new assignment, but the slot is already changed on disk and the
+        # true original is on the left (its .orig snapshot): the on-disk file
+        # IS the replacement that will build — show it here instead of
+        # "no replacement assigned" (monkeybug read that as a lost mod).
+        if rel in self._audio_changed_on_disk and staged_originals \
+                .snapshot_path(self._audio_scan_dir, rel):
+            slot = self._audio_slots_by_rel.get(rel)
+            cur = slot.abs_path if slot else None
+            if cur and os.path.isfile(cur):
+                self._audio_pane_rep.load(
+                    cur, _audio.probe_duration(cur) or 0.0, None,
+                    autoplay=autoplay)
+                return
+        self._audio_pane_rep.clear("no replacement assigned")
 
     def _audio_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
@@ -4570,6 +4601,7 @@ class MainWindow:
         self._cancel_audio_select_job()
         self._audio_current_rel = None
         if self._audio_pane_orig is not None:
+            self._audio_pane_orig.base_title = "Original"
             self._audio_pane_orig.clear()
         if self._audio_pane_rep is not None:
             self._audio_pane_rep.clear("no replacement assigned")
@@ -4671,6 +4703,11 @@ class MainWindow:
                     if rep and rel in (slots or {})]
             if not live:
                 continue
+            # A cleared scan stamp (invalidate_asset_scans after an extract /
+            # transfer) doesn't orphan the assignments: they still belong to
+            # the folder remembered in _scan_dir_prev — compare and report
+            # with that instead of "(unknown)".
+            scanned = scanned or self._scan_dir_prev.get(label, "")
             scanned_norm = os.path.normcase(os.path.normpath(scanned or ""))
             if scanned_norm != target:
                 out.append((label, len(live), scanned or "(unknown)"))
@@ -5020,6 +5057,8 @@ class MainWindow:
             staged = self._load_staged_changes(scan_dir)
             self._video_assignments = staged_changes.live_assignments(
                 staged.get("video"), self._video_slots_by_rel)
+            self._warn_dropped_assignments(
+                "video", staged.get("video"), self._video_slots_by_rel)
             if "video_trim" in staged:
                 self.video_trim_var.set(bool(staged["video_trim"]))
             if "video_no_conversion" in staged:
@@ -5207,7 +5246,17 @@ class MainWindow:
         folder path (``assets_path != self._*_scan_dir``), so a fresh extract
         that repopulates a folder the tab already scanned would otherwise show
         stale (often empty) results until the user manually re-browses.  Clearing
-        the stamps makes the next ``_maybe_rescan_*`` behave like a Browse."""
+        the stamps makes the next ``_maybe_rescan_*`` behave like a Browse.
+
+        The stamps are remembered in ``_scan_dir_prev`` so the in-memory
+        assignments (which this does NOT clear — the next scan re-homes them
+        from the folder's sidecar) keep their folder identity for the
+        Build/Export folder-mismatch warning."""
+        for key, cur in (("audio", self._audio_scan_dir),
+                         ("video", self._video_scan_dir),
+                         ("image", self._image_scan_dir)):
+            if cur:
+                self._scan_dir_prev[key] = cur
         self._audio_scan_dir = ""
         self._video_scan_dir = ""
         self._image_scan_dir = ""
@@ -5551,10 +5600,18 @@ class MainWindow:
         opath = slot.abs_path if slot else None
         # Already-changed slots hold replacement bytes; the .orig snapshot is
         # the true original (see _audio_load_track).
+        snap_used = False
         if rel in getattr(self, "_video_changed_on_disk", ()):
             snap = staged_originals.snapshot_path(self._video_scan_dir, rel)
             if snap:
                 opath = snap
+                snap_used = True
+        # Honest title when there's no snapshot (see _audio_load_track).
+        self._video_pane_orig.base_title = (
+            "Current file (already modified)"
+            if (rel in getattr(self, "_video_changed_on_disk", ())
+                and not snap_used)
+            else "Original")
         if opath and os.path.isfile(opath):
             self._video_pane_orig.load(opath, autoplay=(autoplay == "orig"))
         else:
@@ -5564,11 +5621,21 @@ class MainWindow:
     def _video_load_rep_pane(self, rel, autoplay=False):
         """(Re)load the Replacement pane for *rel* — after a clip change or
         an assign/clear of the currently-loaded slot."""
+        from ..core import staged_originals
         rpath = self._video_assignments.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             self._video_pane_rep.load(rpath, autoplay=autoplay)
-        else:
-            self._video_pane_rep.clear("no replacement assigned")
+            return
+        # Already-changed slot with its true original on the left: the
+        # on-disk file is the effective replacement (see audio twin).
+        if (rel in getattr(self, "_video_changed_on_disk", ())
+                and staged_originals.snapshot_path(self._video_scan_dir, rel)):
+            slot = self._video_slots_by_rel.get(rel)
+            cur = slot.abs_path if slot else None
+            if cur and os.path.isfile(cur):
+                self._video_pane_rep.load(cur, autoplay=autoplay)
+                return
+        self._video_pane_rep.clear("no replacement assigned")
 
     def _video_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
@@ -5605,6 +5672,7 @@ class MainWindow:
         self._cancel_video_select_job()
         self._video_current_rel = None
         if self._video_pane_orig is not None:
+            self._video_pane_orig.base_title = "Original"
             self._video_pane_orig.clear()
         if self._video_pane_rep is not None:
             self._video_pane_rep.clear("no replacement assigned")
@@ -5791,8 +5859,11 @@ class MainWindow:
         preview.pack(fill=tk.X, padx=10, pady=(4, 2))
         panes = ttk.Frame(preview)
         panes.pack(padx=6, pady=(2, 6))
-        ttk.Label(panes, text="Original", font=(_SANS_FONT, 9)).grid(
-            row=0, column=0, pady=(2, 1))
+        # Kept as attributes so the preview loader can retitle the left pane
+        # honestly for a slot that's already changed on disk (monkeybug).
+        self._image_hdr_orig = ttk.Label(panes, text="Original",
+                                         font=(_SANS_FONT, 9))
+        self._image_hdr_orig.grid(row=0, column=0, pady=(2, 1))
         ttk.Label(panes, text="Replacement", font=(_SANS_FONT, 9)).grid(
             row=0, column=1, pady=(2, 1))
         self._image_canvas = tk.Canvas(
@@ -5901,6 +5972,8 @@ class MainWindow:
             staged = self._load_staged_changes(scan_dir)
             self._image_assignments = staged_changes.live_assignments(
                 staged.get("image"), self._image_slots_by_rel)
+            self._warn_dropped_assignments(
+                "image", staged.get("image"), self._image_slots_by_rel)
             if "image_changed_only" in staged:
                 self.image_changed_only_var.set(
                     bool(staged["image_changed_only"]))
@@ -6327,6 +6400,7 @@ class MainWindow:
             kids = self._image_tree.get_children(rel)
             slot = self._image_slots_by_rel.get(kids[0]) if kids else None
             self._image_current_rel = None
+            self._image_set_orig_header("Original")
             self._image_render_thumb(
                 getattr(self, "_image_canvas", None),
                 slot.abs_path if slot else None, "_image_preview_img_orig")
@@ -6592,21 +6666,50 @@ class MainWindow:
     def _image_render_preview(self, rel):
         """Render *rel*'s original and assigned replacement side-by-side on
         the two preview canvases.  Tolerates a missing Pillow / unreadable
-        image by clearing the affected canvas."""
+        image by clearing the affected canvas.
+
+        A slot already changed on disk (imported mod pack, earlier build)
+        holds the REPLACEMENT bytes: prefer its ``.orig`` snapshot as the true
+        original and show the on-disk file on the replacement side — and when
+        no snapshot exists, retitle the left pane instead of calling modified
+        bytes "Original" (monkeybug read his imported logo as a lost mod)."""
+        from ..core import staged_originals
         slot = self._image_slots_by_rel.get(rel) if rel is not None else None
         rep = self._image_assignments.get(rel) if rel is not None else None
+        opath = slot.abs_path if slot else None
+        changed = (rel in self._image_changed_on_disk
+                   if rel is not None else False)
+        snap = None
+        if changed:
+            snap = staged_originals.snapshot_path(self._image_scan_dir, rel)
+            if snap:
+                opath = snap
+        self._image_set_orig_header(
+            "Current file (already modified)" if changed and not snap
+            else "Original")
+        if rep is None and changed and snap and slot:
+            rep = slot.abs_path
         self._image_render_thumb(
-            getattr(self, "_image_canvas", None),
-            slot.abs_path if slot else None, "_image_preview_img_orig")
+            getattr(self, "_image_canvas", None), opath,
+            "_image_preview_img_orig")
         self._image_render_thumb(
             getattr(self, "_image_canvas_rep", None), rep,
             "_image_preview_img_rep",
             empty_text=("(no replacement assigned — double-click the row "
                         "to pick one)" if slot else ""))
 
+    def _image_set_orig_header(self, text):
+        hdr = getattr(self, "_image_hdr_orig", None)
+        if hdr is not None:
+            try:
+                hdr.configure(text=text)
+            except tk.TclError:
+                pass
+
     def _image_clear_preview(self):
         """Reset the static previews entirely (used on manufacturer switch)."""
         self._image_current_rel = None
+        self._image_set_orig_header("Original")
         self._image_preview_img_orig = None
         self._image_preview_img_rep = None
         for attr in ("_image_canvas", "_image_canvas_rep"):
@@ -6649,6 +6752,25 @@ class MainWindow:
         """Read the staged-changes sidecar for *assets_dir* (``{}`` if none)."""
         from ..core import staged_changes
         return staged_changes.load(assets_dir)
+
+    def _warn_dropped_assignments(self, kind, saved, slots_by_rel):
+        """Log the sidecar assignments a restore had to drop (slot gone, or
+        replacement source file unreachable), so a disconnected NAS drive or a
+        re-extract that renamed slots doesn't silently read as "nothing
+        assigned" (monkeybug).  The sidecar keeps the entries until the user
+        changes an assignment, so fixing the cause and re-scanning restores
+        them."""
+        from ..core import staged_changes
+        dropped = staged_changes.dropped_assignments(saved, slots_by_rel)
+        if not dropped:
+            return
+        for rel, path, why in dropped[:6]:
+            self.append_log(
+                'Saved %s replacement for "%s" wasn\'t restored — %s:\n'
+                '        %s' % (kind, rel, why, path), "error")
+        if len(dropped) > 6:
+            self.append_log("…and %d more saved %s replacement(s) like this."
+                            % (len(dropped) - 6, kind), "error")
 
     def _seed_group_tags_from_library(self, scan_dir):
         """Fill in group names the user gave a PREVIOUS extract of this same
@@ -7772,8 +7894,9 @@ class MainWindow:
                     "uses these on a fresh flash or after a factory reset; a "
                     "machine that has already been set up keeps its own "
                     "settings (Stern stores those on the board, not the card). "
-                    "Save to Card Image writes the changes straight into the "
-                    "image, ready to flash.",
+                    "Apply at Next Build stages the changes like any other "
+                    "mod — they're baked into the image you Build, and your "
+                    "master image stays untouched.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         intro.bind("<Configure>", lambda e: intro.configure(
@@ -7855,18 +7978,45 @@ class MainWindow:
         self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
 
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
-        self._settings_apply_btn = ttk.Button(
-            arow, text="Save to Card Image", command=self._settings_apply,
+        # Primary: stage the changes for the next Build — same model as every
+        # Replace tab, so the master image is never modified in place
+        # (monkeybug was surprised Save wrote into his master template).
+        self._settings_stage_btn = ttk.Button(
+            arow, text="Apply at Next Build", command=self._settings_stage,
             state=tk.DISABLED)
-        self._settings_apply_btn.pack(side=tk.LEFT)
+        self._settings_stage_btn.pack(side=tk.LEFT)
+        _Tooltip(
+            self._settings_stage_btn,
+            "Stages these defaults with the shared assets folder; the next "
+            "card you Build gets them baked in. Your master image on disk is "
+            "not touched.",
+            lambda: self._current_theme)
+        self._settings_clear_staged_btn = ttk.Button(
+            arow, text="Clear Staged", command=self._settings_clear_staged,
+            state=tk.DISABLED)
+        self._settings_clear_staged_btn.pack(side=tk.LEFT, padx=(6, 0))
         self._settings_reset_btn = ttk.Button(
             arow, text="Reset Fields", command=self._settings_reset,
             state=tk.DISABLED)
         self._settings_reset_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # Advanced: the old in-place write, for editing an image without
+        # rebuilding.  Explicit wording so nobody mistakes it for the staged
+        # flow.
+        self._settings_apply_btn = ttk.Button(
+            arow, text="Write into This Image Now…",
+            command=self._settings_apply, state=tk.DISABLED)
+        self._settings_apply_btn.pack(side=tk.LEFT, padx=(18, 0))
+        _Tooltip(
+            self._settings_apply_btn,
+            "Writes the changed defaults straight into the card image picked "
+            "above, in place. Use this only when you want to modify that "
+            "exact file — for the normal mod flow use Apply at Next Build.",
+            lambda: self._current_theme)
         self._settings_status = ttk.Label(arow, text="",
                                           font=(_SANS_FONT, 9))
         self._settings_status.pack(side=tk.LEFT, padx=(10, 0))
         self._settings_refresh_presets()
+        self._settings_refresh_staged_state()
 
     # ---- Default Settings: presets ----------------------------------
     def _presets_blob(self):
@@ -7918,7 +8068,7 @@ class MainWindow:
                 self._settings_set_row(
                     r, int(vals[r["name"]]) // r.get("scale", 1))
         self._settings_status.configure(
-            text="Loaded preset \"%s\" — review, then Save to Card Image."
+            text="Loaded preset \"%s\" — review, then Apply at Next Build."
                  % name)
 
     def _settings_save_preset(self):
@@ -7994,9 +8144,20 @@ class MainWindow:
             return
         self._settings_busy = True
         self._settings_clear_form()
-        self._settings_empty.configure(text="Reading firmware…")
+        # Same big animated indicator the Replace tabs' scans use, so the
+        # (possibly slow, NAS-bound) firmware read never looks idle
+        # (monkeybug asked for the swirl here).
         self._settings_empty.grid()
+        try:
+            self._scan_empty_font.setdefault(
+                "settings", str(self._settings_empty.cget("font")))
+            self._settings_empty.configure(font=(_SANS_FONT, 18, "bold"))
+        except tk.TclError:
+            pass
+        self._scan_msgs["settings"] = "Reading the image's firmware…"
+        self._start_scan_spinner("settings")
         self._settings_status.configure(text="")
+        self._settings_stage_btn.config(state=tk.DISABLED)
         self._settings_apply_btn.config(state=tk.DISABLED)
         self._settings_reset_btn.config(state=tk.DISABLED)
         import threading
@@ -8021,6 +8182,14 @@ class MainWindow:
                     pass
                 return
             self._settings_busy = False
+            # Firmware read over — stop the swirl and put the empty label's
+            # normal font back before any (small) message goes into it.
+            self._stop_scan_spinner("settings")
+            try:
+                self._settings_empty.configure(
+                    font=self._scan_empty_font.get("settings", ""))
+            except tk.TclError:
+                pass
             res = state["done"]
             # The Card Image box changed while this load ran (a dropped
             # request) — reload so the form never shows one card's values
@@ -8031,6 +8200,7 @@ class MainWindow:
                 return
             if res[0] == "err":
                 self._settings_table = None
+                self._settings_stage_btn.config(state=tk.DISABLED)
                 self._settings_apply_btn.config(state=tk.DISABLED)
                 self._settings_reset_btn.config(state=tk.DISABLED)
                 self._settings_empty.configure(
@@ -8150,10 +8320,15 @@ class MainWindow:
                       foreground="#888888").grid(
                 row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
+        self._settings_stage_btn.config(state=tk.NORMAL)
         self._settings_apply_btn.config(state=tk.NORMAL)
         self._settings_reset_btn.config(state=tk.NORMAL)
+        self._settings_refresh_staged_state()
+        staged_n = len(self.staged_default_settings(self._settings_staged_dir()))
         self._settings_status.configure(
-            text="%d settings loaded." % len(rows))
+            text="%d settings loaded." % len(rows)
+            + (" %d setting(s) already staged for the next Build."
+               % staged_n if staged_n else ""))
         # If a preset is marked auto-apply, overlay it onto the freshly loaded
         # form so the user sees (and can Apply) their preset without re-typing.
         self._settings_refresh_presets()
@@ -8162,7 +8337,7 @@ class MainWindow:
             self._settings_load_preset(active)
             self._settings_status.configure(
                 text="%d settings loaded; preset \"%s\" applied to the form — "
-                     "click Save to Card Image to write it."
+                     "it's baked into every card you Build automatically."
                      % (len(rows), active))
 
     def _settings_set_row(self, r, display_value):
@@ -8181,6 +8356,91 @@ class MainWindow:
             self._settings_set_row(r, r["default"])
         self._settings_status.configure(text="Fields reset to the image's "
                                              "current defaults.")
+
+    # ---- Default Settings: staged-for-Build flow ---------------------
+    # The primary flow: changed defaults are recorded in the shared assets
+    # folder's .staged_changes.json (key "settings", internal units) and the
+    # Write flow bakes them into the OUTPUT image after a successful build —
+    # the same staged model as every Replace tab, so the master image on disk
+    # is never modified (monkeybug).
+
+    def _settings_staged_dir(self):
+        """The shared assets folder staged settings ride with ('' if unset)."""
+        d = (self.write_assets_var.get() or "").strip()
+        return d if d and os.path.isdir(d) else ""
+
+    def staged_default_settings(self, assets_dir):
+        """``{AD_name: internal_value}`` staged for *assets_dir*, or ``{}``.
+        Called by the app's Write flow after a successful build."""
+        from ..core import staged_changes
+        vals = staged_changes.load(assets_dir).get("settings")
+        if not isinstance(vals, dict):
+            return {}
+        out = {}
+        for name, v in vals.items():
+            try:
+                out[str(name)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _settings_stage(self):
+        if self._settings_busy or self._settings_table is None:
+            return
+        assets_dir = self._settings_staged_dir()
+        if not assets_dir:
+            messagebox.showinfo(
+                "No assets folder",
+                "Set the shared assets folder first (the Extract output the "
+                "Replace and Write tabs use) — staged settings ride with "
+                "that folder and are applied when you Build.")
+            return
+        changes = self._settings_changes()
+        if not changes:
+            self._settings_status.configure(
+                text="No changes to stage — edit a New default first.")
+            return
+        from ..core import staged_changes
+        data = staged_changes.load(assets_dir)
+        data["settings"] = {k: int(v) for k, v in changes.items()}
+        staged_changes.save(assets_dir, data)
+        self._settings_refresh_staged_state()
+        self._settings_status.configure(
+            text="%d setting(s) staged — they'll be baked into the next "
+                 "card you Build." % len(changes))
+        self.append_log(
+            "Defaults: staged %d setting(s) for the next Build (%s)."
+            % (len(changes), ", ".join(sorted(changes))), "success")
+
+    def _settings_clear_staged(self):
+        assets_dir = self._settings_staged_dir()
+        if not assets_dir:
+            return
+        from ..core import staged_changes
+        data = staged_changes.load(assets_dir)
+        n = len(data.get("settings") or {})
+        if "settings" in data:
+            del data["settings"]
+            staged_changes.save(assets_dir, data)
+        self._settings_refresh_staged_state()
+        self._settings_status.configure(
+            text="Cleared %d staged setting(s)." % n if n
+            else "Nothing was staged.")
+
+    def _settings_refresh_staged_state(self):
+        """Reflect whether the shared assets folder has staged settings in
+        the Clear Staged button (and its tooltip-free count)."""
+        btn = getattr(self, "_settings_clear_staged_btn", None)
+        if btn is None:
+            return
+        assets_dir = self._settings_staged_dir()
+        n = len(self.staged_default_settings(assets_dir)) if assets_dir else 0
+        try:
+            btn.configure(
+                text=("Clear Staged (%d)" % n) if n else "Clear Staged",
+                state=(tk.NORMAL if n else tk.DISABLED))
+        except tk.TclError:
+            pass
 
     def _settings_changes(self):
         """``{AD_name: internal_value}`` for rows whose display value differs
@@ -8226,6 +8486,7 @@ class MainWindow:
                 icon="warning"):
             return
         self._settings_busy = True
+        self._settings_stage_btn.config(state=tk.DISABLED)
         self._settings_apply_btn.config(state=tk.DISABLED)
         self._settings_reset_btn.config(state=tk.DISABLED)
         self._settings_status.configure(text="Writing…")
@@ -8257,6 +8518,7 @@ class MainWindow:
                     pass
                 return
             self._settings_busy = False
+            self._settings_stage_btn.config(state=tk.NORMAL)
             self._settings_apply_btn.config(state=tk.NORMAL)
             self._settings_reset_btn.config(state=tk.NORMAL)
             res = state["done"]

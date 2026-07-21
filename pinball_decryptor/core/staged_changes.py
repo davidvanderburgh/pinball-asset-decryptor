@@ -72,3 +72,24 @@ def live_assignments(saved, slots_by_rel):
                 and os.path.isfile(path)):
             out[rel] = path
     return out
+
+
+def dropped_assignments(saved, slots_by_rel):
+    """The entries :func:`live_assignments` would drop, as ``[(rel, path,
+    reason)]`` — the slot no longer exists in this folder, or the replacement
+    source file isn't reachable.
+
+    A disconnected NAS share / mapped drive looks exactly like a missing
+    source file, so callers must WARN with these instead of quietly building
+    or exporting without a recorded replacement (monkeybug).
+    """
+    out = []
+    for rel, path in (saved or {}).items():
+        if not path or not isinstance(path, str):
+            continue
+        if rel not in slots_by_rel:
+            out.append((rel, path, "its slot isn't in this folder"))
+        elif not os.path.isfile(path):
+            out.append((rel, path, "the replacement file is missing "
+                                   "(NAS/drive disconnected?)"))
+    return out

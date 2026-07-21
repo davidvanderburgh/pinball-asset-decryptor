@@ -1644,9 +1644,16 @@ class App:
                 )
                 self.msg_queue.put(LogMsg(
                     f"Mod pack imported: {n} file(s).", "success"))
+                # Re-scan the Replace tabs so the imported changes show up
+                # immediately — without this the tabs keep the pre-import scan
+                # ("0 slots changed") until a manual re-scan (monkeybug).  Same
+                # refresh the mod-transfer flow does.
+                self.root.after(0, self.window.reload_assets_tabs)
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Import Complete",
-                    f"Imported {n} file(s)."))
+                    f"Imported {n} file(s).\n\n"
+                    f"The Replace tabs are re-scanning so the imported "
+                    f"changes show up."))
             except Exception as e:
                 self.msg_queue.put(LogMsg(f"Import failed: {e}", "error"))
                 self.root.after(0, lambda: messagebox.showerror(
@@ -2200,6 +2207,28 @@ class App:
         slots_by_rel = {s.rel_path: s for s in slots}
         assignments = staged_changes.live_assignments(saved.get(kind),
                                                       slots_by_rel)
+        # Never silently drop a recorded replacement: a disconnected NAS or a
+        # re-extract that renamed slots looks identical to "nothing assigned",
+        # and the result is a build/export missing the user's changes with no
+        # trace in the log (monkeybug).
+        dropped = staged_changes.dropped_assignments(saved.get(kind),
+                                                     slots_by_rel)
+        if dropped:
+            for rel, path, why in dropped[:6]:
+                self.msg_queue.put(LogMsg(
+                    f"Recorded {kind} replacement for \"{rel}\" can't be "
+                    f"applied — {why}:\n        {path}", "error"))
+            if len(dropped) > 6:
+                self.msg_queue.put(LogMsg(
+                    f"…and {len(dropped) - 6} more recorded {kind} "
+                    f"replacement(s) like this.", "error"))
+            if not assignments:
+                self.msg_queue.put(LogMsg(
+                    f"NONE of the {len(dropped)} recorded {kind} "
+                    f"replacement(s) for this folder can be applied — "
+                    f"continuing WITHOUT them. If they live on a NAS or "
+                    f"mapped drive, reconnect it and retry; otherwise "
+                    f"re-assign them on the Replace tab.", "error"))
         if not assignments:
             return None
 
@@ -2587,6 +2616,10 @@ class App:
                 # Bake in the auto-apply Default Settings preset, if any, so a
                 # user who set it up never has to revisit the Defaults tab.
                 self._apply_active_preset_to_build()
+                # Then the folder's staged settings (Defaults tab "Apply at
+                # Next Build") — applied second so an explicit staging wins
+                # over the standing preset on any overlapping setting.
+                self._apply_staged_settings_to_build()
                 fails = self._staging_failures
                 if fails:
                     # The build succeeded but some assigned replacements
@@ -2926,6 +2959,50 @@ class App:
                 "Couldn't apply the Default Settings preset \"%s\" to the "
                 "build (%s) — you can still set defaults on the Defaults tab."
                 % (active, e), "warning")
+
+    def _apply_staged_settings_to_build(self):
+        """After a successful Stern build, bake the assets folder's staged
+        default settings (Defaults tab → Apply at Next Build) into the output
+        card image.  Mirrors :meth:`_apply_active_preset_to_build`; runs after
+        it so staged values override the standing preset.  The staging is kept
+        (a rebuild gets it again, like every other staged change) until the
+        user clears it on the Defaults tab."""
+        mfr = self._current_mfr
+        if mfr is None or not getattr(mfr.capabilities, "settings_editor",
+                                      False):
+            return
+        assets_dir = self.window.write_assets_var.get().strip()
+        if not assets_dir or not os.path.isdir(assets_dir):
+            return
+        vals = self.window.staged_default_settings(assets_dir)
+        if not vals:
+            return
+        try:
+            out = self.window._target_write_path()
+        except Exception:
+            out = None
+        if not out or not os.path.isfile(out):
+            return
+        try:
+            from .plugins.stern.explorer import CardImage
+            with CardImage(out) as c:
+                table, part, path = c.adjustment_table()
+                overrides = {}
+                for name, v in vals.items():
+                    if name in table.by_name:
+                        e = table.get(name)
+                        overrides[name] = max(e["min"], min(e["max"], int(v)))
+                if overrides:
+                    n, _ref = c.write_adjustment_defaults(
+                        part, path, table, overrides)
+                    self.window.append_log(
+                        "Applied %d staged default setting(s) to the built "
+                        "image (Defaults tab)." % n, "success")
+        except Exception as e:
+            self.window.append_log(
+                "Couldn't apply the staged default settings to the build "
+                "(%s) — they stay staged; the Defaults tab can also write "
+                "them into an image directly." % e, "warning")
 
     def _on_admin_warning_collapsed_change(self, collapsed):
         """Persist whether the admin-warning body is collapsed so a returning

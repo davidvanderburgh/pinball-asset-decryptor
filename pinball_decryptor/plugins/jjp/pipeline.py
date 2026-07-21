@@ -541,6 +541,35 @@ if __name__ == "__main__":
 '''
 
 
+_ENOSPC = "No space left on device"
+
+
+def _with_disk_full_hint(message):
+    """Append a "how to fix it" pointer when *message* is an out-of-space error.
+
+    The staging area lives inside the helper Linux environment (WSL on
+    Windows, Docker on macOS), whose virtual disk is capped independently of
+    the host drive — so users see "No space left on device" while their own
+    disk shows hundreds of GB free.  Without a pointer to the actual knob the
+    error reads as nonsense.
+    """
+    if _ENOSPC not in message:
+        return message
+    if sys.platform == "win32":
+        return (message
+                + "\n\nWSL's virtual disk is full — it is separate from your "
+                  "Windows drive, so Windows can show plenty of free space "
+                  "while WSL has none. To give it more room, click the "
+                  "⚙ settings button (top right) → \"Manage disk "
+                  "space…\" → \"Resize WSL disk…\", then run "
+                  "this again.")
+    return (message
+            + "\n\nThe helper Linux environment (Docker) has run out of disk "
+              "space — its virtual disk is separate from your drive. Increase "
+              "the virtual disk limit in Docker Desktop (Settings → "
+              "Resources) or free up space in it, then run this again.")
+
+
 class PipelineError(Exception):
     """User-friendly pipeline error with phase context."""
     def __init__(self, phase, message):
@@ -1102,6 +1131,12 @@ class DecryptionPipeline:
                 ]):
                     self.log(f"  {clean}", "info")
         except CommandError as e:
+            # Out of space leaves a truncated-but-present image behind, so the
+            # "non-empty output" forgiveness below would wave it through and
+            # the corruption would only surface as a baffling mount failure.
+            if _ENOSPC in (e.output or ""):
+                raise PipelineError("Extract", _with_disk_full_hint(
+                    f"partclone.restore ran out of space: {e.output}")) from e
             # partclone may exit non-zero but still produce valid output
             try:
                 self.executor.run(f"test -s '{self._raw_img_path}'", timeout=5)
@@ -1167,8 +1202,8 @@ class DecryptionPipeline:
                         pct = float(m.group(1))
                         self.on_progress(int(pct), 100, "Extracting filesystem...")
         except CommandError as e:
-            raise PipelineError("Extract",
-                f"Python extraction failed: {e.output}") from e
+            raise PipelineError("Extract", _with_disk_full_hint(
+                f"Python extraction failed: {e.output}")) from e
 
     # --- Phase 1: Mount ---
 
@@ -1194,6 +1229,11 @@ class DecryptionPipeline:
             )
             self.log(f"Mounted at {self.mount_point}", "success")
         except CommandError as e:
+            # Out of space is not a corrupt-image problem — re-extracting into
+            # the same full disk just burns minutes and fails the same way.
+            if _ENOSPC in (e.output or ""):
+                raise PipelineError("Mount", _with_disk_full_hint(
+                    f"Failed to mount image: {e.output}")) from e
             # If this was a cached image, it may be corrupt — delete and re-extract
             if self._raw_img_path and self._is_iso():
                 self.log(
@@ -1229,11 +1269,11 @@ class DecryptionPipeline:
                     )
                     self.log(f"Mounted at {self.mount_point}", "success")
                 except CommandError as e2:
-                    raise PipelineError("Mount",
-                        f"Failed to mount freshly extracted image: {e2.output}") from e2
+                    raise PipelineError("Mount", _with_disk_full_hint(
+                        f"Failed to mount freshly extracted image: {e2.output}")) from e2
             else:
-                raise PipelineError("Mount",
-                    f"Failed to mount image: {e.output}") from e
+                raise PipelineError("Mount", _with_disk_full_hint(
+                    f"Failed to mount image: {e.output}")) from e
 
     def _cleanup_stale_mounts(self, wsl_img):
         """Clean up stale mount points and loop devices from previous runs."""

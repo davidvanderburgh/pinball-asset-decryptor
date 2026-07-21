@@ -233,3 +233,64 @@ def test_jjp_capabilities_match_expected(manufacturers_by_key):
     assert caps.modpack is True
     assert caps.apply_delta is False
     assert caps.iso is True
+
+
+def test_jjp_enospc_errors_point_at_the_disk_dialog(monkeypatch):
+    """"No space left on device" comes from WSL/Docker's own capped virtual
+    disk while the user's real drive shows hundreds of GB free, so the raw
+    error reads as nonsense.  Any ENOSPC pipeline error must carry the path
+    to the actual knob: ⚙ settings → Manage disk space → Resize WSL disk
+    (Windows) / Docker Desktop's disk limit (macOS)."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    msg = ("mkdir: cannot create directory '/mnt/jjp_0ae5a6a0': "
+           "No space left on device")
+
+    monkeypatch.setattr(P.sys, "platform", "win32")
+    hinted = P._with_disk_full_hint(msg)
+    assert hinted.startswith(msg)
+    assert "Manage disk space" in hinted
+    assert "Resize WSL disk" in hinted
+
+    monkeypatch.setattr(P.sys, "platform", "darwin")
+    hinted = P._with_disk_full_hint(msg)
+    assert "Docker Desktop" in hinted
+
+    # Unrelated failures must pass through untouched.
+    other = "mount: wrong fs type, bad option, bad superblock"
+    assert P._with_disk_full_hint(other) == other
+
+
+def test_jjp_mount_enospc_fails_fast_with_resize_hint(monkeypatch):
+    """Regression guard — Sonic extract, 2026-07-21.  With WSL's disk full,
+    the first mount failure took the "cached image may be corrupt" branch:
+    it deleted the image, re-extracted for minutes into the SAME full disk,
+    then died anyway on a bare mkdir ENOSPC with no guidance.  An
+    out-of-space mount failure must skip the re-extract and point at the
+    resize dialog immediately."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    class _FullDiskExecutor:
+        def run(self, cmd, timeout=None):
+            if cmd.startswith("mkdir -p "):
+                raise P.CommandError(cmd, 1,
+                    "mkdir: cannot create directory "
+                    "'/mnt/jjp_0ae5a6a0': No space left on device")
+            return ""  # stale-mount/loop-device cleanup probes
+
+    monkeypatch.setattr(P.sys, "platform", "win32")
+    pipe = object.__new__(P.DecryptionPipeline)
+    pipe.executor = _FullDiskExecutor()
+    pipe.log = lambda *a, **k: None
+    pipe.on_phase = lambda *a, **k: None
+    pipe._raw_img_path = "/var/tmp/jjp_raw_fake.img"
+    pipe._is_iso = lambda: True
+    reextracted = []
+    pipe._phase_extract = lambda: reextracted.append(True)
+
+    with pytest.raises(P.PipelineError) as exc:
+        pipe._phase_mount()
+    assert "Resize WSL disk" in str(exc.value)
+    assert not reextracted, (
+        "ENOSPC must not trigger the delete-and-re-extract retry — "
+        "re-extracting into the same full disk cannot succeed.")

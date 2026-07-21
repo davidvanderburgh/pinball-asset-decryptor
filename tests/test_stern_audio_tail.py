@@ -581,3 +581,113 @@ def test_decode_length_and_tail_roundtrip(title):
 
     emu.close()
     assert checked >= 1, "%s: no codec-0 sound found to test" % title
+
+
+# --------------------------------------------------------------------------
+# Full-length verification of the body we're about to write.
+#
+# _recovery_valid is only a pre-flight: it re-encodes the sound's OWN audio
+# over the first 4 blocks (800 frames -- 4.3% of a 425 ms sound), so a
+# keystream recovery that holds at the head and degrades later would ship
+# unnoticed and decode to noise on the machine.  _verify_encoded checks the
+# ACTUAL bytes over the WHOLE emitted range for one extra decode.
+# --------------------------------------------------------------------------
+def _verify_fixture(decoded, length=4000, chan=1, body_off=64, delta=0):
+    """(emu, p, start) whose decode() returns ``decoded`` (an L array, or an
+    (L, R) pair for stereo)."""
+    import types
+    import numpy as np
+
+    stereo = chan == 2
+    step = 4 if stereo else 2
+    stock = bytes(len(   # plenty of backing bytes for the overlay to read
+        decoded[0] if stereo else decoded) * step + body_off + 4096)
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock[sl]
+
+        def size(self):
+            return len(stock)
+
+    def decode(p, max_secs=None, cancel=None, progress=None):
+        if stereo:
+            return (np.asarray(decoded[0]), np.asarray(decoded[1]), True)
+        return (np.asarray(decoded), None, False)
+
+    emu = types.SimpleNamespace(mm=MM(), decode=decode)
+    p = {"length": length, "body_off": body_off, "chan": chan, "scale": 3,
+         "idx": 4448}
+    return emu, p, body_off + step * delta
+
+
+def test_verify_encoded_accepts_exact_match():
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _verify_encoded
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    tgt = (np.arange(n) % 900 - 450).astype(np.int64)
+    emu, p, start = _verify_fixture(tgt)
+    _verify_encoded(emu, p, start, b"\0" * 8, tgt, None, np)   # must not raise
+
+
+def test_verify_encoded_catches_late_block_divergence():
+    """The exact gap _recovery_valid leaves: head fine, tail wrong."""
+    import numpy as np
+    import pytest
+    from pinball_decryptor.plugins.stern.engine import (_verify_encoded,
+                                                        _EncodeVerifyError)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    tgt = (np.arange(n) % 900 - 450).astype(np.int64)
+    got = tgt.copy()
+    bad_at = 3000                       # way past the 4-block (800) pre-flight
+    assert bad_at > 800
+    got[bad_at] += 5000
+    emu, p, start = _verify_fixture(got)
+    with pytest.raises(_EncodeVerifyError) as e:
+        _verify_encoded(emu, p, start, b"\0" * 8, tgt, None, np)
+    assert "5000" in str(e.value) and str(bad_at) in str(e.value)
+
+
+def test_verify_encoded_exempts_shared_head_only_on_shifted_builds():
+    """delta<0: the head word is shared with the layout predecessor and is a
+    deliberate compromise, so the first block is exempt.  delta=0 (e.g. the
+    Elvira HoH spinner idx4448) has no shared word -- nothing is exempt."""
+    import numpy as np
+    import pytest
+    from pinball_decryptor.plugins.stern.engine import (_verify_encoded,
+                                                        _EncodeVerifyError)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    tgt = np.zeros(n, np.int64)
+    got = tgt.copy()
+    got[0] = 8255                       # a frame-0 impulse like the real ones
+
+    emu, p, start = _verify_fixture(got, delta=-1)
+    _verify_encoded(emu, p, start, b"\0" * 8, tgt, None, np)   # exempt
+
+    emu0, p0, start0 = _verify_fixture(got, delta=0)
+    with pytest.raises(_EncodeVerifyError):
+        _verify_encoded(emu0, p0, start0, b"\0" * 8, tgt, None, np)
+
+
+def test_verify_encoded_checks_both_stereo_channels():
+    import numpy as np
+    import pytest
+    from pinball_decryptor.plugins.stern.engine import (_verify_encoded,
+                                                        _EncodeVerifyError)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    L = (np.arange(n) % 700 - 350).astype(np.int64)
+    R = (np.arange(n) % 500 - 250).astype(np.int64)
+    badR = R.copy()
+    badR[2500] -= 4242
+    emu, p, start = _verify_fixture((L, badR), chan=2)
+    with pytest.raises(_EncodeVerifyError) as e:
+        _verify_encoded(emu, p, start, b"\0" * 8, L, R, np)
+    assert "R channel" in str(e.value)

@@ -3443,6 +3443,81 @@ def _recovery_valid(emu, gr, sr, p, np, nblk=4):
         return False
 
 
+class _EncodeVerifyError(Exception):
+    """The body we were about to write does not decode back to the target.
+
+    Raised by :func:`_verify_encoded`; callers treat it exactly like a
+    ``_recovery_valid`` failure — skip the sound, leave it unchanged, say so."""
+
+
+def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None):
+    """Check the ACTUAL bytes we're about to write decode back to the target,
+    over the WHOLE emitted range.
+
+    ``_recovery_valid`` is only a pre-flight: it re-encodes the sound's own
+    audio over the first few blocks (4 blocks = ~4% of a 425 ms sound), so a
+    keystream recovery that holds at the head but degrades later would ship
+    unnoticed and decode to noise on the machine.  This is the honest check —
+    it costs one extra decode (not a second encode) and covers every sample we
+    actually lay down.
+
+    The first ``BLOCK`` frames are exempt on delta<0 keys: there the head word
+    is physically shared with the layout predecessor, so it is deliberately a
+    compromise between the two keystreams and any residual is absorbed by a
+    short decay ramp — that head legitimately differs from the fitted target
+    (see :func:`_resolve_shared_boundary`).  On delta=0 keys nothing is exempt.
+
+    Raises :class:`_EncodeVerifyError` on mismatch."""
+    from .spike2.emulator import emitted_length, BLOCK
+    # Verification needs a booted emulator and a real slot; without either
+    # there is nothing to check against (only unit tests exercising the
+    # target-fitting half of the encoders get here).  Both always exist on the
+    # Write path.
+    if emu is None or "body_off" not in p:
+        return
+    n = emitted_length(p["length"])
+    if n <= 0:
+        return
+    stereo = p["chan"] == 2
+    step = 4 if stereo else 2
+    delta = (start - p["body_off"]) // step
+    lo = BLOCK if delta < 0 else 0
+    if lo >= n:
+        return
+    if not isinstance(emu.mm, _BodyOverlay):
+        emu.mm = _BodyOverlay(emu.mm)
+    saved = emu.mm.patch
+    emu.mm.patch = (start, bytes(body))
+    try:
+        out = emu.decode(p)
+    finally:
+        emu.mm.patch = saved
+    if out is None:
+        raise _EncodeVerifyError("idx %d: re-decode of the encoded body failed"
+                                 % p["idx"])
+    got = [np.asarray(out[0], np.int64)]
+    want = [np.asarray(tgtL, np.int64)]
+    if stereo and out[2] and out[1] is not None and tgtR is not None:
+        got.append(np.asarray(out[1], np.int64))
+        want.append(np.asarray(tgtR, np.int64))
+    for ch, (g, w) in enumerate(zip(got, want)):
+        m = min(len(g), len(w), n)
+        if m <= lo:
+            continue
+        d = np.abs(g[lo:m] - w[lo:m])
+        if not d.size:
+            continue
+        worst = int(np.argmax(d))
+        err = int(d[worst])
+        if err:
+            at = lo + worst
+            raise _EncodeVerifyError(
+                "idx %d: encoded body does not decode to the requested audio "
+                "(%s channel differs by %d counts at sample %d of %d, %.0f ms in)"
+                % (p["idx"], "LR"[ch] if stereo else "mono", err, at, n,
+                   at / 44.1))
+
+
 def _slot_end_map(params):
     """``{slot_end_byte_offset: p}`` — who ends exactly where.  Cat-0 sounds
     are packed back-to-back, so the sound ending at another's ``body_off`` is
@@ -3685,6 +3760,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
+    _verify_encoded(emu, p, start, body, tgt, None, np, log=log)
     return start, body
 
 
@@ -3704,6 +3780,7 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     start, body = sr.encode_sound(p, L, R)
     body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
                                     sr=sr, log=log)
+    _verify_encoded(emu, p, start, body, L, R, np, log=log)
     return start, body
 
 
@@ -3772,10 +3849,17 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                 log("idx %d: re-encode isn't bit-exact for this sound's codec "
                     "(skipped -- left unchanged in the output)." % idx, "warning")
                 continue
-            off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred, log=log)
-                         if p["chan"] == 2
-                         else _encode_mono(emu, gr, p, wav, np, pred=pred,
-                                           log=log))
+            try:
+                off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
+                                            log=log)
+                             if p["chan"] == 2
+                             else _encode_mono(emu, gr, p, wav, np, pred=pred,
+                                               log=log))
+            except _EncodeVerifyError as e:
+                skipped.append(idx)
+                log("%s -- skipped, left unchanged in the output." % e,
+                    "warning")
+                continue
             patches[off] = body
             log("Re-encoded idx %d (%s, %d samples)."
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),

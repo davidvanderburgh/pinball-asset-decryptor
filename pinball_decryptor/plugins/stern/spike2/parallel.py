@@ -118,7 +118,8 @@ def encode_one(task):
     global _ENC_GR, _ENC_SR
     import numpy as np
 
-    from ..engine import _encode_mono, _encode_stereo, _recovery_valid
+    from ..engine import (_encode_mono, _encode_stereo, _recovery_valid,
+                          _EncodeVerifyError)
     from .codec import GenRecover, StereoRecover
     idx, wav_path = task
     p = _ENC_BYIDX.get(idx)
@@ -131,11 +132,17 @@ def encode_one(task):
     if not _recovery_valid(_ENC_EMU, _ENC_GR, _ENC_SR, p, np):
         return (idx, p["body_off"], None, False)
     pred = _ENC_ENDS.get(p["body_off"]) if _ENC_ENDS else None
-    if p["chan"] == 2:
-        off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np,
-                                   pred=pred)
-    else:
-        off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np, pred=pred)
+    # A body that doesn't decode back to the request is the same class of
+    # failure as a codec we can't re-encode: skip it, never write it blind.
+    try:
+        if p["chan"] == 2:
+            off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np,
+                                       pred=pred)
+        else:
+            off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np,
+                                     pred=pred)
+    except _EncodeVerifyError:
+        return (idx, p["body_off"], None, False)
     return (idx, off, bytes(body), True)
 
 

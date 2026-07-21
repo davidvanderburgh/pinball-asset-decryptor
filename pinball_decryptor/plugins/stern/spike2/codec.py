@@ -30,7 +30,7 @@ from unicorn.arm_const import (UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1,
                                UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10,
                                UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP)
 
-from .emulator import VOL, _algn
+from .emulator import BLOCK, VOL, _algn
 
 _md = Cs(CS_ARCH_ARM, CS_MODE_ARM)
 _md.detail = True
@@ -95,6 +95,37 @@ def decode_word(word, r, x, qmul):
     s = (_rorv(int(word) & 0xffff, int(r) & 0xf) ^ (int(x) & 0xffff)) & 0xffff
     v = s - 0x10000 if s & 0x8000 else s
     return (int(qmul) * v) >> 16
+
+
+# Frames at the very END of a slot left as stock bytes when we encode the
+# lead-out (see ``_encode_leadout``).  A delta<0 sound reads its frame 0 from
+# the word(s) BELOW its body_off -- which physically live in the layout
+# PREDECESSOR's last frames.  So the tail of every slot may be the next
+# sound's head, and rewriting it would clobber that head (the mirror of
+# ``engine._resolve_shared_boundary``).  Observed deltas are -1 (Elvira HoH
+# 1.13, 303/400 sampled) and -2 (LZ 1.11 idx5103); 8 frames is generous cover
+# and still only 0.18 ms of stock audio versus the 4.5 ms we used to leave.
+LEADOUT_MARGIN = 8
+
+
+def extend_length(p, extra):
+    """A copy of ``p`` whose header length is ``extra`` samples longer.
+
+    Keystream recovery drives the firmware codec, and the codec stops at the
+    sound's own length -- so recovery past the emitted range captures nothing
+    at the true length (the v0.57.2 finding) but works fine once the header
+    says the sound is longer.  The length lives at +0x10 of the raw object.
+    Returns None when there's no raw object to patch."""
+    q = dict(p, length=int(p["length"]) + int(extra))
+    raw = p.get("_rawobj")
+    if not raw:
+        return None
+    b = bytearray(raw)
+    if len(b) < 0x14:
+        return None
+    struct.pack_into("<I", b, 0x10, q["length"])
+    q["_rawobj"] = bytes(b)
+    return q
 
 
 def pick_shared_word(pred_ctx, self_ctx, tol=2):
@@ -365,7 +396,47 @@ class GenRecover:
             s = max(0, -lo); e = min(m, length - lo)  # clip words out of range
             if s < e:
                 body[lo + s:lo + e] = enc[s:e]
+        self._encode_leadout(p, body, delta, d)
         return start, body.tobytes()
+
+    def _encode_leadout(self, p, body, delta, d):
+        """Encode the lead-out block to SILENCE instead of leaving stock bytes.
+
+        The encode proper only covers the emitted range (``length - BLOCK``).
+        v0.57.2 seeded the rest from the ORIGINAL card bytes because raw zeros
+        there decoded as a noise burst -- but that means a replacement ends
+        with up to 4.5 ms of the sound it REPLACED, once per trigger,
+        regardless of what the user supplied.  Inaudible on most slots (median
+        13 counts) but up to -10 dBFS on some (11% of Elvira HoH sounds exceed
+        -40 dBFS).  Recovery does work there once the header length is
+        extended (:func:`extend_length`), so encode it to silence -- the fitted
+        target already fades to zero by the end of the emitted range, so the
+        result is a clean silent tail.
+
+        The last :data:`LEADOUT_MARGIN` frames stay stock so a delta<0
+        successor's head word is never touched.  Any failure leaves the stock
+        bytes exactly as before -- this can only improve on v0.57.2, never
+        regress to the raw-zero noise burst."""
+        length = p["length"]
+        n = length - BLOCK
+        want = BLOCK - LEADOUT_MARGIN
+        if n <= 0 or want <= 0:
+            return
+        pe = extend_length(p, BLOCK)
+        if pe is None:
+            return
+        try:
+            K, rb = self.recover_block(pe, 200 + n, n=want)
+            m = min(len(K), want)
+            if m <= 0:
+                return
+            enc, _ = self.encode_block(np.zeros(m, np.int64), K[:m], rb[:m])
+        except Exception:
+            return                       # keep stock bytes
+        lo = n + delta - d               # window-relative index of frame n
+        s = max(0, -lo); e = min(m, length - lo)
+        if s < e:
+            body[lo + s:lo + e] = enc[s:e]
 
 
 class StereoRecover:
@@ -528,7 +599,37 @@ class StereoRecover:
             s = max(0, -lo); e = min(m, length - lo)   # clip frames out of range
             if s < e:
                 body[2 * (lo + s):2 * (lo + e)] = fr[s:e].ravel()
+        self._encode_leadout(p, body, delta, d)
         return start, body.tobytes()
+
+    def _encode_leadout(self, p, body, delta, d):
+        """Stereo twin of :meth:`GenRecover._encode_leadout` -- encode the
+        lead-out block to silence rather than shipping the replaced sound's
+        own tail, keeping the last :data:`LEADOUT_MARGIN` frames stock so a
+        delta<0 successor's head frame is never clobbered.  Any failure leaves
+        the stock bytes."""
+        length = p["length"]
+        n = length - BLOCK
+        want = BLOCK - LEADOUT_MARGIN
+        if n <= 0 or want <= 0:
+            return
+        pe = extend_length(p, BLOCK)
+        if pe is None:
+            return
+        try:
+            rec = self.recover_block(pe, 200 + n, nf=want)
+            m = min(rec["m"], want)
+            if m <= 0:
+                return
+            frame, _ = self.encode_block(np.zeros(m, np.int64),
+                                         np.zeros(m, np.int64), rec)
+            fr = frame.reshape(-1, 2)[:m]
+        except Exception:
+            return                       # keep stock bytes
+        lo = n + delta - d
+        s = max(0, -lo); e = min(m, length - lo)
+        if s < e:
+            body[2 * (lo + s):2 * (lo + e)] = fr[s:e].ravel()
 
     def recover_block(self, p, cursor, nf=200):
         key = (p["scale"], p["chan"])

@@ -691,3 +691,148 @@ def test_verify_encoded_checks_both_stereo_channels():
     with pytest.raises(_EncodeVerifyError) as e:
         _verify_encoded(emu, p, start, b"\0" * 8, L, R, np)
     assert "R channel" in str(e.value)
+
+
+# --------------------------------------------------------------------------
+# Lead-out encoding.
+#
+# encode_sound only covers the emitted range; v0.57.2 seeded the rest from the
+# stock card bytes because raw zeros there decoded as a noise burst.  But that
+# means a replacement ends with up to 4.5 ms of the sound it REPLACED (up to
+# -10 dBFS on real slots).  Recovery works there once the header length is
+# extended, so the lead-out is now encoded to silence -- except the last
+# LEADOUT_MARGIN frames, which may be the NEXT sound's head word.
+# --------------------------------------------------------------------------
+def _rawobj_for(length):
+    """A raw sound object whose u32 length field at +0x10 extend_length patches."""
+    import struct
+    b = bytearray(0x20)
+    struct.pack_into("<I", b, 0x10, length)
+    return bytes(b)
+
+
+def test_extend_length_patches_header_and_needs_a_rawobj():
+    from pinball_decryptor.plugins.stern.spike2.codec import extend_length
+    import struct
+
+    p = {"length": 600, "_rawobj": _rawobj_for(600)}
+    q = extend_length(p, 200)
+    assert q["length"] == 800
+    assert struct.unpack_from("<I", q["_rawobj"], 0x10)[0] == 800
+    assert p["length"] == 600 and struct.unpack_from(
+        "<I", p["_rawobj"], 0x10)[0] == 600          # original untouched
+    assert extend_length({"length": 600}, 200) is None   # no raw object -> None
+
+
+def test_encode_sound_silences_leadout_but_keeps_the_end_margin():
+    """The lead-out is encoded (not left as the replaced sound's tail), and the
+    final LEADOUT_MARGIN frames stay stock so a delta<0 successor's head word
+    is never clobbered."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import (GenRecover,
+                                                              LEADOUT_MARGIN)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)                       # 400
+    stock = (np.arange(length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    gr = object.__new__(GenRecover)
+    gr.emu = types.SimpleNamespace(mm=MM())
+    gr._calibrate = lambda p: (0, 0, 0)                     # delta = 0
+    gr.recover_block = lambda p, cursor, n=200: (
+        np.zeros(n, np.int64), np.zeros(n, np.int64))
+    gr.encode_block = lambda seg, K, rb: (
+        np.full(len(seg), 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 1, "scale": 3,
+         "_rawobj": _rawobj_for(length)}
+    off, raw = gr.encode_sound(p, np.zeros(emitted, np.int64))
+    body = np.frombuffer(raw, dtype="<u2")
+
+    keep = LEADOUT_MARGIN
+    assert (body[:emitted] == 0xBEEF).all()                # body covered
+    assert (body[emitted:length - keep] == 0xBEEF).all()   # lead-out ENCODED
+    assert (body[length - keep:] == stock[length - keep:]).all()   # margin stock
+
+
+def test_encode_sound_stereo_silences_leadout_but_keeps_the_end_margin():
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import (StereoRecover,
+                                                              LEADOUT_MARGIN)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)
+    stock = (np.arange(2 * length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    sr = object.__new__(StereoRecover)
+    sr.emu = types.SimpleNamespace(mm=MM())
+    sr._calibrate = lambda p: 0
+    sr.recover_block = lambda p, cursor, nf=200: {"m": nf}
+    sr.encode_block = lambda L, R, rec: (
+        np.full(2 * rec["m"], 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 2, "scale": 3,
+         "_rawobj": _rawobj_for(length)}
+    z = np.zeros(emitted, np.int64)
+    off, raw = sr.encode_sound(p, z, z)
+    body = np.frombuffer(raw, dtype="<u2")
+
+    keep = LEADOUT_MARGIN
+    assert (body[:2 * emitted] == 0xBEEF).all()
+    assert (body[2 * emitted:2 * (length - keep)] == 0xBEEF).all()
+    assert (body[2 * (length - keep):] == stock[2 * (length - keep):]).all()
+
+
+def test_leadout_encoding_falls_back_to_stock_when_recovery_fails():
+    """Any failure past the emitted range must leave the stock bytes -- never
+    regress to the raw-zero noise burst v0.57.2 fixed."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import GenRecover
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    length = 600
+    emitted = emitted_length(length)
+    stock = (np.arange(length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    calls = {"n": 0}
+
+    def flaky(p, cursor, n=200):
+        calls["n"] += 1
+        if cursor > emitted:                    # the lead-out block
+            raise RuntimeError("no keystream here")
+        return np.zeros(n, np.int64), np.zeros(n, np.int64)
+
+    gr = object.__new__(GenRecover)
+    gr.emu = types.SimpleNamespace(mm=MM())
+    gr._calibrate = lambda p: (0, 0, 0)
+    gr.recover_block = flaky
+    gr.encode_block = lambda seg, K, rb: (
+        np.full(len(seg), 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 1, "scale": 3,
+         "_rawobj": _rawobj_for(length)}
+    off, raw = gr.encode_sound(p, np.zeros(emitted, np.int64))
+    body = np.frombuffer(raw, dtype="<u2")
+    assert (body[:emitted] == 0xBEEF).all()
+    assert (body[emitted:] == stock[emitted:]).all()   # stock, not zeros
+    assert body[emitted:].all()

@@ -39,7 +39,16 @@ Only the first six appear in `config.KNOWN_GAMES` (the names the runtime decrypt
 - Not a block cipher in ECB — zero repeated 16-byte blocks in 33 MB WAVs — and not a global keystream: assuming the magic sits at any fixed offset (0/4/8/16/32/64) yields a different implied keystream for every file, so the key is still per-file.
 - The `game` ELF is still Sentinel/HASP-wrapped (`strings` shows the LDK runtime), so the routine is not statically visible — the same reason the original scheme had to be recovered from memory dumps.
 
-Recovering this needs the original dynamic-analysis approach against the Sonic binary. Until then the plugin detects the title, and both the ISO and Direct-SSD decrypt phases fail loudly rather than reporting a complete run over an empty folder ([pipeline.py](../../pinball_decryptor/plugins/jjp/pipeline.py) `_nothing_decrypted_message`). `full_dump` (the Extract tab's **File System** box) still works — the unencrypted side of the card is unaffected.
+Recovering a *dongle-free* Python reimplementation needs the original dynamic-analysis approach against the Sonic binary. Until then the plugin detects the title, and both the ISO and Direct-SSD dongle-free decrypt phases fail loudly rather than reporting a complete run over an empty folder ([pipeline.py](../../pinball_decryptor/plugins/jjp/pipeline.py) `_nothing_decrypted_message`). `full_dump` (the Extract tab's **File System** box) still works — the unencrypted side of the card is unaffected.
+
+But a title that isn't supported dongle-free **can still be extracted with its matching HASP dongle** — see *Dongle-decrypt extract* below.
+
+### Dongle-decrypt extract (`dongle_extract` capability)
+
+The advanced **"Decrypt using the game's HASP dongle"** checkbox on the Extract tab (JJP only, off by default) routes an ISO extract through the original dongle-bearing pipeline ([`DecryptionPipeline`](../../pinball_decryptor/plugins/jjp/pipeline.py), phases `Extract / Mount / Chroot / Dongle / Compile / Decrypt / Copy / Cleanup`). It runs the game's own binary under an `LD_PRELOAD` shim ([`resources.py`](../../pinball_decryptor/plugins/jjp/resources.py) `DECRYPT_C_SOURCE`) that overrides `al_install_system`, resolves the game's own crypto functions via `dlsym` (`jcrypt_rand64`, `jcrypt_set_seeds_for_crypto`, `dongle_decrypt_buffer`, `fm_process_filelist`), and drives them to decrypt every asset — `fl.dat` itself is decrypted by the dongle. Because it calls the game's **own** `rand64`, it works **regardless of how the cipher changed** (this is exactly how Sonic can be extracted), as long as the matching dongle is present.
+
+- Windows/WSL only (needs `usbipd` USB passthrough; the pipeline binds + attaches the key itself). Each JJP title has its **own Sentinel vendor code** — a mismatched dongle fails with `H0007`, so a Sonic extract needs a Sonic dongle.
+- **Developer capture** ([pipeline.py](../../pinball_decryptor/plugins/jjp/pipeline.py) `DEV_CAPTURE_C_SOURCE` / `_phase_dev_capture`): because a dongle extract has the game's decrypted crypto in memory, a second fast `LD_PRELOAD` pass dumps `jcrypt_rand64` / `jcrypt_set_seeds_for_crypto` (read under a SIGSEGV guard) into `crypto_capture_<game>.tar.gz` in the output folder. That artifact is what a developer needs to reverse the new cipher and add **dongle-free** support for everyone. It never fails the extract — the assets are already decrypted by then.
 
 ### Input extensions / InputSpec
 
@@ -58,6 +67,7 @@ Recovering this needs the original dynamic-analysis approach against the Sonic b
 | `apply_delta` | False | No upstream delta-update concept |
 | `iso` | True | Input is an ISO container |
 | `direct_ssd` | True | Read/write the physical game SSD directly — surfaces the "From ISO / From SSD" radio on Extract + Write |
+| `dongle_extract` | True | Advanced "Decrypt using the game's HASP dongle" Extract checkbox — runs the game under an `LD_PRELOAD` shim so it decrypts itself via the plugged-in key (works for a title whose cipher isn't RE'd yet, e.g. Sonic). Windows/WSL only. See *Dongle-decrypt extract* above |
 | `asset_filters` | True | Graphics / Sounds / File System checkboxes → `extract_graphics` / `extract_sounds` / `full_dump` |
 | `replace_audio` | True | Replace-Audio tab scans the extract for loose `.wav`/`.ogg` slots |
 

@@ -22,8 +22,9 @@ from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from . import config
 from .games import GAME_DB, detect_iso_game
-from .pipeline import (DirectSSDDecryptPipeline, DirectSSDModPipeline,
-                       StandaloneDecryptPipeline, StandaloneModPipeline)
+from .pipeline import (DecryptionPipeline, DirectSSDDecryptPipeline,
+                       DirectSSDModPipeline, StandaloneDecryptPipeline,
+                       StandaloneModPipeline)
 
 
 _GAMES = tuple(sorted(
@@ -177,6 +178,13 @@ class JJPManufacturer(Manufacturer):
         # ISO intermediate).  Surfaces the "From ISO / From SSD"
         # radio on the Extract + Write tabs.
         direct_ssd=True,
+        # Dongle-decrypt: run the game under an LD_PRELOAD shim that drives
+        # the game's OWN decryption via the plugged-in HASP dongle.  Surfaces
+        # the advanced "Decrypt using the game's HASP dongle" checkbox on the
+        # Extract tab — the escape hatch for a title whose encryption isn't
+        # reverse-engineered yet (e.g. Sonic), provided the matching dongle is
+        # present.  Windows/WSL only.
+        dongle_extract=True,
         # Per-category Extract filters: surfaces Graphics / Sounds /
         # File System checkboxes on the Extract tab.  Maps to the
         # standalone pipeline's extract_graphics / extract_sounds /
@@ -212,6 +220,9 @@ class JJPManufacturer(Manufacturer):
     # gone since we're reading/writing the SSD directly.
     direct_ssd_extract_phases = tuple(config.DIRECT_SSD_PHASES)
     direct_ssd_write_phases = tuple(config.DIRECT_SSD_MOD_PHASES)
+    # Dongle-decrypt flow — the original dongle-bearing pipeline (Extract /
+    # Mount / Chroot / Dongle / Compile / Decrypt / Copy / Cleanup).
+    dongle_extract_phases = tuple(config.PHASES)
     # JJP runs entirely through the executor (WSL on Windows, Docker on
     # macOS).  Six WSL-side tools cover the standalone Decrypt + Mod
     # flows.
@@ -269,6 +280,24 @@ class JJPManufacturer(Manufacturer):
                                extract_graphics=extract_graphics,
                                extract_sounds=extract_sounds,
                                full_dump=full_dump)
+
+    def make_dongle_extract_pipeline(self, input_path, output_dir,
+                                     log_cb, phase_cb, progress_cb, done_cb,
+                                     dev_capture=False):
+        """Dongle-bearing extract: run the game under the LD_PRELOAD shim so it
+        decrypts its own assets via the plugged-in HASP dongle.
+
+        This is the escape hatch for a JJP title whose asset encryption isn't
+        reverse-engineered yet (e.g. Sonic): because the shim calls the game's
+        OWN decryption, it works regardless of how the cipher changed, as long
+        as the matching dongle is present.  ``dev_capture`` additionally dumps
+        the game's crypto routine + keystream samples for developer analysis
+        (the "Help the developer" button).
+        """
+        p = DecryptionPipeline(input_path, output_dir,
+                               log_cb, phase_cb, progress_cb, done_cb)
+        p.dev_capture = bool(dev_capture)
+        return p
 
     def make_write_pipeline(self, original_path, assets_dir, output_path,
                             log_cb, phase_cb, progress_cb, done_cb,

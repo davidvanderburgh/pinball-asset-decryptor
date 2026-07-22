@@ -744,11 +744,29 @@ class App:
                 deltas = list(getattr(self.window, "extract_delta_paths", []))
                 if deltas:
                     extra_kwargs["deltas"] = deltas
-            self.pipeline = self._current_mfr.make_extract_pipeline(
-                in_path, output_path,
-                log_cb, phase_cb, progress_cb, chained_done_cb,
-                **extra_kwargs,
-            )
+            # Advanced dongle-decrypt (JJP): when the "Decrypt using the game's
+            # HASP dongle" checkbox is on, route through the dongle-bearing
+            # pipeline — it runs the game under an LD_PRELOAD shim so the game
+            # decrypts its own assets via the plugged-in key (the escape hatch
+            # for a title whose cipher isn't reverse-engineered yet).  It also
+            # captures the game's crypto routines for the developer.  ISO mode
+            # only (the early SSD branch above already returned).
+            use_dongle = (
+                getattr(self._current_mfr.capabilities, "dongle_extract", False)
+                and getattr(self.window, "extract_dongle_var", None) is not None
+                and self.window.extract_dongle_var.get())
+            if use_dongle and hasattr(
+                    self._current_mfr, "make_dongle_extract_pipeline"):
+                self.pipeline = self._current_mfr.make_dongle_extract_pipeline(
+                    in_path, output_path,
+                    log_cb, phase_cb, progress_cb, chained_done_cb,
+                    dev_capture=True)
+            else:
+                self.pipeline = self._current_mfr.make_extract_pipeline(
+                    in_path, output_path,
+                    log_cb, phase_cb, progress_cb, chained_done_cb,
+                    **extra_kwargs,
+                )
         # Live per-sound decode progress (Stern) updates keyed log lines in
         # place; harmless for plugins that never emit them.  Guard the call:
         # the JJP pipelines are ported standalone classes that don't inherit

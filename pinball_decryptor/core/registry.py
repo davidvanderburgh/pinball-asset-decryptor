@@ -94,6 +94,15 @@ class Capabilities:
     # the Extract / Write tabs swapping the file picker for a drive
     # picker + manual partition override.  Used by JJP.
     direct_ssd: bool = False
+    # Dongle-decrypt path: surfaces a "Decrypt using the game's HASP dongle"
+    # checkbox on the Extract tab (advanced).  When ticked, app.py routes the
+    # ISO extract through the manufacturer's dongle factory instead of the
+    # dongle-free one — the game binary is run under an LD_PRELOAD shim that
+    # drives the game's OWN decryption via the plugged-in Sentinel/HASP key.
+    # This is how a JJP title whose asset encryption isn't reverse-engineered
+    # yet (e.g. Sonic) can still be extracted, provided the matching dongle is
+    # present.  Windows/WSL only (needs usbipd USB passthrough).  Used by JJP.
+    dongle_extract: bool = False
     # Per-category Extract filters: surfaces "Graphics" / "Sounds" /
     # "File System" checkboxes on the Extract tab.  Used by JJP where
     # the encrypted edata tree has two distinct asset categories and

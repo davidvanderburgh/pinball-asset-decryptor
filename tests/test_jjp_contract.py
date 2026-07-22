@@ -430,3 +430,65 @@ def test_jjp_partial_decrypt_still_succeeds(tmp_path):
     ])
 
     pipe._phase_decrypt_standalone()  # no raise
+
+
+# ---------------------------------------------------------------------------
+# Dongle-decrypt mode (advanced): run the game under a HASP dongle so it
+# decrypts its own assets — the escape hatch for a title whose cipher isn't
+# reverse-engineered yet (e.g. Sonic).  These test the wiring, not a live run.
+# ---------------------------------------------------------------------------
+
+def test_jjp_dongle_extract_capability_and_phases(manufacturers_by_key):
+    jjp = manufacturers_by_key["jjp"]
+    assert jjp.capabilities.dongle_extract is True
+    # The dongle flow uses the full dongle-bearing phase list.
+    from pinball_decryptor.plugins.jjp import config
+    assert jjp.dongle_extract_phases == tuple(config.PHASES)
+    assert "Dongle" in jjp.dongle_extract_phases
+    assert "Compile" in jjp.dongle_extract_phases
+
+
+def test_jjp_make_dongle_extract_pipeline(manufacturers_by_key):
+    jjp = manufacturers_by_key["jjp"]
+    noop = lambda *a, **k: None
+    p = jjp.make_dongle_extract_pipeline(
+        r"C:\game.iso", r"C:\out", noop, noop, noop, noop, dev_capture=True)
+    # It's the dongle-bearing DecryptionPipeline (not the standalone one), and
+    # the dev-capture flag rode through.
+    from pinball_decryptor.plugins.jjp.pipeline import DecryptionPipeline
+    assert isinstance(p, DecryptionPipeline)
+    assert p.dev_capture is True
+    assert callable(p.run)
+    # dev_capture defaults off when not requested
+    p2 = jjp.make_dongle_extract_pipeline(
+        r"C:\game.iso", r"C:\out", noop, noop, noop, noop)
+    assert p2.dev_capture is False
+
+
+def test_jjp_dev_capture_shim_is_game_independent():
+    """The developer-capture shim must resolve the game's OWN crypto functions
+    by their mangled names via dlsym (so it works for any title, including one
+    whose cipher changed) and read memory under a fault guard."""
+    from pinball_decryptor.plugins.jjp.pipeline import DEV_CAPTURE_C_SOURCE
+    for sym in ("_Z13jcrypt_rand64v",
+                "_Z27jcrypt_set_seeds_for_cryptoPKc",
+                "_Z21dongle_decrypt_bufferPvj"):
+        assert sym in DEV_CAPTURE_C_SOURCE, sym
+    # reads guarded against running off the end of .text
+    assert "sigsetjmp" in DEV_CAPTURE_C_SOURCE
+    assert "JJP_DEV_CAPTURE_DIR" in DEV_CAPTURE_C_SOURCE
+    # It overrides al_install_system (early init hook) like the decrypt shim.
+    assert "al_install_system" in DEV_CAPTURE_C_SOURCE
+
+
+def test_jjp_dev_capture_noop_when_not_requested():
+    """_phase_dev_capture must do nothing (and never touch the executor) when
+    dev_capture is off — the normal decrypt path is unaffected."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+    pipe = object.__new__(P.DecryptionPipeline)
+    pipe.dev_capture = False
+    called = []
+    pipe.executor = type("E", (), {"run": lambda *a, **k: called.append(1)})()
+    pipe.log = lambda *a, **k: None
+    pipe._phase_dev_capture()  # must return immediately
+    assert not called

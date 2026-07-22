@@ -17,6 +17,93 @@ from .executor import (CommandError, create_executor, find_usbipd,
                        _CREATE_FLAGS as _exec_create_flags)
 
 
+# ---------------------------------------------------------------------------
+# Developer crypto-capture shim (dongle extract only)
+# ---------------------------------------------------------------------------
+# Lives here (not in resources.py, which the regression check pins byte-equal
+# to upstream) because it is a new, unified-app-only helper.  When a dongle
+# extract runs with ``dev_capture`` set, this second LD_PRELOAD pass dumps the
+# game's OWN decrypted asset-crypto routines so a developer can add dongle-free
+# support for a title whose cipher isn't reverse-engineered yet (e.g. Sonic).
+# It resolves the same functions the decrypt shim drives, then copies 8 KB of
+# x86-64 code from each — reading byte-by-byte under a SIGSEGV guard so a read
+# that runs off the end of .text can't crash the game.
+DEV_CAPTURE_C_SOURCE = r"""
+#define _DEFAULT_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+
+static sigjmp_buf g_jb;
+static void on_fault(int s){ (void)s; siglongjmp(g_jb, 1); }
+
+static void dump_region(const char *dir, const char *name, void *addr, size_t n){
+    if(!addr) return;
+    uint8_t *buf = (uint8_t*)malloc(n);
+    if(!buf) return;
+    struct sigaction sa, oldsegv, oldbus;
+    memset(&sa, 0, sizeof sa); sa.sa_handler = on_fault; sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, &oldsegv); sigaction(SIGBUS, &sa, &oldbus);
+    size_t got = 0;
+    if(sigsetjmp(g_jb, 1) == 0){
+        for(; got < n; got++) buf[got] = ((volatile uint8_t*)addr)[got];
+    }
+    sigaction(SIGSEGV, &oldsegv, NULL); sigaction(SIGBUS, &oldbus, NULL);
+    char path[4096]; snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "wb");
+    if(f){ fwrite(buf, 1, got, f); fclose(f); }
+    fprintf(stderr, "[capture] %s <- %p (%zu bytes)\n", name, addr, got);
+    free(buf);
+}
+
+int al_install_system(int version, int (*atexit_ptr)(void (*)(void))){
+    (void)version; (void)atexit_ptr;
+    void *h = dlopen(NULL, RTLD_NOW);
+    const char *dir = getenv("JJP_DEV_CAPTURE_DIR");
+    if(!dir || !dir[0]) dir = "/tmp/jjp_dev_capture";
+    mkdir(dir, 0755);
+
+    void *rand64     = dlsym(h, "_Z13jcrypt_rand64v");
+    void *set_crypto = dlsym(h, "_Z27jcrypt_set_seeds_for_cryptoPKc");
+    void *dongle_dec = dlsym(h, "_Z21dongle_decrypt_bufferPvj");
+    void *hash_str   = dlsym(h, "_Z11hash_stringPKc");
+    if(!hash_str) hash_str = dlsym(h, "_Z18jcrypt_hash_stringPKc");
+    void *dinit = dlsym(h, "_Z11dongle_initv");
+    if(dinit) ((int(*)(void))dinit)();
+
+    fprintf(stderr, "[capture] rand64=%p set_crypto=%p dongle_dec=%p hash=%p\n",
+            rand64, set_crypto, dongle_dec, hash_str);
+
+    char mpath[4096]; snprintf(mpath, sizeof mpath, "%s/manifest.txt", dir);
+    FILE *m = fopen(mpath, "w");
+    if(m){
+        fprintf(m, "JJP developer crypto capture\n");
+        fprintf(m, "rand64=%p\nset_seeds_for_crypto=%p\n"
+                   "dongle_decrypt_buffer=%p\nhash_string=%p\n",
+                rand64, set_crypto, dongle_dec, hash_str);
+        fprintf(m, "each *.bin holds up to 8192 raw bytes of x86-64 code from "
+                   "that function pointer (disassemble to recover the cipher)\n");
+        fclose(m);
+    }
+    dump_region(dir, "jcrypt_rand64.bin", rand64, 8192);
+    dump_region(dir, "jcrypt_set_seeds_for_crypto.bin", set_crypto, 8192);
+    dump_region(dir, "dongle_decrypt_buffer.bin", dongle_dec, 8192);
+    dump_region(dir, "hash_string.bin", hash_str, 8192);
+    fprintf(stderr, "[capture] DONE -> %s\n", dir);
+    syscall(SYS_exit_group, 0);
+    return 0;
+}
+"""
+
+
 def _kill_process_tree(proc):
     """Kill *proc* and all of its descendants.
 
@@ -610,6 +697,10 @@ class DecryptionPipeline:
         self._iso_mount = None      # temp mount for ISO
         self._iso_mounted = False   # True if ISO was loop-mounted (vs xorriso)
         self._raw_img_path = None   # extracted raw ext4 (cached between runs)
+        # When True, a dongle extract also dumps the game's decrypted crypto
+        # routines for the developer (see _phase_dev_capture).  Set by the
+        # manufacturer's make_dongle_extract_pipeline factory.
+        self.dev_capture = False
 
     def cancel(self):
         """Request cancellation. Safe to call from any thread."""
@@ -923,6 +1014,10 @@ class DecryptionPipeline:
             self.on_phase(5)  # Decrypt
             self._phase_decrypt()
             self._check_cancel()
+
+            # Optional developer crypto capture (dongle extract only) — never
+            # fails the run; the assets are already decrypted at this point.
+            self._phase_dev_capture()
 
             self.on_phase(6)  # Copy
             self._phase_copy()
@@ -1926,6 +2021,86 @@ class DecryptionPipeline:
             f"out of {final_total} files.",
             "success" if final_fail == 0 else "info",
         )
+
+    def _phase_dev_capture(self):
+        """Dump the game's decrypted asset-crypto routines for the developer.
+
+        Runs only when ``dev_capture`` is set (dongle extract).  A second, fast
+        LD_PRELOAD pass over the already-decrypted game grabs 8 KB of code from
+        each crypto function (see DEV_CAPTURE_C_SOURCE) and tars it into the
+        output folder as ``crypto_capture_<game>.tar.gz`` — the artifact a
+        developer needs to add dongle-free support for a new title.
+
+        Wrapped so any failure is a logged warning, never a failed extract:
+        the user's assets are already decrypted by the time we get here.
+        """
+        if not getattr(self, "dev_capture", False):
+            return
+        mp = self.mount_point
+        game = self.game_name or "game"
+        try:
+            self.log("Capturing crypto sample for the developer...", "info")
+            import tempfile as _tf
+            import os as _os
+            with _tf.NamedTemporaryFile(
+                    mode="w", suffix=".c", delete=False,
+                    dir=self.executor.host_tmp_dir()) as tf:
+                tf.write(DEV_CAPTURE_C_SOURCE)
+                tmp_win = tf.name
+            wsl_tmp = self.executor.to_exec_path(tmp_win)
+            self.executor.run(f"cp '{wsl_tmp}' {mp}/tmp/jjp_capture.c", timeout=15)
+            _os.unlink(tmp_win)
+
+            chroot_lib = f"{mp}/lib/x86_64-linux-gnu"
+            self.executor.run(
+                f"gcc -c -fPIC -std=gnu11 -D_FORTIFY_SOURCE=0 "
+                f"-fno-stack-protector -o {mp}/tmp/jjp_capture.o "
+                f"{mp}/tmp/jjp_capture.c 2>&1", timeout=config.COMPILE_TIMEOUT)
+            self.executor.run(
+                f"LIBS='{chroot_lib}/libc.so.6'; "
+                f"[ -f '{chroot_lib}/libdl.so.2' ] && "
+                f"LIBS=\"$LIBS {chroot_lib}/libdl.so.2\"; "
+                f"gcc -shared -nostdlib -o {mp}/tmp/jjp_capture.so "
+                f"{mp}/tmp/jjp_capture.o $LIBS -lgcc 2>&1",
+                timeout=config.COMPILE_TIMEOUT)
+
+            cap_dir = "/tmp/jjp_dev_capture"
+            self.executor.run(
+                f"rm -rf {mp}{cap_dir}; mkdir -p {mp}{cap_dir}", timeout=10)
+            game_bin = f"{config.GAME_BASE_PATH}/{self.game_name}/game"
+            ld_lib_path = ("LD_LIBRARY_PATH=/tmp/stubs "
+                           if getattr(self, "_stubs_built", 0) > 0 else "")
+            cmd = (
+                f"chroot {mp} /bin/bash -c '"
+                f"export JJP_DEV_CAPTURE_DIR={cap_dir}; unset DISPLAY; "
+                f"LD_PRELOAD=/tmp/jjp_capture.so {ld_lib_path}{game_bin}' 2>&1")
+            for line in self.executor.stream(cmd, timeout=120):
+                if "[capture]" in line:
+                    self.log(line.strip(), "info")
+
+            # tar the capture straight into the user's output folder
+            wsl_out = self.executor.to_exec_path(self.output_path)
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", game)
+            arc = f"crypto_capture_{safe}.tar.gz"
+            self.executor.run(
+                f"if [ -n \"$(ls -A {mp}{cap_dir} 2>/dev/null)\" ]; then "
+                f"cd {mp}{cap_dir} && tar czf '{wsl_out}/{arc}' .; fi",
+                timeout=30)
+            # confirm it landed
+            try:
+                self.executor.run(f"test -s '{wsl_out}/{arc}'", timeout=5)
+                self.log(
+                    f"Developer crypto sample saved: {arc} (in the output "
+                    f"folder). If this title isn't supported dongle-free yet, "
+                    f"send that file to the developer to add support for "
+                    f"everyone.", "success")
+            except CommandError:
+                self.log("Developer capture produced no data (the game's "
+                         "crypto symbols may be named differently) — the "
+                         "extract itself is unaffected.", "info")
+        except (CommandError, OSError) as e:
+            self.log(f"Developer capture skipped ({e}) — the extract itself "
+                     f"is unaffected.", "info")
 
     # --- Phase 6: Copy ---
 

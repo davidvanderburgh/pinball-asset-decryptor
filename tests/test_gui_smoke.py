@@ -2584,3 +2584,31 @@ def test_image_info_button_without_valid_path(app, manufacturers_by_key,
     w._open_image_info(w.extract_input_var)
     assert shown[-1] == ("error", "File not found")
     assert w._info_win is None
+
+
+def test_jjp_dongle_extract_checkbox_and_phase_swap(app, manufacturers_by_key):
+    """The advanced 'Decrypt using the game's HASP dongle' checkbox is shown
+    only for JJP, and ticking it swaps the extract step row to the dongle-
+    bearing phase list (Chroot / Dongle / Compile appear)."""
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["jjp"])
+    app.root.update(); app.root.update()
+    # ISO mode (not SSD) so the dongle option is meaningful
+    win.extract_input_source_var.set("iso")
+    win._refresh_extract_phases()
+    assert win._dongle_extract_frame.winfo_manager() == "pack"
+    assert win.extract_dongle_var.get() is False
+    assert "Dongle" not in win._extract_phases
+
+    win.extract_dongle_var.set(True)
+    win._on_dongle_extract_toggle()
+    app.root.update()
+    assert "Dongle" in win._extract_phases
+    assert "Compile" in win._extract_phases
+
+    # A plugin without the capability never shows the row, and the toggle is
+    # reset so it can't leak a stale ON.
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert win._dongle_extract_frame.winfo_manager() == ""
+    assert win.extract_dongle_var.get() is False

@@ -1386,6 +1386,14 @@ class MainWindow:
         self.extract_sounds_var = tk.BooleanVar(value=True)
         self.extract_filesystem_var = tk.BooleanVar(value=False)
 
+        # JJP-only (capabilities.dongle_extract): advanced "Decrypt using the
+        # game's HASP dongle" checkbox.  Off by default; when on, app.py routes
+        # the ISO extract through the dongle pipeline (runs the game under an
+        # LD_PRELOAD shim so it decrypts itself via the plugged-in key) — the
+        # escape hatch for a title whose cipher isn't reverse-engineered yet.
+        # Hidden for plugins without the capability.
+        self.extract_dongle_var = tk.BooleanVar(value=False)
+
         # Generic per-type Extract selection (capabilities.extract_categories):
         # one default-on checkbox per (key, label) the plugin advertises, built
         # dynamically in apply_manufacturer().  Stern uses Audio/Video/Images/
@@ -2011,6 +2019,19 @@ class MainWindow:
             self._asset_filters_frame, text="File System",
             variable=self.extract_filesystem_var,
         ).pack(side=tk.LEFT, padx=(0, 12))
+
+        # JJP-only (capabilities.dongle_extract): advanced dongle-decrypt row.
+        # Built unpacked; shown in apply_manufacturer() for plugins that expose
+        # it.  Toggling it re-labels the phase steps (the dongle flow has more
+        # phases than the dongle-free one), so it fires the phase refresh.
+        self._dongle_extract_frame = ttk.Frame(f)
+        ttk.Checkbutton(
+            self._dongle_extract_frame,
+            text="Decrypt using the game's HASP dongle (advanced — for titles "
+                 "not yet supported dongle-free)",
+            variable=self.extract_dongle_var,
+            command=self._on_dongle_extract_toggle,
+        ).pack(side=tk.LEFT, padx=(10, 8))
 
         # The Extract action button and the inline option checkboxes share one
         # bottom row: the checkbox cluster sits on the left (aligned under the
@@ -10000,6 +10021,17 @@ class MainWindow:
         else:
             self._asset_filters_frame.pack_forget()
 
+        # Advanced dongle-decrypt checkbox (JJP).  Off by default; sits just
+        # below the asset filters.  Reset the toggle on every mfr switch so it
+        # never carries a stale ON into a plugin that doesn't support it.
+        if getattr(caps, "dongle_extract", False):
+            self._dongle_extract_frame.pack(
+                fill=tk.X, padx=10, pady=(0, 0),
+                before=self._extract_action_row)
+        else:
+            self._dongle_extract_frame.pack_forget()
+            self.extract_dongle_var.set(False)
+
         # Generic per-type Extract checkboxes (capabilities.extract_categories).
         # Rebuilt each time so the labels match the active plugin; default all
         # on.  These live inline in the action row's option cluster: an
@@ -10229,6 +10261,12 @@ class MainWindow:
         self._update_music_id_visibility()
         self._update_duration_names_visibility()
 
+    def _on_dongle_extract_toggle(self):
+        """The advanced 'Decrypt using the game's HASP dongle' checkbox was
+        toggled — the dongle flow has a different phase list, so refresh the
+        step indicator."""
+        self._refresh_extract_phases()
+
     def _refresh_extract_phases(self):
         """Rebuild the extract phase indicator for the current extract
         mode and the detected game's audio-export support.
@@ -10255,8 +10293,15 @@ class MainWindow:
                        and self.extract_input_source_var.get() == "ssd")
         write_ssd = (mfr.capabilities.direct_ssd
                      and self.write_input_source_var.get() == "ssd")
+        # Dongle-decrypt (ISO mode only): the dongle-bearing pipeline runs the
+        # extra Chroot / Dongle / Compile phases, so it has its own step list.
+        extract_dongle = (getattr(mfr.capabilities, "dongle_extract", False)
+                          and not extract_ssd
+                          and self.extract_dongle_var.get())
 
-        if extract_ssd and mfr.direct_ssd_extract_phases:
+        if extract_dongle and getattr(mfr, "dongle_extract_phases", None):
+            phases = mfr.dongle_extract_phases
+        elif extract_ssd and mfr.direct_ssd_extract_phases:
             phases = mfr.direct_ssd_extract_phases
         else:
             basic = self.static_extract_var.get()

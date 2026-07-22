@@ -318,9 +318,10 @@ class JJPManufacturer(Manufacturer):
 
     def extract_input_help(self):
         return ("Decrypt a Jersey Jack Pinball game ISO (Wonka, Guns N' "
-                "Roses, Hobbit, Godfather, Avatar, Wizard of Oz, Pirates, "
-                "Toy Story 4, Dialed In, Harry Potter). Requires WSL2 "
-                "(Windows) / Docker (macOS) with partclone, debugfs, xorriso.")
+                "Roses, Hobbit, Godfather, Avatar, Sonic the Hedgehog, "
+                "Wizard of Oz, Pirates, Toy Story 4, Dialed In, Harry "
+                "Potter). Requires WSL2 (Windows) / Docker (macOS) with "
+                "partclone, debugfs, xorriso.")
 
     def write_install_help(self):
         return ("1. The modified ISO is written to the chosen Build Location.\n"

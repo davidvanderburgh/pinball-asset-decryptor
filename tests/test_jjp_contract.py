@@ -294,3 +294,139 @@ def test_jjp_mount_enospc_fails_fast_with_resize_hint(monkeypatch):
     assert not reextracted, (
         "ENOSPC must not trigger the delete-and-re-extract retry — "
         "re-extracting into the same full disk cannot succeed.")
+
+
+def test_jjp_partclone_short_restore_is_fatal():
+    """Regression guard — Sonic extract, 2026-07-21.  ``cat | gunzip |
+    partclone.restore`` reported the *last* stage's status only, so a source
+    that died mid-stream just looked like EOF: partclone stopped at 60%,
+    exited 0, and the pipeline mounted a filesystem missing most of its
+    files (the decrypt then walked 2352 of 16207 assets and called it a
+    day).  A restore that never reaches ~100% must fail loudly."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    class _ShortExecutor:
+        def stream(self, cmd, timeout=None):
+            assert "pipefail" in cmd, (
+                "the restore pipeline must run under pipefail, or a failing "
+                "cat/gunzip stays invisible behind partclone's exit status")
+            yield "Starting to restore image (-) to device (/var/tmp/x.img)"
+            for pct in (10, 30, 60):
+                yield f"Elapsed: 00:00:08, Completed:  {pct}.00%,"
+
+        def run(self, cmd, timeout=None):
+            return ""
+
+    pipe = object.__new__(P.DecryptionPipeline)
+    pipe.executor = _ShortExecutor()
+    pipe.log = lambda *a, **k: None
+    pipe.on_progress = lambda *a, **k: None
+    pipe.cancelled = False
+    pipe._raw_img_path = "/var/tmp/jjp_raw_fake.img"
+
+    with pytest.raises(P.PipelineError) as exc:
+        pipe._extract_with_partclone(["/iso/sda3.ext4-ptcl-img.gz.aa"])
+    assert "60%" in str(exc.value)
+
+
+def test_jjp_partclone_full_restore_passes():
+    """The completeness guard must not fire on a healthy restore."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    class _GoodExecutor:
+        def stream(self, cmd, timeout=None):
+            for pct in (10, 50, 100):
+                yield f"Elapsed: 00:00:08, Completed:  {pct}.00%,"
+
+        def run(self, cmd, timeout=None):
+            # dumpe2fs / stat probes — empty output exercises the
+            # "can't read the superblock, skip the extend" path.
+            return ""
+
+    pipe = object.__new__(P.DecryptionPipeline)
+    pipe.executor = _GoodExecutor()
+    pipe.log = lambda *a, **k: None
+    pipe.on_progress = lambda *a, **k: None
+    pipe.cancelled = False
+    pipe._raw_img_path = "/var/tmp/jjp_raw_fake.img"
+
+    pipe._extract_with_partclone(["/iso/sda3.ext4-ptcl-img.gz.aa"])  # no raise
+
+
+def _decrypt_pipe(tmp_path, script_output, **attrs):
+    """A StandaloneDecryptPipeline wired to a canned decrypt-script run."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    class _ScriptExecutor:
+        def to_exec_path(self, p):
+            return "/mnt/out"
+
+        def run(self, cmd, timeout=None):
+            return ""
+
+        def stream(self, cmd, timeout=None):
+            for line in script_output:
+                yield line
+
+    pipe = object.__new__(P.StandaloneDecryptPipeline)
+    pipe.executor = _ScriptExecutor()
+    pipe.log = lambda *a, **k: None
+    pipe.on_progress = lambda *a, **k: None
+    pipe.cancelled = False
+    pipe.mount_point = "/mnt/jjp_x"
+    pipe.output_path = str(tmp_path)
+    pipe.game_name = "Sonic"
+    pipe.fl_dat_path = None
+    pipe.extract_graphics = True
+    pipe.extract_sounds = True
+    for k, v in attrs.items():
+        setattr(pipe, k, v)
+    return pipe
+
+
+def test_jjp_zero_decrypted_assets_is_a_failure(tmp_path):
+    """Regression guard — Sonic v00.925, 2026-07-21.  Its assets use an
+    encryption the filler-size probe doesn't recognise, so every file was
+    rejected: the run walked 2352 files, wrote none, and still finished with
+    "Decryption complete!" over an empty output folder."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+
+    pipe = _decrypt_pipe(tmp_path, [
+        "Scanning edata directory...",
+        "TOTAL_FILES=2352",
+        "Scan complete: 0 files found",
+        "BATCH COMPLETE",
+        "Total: 0  OK: 0  Failed: 0  Skipped: 0",
+    ])
+
+    with pytest.raises(P.PipelineError) as exc:
+        pipe._phase_decrypt_standalone()
+    msg = str(exc.value)
+    assert "2352" in msg
+    assert "File System" in msg, (
+        "the error should point at the one thing that still works")
+
+
+def test_jjp_zero_decrypted_ok_when_no_asset_categories_wanted(tmp_path):
+    """Unticking both Graphics and Sounds legitimately decrypts nothing —
+    that must stay a success, not trip the new guard."""
+    pipe = _decrypt_pipe(tmp_path, [
+        "TOTAL_FILES=2352",
+        "Scan complete: 2352 files found",
+        "Filtered to 0/2352 files by category selection",
+        "Total: 0  OK: 0  Failed: 0  Skipped: 0",
+    ], extract_graphics=False, extract_sounds=False)
+
+    pipe._phase_decrypt_standalone()  # no raise
+
+
+def test_jjp_partial_decrypt_still_succeeds(tmp_path):
+    """A run that decrypts *some* files is a success — the guard is only for
+    the all-or-nothing case."""
+    pipe = _decrypt_pipe(tmp_path, [
+        "TOTAL_FILES=100",
+        "Scan complete: 100 files found",
+        "Total: 100  OK: 98  Failed: 2  Skipped: 0",
+    ])
+
+    pipe._phase_decrypt_standalone()  # no raise

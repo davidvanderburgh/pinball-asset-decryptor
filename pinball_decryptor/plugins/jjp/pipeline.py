@@ -543,6 +543,11 @@ if __name__ == "__main__":
 
 _ENOSPC = "No space left on device"
 
+# partclone's last reported percentage has to reach this before we accept the
+# restore as complete.  It reports in whole percents and the final tick can be
+# swallowed by the stream, so this sits just under 100 rather than at it.
+_RESTORE_COMPLETE_PCT = 99
+
 
 def _with_disk_full_hint(message):
     """Append a "how to fix it" pointer when *message* is an out-of-space error.
@@ -1086,6 +1091,21 @@ class DecryptionPipeline:
             raise PipelineError("Extract",
                 f"Raw image was not created: {e.output}") from e
 
+    @staticmethod
+    def _truncated_restore_message(last_pct, output=""):
+        """Error text for a restore that stopped before the end."""
+        msg = (
+            f"partclone.restore stopped at {last_pct}% — the extracted "
+            f"filesystem would be incomplete, so most game files would be "
+            f"missing from the extract.\n\n"
+            f"This usually means the helper Linux environment ran out of "
+            f"disk space, or the .iso itself is truncated (re-download or "
+            f"re-copy it from the USB stick and try again)."
+        )
+        if output:
+            msg += f"\n\n{output}"
+        return msg
+
     def _extract_with_partclone(self, parts):
         """Use native partclone.restore to convert compressed image to raw."""
         self.log("Using partclone.restore (native, fast)...", "info")
@@ -1093,8 +1113,13 @@ class DecryptionPipeline:
         # -C = disable size checking (needed for file output)
         # -O = overwrite output file
         cat_parts = " ".join(f"'{p}'" for p in parts)
+        # pipefail: without it the pipeline's exit status is partclone's
+        # alone, so a cat/gunzip that dies mid-stream just looks like EOF —
+        # partclone stops early, exits 0, and we mount a filesystem that is
+        # missing most of its files (seen in the field as a decrypt run that
+        # walks a fraction of the assets).
         cmd = (
-            f"cat {cat_parts} | gunzip -c | "
+            f"set -o pipefail; cat {cat_parts} | gunzip -c | "
             f"partclone.restore -C -s - -O '{self._raw_img_path}' 2>&1"
         )
 
@@ -1137,12 +1162,24 @@ class DecryptionPipeline:
             if _ENOSPC in (e.output or ""):
                 raise PipelineError("Extract", _with_disk_full_hint(
                     f"partclone.restore ran out of space: {e.output}")) from e
-            # partclone may exit non-zero but still produce valid output
+            # partclone may exit non-zero but still produce valid output —
+            # but only once it has actually restored the whole image.  A
+            # failure part-way through leaves a mountable-but-gutted
+            # filesystem, which is far worse than a loud error.
+            if 0 <= last_pct < _RESTORE_COMPLETE_PCT:
+                raise PipelineError("Extract", _with_disk_full_hint(
+                    self._truncated_restore_message(last_pct, e.output))) from e
             try:
                 self.executor.run(f"test -s '{self._raw_img_path}'", timeout=5)
             except CommandError:
                 raise PipelineError("Extract",
                     f"partclone.restore failed: {e.output}") from e
+        else:
+            # Clean exit is not proof of a complete restore: with a truncated
+            # or unreadable source, partclone sees EOF and stops happily.
+            if 0 <= last_pct < _RESTORE_COMPLETE_PCT:
+                raise PipelineError("Extract",
+                    self._truncated_restore_message(last_pct))
 
         # partclone.restore -C creates a truncated image containing only
         # used blocks. The ext4 driver requires the image to be at least
@@ -3563,6 +3600,25 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
         self.extract_graphics = extract_graphics
         self.extract_sounds = extract_sounds
 
+    @staticmethod
+    def _nothing_decrypted_message(walked, scan_found=None):
+        """Error text for a decrypt pass that produced no assets at all."""
+        detail = ""
+        if scan_found == 0:
+            detail = ("Every one of them failed the encryption probe — not "
+                      "one decoded to a recognisable image, sound or video "
+                      "file.\n\n")
+        return (
+            f"Decrypted 0 of {walked} encrypted asset(s).\n\n"
+            f"{detail}"
+            "This game build encrypts its assets in a way this version does "
+            "not recognise, so there is nothing to show for the run. Newer "
+            "game engines change the scheme and support has to be added for "
+            "them.\n\n"
+            "The unencrypted part of the image still extracts: tick "
+            "\"File System\" on the Extract tab to pull the plain files."
+        )
+
     def run(self):
         """Execute the standalone pipeline."""
         import os
@@ -3781,7 +3837,10 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
         final_fail = 0
         final_total = 0
 
+        scan_found = None
+
         total_re = re.compile(r'TOTAL_FILES=(\d+)')
+        scan_re = re.compile(r'Scan complete:\s*(\d+)\s+files found')
         progress_re = re.compile(
             r'Progress:\s*(\d+)\s*\(ok=(\d+)\s+fail=(\d+)\s+skip=(\d+)\)')
         result_re = re.compile(
@@ -3801,6 +3860,10 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
                 if m:
                     total_files = int(m.group(1))
                     self.on_progress(0, total_files, "Decrypting...")
+
+                m = scan_re.search(line)
+                if m:
+                    scan_found = int(m.group(1))
 
                 m = progress_re.search(line)
                 if m:
@@ -3829,6 +3892,16 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
         if final_total == 0 and total_files == 0:
             raise PipelineError("Decrypt",
                 "No files were decrypted. Check fl_decrypted.dat path mapping.")
+
+        # Walking thousands of encrypted assets and decrypting none of them is
+        # a failure, not a "complete" run — without this the GUI reported
+        # success over an empty output folder.  Only the categories the user
+        # actually asked for count: unticking both Graphics and Sounds
+        # legitimately leaves nothing to decrypt.
+        if (final_ok == 0 and total_files > 0
+                and (self.extract_graphics or self.extract_sounds)):
+            raise PipelineError("Decrypt",
+                self._nothing_decrypted_message(total_files, scan_found))
 
         self.on_progress(final_total, final_total, "Complete")
         self.log(
@@ -5983,6 +6056,13 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             f"Decryption finished: {ok} OK, {fail} failed "
             f"out of {ok + fail + skip} files.",
             "success" if fail == 0 else "info")
+
+        # Same honesty rule as the ISO flow: walking the whole edata tree and
+        # writing nothing is a failed run, not a finished one.
+        if ok == 0 and total > 0 and (self.extract_graphics
+                                      or self.extract_sounds):
+            raise PipelineError("Decrypt", self._nothing_decrypted_message(
+                total, 0 if skip == total else None))
 
     def _detect_game_via_debugfs(self):
         """Detect game name on the SSD via debugfs.

@@ -20,13 +20,26 @@ The GUI "Detected:" badge is driven by `GAME_DB`, a superset of the runtime-dete
 | `the_hobbit` | The Hobbit | yes | prefix `hobbit` |
 | `the_godfather` | The Godfather | yes | prefix `godfather` |
 | `avatar` | Avatar | yes | prefix `avatar` |
+| `sonic` | Sonic the Hedgehog | detect only | prefix `sonic`; assets do **not** decrypt yet — see below |
 | `pirates_of_the_caribbean` | Pirates of the Caribbean | yes | prefixes `pirates`, `potc` |
 | `wizard_of_oz` | The Wizard of Oz | yes | prefixes `wizardofoz`, `woz` |
 | `toy_story` | Toy Story 4 | yes | prefix `toystory` |
 | `dialed_in` | Dialed In! | yes | prefix `dialedin` |
 | `harry_potter` | Harry Potter | yes | prefix `harrypotter` |
 
-Only the first six appear in `config.KNOWN_GAMES` (the names the runtime decryptor maps inside the mounted filesystem); the others light the badge from the filename but still decrypt via the generic dongle-free path (the crypto is game-independent — the file *path* is the key). The standalone pipeline auto-detects the actual game folder from the mount regardless of `GAME_DB`.
+Only the first six appear in `config.KNOWN_GAMES` (the names the runtime decryptor maps inside the mounted filesystem). That table is a verbatim upstream lift the regression check pins byte-for-byte ([verify_no_upstream_regression.py:143](../../tests/verify_no_upstream_regression.py#L143)), so new titles go in `GAME_DB` only — `KNOWN_GAMES` is just a fast path for the Direct-SSD `debugfs` probe, which falls back to listing `/jjpe/gen1` when no name matches ([pipeline.py:5977](../../pinball_decryptor/plugins/jjp/pipeline.py#L5977)). The others light the badge from the filename but still decrypt via the generic dongle-free path (the crypto is game-independent — the file *path* is the key). The standalone pipeline auto-detects the actual game folder from the mount regardless of `GAME_DB`.
+
+#### Sonic: a new asset encryption (unsolved as of 2026-07-21)
+
+`Sonic-v00.925.iso` mounts, detects and walks fine (16,207 files under `/jjpe/gen1/Sonic/edata`), but **not one asset decrypts**. Measured on the mounted image:
+
+- Every encrypted file — all 16,440 across `edata` *and* the shared `ecoredata` tree — has a size that is an exact multiple of 8. The old container has no such alignment (filler + content + 4-byte CRC suffix lands anywhere). `fl.dat` itself is *not* 8-aligned, so it sits outside whatever the new wrapper is.
+- 1,680 combinations of key-path derivation × seeding mode (`set_seeds_for_crypto` / `set_seeds_for_filler`, absolute/relative/case-folded/backslashed paths) produce zero magic-byte hits across 27 sample files spanning png/jpg/wav/ogg/webm/ttf.
+- The failure is not title-scoped: the shared `ecoredata` tree, whose paths are identical across JJP titles, is equally undecryptable on this card.
+- Not a block cipher in ECB — zero repeated 16-byte blocks in 33 MB WAVs — and not a global keystream: assuming the magic sits at any fixed offset (0/4/8/16/32/64) yields a different implied keystream for every file, so the key is still per-file.
+- The `game` ELF is still Sentinel/HASP-wrapped (`strings` shows the LDK runtime), so the routine is not statically visible — the same reason the original scheme had to be recovered from memory dumps.
+
+Recovering this needs the original dynamic-analysis approach against the Sonic binary. Until then the plugin detects the title, and both the ISO and Direct-SSD decrypt phases fail loudly rather than reporting a complete run over an empty folder ([pipeline.py](../../pinball_decryptor/plugins/jjp/pipeline.py) `_nothing_decrypted_message`). `full_dump` (the Extract tab's **File System** box) still works — the unencrypted side of the card is unaffected.
 
 ### Input extensions / InputSpec
 

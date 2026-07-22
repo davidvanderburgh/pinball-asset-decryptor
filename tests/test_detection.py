@@ -131,6 +131,7 @@ def test_bof_detect_rejects_unknown_fun(manufacturers_by_key, tmp_path):
     ("Hobbit-v04.02.iso", "the_hobbit"),
     ("WizardOfOz-v08.02.iso", "wizard_of_oz"),
     ("HarryPotter-v00.76P.iso", "harry_potter"),
+    ("Sonic-v00.925.iso", "sonic"),
 ])
 def test_jjp_detect_iso_filename(manufacturers_by_key, tmp_path,
                                   filename, expected_key):

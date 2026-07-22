@@ -39,6 +39,11 @@ GAME_DB = {
         "filename_prefixes": ["avatar"],
         "supported": True,
     },
+    "sonic": {
+        "display": "Sonic the Hedgehog",
+        "filename_prefixes": ["sonic"],
+        "supported": True,
+    },
     # --- Older Jersey Jack titles --------------------------------------
     "pirates_of_the_caribbean": {
         "display": "Pirates of the Caribbean",

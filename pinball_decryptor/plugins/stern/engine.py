@@ -2652,6 +2652,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         else:
             log("No .checksums.md5 baseline found; re-encoding all %d sound(s): "
                 "%s." % (len(audio_edits), listing), "warning")
+        # Say which shaping mode built this card.  The toggle persists across
+        # sessions, so a box unticked during an old A/B test silently makes
+        # every later card RAW — and a phone recording of the machine can't
+        # settle which mode a card was built with after the fact (monkeybug's
+        # 2026-07 click A/B: the answer had to come from this log line).
+        if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
+            log("Audio shaping OFF ('Match audio replacements to the game's "
+                "callouts' is unticked): replacements are written as provided "
+                "-- no edge fade, level cap, or 5 kHz roll-off. Hot or bright "
+                "clips can click on the real machine.", "warning")
+        else:
+            log("Audio shaping on: replacements get the stock-callout edge "
+                "fade, level cap, and 5 kHz roll-off.", "info")
     if music_edits:
         log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
             "info")

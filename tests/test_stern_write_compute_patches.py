@@ -69,6 +69,43 @@ def test_audio_edit_log_branch_has_no_dangling_names(tmp_path, monkeypatch):
             log=_log, progress=None, cancel=lambda: False)
 
 
+@pytest.mark.parametrize("raw,needle,level", [
+    (False, "Audio shaping on", "info"),
+    (True, "Audio shaping OFF", "warning"),
+])
+def test_audio_edit_logs_shaping_mode(tmp_path, monkeypatch, raw, needle, level):
+    # The match-to-callouts toggle persists across sessions, so a card built
+    # with the box unticked is indistinguishable after the fact unless the
+    # Write log says which mode ran (monkeybug's 2026-07 click A/B).  One line
+    # per Write, warning-level when shaping is off.
+    (tmp_path / "idx0001.wav").write_bytes(b"\x00\x01\x02\x03")
+    if raw:
+        monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+    else:
+        monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
+
+    lines = []
+
+    def _cap_log(msg, lvl="info", *a, **k):
+        lines.append((msg, lvl))
+
+    class _Reached(Exception):
+        pass
+
+    def _sentinel(*_a, **_k):
+        raise _Reached()
+
+    monkeypatch.setattr(engine, "_extract_inputs", _sentinel)
+    with pytest.raises(_Reached):
+        engine._compute_patches(
+            io.BytesIO(b""), [], str(tmp_path),
+            log=_cap_log, progress=None, cancel=lambda: False)
+    hits = [(m, l) for m, l in lines if m.startswith("Audio shaping")]
+    assert len(hits) == 1
+    assert needle in hits[0][0]
+    assert hits[0][1] == level
+
+
 # --- write_image: background-copy / patch overlap orchestration --------------
 # (the copy of the unpatched card runs in a thread while patches are computed;
 # joined before any patch byte is written.  These stub the heavy compute so they

@@ -168,16 +168,20 @@ def test_audio_group_duplicates_checkbox_only_for_cgc(
 
 
 def test_audio_declick_checkbox_only_for_stern(app, manufacturers_by_key):
-    """'Match audio replacements to the game's callouts' is packed only for
-    Stern — its env var is read solely by the Spike 2 encoder, so other plugins
-    must not show an inert toggle."""
+    """The match-to-callouts row (checkbox + Advanced… + Profile vs stock) is
+    packed only for Stern — its env vars are read solely by the Spike 2
+    encoder, so other plugins must not show inert controls."""
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update(); app.root.update()
+    assert win._audio_declick_row.winfo_manager() == "pack"
+    # The row's children exist and live inside it.
     assert win._audio_declick_cb.winfo_manager() == "pack"
+    assert win._audio_adv_btn.winfo_manager() == "pack"
+    assert win._audio_profile_btn.winfo_manager() == "pack"
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update(); app.root.update()
-    assert win._audio_declick_cb.winfo_manager() == ""
+    assert win._audio_declick_row.winfo_manager() == ""
 
 
 def test_audio_declick_toggle_persists_and_sets_env(
@@ -202,6 +206,42 @@ def test_audio_declick_toggle_persists_and_sets_env(
     win._on_audio_declick_toggle()
     assert "PAD_STERN_AUDIO_RAW" not in os.environ
     assert app._settings["audio_declick"] is True
+
+
+def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
+    """Advanced audio options persist and mirror into the PAD_STERN_* env
+    vars; defaults clear every var so the engine baseline stays
+    authoritative.  Machine-render previews point next to the build output."""
+    import os
+    for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
+                "PAD_STERN_LOWPASS_HZ", "PAD_STERN_HEAD_MODE",
+                "PAD_STERN_LEADOUT", "PAD_STERN_PREVIEW_DIR"):
+        monkeypatch.delenv(var, raising=False)
+
+    cfg = {"fade_ms": 80, "headroom_pct": 60, "lowpass_hz": 0,
+           "head_mode": "stock", "leadout": "stock", "previews": True}
+    app._on_audio_advanced_change(cfg)
+    assert os.environ["PAD_STERN_FADE_MS"] == "80.0"
+    assert os.environ["PAD_STERN_HEADROOM"] == "0.6"
+    assert os.environ["PAD_STERN_LOWPASS_HZ"] == "0"
+    assert os.environ["PAD_STERN_HEAD_MODE"] == "stock"
+    assert os.environ["PAD_STERN_LEADOUT"] == "stock"
+    assert app._settings["audio_advanced"] == cfg
+
+    # Preview dir: gate on the current manufacturer without switching the
+    # whole GUI (a full switch would leak state into later tests).
+    monkeypatch.setattr(app, "_current_mfr", manufacturers_by_key["stern"])
+    app._apply_audio_preview_env(os.path.join("X:", "out", "card.raw"))
+    assert os.environ["PAD_STERN_PREVIEW_DIR"].endswith(
+        "card_machine_previews")
+
+    app._on_audio_advanced_change({})              # back to defaults
+    for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
+                "PAD_STERN_LOWPASS_HZ", "PAD_STERN_HEAD_MODE",
+                "PAD_STERN_LEADOUT"):
+        assert var not in os.environ
+    app._apply_audio_preview_env(os.path.join("X:", "out", "card.raw"))
+    assert "PAD_STERN_PREVIEW_DIR" not in os.environ
 
 
 def test_audio_group_duplicates_renders_two_level_tree(

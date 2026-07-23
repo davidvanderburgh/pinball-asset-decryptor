@@ -78,6 +78,10 @@ class App:
         # Default on.
         self._apply_audio_declick_env(
             bool(self._settings.get("audio_declick", True)))
+        # Same for the Advanced audio options (fade/cap/roll-off overrides,
+        # head/tail modes) — experiment levers for the Spike 2 click hunt.
+        self._apply_audio_advanced_env(
+            self._settings.get("audio_advanced") or {})
 
         # First-launch disclaimer.  Boolean flag, unversioned: once the
         # user accepts, they never see it again — including across app
@@ -167,6 +171,9 @@ class App:
             initial_audio_declick=bool(
                 self._settings.get("audio_declick", True)),
             on_audio_declick_change=self._on_audio_declick_change,
+            initial_audio_advanced=self._settings.get("audio_advanced") or {},
+            on_audio_advanced_change=self._on_audio_advanced_change,
+            on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
             initial_default_presets=self._settings.get(
                 "default_settings_presets", {}),
@@ -1193,6 +1200,9 @@ class App:
             write_kwargs["keep_full_length_names"] = (
                 self.window.audio_keep_full_rels(assets_dir))
 
+        # Machine-render previews (Advanced audio options) land next to this
+        # build's output; must be set before the pipeline spawns workers.
+        self._apply_audio_preview_env(output_path)
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -3046,6 +3056,92 @@ class App:
         self._settings["audio_declick"] = enabled
         self._apply_audio_declick_env(enabled)
         self._save_settings()
+
+    # Advanced audio options (Audio tab -> Advanced...).  Experiment levers
+    # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
+    # Stern encoder reads, and a value at its default clears the var so the
+    # engine baseline stays authoritative.
+    _AUDIO_ADV_DEFAULTS = {
+        "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
+        "head_mode": "encode", "leadout": "silence", "previews": False,
+        "experiment_idxs": "",
+    }
+
+    def _apply_audio_advanced_env(self, cfg):
+        """Mirror the Advanced audio options into the encoder env vars (see
+        ``_apply_audio_declick_env`` for why env: spawned workers inherit)."""
+        d = dict(self._AUDIO_ADV_DEFAULTS)
+        d.update({k: v for k, v in (cfg or {}).items() if v is not None})
+
+        def setenv(name, val):
+            if val is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = str(val)
+
+        try:
+            fade = float(d["fade_ms"])
+            cap = int(d["headroom_pct"])
+            lp = int(d["lowpass_hz"])
+        except (TypeError, ValueError):
+            fade, cap, lp = 40.0, 80, 5000
+        setenv("PAD_STERN_FADE_MS", None if fade == 40.0 else fade)
+        setenv("PAD_STERN_HEADROOM", None if cap == 80 else cap / 100.0)
+        setenv("PAD_STERN_LOWPASS_HZ", None if lp == 5000 else lp)
+        setenv("PAD_STERN_HEAD_MODE",
+               "stock" if d.get("head_mode") == "stock" else None)
+        setenv("PAD_STERN_LEADOUT",
+               "stock" if d.get("leadout") == "stock" else None)
+        idxs = str(d.get("experiment_idxs") or "").strip()
+        setenv("PAD_STERN_EXPERIMENT_IDXS", idxs or None)
+
+    def _on_audio_advanced_change(self, cfg):
+        """Persist + apply the Advanced audio options."""
+        self._settings["audio_advanced"] = dict(cfg or {})
+        self._apply_audio_advanced_env(cfg)
+        self._save_settings()
+
+    def _apply_audio_preview_env(self, output_path):
+        """Point ``PAD_STERN_PREVIEW_DIR`` next to this build's output when
+        machine-render previews are enabled (Advanced audio options), so the
+        encoder drops idxNNNN_machine_render.wav files there; cleared
+        otherwise so a stale dir never collects files from a later build."""
+        cfg = self._settings.get("audio_advanced") or {}
+        on = (bool(cfg.get("previews"))
+              and self._current_mfr is not None
+              and self._current_mfr.key == "stern"
+              and bool(output_path))
+        if on:
+            base = os.path.splitext(os.path.basename(output_path))[0]
+            os.environ["PAD_STERN_PREVIEW_DIR"] = os.path.join(
+                os.path.dirname(output_path) or ".",
+                base + "_machine_previews")
+        else:
+            os.environ.pop("PAD_STERN_PREVIEW_DIR", None)
+
+    def _on_audio_profile_request(self, assets_dir):
+        """Audio tab -> "Profile vs stock": characterize every sound in the
+        extract folder and compare replacements against their stock originals
+        (engine.audio_profile_report), on a worker thread."""
+        if not assets_dir or not os.path.isdir(assets_dir):
+            self.msg_queue.put(LogMsg(
+                "Profile vs stock: scan an extract folder on the Audio tab "
+                "first.", "warning"))
+            return
+
+        def _log(msg, level="info"):
+            self.msg_queue.put(LogMsg(msg, level))
+
+        def _run():
+            try:
+                from .plugins.stern import engine as stern_engine
+                stern_engine.audio_profile_report(assets_dir, _log)
+            except Exception as e:
+                _log("Profile vs stock failed: %s" % e, "error")
+
+        self.msg_queue.put(LogMsg(
+            "Profiling sounds under %s ..." % assets_dir, "info"))
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_voice_quality_change(self, model_size):
         """Persist the ⚙-menu voice-recognition quality pick (the

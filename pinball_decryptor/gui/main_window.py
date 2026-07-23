@@ -993,6 +993,9 @@ class MainWindow:
                  on_voice_quality_change=None,
                  initial_audio_declick=True,
                  on_audio_declick_change=None,
+                 initial_audio_advanced=None,
+                 on_audio_advanced_change=None,
+                 on_audio_profile=None,
                  on_partition_image_opened=None,
                  initial_default_presets=None,
                  on_default_presets_change=None):
@@ -1068,6 +1071,13 @@ class MainWindow:
         self.audio_declick_var = tk.BooleanVar(
             value=bool(initial_audio_declick))
         self._on_audio_declick_change = on_audio_declick_change
+        # Advanced audio options (fade/cap/roll-off overrides + head/tail
+        # modes + machine-render previews) — experiment levers for the Spike 2
+        # trigger-pop hunt.  Persisted via ``on_audio_advanced_change``; the
+        # App mirrors them into the encoder's env vars.
+        self._audio_advanced = dict(initial_audio_advanced or {})
+        self._on_audio_advanced_change = on_audio_advanced_change
+        self._on_audio_profile = on_audio_profile
         # Fired with the image path when the Partition Explorer successfully
         # opens a card — the App records it into the field's recent-paths
         # dropdown (monkeybug: same "last 5" memory as the Extract screen).
@@ -3076,11 +3086,40 @@ class MainWindow:
         # (monkeybug's callout clicks).  On by default; only meaningful for the
         # Spike 2 re-encode path, so apply_manufacturer shows it for Stern and
         # hides it elsewhere.
+        self._audio_declick_row = ttk.Frame(f)
+        self._audio_declick_row.pack(anchor=tk.W, fill=tk.X, padx=12,
+                                     pady=(0, 4))
         self._audio_declick_cb = ttk.Checkbutton(
-            f, text="Match audio replacements to the game's callouts",
+            self._audio_declick_row,
+            text="Match audio replacements to the game's callouts",
             variable=self.audio_declick_var,
             command=self._on_audio_declick_toggle)
-        self._audio_declick_cb.pack(anchor=tk.W, padx=12, pady=(0, 4))
+        self._audio_declick_cb.pack(side=tk.LEFT)
+        # Experiment levers for the trigger-pop hunt (Stern-only, same
+        # show/hide as the checkbox): per-knob encode overrides + a stock
+        # characterization report.
+        self._audio_adv_btn = ttk.Button(
+            self._audio_declick_row, text="Advanced…", width=12,
+            command=self._open_audio_advanced)
+        self._audio_adv_btn.pack(side=tk.LEFT, padx=(10, 0))
+        _Tooltip(self._audio_adv_btn,
+                 "Fine-tune how replacements are encoded: fade length, level "
+                 "cap, treble roll-off, and experimental head/tail block "
+                 "handling — plus machine-render preview WAVs on Build.\n\n"
+                 "These are levers for chasing clicks heard on the real "
+                 "machine. Defaults match the standard behavior.",
+                 lambda: self._current_theme)
+        self._audio_profile_btn = ttk.Button(
+            self._audio_declick_row, text="Profile vs stock", width=15,
+            command=self._audio_profile_click)
+        self._audio_profile_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(self._audio_profile_btn,
+                 "Characterize every sound in the scanned extract folder — "
+                 "lead-in, fade-out, peak/RMS level, DC offset, spectral "
+                 "brightness — and flag replacements that deviate from the "
+                 "game's own callout style. Writes audio_profile.csv into "
+                 "the extract folder.",
+                 lambda: self._current_theme)
         self._audio_declick_tip = _Tooltip(
             self._audio_declick_cb,
             "On by default. Shapes each replacement to behave like the game's "
@@ -3093,6 +3132,9 @@ class MainWindow:
             "Leave this on unless a replacement sounds too dull with it — "
             "turning it off uses your audio exactly as provided.",
             lambda: self._current_theme)
+        # A persisted experiment setting from a previous session must be
+        # visible immediately (the RAW-toggle lesson).
+        self._refresh_audio_adv_marker()
 
         self._refresh_audio_ffmpeg_warning()
 
@@ -6886,6 +6928,183 @@ class MainWindow:
                     "as-is.")
         return forces
 
+    _AUDIO_ADV_DEFAULTS = {
+        "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
+        "head_mode": "encode", "leadout": "silence", "previews": False,
+        "experiment_idxs": "",
+    }
+    _AUDIO_HEAD_CHOICES = (
+        ("encode", "Re-encode from the first sample (default)"),
+        ("stock", "Keep the stock head block (experimental, first 4.5 ms)"),
+    )
+    _AUDIO_LEADOUT_CHOICES = (
+        ("silence", "Encode the tail block to silence (default)"),
+        ("stock", "Keep the stock tail scrap (pre-v0.71.1 behavior)"),
+    )
+
+    def _open_audio_advanced(self):
+        """Advanced audio options: per-knob encode overrides for the Spike 2
+        click hunt.  Values at their defaults leave the standard behavior
+        untouched; everything is persisted and applied via
+        ``on_audio_advanced_change`` (the App mirrors them into env vars)."""
+        root = self._tk_root()
+        dlg = tk.Toplevel(root)
+        dlg.title("Advanced Audio Options")
+        dlg.transient(root)
+        dlg.resizable(False, False)
+        self._theme_toplevel(dlg)
+        cfg = dict(self._AUDIO_ADV_DEFAULTS)
+        cfg.update({k: v for k, v in self._audio_advanced.items()
+                    if v is not None})
+
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=460,
+            text="Experiment levers for how Stern Spike 2 audio replacements "
+                 "are encoded. Defaults match the standard behavior; change "
+                 "one thing at a time when chasing a click on the real "
+                 "machine.").pack(anchor=tk.W, padx=12, pady=(12, 8))
+
+        grid = ttk.Frame(dlg)
+        grid.pack(fill=tk.X, padx=12)
+        fade_var = tk.StringVar(value=str(cfg["fade_ms"]))
+        cap_var = tk.StringVar(value=str(cfg["headroom_pct"]))
+        lp_var = tk.StringVar(value=str(cfg["lowpass_hz"]))
+
+        def _row(r, label, var, lo, hi, inc, hint):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky=tk.W,
+                                             pady=2)
+            ttk.Spinbox(grid, textvariable=var, from_=lo, to=hi,
+                        increment=inc, width=8).grid(row=r, column=1,
+                                                     sticky=tk.W, padx=(8, 0))
+            ttk.Label(grid, text=hint, font=(_SANS_FONT, 8, "italic")).grid(
+                row=r, column=2, sticky=tk.W, padx=(8, 0))
+
+        _row(0, "Edge fade length (ms):", fade_var, 0, 500, 5,
+             "default 40 — stock callouts ease in over 40-77 ms")
+        _row(1, "Level cap (% of full scale):", cap_var, 5, 100, 5,
+             "default 80 — near stock callout loudness")
+        _row(2, "Treble roll-off (Hz):", lp_var, 0, 20000, 500,
+             "default 5000; 0 turns the filter off")
+
+        head_var = tk.StringVar(value=dict(self._AUDIO_HEAD_CHOICES)[
+            cfg["head_mode"] if cfg["head_mode"] in
+            dict(self._AUDIO_HEAD_CHOICES) else "encode"])
+        lead_var = tk.StringVar(value=dict(self._AUDIO_LEADOUT_CHOICES)[
+            cfg["leadout"] if cfg["leadout"] in
+            dict(self._AUDIO_LEADOUT_CHOICES) else "silence"])
+        ttk.Label(grid, text="Head block (first 4.5 ms):").grid(
+            row=3, column=0, sticky=tk.W, pady=(8, 2))
+        ttk.Combobox(grid, textvariable=head_var, state="readonly", width=48,
+                     values=[v for _k, v in self._AUDIO_HEAD_CHOICES]).grid(
+            row=3, column=1, columnspan=2, sticky=tk.W, padx=(8, 0),
+            pady=(8, 2))
+        ttk.Label(grid, text="Tail block (last 4.5 ms):").grid(
+            row=4, column=0, sticky=tk.W, pady=2)
+        ttk.Combobox(grid, textvariable=lead_var, state="readonly", width=48,
+                     values=[v for _k, v in self._AUDIO_LEADOUT_CHOICES]).grid(
+            row=4, column=1, columnspan=2, sticky=tk.W, padx=(8, 0), pady=2)
+
+        idxs_var = tk.StringVar(value=str(cfg.get("experiment_idxs") or ""))
+        ttk.Label(grid, text="Only these idx numbers:").grid(
+            row=5, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(grid, textvariable=idxs_var, width=24).grid(
+            row=5, column=1, sticky=tk.W, padx=(8, 0), pady=2)
+        ttk.Label(grid, text="head/tail modes only, e.g. 231, 258 — blank "
+                             "= all; lets one card carry treated slots and "
+                             "untouched controls",
+                  font=(_SANS_FONT, 8, "italic")).grid(
+            row=5, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+
+        prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
+        ttk.Checkbutton(
+            dlg, variable=prev_var,
+            text="On Build, export machine-render WAVs of every changed "
+                 "sound (hear exactly what the card will play)").pack(
+            anchor=tk.W, padx=12, pady=(8, 0))
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=460,
+            font=(_SANS_FONT, 8, "italic"),
+            text="Previews land in a <build name>_machine_previews folder "
+                 "next to the built image. Note: they show what our decoder "
+                 "renders — an artifact the real machine adds on its own "
+                 "cannot appear in a preview.").pack(
+            anchor=tk.W, padx=12, pady=(2, 8))
+
+        def _collect():
+            def num(var, lo, hi, dflt):
+                try:
+                    v = float(var.get())
+                except (TypeError, ValueError):
+                    return dflt
+                return int(min(max(v, lo), hi))
+            keys_h = {v: k for k, v in self._AUDIO_HEAD_CHOICES}
+            keys_l = {v: k for k, v in self._AUDIO_LEADOUT_CHOICES}
+            idxs = ",".join(t.strip() for t in
+                            idxs_var.get().replace(";", ",").split(",")
+                            if t.strip().isdigit())
+            return {
+                "fade_ms": num(fade_var, 0, 500, 40),
+                "headroom_pct": num(cap_var, 5, 100, 80),
+                "lowpass_hz": num(lp_var, 0, 20000, 5000),
+                "head_mode": keys_h.get(head_var.get(), "encode"),
+                "leadout": keys_l.get(lead_var.get(), "silence"),
+                "previews": bool(prev_var.get()),
+                "experiment_idxs": idxs,
+            }
+
+        def _ok(_e=None):
+            self._audio_advanced = _collect()
+            if self._on_audio_advanced_change:
+                self._on_audio_advanced_change(dict(self._audio_advanced))
+            self._refresh_audio_adv_marker()
+            dlg.destroy()
+
+        def _defaults():
+            fade_var.set(str(self._AUDIO_ADV_DEFAULTS["fade_ms"]))
+            cap_var.set(str(self._AUDIO_ADV_DEFAULTS["headroom_pct"]))
+            lp_var.set(str(self._AUDIO_ADV_DEFAULTS["lowpass_hz"]))
+            head_var.set(dict(self._AUDIO_HEAD_CHOICES)["encode"])
+            lead_var.set(dict(self._AUDIO_LEADOUT_CHOICES)["silence"])
+            prev_var.set(False)
+            idxs_var.set("")
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(4, 12))
+        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="Restore defaults", command=_defaults).pack(
+            side=tk.LEFT)
+        dlg.bind("<Return>", _ok)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        dlg.grab_set()
+
+    def _refresh_audio_adv_marker(self):
+        """Star the Advanced button when any option is off its default, so a
+        forgotten experiment setting is visible at a glance (the RAW-toggle
+        lesson: a persisted A/B leftover silently shaped every later card)."""
+        btn = getattr(self, "_audio_adv_btn", None)
+        if btn is None:
+            return
+        d = dict(self._AUDIO_ADV_DEFAULTS)
+        d.update({k: v for k, v in self._audio_advanced.items()
+                  if v is not None})
+        btn.config(text="Advanced…*" if d != self._AUDIO_ADV_DEFAULTS
+                   else "Advanced…")
+
+    def _audio_profile_click(self):
+        """Audio tab -> Profile vs stock: hand the scanned extract folder to
+        the App's worker (engine.audio_profile_report)."""
+        assets = self._audio_scan_dir
+        if not assets:
+            messagebox.showinfo(
+                "Profile vs stock",
+                "Scan an extract folder on the Audio tab first — the report "
+                "characterizes the sounds in that folder.")
+            return
+        if self._on_audio_profile:
+            self._on_audio_profile(assets)
+
     def _on_audio_declick_toggle(self):
         """Forward the Auto-fade + cap toggle to the App (persist + apply to
         the encoder).  A no-op when the App didn't wire a handler (e.g. tests)."""
@@ -9831,14 +10050,14 @@ class MainWindow:
         # var is read solely by the Stern engine's audio encoder), so show the
         # checkbox for Stern and hide it elsewhere rather than offer an inert
         # toggle.  Packed just under the Trim/pad row.
-        if hasattr(self, "_audio_declick_cb"):
+        if hasattr(self, "_audio_declick_row"):
             if mfr.key == "stern":
-                if not self._audio_declick_cb.winfo_ismapped():
-                    self._audio_declick_cb.pack(
-                        anchor=tk.W, padx=12, pady=(0, 4),
+                if not self._audio_declick_row.winfo_ismapped():
+                    self._audio_declick_row.pack(
+                        anchor=tk.W, fill=tk.X, padx=12, pady=(0, 4),
                         after=self._audio_trim_cb)
             else:
-                self._audio_declick_cb.pack_forget()
+                self._audio_declick_row.pack_forget()
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}

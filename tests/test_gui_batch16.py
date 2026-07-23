@@ -138,14 +138,19 @@ def test_optional_toolbar_widgets_still_pack(app):
 
 
 def test_audio_checkboxes_are_left_aligned(app):
-    """monkeybug: "move checkbox to same level as other and tighten up"."""
+    """monkeybug: "move checkbox to same level as other and tighten up".
+
+    The match-to-callouts checkbox now lives inside a row frame (with the
+    Advanced… / Profile vs stock buttons), so alignment is checked in
+    root-relative coordinates."""
     w = _stern(app)
     _show_tab(app, w, w._tab_audio)
     assert w._audio_trim_cb.winfo_ismapped()
-    assert w._audio_trim_cb.winfo_x() == w._audio_declick_cb.winfo_x()
+    assert (w._audio_trim_cb.winfo_rootx()
+            == w._audio_declick_cb.winfo_rootx())
     # The blank spacer label that used to wedge a full text line between them
     # is gone, so they are adjacent rows.
-    gap = w._audio_declick_cb.winfo_y() - (
+    gap = w._audio_declick_row.winfo_y() - (
         w._audio_trim_cb.winfo_y() + w._audio_trim_cb.winfo_height())
     assert 0 <= gap <= 6, "checkboxes drifted apart again (gap=%d)" % gap
 

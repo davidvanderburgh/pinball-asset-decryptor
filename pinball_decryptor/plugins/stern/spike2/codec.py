@@ -18,6 +18,7 @@ bit-exact, with no per-scale port:
 """
 
 import ctypes
+import os
 import struct
 
 import numpy as np
@@ -106,6 +107,23 @@ def decode_word(word, r, x, qmul):
 # 1.13, 303/400 sampled) and -2 (LZ 1.11 idx5103); 8 frames is generous cover
 # and still only 0.18 ms of stock audio versus the 4.5 ms we used to leave.
 LEADOUT_MARGIN = 8
+
+
+def experiment_covers(p):
+    """True when the experimental encode modes apply to this sound.
+
+    ``PAD_STERN_EXPERIMENT_IDXS`` (GUI: Advanced audio options, "only these
+    idx numbers") narrows the head/tail experiment modes to a comma-separated
+    idx list, so a single card can carry treated slots AND untouched controls
+    for an A/B on the real machine.  Unset/empty = every sound."""
+    raw = os.environ.get("PAD_STERN_EXPERIMENT_IDXS", "").strip()
+    if not raw:
+        return True
+    try:
+        wanted = {int(t) for t in raw.replace(";", ",").split(",") if t.strip()}
+    except ValueError:
+        return True
+    return int(p.get("idx", -1)) in wanted
 
 
 def extend_length(p, extra):
@@ -416,7 +434,15 @@ class GenRecover:
         The last :data:`LEADOUT_MARGIN` frames stay stock so a delta<0
         successor's head word is never touched.  Any failure leaves the stock
         bytes exactly as before -- this can only improve on v0.57.2, never
-        regress to the raw-zero noise burst."""
+        regress to the raw-zero noise burst.
+
+        ``PAD_STERN_LEADOUT=stock`` (GUI: Advanced audio options) skips the
+        silencing entirely -- the deliberate return to the v0.57.2..v0.71.0
+        stock-scrap behavior, kept as an A/B lever for the click hunt
+        (idx-scoped via :func:`experiment_covers`)."""
+        if (os.environ.get("PAD_STERN_LEADOUT") == "stock"
+                and experiment_covers(p)):
+            return
         length = p["length"]
         n = length - BLOCK
         want = BLOCK - LEADOUT_MARGIN
@@ -607,7 +633,11 @@ class StereoRecover:
         lead-out block to silence rather than shipping the replaced sound's
         own tail, keeping the last :data:`LEADOUT_MARGIN` frames stock so a
         delta<0 successor's head frame is never clobbered.  Any failure leaves
-        the stock bytes."""
+        the stock bytes.  ``PAD_STERN_LEADOUT=stock`` skips the silencing
+        (see the mono twin for why; idx-scoped)."""
+        if (os.environ.get("PAD_STERN_LEADOUT") == "stock"
+                and experiment_covers(p)):
+            return
         length = p["length"]
         n = length - BLOCK
         want = BLOCK - LEADOUT_MARGIN

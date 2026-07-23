@@ -836,3 +836,292 @@ def test_leadout_encoding_falls_back_to_stock_when_recovery_fails():
     assert (body[:emitted] == 0xBEEF).all()
     assert (body[emitted:] == stock[emitted:]).all()   # stock, not zeros
     assert body[emitted:].all()
+
+
+# --------------------------------------------------------------------------
+# Advanced audio options (2026-07 trigger-pop hunt): env-driven experiment
+# levers — fade/cap/roll-off overrides, tail-block mode, stock-head mode,
+# machine-render previews.
+# --------------------------------------------------------------------------
+def test_declick_env_overrides(monkeypatch):
+    from pinball_decryptor.plugins.stern.engine import (_declick_params,
+                                                        _declick_lowpass_hz)
+
+    for var in ("PAD_STERN_AUDIO_RAW", "PAD_STERN_FADE_MS",
+                "PAD_STERN_HEADROOM", "PAD_STERN_LOWPASS_HZ"):
+        monkeypatch.delenv(var, raising=False)
+    assert _declick_params() == (40.0, 0.80)
+    assert _declick_lowpass_hz() == 5000.0
+
+    monkeypatch.setenv("PAD_STERN_FADE_MS", "12.5")
+    monkeypatch.setenv("PAD_STERN_HEADROOM", "0.6")
+    monkeypatch.setenv("PAD_STERN_LOWPASS_HZ", "3000")
+    assert _declick_params() == (12.5, 0.6)
+    assert _declick_lowpass_hz() == 3000.0
+
+    monkeypatch.setenv("PAD_STERN_LOWPASS_HZ", "0")     # 0 = filter off
+    assert _declick_lowpass_hz() is None
+
+    # Overrides apply on top of RAW mode too.
+    monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
+    assert _declick_params() == (12.5, 0.6)
+
+    # Garbage / out-of-range values fall back to the mode base.
+    monkeypatch.setenv("PAD_STERN_FADE_MS", "banana")
+    monkeypatch.setenv("PAD_STERN_HEADROOM", "7.5")
+    assert _declick_params() == (5.0, 0.97)
+
+
+def test_leadout_env_keeps_stock(monkeypatch):
+    """PAD_STERN_LEADOUT=stock deliberately restores the v0.57.2..v0.71.0
+    stock-scrap tail (an A/B lever, not a regression)."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern.spike2.codec import GenRecover
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    monkeypatch.setenv("PAD_STERN_LEADOUT", "stock")
+    length = 600
+    emitted = emitted_length(length)
+    stock = (np.arange(length, dtype=np.uint32) % 60000 + 1).astype("<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    gr = object.__new__(GenRecover)
+    gr.emu = types.SimpleNamespace(mm=MM())
+    gr._calibrate = lambda p: (0, 0, 0)
+    gr.recover_block = lambda p, cursor, n=200: (
+        np.zeros(n, np.int64), np.zeros(n, np.int64))
+    gr.encode_block = lambda seg, K, rb: (
+        np.full(len(seg), 0xBEEF, np.uint16), 0)
+
+    p = {"length": length, "body_off": 0, "chan": 1, "scale": 3,
+         "_rawobj": _rawobj_for(length)}
+    _off, raw = gr.encode_sound(p, np.zeros(emitted, np.int64))
+    body = np.frombuffer(raw, dtype="<u2")
+    assert (body[:emitted] == 0xBEEF).all()
+    assert (body[emitted:] == stock[emitted:]).all()   # WHOLE lead-out stock
+
+
+def _stock_head_fixture(np, stock_word=0, body_off=64, length=600):
+    """(emu, p, rec, body) for _apply_stock_head: keystream identity
+    (r=0, x=0) so a stock word w decodes to (qmul * sxth(w)) >> 16."""
+    import types
+    from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
+
+    stock = np.full(body_off // 2 + length, stock_word, dtype="<u2")
+    stock_bytes = stock.tobytes()
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+    emu = types.SimpleNamespace(mm=MM())
+    rec = types.SimpleNamespace(
+        recover_block=lambda p, cursor, n=200: (
+            np.zeros(n, np.int64), np.zeros(n, np.int64)),
+        qmul=0x10000)                        # decode == sxth(word)
+    p = {"idx": 231, "length": length, "body_off": body_off, "chan": 1}
+    body = np.full(length, 0xBEEF, dtype="<u2").tobytes()
+    return emu, p, rec, body
+
+
+def test_stock_head_applied_when_all_gates_pass(monkeypatch):
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _apply_stock_head
+    from pinball_decryptor.plugins.stern.spike2.emulator import BLOCK
+
+    monkeypatch.setenv("PAD_STERN_HEAD_MODE", "stock")
+    emu, p, rec, body = _stock_head_fixture(np, stock_word=0)
+    tgt = np.zeros(400, np.int64)
+    out, applied = _apply_stock_head(emu, p, p["body_off"], body, tgt, rec, np)
+    assert applied
+    got = np.frombuffer(out, dtype="<u2")
+    assert (got[:BLOCK] == 0).all()                   # stock words in place
+    assert (got[BLOCK:] == 0xBEEF).all()              # rest untouched
+
+
+def test_stock_head_gates(monkeypatch):
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _apply_stock_head
+
+    monkeypatch.setenv("PAD_STERN_HEAD_MODE", "stock")
+    emu, p, rec, body = _stock_head_fixture(np, stock_word=0)
+
+    # Gate: replacement head must be silent.
+    hot = np.zeros(400, np.int64)
+    hot[3] = 5000
+    out, applied = _apply_stock_head(emu, p, p["body_off"], body, hot, rec, np)
+    assert not applied and out == body
+
+    # Gate: stock head must decode silent (0x4000 -> sxth 0x4000 -> loud).
+    emu2, p2, rec2, body2 = _stock_head_fixture(np, stock_word=0x4000)
+    tgt = np.zeros(400, np.int64)
+    out, applied = _apply_stock_head(emu2, p2, p2["body_off"], body2, tgt,
+                                     rec2, np)
+    assert not applied and out == body2
+
+    # Gate: shifted delta<0 window (head word shared with the predecessor).
+    out, applied = _apply_stock_head(emu, p, p["body_off"] - 2, body, tgt,
+                                     rec, np)
+    assert not applied and out == body
+
+    # Gate: stereo slots are skipped (mono-only for now).
+    p_st = dict(p, chan=2)
+    out, applied = _apply_stock_head(emu, p_st, p["body_off"], body, tgt,
+                                     rec, np)
+    assert not applied and out == body
+
+    # Off by default: no env var, no change even when every gate would pass.
+    monkeypatch.delenv("PAD_STERN_HEAD_MODE", raising=False)
+    out, applied = _apply_stock_head(emu, p, p["body_off"], body, tgt, rec, np)
+    assert not applied and out == body
+
+
+def test_verify_encoded_exempts_head_for_stock_head_mode():
+    """exempt_head=True (block 0 deliberately restored to stock words) skips
+    the head block exactly like delta<0 does; without it the same decode
+    fails."""
+    import numpy as np
+    import pytest
+    from pinball_decryptor.plugins.stern.engine import (_verify_encoded,
+                                                        _EncodeVerifyError)
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    tgt = np.zeros(n, np.int64)
+    got = tgt.copy()
+    got[5] = 7                       # the stock head's own tiny residue
+    emu, p, start = _verify_fixture(got, delta=0)
+    _verify_encoded(emu, p, start, b"\0" * 8, tgt, None, np, exempt_head=True)
+    with pytest.raises(_EncodeVerifyError):
+        _verify_encoded(emu, p, start, b"\0" * 8, tgt, None, np)
+
+
+def test_write_machine_render(monkeypatch, tmp_path):
+    import wave
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _write_machine_render
+
+    out = tmp_path / "previews"
+    monkeypatch.setenv("PAD_STERN_PREVIEW_DIR", str(out))
+    _write_machine_render({"idx": 7}, [np.array([0, 100, -100, 40000])],
+                          False, np)
+    path = out / "idx0007_machine_render.wav"
+    assert path.is_file()
+    with wave.open(str(path), "rb") as w:
+        assert w.getnchannels() == 1
+        assert w.getframerate() == 44100
+        pcm = np.frombuffer(w.readframes(4), np.int16)
+    assert list(pcm) == [0, 100, -100, 32767]          # clipped, not wrapped
+
+    # No env var -> no file, never an error.
+    monkeypatch.delenv("PAD_STERN_PREVIEW_DIR", raising=False)
+    _write_machine_render({"idx": 8}, [np.array([1])], False, np)
+    assert not (out / "idx0008_machine_render.wav").exists()
+
+
+def test_experiment_covers_idx_scope(monkeypatch):
+    from pinball_decryptor.plugins.stern.spike2.codec import experiment_covers
+
+    monkeypatch.delenv("PAD_STERN_EXPERIMENT_IDXS", raising=False)
+    assert experiment_covers({"idx": 231})            # unset = all
+    monkeypatch.setenv("PAD_STERN_EXPERIMENT_IDXS", "231, 258")
+    assert experiment_covers({"idx": 231})
+    assert experiment_covers({"idx": 258})
+    assert not experiment_covers({"idx": 99})
+    monkeypatch.setenv("PAD_STERN_EXPERIMENT_IDXS", "  ")   # blank = all
+    assert experiment_covers({"idx": 99})
+    monkeypatch.setenv("PAD_STERN_EXPERIMENT_IDXS", "garbage")
+    assert experiment_covers({"idx": 99})              # unparseable = all
+
+
+def test_stock_head_respects_experiment_scope(monkeypatch):
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _apply_stock_head
+
+    monkeypatch.setenv("PAD_STERN_HEAD_MODE", "stock")
+    monkeypatch.setenv("PAD_STERN_EXPERIMENT_IDXS", "999")   # not our idx
+    emu, p, rec, body = _stock_head_fixture(np, stock_word=0)   # idx 231
+    tgt = np.zeros(400, np.int64)
+    out, applied = _apply_stock_head(emu, p, p["body_off"], body, tgt, rec, np)
+    assert not applied and out == body
+
+
+def test_audit_audio_patches_clean_and_anomalies():
+    from pinball_decryptor.plugins.stern.engine import _audit_audio_patches
+
+    # Two mono sounds packed back-to-back: idx1 at 0 (len 100 -> 200 bytes),
+    # idx2 at 200 (len 50 -> 100 bytes).
+    params = [{"idx": 1, "body_off": 0, "length": 100, "chan": 1},
+              {"idx": 2, "body_off": 200, "length": 50, "chan": 1}]
+    logs = []
+    log = lambda m, lv="info": logs.append((lv, m))
+
+    clean = {0: b"\0" * 200, 200: b"\0" * 100}
+    assert _audit_audio_patches(params, clean, log) == 0
+
+    # A patch at an offset no sound owns.
+    logs.clear()
+    bad = {0: b"\0" * 200, 512: b"\0" * 40}
+    assert _audit_audio_patches(params, bad, log) >= 1
+    assert any("matches no sound" in m for _lv, m in logs)
+
+    # A delta=-1 shifted window (start one word below body_off) is legitimate.
+    logs.clear()
+    shifted = {0: b"\0" * 200, 198: b"\0" * 100}     # idx2 window shifted -1
+    assert _audit_audio_patches(params, shifted, log) == 0
+
+
+def test_audio_profile_report(tmp_path):
+    """Stock population + a hot bright replacement -> flagged row + CSV."""
+    import csv
+    import wave
+    import numpy as np
+    from pinball_decryptor.core.checksums import md5_file
+    from pinball_decryptor.plugins.stern.engine import audio_profile_report
+
+    def write_wav(path, samples):
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(np.asarray(samples, np.int16).tobytes())
+
+    n = 22050
+    t = np.arange(n) / 44100.0
+    # Stock-style: 60 ms ease-in, 500 Hz tone at moderate level.
+    ramp = np.clip(t / 0.060, 0, 1)
+    stock = (4000 * ramp * np.sin(2 * np.pi * 500 * t))
+    # Replacement-style: instant hot 9 kHz tone.
+    hot = (30000 * np.sin(2 * np.pi * 9000 * t))
+
+    a = tmp_path / "audio"
+    a.mkdir()
+    for i in (1, 2, 3):
+        write_wav(a / ("idx%04d.wav" % i), stock)
+    write_wav(a / "idx0004.wav", hot)
+
+    # Baseline: idx0001-3 unchanged, idx0004's hash deliberately stale.
+    lines = []
+    for i in (1, 2, 3):
+        lines.append("audio/idx%04d.wav\t%s"
+                     % (i, md5_file(str(a / ("idx%04d.wav" % i)))))
+    lines.append("audio/idx0004.wav\t" + "0" * 32)
+    (tmp_path / ".checksums.md5").write_text("\n".join(lines) + "\n",
+                                             encoding="utf-8")
+
+    logged = []
+    csv_path, n_sounds, n_rep, n_flagged = audio_profile_report(
+        str(tmp_path), lambda m, lv="info": logged.append((lv, m)))
+    assert n_sounds == 4 and n_rep == 1 and n_flagged == 1
+    rows = list(csv.DictReader(open(csv_path, encoding="utf-8")))
+    by_idx = {r["idx"]: r for r in rows}
+    assert by_idx["idx0004"]["status"] == "replaced"
+    assert "brighter" in by_idx["idx0004"]["flags"] or \
+           "hotter" in by_idx["idx0004"]["flags"]
+    assert by_idx["idx0001"]["status"] == "stock"
+    assert by_idx["idx0001"]["flags"] == ""

@@ -2665,6 +2665,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         else:
             log("Audio shaping on: replacements get the stock-callout edge "
                 "fade, level cap, and 5 kHz roll-off.", "info")
+        # Advanced audio options leave fingerprints in the log for the same
+        # reason the shaping mode does: a card built during an experiment must
+        # be identifiable as such after the fact.
+        adv = [(lbl, os.environ.get(var))
+               for var, lbl in (("PAD_STERN_FADE_MS", "edge fade ms"),
+                                ("PAD_STERN_HEADROOM", "level cap"),
+                                ("PAD_STERN_LOWPASS_HZ", "treble roll-off Hz"),
+                                ("PAD_STERN_HEAD_MODE", "head block"),
+                                ("PAD_STERN_LEADOUT", "tail block"))]
+        adv = ["%s=%s" % (lbl, v) for lbl, v in adv if v]
+        if adv:
+            log("Advanced audio overrides active for this build: %s."
+                % "; ".join(adv), "warning")
     if music_edits:
         log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
             "info")
@@ -2743,6 +2756,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             return None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
                                                 params, np, log, work)
+                    if audio_patches:
+                        _audit_audio_patches(params, audio_patches, log)
+                        # Honest end-of-pipeline check: decode the FINAL card
+                        # bytes (post master-directory restore) and report /
+                        # preview what each sound really plays.  Skippable for
+                        # a huge re-encode where the extra decodes aren't worth
+                        # it; on by default because it's the only check that
+                        # sees the restore's effect (the silent-replacement
+                        # scrap).
+                        if os.environ.get(
+                                "PAD_STERN_SKIP_FINAL_VERIFY") != "1":
+                            try:
+                                _verify_final_patches(
+                                    gr_path, img_path, audio_patches, params,
+                                    np, log, cancel)
+                            except Exception as e:
+                                log("Final-bytes check skipped (%s)." % e,
+                                    "info")
 
                 # Per-song music banks (image-scNN.bin) — re-encode each edited
                 # song back into its bank (own fresh CatEmu per bank).
@@ -3319,18 +3350,47 @@ _DECLICK_HEADROOM = 0.80
 _DECLICK_LOWPASS_HZ = 5000.0
 
 
+def _env_float(name):
+    """``float(os.environ[name])`` or None (unset / not a number).  The audio
+    experiment overrides ride the environment for the same reason
+    ``PAD_STERN_AUDIO_RAW`` does: spawned encode workers inherit it, so serial
+    and parallel writes agree without threading knobs through every
+    signature."""
+    v = os.environ.get(name)
+    if not v:
+        return None
+    try:
+        return float(v)
+    except ValueError:
+        return None
+
+
 def _declick_params():
     """``(fade_ms, headroom)`` for an audio replacement's edge fade + level cap.
     Auto-fade + cap is on unless the GUI unticked it (``PAD_STERN_AUDIO_RAW=1``),
-    which restores the pre-v0.49 behavior."""
+    which restores the pre-v0.49 behavior.  ``PAD_STERN_FADE_MS`` /
+    ``PAD_STERN_HEADROOM`` (GUI: Advanced audio options) override either base
+    so the click hunt can vary one lever at a time."""
     if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
-        return 5.0, 0.97
-    return _DECLICK_FADE_MS, _DECLICK_HEADROOM
+        fade, headroom = 5.0, 0.97
+    else:
+        fade, headroom = _DECLICK_FADE_MS, _DECLICK_HEADROOM
+    ov = _env_float("PAD_STERN_FADE_MS")
+    if ov is not None and 0.0 <= ov <= 500.0:
+        fade = ov
+    ov = _env_float("PAD_STERN_HEADROOM")
+    if ov is not None and 0.05 <= ov <= 1.0:
+        headroom = ov
+    return fade, headroom
 
 
 def _declick_lowpass_hz():
     """Low-pass cutoff (Hz) for band-limiting a replacement to stock callout
-    bandwidth, or ``None`` in RAW mode (same toggle as :func:`_declick_params`)."""
+    bandwidth, or ``None`` in RAW mode (same toggle as :func:`_declick_params`).
+    ``PAD_STERN_LOWPASS_HZ`` overrides in either mode; 0 disables the filter."""
+    ov = _env_float("PAD_STERN_LOWPASS_HZ")
+    if ov is not None:
+        return None if ov <= 0 else min(max(ov, 500.0), 20000.0)
     if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
         return None
     return _DECLICK_LOWPASS_HZ
@@ -3372,6 +3432,188 @@ def _lowpass(samples, cutoff_hz, np, fs=44100.0):
     y = _iir(x)                              # forward
     y = _iir(y[::-1])[::-1]                   # reverse -> zero phase
     return np.round(y).astype(np.int64)
+
+
+# ---- stock-vs-replacement audio profiling (Audio tab: "Profile vs stock") --
+#
+# The stock callouts have a house style — 40-77 ms ease-ins, band-limited
+# speech (centroid ~620 Hz, nothing above 8 kHz), moderate levels — and every
+# hardware click hunt so far has come back to a replacement deviating from it
+# (hot onsets, 10x the HF energy, near-full-scale peaks).  This report puts
+# numbers on that per sound: every idxNNNN.wav gets characterized, and each
+# REPLACED sound is compared against its pristine .orig snapshot (or, without
+# one, the stock population median) with plain-language flags.
+
+def _wav_profile(path, np):
+    """Waveform metrics for one WAV: duration, levels, edges, spectrum."""
+    import math
+    s = _load_wav(path, False, np)
+    n = len(s)
+    if n == 0:
+        return None
+    x = s.astype(np.float64)
+    peak = float(np.abs(x).max())
+    rms = float(np.sqrt((x ** 2).mean()))
+    dbfs = lambda v: -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
+
+    def first_above(frac):
+        i = np.flatnonzero(np.abs(x) >= frac * peak)
+        return (i[0] / 44.1) if len(i) else -1.0          # ms
+
+    def last_above(frac):
+        i = np.flatnonzero(np.abs(x) >= frac * peak)
+        return ((n - 1 - i[-1]) / 44.1) if len(i) else -1.0
+
+    # Whole-file spectrum (these are short callouts; decimate very long files
+    # to keep the FFT cheap).
+    xs = x if n <= 2 ** 21 else x[:: (n // 2 ** 20)]
+    S = np.abs(np.fft.rfft(xs * np.hanning(len(xs)))) ** 2
+    f = np.fft.rfftfreq(len(xs), 1 / 44100.0)
+    tot = max(float(S.sum()), 1e-9)
+    return {
+        "dur_s": round(n / 44100.0, 4),
+        "peak_dbfs": round(dbfs(peak), 1),
+        "rms_dbfs": round(dbfs(rms), 1),
+        "dc_counts": int(round(float(x.mean()))),
+        "lead5_ms": round(first_above(0.05), 1),
+        "lead50_ms": round(first_above(0.50), 1),
+        "tail5_ms": round(last_above(0.05), 1),
+        "centroid_hz": int((S * f).sum() / tot),
+        "pct_gt4k": round(float(S[f > 4000].sum()) / tot * 100.0, 1),
+        "pct_gt8k": round(float(S[f > 8000].sum()) / tot * 100.0, 1),
+    }
+
+
+_PROFILE_FIELDS = ["dur_s", "peak_dbfs", "rms_dbfs", "dc_counts", "lead5_ms",
+                   "lead50_ms", "tail5_ms", "centroid_hz", "pct_gt4k",
+                   "pct_gt8k"]
+
+
+def _profile_flags(rep, ref):
+    """Plain-language deviations of a replacement profile vs its reference."""
+    flags = []
+    if ref["lead5_ms"] >= 0 and rep["lead5_ms"] >= 0:
+        if rep["lead5_ms"] < 10.0 and ref["lead5_ms"] - rep["lead5_ms"] > 10.0:
+            flags.append("starts much hotter than stock (lead-in %.0fms vs "
+                         "%.0fms)" % (rep["lead5_ms"], ref["lead5_ms"]))
+    if rep["centroid_hz"] > max(2 * ref["centroid_hz"], 1500):
+        flags.append("much brighter than stock (centroid %dHz vs %dHz)"
+                     % (rep["centroid_hz"], ref["centroid_hz"]))
+    if rep["pct_gt8k"] > ref["pct_gt8k"] + 5.0:
+        flags.append("treble-heavy vs stock (%.1f%% vs %.1f%% above 8kHz)"
+                     % (rep["pct_gt8k"], ref["pct_gt8k"]))
+    if rep["peak_dbfs"] > ref["peak_dbfs"] + 6.0:
+        flags.append("much hotter peak than stock (%.1f vs %.1f dBFS)"
+                     % (rep["peak_dbfs"], ref["peak_dbfs"]))
+    if abs(rep["dc_counts"]) > 100:
+        flags.append("carries a DC offset (%+d counts)" % rep["dc_counts"])
+    return flags
+
+
+def audio_profile_report(assets_dir, log, progress=None):
+    """Characterize every ``idxNNNN.wav`` under *assets_dir* and write
+    ``audio_profile.csv`` beside the extract baseline.
+
+    Returns ``(csv_path, n_sounds, n_replaced, n_flagged)``.  Replaced sounds
+    (bytes differ from ``.checksums.md5``) are compared against their pristine
+    ``.orig`` snapshot when one exists, else against the median profile of the
+    unchanged (stock) population."""
+    import csv
+    import statistics
+
+    import numpy as np
+
+    from ...core import staged_originals
+    from ...core.checksums import md5_file, read_checksums
+
+    baseline = read_checksums(assets_dir)
+    base_by_idx = {}
+    rel_by_idx = {}
+    for rel in baseline:
+        idx = _wav_idx(os.path.splitext(os.path.basename(rel))[0])
+        if idx is not None:
+            base_by_idx[idx] = baseline[rel]
+            rel_by_idx[idx] = rel
+
+    files = []
+    for root, _dirs, fns in os.walk(assets_dir):
+        _dirs[:] = [d for d in _dirs if not d.startswith(".")]
+        for fn in fns:
+            if fn.lower().endswith(".wav"):
+                idx = _wav_idx(os.path.splitext(fn)[0])
+                if idx is not None:
+                    files.append((idx, os.path.join(root, fn)))
+    # One row per idx (renamed twins share content; prefer the changed twin).
+    by_idx = {}
+    for idx, path in sorted(files):
+        base = base_by_idx.get(idx)
+        changed = True
+        if base is not None:
+            try:
+                changed = md5_file(path) != base
+            except OSError:
+                pass
+        prev = by_idx.get(idx)
+        if prev is None or (changed and not prev[1]):
+            by_idx[idx] = (path, changed)
+
+    rows = []
+    stock_profiles = []
+    n_rep = 0
+    items = sorted(by_idx.items())
+    for i, (idx, (path, changed)) in enumerate(items):
+        if progress:
+            progress(i, len(items), os.path.basename(path))
+        try:
+            prof = _wav_profile(path, np)
+        except Exception as e:
+            log("idx%04d: could not profile (%s)" % (idx, e), "warning")
+            continue
+        if prof is None:
+            continue
+        ref = None
+        if changed:
+            n_rep += 1
+            rel = rel_by_idx.get(idx)
+            snap = staged_originals.snapshot_path(assets_dir, rel) if rel else None
+            if snap:
+                try:
+                    ref = _wav_profile(snap, np)
+                except Exception:
+                    ref = None
+        else:
+            stock_profiles.append(prof)
+        rows.append({"idx": idx, "file": os.path.basename(path),
+                     "status": "replaced" if changed else "stock",
+                     "prof": prof, "ref": ref})
+
+    # Population median as the fallback reference for snapshot-less edits.
+    pop_ref = None
+    if stock_profiles:
+        pop_ref = {k: statistics.median(p[k] for p in stock_profiles)
+                   for k in _PROFILE_FIELDS}
+
+    csv_path = os.path.join(assets_dir, "audio_profile.csv")
+    n_flagged = 0
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["idx", "file", "status"] + _PROFILE_FIELDS
+                   + ["stock_" + k for k in _PROFILE_FIELDS] + ["flags"])
+        for r in rows:
+            ref = r["ref"] or (pop_ref if r["status"] == "replaced" else None)
+            flags = _profile_flags(r["prof"], ref) if ref else []
+            if flags:
+                n_flagged += 1
+                log("idx%04d %s: %s" % (r["idx"], r["file"],
+                                        "; ".join(flags)), "warning")
+            w.writerow(["idx%04d" % r["idx"], r["file"], r["status"]]
+                       + [r["prof"][k] for k in _PROFILE_FIELDS]
+                       + [(r["ref"] or {}).get(k, "") for k in _PROFILE_FIELDS]
+                       + ["; ".join(flags)])
+    log("Audio profile written: %s (%d sounds, %d replaced, %d flagged)."
+        % (csv_path, len(rows), n_rep, n_flagged),
+        "success" if not n_flagged else "warning")
+    return csv_path, len(rows), n_rep, n_flagged
 
 
 class _BodyOverlay:
@@ -3463,7 +3705,8 @@ class _EncodeVerifyError(Exception):
     ``_recovery_valid`` failure — skip the sound, leave it unchanged, say so."""
 
 
-def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None):
+def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None,
+                    exempt_head=False):
     """Check the ACTUAL bytes we're about to write decode back to the target,
     over the WHOLE emitted range.
 
@@ -3478,7 +3721,13 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None):
     is physically shared with the layout predecessor, so it is deliberately a
     compromise between the two keystreams and any residual is absorbed by a
     short decay ramp — that head legitimately differs from the fitted target
-    (see :func:`_resolve_shared_boundary`).  On delta=0 keys nothing is exempt.
+    (see :func:`_resolve_shared_boundary`).  On delta=0 keys nothing is exempt
+    unless *exempt_head* says block 0 was deliberately restored to the stock
+    card's words (:func:`_apply_stock_head` — those decode to the STOCK head,
+    within its silence gate, not to the fitted target).
+
+    On success, drops a machine-render preview WAV when the GUI asked for one
+    (:func:`_write_machine_render`).
 
     Raises :class:`_EncodeVerifyError` on mismatch."""
     from .spike2.emulator import emitted_length, BLOCK
@@ -3494,7 +3743,7 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None):
     stereo = p["chan"] == 2
     step = 4 if stereo else 2
     delta = (start - p["body_off"]) // step
-    lo = BLOCK if delta < 0 else 0
+    lo = BLOCK if (delta < 0 or exempt_head) else 0
     if lo >= n:
         return
     if not isinstance(emu.mm, _BodyOverlay):
@@ -3529,6 +3778,64 @@ def _verify_encoded(emu, p, start, body, tgtL, tgtR, np, log=None):
                 "(%s channel differs by %d counts at sample %d of %d, %.0f ms in)"
                 % (p["idx"], "LR"[ch] if stereo else "mono", err, at, n,
                    at / 44.1))
+    _write_machine_render(p, got, stereo, np)
+
+
+def _audit_audio_patches(params, patches, log):
+    """Byte-range audit of the assembled cat-0 patch set — the paranoid check
+    that OUR writes land exactly where the model says they do.
+
+    Every hardware click hunt eventually asks "did the pipeline scribble on a
+    neighbor?", so answer it on every build: each patch must be owned by
+    exactly one sound (its window at ``body_off`` or the documented delta<0
+    shift of 1-2 words below), be size-neutral for that window, and overlap
+    another patch by at most the deliberate shared-boundary word(s).  Log-only
+    — an anomaly warns loudly but never blocks a build (the verify pass is
+    the hard gate).  Returns the number of anomalies."""
+    own = {}
+    for p in params:
+        s = 4 if p.get("chan") == 2 else 2
+        for d in (0, 1, 2):                 # delta 0 / -1 / -2 window starts
+            own.setdefault(p["body_off"] - s * d, []).append((p, s, d))
+    issues = shared = 0
+    items = sorted(patches.items())
+    prev_end = prev_owner = None
+    for off, body in items:
+        owner = None
+        for p, s, d in own.get(off, ()):
+            if len(body) == s * p["length"]:
+                owner = (p, s, d)
+                break
+        if owner is None:
+            log("Patch audit: patch at 0x%x (%d bytes) matches no sound's "
+                "write window — please report this build log." % (off, len(body)),
+                "warning")
+            issues += 1
+        elif owner[2]:
+            shared += 1                      # shifted window: head word shared
+        if prev_end is not None and off < prev_end:
+            ov = prev_end - off
+            if owner is not None and ov <= 2 * owner[1]:
+                shared += 1                  # adjacent replacement, shared word
+            else:
+                log("Patch audit: patches overlap by %d bytes at 0x%x "
+                    "(owners idx%s/idx%s) — please report this build log."
+                    % (ov, off,
+                       getattr(prev_owner, "get", lambda *_: "?")("idx", "?")
+                       if prev_owner else "?",
+                       owner[0]["idx"] if owner else "?"), "warning")
+                issues += 1
+        prev_end = off + len(body)
+        prev_owner = owner[0] if owner else None
+    if issues:
+        log("Patch audit: %d anomalies across %d audio patches." %
+            (issues, len(items)), "warning")
+    else:
+        log("Patch audit: %d audio patches, every byte inside its own "
+            "sound's window%s." %
+            (len(items), (" (%d shared-boundary words, expected)" % shared)
+             if shared else ""), "info")
+    return issues
 
 
 def _slot_end_map(params):
@@ -3754,6 +4061,97 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
         return body
 
 
+# Experimental head mode for the 2026-07 monkeybug trigger-pop hunt
+# (``PAD_STERN_HEAD_MODE=stock``, GUI: Advanced audio options).  Theory under
+# test: real playback seeds per-sound codec state at voice start in a way the
+# emulated decode path doesn't model, so ANY re-encoded head block can burp a
+# few-ms burst at trigger even when its words provably decode to the fitted
+# (silent-headed) target — the write-side mirror of the extract-side
+# quiet-intro slot trap.  Keeping the stock words for block 0 makes the first
+# 4.5 ms byte-identical to stock — immune to any unmodeled read path — and the
+# gates guarantee it never audibly changes the sound: delta=0 windows only,
+# fitted head essentially silent (always true with shaping on: the fade starts
+# at zero), and the stock head itself decodes essentially silent (so a
+# replacement never opens with the replaced sound's own attack).
+_STOCK_HEAD_TGT_MAX = 16      # counts: fitted head counts as silent
+_STOCK_HEAD_STOCK_MAX = 64    # counts: stock head counts as silent (-53 dBFS)
+
+
+def _apply_stock_head(emu, p, start, body, tgt, rec, np, log=None):
+    """``(body, applied)`` — *body* with block 0 restored to the stock card's
+    words when every stock-head gate passes (see above), unchanged otherwise."""
+    from .spike2.codec import decode_word, experiment_covers
+    from .spike2.emulator import BLOCK
+
+    def skip(why):
+        if log is not None:
+            log("idx %d: stock-head mode not applied (%s)." % (p["idx"], why),
+                "info")
+        return body, False
+
+    if os.environ.get("PAD_STERN_HEAD_MODE") != "stock":
+        return body, False
+    if not experiment_covers(p):
+        return body, False               # not in the experiment idx list
+    try:
+        if p.get("chan") == 2:
+            return skip("stereo slot; mono only for now")
+        if start != p["body_off"]:
+            return skip("shifted delta<0 window, head word is shared")
+        head = np.abs(np.asarray(tgt[:BLOCK], np.int64))
+        if head.size == 0 or len(body) < 2 * BLOCK:
+            return skip("sound shorter than one block")
+        if int(head.max()) > _STOCK_HEAD_TGT_MAX:
+            return skip("replacement head is not silent (max %d counts)"
+                        % int(head.max()))
+        K, rb = rec.recover_block(p, 200, n=BLOCK)
+        m = min(len(K), BLOCK)
+        if m < BLOCK:
+            return skip("head keystream recovery came up short")
+        stock = np.frombuffer(bytes(emu.mm[start:start + 2 * BLOCK]),
+                              dtype="<u2")
+        worst = max(abs(decode_word(int(stock[i]), int(rb[i]), int(K[i]),
+                                    rec.qmul)) for i in range(BLOCK))
+        if worst > _STOCK_HEAD_STOCK_MAX:
+            return skip("stock head is not silent (max %d counts)" % worst)
+        out = bytearray(body)
+        out[:2 * BLOCK] = stock.tobytes()
+        if log is not None:
+            log("idx %d: head block kept byte-identical to stock "
+                "(experimental stock-head mode; stock head decodes within "
+                "%d counts)." % (p["idx"], worst), "info")
+        return bytes(out), True
+    except Exception:
+        return skip("gate check failed")
+
+
+def _write_machine_render(p, got, stereo, np):
+    """Drop the verified machine-render of a re-encoded sound as a WAV into
+    ``PAD_STERN_PREVIEW_DIR`` (set by the GUI's 'export machine-render
+    previews' option).  Best-effort: a preview must never fail a Write."""
+    out_dir = os.environ.get("PAD_STERN_PREVIEW_DIR")
+    if not out_dir:
+        return
+    try:
+        import wave
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, "idx%04d_machine_render.wav" % p["idx"])
+        if stereo and len(got) > 1:
+            a = np.stack([got[0], got[1]], axis=1).ravel()
+            nch = 2
+        else:
+            a = np.asarray(got[0])
+            nch = 1
+        pcm = np.clip(a, -32768, 32767).astype("<i2").tobytes()
+        with wave.open(path, "wb") as w:
+            w.setnchannels(nch)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(pcm)
+    except Exception:
+        pass
+
+
 def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
     # one word below body_off on delta=-1 codec keys (the start-click fix).
@@ -3773,7 +4171,10 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
-    _verify_encoded(emu, p, start, body, tgt, None, np, log=log)
+    body, head_stock = _apply_stock_head(emu, p, start, body, tgt, gr, np,
+                                         log=log)
+    _verify_encoded(emu, p, start, body, tgt, None, np, log=log,
+                    exempt_head=head_stock)
     return start, body
 
 
@@ -3793,7 +4194,10 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     start, body = sr.encode_sound(p, L, R)
     body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
                                     sr=sr, log=log)
-    _verify_encoded(emu, p, start, body, L, R, np, log=log)
+    body, head_stock = _apply_stock_head(emu, p, start, body, L, sr, np,
+                                         log=log)
+    _verify_encoded(emu, p, start, body, L, R, np, log=log,
+                    exempt_head=head_stock)
     return start, body
 
 
@@ -4045,6 +4449,102 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
     finally:
         emu.close()
     return patches
+
+
+def _verify_final_patches(gr_path, img_path, patches, params, np, log,
+                          cancel=None):
+    """Decode the ACTUAL card bytes — after ``_restore_masterdir_consumed`` —
+    and report what each replaced sound really plays.
+
+    The per-sound ``_verify_encoded`` runs INSIDE the encoder, before the
+    master-directory restore reverts ~1 KB of scattered body words back to
+    stock to keep the firmware's forward-chain intact.  Those reverted words
+    are inside the audible range and decode to a scrap of the ORIGINAL callout
+    (up to ~-12 dBFS on a silent replacement), so the pre-restore preview and
+    verify both understate what ships.  This is the honest, end-of-pipeline
+    check: it decodes the final bytes and, when previews are enabled, writes
+    the real card render (overwriting the encoder's pre-restore preview).
+
+    Log-only.  Returns ``[(idx, peak_dbfs, head_dbfs, reverted_dbfs)]``."""
+    import math
+
+    from .spike2.emulator import BLOCK, Spike2Emu, emitted_length
+
+    if not patches:
+        return []
+    # {start_off: param} for every plausible window start (delta 0 / -1 / -2).
+    owners = {}
+    for p in params:
+        s = 4 if p.get("chan") == 2 else 2
+        for d in (0, 1, 2):
+            owners.setdefault(p["body_off"] - s * d, p)
+
+    def dbfs(v):
+        return -120.0 if v <= 0 else 20.0 * math.log10(v / 32768.0)
+
+    out = []
+    emu = Spike2Emu(gr_path, img_path)
+    try:
+        emu.boot()
+        if not isinstance(emu.mm, _BodyOverlay):
+            emu.mm = _BodyOverlay(emu.mm)
+        for off in sorted(patches):
+            if cancel and cancel():
+                break
+            p = owners.get(off)
+            if p is None:
+                continue
+            body = patches[off]
+            n = emitted_length(p["length"])
+            step = 4 if p.get("chan") == 2 else 2
+            stock = bytes(emu.mm.base[off:off + len(body)]
+                          if hasattr(emu.mm, "base")
+                          else emu.mm[off:off + len(body)])
+            reverted = np.flatnonzero(
+                np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2"))
+            saved = emu.mm.patch
+            emu.mm.patch = (off, body)
+            try:
+                got = emu.decode(p)
+            finally:
+                emu.mm.patch = saved
+            if got is None or got[0] is None:
+                continue
+            s = np.asarray(got[0], np.int64)[:n]
+            if not len(s):
+                continue
+            peak = int(np.abs(s).max())
+            head = int(np.abs(s[:BLOCK]).max()) if len(s) else 0
+            # Peak within the master-directory-reverted words specifically:
+            # those map ~1:1 to output samples (delta near 0), so index by
+            # word position clipped into range.
+            rev_pk = 0
+            if len(reverted):
+                ri = reverted[reverted < step * n] // step
+                ri = ri[ri < len(s)]
+                if len(ri):
+                    rev_pk = int(np.abs(s[ri]).max())
+            out.append((p["idx"], dbfs(peak), dbfs(head), dbfs(rev_pk)))
+            if peak:
+                _write_machine_render(p, [s], False, np)
+            # A sound whose head is quiet but whose body carries a loud scrap
+            # is the master-directory tradeoff surfacing — name it so a "why is
+            # my quiet replacement not quiet?" is answered from the log.
+            if rev_pk > 512 and rev_pk >= peak - 6:
+                log("idx %d: the card plays a %.0f dBFS scrap of the original "
+                    "sound mid-body (bytes the firmware's decode chain forces "
+                    "back to stock — unavoidable without rebooting audio); "
+                    "the start is clean (%.0f dBFS)."
+                    % (p["idx"], dbfs(rev_pk), dbfs(head)), "warning")
+    finally:
+        emu.close()
+    if out:
+        worst = max(out, key=lambda r: r[1])
+        log("Final-bytes check: %d replaced sound(s) decoded from the card "
+            "image; loudest start %.0f dBFS (idx %d)."
+            % (len(out), max(r[2] for r in out),
+               max(out, key=lambda r: r[2])[0]), "info")
+    return out
 
 
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,

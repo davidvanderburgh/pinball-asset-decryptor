@@ -173,3 +173,100 @@ the machine. Needs the video re-sent. No code.
   firmware ELF patch (idea 12) is the only true fix if it is.
 - Everything in Tier 1–2 is committed and built to be tested on monkeybug's
   actual machine, with per-slot A/B so one card settles multiple questions.
+
+---
+
+## Round 2 — 10 more ideas, each run down (2026-07-23)
+
+After the mid-body scrap was closed (idea 10) and the start pop localized to
+the machine, here are 10 further ideas with the verdict from actually chasing
+each on the LZ 1.22 rig / firmware (scripts `clickdiag/inv1..inv3`).
+
+**11. Firmware ELF patch — ramp the voice-start / un-mute step (the real fix
+for the START pop).** Run down: the pop is in the *digital* domain — master
+volume is applied via ALSA (`snd_mixer_selem_set_playback_volume_all`), a
+hardware-codec gain *downstream* of the FIQ mix, so a digital pop scales with
+the knob (matches Chris's v0.47-era report). That makes it software-addressable
+in principle. BUT the FIQ callout output path is **unsymboled** in LZ's
+game_real (only ALSA/SoLoud *imports* are named), so locating the exact
+gain-step needs a full RE like cabal's 1987-game work, then a SIDX re-sign and
+on-machine validation. **Verdict: the only true fix, but a dedicated
+high-effort / high-risk firmware project — not shippable blind, can't validate
+without hardware. Deferred.**
+
+**12. Patch a per-sound attack/fade field in the codec obj.** Run down: dumped
+the full 0x80-byte obj for four sounds (`inv1`). Every live field sits in
++0x00..+0x1e (body_off, band0, length, seed_a, pred16, stride, chan, flag,
+scale); everything past +0x1e is zero. There is no attack/fade/ramp field to
+set. **Verdict: DEAD — no such field exists.**
+
+**13. Trim leading silence from voiced callouts so the voice masks the pop.**
+Run down: his files already start at ~1.8 ms (Kashmir) / ~9 ms (Ramble On)
+versus stock ~20 ms — already tighter than stock. And the video shows the pop
+*precedes* the voice (coil → pop → voice), so a voice onset cannot mask a
+transient that fires before our stream is even read. **Verdict: won't help —
+onsets already tight, pop is temporally before the voice.**
+
+**14. Anti-pop tick at sample 0 (emit the inverse of the pop to cancel it).**
+Run down: needs the pop's exact shape, polarity, and timing, which are
+machine-side and likely un-mute-latency dependent and variable; and the machine
+appears to un-mute before it streams our samples. High risk of adding a click
+instead of cancelling one. **Verdict: not reliable — speculative-negative.**
+
+**15. A silent "priming" sound before the callout to absorb the un-mute pop.**
+Run down: the track-change → callout playback order is driven by the game's own
+logic, not by the card. We cannot insert a primer into the machine's trigger
+sequence. **Verdict: not controllable from the card.**
+
+**16. Pin whether the pop scales with master volume (mechanism-locating).** Run
+down: RESOLVED from firmware — master volume lives in ALSA, a codec gain
+downstream of the digital mix, so a digital/FIQ-domain pop scales with the knob
+while a pure analog-amp pop would not. Chris's earlier "click tracks the master
+knob" therefore places the pop in the *digital* domain, i.e. addressable by
+firmware (idea 11). **Verdict: mechanism confirmed digital-domain; the Sound
+Test volume A/B remains the clean hardware confirmation.**
+
+**17. Forward-sweep whole-catalog re-encode (let params float so the consumed
+words can be silenced).** The insight: the constraint isn't "params == stock,"
+it's "each sound decodes to its target under whatever params the chain yields" —
+so silence the target, then re-encode every downstream sound's *original* audio
+to its new (shifted) params. Run down: the building block **fails** (`inv3`) —
+re-encoding idx232's original audio to its shifted params decoded back with
+maxerr 20648 (not a clean round-trip), so the core mechanic doesn't hold without
+further deep RE. On top of that it would need a serial re-encode of the whole
+downstream catalog per build (minutes–hours) at high risk. **Verdict: dead in
+practice.**
+
+**18. Firmware patch so the master-directory chain doesn't consume from the
+audible range.** Run down: same class as idea 11 — unsymboled internal path,
+deep RE, SIDX re-sign, and it would shift every sound's params (needing a
+matched re-encode of all of them). **Verdict: deferred, high risk, not worth it
+for a masked artifact.**
+
+**19. Fill "silent" slots with low-level masking noise instead of pure
+silence.** Run down: the consumed positions always play the *original* callout
+regardless of our target (they are reverted to stock), so user content can
+never change the scrap; only the non-consumed remainder could carry masking
+noise, which turns "silence" into "quiet noise" the user didn't ask for.
+**Verdict: low value — changes the user's intent, marginal perceptual gain.**
+
+**20. Per-slot scrap-severity warning.** Run down: already effectively shipped —
+`_verify_final_patches` decodes the final card bytes and reports each replaced
+sound's reverted-region dBFS, warning when a quiet replacement carries a loud
+mid-body scrap. **Verdict: already in place; no new code needed.**
+
+### Round-2 bottom line
+
+The 10 ideas converge to one conclusion: **there is no new shippable code fix.**
+
+- The START pop (Chris's actual complaint) is machine-side and digital-domain;
+  the only true fix is a firmware ELF patch to ramp the voice-start gain step —
+  a dedicated RE project (callout path unsymboled in LZ), high-risk, needs
+  hardware validation. Do not ship blind.
+- Two ideas are dead by inspection (no fade field; forward-sweep fails to
+  round-trip), several are machine/hardware-bound (anti-pop tick, primer,
+  volume A/B), and the mid-body-scrap avenues are all now closed.
+- The best near-term path is unchanged and already shipped: the stock-head
+  experiment mode plus the Sound Test isolation + master-volume A/B, which will
+  confirm the mechanism and whether stock sounds pop too. If they do, it is
+  intrinsic machine behavior and only a firmware patch can remove it.

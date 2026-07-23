@@ -6931,7 +6931,7 @@ class MainWindow:
     _AUDIO_ADV_DEFAULTS = {
         "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
-        "experiment_idxs": "",
+        "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
     }
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
@@ -7015,6 +7015,34 @@ class MainWindow:
                   font=(_SANS_FONT, 8, "italic")).grid(
             row=5, column=2, sticky=tk.W, padx=(8, 0), pady=2)
 
+        # Anti-pop codec seed (the LZ start-pop fix).
+        seed_var = tk.BooleanVar(value=bool(cfg.get("slot_seed")))
+        seed_db_var = tk.StringVar(value=str(cfg.get("slot_seed_db") or 65))
+        seed_row = ttk.Frame(dlg)
+        seed_row.pack(fill=tk.X, padx=12, pady=(8, 0))
+        ttk.Checkbutton(
+            seed_row, variable=seed_var,
+            text="Anti-pop codec seed for silent / quiet callouts").pack(
+            side=tk.LEFT)
+        ttk.Label(seed_row, text="level -").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Spinbox(seed_row, textvariable=seed_db_var, from_=40, to=90,
+                    increment=5, width=5).pack(side=tk.LEFT)
+        ttk.Label(seed_row, text="dBFS").pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=460,
+            font=(_SANS_FONT, 8, "italic"),
+            text="Mixes an inaudible low tone (default -65 dBFS) into "
+                 "replacements so a callout is never completely silent. On some "
+                 "machines a silent or very quiet replacement clicks at the "
+                 "start while audible ones and the stock callouts do not — the "
+                 "machine's audio output adds that pop on dead silence (the "
+                 "decoded audio itself is correct). Keeping a whisper-level "
+                 "signal present is meant to stop that. Turn on if silent or "
+                 "quiet replacements click at the start; combine with the "
+                 "'only these idx numbers' box above to seed some slots and "
+                 "leave others as an on-card A/B. Experimental, "
+                 "hardware-unverified.").pack(anchor=tk.W, padx=12, pady=(2, 8))
+
         prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
         ttk.Checkbutton(
             dlg, variable=prev_var,
@@ -7050,6 +7078,8 @@ class MainWindow:
                 "leadout": keys_l.get(lead_var.get(), "silence"),
                 "previews": bool(prev_var.get()),
                 "experiment_idxs": idxs,
+                "slot_seed": bool(seed_var.get()),
+                "slot_seed_db": num(seed_db_var, 40, 90, 65),
             }
 
         def _ok(_e=None):
@@ -7067,6 +7097,8 @@ class MainWindow:
             lead_var.set(dict(self._AUDIO_LEADOUT_CHOICES)["silence"])
             prev_var.set(False)
             idxs_var.set("")
+            seed_var.set(False)
+            seed_db_var.set("65")
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))

@@ -215,17 +215,20 @@ def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
     import os
     for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
                 "PAD_STERN_LOWPASS_HZ", "PAD_STERN_HEAD_MODE",
-                "PAD_STERN_LEADOUT", "PAD_STERN_PREVIEW_DIR"):
+                "PAD_STERN_LEADOUT", "PAD_STERN_PREVIEW_DIR",
+                "PAD_STERN_SLOT_SEED_DB"):
         monkeypatch.delenv(var, raising=False)
 
     cfg = {"fade_ms": 80, "headroom_pct": 60, "lowpass_hz": 0,
-           "head_mode": "stock", "leadout": "stock", "previews": True}
+           "head_mode": "stock", "leadout": "stock", "previews": True,
+           "slot_seed": True, "slot_seed_db": 65}
     app._on_audio_advanced_change(cfg)
     assert os.environ["PAD_STERN_FADE_MS"] == "80.0"
     assert os.environ["PAD_STERN_HEADROOM"] == "0.6"
     assert os.environ["PAD_STERN_LOWPASS_HZ"] == "0"
     assert os.environ["PAD_STERN_HEAD_MODE"] == "stock"
     assert os.environ["PAD_STERN_LEADOUT"] == "stock"
+    assert os.environ["PAD_STERN_SLOT_SEED_DB"] == "-65"
     assert app._settings["audio_advanced"] == cfg
 
     # Preview dir: gate on the current manufacturer without switching the
@@ -238,7 +241,7 @@ def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
     app._on_audio_advanced_change({})              # back to defaults
     for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
                 "PAD_STERN_LOWPASS_HZ", "PAD_STERN_HEAD_MODE",
-                "PAD_STERN_LEADOUT"):
+                "PAD_STERN_LEADOUT", "PAD_STERN_SLOT_SEED_DB"):
         assert var not in os.environ
     app._apply_audio_preview_env(os.path.join("X:", "out", "card.raw"))
     assert "PAD_STERN_PREVIEW_DIR" not in os.environ

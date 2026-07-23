@@ -2673,11 +2673,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 ("PAD_STERN_HEADROOM", "level cap"),
                                 ("PAD_STERN_LOWPASS_HZ", "treble roll-off Hz"),
                                 ("PAD_STERN_HEAD_MODE", "head block"),
-                                ("PAD_STERN_LEADOUT", "tail block"))]
+                                ("PAD_STERN_LEADOUT", "tail block"),
+                                ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"))]
         adv = ["%s=%s" % (lbl, v) for lbl, v in adv if v]
         if adv:
             log("Advanced audio overrides active for this build: %s."
                 % "; ".join(adv), "warning")
+        if _slot_seed_dbfs() is not None:
+            log("Anti-pop seed ON (%.0f dBFS): mixing an inaudible low tone into "
+                "replacements so a callout is never digitally silent -- aimed at "
+                "the start-pop the machine's audio output adds on silent/quiet "
+                "callouts (the codec itself is clean). Experimental; HW-"
+                "unverified; per-slot idx gate applies." % _slot_seed_dbfs(),
+                "info")
     if music_edits:
         log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
             "info")
@@ -3394,6 +3402,71 @@ def _declick_lowpass_hz():
     if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
         return None
     return _DECLICK_LOWPASS_HZ
+
+
+# Anti-pop "keep the output engaged" seed (2026-07-23 LZ RE).
+# WHAT IT ADDRESSES: on real hardware a SILENT (or near-silent) callout
+# replacement clicks/pops at its start, while stock callouts and audible
+# replacements do not (monkeybug, Led Zeppelin 1.22).  We proved the whole
+# codec + encode pipeline is clean -- our silent body decodes to true silence
+# with the same codec the machine uses (clickdiag/encode_slot_match.py) -- so
+# the pop is added by the machine's audio OUTPUT/mixer stage and is
+# content-dependent: something there reacts to a dead-silent voice (a
+# noise-gate / un-mute / underrun-restart in the SoLoud+ALSA output) that an
+# audible voice keeps from firing.  The exact output mechanism is not yet
+# pinned and this is HARDWARE-UNVERIFIED.
+# THE SEED: mix an essentially-inaudible low-frequency tone into the target so
+# the sound is never *digitally* silent -- keeping the output stage engaged so
+# the silence-triggered pop never fires -- while staying below hearing
+# (-65 dBFS default = ~18 counts).  A tone (not dither) is used so it also reads
+# as real audio to anything that inspects the signal.  Off by default; opt-in
+# via the GUI / PAD_STERN_SLOT_SEED_DB, and gated per-slot so one card can carry
+# treated + control slots for a single-flash A/B (see _slot_seed_for).
+_SLOT_SEED_HZ = 150.0
+
+
+def _slot_seed_dbfs():
+    """Seed-tone level in dBFS (negative), or None when the anti-pop codec seed
+    is off.  ``PAD_STERN_SLOT_SEED_DB`` (GUI: Advanced audio options) sets it;
+    clamped to a sane inaudible-but-effective range."""
+    ov = _env_float("PAD_STERN_SLOT_SEED_DB")
+    if ov is None or ov >= 0:
+        return None
+    return max(min(ov, -40.0), -90.0)
+
+
+def _slot_seed_for(p):
+    """Seed level for sound *p*, honouring the per-slot experiment idx gate so
+    one card can carry seeded (treated) AND unseeded (control) slots for a
+    single-flash A/B on the real machine (``PAD_STERN_EXPERIMENT_IDXS``)."""
+    db = _slot_seed_dbfs()
+    if db is None:
+        return None
+    from .spike2.codec import experiment_covers
+    return db if experiment_covers(p) else None
+
+
+def _apply_slot_seed(samples, np, rng, dbfs):
+    """Mix an inaudible edge-faded ~150 Hz tone into *samples* so the correct
+    codec slot decodes to spectrally-peaked ("audio") content and the firmware's
+    slot resolver never falls back to the noise codec (the start pop).  The tone
+    is faded to zero at both edges (like :func:`_fit`) so it adds no edge step,
+    and the sum is clipped to the codec range.  See the module comment above."""
+    if dbfs is None:
+        return samples
+    n = len(samples)
+    if n < 8:
+        return samples
+    amp = (10.0 ** (dbfs / 20.0)) * 32768.0
+    t = np.arange(n) / 44100.0
+    tone = amp * np.sin(2.0 * np.pi * _SLOT_SEED_HZ * t)
+    m = min(n // 2, int(round(40.0 * 44.1)))   # match the declick edge fade
+    if m > 1:
+        ramp = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, m))
+        tone[:m] *= ramp
+        tone[n - m:] *= ramp[::-1]
+    out = np.asarray(samples, np.int64) + np.round(tone).astype(np.int64)
+    return np.clip(out, -rng, rng)
 
 
 def _lowpass(samples, cutoff_hz, np, fs=44100.0):
@@ -4168,6 +4241,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     s = _lowpass(s, _declick_lowpass_hz(), np)
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
+    tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, _slot_seed_for(p))
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
@@ -4191,6 +4265,9 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
              fade_ms=fade_ms)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
+    _seed = _slot_seed_for(p)
+    L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
+    R = _apply_slot_seed(R, np, _STEREO_RANGE, _seed)
     start, body = sr.encode_sound(p, L, R)
     body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
                                     sr=sr, log=log)

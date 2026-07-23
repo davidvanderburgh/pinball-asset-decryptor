@@ -1024,6 +1024,84 @@ def test_write_machine_render(monkeypatch, tmp_path):
     assert not (out / "idx0008_machine_render.wav").exists()
 
 
+def test_slot_seed_dbfs_env(monkeypatch):
+    from pinball_decryptor.plugins.stern.engine import _slot_seed_dbfs
+    monkeypatch.delenv("PAD_STERN_SLOT_SEED_DB", raising=False)
+    assert _slot_seed_dbfs() is None            # off by default
+    monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "-65")
+    assert _slot_seed_dbfs() == -65.0
+    monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "5")   # positive = off
+    assert _slot_seed_dbfs() is None
+    monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "-200")  # clamp
+    assert _slot_seed_dbfs() == -90.0
+
+
+def test_apply_slot_seed_makes_silence_tonal_but_inaudible():
+    """The seed turns flat silence into a spectrally-peaked (low flatness),
+    still-inaudible signal -- the whole point (silence loses the codec-slot
+    resolver, a tone wins it)."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import (_apply_slot_seed,
+                                                        _MONO_RANGE)
+
+    def specflat(x):
+        x = np.asarray(x, float)
+        if len(x) < 64 or np.std(x) < 1e-6:
+            return 1.0
+        m = 1 << int(np.floor(np.log2(len(x))))
+        X = np.abs(np.fft.rfft((x[:m] - x[:m].mean()) * np.hanning(m)))[1:]
+        X = np.maximum(X, 1e-9)
+        return float(np.exp(np.mean(np.log(X))) / np.mean(X))
+
+    n = 22050
+    silent = np.zeros(n, np.int64)
+    # off -> unchanged
+    assert (_apply_slot_seed(silent, np, _MONO_RANGE, None) == 0).all()
+    seeded = _apply_slot_seed(silent, np, _MONO_RANGE, -65.0)
+    pk = int(np.abs(seeded).max())
+    # inaudible: -65 dBFS ~= 18 counts
+    assert 5 <= pk <= 40, pk
+    # spectrally peaked (a tone) -> far below the noise codec's ~0.67 flatness
+    assert specflat(seeded[:8192]) < 0.3
+    # flat silence reads ~1.0 -> confirm the seed changed that
+    assert specflat(np.zeros(4096)) > 0.9
+    # edges land at (near) zero -> no step that itself clicks
+    assert abs(int(seeded[0])) <= 1 and abs(int(seeded[-1])) <= 1
+
+
+def test_encoders_apply_slot_seed(monkeypatch):
+    """_encode_mono/_stereo feed the seed into the fitted target when on."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+    monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "-65")
+    captured = {}
+
+    class FakeGR:
+        def encode_sound(self, p, tgt):
+            captured["tgt"] = np.asarray(tgt)
+            return 0, b"\0" * 8
+
+    # patch the wav loader + the post-encode steps to isolate the seed path
+    monkeypatch.setattr(E, "_load_wav", lambda *a, **k: np.zeros(4000, np.int64))
+    monkeypatch.setattr(E, "_resolve_shared_boundary",
+                        lambda *a, **k: b"\0" * 8)
+    monkeypatch.setattr(E, "_apply_stock_head",
+                        lambda *a, **k: (b"\0" * 8, False))
+    monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
+    E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
+                   "x.wav", np)
+    pk = int(np.abs(captured["tgt"]).max())
+    assert 5 <= pk <= 40, pk            # the silent target now carries the seed
+
+    # per-slot gate: with an idx list that excludes this sound, no seed
+    monkeypatch.setenv("PAD_STERN_EXPERIMENT_IDXS", "999")
+    captured.clear()
+    E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
+                   "x.wav", np)
+    assert int(np.abs(captured["tgt"]).max()) == 0     # gated out -> silent
+
+
 def test_experiment_covers_idx_scope(monkeypatch):
     from pinball_decryptor.plugins.stern.spike2.codec import experiment_covers
 

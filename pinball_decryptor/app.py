@@ -3064,7 +3064,7 @@ class App:
     _AUDIO_ADV_DEFAULTS = {
         "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
-        "experiment_idxs": "",
+        "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -3094,6 +3094,16 @@ class App:
                "stock" if d.get("leadout") == "stock" else None)
         idxs = str(d.get("experiment_idxs") or "").strip()
         setenv("PAD_STERN_EXPERIMENT_IDXS", idxs or None)
+        # Anti-pop codec seed: a negative dBFS level enables it; a positive
+        # "slot_seed_db" in the config is the magnitude (60 -> -60 dBFS).
+        if d.get("slot_seed"):
+            try:
+                mag = abs(int(d.get("slot_seed_db") or 65))
+            except (TypeError, ValueError):
+                mag = 65
+            setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
+        else:
+            setenv("PAD_STERN_SLOT_SEED_DB", None)
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

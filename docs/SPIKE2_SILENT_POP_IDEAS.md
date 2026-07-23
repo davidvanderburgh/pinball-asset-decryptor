@@ -270,3 +270,64 @@ The 10 ideas converge to one conclusion: **there is no new shippable code fix.**
   experiment mode plus the Sound Test isolation + master-volume A/B, which will
   confirm the mechanism and whether stock sounds pop too. If they do, it is
   intrinsic machine behavior and only a firmware patch can remove it.
+
+---
+
+## Firmware RE deep-dive (2026-07-23) — "how does Stern stay clean?"
+
+Pushed on the firmware path to answer why stock callouts don't pop but our
+rebuilds do. Result: the pop is decisively **machine-side, in the output
+stage**, and every data-side explanation is now ruled out on the rig
+(`clickdiag/fw1..fw4`, `inv1..inv3`).
+
+**Findings that locate the pop:**
+
+1. **The cat-0 callout codec is memoryless.** `decode_word` is a per-sample
+   rotate + xor-keystream + companding multiply — no predictor, no state across
+   samples (the 12-tap predictor belongs to the separate loud/music codec). So
+   a silent body provably outputs digital silence sample-for-sample, and the
+   pop is 100% downstream of the decode: in the FIQ mixer → saturate → DSP
+   filter → amp_write / ALSA hardware stage, which the emulator does not model.
+   That is why every round-trip on the rig looks clean.
+
+2. **Stock does NOT avoid digital silence** (kills the noise-floor idea). Stock
+   callouts contain hundreds of exact-zero samples (idx231: 864, idx258: 1667)
+   and even fully-silent ~25 ms stretches (idx150). Adding a dither floor would
+   not be "replicating Stern."
+
+3. **The paradox.** Stock idx231 and idx258 — Chris's exact slots — decode with
+   head `[0,0,0,0,0,0,0,0]`, an exact-zero silent head identical to ours, yet
+   stock is clean and our silent replacement pops. Same slot, same silent head
+   → the head is not the differentiator. This matches the EHOH machine-side
+   voice-start artifact: the pop is present at voice-start and stock's arriving
+   content masks it, while our silence/quiet head leaves it naked.
+
+4. **Onset-energy masking is dead too.** Our `_fit` output reaches audible level
+   *earlier* than stock (0.5%%-full at 3.7 ms even with the 40 ms fade; stock
+   idx231/258 take 14–20 ms). So we are already hotter-earlier than stock —
+   shortening or removing the fade cannot help, and would not explain why stock
+   (slower onset) stays clean.
+
+5. **No per-sound ramp field** in the codec obj to patch (all zero past +0x1e).
+
+**Firmware structure.** game_real's `.dynsym` names only ALSA/SoLoud *imports*:
+`snd_mixer_selem_set_playback_switch_all` (hardware mute), `_volume_all`
+(hardware codec volume, downstream of the digital mix — so a digital pop scales
+with the master knob, matching Chris's earlier report). The internal FIQ
+callout output path is **unsymboled** and reached through PLT veneers, so
+pinpointing the exact voice-start gain-step needs porting cabal's 1987-game
+symbol map onto the LZ binary.
+
+**The wall (why I did not ship a patch).** (a) The emulator is a codec oracle —
+it cannot reproduce a mixer/amp pop, so I cannot see the defect here. (b) There
+is no hardware in this environment to validate a firmware patch, and a wrong
+audio patch can brick the machine's sound. A blind patch would be irresponsible.
+
+**What unblocks the firmware fix.** A clean hardware capture: a line-out (not
+phone-mic) recording from the Sound Test menu, music off, of (i) a stock callout
+in isolation and (ii) our silent/replacement in the same slot, triggered several
+times each. That definitively settles whether stock pops too (masking vs
+genuinely clean) and characterizes the exact transient (DC step vs filter ring
+vs un-mute) so a targeted, testable ELF patch to ramp the voice-start step can
+be written — the same class of work as the TMNT validation patch, but for the
+audio output path.

@@ -64,42 +64,171 @@ static void dump_region(const char *dir, const char *name, void *addr, size_t n)
     free(buf);
 }
 
-int al_install_system(int version, int (*atexit_ptr)(void (*)(void))){
-    (void)version; (void)atexit_ptr;
+static volatile int g_cap_fired = 0;
+
+/* Copy /proc/self/maps so a dev can recover function offsets even when a symbol
+ * did not resolve (e.g. an envelope that keeps its crypto symbols internal). */
+static void dump_maps(const char *dir){
+    char p[4096]; snprintf(p, sizeof p, "%s/proc_self_maps.txt", dir);
+    FILE *o = fopen(p, "w"); if(!o) return;
+    FILE *m = fopen("/proc/self/maps", "r");
+    if(m){
+        char b[2048]; size_t k;
+        while((k = fread(b,1,sizeof b,m)) > 0) fwrite(b,1,k,o);
+        fclose(m);
+    }
+    fclose(o);
+}
+
+static void *cap_resolve(void *h, const char **names){
+    for(int i=0; names[i]; i++){ void *p = dlsym(h, names[i]); if(p) return p; }
+    return NULL;
+}
+
+/* One-shot capture: resolve the game's own crypto, open the dongle session,
+ * dump 8 KB of each routine + the module map, exit.  Best-effort: writes the
+ * manifest + maps even if a symbol is nil so a dongle session is never wasted. */
+static void run_capture(const char *via){
+    if(__sync_lock_test_and_set(&g_cap_fired, 1)) return;
+
     void *h = dlopen(NULL, RTLD_NOW);
     const char *dir = getenv("JJP_DEV_CAPTURE_DIR");
     if(!dir || !dir[0]) dir = "/tmp/jjp_dev_capture";
     mkdir(dir, 0755);
 
-    void *rand64     = dlsym(h, "_Z13jcrypt_rand64v");
-    void *set_crypto = dlsym(h, "_Z27jcrypt_set_seeds_for_cryptoPKc");
-    void *dongle_dec = dlsym(h, "_Z21dongle_decrypt_bufferPvj");
-    void *hash_str   = dlsym(h, "_Z11hash_stringPKc");
-    if(!hash_str) hash_str = dlsym(h, "_Z18jcrypt_hash_stringPKc");
-    void *dinit = dlsym(h, "_Z11dongle_initv");
+    const char *r64_n[]  = { "_Z13jcrypt_rand64v", NULL };
+    const char *sc_n[]   = { "_Z27jcrypt_set_seeds_for_cryptoPKc", NULL };
+    const char *dd_n[]   = { "_Z21dongle_decrypt_bufferPvj", NULL };
+    const char *hash_n[] = { "_Z11hash_stringPKc", "_Z18jcrypt_hash_stringPKc", NULL };
+    const char *init_n[] = { "_Z11dongle_initv", "_Z11dongle_initb",
+        "_Z17dongle_initializev", "_Z14dongle_connectv", "_Z12dongle_loginv",
+        "_Z10DongleInitv", "dongle_init", "dongle_initialize", NULL };
+
+    void *rand64     = cap_resolve(h, r64_n);
+    void *set_crypto = cap_resolve(h, sc_n);
+    void *dongle_dec = cap_resolve(h, dd_n);
+    void *hash_str   = cap_resolve(h, hash_n);
+    void *dinit      = cap_resolve(h, init_n);
     if(dinit) ((int(*)(void))dinit)();
 
-    fprintf(stderr, "[capture] rand64=%p set_crypto=%p dongle_dec=%p hash=%p\n",
-            rand64, set_crypto, dongle_dec, hash_str);
+    fprintf(stderr, "[capture] hook via %s: rand64=%p set_crypto=%p "
+            "dongle_dec=%p hash=%p\n", via, rand64, set_crypto, dongle_dec, hash_str);
 
     char mpath[4096]; snprintf(mpath, sizeof mpath, "%s/manifest.txt", dir);
     FILE *m = fopen(mpath, "w");
     if(m){
         fprintf(m, "JJP developer crypto capture\n");
+        fprintf(m, "hook=%s\n", via);
         fprintf(m, "rand64=%p\nset_seeds_for_crypto=%p\n"
                    "dongle_decrypt_buffer=%p\nhash_string=%p\n",
                 rand64, set_crypto, dongle_dec, hash_str);
         fprintf(m, "each *.bin holds up to 8192 raw bytes of x86-64 code from "
-                   "that function pointer (disassemble to recover the cipher)\n");
+                   "that function pointer (disassemble to recover the cipher); "
+                   "proc_self_maps.txt gives the module layout if a symbol was nil\n");
         fclose(m);
     }
+    dump_maps(dir);
     dump_region(dir, "jcrypt_rand64.bin", rand64, 8192);
     dump_region(dir, "jcrypt_set_seeds_for_crypto.bin", set_crypto, 8192);
     dump_region(dir, "dongle_decrypt_buffer.bin", dongle_dec, 8192);
     dump_region(dir, "hash_string.bin", hash_str, 8192);
     fprintf(stderr, "[capture] DONE -> %s\n", dir);
     syscall(SYS_exit_group, 0);
-    return 0;
+}
+
+/* Old engine first-call (Allegro) pre-empts the new-engine hooks below; the new
+ * hooks only fire for a title (e.g. Sonic) that never calls al_install_system. */
+int al_install_system(int version, int (*atexit_ptr)(void (*)(void))){
+    (void)version; (void)atexit_ptr; run_capture("al_install_system"); return 0;
+}
+void *XOpenDisplay(const char *n){ (void)n; run_capture("XOpenDisplay"); return (void*)0; }
+int FT_Init_FreeType(void *a){ (void)a; run_capture("FT_Init_FreeType"); return 0; }
+void *pa_simple_new(const char *a, const char *b, int c, const char *d,
+                    const char *e, const void *f, const void *g,
+                    const void *i, int *j){
+    (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)i;(void)j;
+    run_capture("pa_simple_new"); return (void*)0;
+}
+void *pa_context_new(void *a, const char *b){ (void)a; (void)b;
+    run_capture("pa_context_new"); return (void*)0; }
+int ov_fopen(const char *a, void *b){ (void)a; (void)b;
+    run_capture("ov_fopen"); return -1; }
+int ov_open_callbacks(void *a, void *b, const char *c, long d, void *e){
+    (void)a;(void)b;(void)c;(void)d;(void)e;
+    run_capture("ov_open_callbacks"); return -1;
+}
+"""
+
+
+# Engine-agnostic entry hooks for the DECRYPT shim (appended at compile time)
+# ---------------------------------------------------------------------------
+# resources.py DECRYPT_C_SOURCE is pinned byte-verbatim to upstream by the
+# regression firewall (tests/verify_no_upstream_regression.py), and it hooks
+# ONLY Allegro's al_install_system.  Titles rebuilt off Allegro (JJP Sonic runs
+# on libX11/libpulse/libfreetype/libvorbis, with NO liballegro) never call it,
+# so the shim never fired and a dongle extract produced nothing.  Rather than
+# edit the pinned file, _phase_compile appends this snippet to the upstream
+# source: it interposes the newer engines' first-init calls, drops a diagnostic
+# breadcrumb (which hook + /proc/self/maps) so a hook that fires but can't
+# resolve the crypto still yields intel, then re-uses the upstream
+# al_install_system(0, 0) (which resolves the game's own crypto, opens the
+# dongle session, decrypts, and exits).  al_install_system is an Allegro
+# program's FIRST call, so old titles exit before any of these fire and their
+# behaviour is unchanged; these only ever run for a non-Allegro title.
+DECRYPT_ENGINE_HOOKS_C = r"""
+
+extern int al_install_system(int, int (*)(void (*)(void)));
+
+static volatile int g_engine_hook_fired = 0;
+
+static void jjp_hook_diag(const char *via) {
+    const char *od = getenv("JJP_OUTPUT_DIR");
+    char p[4096];
+    snprintf(p, sizeof p, "%s/jjp_hook_diag.txt", (od && od[0]) ? od : "/tmp");
+    FILE *d = fopen(p, "a");
+    if (d) {
+        fprintf(d, "=== decrypt hook fired via %s ===\n", via);
+        char exe[4096];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        if (n > 0) { exe[n] = '\0'; fprintf(d, "exe=%s\n", exe); }
+        FILE *m = fopen("/proc/self/maps", "r");
+        if (m) {
+            char b[2048]; size_t k;
+            fprintf(d, "--- /proc/self/maps ---\n");
+            while ((k = fread(b, 1, sizeof b, m)) > 0) fwrite(b, 1, k, d);
+            fclose(m);
+        }
+        fprintf(d, "\n");
+        fclose(d);
+    }
+    fprintf(stderr, "[decrypt] engine hook fired via %s\n", via);
+}
+
+/* First engine hook the game hits wins: breadcrumb, then hand off to the
+ * upstream al_install_system (resolve + dongle + decrypt + exit). */
+static void jjp_engine_fire(const char *via) {
+    if (__sync_lock_test_and_set(&g_engine_hook_fired, 1)) return;
+    jjp_hook_diag(via);
+    al_install_system(0, 0);
+}
+
+/* New engines' first init call.  We never invoke the real function (the handoff
+ * exits), so these only need to match by NAME for the loader to interpose. */
+void *XOpenDisplay(const char *n){ (void)n; jjp_engine_fire("XOpenDisplay"); return (void*)0; }
+int FT_Init_FreeType(void *a){ (void)a; jjp_engine_fire("FT_Init_FreeType"); return 0; }
+void *pa_simple_new(const char *a, const char *b, int c, const char *d,
+                    const char *e, const void *f, const void *g,
+                    const void *i, int *j){
+    (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)i;(void)j;
+    jjp_engine_fire("pa_simple_new"); return (void*)0;
+}
+void *pa_context_new(void *a, const char *b){ (void)a; (void)b;
+    jjp_engine_fire("pa_context_new"); return (void*)0; }
+int ov_fopen(const char *a, void *b){ (void)a; (void)b;
+    jjp_engine_fire("ov_fopen"); return -1; }
+int ov_open_callbacks(void *a, void *b, const char *c, long d, void *e){
+    (void)a;(void)b;(void)c;(void)d;(void)e;
+    jjp_engine_fire("ov_open_callbacks"); return -1;
 }
 """
 
@@ -1791,7 +1920,10 @@ class DecryptionPipeline:
                 mode='w', suffix='.c', delete=False,
                 dir=self.executor.host_tmp_dir(),
             ) as tf:
-                tf.write(DECRYPT_C_SOURCE)
+                # Upstream (pinned verbatim) shim + the unified-app
+                # engine-agnostic hooks that make it fire on non-Allegro
+                # titles (e.g. Sonic).  See DECRYPT_ENGINE_HOOKS_C.
+                tf.write(DECRYPT_C_SOURCE + DECRYPT_ENGINE_HOOKS_C)
                 tmp_win = tf.name
             wsl_tmp = self.executor.to_exec_path(tmp_win)
             self.executor.run(f"cp '{wsl_tmp}' {mp}/tmp/jjp_decrypt.c", timeout=15)

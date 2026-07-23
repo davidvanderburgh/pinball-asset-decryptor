@@ -481,6 +481,55 @@ def test_jjp_dev_capture_shim_is_game_independent():
     assert "al_install_system" in DEV_CAPTURE_C_SOURCE
 
 
+# The single Allegro hook (al_install_system) is dead on titles rebuilt off
+# Allegro (JJP Sonic runs on libX11/libpulse/libfreetype/libvorbis, no
+# liballegro), so the shim would never fire and a one-shot dongle session would
+# be wasted.  Both shims must ALSO interpose the new engines' first-init calls.
+_ENGINE_AGNOSTIC_HOOKS = (
+    "al_install_system",   # Allegro (old titles)
+    "XOpenDisplay",        # libX11
+    "FT_Init_FreeType",    # libfreetype
+    "pa_simple_new",       # libpulse
+    "pa_context_new",      # libpulse
+    "ov_fopen",            # libvorbisfile
+    "ov_open_callbacks",   # libvorbisfile
+)
+
+
+def test_jjp_decrypt_shim_hooks_every_engine():
+    """The decrypt shim must fire on non-Allegro titles too (Sonic), and drop a
+    diagnostic breadcrumb so a hook that fires but can't resolve the crypto
+    still yields intel instead of a silent no-op.
+
+    resources.py DECRYPT_C_SOURCE is pinned byte-verbatim to upstream (it only
+    hooks Allegro); the engine-agnostic hooks are appended from pipeline.py's
+    DECRYPT_ENGINE_HOOKS_C at compile time.  Verify the *combined* source that
+    _phase_compile actually builds."""
+    from pinball_decryptor.plugins.jjp.resources import DECRYPT_C_SOURCE
+    from pinball_decryptor.plugins.jjp.pipeline import DECRYPT_ENGINE_HOOKS_C
+    combined = DECRYPT_C_SOURCE + DECRYPT_ENGINE_HOOKS_C
+    for hook in _ENGINE_AGNOSTIC_HOOKS:
+        assert hook in combined, hook
+    # the appended snippet must hand off to the upstream Allegro entry, so we
+    # never duplicate the 300-line resolve/decrypt body
+    assert "al_install_system(0, 0)" in DECRYPT_ENGINE_HOOKS_C
+    # diagnostics: a hook that fires without resolving crypto dumps maps + ptrs
+    assert "jjp_hook_diag.txt" in DECRYPT_ENGINE_HOOKS_C
+    assert "/proc/self/maps" in DECRYPT_ENGINE_HOOKS_C
+    # one-shot guard so the first engine hook to fire wins the race
+    assert "__sync_lock_test_and_set" in DECRYPT_ENGINE_HOOKS_C
+
+
+def test_jjp_dev_capture_shim_hooks_every_engine():
+    """Same engine-agnostic coverage for the crypto-capture shim, plus a maps
+    dump so a nil-symbol capture still records the module layout."""
+    from pinball_decryptor.plugins.jjp.pipeline import DEV_CAPTURE_C_SOURCE
+    for hook in _ENGINE_AGNOSTIC_HOOKS:
+        assert hook in DEV_CAPTURE_C_SOURCE, hook
+    assert "proc_self_maps.txt" in DEV_CAPTURE_C_SOURCE
+    assert "__sync_lock_test_and_set" in DEV_CAPTURE_C_SOURCE
+
+
 def test_jjp_dev_capture_noop_when_not_requested():
     """_phase_dev_capture must do nothing (and never touch the executor) when
     dev_capture is off — the normal decrypt path is unaffected."""

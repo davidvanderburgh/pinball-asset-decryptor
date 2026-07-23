@@ -77,12 +77,34 @@ when anything is off-default.
 ## Tier 3 — deferred, real RE required
 
 **10. Silence the master-directory-consumed words (the actual mid-body fix).**
-The reverted bytes must equal stock because the forward-chain decode reads them
-raw. But the accumulator is many-to-one: there may exist alternate byte values
-that preserve the chain state AND decode to ~silence — the same joint-
-optimization `pick_shared_word` already does for the shared-boundary word.
-Highest-value *real* fix for the mid-body scrap; needs the accumulator function
-reverse-engineered (cabal's symboled Ghidra DBs). **Deferred, high effort.**
+**RE DONE 2026-07-23 — NEGATIVE, CLOSED.** Investigated on the LZ 1.22 rig
+(scripts `clickdiag/re1..re4`). Findings:
+- Silencing idx231 with no revert shifts **317 of 549** downstream sounds'
+  `scale`/`pred16`, cascading from the very next sound — the band-build folds
+  each sound's body into forward-chain state (`re1`).
+- Replay of the band-build is bit-faithful, but it *analyzes decoded body
+  content*: a silent body makes it produce no obj at all, and driving it with
+  perturbed bodies access-violates the emulator (`re2`). So there is no simple
+  checksum to preserve — the obj depends on the actual audio.
+- The obj arithmetic lives in dense, heavily-optimized C++ (shared_ptr atomic
+  refcounting, `unordered_map`, nested `bl` calls); analytic RE of the exact
+  `scale`/`pred16`/`seed_a` formula is not tractable in reasonable effort
+  (`re3`).
+- **Decisive:** reverting only *half* the consumed words (first, second, or
+  alternate) preserves the chain no better than reverting *none* — all three
+  give the same 317/317 downstream shift; only reverting **all 512** words
+  gives zero (`re4`). Every consumed word is load-bearing, jointly. There is no
+  subset freedom and no equivalence class to exploit.
+
+Conclusion: the mid-body scrap on a **silent/quiet** replacement is
+**irremovable by re-encode** — the firmware makes every sound's codec params
+depend on the raw bytes of earlier sounds' consumed regions, so those bytes
+must be exactly stock (which is the original audio) or the machine reboots.
+The only remaining path is a **firmware ELF patch** so the forward chain
+doesn't consume from the audible range (deep RE, same class as the TMNT
+validation patch) — not worth it for a mid-body, mostly-masked, non-pop
+artifact. What ships instead: the honest detection/preview/warning (idea 1).
+Full write-up: memory `reference_spike2_masterdir_accumulator_re`.
 
 **11. Move a slot's audio away from its consumed region.** If the firmware's
 consumed offsets are a function of position/length, a size-neutral internal
@@ -144,7 +166,8 @@ the machine. Needs the video re-sent. No code.
 ### Bottom line
 
 - The **mid-body scrap** is ours (master-directory restore) and is now honestly
-  surfaced; a real fix needs accumulator RE (idea 10).
+  surfaced; the accumulator RE is **done and negative** (idea 10) — it is
+  irremovable by re-encode, so honest detection is the shipped answer.
 - The **START pop** is, on all current evidence, machine-side; the shipped
   stock-head mode (idea 2) is the cleanest way to prove that on hardware, and a
   firmware ELF patch (idea 12) is the only true fix if it is.

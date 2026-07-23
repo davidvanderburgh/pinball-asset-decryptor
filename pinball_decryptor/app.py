@@ -75,9 +75,11 @@ class App:
         saved_theme = self._settings.get("theme")
         # Apply the saved "Match audio replacements to the game's callouts" pref
         # before any Write can spawn encode workers (they inherit this env var).
-        # Default on.
+        # Default OFF: it's an unproven experiment for the callout click (now in
+        # the Advanced Audio Options dialog), so the encoder runs raw unless the
+        # user opts in.
         self._apply_audio_declick_env(
-            bool(self._settings.get("audio_declick", True)))
+            bool(self._settings.get("audio_declick", False)))
         # Same for the Advanced audio options (fade/cap/roll-off overrides,
         # head/tail modes) — experiment levers for the Spike 2 click hunt.
         self._apply_audio_advanced_env(
@@ -169,7 +171,7 @@ class App:
             initial_voice_quality=self._settings.get("voice_quality"),
             on_voice_quality_change=self._on_voice_quality_change,
             initial_audio_declick=bool(
-                self._settings.get("audio_declick", True)),
+                self._settings.get("audio_declick", False)),
             on_audio_declick_change=self._on_audio_declick_change,
             initial_audio_advanced=self._settings.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,

@@ -167,45 +167,46 @@ def test_audio_group_duplicates_checkbox_only_for_cgc(
     assert win._audio_dup_group_cb.winfo_manager() == ""
 
 
-def test_audio_declick_checkbox_only_for_stern(app, manufacturers_by_key):
-    """The match-to-callouts row (checkbox + Advanced… + Profile vs stock) is
-    packed only for Stern — its env vars are read solely by the Spike 2
-    encoder, so other plugins must not show inert controls."""
+def test_audio_experiment_buttons_only_for_stern(app, manufacturers_by_key):
+    """Advanced… / Profile vs stock drive env vars read solely by the Spike 2
+    encoder, so they are packed only for Stern.  The Trim/pad checkbox they
+    share a row with stays for every manufacturer."""
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update(); app.root.update()
-    assert win._audio_declick_row.winfo_manager() == "pack"
-    # The row's children exist and live inside it.
-    assert win._audio_declick_cb.winfo_manager() == "pack"
+    assert win._audio_trim_cb.winfo_manager() == "pack"
     assert win._audio_adv_btn.winfo_manager() == "pack"
     assert win._audio_profile_btn.winfo_manager() == "pack"
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update(); app.root.update()
-    assert win._audio_declick_row.winfo_manager() == ""
+    assert win._audio_adv_btn.winfo_manager() == ""
+    assert win._audio_profile_btn.winfo_manager() == ""
+    # The shared row (Trim/pad checkbox) stays for non-Stern.
+    assert win._audio_trim_cb.winfo_manager() == "pack"
 
 
-def test_audio_declick_toggle_persists_and_sets_env(
-        app, manufacturers_by_key, monkeypatch):
-    """The toggle is on by default (env var unset).  Unticking it persists
-    audio_declick=False and sets PAD_STERN_AUDIO_RAW=1 so the next Write's
-    encode workers inherit it; re-ticking clears both."""
+def test_audio_declick_toggle_persists_and_sets_env(app, manufacturers_by_key):
+    """Off by default now (unproven experiment, moved into the Advanced
+    dialog): the encoder runs raw (PAD_STERN_AUDIO_RAW=1).  Ticking it on
+    clears the var so the shaper runs; unticking re-sets it.  The BooleanVar +
+    handler are unchanged — only the widget's home moved."""
     import os
-    monkeypatch.delenv("PAD_STERN_AUDIO_RAW", raising=False)
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update()
-    assert win.audio_declick_var.get() is True
-    assert "PAD_STERN_AUDIO_RAW" not in os.environ
+    assert win.audio_declick_var.get() is False
 
-    win.audio_declick_var.set(False)
-    win._on_audio_declick_toggle()
-    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
-    assert app._settings["audio_declick"] is False
-
+    # Enable it -> encoder shapes to callouts (env cleared).
     win.audio_declick_var.set(True)
     win._on_audio_declick_toggle()
     assert "PAD_STERN_AUDIO_RAW" not in os.environ
     assert app._settings["audio_declick"] is True
+
+    # Disable again -> raw encode (env set).
+    win.audio_declick_var.set(False)
+    win._on_audio_declick_toggle()
+    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
+    assert app._settings["audio_declick"] is False
 
 
 def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
@@ -245,6 +246,44 @@ def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
         assert var not in os.environ
     app._apply_audio_preview_env(os.path.join("X:", "out", "card.raw"))
     assert "PAD_STERN_PREVIEW_DIR" not in os.environ
+
+
+def test_audio_advanced_modal_declick_applies_on_ok(app, manufacturers_by_key):
+    """The match-to-callouts switch now lives in the Advanced dialog and is
+    applied on OK: opening the dialog, ticking it, and pressing OK must flip the
+    var, persist the setting, and clear PAD_STERN_AUDIO_RAW (raw -> shaped)."""
+    import os
+
+    def _descendants(w):
+        out = []
+        for c in w.winfo_children():
+            out.append(c)
+            out += _descendants(c)
+        return out
+
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    # Baseline: off (raw encode).
+    win.audio_declick_var.set(False)
+    win._on_audio_declick_toggle()
+    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
+
+    win._open_audio_advanced()
+    app.root.update()
+    dlg = [c for c in win.root.winfo_children()
+           if isinstance(c, _tk_mod.Toplevel)][-1]
+    kids = _descendants(dlg)
+    cb = next(w for w in kids if "text" in w.keys()
+              and "Match audio replacements" in str(w.cget("text")))
+    ok = next(w for w in kids if "text" in w.keys()
+              and str(w.cget("text")) == "OK")
+    cb.invoke()   # local var False -> True
+    ok.invoke()   # _ok applies the declick change
+    app.root.update()
+    assert win.audio_declick_var.get() is True
+    assert "PAD_STERN_AUDIO_RAW" not in os.environ
+    assert app._settings["audio_declick"] is True
 
 
 def test_audio_group_duplicates_renders_two_level_tree(

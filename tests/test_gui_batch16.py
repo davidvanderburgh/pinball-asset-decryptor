@@ -118,9 +118,8 @@ def test_sort_hint_labels_are_gone(app):
 
 
 def test_optional_toolbar_widgets_still_pack(app):
-    """Type / Group-duplicates used to pack `before=` the sort hint, and the
-    declick checkbox `after=` a blank note label; both anchors were deleted.
-    Their replacements must still place the widgets."""
+    """Type / Group-duplicates used to pack `before=` the sort hint; that anchor
+    was deleted.  Its replacement must still place the widget."""
     w = _stern(app)
     _show_tab(app, w, w._tab_audio)
     w._audio_categories = {"audio/a.wav": "callouts"}
@@ -128,8 +127,7 @@ def test_optional_toolbar_widgets_still_pack(app):
     app.root.update()
     assert w._audio_type_frame.winfo_ismapped(), \
         "Type filter lost its pack anchor"
-    # Stern shows the callout-matching checkbox, packed after the trim box.
-    assert w._audio_declick_cb.winfo_ismapped()
+    # Stern shows the Trim/pad checkbox on the audio-options row.
     assert w._audio_trim_cb.winfo_ismapped()
     # ...and the Type filter still sits LEFT of the Changed-only checkbox.
     order = w._audio_type_frame.master.pack_slaves()
@@ -137,22 +135,22 @@ def test_optional_toolbar_widgets_still_pack(app):
         w._audio_changed_only_cb)
 
 
-def test_audio_checkboxes_are_left_aligned(app):
-    """monkeybug: "move checkbox to same level as other and tighten up".
-
-    The match-to-callouts checkbox now lives inside a row frame (with the
-    Advanced… / Profile vs stock buttons), so alignment is checked in
-    root-relative coordinates."""
+def test_audio_options_row_aligned(app):
+    """The Trim/pad checkbox and the Advanced… / Profile vs stock buttons share
+    one row: the buttons sit to the right of the checkbox and are vertically
+    centered on it (David's alignment fix)."""
     w = _stern(app)
     _show_tab(app, w, w._tab_audio)
     assert w._audio_trim_cb.winfo_ismapped()
-    assert (w._audio_trim_cb.winfo_rootx()
-            == w._audio_declick_cb.winfo_rootx())
-    # The blank spacer label that used to wedge a full text line between them
-    # is gone, so they are adjacent rows.
-    gap = w._audio_declick_row.winfo_y() - (
-        w._audio_trim_cb.winfo_y() + w._audio_trim_cb.winfo_height())
-    assert 0 <= gap <= 6, "checkboxes drifted apart again (gap=%d)" % gap
+    assert w._audio_adv_btn.winfo_ismapped()
+    assert w._audio_profile_btn.winfo_ismapped()
+    # Buttons to the right of the checkbox, all in the same row frame.
+    assert w._audio_adv_btn.winfo_rootx() > w._audio_trim_cb.winfo_rootx()
+    assert w._audio_adv_btn.master is w._audio_trim_cb.master
+    # Vertically centered on each other.
+    cb_c = w._audio_trim_cb.winfo_rooty() + w._audio_trim_cb.winfo_height() / 2
+    adv_c = w._audio_adv_btn.winfo_rooty() + w._audio_adv_btn.winfo_height() / 2
+    assert abs(cb_c - adv_c) <= 2, "checkbox/buttons not vertically centered"
 
 
 def test_video_checkboxes_are_left_aligned(app):

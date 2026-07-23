@@ -1063,11 +1063,13 @@ class MainWindow:
         self._on_voice_quality_change = on_voice_quality_change
         # "Match audio replacements to the game's callouts" — fades the
         # start/end of each replacement, caps its level, and band-limits it to
-        # the stock callout bandwidth (~5 kHz low-pass) so it can't click on
-        # real hardware (monkeybug's callout clicks; the band-limit is the
-        # firmware-RE-motivated part).  Persisted in settings.json via
-        # ``on_audio_declick_change``; the App also mirrors it into the Stern
-        # encoder's env var.  On by default.
+        # the stock callout bandwidth (~5 kHz low-pass).  It was an attempt at
+        # monkeybug's callout click, but no machine has confirmed it removes the
+        # pop (this session's RE traced the pop to the machine's own audio
+        # output stage), so it is OFF by default and now lives inside the
+        # Advanced Audio Options dialog rather than on the tab.  Persisted in
+        # settings.json via ``on_audio_declick_change``; the App also mirrors it
+        # into the Stern encoder's env var.
         self.audio_declick_var = tk.BooleanVar(
             value=bool(initial_audio_declick))
         self._on_audio_declick_change = on_audio_declick_change
@@ -3067,52 +3069,44 @@ class MainWindow:
                                         padx=(4, 0))
         self._audio_pane_rep.clear("no replacement assigned")
 
-        # Length-matching option + per-manufacturer guidance note.  The
-        # checkbox is forced on + disabled for plugins whose Write always
-        # length-matches regardless (audio_forces_length_match), set in
-        # apply_manufacturer.
+        # Length-matching option + the Stern experiment buttons share one row:
+        # the Trim/pad checkbox on the left, Advanced… / Profile vs stock on the
+        # right.  The checkbox is forced on + disabled for plugins whose Write
+        # always length-matches (audio_forces_length_match, set in
+        # apply_manufacturer); the buttons are Stern-only (apply_manufacturer
+        # hides them elsewhere).
+        self._audio_opts_row = ttk.Frame(f)
+        self._audio_opts_row.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(4, 4))
         self._audio_trim_cb = ttk.Checkbutton(
-            f, text="Trim / pad replacements to the original slot length",
+            self._audio_opts_row,
+            text="Trim / pad replacements to the original slot length",
             variable=self.audio_trim_var, command=self._save_staged_changes)
-        self._audio_trim_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
+        self._audio_trim_cb.pack(side=tk.LEFT)
         # Hover tooltip — its text is set per-manufacturer in apply_manufacturer
         # (esp. WHY it's disabled for size-neutral formats like Spike 2).
         self._audio_trim_tip = _Tooltip(
             self._audio_trim_cb, "", lambda: self._current_theme)
-
-        # Match-to-callouts: land a stock-length fade on both edges of every
-        # replacement, cap its level, and band-limit it to the stock callout
-        # bandwidth (~5 kHz), so a hot/bright clip can't click on real hardware
-        # (monkeybug's callout clicks).  On by default; only meaningful for the
-        # Spike 2 re-encode path, so apply_manufacturer shows it for Stern and
-        # hides it elsewhere.
-        self._audio_declick_row = ttk.Frame(f)
-        self._audio_declick_row.pack(anchor=tk.W, fill=tk.X, padx=12,
-                                     pady=(0, 4))
-        self._audio_declick_cb = ttk.Checkbutton(
-            self._audio_declick_row,
-            text="Match audio replacements to the game's callouts",
-            variable=self.audio_declick_var,
-            command=self._on_audio_declick_toggle)
-        self._audio_declick_cb.pack(side=tk.LEFT)
-        # Experiment levers for the trigger-pop hunt (Stern-only, same
-        # show/hide as the checkbox): per-knob encode overrides + a stock
-        # characterization report.
+        # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
+        # encode overrides (incl. the match-to-callouts shaper, now off by
+        # default and living inside the dialog) + a stock characterization
+        # report.
         self._audio_adv_btn = ttk.Button(
-            self._audio_declick_row, text="Advanced…", width=12,
+            self._audio_opts_row, text="Advanced…", width=12,
             command=self._open_audio_advanced)
-        self._audio_adv_btn.pack(side=tk.LEFT, padx=(10, 0))
         _Tooltip(self._audio_adv_btn,
-                 "Fine-tune how replacements are encoded: fade length, level "
-                 "cap, treble roll-off, and experimental head/tail block "
-                 "handling — plus machine-render preview WAVs on Build.\n\n"
-                 "These are levers for chasing clicks heard on the real "
-                 "machine. Defaults match the standard behavior.",
+                 "Fine-tune how replacements are encoded: the match-to-callouts "
+                 "shaper (fade, level cap, treble roll-off) and experimental "
+                 "head/tail block handling — plus machine-render preview WAVs "
+                 "on Build.\n\nThese are levers for chasing clicks heard on the "
+                 "real machine. Defaults match the standard behavior.",
                  lambda: self._current_theme)
         self._audio_profile_btn = ttk.Button(
-            self._audio_declick_row, text="Profile vs stock", width=15,
+            self._audio_opts_row, text="Profile vs stock", width=15,
             command=self._audio_profile_click)
-        self._audio_profile_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # Right-align the two buttons (the checkbox stays left): pack Profile
+        # first so it sits at the right edge, Advanced to its left.
+        self._audio_profile_btn.pack(side=tk.RIGHT)
+        self._audio_adv_btn.pack(side=tk.RIGHT, padx=(0, 6))
         _Tooltip(self._audio_profile_btn,
                  "Characterize every sound in the scanned extract folder — "
                  "lead-in, fade-out, peak/RMS level, DC offset, spectral "
@@ -3120,18 +3114,6 @@ class MainWindow:
                  "game's own callout style. Writes audio_profile.csv into "
                  "the extract folder.",
                  lambda: self._current_theme)
-        self._audio_declick_tip = _Tooltip(
-            self._audio_declick_cb,
-            "On by default. Shapes each replacement to behave like the game's "
-            "own callouts so it can't click on the real machine: it smooths "
-            "the very start and end, gently caps the level, and rolls off the "
-            "high treble above 5 kHz.\n\nThe machine's stock callouts are "
-            "band-limited speech. A brighter or hotter replacement (a music "
-            "clip carries far more treble than a spoken callout) is what clicks "
-            "on the cabinet speaker; the roll-off is the part that targets it. "
-            "Leave this on unless a replacement sounds too dull with it — "
-            "turning it off uses your audio exactly as provided.",
-            lambda: self._current_theme)
         # A persisted experiment setting from a previous session must be
         # visible immediately (the RAW-toggle lesson).
         self._refresh_audio_adv_marker()
@@ -6964,6 +6946,26 @@ class MainWindow:
                  "one thing at a time when chasing a click on the real "
                  "machine.").pack(anchor=tk.W, padx=12, pady=(12, 8))
 
+        # Master switch for the callout-matching shaper (the fade / cap /
+        # roll-off knobs below are its parameters).  Applied on OK like the
+        # rest of this dialog.  Off by default: it was an attempt at the
+        # callout click, but no machine has confirmed it removes the pop.
+        declick_var = tk.BooleanVar(value=bool(self.audio_declick_var.get()))
+        ttk.Checkbutton(
+            dlg, variable=declick_var,
+            text="Match audio replacements to the game's callouts").pack(
+            anchor=tk.W, padx=12, pady=(4, 0))
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=460,
+            font=(_SANS_FONT, 8, "italic"),
+            text="Shapes each replacement to behave like the game's own "
+                 "callouts: smooths the very start and end, gently caps the "
+                 "level, and rolls the treble off above ~5 kHz (the fade, cap "
+                 "and roll-off below are its knobs). Off by default: it was an "
+                 "attempt at the callout click, but no machine has confirmed it "
+                 "removes the pop. When off, your audio is encoded exactly as "
+                 "provided.").pack(anchor=tk.W, padx=12, pady=(2, 8))
+
         grid = ttk.Frame(dlg)
         grid.pack(fill=tk.X, padx=12)
         fade_var = tk.StringVar(value=str(cfg["fade_ms"]))
@@ -7086,6 +7088,11 @@ class MainWindow:
             self._audio_advanced = _collect()
             if self._on_audio_advanced_change:
                 self._on_audio_advanced_change(dict(self._audio_advanced))
+            # The match-to-callouts master switch persists + drives its own env
+            # var separately from the advanced dict; apply it here on OK too.
+            if bool(declick_var.get()) != bool(self.audio_declick_var.get()):
+                self.audio_declick_var.set(bool(declick_var.get()))
+                self._on_audio_declick_toggle()
             self._refresh_audio_adv_marker()
             dlg.destroy()
 
@@ -7099,6 +7106,7 @@ class MainWindow:
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
+            declick_var.set(False)
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))
@@ -7109,6 +7117,12 @@ class MainWindow:
             side=tk.LEFT)
         dlg.bind("<Return>", _ok)
         dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        # Center over the main window (not the top-left of the monitor).
+        dlg.update_idletasks()
+        px, py = root.winfo_rootx(), root.winfo_rooty()
+        pw, ph = root.winfo_width(), root.winfo_height()
+        w, h = dlg.winfo_width(), dlg.winfo_height()
+        dlg.geometry("+%d+%d" % (px + (pw - w) // 2, py + (ph - h) // 2))
         dlg.grab_set()
 
     def _refresh_audio_adv_marker(self):
@@ -7121,8 +7135,12 @@ class MainWindow:
         d = dict(self._AUDIO_ADV_DEFAULTS)
         d.update({k: v for k, v in self._audio_advanced.items()
                   if v is not None})
-        btn.config(text="Advanced…*" if d != self._AUDIO_ADV_DEFAULTS
-                   else "Advanced…")
+        # The match-to-callouts switch lives in this dialog too; its non-default
+        # (on) state should raise the same star.
+        declick_on = bool(getattr(self, "audio_declick_var", None)
+                          and self.audio_declick_var.get())
+        off_default = d != self._AUDIO_ADV_DEFAULTS or declick_on
+        btn.config(text="Advanced…*" if off_default else "Advanced…")
 
     def _audio_profile_click(self):
         """Audio tab -> Profile vs stock: hand the scanned extract folder to
@@ -10078,18 +10096,18 @@ class MainWindow:
         # whose answer is per-extract (CGC) reports its default; the lock is
         # re-applied against the real folder after an audio scan.
         self._apply_audio_trim_lock(mfr)
-        # Auto-fade + cap only drives the Spike 2 in-place re-encode (its env
-        # var is read solely by the Stern engine's audio encoder), so show the
-        # checkbox for Stern and hide it elsewhere rather than offer an inert
-        # toggle.  Packed just under the Trim/pad row.
-        if hasattr(self, "_audio_declick_row"):
+        # The Advanced… / Profile vs stock buttons drive env vars read solely
+        # by the Spike 2 encoder, so show them for Stern and hide them
+        # elsewhere rather than offer inert controls.  They share a row with the
+        # Trim/pad checkbox, which stays for every manufacturer.
+        if hasattr(self, "_audio_adv_btn"):
             if mfr.key == "stern":
-                if not self._audio_declick_row.winfo_ismapped():
-                    self._audio_declick_row.pack(
-                        anchor=tk.W, fill=tk.X, padx=12, pady=(0, 4),
-                        after=self._audio_trim_cb)
+                if not self._audio_profile_btn.winfo_ismapped():
+                    self._audio_profile_btn.pack(side=tk.RIGHT)
+                    self._audio_adv_btn.pack(side=tk.RIGHT, padx=(0, 6))
             else:
-                self._audio_declick_row.pack_forget()
+                self._audio_adv_btn.pack_forget()
+                self._audio_profile_btn.pack_forget()
         # Same clean slate for the video tab.
         self._video_slots = []
         self._video_slots_by_rel = {}

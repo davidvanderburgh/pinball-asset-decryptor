@@ -14,8 +14,10 @@ from tests.conftest import HAS_DISPLAY
 from tests.test_gui_smoke import app  # noqa: F401  (fixture)
 
 
-pytestmark = pytest.mark.skipif(
-    not HAS_DISPLAY, reason="no Tk display available")
+pytestmark = [
+    pytest.mark.gui,
+    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
+]
 
 
 class _Slot:

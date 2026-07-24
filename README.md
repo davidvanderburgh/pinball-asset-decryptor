@@ -353,7 +353,7 @@ journal so you know to rebuild it rather than blame the card.
 Flashing a card is otherwise a blind raw write with no integrity check,
 so a single bad sector or a flaky reader can corrupt the card silently —
 and a partially-written installer can SHELL ERROR or leave the machine
-unbootable. The **Flash image to SD card** button now reads the whole
+unbootable. The **Build / flash SD card** button now reads the whole
 card back after writing and compares it byte-for-byte to the image,
 aborting if anything doesn't match, so a bad flash is caught on your PC
 instead of at the machine. (This roughly doubles the flash time; the
@@ -541,6 +541,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    You get an installable file that's ready for a USB drive (SD-card
    plugins default the name to `…-modified.raw` so it can't be
    mistaken for the stock image).
+   Where whole-card flashing is supported (Stern Spike 2, CGC), the
+   single **Build / flash SD card…** button replaces the plain Build
+   button and does the whole test loop in one step: a two-part dialog
+   builds a fresh image and/or writes an image onto a card — tick both
+   and the fresh build goes straight onto the card, no separate flash
+   step. (Untick building and it's the classic "flash a pre-built or
+   backup image" dialog.) Action buttons are colour-coded — green for
+   go actions (Extract, Build), red for the live Cancel and Revert all
+   changes — with neutral buttons (Browse, Refresh) left plain.
    Any Replace Audio / Video assignments are applied automatically
    here — no extra step. The assets folder *is* your project: your picks and built
    changes persist there across app restarts, so you extract once and
@@ -584,6 +593,21 @@ Two quality-of-life touches apply everywhere: every file/folder box
 keeps a per-manufacturer dropdown of your recent paths (handy when you
 bounce between games), and the **?** button in the top bar opens a tips
 page for whichever tab you're on.
+
+Working several game versions at once? **⚙ → Save project…** snapshots
+the whole setup — manufacturer, every Extract/Write path, and the
+Extract options — into a `.pinproj` file, and **Load project…** puts it
+all back in one go (the loaded project's name shows in the title bar).
+The log survives sessions too: the log pane opens with the previous
+sessions' lines already in it — dimmed, above a clear cut line — so an
+app update or restart no longer wipes what you were looking at. Prefer
+a clean log? ⚙ → **Logs** → **Show previous sessions in the log**
+toggles the inline history off (the on-disk history keeps collecting
+either way), and right-click → **Copy current session log** grabs just
+this session's lines regardless. Behind it all sits a rolling on-disk
+history (capped by size and age); for anything older than the pane
+shows, right-click the log → **View log history…**, or ⚙ → **Logs** →
+**View log history…**.
 
 If you browse to a file the current manufacturer doesn't recognise but
 *another* manufacturer does, the badge under the input field will say

@@ -72,6 +72,10 @@ class DiskManagerDialog:
         th = self._theme
         dlg = tk.Toplevel(self._parent)
         self._dlg = dlg
+        # Hidden until built + positioned (deiconify at the tail); otherwise
+        # dark_titlebar/_center's update_idletasks maps it at the default
+        # spot first and it flickers into place (David).
+        dlg.withdraw()
         dlg.title("Manage disk space")
         dlg.configure(bg=th["bg"])
         dark_titlebar(dlg, th is THEMES["dark"])
@@ -694,9 +698,10 @@ class DiskManagerDialog:
 
         brow = ttk.Frame(frm)
         brow.pack(fill="x", pady=(14, 0))
-        ttk.Button(brow, text="Cancel", command=win.destroy).pack(side="right")
-        ttk.Button(brow, text="Resize", command=_ok).pack(
-            side="right", padx=(0, 8))
+        ttk.Button(brow, text="Cancel", command=win.destroy,
+                   style="Danger.TButton").pack(side="right")
+        ttk.Button(brow, text="Resize", command=_ok,
+                   style="Go.TButton").pack(side="right", padx=(0, 8))
         ent.focus_set()
         ent.select_range(0, "end")
         win.bind("<Return>", lambda _e: _ok())

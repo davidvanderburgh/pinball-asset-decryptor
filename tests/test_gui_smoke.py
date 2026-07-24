@@ -10,8 +10,12 @@ import pytest
 from tests.conftest import HAS_DISPLAY
 
 
-pytestmark = pytest.mark.skipif(
-    not HAS_DISPLAY, reason="no Tk display available")
+# Every test here builds a full Tk App() (~0.5s setup) — tag them `gui` so a
+# fast dev run can deselect the lot with -m "not gui".
+pytestmark = [
+    pytest.mark.gui,
+    pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
+]
 
 
 import tkinter as _tk_mod
@@ -44,6 +48,12 @@ def app(tmp_path, monkeypatch):
     import pinball_decryptor.app as app_mod
     monkeypatch.setattr(app_mod, "SETTINGS_FILE",
                         str(tmp_path / "settings.json"))
+    # Same sandboxing for the rolling on-disk log history — every
+    # append_log() a test triggers would otherwise land in (and eventually
+    # roll!) the developer's real session.log.
+    from pinball_decryptor.core import session_log
+    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE",
+                        str(tmp_path / "logs"))
     # Don't fire the real prerequisite probes: every mfr selection would
     # spawn a background thread + a storm of subprocess probes that outlive
     # the (sub-second) test and churn against the next Tk create.  Tests
@@ -998,17 +1008,24 @@ def test_flash_button_shown_for_stern_hidden_otherwise(
     # Same row as Build (the preview-frame toolbar), not a separate frame.
     assert (app.window._flash_btn.master
             is app.window._write_btn.master)
+    # Consolidated (David: "two build buttons"): for flash-capable plugins
+    # the Build / flash dialog IS the build entry point, so the plain Build
+    # button hides — exactly one primary write-side action button.
+    assert app.window._write_btn.winfo_manager() == ""
 
-    # Whitestar (MAME capture) era has no flash capability → button hidden.
+    # Whitestar (MAME capture) era has no flash capability → flash hidden,
+    # plain Build back.
     stern.set_era("whitestar")
     app.window.apply_manufacturer(stern, reset_era=False)
     app.root.update()
     assert app.window._flash_btn.winfo_manager() == ""
+    assert app.window._write_btn.winfo_manager() == "pack"
 
     app._on_back_to_picker()
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
     assert app.window._flash_btn.winfo_manager() == ""
+    assert app.window._write_btn.winfo_manager() == "pack"
 
 
 def test_write_preview_scan_uses_shared_scan_state(app, manufacturers_by_key):
@@ -1055,7 +1072,7 @@ def test_flash_button_folds_cancel_and_status_resets_on_run_start(
         assert w._flash_btn.cget("text") == "Cancel"
     finally:
         w.set_running(False, mode="write")
-    assert w._flash_btn.cget("text").startswith("Flash image")
+    assert w._flash_btn.cget("text").startswith("Build / flash")
     assert not getattr(w, "_flash_running", False)
 
 
@@ -1929,7 +1946,7 @@ def test_flash_run_has_exactly_one_cancel(app, manufacturers_by_key):
         assert str(w._write_btn.cget("state")) == "disabled"
     finally:
         w.set_running(False, mode="write")
-    assert w._flash_btn.cget("text").startswith("Flash image")
+    assert w._flash_btn.cget("text").startswith("Build / flash")
     assert w._write_btn.cget("text") == idle
     assert str(w._write_btn.cget("state")) == "normal"
 
@@ -1953,8 +1970,10 @@ def test_set_cancelling_only_relabels_live_cancel(app):
 def test_write_toolbar_groups_scan_left_actions_right(
         app, manufacturers_by_key):
     """Modified Files toolbar grouping (monkeybug batch 9): Refresh (the scan
-    control) sits on the left; Flash / Revert / Build are grouped on the
-    right."""
+    control) sits on the left; the action buttons are grouped on the right.
+    For a flash-capable plugin the plain Build button is hidden (David: the
+    consolidated Build / flash button replaces it), so the right-hand group
+    is Build / flash + Revert."""
     w = app.window
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
@@ -1963,7 +1982,8 @@ def test_write_toolbar_groups_scan_left_actions_right(
     w.apply_manufacturer(stern, reset_era=False)
     app.root.update()
     assert w._write_preview_refresh_btn.pack_info()["side"] == "left"
-    for btn in (w._write_btn, w._revert_all_btn, w._flash_btn):
+    assert w._write_btn.winfo_manager() == ""     # consolidated away
+    for btn in (w._flash_btn, w._revert_all_btn):
         assert btn.pack_info()["side"] == "right"
     app._on_back_to_picker()
     app._on_manufacturer_change(manufacturers_by_key["spooky"])

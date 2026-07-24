@@ -22,6 +22,7 @@ from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import stale_source_message
 from ..core.staged_originals import ORIG_DIR
+from ..core import session_log
 from .theme import (THEMES, dark_titlebar, detect_system_theme,
                     platform_font)
 
@@ -998,7 +999,12 @@ class MainWindow:
                  on_audio_profile=None,
                  on_partition_image_opened=None,
                  initial_default_presets=None,
-                 on_default_presets_change=None):
+                 on_default_presets_change=None,
+                 on_build_flash=None,
+                 on_save_project=None,
+                 on_load_project=None,
+                 initial_show_log_history=True,
+                 on_show_log_history_change=None):
         self.root = root
         # Default Settings presets: {"presets": {name: {AD_name: value}},
         # "active": name}.  Persisted via on_default_presets_change.
@@ -1013,6 +1019,11 @@ class MainWindow:
         self._on_apply_delta = on_apply_delta
         self._on_revert_all = on_revert_all
         self._on_flash_image = on_flash_image
+        # Build-then-flash chain (the two-section Build / flash dialog):
+        # ``on_build_flash(build_path, device_path_or_None)``.
+        self._on_build_flash = on_build_flash
+        self._on_save_project = on_save_project
+        self._on_load_project = on_load_project
         self._on_recheck_prereqs = on_recheck_prereqs
         self._on_install_prereqs = on_install_prereqs
         self._on_back = on_back
@@ -1084,6 +1095,15 @@ class MainWindow:
         # opens a card — the App records it into the field's recent-paths
         # dropdown (monkeybug: same "last 5" memory as the Extract screen).
         self._on_partition_image_opened = on_partition_image_opened
+        # Seed each log pane with the previous sessions' history (dimmed,
+        # above a cut line)?  ⚙-menu checkbutton; OFF = a clean per-session
+        # log for users who don't want the past in view.  Persisted in
+        # settings.json via ``on_show_log_history_change``; the on-disk
+        # history keeps collecting either way, so flipping it back ON
+        # restores the past instantly.
+        self.show_log_history_var = tk.BooleanVar(
+            value=bool(initial_show_log_history))
+        self._on_show_log_history_change = on_show_log_history_change
         self._app_title = app_title
 
         self._current_mfr = None
@@ -2278,7 +2298,8 @@ class MainWindow:
         # _set_extract_button_running) and is gated otherwise (see
         # _refresh_extract_enabled).
         self._extract_btn = ttk.Button(
-            self._extract_action_row, text="Extract", command=self._on_extract)
+            self._extract_action_row, text="Extract",
+            command=self._on_extract, style="Go.TButton")
         self._extract_btn.pack(side=tk.RIGHT)
         self._extract_btn_tip = _Tooltip(
             self._extract_btn, "", lambda: self._current_theme)
@@ -2572,13 +2593,15 @@ class MainWindow:
         # command are driven by _set_write_button_running.
         self._write_btn = ttk.Button(
             preview_toolbar, text="Build update",
-            command=self._on_write_clicked)
+            command=self._on_write_clicked, style="Go.TButton")
         self._write_btn.pack(side=tk.RIGHT)
         # Revert is gated to plugins with a Replace surface in
         # apply_manufacturer, which re-packs it just left of Build.
+        # Danger-styled: it rewrites files on disk (David: red for
+        # delete-like actions).
         self._revert_all_btn = ttk.Button(
             preview_toolbar, text="Revert all changes…",
-            command=self._revert_all_clicked)
+            command=self._revert_all_clicked, style="Danger.TButton")
         self._revert_all_btn.pack(
             side=tk.RIGHT, padx=(0, 6), after=self._write_btn)
 
@@ -2691,13 +2714,14 @@ class MainWindow:
         # While a flash runs the button doubles as its live Cancel — see
         # set_flash_running.
         self._flash_btn = ttk.Button(
-            preview_toolbar, text="Flash image to SD card…",
-            command=self._open_flash_dialog)
+            preview_toolbar, text="Build / flash SD card…",
+            command=self._open_flash_dialog, style="Go.TButton")
         self._flash_btn_tip = _Tooltip(
             self._flash_btn,
-            "Write a complete, pre-built SD-card image (.img / .raw) onto a "
-            "card — handy after a build, or to restore a backup. The whole "
-            "card is erased and replaced. Requires Administrator.",
+            "Build a fresh image and/or write one onto an SD card — tick "
+            "both in the dialog to build and flash in one step. Flashing "
+            "erases and replaces the whole card, and needs Administrator "
+            "(approved when the write starts).",
             lambda: self._current_theme)
         # "Card diagnostics…" — only for manufacturers implementing
         # diagnose_card (CGC): reads the on-machine installer's log back off
@@ -2738,7 +2762,7 @@ class MainWindow:
                   text="Create a zip of only your modified files to share.",
                   font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=8, pady=(4, 2))
         ttk.Button(export_frame, text="Export Mod Pack...",
-                   command=self._on_export).pack(
+                   command=self._on_export, style="Go.TButton").pack(
             anchor=tk.W, padx=8, pady=(2, 6))
 
         import_frame = ttk.LabelFrame(f, text="Import Mod Pack")
@@ -2747,7 +2771,7 @@ class MainWindow:
                   text="Apply a mod pack zip from another user.",
                   font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=8, pady=(4, 2))
         ttk.Button(import_frame, text="Import Mod Pack...",
-                   command=self._on_import).pack(
+                   command=self._on_import, style="Go.TButton").pack(
             anchor=tk.W, padx=8, pady=(2, 6))
 
         # Gated per-plugin (caps.mod_transfer) in apply_manufacturer — this tab
@@ -2827,7 +2851,8 @@ class MainWindow:
         ttk.Button(self._modpack_transfer_frame,
                    text="Transfer mods → new version...",
                    command=(self._on_transfer_mods
-                            if self._on_transfer_mods else lambda: None)).pack(
+                            if self._on_transfer_mods else lambda: None),
+                   style="Go.TButton").pack(
             anchor=tk.W, padx=8, pady=(2, 2))
         # Filled after a successful transfer with the exact next step (also
         # written to the log, so it survives once this panel scrolls away).
@@ -4267,9 +4292,10 @@ class MainWindow:
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(0, 12))
-        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
-        ttk.Button(btns, text="Cancel", command=_cancel).pack(
-            side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="OK", command=_ok,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=_cancel,
+                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
         dlg.bind("<Return>", _ok)
         dlg.bind("<Escape>", _cancel)
         combo.focus_set()
@@ -7110,9 +7136,10 @@ class MainWindow:
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))
-        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
-        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(
-            side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="OK", command=_ok,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy,
+                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
         ttk.Button(btns, text="Restore defaults", command=_defaults).pack(
             side=tk.LEFT)
         dlg.bind("<Return>", _ok)
@@ -7357,15 +7384,17 @@ class MainWindow:
         # rather than the opens-a-dialog convention (monkeybug batch 14).
         self._pex_extract_btn = ttk.Button(
             arow, text="Extract Selected", command=self._pex_extract_selected,
-            state=tk.DISABLED)
+            state=tk.DISABLED, style="Go.TButton")
         self._pex_extract_btn.pack(side=tk.LEFT)
         self._pex_extract_part_btn = ttk.Button(
             arow, text="Extract Whole Partition",
-            command=self._pex_extract_partition, state=tk.DISABLED)
+            command=self._pex_extract_partition, state=tk.DISABLED,
+            style="Go.TButton")
         self._pex_extract_part_btn.pack(side=tk.LEFT, padx=(6, 0))
         self._pex_extract_all_btn = ttk.Button(
             arow, text="Extract All Partitions",
-            command=self._pex_extract_all, state=tk.DISABLED)
+            command=self._pex_extract_all, state=tk.DISABLED,
+            style="Go.TButton")
         self._pex_extract_all_btn.pack(side=tk.LEFT, padx=(6, 0))
         # Extract results show right next to the buttons that made them
         # (they used to land top-right by the partition combo, where they
@@ -8063,7 +8092,7 @@ class MainWindow:
             if b is not btn:
                 b.config(state=tk.DISABLED)
         btn.config(text="Cancel", state=tk.NORMAL,
-                   command=self._pex_cancel_extract)
+                   command=self._pex_cancel_extract, style="Danger.TButton")
         self._pex_action_status.configure(text="")
         # normpath: Tk's pickers hand back forward-slash paths that turned
         # into mixed-slash log lines on Windows, which couldn't be pasted
@@ -8110,14 +8139,16 @@ class MainWindow:
         self._pex_busy_lbl.place_forget()
         self._pex_extract_btn.config(
             text="Extract Selected", command=self._pex_extract_selected,
+            style="Go.TButton",
             state=(tk.NORMAL if self._pex_tree.selection() else tk.DISABLED))
         self._pex_extract_part_btn.config(
             text="Extract Whole Partition",
-            command=self._pex_extract_partition,
+            command=self._pex_extract_partition, style="Go.TButton",
             state=(tk.NORMAL if self._pex_part_index is not None
                    else tk.DISABLED))
         self._pex_extract_all_btn.config(
             text="Extract All Partitions", command=self._pex_extract_all,
+            style="Go.TButton",
             state=(tk.NORMAL if any(
                 q.browsable for q in self._pex_part_labels.values())
                 else tk.DISABLED))
@@ -9915,6 +9946,12 @@ class MainWindow:
             # Replace trees above).
             for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
                 text.bind(seq, self._log_context_menu)
+            # Seed the fresh pane with the previous sessions' log tail
+            # (dimmed, above a cut line) — the log "keeps" across restarts
+            # and in-place updates right where the user already looks
+            # (monkeybug batch 18).  Before the pending-line flush below, so
+            # this session's buffered lines land under the cut.
+            self._seed_log_history(text)
             bundle = {"text": text, "scroll": scroll}
             self._log_widgets[mfr.key] = bundle
 
@@ -9932,6 +9969,62 @@ class MainWindow:
                 else:
                     self._write_log_line(ts, text, extra)
 
+    def _seed_log_history(self, text):
+        """Load the previous sessions' log into the TOP of a log widget,
+        dimmed, closed out by a cut line — so what happened before a
+        restart/update reads as history, not as this session's output.
+        Everything before the current session goes in (the file itself is
+        size-capped by the roll, so this tops out at a couple of MB); one
+        bulk insert keeps even a full file instant.  The pane ends up
+        scrolled to the cut line; scroll up for the past.
+
+        Gated on the ⚙-menu "Show previous sessions in the log" toggle and
+        idempotent (the cut line marks a seeded pane), so it serves both
+        widget creation and re-enabling the toggle mid-session."""
+        if not self.show_log_history_var.get():
+            return
+        if text.tag_ranges("cut"):
+            return                      # already seeded
+        lines = session_log.previous_tail()
+        if not lines:
+            return
+        text.configure(state=tk.NORMAL)
+        # Cut line first, then the history above it — two inserts at "1.0"
+        # land in visual order history → cut, above any live lines already
+        # in the widget (the mid-session re-enable case).
+        text.insert(
+            "1.0",
+            "──────────── earlier sessions above · this session below "
+            "────────────\n", "cut")
+        text.insert("1.0", "\n".join(lines) + "\n", "hist")
+        text.configure(state=tk.DISABLED)
+        text.see(tk.END)
+
+    def _remove_log_history(self, text):
+        """Strip the seeded history + cut line from a pane (the ⚙ toggle
+        turned off) — live session lines are untouched.  The tags cover
+        exactly what seeding inserted, trailing newlines included."""
+        text.configure(state=tk.NORMAL)
+        # "cut" sits below "hist"; delete it first so the hist indices
+        # (earlier in the widget) stay valid.
+        for tag in ("cut", "hist"):
+            rng = text.tag_ranges(tag)
+            for i in range(len(rng) - 2, -1, -2):
+                text.delete(rng[i], rng[i + 1])
+        text.configure(state=tk.DISABLED)
+
+    def _on_toggle_log_history(self):
+        """⚙ → "Show previous sessions in the log" flipped: apply to every
+        existing pane immediately (they're per-manufacturer) and persist."""
+        show = bool(self.show_log_history_var.get())
+        for bundle in self._log_widgets.values():
+            if show:
+                self._seed_log_history(bundle["text"])
+            else:
+                self._remove_log_history(bundle["text"])
+        if self._on_show_log_history_change:
+            self._on_show_log_history_change(show)
+
     def _apply_log_theme(self, text_widget):
         c = THEMES[self._current_theme]
         text_widget.configure(
@@ -9942,6 +10035,10 @@ class MainWindow:
         text_widget.tag_configure("error", foreground=c["error"])
         text_widget.tag_configure("ts", foreground=c["timestamp"])
         text_widget.tag_configure("link", foreground=c["link"])
+        # Previous-session history: dimmed like timestamps so it visibly
+        # reads as "the past"; the cut line a touch stronger.
+        text_widget.tag_configure("hist", foreground=c["timestamp"])
+        text_widget.tag_configure("cut", foreground=c["gray"])
 
     # ------------------------------------------------------------------
     # Manufacturer switching
@@ -10410,17 +10507,23 @@ class MainWindow:
         else:
             self._install_frame.pack_forget()
 
-        # Flash-image action (Stern Spike 2, CGC) — write a whole pre-built
-        # image onto a card.  Independent of the Build/Write destination
-        # toggle; joins the right-hand action group of the Modified Files
-        # toolbar (monkeybug batch 9: actions grouped together on the right,
-        # scan control alone on the left).  `after=` on a side=RIGHT pack
-        # places it visually LEFT of Build (and of Revert, packed below).
+        # Build / flash (Stern Spike 2, CGC) — for flash-capable plugins
+        # this dialog is the SINGLE build entry point: its build-only mode
+        # is the old Build button, so the plain Build button hides here
+        # (David: "Build / flash SD card…" next to "Build SD-card image"
+        # read as two build buttons).  Everyone else keeps the plain Build
+        # button and no flash action.  Repacked from scratch so the
+        # right-hand action group's order is deterministic across mfr
+        # switches (`after=` on a side=RIGHT pack places a widget visually
+        # LEFT of its anchor).
+        for btn in (self._flash_btn, self._diagnose_btn,
+                    self._revert_all_btn):
+            btn.pack_forget()
         if caps.flash_image:
-            self._flash_btn.pack(side=tk.RIGHT, padx=(0, 6),
-                                 after=self._write_btn)
-        else:
-            self._flash_btn.pack_forget()
+            self._write_btn.pack_forget()
+            self._flash_btn.pack(side=tk.RIGHT)
+        elif not self._write_btn.winfo_manager():
+            self._write_btn.pack(side=tk.RIGHT)
         # Card diagnostics — manufacturers that can read a failed install's
         # on-card log back (CGC's diagnose_card).  Beside Flash, so it can
         # only show when flashing does too.
@@ -10431,12 +10534,15 @@ class MainWindow:
             self._diagnose_btn.pack_forget()
 
         # "Revert all changes…" — only meaningful when this plugin has a Replace
-        # surface (the assets folder is where staged edits live).
+        # surface (the assets folder is where staged edits live).  Anchors on
+        # whichever primary action button this plugin shows.
         has_replace = (caps.replace_audio or caps.replace_video
                        or caps.replace_image or caps.replace_text)
         if has_replace and self._on_revert_all is not None:
+            anchor = (self._flash_btn if caps.flash_image
+                      else self._write_btn)
             self._revert_all_btn.pack(
-                side=tk.RIGHT, padx=(0, 6), after=self._write_btn)
+                side=tk.RIGHT, padx=(0, 6), after=anchor)
         else:
             self._revert_all_btn.pack_forget()
 
@@ -11455,9 +11561,10 @@ class MainWindow:
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(0, 12))
-        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
-        ttk.Button(btns, text="Cancel", command=_cancel).pack(
-            side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="OK", command=_ok,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=_cancel,
+                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
         dlg.bind("<Return>", _ok)
         dlg.bind("<Escape>", _cancel)
         entry.focus_set()
@@ -11779,20 +11886,21 @@ class MainWindow:
         if running and active:
             self._extract_btn.configure(
                 text="Cancel", command=self._on_extract_cancel,
-                state=tk.NORMAL)
+                state=tk.NORMAL, style="Danger.TButton")
             self._extract_btn_tip.text = (
                 "Cancel the operation in progress — it stops as soon as it's "
                 "safe to.")
         elif running:
             self._extract_btn.configure(
                 text="Extract", command=self._on_extract,
-                state=tk.DISABLED)
+                state=tk.DISABLED, style="Go.TButton")
             self._extract_btn_tip.text = (
                 "Another operation is running — cancel it or let it finish "
                 "first.")
         else:
             self._extract_btn.configure(
-                text="Extract", command=self._on_extract)
+                text="Extract", command=self._on_extract,
+                style="Go.TButton")
             self._refresh_extract_enabled()
 
     def _current_write_button_label(self):
@@ -11823,18 +11931,48 @@ class MainWindow:
         if running and active:
             self._write_btn.configure(
                 text="Cancel", command=self._on_write_cancel,
-                state=tk.NORMAL)
+                state=tk.NORMAL, style="Danger.TButton")
         elif running:
             self._write_btn.configure(
                 text=self._current_write_button_label(),
-                command=self._on_write_clicked, state=tk.DISABLED)
+                command=self._on_write_clicked, state=tk.DISABLED,
+                style="Go.TButton")
         else:
             self._write_btn.configure(
                 text=self._current_write_button_label(),
-                command=self._on_write_clicked, state=tk.NORMAL)
+                command=self._on_write_clicked, state=tk.NORMAL,
+                style="Go.TButton")
+        self._sync_flash_button_for_write_run(running, active)
+
+    _FLASH_BTN_TEXT = "Build / flash SD card…"
+
+    def _sync_flash_button_for_write_run(self, running, active):
+        """For consolidated (flash_image) plugins the Build / flash button
+        IS the write-side action button — the plain Build button is hidden
+        there (David: two build buttons) — so mirror Build's Cancel/parked
+        role onto it during write runs.  A real flash run owns the button
+        through set_flash_running (which runs after this and must win), so
+        while ``_flash_running`` is up this stays hands-off."""
+        btn = getattr(self, "_flash_btn", None)
+        mfr = self._current_mfr
+        if (btn is None or mfr is None
+                or not getattr(mfr.capabilities, "flash_image", False)
+                or getattr(self, "_flash_running", False)):
+            return
+        try:
+            if running and active:
+                btn.configure(text="Cancel", command=self._on_write_cancel,
+                              state=tk.NORMAL, style="Danger.TButton")
+            else:
+                btn.configure(text=self._FLASH_BTN_TEXT,
+                              command=self._open_flash_dialog,
+                              state=(tk.DISABLED if running else tk.NORMAL),
+                              style="Go.TButton")
+        except tk.TclError:
+            pass
 
     def set_flash_running(self, running):
-        """While a flash run is in flight, the "Flash image to SD card…"
+        """While a flash run is in flight, the "Build / flash SD card…"
         button doubles as its live Cancel, same as the Build and Extract
         buttons (monkeybug batch 8).  The app flips this on when it starts a
         flash pipeline; ``set_running(False)`` restores the opener
@@ -11846,16 +11984,16 @@ class MainWindow:
         try:
             if running:
                 btn.configure(text="Cancel", command=self._on_write_cancel,
-                              state=tk.NORMAL)
+                              state=tk.NORMAL, style="Danger.TButton")
                 # A flash starts via set_running(mode="write"), which armed
                 # the Build button as the run's Cancel — but the Flash button
                 # owns that role now.  Park Build disabled on its idle label
                 # so there's exactly one Cancel on screen (monkeybug batch 9).
                 self._set_write_button_running(True, active=False)
             else:
-                btn.configure(text="Flash image to SD card…",
+                btn.configure(text=self._FLASH_BTN_TEXT,
                               command=self._open_flash_dialog,
-                              state=tk.NORMAL)
+                              state=tk.NORMAL, style="Go.TButton")
         except tk.TclError:
             pass
 
@@ -12955,9 +13093,13 @@ class MainWindow:
         # No explicit font — Tk's TkMenuFont is the platform's native menu
         # font/metrics; forcing our own renders visibly "off" next to real
         # context menus (monkeybug/David).
+        # selectcolor draws the ✓ / radio indicators — Tk's default is
+        # near-black, which vanishes on the dark theme's menu background
+        # (David: "can't see the check marks"); the theme fg is visible on
+        # both themes' menus.
         kw = dict(tearoff=0, bg=c["bg"], fg=c["fg"],
                   activebackground=c["accent"], activeforeground="#ffffff",
-                  disabledforeground=c["gray"])
+                  disabledforeground=c["gray"], selectcolor=c["fg"])
         menu = tk.Menu(self.root, **kw)
 
         # A found update leads the menu (matches the ● on the gear) so it's
@@ -13003,6 +13145,39 @@ class MainWindow:
                 label += f"   {self._disk_badge_suffix}"
             menu.add_command(label=label, command=self._open_disk_dialog)
 
+        # Logs — one cascade for the log settings (David), same shape as the
+        # voice-quality submenu: the rolling on-disk history viewer (also on
+        # the log pane's right-click menu) + the seed-the-pane toggle (off =
+        # a clean per-session log; the file keeps collecting either way).
+        logs_menu = tk.Menu(menu, **kw)
+        logs_menu.add_command(label="View log history…",
+                              command=self._open_log_history)
+        logs_menu.add_checkbutton(
+            label="Show previous sessions in the log",
+            variable=self.show_log_history_var,
+            command=self._on_toggle_log_history)
+        menu.add_cascade(label=self._cascade_label("Logs"), menu=logs_menu)
+        menu.add_separator()
+
+        # Projects — a saved snapshot of every path + option for one game /
+        # version, so bouncing between several test cards doesn't mean
+        # re-checking every box each time (monkeybug).
+        menu.add_command(
+            label="Save project…",
+            command=lambda: (self._on_save_project()
+                             if self._on_save_project else None),
+            state=(tk.NORMAL if (self._on_save_project
+                                 and self._current_mfr is not None
+                                 and not self._is_running())
+                   else tk.DISABLED))
+        menu.add_command(
+            label="Load project…",
+            command=lambda: (self._on_load_project()
+                             if self._on_load_project else None),
+            state=(tk.NORMAL if (self._on_load_project
+                                 and not self._is_running())
+                   else tk.DISABLED))
+
         # Voice recognition quality — the faster-whisper model Auto-name
         # call-outs uses.  App-wide (persisted), shown even for plugins
         # without transcribe so the setting is always discoverable.
@@ -13020,7 +13195,9 @@ class MainWindow:
             label="Clear downloaded voice models…",
             command=self._clear_voice_models,
             state=(tk.DISABLED if self._is_running() else tk.NORMAL))
-        menu.add_cascade(label="Voice recognition quality", menu=vq_menu)
+        menu.add_cascade(
+            label=self._cascade_label("Voice recognition quality"),
+            menu=vq_menu)
         menu.add_separator()
 
         # Prerequisites — one cascade, like the voice-quality submenu above
@@ -13047,8 +13224,22 @@ class MainWindow:
                                  if self._on_install_prereqs else None),
                 state=(tk.NORMAL if any_missing and self._on_install_prereqs
                        else tk.DISABLED))
-        menu.add_cascade(label=summary, menu=prereq_menu)
+        menu.add_cascade(label=self._cascade_label(summary),
+                         menu=prereq_menu)
         return menu
+
+    def _cascade_label(self, label):
+        """Cascade-entry label, with a dark-theme arrow glyph appended.
+
+        Windows Tk draws the native cascade ▶ in the SYSTEM menu-text
+        color, ignoring the menu's -foreground, and offers no option to
+        change it — so on the dark theme it's black-on-dark and invisible
+        (David).  Dark mode therefore carries its own arrow inside the
+        label text (drawn in the label's fg, so it follows active/normal
+        colors too); light mode keeps the native arrow and adds nothing."""
+        if self._current_theme == "dark":
+            return label + "   ▸"
+        return label
 
     def _prereq_menu_summary(self):
         """(label, any_missing) for the settings menu's prerequisite line."""
@@ -13113,11 +13304,15 @@ class MainWindow:
             self._help_window.refresh(tab_name)
 
     def _open_flash_dialog(self):
-        """Open the modal that collects (image, target card) for a flash.
+        """Open the two-section Build / flash modal.
 
-        The dialog hands the choice to the app's ``on_flash_image`` callback,
-        which runs the flash through the normal status area.  Refuses while a
-        run is in flight (the status area is busy)."""
+        Section 1 builds a fresh image (the Write tab's normal Build, path
+        pre-filled from Output Folder + File Name); section 2 flashes an
+        image onto a card; both = build-then-flash in one click (monkeybug:
+        testing on the machine was always a two-step).  The dialog hands the
+        choice to the app's ``on_build_flash`` / ``on_flash_image``
+        callbacks, which run the pipelines through the normal status area.
+        Refuses while a run is in flight (the status area is busy)."""
         if self._on_flash_image is None:
             return
         if self._is_running():
@@ -13126,25 +13321,26 @@ class MainWindow:
                 "Finish or cancel the current operation before flashing a "
                 "card.")
             return
-        # Flash writes a whole pre-built / backup image and is independent of
-        # this session's edits, so a "nothing modified" state is legitimate
-        # (restoring a backup, writing an image built earlier).  monkeybug
-        # still wanted a heads-up so an accidental no-change flash is caught.
-        if not self._has_pending_write_changes():
-            if not messagebox.askyesno(
-                "Nothing modified",
-                "Nothing was modified this session.\n\nFlashing writes a "
-                "whole pre-built or backup image onto the card, independent "
-                "of any edits here — expected if you're restoring a backup "
-                "or writing an image you built earlier. To apply changes "
-                "instead, build the SD-card image first.\n\nOpen the flash "
-                "dialog anyway?",
-                icon="warning"):
-                return
-        # Pre-fill the dialog with the image the Output Folder + File Name
+        # The build section needs everything the Build button needs; when
+        # something's missing it's shown disabled with a "set these on the
+        # Write tab" hint instead of failing after the dialog closes.
+        target = self._target_write_path()
+        missing = []
+        if not self.write_upd_var.get().strip():
+            missing.append("the original image")
+        if not self.write_assets_var.get().strip():
+            missing.append("the assets folder")
+        if not target:
+            missing.append("the build location")
+        reason = ("Set %s on the Write tab first." % " and ".join(missing)
+                  if missing else "")
+        caps = getattr(self._current_mfr, "capabilities", None)
+        can_build = (not missing
+                     and bool(caps is not None
+                              and getattr(caps, "write", False)))
+        # Pre-fill the flash box with the image the Output Folder + File Name
         # boxes point at, when it's already been built — flashing what you
         # just built is the overwhelmingly common case (monkeybug batch 8).
-        target = self._target_write_path()
         initial = target if (target and os.path.isfile(target)) else None
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
@@ -13152,7 +13348,12 @@ class MainWindow:
             manufacturer=self._current_mfr,
             theme_name=self._current_theme,
             on_flash=self._on_flash_image,
-            initial_image=initial)
+            initial_image=initial,
+            on_build_flash=self._on_build_flash,
+            build_target=target,
+            can_build=can_build,
+            cannot_build_reason=reason,
+            has_pending_changes=self._has_pending_write_changes())
 
     def _open_diagnose_dialog(self):
         """Open the read-only card-diagnostics modal (mfr.diagnose_card).
@@ -13729,8 +13930,12 @@ class MainWindow:
         has_sel = bool(widget.tag_ranges("sel"))
         menu.add_command(label="Copy" if has_sel else "Copy all",
                          command=lambda w=widget: self._log_copy(w))
+        menu.add_command(label="Copy current session log",
+                         command=lambda w=widget: self._log_copy_session(w))
         menu.add_command(label="Save As…",
                          command=lambda w=widget: self._log_save_as(w))
+        menu.add_command(label="View log history…",
+                         command=self._open_log_history)
         menu.add_separator()
         menu.add_command(label="Clear",
                          command=lambda w=widget: self._log_clear(w))
@@ -13746,6 +13951,19 @@ class MainWindow:
             text = widget.get("sel.first", "sel.last")
         except tk.TclError:
             text = widget.get("1.0", "end-1c")
+        if not text:
+            return
+        widget.clipboard_clear()
+        widget.clipboard_append(text)
+
+    def _log_copy_session(self, widget):
+        """Copy only THIS session's lines — everything below the cut line,
+        skipping the seeded previous-session history.  With no cut line in
+        the pane (history hidden or none existed) the whole pane IS the
+        current session, so it all copies."""
+        rng = widget.tag_ranges("cut")
+        start = rng[-1] if rng else "1.0"
+        text = widget.get(start, "end-1c").lstrip("\n")
         if not text:
             return
         widget.clipboard_clear()
@@ -13768,11 +13986,39 @@ class MainWindow:
         widget.delete("1.0", tk.END)
         widget.configure(state=tk.DISABLED)
 
+    def _open_log_history(self):
+        """Open the rolling on-disk session log (every line from every
+        session, capped by size/age — see core.session_log) in the system's
+        default text viewer.  Right-click menu + ⚙ menu both land here."""
+        path = session_log.log_path()
+        if not os.path.isfile(path):
+            messagebox.showinfo(
+                "Log history",
+                "No log history yet — it starts collecting from now on.\n\n"
+                "Everything the log pane shows is also saved to:\n%s" % path)
+            return
+        import subprocess
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception:
+            # No default .log association / no opener — show the folder so
+            # the user can still get at the file.
+            self._reveal_in_file_manager(path)
+
     def append_log(self, text, level="info"):
         # Calls before any mfr is selected (e.g. update-check on startup
         # while picker is showing) are buffered against the first mfr's
         # widget once one is selected.  For now, silently drop them.
         ts = time.strftime("%H:%M:%S")
+        # Every pane line is also mirrored into the rolling on-disk history
+        # (survives restarts and in-place updates — monkeybug), including
+        # buffered lines: the file wants the real event time, not the flush.
+        session_log.append(text, level)
         if self._log_text is None:
             # Picker is showing (no mfr log yet) — buffer; _swap_log_widget
             # flushes into the first log widget that appears.
@@ -13812,6 +14058,7 @@ class MainWindow:
 
     def append_log_link(self, text, url):
         ts = time.strftime("%H:%M:%S")
+        session_log.append("%s (%s)" % (text, url))
         if self._log_text is None:
             self._pending_log.append(("link", ts, text, url))
             return
@@ -14222,7 +14469,8 @@ class MainWindow:
             detail.configure(text="Cancelling…")
             on_cancel()
 
-        cancel_btn = ttk.Button(win, text="Cancel", command=_cancel)
+        cancel_btn = ttk.Button(win, text="Cancel", command=_cancel,
+                                style="Danger.TButton")
         cancel_btn.pack(pady=(2, 12))
         win.protocol("WM_DELETE_WINDOW", _cancel)
         # Center over the main window.
@@ -14378,6 +14626,24 @@ class MainWindow:
         style.map("TButton",
                   background=[("active", c["accent"]), ("pressed", c["accent"])],
                   foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+        # Color-coded action buttons (David): "Go.TButton" = green
+        # go/confirm actions (Extract, Build, Build / flash, dialog Start);
+        # "Danger.TButton" = red destructive ones (live run Cancels, Revert
+        # all changes).  Neutral buttons (Browse, Refresh, …) stay on plain
+        # TButton.  Clam draws flat fills, so this is a solid chip with a
+        # hover/pressed shade; DISABLED falls back to the neutral gray so a
+        # parked button doesn't stay loudly colored ("disabled" listed
+        # first — ttk.map takes the first matching state).
+        for name, fill, hot in (("Go.TButton", c["go_btn"], c["go_btn_hot"]),
+                                ("Danger.TButton", c["danger_btn"],
+                                 c["danger_btn_hot"])):
+            style.configure(name, background=fill, foreground="#ffffff")
+            style.map(name,
+                      background=[("disabled", c["button"]),
+                                  ("pressed", hot), ("active", hot)],
+                      foreground=[("disabled", c["gray"]),
+                                  ("pressed", "#ffffff"),
+                                  ("active", "#ffffff")])
         # ttk.Checkbutton — clam's default flips the background to
         # white on hover/active, which makes our light-grey text
         # invisible in dark mode.  Pin the background to our panel

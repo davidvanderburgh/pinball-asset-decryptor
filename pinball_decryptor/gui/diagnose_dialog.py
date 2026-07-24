@@ -52,6 +52,10 @@ class DiagnoseCardDialog:
         noun = getattr(self._mfr, "direct_medium_noun", "SD card")
         dlg = tk.Toplevel(self._parent)
         self._dlg = dlg
+        # Hidden until built + positioned (deiconify at the tail); otherwise
+        # dark_titlebar/_center's update_idletasks maps it at the default
+        # spot first and it flickers into place (David).
+        dlg.withdraw()
         dlg.title("Card diagnostics")
         dlg.configure(bg=th["bg"])
         dark_titlebar(dlg, th is THEMES["dark"])

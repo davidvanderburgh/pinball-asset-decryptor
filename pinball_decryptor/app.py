@@ -70,9 +70,20 @@ class App:
         # (list of (label, error)); drives the post-build "some replacements
         # were skipped" warning so a partial no-op isn't silent.
         self._staging_failures = []
+        # (device_path, image_path) when the running Build should chain a
+        # card flash on success (the Build / flash dialog with both sections
+        # ticked); None otherwise.  Armed at build dispatch, consumed (and
+        # cleared) in _on_done.
+        self._chain_flash_after_build = None
+        # Path of the loaded/saved .pinproj (shown in the title bar), or None.
+        self._project_path = None
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
+        # Open the rolling on-disk log history for this session (every log
+        # pane line is mirrored into it — see core.session_log).
+        from .core import session_log
+        session_log.start_session(__version__)
         # Apply the saved "Match audio replacements to the game's callouts" pref
         # before any Write can spawn encode workers (they inherit this env var).
         # Default OFF: it's an unproven experiment for the callout click (now in
@@ -149,6 +160,12 @@ class App:
             on_apply_delta=self._start_apply_delta,
             on_revert_all=self._start_revert_all,
             on_flash_image=self._start_flash_image,
+            on_build_flash=self._on_build_flash_request,
+            on_save_project=self._save_project,
+            on_load_project=self._load_project,
+            initial_show_log_history=bool(
+                self._settings.get("show_log_history", True)),
+            on_show_log_history_change=self._on_show_log_history_change,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -786,6 +803,21 @@ class App:
             self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
+    def _extract_will_produce_audio(self):
+        """True when the Extract run being dispatched will actually emit
+        audio files.  Plugins with per-type Extract checkboxes (Stern's
+        Audio / Video / Images / Text) skip the audio phase entirely when
+        Audio is unchecked — the chained Auto-name call-outs / music steps
+        would then fail on an output with no WAVs (monkeybug: video-only
+        extract still ran them and the log filled with errors).  The GUI
+        greys those options out; this is the run-time gate that actually
+        honours it.  Plugins without an Audio category always pass."""
+        cats = (self._collect_extract_category_kwargs()
+                .get("extract_categories"))
+        if not cats or "audio" not in cats:
+            return True
+        return bool(cats["audio"])
+
     def _maybe_wrap_done_for_transcribe(self, original_done_cb, output_path):
         """If the user ticked the Auto-transcribe checkbox AND the
         active mfr supports it, return a wrapped done_cb that kicks
@@ -798,6 +830,8 @@ class App:
         if not getattr(self.window, "transcribe_var", None):
             return original_done_cb
         if not self.window.transcribe_var.get():
+            return original_done_cb
+        if not self._extract_will_produce_audio():
             return original_done_cb
 
         def wrapped(success, summary):
@@ -1042,7 +1076,12 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
-    def _start_write(self):
+    def _start_write(self, chain_flash_device=None):
+        """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
+        dialog with both sections ticked) makes a successful build chain
+        straight into flashing its output onto that device — armed only at
+        dispatch, after every validation prompt, so an aborted build never
+        leaves a flash queued."""
         if not self._current_mfr.capabilities.write:
             return
 
@@ -1205,6 +1244,8 @@ class App:
         # Machine-render previews (Advanced audio options) land next to this
         # build's output; must be set before the pipeline spawns workers.
         self._apply_audio_preview_env(output_path)
+        self._chain_flash_after_build = (
+            (chain_flash_device, output_path) if chain_flash_device else None)
         self.pipeline = self._current_mfr.make_write_pipeline(
             original, assets_dir, output_path,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -1296,6 +1337,21 @@ class App:
         threading.Thread(
             target=self._run_pipeline_with_audio, args=(assets_dir,),
             daemon=True).start()
+
+    def _on_build_flash_request(self, build_path, device_path):
+        """The Build / flash dialog's build section was ticked: build to
+        *build_path*, then (when *device_path* is set) chain a flash of the
+        fresh build onto that card.
+
+        The dialog's Build-to box may have been edited — push it back into
+        the Write tab's Output Folder + File Name so ``_start_write`` (and
+        the tab itself) agree on the destination."""
+        folder, name = os.path.split((build_path or "").strip())
+        if folder:
+            self.window.write_output_var.set(folder)
+        if name and getattr(self.window, "write_filename_var", None):
+            self.window.write_filename_var.set(name)
+        self._start_write(chain_flash_device=device_path)
 
     def _start_flash_image(self, image_path, device_path):
         """Flash a pre-built image onto a card (dd-style whole-image write).
@@ -1419,6 +1475,8 @@ class App:
         if not getattr(self.window, "music_id_var", None):
             return original_done_cb
         if not self.window.music_id_var.get():
+            return original_done_cb
+        if not self._extract_will_produce_audio():
             return original_done_cb
 
         def wrapped(success, summary):
@@ -2547,6 +2605,12 @@ class App:
             self.pipeline.cancel()
 
     def _on_done(self, success, summary):
+        # Consume any armed build→flash chain up front: it only fires from
+        # the successful-Build branch below, and clearing it here means a
+        # failed / cancelled build (or any other run finishing) can never
+        # leave a stale flash queued for a later, unrelated success.
+        chain_flash = self._chain_flash_after_build
+        self._chain_flash_after_build = None
         # Revert runs reuse the write run-state but have their own messaging +
         # a post-run rescan (on-disk asset bytes changed under the tabs).
         if getattr(self, "_revert_active", False):
@@ -2655,7 +2719,9 @@ class App:
                     # The build succeeded but some assigned replacements
                     # couldn't be applied — surface them so the user knows
                     # those slots still play their original asset (instead of
-                    # quietly shipping a partially-unmodified image).
+                    # quietly shipping a partially-unmodified image).  When a
+                    # flash is chained, this stays a blocking heads-up BEFORE
+                    # the card gets written.
                     messagebox.showwarning(
                         "Update built — some replacements were skipped",
                         f"{summary}\n\n"
@@ -2664,8 +2730,21 @@ class App:
                         f"play/show their original asset):\n\n"
                         f"{self._failure_lines(fails)}\n\n"
                         f"{self._noop_stage_hint()}")
-                else:
+                elif not chain_flash:
                     messagebox.showinfo("Write Complete", summary)
+                if chain_flash:
+                    # Build / flash dialog, both sections ticked: chain the
+                    # freshly-built image straight onto the card.  No "Write
+                    # Complete" modal in between (the flash has its own
+                    # completion) — the log carries the hand-off.  after(0,…)
+                    # lets this _on_done fully unwind (set_running state,
+                    # queue drain) before the flash re-arms the run state.
+                    device_path, image_path = chain_flash
+                    self.window.append_log(
+                        "Build complete — writing the fresh image onto the "
+                        "card...", "info")
+                    self.root.after(0, lambda: self._start_flash_image(
+                        image_path, device_path))
         else:
             self.window.set_status("Failed")
             title = "Extract Failed" if is_extract else "Write Failed"
@@ -2923,6 +3002,136 @@ class App:
                 json.dump(self._settings, f, indent=2)
         except OSError:
             pass
+
+    # ------------------------------------------------------------------
+    # Project files (⚙ → Save project… / Load project…)
+    # ------------------------------------------------------------------
+
+    def _project_paths_snapshot(self):
+        return {
+            "extract_input": self.window.extract_input_var.get().strip(),
+            "extract_output": self.window.extract_output_var.get().strip(),
+            "write_original": self.window.write_upd_var.get().strip(),
+            "write_assets": self.window.write_assets_var.get().strip(),
+            "write_output": self.window.write_output_var.get().strip(),
+        }
+
+    def _save_project(self):
+        """⚙ → Save project…: snapshot the current manufacturer + every path
+        + the Extract options into one shareable .pinproj file (monkeybug:
+        bouncing between game versions meant re-checking everything on every
+        switch — one file now restores the whole setup)."""
+        from .core import project_file
+        if self._current_mfr is None or self.window._is_running():
+            return
+        # Suggest a name from what's being worked on: the loaded project's
+        # name, else the extract input / original image's stem.
+        suggest = ""
+        if self._project_path:
+            suggest = os.path.basename(self._project_path)
+        else:
+            src = (self.window.extract_input_var.get().strip()
+                   or self.window.write_upd_var.get().strip())
+            if src:
+                suggest = (os.path.splitext(os.path.basename(src))[0]
+                           + project_file.EXTENSION)
+        path = filedialog.asksaveasfilename(
+            title="Save project as…",
+            defaultextension=project_file.EXTENSION,
+            filetypes=project_file.FILETYPES,
+            initialdir=self._settings.get("project_dir") or None,
+            initialfile=suggest or None)
+        if not path:
+            return
+        name_var = getattr(self.window, "write_filename_var", None)
+        try:
+            project_file.save(
+                path,
+                manufacturer_key=self._current_mfr.key,
+                paths=self._project_paths_snapshot(),
+                extract_options=self.window.get_extract_options(),
+                write_filename=(name_var.get().strip() if name_var else ""),
+                app_version=__version__)
+        except OSError as e:
+            messagebox.showerror(
+                "Save project", "Couldn't save the project:\n%s" % e)
+            return
+        self._settings["project_dir"] = os.path.dirname(path)
+        self._set_loaded_project(path)
+        self._save_settings()
+        self.window.append_log(
+            "Project saved: %s" % path, "success")
+
+    def _load_project(self):
+        """⚙ → Load project…: pick a .pinproj and restore everything in it."""
+        from .core import project_file
+        if self.window._is_running():
+            return
+        path = filedialog.askopenfilename(
+            title="Load project",
+            filetypes=project_file.FILETYPES,
+            initialdir=self._settings.get("project_dir") or None)
+        if not path:
+            return
+        try:
+            self._apply_project_file(path)
+        except (OSError, ValueError) as e:
+            messagebox.showerror(
+                "Load project", "Couldn't load the project:\n%s" % e)
+
+    def _apply_project_file(self, path):
+        """Load *path* and push its manufacturer + paths + options onto the
+        UI.  Raises OSError/ValueError for the caller's error dialog."""
+        from .core import project_file
+        from .core.admin import resolve_mapped_drive as _rmd
+        data = project_file.load(path)
+        mfr = get_manufacturer(data["manufacturer"])
+        if mfr is None:
+            raise ValueError(
+                "This project is for a manufacturer this app doesn't have "
+                "loaded: %r" % data["manufacturer"])
+        # Switch onto the project's manufacturer (saves the old one's paths,
+        # applies the new one's saved defaults + shows its view) — then the
+        # project's own values override whatever that restored.
+        if self._current_mfr is not mfr:
+            self._on_manufacturer_change(mfr)
+        paths = data.get("paths", {})
+        # Apply order matters — see project_file.PATH_FIELDS.
+        var_by_field = {
+            "extract_input": self.window.extract_input_var,
+            "extract_output": self.window.extract_output_var,
+            "write_output": self.window.write_output_var,
+            "write_original": self.window.write_upd_var,
+            "write_assets": self.window.write_assets_var,
+        }
+        for field in project_file.PATH_FIELDS:
+            var_by_field[field].set(_rmd(str(paths.get(field) or "")))
+        self.window.set_extract_options(data.get("extract_options", {}))
+        name = str(data.get("write_filename") or "").strip()
+        name_var = getattr(self.window, "write_filename_var", None)
+        if name and name_var is not None:
+            name_var.set(name)
+        self._settings["project_dir"] = os.path.dirname(path)
+        self._set_loaded_project(path)
+        self._save_settings()
+        self.window.append_log("Project loaded: %s" % path, "success")
+
+    def _set_loaded_project(self, path):
+        """Remember the active project + show it in the title bar so juggling
+        several versions stays legible at a glance."""
+        self._project_path = path
+        title = f"{APP_NAME} v{__version__}"
+        if path:
+            title += " — %s" % os.path.basename(path)
+        try:
+            self.root.title(title)
+        except tk.TclError:
+            pass
+
+    def _on_show_log_history_change(self, show):
+        """Persist the ⚙ "Show previous sessions in the log" toggle."""
+        self._settings["show_log_history"] = bool(show)
+        self._save_settings()
 
     def _on_fda_acknowledge(self, acknowledged):
         """Persist the macOS FDA banner dismissal across restarts.

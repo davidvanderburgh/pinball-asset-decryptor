@@ -245,14 +245,16 @@ HELP_CONTENT = {
          "\"Write to SD card / SSD\" (where available) applies the same "
          "changes straight to the physical media. Remove the media from the "
          "machine first and always keep a backup image."),
-        ("Flash image",
-         "\"Flash image to SD card…\" (where available, beside Build) "
-         "writes a complete pre-built image onto a card — for putting the "
-         "image you just built onto the card, or restoring a backup, "
-         "without a separate imaging tool. The whole card is erased and "
-         "replaced; a size check refuses an image too big for the card. "
-         "The dialog pre-fills with the image the Build Location + File "
-         "Name boxes point at once it exists. Requires Administrator."),
+        ("Build / flash",
+         "On SD-card machines (Stern Spike 2, CGC) \"Build / flash SD "
+         "card…\" is the single build button: it opens a two-part dialog "
+         "where you build a fresh image, write an image onto a card, or "
+         "tick both to build and then flash the fresh build in one step — "
+         "the quickest way to test a change on the machine. With building "
+         "unticked it flashes any pre-built or backup image, without a "
+         "separate imaging tool. The whole card is erased and replaced; a "
+         "size check refuses an image too big for the card. Requires "
+         "Administrator. (Other machines keep a plain Build button.)"),
     ],
     "Mod Pack": [
         ("Export",

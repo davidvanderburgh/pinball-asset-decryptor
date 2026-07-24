@@ -989,7 +989,7 @@ class WritePipeline(BasePipeline):
             f"Flash the whole image to your machine's installer medium -- a "
             f"USB drive or a microSD card, depending on the unit (some CGC "
             f"machines install from a microSD master card, not USB). Easiest: "
-            f"use the \"Flash image to SD card or USB drive...\" button on this "
+            f"use the \"Build / flash SD card...\" button on this "
             f"Write tab (run the app as Administrator). You can also use "
             f"Etcher / Rufus (DD mode) / Win32DiskImager. Insert it with the "
             f"machine powered off, power on, and follow CGC's on-screen "

@@ -20,6 +20,12 @@ THEMES = {
         "tab_selected": "#1e1e1e", "link": "#3794ff",
         "warning": "#d7ba7d",
         "tooltip_bg": "#404040", "tooltip_fg": "#cccccc",
+        # Color-coded action buttons: green = go/confirm, red = destructive
+        # (abort a run, revert files).  Fill + hover/pressed shade; white
+        # text on both.  Muted a step below the log's success/error text
+        # colors so a solid button doesn't glow against the dark panel.
+        "go_btn": "#2f7d32", "go_btn_hot": "#3f9c44",
+        "danger_btn": "#a33636", "danger_btn_hot": "#c24444",
     },
     "light": {
         "bg": "#f5f5f5", "fg": "#1e1e1e", "field_bg": "#ffffff",
@@ -29,6 +35,8 @@ THEMES = {
         "tab_selected": "#ffffff", "link": "#0066cc",
         "warning": "#9a6700",
         "tooltip_bg": "#ffffe0", "tooltip_fg": "#1e1e1e",
+        "go_btn": "#2e7d32", "go_btn_hot": "#256a29",
+        "danger_btn": "#c62828", "danger_btn_hot": "#a52222",
     },
 }
 

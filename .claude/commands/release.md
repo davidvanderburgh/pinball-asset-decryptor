@@ -124,6 +124,36 @@ loop.
      and note the miss in the release summary so the commit-time
      convention gets re-applied next time.
 
+5d. **Audit the in-app tab tips (the header "?" button).**  Same class
+   of user-facing doc as the README (5b), and it drifts the same way.
+   The tips live in `HELP_CONTENT` in
+   `pinball_decryptor/gui/help_dialog.py` — a `{tab-name: [(title,
+   body), ...]}` dict rendered by the "?" button for whichever notebook
+   tab is showing (Extract / Audio / Video / Images / Text / Defaults /
+   Write / Mod Pack / Partitions).  When a release adds, renames, moves,
+   or removes a GUI control or workflow, the tip for that tab must
+   follow, or the "?" text describes an app that no longer exists.
+
+   Gate on whether the GUI actually changed:
+   ```
+   git diff $(git describe --tags --abbrev=0)..HEAD -- \
+       pinball_decryptor/gui pinball_decryptor/app.py
+   ```
+   - **No GUI change** → skip.
+   - **GUI changed** → for each control/label/button/flow this release
+     touched, open `HELP_CONTENT` and check the matching tab's tips.
+     A button renamed (e.g. "Flash image" → "Build / flash SD card"),
+     a control that moved tabs, a new checkbox/mode, a consolidated or
+     removed button, or a changed default all need their tip text
+     updated to match.  A brand-new tab needs a new `HELP_CONTENT` key.
+     Edit the tips in the SAME release commit (step 6).
+   - Cross-check that no tip names a control by an old caption: grep the
+     just-changed button/label strings against `help_dialog.py`.  If a
+     tip still says the old name, it's stale.
+
+   When the fix isn't obvious, ask the user: *"This release renamed
+   <control>; the <Tab> tip still calls it <old name> — update it?"*
+
 6. **Join the test suite, then stage + commit.**  Before staging
    anything, collect the result of the background pytest task from
    step 3.  If it hasn't finished yet, stop and wait for its completion

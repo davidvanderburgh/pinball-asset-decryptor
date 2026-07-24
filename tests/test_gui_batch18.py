@@ -21,6 +21,17 @@ pytestmark = [
     pytest.mark.skipif(not HAS_DISPLAY, reason="no Tk display available"),
 ]
 
+# Shared fake paths — OS-native so nothing depends on the runner's platform.
+# _on_build_flash_request parses the build path with os.path.split, so a
+# drive-letter literal like "D:\..." reads as one flat name on POSIX CI and
+# the folder push-back looks empty (the bug this file's build-flash test hit).
+# FAKE_DEVICE is an opaque physical-device handle — passed straight through to
+# a stubbed flash, never touched as a filesystem path — so its Windows-style
+# spelling is fine; it only ever has to ride through a call unchanged.
+FAKE_BUILD = os.path.join(os.sep + "builds", "game-modified.raw")
+FAKE_IMG = os.path.join(os.sep + "imgs", "image.raw")
+FAKE_DEVICE = r"\\.\PHYSICALDRIVE9"
+
 
 def _pick(app, key):
     mfr = next(m for m in app._manufacturers if m.key == key)
@@ -78,11 +89,11 @@ def test_build_success_chains_flash(app, monkeypatch):
         app_mod.messagebox, "showinfo",
         lambda *a, **k: pytest.fail("no modal between build and flash"))
 
-    app._chain_flash_after_build = (r"\\.\PHYSICALDRIVE9", r"C:\img.raw")
+    app._chain_flash_after_build = (FAKE_DEVICE, FAKE_IMG)
     app._on_done(True, "built.")
     app.root.update()          # fire the after(0, …) hand-off
 
-    assert flashed == [(r"C:\img.raw", r"\\.\PHYSICALDRIVE9")]
+    assert flashed == [(FAKE_IMG, FAKE_DEVICE)]
     assert app._chain_flash_after_build is None
 
 
@@ -98,7 +109,7 @@ def test_failed_build_drops_the_chained_flash(app, monkeypatch):
     monkeypatch.setattr(app_mod.messagebox, "showerror",
                         lambda *a, **k: None)
 
-    app._chain_flash_after_build = (r"\\.\PHYSICALDRIVE9", r"C:\img.raw")
+    app._chain_flash_after_build = (FAKE_DEVICE, FAKE_IMG)
     app._on_done(False, "boom")
     app.root.update()
 
@@ -115,7 +126,7 @@ def test_unrelated_success_never_fires_a_stale_chain(app, monkeypatch):
     monkeypatch.setattr(
         app, "_start_flash_image",
         lambda img, dev: flashed.append((img, dev)))
-    app._chain_flash_after_build = (r"\\.\PHYSICALDRIVE9", r"C:\img.raw")
+    app._chain_flash_after_build = (FAKE_DEVICE, FAKE_IMG)
     app._on_done(True, "extract done")
     app.root.update()
     assert flashed == []
@@ -142,13 +153,13 @@ def test_dialog_defaults_build_and_flash_when_changes_pending(
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: None,
-        build_target=r"C:\x\y-modified.raw",
+        build_target=FAKE_BUILD,
         can_build=True, has_pending_changes=True)
     try:
         assert dlg._build_var.get() and dlg._write_var.get()
         assert dlg._start_btn.cget("text") == "Build + flash"
         # The flash box mirrors the build output while building.
-        assert dlg._image_var.get() == r"C:\x\y-modified.raw"
+        assert dlg._image_var.get() == FAKE_BUILD
         # Build unticked ⇒ plain flash (the old dialog).
         dlg._build_var.set(False); dlg._sync_sections()
         assert dlg._start_btn.cget("text") == "Flash image"
@@ -164,7 +175,7 @@ def test_dialog_no_pending_changes_defaults_flash_only(app, monkeypatch):
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: None,
-        build_target=r"C:\x\y-modified.raw",
+        build_target=FAKE_BUILD,
         can_build=True, has_pending_changes=False)
     try:
         assert not dlg._build_var.get()
@@ -181,7 +192,7 @@ def test_dialog_cancel_is_red_start_is_green(app, monkeypatch):
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: None,
-        build_target=r"C:\x\y-modified.raw", can_build=True)
+        build_target=FAKE_BUILD, can_build=True)
     try:
         assert str(dlg._start_btn.cget("style")) == "Go.TButton"
         # The Cancel button is the sibling of Start in the button row.
@@ -218,7 +229,7 @@ def test_dialog_opens_without_default_position_flicker(app, monkeypatch):
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: None,
-        build_target=r"C:\x\y.raw", can_build=True)
+        build_target=FAKE_BUILD, can_build=True)
     try:
         assert seen.get("state_before") == "withdrawn", \
             "dialog must be hidden right up until the single deiconify"
@@ -236,11 +247,11 @@ def test_dialog_build_only_hands_off_without_confirm(app, monkeypatch):
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: calls.append((b, d)),
-        build_target=r"C:\x\y-modified.raw",
+        build_target=FAKE_BUILD,
         can_build=True, has_pending_changes=True)
     dlg._write_var.set(False); dlg._sync_sections()
     dlg._do_start()
-    assert calls == [(r"C:\x\y-modified.raw", None)]
+    assert calls == [(FAKE_BUILD, None)]
 
 
 def test_on_build_flash_request_writes_back_and_arms_chain(app, monkeypatch):
@@ -252,15 +263,12 @@ def test_on_build_flash_request_writes_back_and_arms_chain(app, monkeypatch):
         app, "_start_write",
         lambda chain_flash_device=None: seen.update(
             device=chain_flash_device))
-    # Build the path with the OS-native separator (os.path.split only treats
-    # os.sep as a separator — a hardcoded r"D:\..." reads as one flat name on
-    # POSIX CI and the folder push-back looks empty).
     build_path = os.path.join(os.sep + "builds", "lz-test.raw")
     expected_folder, expected_name = os.path.split(build_path)
-    app._on_build_flash_request(build_path, r"\\.\PHYSICALDRIVE7")
+    app._on_build_flash_request(build_path, FAKE_DEVICE)
     assert w.write_output_var.get() == expected_folder
     assert w.write_filename_var.get() == expected_name == "lz-test.raw"
-    assert seen["device"] == r"\\.\PHYSICALDRIVE7"
+    assert seen["device"] == FAKE_DEVICE
 
 
 # ---- Previous-session log seeded into the pane ----------------------------
@@ -436,7 +444,7 @@ def test_dialog_build_warns_when_nothing_modified(app, monkeypatch):
     dlg = _make_dialog(
         app, monkeypatch,
         on_build_flash=lambda b, d: calls.append((b, d)),
-        build_target=r"C:\x\y-modified.raw",
+        build_target=FAKE_BUILD,
         can_build=True, has_pending_changes=False)
     try:
         dlg._build_var.set(True)

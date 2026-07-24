@@ -1203,3 +1203,278 @@ def test_audio_profile_report(tmp_path):
            "hotter" in by_idx["idx0004"]["flags"]
     assert by_idx["idx0001"]["status"] == "stock"
     assert by_idx["idx0001"]["flags"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Master-directory window feathering (2026-07-24, the callout-click root cause:
+# the ~two 512-byte forced-stock windows per re-encoded sound play a bit-exact
+# fragment of the ORIGINAL audio; feathering blends the target into it so the
+# fragment can't butt a hard edge against foreign content).
+# ---------------------------------------------------------------------------
+
+def test_feather_ms_env(monkeypatch):
+    from pinball_decryptor.plugins.stern.engine import _feather_ms
+
+    monkeypatch.delenv("PAD_STERN_FEATHER_MS", raising=False)
+    assert _feather_ms() == 15.0                  # on by default
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "30")
+    assert _feather_ms() == 30.0
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "0")
+    assert _feather_ms() == 0.0                   # the A/B kill switch
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "-4")
+    assert _feather_ms() == 0.0
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "9999")
+    assert _feather_ms() == 200.0
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "garbage")
+    assert _feather_ms() == 15.0                  # unparseable -> default
+
+
+def test_consumed_sample_runs_mapping():
+    import numpy as np
+    from pinball_decryptor.plugins.stern.engine import _consumed_sample_runs
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    # Mono: one clean byte run, one run straddling the emitted end (clipped),
+    # plus offsets outside the body (ignored, before and after).
+    p = {"body_off": 1000, "length": 4000, "chan": 1}
+    n = emitted_length(4000)
+    run1 = np.arange(1200, 1200 + 256)            # samples 100..227
+    run2 = np.arange(1000 + 2 * (n - 10), 1000 + 2 * (n + 50))
+    consumed = np.unique(np.concatenate(
+        [np.arange(100, 110), run1, run2, [1000 + 2 * 4000 + 8]]))
+    spans = _consumed_sample_runs(consumed, p, np)
+    assert spans == [(100, 228), (n - 10, n)]
+
+    # Stereo: 4 bytes per frame -> frame index, not word index.
+    p2 = {"body_off": 0, "length": 2000, "chan": 2}
+    spans2 = _consumed_sample_runs(np.arange(400, 912), p2, np)
+    assert spans2 == [(100, 228)]
+
+    # No consumed bytes inside the body at all.
+    assert _consumed_sample_runs(np.array([50, 60]), p, np) == []
+
+
+def _feather_fixture(np, n, stock, runs, chan=1):
+    import types
+
+    if chan == 2:
+        decode = lambda p, **k: (np.asarray(stock[0]), np.asarray(stock[1]),
+                                 True)
+    else:
+        decode = lambda p, **k: (np.asarray(stock), None, False)
+    emu = types.SimpleNamespace(decode=decode)
+    p = {"idx": 231, "length": n + 200, "body_off": 0, "chan": chan,
+         "consumed_runs": runs}
+    return emu, p
+
+
+def test_feather_stock_windows_blends_smooth(monkeypatch):
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    monkeypatch.delenv("PAD_STERN_FEATHER_MS", raising=False)
+    n = 4000
+    t = np.arange(n)
+    stock = np.round(2000.0 * np.sin(2 * np.pi * 100.0 * t / 44100.0)) \
+        .astype(np.int64)
+    emu, p = _feather_fixture(np, n, stock, [(1500, 1756)])
+    tgt = np.zeros(n, np.int64)
+    out = E._feather_stock_windows(emu, p, [tgt], np,
+                                   -E._MONO_RANGE, E._MONO_RANGE - 1)[0]
+    assert out is tgt                              # mutated in place
+    F = int(round(E._feather_ms() * 44.1))
+    # the window (and the 4-sample pad) carries the exact original audio
+    assert (out[1500:1756] == stock[1500:1756]).all()
+    assert (out[1496:1760] == stock[1496:1760]).all()
+    # untouched far outside the blend
+    assert (out[:1496 - F] == 0).all() and (out[1760 + F:] == 0).all()
+    # smooth everywhere: worst step must be ~content-slope, nowhere near the
+    # ~2000-count cliff a raw paste of the fragment would leave
+    assert int(np.abs(np.diff(out)).max()) < 120
+    # int dtype preserved for the exact-encode contract
+    assert out.dtype == np.int64
+
+
+def test_feather_stock_windows_noops(monkeypatch):
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    n = 2000
+    stock = np.full(n, 3000, np.int64)
+    tgt0 = np.zeros(n, np.int64)
+
+    # no consumed_runs key (bank rows, non-feathered builds) -> untouched
+    emu, p = _feather_fixture(np, n, stock, [(500, 700)])
+    del p["consumed_runs"]
+    assert (E._feather_stock_windows(emu, p, [tgt0.copy()], np,
+                                     -11147, 11146)[0] == 0).all()
+
+    # PAD_STERN_FEATHER_MS=0 -> untouched
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "0")
+    emu, p = _feather_fixture(np, n, stock, [(500, 700)])
+    assert (E._feather_stock_windows(emu, p, [tgt0.copy()], np,
+                                     -11147, 11146)[0] == 0).all()
+    monkeypatch.delenv("PAD_STERN_FEATHER_MS", raising=False)
+
+    # decode failure -> untouched (feathering must never break an encode)
+    import types
+    emu = types.SimpleNamespace(decode=lambda p, **k: None)
+    p = {"idx": 1, "length": n + 200, "body_off": 0, "chan": 1,
+         "consumed_runs": [(500, 700)]}
+    assert (E._feather_stock_windows(emu, p, [tgt0.copy()], np,
+                                     -11147, 11146)[0] == 0).all()
+
+    # clip bound respected even for pathological stock values
+    emu, p = _feather_fixture(np, n, np.full(n, 99999, np.int64), [(500, 700)])
+    out = E._feather_stock_windows(emu, p, [tgt0.copy()], np, -11147, 11146)[0]
+    assert int(out.max()) == 11146
+
+
+def test_encoders_feather_consumed_windows(monkeypatch):
+    """_encode_mono/_encode_stereo blend the forced-stock windows into the
+    fitted target (the same array the zero-error verify checks)."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    monkeypatch.delenv("PAD_STERN_FEATHER_MS", raising=False)
+    n = emitted_length(4000)
+    t = np.arange(n)
+    stockL = np.round(1500.0 * np.sin(2 * np.pi * 80.0 * t / 44100.0)) \
+        .astype(np.int64)
+    stockR = -stockL
+    captured = {}
+
+    class FakeGR:
+        def encode_sound(self, p, tgt):
+            captured["tgt"] = np.asarray(tgt)
+            return 0, b"\0" * 8
+
+    class FakeSR:
+        def encode_sound(self, p, L, R):
+            captured["L"], captured["R"] = np.asarray(L), np.asarray(R)
+            return 0, b"\0" * 8
+
+    monkeypatch.setattr(E, "_load_wav",
+                        lambda path, stereo, np_: (np.zeros((6000, 2), np.int64)
+                                                   if stereo else
+                                                   np.zeros(6000, np.int64)))
+    monkeypatch.setattr(E, "_resolve_shared_boundary",
+                        lambda *a, **k: b"\0" * 8)
+    monkeypatch.setattr(E, "_apply_stock_head",
+                        lambda *a, **k: (b"\0" * 8, False))
+    monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
+
+    emu = types.SimpleNamespace(
+        decode=lambda p, **k: (stockL, None, False))
+    p = {"length": 4000, "chan": 1, "idx": 1, "body_off": 0,
+         "consumed_runs": [(1500, 1756)]}
+    E._encode_mono(emu, FakeGR(), p, "x.wav", np)
+    tgt = captured["tgt"]
+    assert (tgt[1500:1756] == stockL[1500:1756]).all()
+    assert int(np.abs(np.diff(tgt)).max()) < 120
+    # without runs the silent target stays silent (bank rows keep old behavior)
+    E._encode_mono(emu, FakeGR(), {"length": 4000, "chan": 1, "idx": 1,
+                                   "body_off": 0}, "x.wav", np)
+    assert int(np.abs(captured["tgt"]).max()) == 0
+
+    emu2 = types.SimpleNamespace(
+        decode=lambda p, **k: (stockL, stockR, True))
+    p2 = {"length": 4000, "chan": 2, "idx": 2, "body_off": 0,
+          "consumed_runs": [(1500, 1756)]}
+    E._encode_stereo(emu2, FakeSR(), p2, "x.wav", np)
+    assert (captured["L"][1500:1756] == stockL[1500:1756]).all()
+    assert (captured["R"][1500:1756] == stockR[1500:1756]).all()
+
+
+def test_verify_final_reports_feathered_snippet(monkeypatch):
+    """_verify_final_patches: rev_pk comes from the consumed spans and the log
+    line says feathered-blend (info) when feathering is on, scrap-warning when
+    it's off."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+    from pinball_decryptor.plugins.stern.spike2.emulator import emitted_length
+
+    n = emitted_length(4000)
+    decoded = np.zeros(n, np.int64)
+    decoded[1000:1256] = 5000                  # the forced original fragment
+
+    stock_bytes = b"\x11\x22" * 8000
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock_bytes[sl]
+
+        def size(self):
+            return len(stock_bytes)
+
+    class FakeEmu:
+        def __init__(self, gr, img):
+            self.mm = MM()
+
+        def boot(self):
+            pass
+
+        def decode(self, p, max_secs=None, cancel=None, progress=None):
+            return (decoded, None, False)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(EM, "Spike2Emu", FakeEmu)
+    p = {"idx": 7, "length": 4000, "body_off": 64, "chan": 1,
+         "consumed_runs": [(1000, 1256)]}
+    patches = {64: b"\x33\x44" * 4000}
+    logs = []
+    log = lambda m, lv="info": logs.append((lv, m))
+
+    monkeypatch.delenv("PAD_STERN_FEATHER_MS", raising=False)
+    monkeypatch.delenv("PAD_STERN_PREVIEW_DIR", raising=False)
+    out = E._verify_final_patches("gr", "img", patches, [p], np, log)
+    assert len(out) == 1
+    idx, peak_db, head_db, rev_db = out[0]
+    assert idx == 7 and abs(rev_db - peak_db) < 0.01   # rev_pk == the fragment
+    assert any(lv == "info" and "feathered" in m for lv, m in logs)
+    assert not any(lv == "warning" for lv, m in logs)
+
+    # feathering off -> the honest scrap warning
+    logs.clear()
+    monkeypatch.setenv("PAD_STERN_FEATHER_MS", "0")
+    E._verify_final_patches("gr", "img", patches, [p], np, log)
+    assert any(lv == "warning" and "scrap" in m for lv, m in logs)
+
+
+def test_ensure_consumed_survives_cache_save_failure(monkeypatch):
+    """A successful derive must feed THIS build even when the cache can't be
+    persisted (_save_consumed swallows write errors)."""
+    import types
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+
+    class FakeEmu:
+        mu = types.SimpleNamespace(hook_del=lambda h: None)
+
+        def __init__(self, gr, img):
+            pass
+
+        def boot(self):
+            pass
+
+        def derive_params(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(EM, "Spike2Emu", FakeEmu)
+    monkeypatch.setattr(E, "_load_consumed", lambda g, i: None)
+    monkeypatch.setattr(E, "_install_consumed_hook",
+                        lambda emu: ({9, 3, 5}, "hh"))
+    monkeypatch.setattr(E, "_save_consumed", lambda fp, reads: None)  # "fails"
+    monkeypatch.setattr(E, "_fingerprint", lambda g, i: "f" * 64)
+    out = E._ensure_consumed("g", "i", lambda *a, **k: None)
+    assert out is not None and list(out) == [3, 5, 9]

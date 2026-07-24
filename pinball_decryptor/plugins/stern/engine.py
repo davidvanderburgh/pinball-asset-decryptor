@@ -2509,7 +2509,8 @@ def _merge_radium_overlays(dst, src):
 
 
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
-                         full_repl, radium_overlays, log):
+                         full_repl, radium_overlays, log,
+                         fw_node=None, fw_overlays=None):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
@@ -2541,6 +2542,12 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         p = ipath.get(bytes(img_node["i_block"]))
         if p:
             modified[p] = _overlay_digests(reader, disk_f, img_node, audio_patches)
+    # Path A: the patched game_real (firmware cave) also needs its .sidx digest
+    # refreshed, or the card fails SD validation on the modified firmware.
+    if fw_overlays and fw_node is not None:
+        p = ipath.get(bytes(fw_node["i_block"]))
+        if p:
+            modified[p] = _overlay_digests(reader, disk_f, fw_node, fw_overlays)
     if music_patches:
         banks = {}
         for sc_node, body_off, body in music_patches:
@@ -2674,11 +2681,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 ("PAD_STERN_LOWPASS_HZ", "treble roll-off Hz"),
                                 ("PAD_STERN_HEAD_MODE", "head block"),
                                 ("PAD_STERN_LEADOUT", "tail block"),
-                                ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"))]
+                                ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"),
+                                ("PAD_STERN_NO_RESTORE_KEYPATCH",
+                                 "blip-free firmware cave"))]
         adv = ["%s=%s" % (lbl, v) for lbl, v in adv if v]
         if adv:
             log("Advanced audio overrides active for this build: %s."
                 % "; ".join(adv), "warning")
+        if _no_restore_keypatch():
+            log("Blip-free callouts ON: patching game_real so the boot-derive "
+                "reads stock master-directory windows -- re-encoded callouts play "
+                "your audio for their whole length (no ~6 ms original scrap). "
+                "LZ 1.22 LE only; experimental, hardware-unverified.", "warning")
         if _slot_seed_dbfs() is not None:
             log("Anti-pop seed ON (%.0f dBFS): mixing an inaudible low tone into "
                 "replacements so a callout is never digitally silent -- aimed at "
@@ -2716,11 +2730,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
         img_node = None
+        fw_node = None
+        fw_overlays = {}       # Path A: game_real changed bytes {file_off: bytes}
         reader = None
         gr_path = img_path = None
         if audio_edits or music_edits:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
-            gr_path, img_path, reader, _fw_node, img_node = _extract_inputs(
+            gr_path, img_path, reader, fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
             if cancel():
                 return None, None, None
@@ -2751,12 +2767,43 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         progress, cancel)
                     if audio_patches is None:
                         return None, None, None
-                    # Keep the firmware's master-directory forward-chain intact:
-                    # restore the bytes its decode consumes, then verify every
-                    # sound still derives valid codec params (else abort — the
-                    # card would reboot on audio).  See _restore_masterdir_consumed.
-                    if audio_patches and os.environ.get(
-                            "PAD_STERN_SKIP_MASTERDIR_FIX") != "1":
+                    # Keep the firmware's master-directory forward-chain intact.
+                    # Path A (PAD_STERN_NO_RESTORE_KEYPATCH): patch game_real so
+                    # the boot-derive reads STOCK window bytes for the replaced
+                    # sounds -- fully-stock codec params on a card whose bodies
+                    # are entirely our audio, so no ~6 ms "blip".  Default: revert
+                    # the bytes the decode consumes back to stock (the blip), then
+                    # verify every sound still derives valid params (else abort --
+                    # the card would reboot on audio).  Either way the safety net
+                    # is a boot of the FINAL firmware+image that asserts stock
+                    # codec params for every sound.
+                    did_pathA = False
+                    if audio_patches and _no_restore_keypatch():
+                        try:
+                            fw_overlays, patched_gr = _build_derive_redirect_cave(
+                                gr_path, img_path, audio_patches, np, log, work)
+                            # Safety net: boot the PATCHED firmware on the patched
+                            # image (our whole bodies) and confirm every sound
+                            # still derives stock codec params, else abort.
+                            _assert_param_integrity(patched_gr, img_path,
+                                                    audio_patches, params, np,
+                                                    log, work)
+                            did_pathA = True
+                        except Exception as e:
+                            # Any Path A failure (unsupported title, too many
+                            # replaced sounds for the firmware cave, or a failed
+                            # integrity assert) degrades to the standard build --
+                            # a working card with the brief original scrap -- not
+                            # a hard build failure.  The fallback path re-asserts
+                            # integrity itself.
+                            fw_overlays = {}
+                            log("Blip-free callouts not applied (%s); building the "
+                                "standard way instead (the brief original-callout "
+                                "scrap remains). Fewer replaced callouts fit the "
+                                "firmware cave." % e, "warning")
+                    if (audio_patches and not did_pathA
+                            and os.environ.get(
+                                "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
                         audio_patches = _restore_masterdir_consumed(
                             gr_path, img_path, audio_patches, log, progress,
                             cancel)
@@ -2894,6 +2941,14 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
+        # Path A: the patched game_real (cave code + redirect table + stock window
+        # copies + the FN branch + the segment +X flag) written back over the
+        # firmware inode.  Sparse -- only the changed byte ranges.
+        if fw_overlays and fw_node is not None:
+            for file_off, b in sorted(fw_overlays.items()):
+                for disk, n in reader.disk_ranges(fw_node, file_off, len(b)):
+                    writes.append((disk, b[:n]))
+                    b = b[n:]
         # Regenerate the .sidx manifest records for the changed files so the
         # card passes Stern's SD validation (recompute HMAC-SHA1 + MD5 with the
         # manifest's global validation key).  Best-effort: a missing /
@@ -2903,7 +2958,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         try:
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_patches, music_patches,
-                full_repl, radium_overlays, log)
+                full_repl, radium_overlays, log,
+                fw_node=fw_node, fw_overlays=fw_overlays)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
@@ -3444,6 +3500,17 @@ def _slot_seed_for(p):
         return None
     from .spike2.codec import experiment_covers
     return db if experiment_covers(p) else None
+
+
+def _pathA_seed_peak():
+    """Sample peak of the Path A anti-degenerate seed tone.  A replacement whose
+    fitted target peaks below this is (near-)silent -- and Path A skips the
+    master-directory restore, so a silent body stays silent everywhere and the
+    codec can't round-trip pure silence (it decodes to loud garbage).  Such
+    replacements are seeded to :data:`_PATHA_SEED_DBFS` to stay decodable.
+    (:func:`_amplitude_fit` normalises any real content up to near full scale, so
+    only genuinely silent targets fall below this -- voice is never touched.)"""
+    return int(round((10.0 ** (_PATHA_SEED_DBFS / 20.0)) * 32768.0))
 
 
 def _apply_slot_seed(samples, np, rng, dbfs):
@@ -4241,7 +4308,11 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     s = _lowpass(s, _declick_lowpass_hz(), np)
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
-    tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, _slot_seed_for(p))
+    seed = _slot_seed_for(p)
+    if (seed is None and _no_restore_keypatch()
+            and int(np.abs(tgt).max()) < _pathA_seed_peak()):
+        seed = _PATHA_SEED_DBFS   # Path A: rescue a degenerate near-silent slot
+    tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
@@ -4266,6 +4337,9 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
     _seed = _slot_seed_for(p)
+    if (_seed is None and _no_restore_keypatch()
+            and max(int(np.abs(L).max()), int(np.abs(R).max())) < _pathA_seed_peak()):
+        _seed = _PATHA_SEED_DBFS   # Path A: rescue a degenerate near-silent slot
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
     R = _apply_slot_seed(R, np, _STEREO_RANGE, _seed)
     start, body = sr.encode_sound(p, L, R)
@@ -4430,6 +4504,298 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     return patches, sorted(skipped), []
 
 
+# --------------------------------------------------------------------------
+# Path A — derive-read redirect firmware cave (the callout "blip" COMPLETE fix)
+#
+# The default Write keeps the firmware's master-directory forward-chain valid by
+# reverting the ~1 KB each sound's boot-derive CONSUMES back to stock
+# (_restore_masterdir_consumed).  Those bytes sit inside the audible body, so a
+# re-encoded callout plays a ~6 ms scrap of the ORIGINAL at each of its two
+# consumed windows -- the "blip".
+#
+# Path A removes the blip entirely: instead of reverting card bytes, it patches
+# game_real with a code cave that redirects the derive's window reads (for the
+# replaced sounds only) to a STOCK copy stored in the firmware.  The derive then
+# builds fully-stock codec params from a card whose bodies are ENTIRELY our audio
+# -> our audio plays for the sound's whole length; no blip, no hole.  Proven
+# offline (all sounds' derived params identical to stock; every replaced sound
+# decodes our target with max-abs-err = 0, both windows included).
+#
+# Gated behind PAD_STERN_NO_RESTORE_KEYPATCH=1 (advanced option, default off).
+# The addresses below are LZ 1.22 LE-specific and guarded by an FN-prologue
+# signature check; a non-matching firmware refuses Path A rather than corrupt it.
+# (Generic signature-based location of these addresses is future work.)
+# --------------------------------------------------------------------------
+_CAVE_FN = 0x25cb48        # ARX window-read compressor entry (the derive's window read)
+_CAVE_RET = 0x25cb54       # resume point, past the 3-word prologue the cave replicates
+_CAVE_VA = 0x884940        # seg1 (.data) zero-run: cave code + redirect table + stock copies
+# End of the contiguous 72572-byte (~72 KB) zero fill at _CAVE_VA, measured on the
+# LZ 1.22 LE firmware (first non-zero byte at 0x8964bc; no relocations point into
+# the run).  Holds the cave + table (12 B/window) + 512 B stock copy/window, i.e.
+# up to ~69 replaced mono sounds; a larger set falls back to the standard build.
+_CAVE_ZERO_RUN_END = 0x8964bc
+# push {r4-r8,sb,sl,fp,lr} / sub sp,sp,#0x16c / add sb,r1,#0x40 — the fingerprint
+# that identifies this exact window-read function on LZ 1.22 LE.
+_CAVE_SIG = (0xE92D4FF0, 0xE24DDF5B, 0xE2819040)
+_PATHA_SEED_DBFS = -45.0   # anti-degenerate seed level for a near-silent Path A replacement
+
+
+def _no_restore_keypatch():
+    """True when Path A (the derive-read redirect firmware cave) is enabled via
+    ``PAD_STERN_NO_RESTORE_KEYPATCH=1``: skip the master-directory restore and
+    instead patch ``game_real`` so the boot-derive reads stock window bytes."""
+    return os.environ.get("PAD_STERN_NO_RESTORE_KEYPATCH") == "1"
+
+
+def _cave_va2off(segs, va):
+    """File offset of virtual address *va* in the firmware ELF (its file-backed
+    PT_LOAD)."""
+    for v, o, fz, _mz in segs:
+        if v <= va < v + fz:
+            return o + (va - v)
+    raise ValueError("VA 0x%x is not in any file-backed segment" % va)
+
+
+def _set_seg_exec(raw, va):
+    """Add PF_X to the PT_LOAD segment whose ``[vaddr, vaddr+memsz)`` contains
+    *va* (mutating *raw* in place).  The cave code lives in seg1, which ships
+    RW- (non-executable); on real HW a branch into it would fault.  This
+    one-field ELF edit marks that segment executable.  The firmware already
+    ships a PT_GNU_STACK with RWX flags, so its loader demonstrably permits W+X.
+    (The emulator maps everything RWX regardless, so this is the HW-only
+    correctness fix.)  Returns ``(ph_off, old_flags, new_flags)``."""
+    e_phoff = struct.unpack_from("<I", raw, 0x1c)[0]
+    e_phentsize = struct.unpack_from("<H", raw, 0x2a)[0]
+    e_phnum = struct.unpack_from("<H", raw, 0x2c)[0]
+    PT_LOAD, PF_X = 1, 1
+    for i in range(e_phnum):
+        ph = e_phoff + i * e_phentsize
+        if struct.unpack_from("<I", raw, ph + 0)[0] != PT_LOAD:
+            continue
+        p_va = struct.unpack_from("<I", raw, ph + 8)[0]
+        p_mz = struct.unpack_from("<I", raw, ph + 20)[0]
+        if p_va <= va < p_va + p_mz:
+            old = struct.unpack_from("<I", raw, ph + 24)[0]
+            new = old | PF_X
+            struct.pack_into("<I", raw, ph + 24, new)
+            return ph, old, new
+    raise ValueError("no PT_LOAD segment contains VA 0x%x" % va)
+
+
+def _asm_derive_redirect_cave(raw, va2off, table_va, first_off, basevar_va):
+    """Assemble the self-calibrating derive-read redirect cave (ARM, little-
+    endian).  On the FIRST masterdir window read (``r2 == 0x200`` and the stored
+    base is still 0) it computes ``base = r1 - FIRST_OFF`` and caches it in a
+    writable word (BASEVAR); thereafter ``fileoff = r1 - base`` and it matches a
+    FILE-OFFSET table (card-position-independent).  A matched window redirects
+    ``r1`` to that window's stock copy; unmatched reads (and the non-window
+    ``r2 != 0x200`` scratch call) pass through untouched.  The cave replicates
+    the function's 3-word prologue (push / sub sp / add sb) and returns to
+    ``_CAVE_RET``.  ``game_real`` is ET_EXEC, so the absolute VAs baked as
+    literals are HW-valid; the code must live in an executable segment (see
+    :func:`_set_seg_exec`).  Ported verbatim from the validated rig."""
+    def w(x):
+        return struct.pack("<I", x & 0xffffffff)
+
+    def br(cond, frm, to):
+        return w((cond << 28) | (0xA << 24) | (((to - (frm + 8)) >> 2) & 0xFFFFFF))
+    W_push = struct.unpack_from("<I", raw, va2off(_CAVE_FN))[0]
+    W_subsp = struct.unpack_from("<I", raw, va2off(_CAVE_FN + 4))[0]
+    W_addsb = struct.unpack_from("<I", raw, va2off(_CAVE_FN + 8))[0]
+
+    def iva(i):
+        return _CAVE_VA + i * 4
+    LIT_BASE, LIT_FIRST, LIT_TABLE = iva(26), iva(27), iva(28)
+
+    def ldrpc(rt, frm, lit):
+        return w(0xE59F0000 | (rt << 12) | (lit - (frm + 8)))
+    words = [
+        w(W_push), w(W_subsp),                  # 0,1  replicated prologue
+        w(0xE3520C02),                          # 2  cmp r2,#0x200   (window read?)
+        br(0x1, iva(3), iva(24)),               # 3  bne done
+        ldrpc(4, iva(4), LIT_BASE),             # 4  ldr r4,=&BASEVAR
+        w(0xE5948000),                          # 5  ldr r8,[r4]
+        w(0xE3580000),                          # 6  cmp r8,#0
+        br(0x1, iva(7), iva(11)),               # 7  bne have_base
+        ldrpc(5, iva(8), LIT_FIRST),            # 8  ldr r5,=FIRST_OFF
+        w(0xE0418005),                          # 9  sub r8,r1,r5
+        w(0xE5848000),                          # 10 str r8,[r4]     (base = r1 - FIRST_OFF)
+        w(0xE0418008),                          # 11 have_base: sub r8,r1,r8   (fileoff)
+        ldrpc(4, iva(12), LIT_TABLE),           # 12 ldr r4,=&TABLE
+        w(0xE4945004),                          # 13 scan: ldr r5,[r4],#4   (lo)
+        w(0xE3550000),                          # 14 cmp r5,#0
+        br(0x0, iva(15), iva(24)),              # 15 beq done  (zero sentinel)
+        w(0xE4946004), w(0xE4947004),           # 16,17 ldr r6/r7,[r4],#4   (hi, stockbuf)
+        w(0xE1580005), br(0x3, iva(19), iva(13)),  # 18 cmp r8,r5 ; 19 blo scan
+        w(0xE1580006), br(0x2, iva(21), iva(13)),  # 20 cmp r8,r6 ; 21 bhs scan
+        w(0xE0488005), w(0xE0871008),           # 22 sub r8,r8,r5 ; 23 add r1,r7,r8
+        w(W_addsb),                             # 24 done: add sb,r1,#0x40
+        br(0xE, iva(25), _CAVE_RET),            # 25 b _CAVE_RET
+        w(basevar_va), w(first_off), w(table_va),  # 26,27,28 literals
+        w(0),                                   # 29 BASEVAR (writable, init 0)
+    ]
+    return b"".join(words)
+
+
+def _capture_first_window_off(gr_path, img_path):
+    """File offset of the FIRST masterdir window read (``r2 == 0x200``) the
+    boot-derive performs — the FIRST_OFF the self-cal cave subtracts from the
+    live source pointer to recover the image mmap base.  Boots and derives only
+    until that first read, then stops."""
+    from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2
+
+    from .spike2 import emulator as EM
+    from .spike2.emulator import Spike2Emu
+    emu = Spike2Emu(gr_path, img_path)
+    got = {}
+
+    def at_fn(eng):
+        m = eng.mu
+        if m.reg_read(UC_ARM_REG_R2) == 0x200 and "off" not in got:
+            got["off"] = m.reg_read(UC_ARM_REG_R1) - EM.DESC_BASE
+            m.emu_stop()
+    emu.boot()
+    emu.extra[_CAVE_FN] = at_fn
+    try:
+        emu.derive_params()
+    except Exception:
+        pass
+    finally:
+        emu.extra.pop(_CAVE_FN, None)
+        emu.close()
+    return got.get("off")
+
+
+def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
+                                out_dir):
+    """Build the Path A firmware cave for the replaced sounds in *patches*
+    (``{body_off: body}``).
+
+    Patches ``game_real`` so the boot-derive reads STOCK window bytes for every
+    replaced sound, writes the patched firmware to *out_dir*, and returns
+    ``(fw_overlays, patched_gr_path)`` where ``fw_overlays`` = ``{file_off:
+    bytes}`` are exactly the changed firmware bytes (cave code + redirect table +
+    stock window copies + the FN branch + the segment +X flag) — for both the
+    on-disk write and the ``.sidx`` digest refresh.
+
+    Raises ``RuntimeError`` if the firmware doesn't match the LZ 1.22 signature,
+    if a needed consumed-window map is missing, or if the replacement set is too
+    large for the in-firmware zero-run (which would need an appended PT_LOAD)."""
+    from .spike2.elf import parse_elf
+    raw = bytearray(open(gr_path, "rb").read())
+    segs, relocs = parse_elf(bytes(raw))
+
+    def va2off(va):
+        return _cave_va2off(segs, va)
+
+    # Signature guard: only patch the exact firmware whose window-read function
+    # this cave was reverse-engineered against.
+    sig = tuple(struct.unpack_from("<I", raw, va2off(_CAVE_FN + i * 4))[0]
+                for i in range(3))
+    if sig != _CAVE_SIG:
+        raise RuntimeError(
+            "Path A firmware cave not supported for this title: the window-read "
+            "function signature at 0x%x (%s) doesn't match LZ 1.22 LE (%s). "
+            "Disable 'blip-free callouts' for this card."
+            % (_CAVE_FN, tuple("0x%08X" % s for s in sig),
+               tuple("0x%08X" % s for s in _CAVE_SIG)))
+
+    # The exact bytes the boot-derive consumes for each replaced sound == the
+    # window ranges to redirect.  Reuse the cached consumed map (same source the
+    # master-directory restore uses); a cold/absent cache is a hard error here.
+    cached = _load_consumed(gr_path, img_path)
+    if cached is None or not len(cached):
+        raise RuntimeError(
+            "Path A firmware cave needs the master-directory consumed-byte map "
+            "(captured at Extract); it's missing for this card. Re-Extract, or "
+            "disable 'blip-free callouts'.")
+    cached = np.asarray(cached, np.int64)
+    windows = []   # (lo, hi) file-offset ranges (2 per mono sound)
+    with open(img_path, "rb") as f:
+        stock_chunks = []
+        for off in sorted(patches):
+            body = patches[off]
+            lo = int(np.searchsorted(cached, off, "left"))
+            hi = int(np.searchsorted(cached, off + len(body), "left"))
+            if lo >= hi:
+                continue
+            wcon = cached[lo:hi]
+            brk = np.where(np.diff(wcon) != 1)[0]
+            starts = np.concatenate(([0], brk + 1))
+            ends = np.concatenate((brk, [len(wcon) - 1]))
+            for s, e in zip(starts, ends):
+                a0, b0 = int(wcon[s]), int(wcon[e]) + 1
+                windows.append((a0, b0))
+                f.seek(a0)
+                stock_chunks.append(f.read(b0 - a0))
+    if not windows:
+        raise RuntimeError(
+            "Path A firmware cave: no master-directory windows found for the "
+            "replaced sound(s) — nothing to redirect.")
+
+    # Layout inside the zero-run: 30-word cave (code + 3 literals + BASEVAR),
+    # then the redirect table (12 bytes/window + a zero sentinel), then the
+    # 16-aligned stock window copies (512 bytes each).
+    ncode = 30
+    table_va = _CAVE_VA + ncode * 4
+    basevar_va = _CAVE_VA + 29 * 4
+    table_bytes = (len(windows) + 1) * 12
+    stock_va = (table_va + table_bytes + 0xf) & ~0xf
+    region_end = stock_va + sum(b - a for a, b in windows)
+    if region_end > _CAVE_ZERO_RUN_END:
+        raise RuntimeError(
+            "Path A firmware cave overruns the firmware's spare space "
+            "(%d bytes needed, %d available): %d replaced sound(s) is too many "
+            "for the in-firmware cave. Reduce the number of replaced callouts, "
+            "or extend the cave with an appended PT_LOAD (not yet implemented)."
+            % (region_end - _CAVE_VA, _CAVE_ZERO_RUN_END - _CAVE_VA,
+               len(patches)))
+    for gv, _nm in relocs:
+        if _CAVE_VA <= gv < region_end:
+            raise RuntimeError("Path A firmware cave region collides with a "
+                               "firmware relocation at 0x%x." % gv)
+
+    first_off = _capture_first_window_off(gr_path, img_path)
+    if first_off is None:
+        raise RuntimeError("Path A firmware cave: could not capture FIRST_OFF "
+                           "(the first window read) from the boot-derive.")
+    cave = _asm_derive_redirect_cave(raw, va2off, table_va, first_off,
+                                     basevar_va)
+
+    table = b""
+    off_stock = stock_va
+    for (a0, b0) in windows:
+        table += struct.pack("<III", a0, b0, off_stock)
+        off_stock += (b0 - a0)
+    table += struct.pack("<III", 0, 0, 0)     # zero sentinel
+    stock = b"".join(stock_chunks)
+
+    branch = struct.pack("<I", (0xE << 28) | (0xA << 24)
+                         | (((_CAVE_VA - (_CAVE_FN + 8)) >> 2) & 0xFFFFFF))
+    overlays = {
+        va2off(_CAVE_VA): bytes(cave),
+        va2off(table_va): table,
+        va2off(stock_va): stock,
+        va2off(_CAVE_FN): branch,
+    }
+    for fo, b in overlays.items():
+        raw[fo:fo + len(b)] = b
+    seg_ph, seg_old, seg_new = _set_seg_exec(raw, _CAVE_VA)
+    overlays[seg_ph + 24] = struct.pack("<I", seg_new)
+
+    patched_gr = os.path.join(out_dir, "game_real_pathA")
+    with open(patched_gr, "wb") as f:
+        f.write(bytes(raw))
+
+    def _flg(fl):
+        return ("R" if fl & 4 else "-") + ("W" if fl & 2 else "-") + ("X" if fl & 1 else "-")
+    log("Path A cave built: %d window(s) across %d replaced sound(s) redirected "
+        "to stock; FIRST_OFF=0x%x; cave 0x%x..0x%x; seg %s->%s (executable)."
+        % (len(windows), len(patches), first_off, _CAVE_VA, region_end,
+           _flg(seg_old), _flg(seg_new)), "success")
+    return overlays, patched_gr
+
+
 def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
                                 cancel=None):
     """Keep each re-encoded body byte-identical to stock in the bytes the
@@ -4577,8 +4943,14 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
             stock = bytes(emu.mm.base[off:off + len(body)]
                           if hasattr(emu.mm, "base")
                           else emu.mm[off:off + len(body)])
-            reverted = np.flatnonzero(
-                np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2"))
+            # Path A keeps the whole body as our audio (no master-directory
+            # restore), so there is no original-scrap to flag; the body differs
+            # from stock nearly everywhere and the scrap heuristic below would
+            # false-positive.  Skip it.
+            reverted = (
+                np.empty(0, int) if _no_restore_keypatch()
+                else np.flatnonzero(
+                    np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2")))
             saved = emu.mm.patch
             emu.mm.patch = (off, body)
             try:

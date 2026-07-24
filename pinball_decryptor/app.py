@@ -3276,6 +3276,7 @@ class App:
         "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
+        "blip_free": False,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -3315,6 +3316,12 @@ class App:
             setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
         else:
             setenv("PAD_STERN_SLOT_SEED_DB", None)
+        # Blip-free callouts (Path A firmware cave): skip the master-directory
+        # restore and patch game_real so the boot-derive reads stock window bytes
+        # -> a re-encoded callout plays our audio for its whole length, no ~6 ms
+        # scrap of the original.  LZ 1.22 LE only; guarded in the engine.
+        setenv("PAD_STERN_NO_RESTORE_KEYPATCH",
+               "1" if d.get("blip_free") else None)
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

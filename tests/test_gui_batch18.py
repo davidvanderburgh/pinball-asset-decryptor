@@ -252,10 +252,14 @@ def test_on_build_flash_request_writes_back_and_arms_chain(app, monkeypatch):
         app, "_start_write",
         lambda chain_flash_device=None: seen.update(
             device=chain_flash_device))
-    app._on_build_flash_request(r"D:\builds\lz-test.raw",
-                                r"\\.\PHYSICALDRIVE7")
-    assert w.write_output_var.get() == r"D:\builds"
-    assert w.write_filename_var.get() == "lz-test.raw"
+    # Build the path with the OS-native separator (os.path.split only treats
+    # os.sep as a separator — a hardcoded r"D:\..." reads as one flat name on
+    # POSIX CI and the folder push-back looks empty).
+    build_path = os.path.join(os.sep + "builds", "lz-test.raw")
+    expected_folder, expected_name = os.path.split(build_path)
+    app._on_build_flash_request(build_path, r"\\.\PHYSICALDRIVE7")
+    assert w.write_output_var.get() == expected_folder
+    assert w.write_filename_var.get() == expected_name == "lz-test.raw"
     assert seen["device"] == r"\\.\PHYSICALDRIVE7"
 
 

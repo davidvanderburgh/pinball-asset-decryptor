@@ -20,42 +20,6 @@ Ranking is by (impact on the reported problem) × (confidence it's real) ×
 
 ---
 
-## RESOLVED 2026-07-24 — the click is the mid-body scrap, and it is now feathered
-
-The v0.73.0 machine-render export cracked it: monkeybug's exported WAVs carry
-the clicks, and every burst lines up **exactly** with a master-directory
-consumed run. On this card family each mono callout has **two contiguous
-512-byte forced-stock windows** (~5.8 ms each, ~25% and ~70% through the
-body); because the callout codec is memoryless per word, each window plays a
-**bit-exact fragment of the original callout at stock level** no matter what
-surrounds it (his idx0258 burst correlates +1.000 with the original at the
-same offset). Silence around a loud fragment = a blob-click; loud audio around
-a quiet fragment = a dropout-click. The window *audibility* per slot is just
-the original's level at that spot — which is why the artifact looked
-intermittent and content-dependent for months.
-
-**The fix (this build): master-directory window feathering.** The windows
-cannot change (idea 10 below stays closed), but the samples around them are
-ours: the fitted target now carries the *original* audio across each window
-with raised-cosine crossfades (`_feather_stock_windows`, 15 ms default,
-`PAD_STERN_FEATHER_MS` overrides, ≤0 disables). A silent replacement plays a
-brief soft snippet of the original instead of a click; a loud one gets a
-smooth dip instead of a hard dropout. Verified on the LZ 1.22 rig: the control
-build reproduces monkeybug's clicking render byte-identical; the feathered
-renders equal the ideal blended target at **maxerr 0**; master-directory
-integrity holds 549/549; serial == parallel byte-identical.
-
-Also fixed: `_verify_final_patches`' scrap detector measured the wrong words
-(mask polarity inverted and word-index/step mapping wrong), which is why no
-build log ever warned about the scrap. It now measures the real windows and
-logs a feathered-aware message.
-
-The START pop (machine output-stage, below) remains a separate question — but
-with the scrap identified as the dominant audible click, it may account for
-little or nothing of what was reported.
-
----
-
 ## Tier 1 — shipped this round, directly test on the machine
 
 **1. Honest post-restore verification + preview (`_verify_final_patches`).**

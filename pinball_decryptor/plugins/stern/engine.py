@@ -135,49 +135,6 @@ def _load_consumed(game_real_path, image_path):
         return None
 
 
-def _ensure_consumed(gr_path, img_path, log, progress=None, cancel=None):
-    """Consumed-offset array for this card, deriving AND caching it when the
-    Extract-time cache is cold (an Extract from an older app version).  The
-    derive is the same ~2 min pass :func:`_restore_masterdir_consumed` would
-    otherwise run later without saving, so on a cold cache this moves that cost
-    up front and makes the restore's fast path hit too.  Returns ``None`` on
-    failure/cancel (callers must treat that as "no feathering", never abort)."""
-    try:
-        consumed = _load_consumed(gr_path, img_path)
-    except Exception:
-        consumed = None
-    if consumed is not None and len(consumed):
-        return consumed
-    if cancel and cancel():
-        return None
-    from .spike2.emulator import Spike2Emu
-    log("Deriving master-directory consumed offsets (one-time per card, "
-        "~2 min; later builds hit the cache)...", "info")
-    if progress:
-        progress(8, 100, "Deriving master-directory offsets...")
-    emu = Spike2Emu(gr_path, img_path)
-    try:
-        emu.boot()
-        reads, hh = _install_consumed_hook(emu)
-        emu.derive_params()
-        try:
-            emu.mu.hook_del(hh)
-        except Exception:
-            pass
-        _save_consumed(_fingerprint(gr_path, img_path), reads)
-    except Exception as e:
-        log("Master-directory offset derive failed (%s) -- the forced-stock "
-            "windows will not be feathered this build." % e, "warning")
-        return None
-    finally:
-        emu.close()
-    # Return the in-memory result, not a disk round-trip: _save_consumed
-    # swallows write failures (like the params cache), and a successful derive
-    # must feather THIS build even if the cache couldn't be persisted.
-    import numpy as np
-    return np.array(sorted(reads), dtype=np.int64)
-
-
 def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     fp = _fingerprint(game_real_path, image_path)
     cache = _cache_path(fp)
@@ -2717,9 +2674,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 ("PAD_STERN_LOWPASS_HZ", "treble roll-off Hz"),
                                 ("PAD_STERN_HEAD_MODE", "head block"),
                                 ("PAD_STERN_LEADOUT", "tail block"),
-                                ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"),
-                                ("PAD_STERN_FEATHER_MS",
-                                 "masterdir feather ms"))]
+                                ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"))]
         adv = ["%s=%s" % (lbl, v) for lbl, v in adv if v]
         if adv:
             log("Advanced audio overrides active for this build: %s."
@@ -3514,131 +3469,6 @@ def _apply_slot_seed(samples, np, rng, dbfs):
     return np.clip(out, -rng, rng)
 
 
-# --------------------------------------------------------------------------
-# Master-directory window feathering (2026-07-24, the click root cause).
-# Every re-encoded cat-0 sound must keep ~1 KB of its body byte-identical to
-# stock (_restore_masterdir_consumed) or the firmware's forward-chained decode
-# desyncs and the machine reboots.  On this card family that is two contiguous
-# ~512-byte runs per sound (~5.8 ms each), and because the callout codec is
-# memoryless per word, those runs ALWAYS play a bit-exact fragment of the
-# ORIGINAL sound at stock level no matter what surrounds them.  A replacement
-# that differs there (silence around a loud original, loud audio around a
-# quiet original) butts a hard edge against that fragment = the click
-# monkeybug chased across many builds -- proven by the machine-render WAVs,
-# where every burst lines up with a consumed run exactly.
-# The windows cannot be changed (every consumed word is load-bearing -- see
-# the masterdir RE notes), but the samples AROUND them are ours: overlay the
-# original audio across each window and crossfade replacement<->original over
-# _FEATHER_MS on each side.  The forced fragment then sits inside matching
-# audio with no discontinuity: a silent replacement plays a brief soft snippet
-# of the original instead of a click; a loud one gets a smooth dip.  Always on
-# (it only ever removes an artifact); PAD_STERN_FEATHER_MS overrides the
-# crossfade length, <=0 disables for A/B.
-# --------------------------------------------------------------------------
-_FEATHER_MS_DEFAULT = 15.0
-
-
-def _feather_ms():
-    """Crossfade length (ms) blended around each masterdir-forced stock
-    window.  ``PAD_STERN_FEATHER_MS`` overrides; <=0 disables feathering."""
-    ov = _env_float("PAD_STERN_FEATHER_MS")
-    if ov is None:
-        return _FEATHER_MS_DEFAULT
-    return max(0.0, min(ov, 200.0))
-
-
-def _consumed_sample_runs(consumed, p, np):
-    """Map the card's masterdir-consumed byte offsets into sound *p*'s body as
-    contiguous ``[s0, s1)`` sample spans, clipped to the emitted range.
-    *consumed* is the sorted offset array from :func:`_load_consumed`."""
-    from .spike2.emulator import emitted_length
-    step = 4 if p.get("chan") == 2 else 2
-    off = p["body_off"]
-    lo = int(np.searchsorted(consumed, off, "left"))
-    hi = int(np.searchsorted(consumed, off + step * p["length"], "left"))
-    if lo >= hi:
-        return []
-    n = emitted_length(p["length"])
-    spans = []
-    run0 = prev = int(consumed[lo])
-    for v in consumed[lo + 1:hi]:
-        v = int(v)
-        if v == prev + 1:
-            prev = v
-            continue
-        spans.append((run0, prev))
-        run0 = prev = v
-    spans.append((run0, prev))
-    out = []
-    for a, b in spans:
-        s0 = max(0, (a - off) // step)
-        s1 = min(n, (b - off) // step + 1)
-        if s1 > s0:
-            out.append((int(s0), int(s1)))
-    return out
-
-
-def _feather_stock_windows(emu, p, targets, np, lo_clip, hi_clip):
-    """Blend the fitted target into the sound's ORIGINAL audio across each
-    masterdir-consumed window (``p["consumed_runs"]``, attached by
-    :func:`_encode_cat0_sounds`): exact original over the window itself (plus a
-    small pad for the write-start delta slop), raised-cosine crossfades over
-    :func:`_feather_ms` on each side.  The post-encode restore then reverts
-    bytes that already decode to the target, so the final card plays a smooth
-    blend instead of a hard-edged foreign fragment.  *targets* is ``[tgt]``
-    (mono) or ``[L, R]``; mutated in place and returned.  *lo_clip*/*hi_clip*
-    bound the codec's exactly-representable range (asymmetric: mono
-    ``[-11147, 11146]``, stereo ``[-21453, 21452]``) so the zero-error encode
-    verify holds for every blended sample."""
-    spans = p.get("consumed_runs")
-    if not spans:
-        return targets
-    F = int(round(_feather_ms() * 44.1))
-    if F <= 0:
-        return targets
-    n = len(targets[0])
-    PAD = 4                     # extra exact-original samples past each edge
-    merged = []
-    for s0, s1 in spans:
-        s0 = max(0, int(s0) - PAD)
-        s1 = min(n, int(s1) + PAD)
-        if s1 <= s0:
-            continue
-        if merged and s0 - merged[-1][1] < 2 * F:
-            merged[-1][1] = max(merged[-1][1], s1)
-        else:
-            merged.append([s0, s1])
-    if not merged:
-        return targets
-    out = emu.decode(p)         # overlay patch is disarmed here -> stock audio
-    if out is None or out[0] is None:
-        return targets
-    stock = [np.asarray(out[0], np.int64)]
-    if len(targets) == 2:
-        if out[1] is None:
-            return targets
-        stock.append(np.asarray(out[1], np.int64))
-    for tgt, st in zip(targets, stock):
-        m = min(n, len(st))
-        for s0, s1 in merged:
-            s1 = min(s1, m)
-            if s1 <= s0:
-                continue
-            a0 = max(0, s0 - F)
-            b1 = min(m, s1 + F)
-            w = np.ones(b1 - a0, np.float64)
-            up = s0 - a0
-            if up > 1:
-                w[:up] = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, up))
-            dn = b1 - s1
-            if dn > 1:
-                w[len(w) - dn:] = 0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi,
-                                                                 dn))
-            mix = np.round((1.0 - w) * tgt[a0:b1] + w * st[a0:b1])
-            tgt[a0:b1] = np.clip(mix.astype(np.int64), lo_clip, hi_clip)
-    return targets
-
-
 def _lowpass(samples, cutoff_hz, np, fs=44100.0):
     """Zero-phase 2nd-order Butterworth low-pass (applied forward + reverse, so
     4th-order effective with no phase shift and, being IIR, no pre-echo that an
@@ -4412,10 +4242,6 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, _slot_seed_for(p))
-    # Mono G(S) hits every integer in [-11147, 11146] exactly (G(-32768) =
-    # -11147, G(32767) = 11146) -- the blend must stay inside that.
-    tgt = _feather_stock_windows(emu, p, [tgt], np,
-                                 -_MONO_RANGE, _MONO_RANGE - 1)[0]
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
                                     gr=gr, log=log)
@@ -4442,9 +4268,6 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     _seed = _slot_seed_for(p)
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
     R = _apply_slot_seed(R, np, _STEREO_RANGE, _seed)
-    # Stereo G(S) covers [-21453, 21452] (asymmetric the other way from mono).
-    L, R = _feather_stock_windows(emu, p, [L, R], np,
-                                  -_STEREO_RANGE - 1, _STEREO_RANGE)
     start, body = sr.encode_sound(p, L, R)
     body = _resolve_shared_boundary(emu, p, pred, start, body, L, R, np,
                                     sr=sr, log=log)
@@ -4754,14 +4577,8 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
             stock = bytes(emu.mm.base[off:off + len(body)]
                           if hasattr(emu.mm, "base")
                           else emu.mm[off:off + len(body)])
-            # Words EQUAL to stock inside the emitted range are the restore's
-            # reverts (plus stray coincidences -- our encode covers the whole
-            # range, so equality there is not the default).  This mask was
-            # inverted (!=) until 2026-07-24, which measured OUR words instead
-            # and kept the scrap warning from ever firing on the silent
-            # replacements it was written for.
             reverted = np.flatnonzero(
-                np.frombuffer(body, "<u2") == np.frombuffer(stock, "<u2"))
+                np.frombuffer(body, "<u2") != np.frombuffer(stock, "<u2"))
             saved = emu.mm.patch
             emu.mm.patch = (off, body)
             try:
@@ -4775,47 +4592,27 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
                 continue
             peak = int(np.abs(s).max())
             head = int(np.abs(s[:BLOCK]).max()) if len(s) else 0
-            # Peak within the forced-stock windows specifically.  Prefer the
-            # exact consumed sample spans when the encode stage attached them
-            # (p["consumed_runs"], same dicts); fall back to the byte-equality
-            # mask (those map ~1:1 to output samples, delta near 0).
+            # Peak within the master-directory-reverted words specifically:
+            # those map ~1:1 to output samples (delta near 0), so index by
+            # word position clipped into range.
             rev_pk = 0
-            spans = p.get("consumed_runs")
-            if spans:
-                for s0, s1 in spans:
-                    s0, s1 = int(s0), min(int(s1), len(s))
-                    if s1 > s0:
-                        rev_pk = max(rev_pk, int(np.abs(s[s0:s1]).max()))
-            elif len(reverted):
-                # ``reverted`` holds u2 WORD indices: sample = 2*word // step
-                # (1:1 mono, word-pairs per frame stereo).  Dividing the word
-                # index by step (pre-2026-07-24) landed on the wrong samples.
-                ri = (2 * reverted) // step
-                ri = ri[ri < min(n, len(s))]
+            if len(reverted):
+                ri = reverted[reverted < step * n] // step
+                ri = ri[ri < len(s)]
                 if len(ri):
                     rev_pk = int(np.abs(s[ri]).max())
             out.append((p["idx"], dbfs(peak), dbfs(head), dbfs(rev_pk)))
             if peak:
                 _write_machine_render(p, [s], False, np)
-            # A sound whose body carries a loud original fragment is the
-            # master-directory tradeoff surfacing — name it so a "why is my
-            # quiet replacement not quiet?" is answered from the log.  With
-            # feathering the fragment's edges are blended, so it plays as a
-            # brief soft snippet instead of a click.
+            # A sound whose head is quiet but whose body carries a loud scrap
+            # is the master-directory tradeoff surfacing — name it so a "why is
+            # my quiet replacement not quiet?" is answered from the log.
             if rev_pk > 512 and rev_pk >= peak - 6:
-                if spans and _feather_ms() > 0:
-                    log("idx %d: mid-body the card plays a %.0f dBFS snippet "
-                        "of the original sound (bytes the firmware's decode "
-                        "chain forces back to stock); its edges are feathered "
-                        "so it blends instead of clicking — hear it in the "
-                        "machine-render preview." % (p["idx"], dbfs(rev_pk)),
-                        "info")
-                else:
-                    log("idx %d: the card plays a %.0f dBFS scrap of the "
-                        "original sound mid-body (bytes the firmware's decode "
-                        "chain forces back to stock — unavoidable without "
-                        "rebooting audio); the start is clean (%.0f dBFS)."
-                        % (p["idx"], dbfs(rev_pk), dbfs(head)), "warning")
+                log("idx %d: the card plays a %.0f dBFS scrap of the original "
+                    "sound mid-body (bytes the firmware's decode chain forces "
+                    "back to stock — unavoidable without rebooting audio); "
+                    "the start is clean (%.0f dBFS)."
+                    % (p["idx"], dbfs(rev_pk), dbfs(head)), "warning")
     finally:
         emu.close()
     if out:
@@ -4890,35 +4687,6 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
                    key=lambda iw: (-byidx[iw[0]].get("length", 0), iw[0]))
     if not edits:
         return {}, []
-
-    # Attach each edited sound's masterdir-consumed windows (as sample spans)
-    # to its param dict so the encoders can feather the forced-stock fragments
-    # (_feather_stock_windows).  Done here, before dispatch, so the serial and
-    # parallel paths see identical params (workers get them via the pool
-    # initargs pickle) and stay byte-identical.  Skipped when the restore
-    # itself is skipped -- without the restore there is no forced window.
-    if (_feather_ms() > 0
-            and os.environ.get("PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
-        try:
-            consumed = _ensure_consumed(gr_path, img_path, log, progress,
-                                        cancel)
-            if consumed is not None and len(consumed):
-                hits = 0
-                for idx, _wav in edits:
-                    spans = _consumed_sample_runs(consumed, byidx[idx], np)
-                    if spans:
-                        byidx[idx]["consumed_runs"] = spans
-                        hits += 1
-                if hits:
-                    log("Feathering the firmware's forced-stock windows on "
-                        "%d of %d edited sound(s) (%.0f ms blends) so they "
-                        "can't click." % (hits, len(edits), _feather_ms()),
-                        "info")
-        except Exception as e:
-            # Feathering is an enhancement -- it must never break a Write.
-            log("Masterdir-window feathering unavailable (%s); building "
-                "without it (the forced-stock windows may click)." % e,
-                "warning")
 
     nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
     nworkers = max(1, min(nworkers, len(edits)))

@@ -224,9 +224,18 @@ loop.
    installer assets upload from the four `Build Release Installers` CI
    jobs minutes later — apps in the field saw the v0.69.5 update banner
    while the release page had zero downloads on it.  Draft-first keeps
-   the release invisible to every update checker (including old app
-   versions that predate the client-side asset gate) until the assets
-   are actually there.
+   the release invisible to every update checker until at least one
+   asset exists (step 9b flips it live as soon as the FIRST asset
+   attaches, NOT after all four — David wants each platform downloadable
+   the moment its own installer is ready, so Windows users aren't held
+   up by the ~4x-slower Intel Mac build).  Publishing early is safe
+   because the app gates per-platform client-side: `updater._release_ready`
+   only surfaces an update to a given OS once THAT OS's asset is present
+   (`*_Windows.exe` / `*_macOS_*.dmg` / `*.AppImage`), so a live release
+   carrying only the Windows asset never prompts a Mac user with a dead
+   link.  The only residual exposure is app versions that predate that
+   client-side gate; that population shrinks every release, and the
+   zero-asset window is still covered by drafting until the first asset.
    ```
    gh release create vN.N.N --draft --title "vN.N.N — <short title>" --notes "$(cat <<'EOF'
    <markdown release notes — can be more elaborate than the tag body;
@@ -240,26 +249,41 @@ loop.
    and `gh release view`/`upload` resolve drafts by tag name fine, so
    an early draft is what keeps that fallback from firing.
 
-9b. **Background-watch the installer workflow, then publish.**  Resolve
-    the `Build Release Installers` run id for the tag (same lookup
-    pattern as step 7b, `--workflow=release.yml`), start
-    `gh run watch --exit-status` on it **as a background task**, and
-    END THE TURN — the four platform builds take ~7-8 minutes and are
-    never watched live.  When the watch completes:
+9b. **Publish at the FIRST asset, then background-watch the rest.**
+    Each platform's installer job attaches its own asset independently
+    (fastest first: Linux + Apple Silicon land ~2 min in, Windows ~5 min,
+    Intel Mac ~6.5 min).  Flip the release live the moment the first
+    asset exists so users on the ready platforms download immediately;
+    the per-platform client gate (step 9) keeps the not-yet-built
+    platforms silent.
+
+    Start TWO background tasks and END THE TURN:
+    1. A "publish at first asset" watcher — polls the release and flips
+       it live as soon as one asset is attached, then exits:
+       ```bash
+       until [ "$(gh release view vN.N.N --json assets \
+                    --jq '.assets | length' 2>/dev/null)" -ge 1 ]; do
+         sleep 15
+       done
+       gh release edit vN.N.N --draft=false
+       ```
+    2. The installer-run watch (`gh run watch <id> --exit-status`,
+       `--workflow=release.yml`) so the remaining assets finish
+       attaching to the now-live release.
+
+    When the installer-run watch completes:
     - If an upload step failed on a transient GitHub error,
-      `gh run rerun <id> --failed` — the builds are per-job, so only
-      the failed uploads redo.  Start a fresh background watch on the
-      rerun.
-    - When the run is green, verify all four assets are attached, then
-      flip the draft live:
+      `gh run rerun <id> --failed` — builds are per-job, so only the
+      failed uploads redo.  Start a fresh background watch on the rerun.
+      (The release is already live with whatever assets DID build; the
+      rerun just backfills the missing one — a partial-platform release
+      is acceptable per the publish-early policy, but always backfill.)
+    - When green, verify all four assets are attached and print the URL:
     ```
     gh release view vN.N.N --json assets --jq '.assets[].name'
     # expect: *_Windows.exe, *_macOS_AppleSilicon.dmg,
     #         *_macOS_Intel.dmg, *_Linux_x86_64.AppImage
-    gh release edit vN.N.N --draft=false
     ```
-    Print the resulting URL.  Do NOT publish with missing assets — a
-    dead download link is exactly what draft-first exists to prevent.
 
 10. **Draft a message for the tester / user.**
 

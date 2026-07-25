@@ -94,6 +94,14 @@ def load_fonts(assets_dir):
                 adv = w + max(1.0, round(w * 0.15))
             stem = g_rel.replace("\\", "/").split("/")[-2]
             key = cols[14] if len(cols) >= 15 and cols[14] else stem
+            kern = {}
+            if len(cols) >= 16 and cols[15]:
+                for pair in cols[15].split(";"):
+                    try:
+                        c, v = pair.split(":")
+                        kern[int(c, 16)] = float(v)
+                    except ValueError:
+                        continue
             fo = fonts.get(key)
             if fo is None:
                 fo = fonts[key] = {
@@ -109,6 +117,7 @@ def load_fonts(assets_dir):
                 "abs": os.path.join(assets_dir, "images", *g_rel.split("/")),
                 "x": x, "y": y, "w": w, "h": h, "rot": rot,
                 "lw": lw, "lh": lh, "bx": bx, "by": by, "adv": adv,
+                "kern": kern,
             }
     out = []
     for fo in fonts.values():
@@ -207,25 +216,31 @@ def render_text(font, text, slice_loader=None, tracking=0):
     for li, line in enumerate(text.split("\n")):
         pen = 0.0
         base_y = li * line_h + asc
-        for ch in line:
+        for ci, ch in enumerate(line):
             g = font["glyphs"].get(ord(ch))
+            # pair-kerning: the glyph's table adjusts the advance when THIS
+            # right-hand character follows it
+            nxt = ord(line[ci + 1]) if ci + 1 < len(line) else None
+            kern = (g["kern"].get(nxt, 0.0)
+                    if g is not None and nxt is not None else 0.0)
             if g is None or g["lh"] <= 1:
                 if g is None and ch != " ":
                     missing.add(ch)
-                pen += (g["adv"] if g is not None else sp_adv) + tracking
+                pen += ((g["adv"] if g is not None else sp_adv)
+                        + kern + tracking)
                 continue
             try:
                 img = loader(g)
             except (OSError, FontError):
                 missing.add(ch)
-                pen += g["adv"] + tracking
+                pen += g["adv"] + kern + tracking
                 continue
             x = pen + g["bx"]
             y = base_y - g["by"]
             placed.append((x, y, img))
             min_x = min(min_x, x)
             max_x = max(max_x, x + img.size[0], pen + g["adv"])
-            pen += g["adv"] + tracking
+            pen += g["adv"] + kern + tracking
         max_x = max(max_x, pen)
     n_lines = text.count("\n") + 1
     W = max(1, int(round(max_x - min_x)))

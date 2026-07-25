@@ -818,13 +818,16 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 # Trailing metrics columns (rot + the record's layout floats
                 # -- see radium.py's format comment) feed the Font Preview /
                 # Import renderer; older readers only parse the first 8.
+                # kern: ";"-joined 0xRIGHT:adjust pairs (usually empty).
                 gw, gh, bx, by, adv = g["metrics"]
+                kern = ";".join("0x%04X:%g" % (c, v)
+                                for c, v in sorted(g["kern"].items()))
                 glyph_manifest.append(
                     "%s\t%s\t0x%04X\t%d\t%d\t%d\t%d\t%s\t%d\t%g\t%g\t%g\t%g"
-                    "\t%g\t%s"
+                    "\t%g\t%s\t%s"
                     % (g_rel, atlas_rel, g["char"], x, y, w, hh,
                        table["name"], int(g["rot"]), gw, gh, bx, by, adv,
-                       table_key))
+                       table_key, kern))
                 n_glyphs += 1
             # every glyph of a table shares its per-atlas dedupe fate; mark
             # the table's atlases done only after the whole table is sliced
@@ -847,7 +850,7 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                       encoding="utf-8") as f:
                 f.write("# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont"
                         "\trot\tglyph_w\tglyph_h\tbearing_x\tbearing_y"
-                        "\tadvance\ttable\n"
+                        "\tadvance\ttable\tkern\n"
                         + "\n".join(glyph_manifest) + "\n")
         except Exception:
             pass

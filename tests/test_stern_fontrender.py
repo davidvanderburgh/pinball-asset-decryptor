@@ -192,6 +192,18 @@ def test_render_text_layout_and_pixels(tmp_path):
     assert arr[6].max() == 0
 
 
+def test_render_text_applies_kerning(tmp_path):
+    _make_extract(tmp_path)
+    fo = _font(tmp_path)
+    img_plain, _ = fr.render_text(fo, "AB")
+    fo["glyphs"][ord("A")]["kern"] = {ord("B"): -3.0}
+    img_kern, _ = fr.render_text(fo, "AB")
+    assert img_kern.size[0] == img_plain.size[0] - 3
+    arr = np.asarray(img_kern)
+    # 'B' (blue) starts 3px earlier: at pen 6-3=3
+    assert tuple(arr[0, 3]) == BLUE
+
+
 def test_render_text_missing_and_multiline(tmp_path):
     _make_extract(tmp_path)
     fo = _font(tmp_path)

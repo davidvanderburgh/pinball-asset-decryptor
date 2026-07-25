@@ -207,7 +207,8 @@ def display_texts(data):
 #                                 reference to an already-introduced handle
 #         inline atlas: [u32 texW][u32 texH][u32 fmt(4|5)][u32 0][u32 0]
 #                       [u32 length][length bytes of BC1/BC3 blocks]
-#       8x u8 zeros
+#       kerning table: [u64 count][count x (u16 right-char, f32 advance
+#                      adjust)] -- count 0 (8 zero bytes) on most tables
 #
 # The atlas images themselves are exactly the inline BC3/BC1 images
 # ``engine.parse_radium_images`` already finds (the introducing handle sits 28
@@ -215,6 +216,14 @@ def display_texts(data):
 # parses and the existing atlas PNG extract/patch codec is reused unchanged.
 # Some glyphs are stored ROTATED 90 degrees in the atlas (the packer's choice);
 # they are sliced/pasted as stored.
+#
+# The record tail (formerly assumed "8x u8 zeros") is really a KERNING table:
+# [u64 pair count][count x (u16 right-char, f32 advance adjust)] — count is 0
+# on every TMNT 1.59 table (why the zeros assumption held there), but e.g.
+# Munsters 1.27 kerns ('-' vs A = -4.0), and the old strict-zeros check made
+# every kerned table vanish (Peter: scenes showed their font atlases but
+# "Fonts (0)").  Pair chars must be members of the font's own char array —
+# that keeps the anchor validation as strict as the zeros check was.
 MAX_GLYPHS = 4096
 _GLYPH_HEAD = struct.Struct("<HI")          # char, handle
 _GLYPH_RECT_OFF = 2 + 4 + 28 + 1            # head + 7 metrics floats + flag
@@ -253,10 +262,12 @@ def _parse_glyph_records(data, off, chars):
     """Parse ``len(chars)`` glyph records at *off*; every field is validated,
     so a false anchor cannot survive.  Returns ``(glyphs, end_off)`` with
     ``glyphs = [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None,
-    metrics, rot)]`` -- ``metrics = (w, h, bearing_x, bearing_y, advance)``,
-    ``rot`` true when the bitmap is stored rotated 90° CW in the atlas -- or
+    metrics, rot, kern)]`` -- ``metrics = (w, h, bearing_x, bearing_y,
+    advance)``, ``rot`` true when the bitmap is stored rotated 90° CW in the
+    atlas, ``kern = {right_char: advance_adjust}`` (usually empty) -- or
     ``None`` on any mismatch."""
     n = len(data)
+    charset = set(chars)
     glyphs = []
     for want in chars:
         if off + _GLYPH_TEX_OFF + 4 > n:
@@ -290,11 +301,25 @@ def _parse_glyph_records(data, off, chars):
                 return None
             atlas = dict(data_off=pos, length=ln, tex_w=tw, tex_h=th, fmt=fmt)
             pos += ln
-        if data[pos:pos + 8] != b"\x00" * 8:
+        # Kerning table: [u64 count][count x (u16 right-char, f32 adjust)].
+        # Count 0 (the common case) is the 8 zero bytes this parser used to
+        # require; pair chars must belong to the font's own char array so a
+        # false anchor still cannot survive.
+        if pos + 8 > n:
+            return None
+        kn = struct.unpack_from("<Q", data, pos)[0]
+        if kn > MAX_GLYPHS or pos + 8 + 6 * kn > n:
             return None
         pos += 8
+        kern = {}
+        for _k in range(kn):
+            kch = struct.unpack_from("<H", data, pos)[0]
+            if kch not in charset:
+                return None
+            kern[kch] = struct.unpack_from("<f", data, pos + 2)[0]
+            pos += 6
         glyphs.append((ch, (u0, v0, u1, v1), tex & 0xFFFFFF, atlas,
-                       metrics, rot))
+                       metrics, rot, kern))
         off = pos
     return glyphs, off
 
@@ -368,8 +393,9 @@ def parse_glyph_tables(data, images):
                         {"char": ch, "rect": rect,
                          "atlas": (by_off.get(inl["data_off"]) if inl
                                    else by_handle.get(ref) if ref else None),
-                         "metrics": metrics, "rot": rot}
-                        for ch, rect, ref, inl, metrics, rot in glyphs],
+                         "metrics": metrics, "rot": rot, "kern": kern}
+                        for ch, rect, ref, inl, metrics, rot, kern
+                        in glyphs],
                 })
                 done_until = end
                 break

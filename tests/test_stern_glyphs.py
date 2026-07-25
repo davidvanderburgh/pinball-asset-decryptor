@@ -45,11 +45,12 @@ def _atlas_raw(w=16, h=16):
 
 
 def _glyph_record(char, handle, rect, tex=0, inline=None,
-                  metrics=(1.0, 1.0, 0.0, 0.0, 20.0), flag=0):
+                  metrics=(1.0, 1.0, 0.0, 0.0, 20.0), flag=0, kern=()):
     """One glyph-table record.  *inline* = ``(raw, w, h, fmt)`` embeds the
     atlas image (its first user introduces it); *tex* alone is a handle
     back-reference (0 = no bitmap).  *metrics* = (w, h, bearing_x,
-    bearing_y, advance); *flag* bit0 = stored rotated."""
+    bearing_y, advance); *flag* bit0 = stored rotated; *kern* =
+    ((right_char, adjust), ...) pair-kerning entries."""
     b = struct.pack("<HI", char, 0x80000000 | handle)
     b += _f32s(*(tuple(metrics) + (0.0, 0.0)))
     b += bytes([flag])
@@ -60,7 +61,9 @@ def _glyph_record(char, handle, rect, tex=0, inline=None,
         b += struct.pack("<6I", tw, th, fmt, 0, 0, len(raw)) + raw
     else:
         b += struct.pack("<I", tex)
-    b += b"\x00" * 8
+    b += struct.pack("<Q", len(kern))
+    for kch, adj in kern:
+        b += struct.pack("<Hf", kch, adj)
     return b
 
 
@@ -112,6 +115,36 @@ def test_parse_glyph_tables_inline_backref_and_none():
     # layout metrics + rotation flag pass through (Font Preview / Import)
     assert gs[0x41]["metrics"] == (1.0, 1.0, 0.0, 0.0, 20.0)
     assert gs[0x41]["rot"] is False
+    assert gs[0x41]["kern"] == {}
+
+
+def test_parse_glyph_tables_kerning(tmp_path):
+    """A record tail with kerning pairs (Munsters '-' vs A/B — Peter's
+    scenes-without-fonts) parses, and pair chars outside the font's char
+    array reject the table (the strictness the old zeros check provided)."""
+    raw, _rgba = _atlas_raw(16, 16)
+    recs = [
+        (0x41, _glyph_record(0x41, 3, (0.25, 0.25, 0.5, 0.5), tex=5,
+                             inline=(raw, 16, 16, 5),
+                             kern=((0x42, -4.0), (0x43, 2.5)))),
+        (0x42, _glyph_record(0x42, 6, (0.5, 0.5, 0.75, 1.0), tex=5)),
+        (0x43, _glyph_record(0x43, 7, (0.0, 0.5, 0.25, 1.0), tex=5)),
+    ]
+    blob = _font_blob(recs)
+    tables = rad.parse_glyph_tables(blob, engine.parse_radium_images(blob))
+    assert len(tables) == 1
+    gs = {g["char"]: g for g in tables[0]["glyphs"]}
+    assert gs[0x41]["kern"] == {0x42: -4.0, 0x43: 2.5}
+    assert gs[0x42]["kern"] == {}
+    # a kern pair char that is NOT in the char array -> table rejected
+    bad_recs = [
+        (0x41, _glyph_record(0x41, 3, (0.25, 0.25, 0.5, 0.5), tex=5,
+                             inline=(raw, 16, 16, 5),
+                             kern=((0x5A, -4.0),))),   # 'Z' not in table
+        (0x42, _glyph_record(0x42, 6, (0.5, 0.5, 0.75, 1.0), tex=5)),
+    ]
+    bad = _font_blob(bad_recs)
+    assert rad.parse_glyph_tables(bad, engine.parse_radium_images(bad)) == []
 
 
 def test_parse_glyph_tables_rejects_corruption():
@@ -320,7 +353,8 @@ def test_extract_writes_metrics_and_font_loader_roundtrip(tmp_path):
     recs = [
         (0x41, _glyph_record(0x41, 4, (0.25, 0.25, 0.5, 0.5), tex=5,
                              inline=(raw, 16, 16, 5),
-                             metrics=(4.0, 4.0, 1.0, 4.0, 6.0))),
+                             metrics=(4.0, 4.0, 1.0, 4.0, 6.0),
+                             kern=((0x42, -1.5),))),
         (0x42, _glyph_record(0x42, 6, (0.5, 0.5, 0.75, 1.0), tex=5,
                              metrics=(8.0, 4.0, 0.0, 4.0, 9.0), flag=1)),
     ]
@@ -335,6 +369,7 @@ def test_extract_writes_metrics_and_font_loader_roundtrip(tmp_path):
     A = fo["glyphs"][0x41]
     assert (A["lw"], A["lh"], A["bx"], A["by"], A["adv"]) == (4, 4, 1, 4, 6)
     assert not A["rot"]
+    assert A["kern"] == {0x42: -1.5}          # survived the manifest round trip
     B = fo["glyphs"][0x42]
     assert B["rot"]
     assert (B["w"], B["h"]) == (4, 8)            # as stored in the atlas

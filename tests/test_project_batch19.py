@@ -118,10 +118,14 @@ def test_registry_touch_dedup_and_order():
     s = {}
     project_registry.touch(s, r"C:\p\one", manufacturer="stern", stamp="t1")
     project_registry.touch(s, r"C:\p\two", manufacturer="jjp", stamp="t2")
-    # Re-touch one with a different case — dedups, moves to head, keeps mfr.
-    project_registry.touch(s, r"c:\P\ONE", stamp="t3")
+    # Re-touch the first entry — dedups, moves to head, keeps its
+    # manufacturer.  Dedup is normcase-based, so the case-variant spelling
+    # only folds together on Windows (POSIX paths are case-sensitive and
+    # normcase is rightly a no-op there — CI caught this on macOS/Linux).
+    variant = r"c:\P\ONE" if os.name == "nt" else r"C:\p\one"
+    project_registry.touch(s, variant, stamp="t3")
     ents = project_registry.entries(s)
-    assert [e["folder"] for e in ents] == [r"c:\P\ONE", r"C:\p\two"]
+    assert [e["folder"] for e in ents] == [variant, r"C:\p\two"]
     assert ents[0]["manufacturer"] == "stern"
     assert ents[0]["last_opened"] == "t3"
 
@@ -130,7 +134,8 @@ def test_registry_remove_and_relocate():
     s = {}
     project_registry.touch(s, r"C:\p\one", stamp="t1")
     project_registry.touch(s, r"C:\p\two", stamp="t2")
-    assert project_registry.remove(s, r"C:\P\ONE") is True
+    variant = r"C:\P\ONE" if os.name == "nt" else r"C:\p\one"
+    assert project_registry.remove(s, variant) is True
     assert [e["folder"] for e in project_registry.entries(s)] == [r"C:\p\two"]
     assert project_registry.relocate(s, r"C:\p\two", r"D:\moved\two") is True
     assert project_registry.entries(s)[0]["folder"] == r"D:\moved\two"

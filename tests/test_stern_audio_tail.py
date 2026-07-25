@@ -1070,11 +1070,14 @@ def test_apply_slot_seed_makes_silence_tonal_but_inaudible():
 
 
 def test_encoders_apply_slot_seed(monkeypatch):
-    """_encode_mono/_stereo feed the seed into the fitted target when on."""
+    """_encode_mono/_stereo feed the explicit PAD_STERN_SLOT_SEED_DB seed into the
+    fitted target, honouring the per-slot experiment gate.  The always-on blip-
+    free seed is disabled here (kill switch) so this isolates the explicit path."""
     import types
     import numpy as np
     from pinball_decryptor.plugins.stern import engine as E
     monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "-65")
+    monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")   # isolate the explicit seed
     captured = {}
 
     class FakeGR:
@@ -1100,6 +1103,37 @@ def test_encoders_apply_slot_seed(monkeypatch):
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
                    "x.wav", np)
     assert int(np.abs(captured["tgt"]).max()) == 0     # gated out -> silent
+
+
+def test_encoders_seed_near_silence_by_default(monkeypatch):
+    """Blip-free callouts are on by default, so a near-silent replacement is
+    auto-seeded (pure silence is degenerate for the firmware cave -- it decodes
+    to loud garbage).  PAD_STERN_SKIP_KEYPATCH=1 (kill switch) turns it off."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+    monkeypatch.delenv("PAD_STERN_SLOT_SEED_DB", raising=False)
+    monkeypatch.delenv("PAD_STERN_EXPERIMENT_IDXS", raising=False)
+    monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
+    captured = {}
+
+    class FakeGR:
+        def encode_sound(self, p, tgt):
+            captured["tgt"] = np.asarray(tgt)
+            return 0, b"\0" * 8
+
+    monkeypatch.setattr(E, "_load_wav", lambda *a, **k: np.zeros(4000, np.int64))
+    monkeypatch.setattr(E, "_resolve_shared_boundary", lambda *a, **k: b"\0" * 8)
+    monkeypatch.setattr(E, "_apply_stock_head", lambda *a, **k: (b"\0" * 8, False))
+    monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
+    E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
+                   "x.wav", np)
+    assert int(np.abs(captured["tgt"]).max()) > 0      # auto-seeded (default on)
+
+    monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch
+    captured.clear()
+    E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
+                   "x.wav", np)
+    assert int(np.abs(captured["tgt"]).max()) == 0     # disabled -> no seed
 
 
 def test_experiment_covers_idx_scope(monkeypatch):

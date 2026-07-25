@@ -6940,7 +6940,6 @@ class MainWindow:
         "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free": False,
     }
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
@@ -7072,26 +7071,6 @@ class MainWindow:
                  "leave others as an on-card A/B. Experimental, "
                  "hardware-unverified.").pack(anchor=tk.W, padx=12, pady=(2, 8))
 
-        # Blip-free callouts (Path A firmware cave — LZ 1.22 LE only).
-        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free")))
-        ttk.Checkbutton(
-            dlg, variable=blip_var,
-            text="Blip-free callouts (patch the firmware; Led Zeppelin LE "
-                 "1.22 only)").pack(anchor=tk.W, padx=12, pady=(8, 0))
-        ttk.Label(
-            dlg, justify=tk.LEFT, wraplength=460,
-            font=(_SANS_FONT, 8, "italic"),
-            text="Removes the ~6 ms scrap of the ORIGINAL callout that plays at "
-                 "two points inside every re-encoded sound. Normally the game's "
-                 "firmware reads a little of each sound's body to set up its "
-                 "decoder, so we must leave those bytes stock — you hear the old "
-                 "callout blip through. This instead patches the game firmware "
-                 "so it reads those set-up bytes from a stashed stock copy, "
-                 "letting your audio fill the whole callout. Only for Led "
-                 "Zeppelin LE 1.22 (other titles are refused automatically). "
-                 "Experimental, hardware-unverified — keep a stock re-flash "
-                 "handy.").pack(anchor=tk.W, padx=12, pady=(2, 8))
-
         prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
         ttk.Checkbutton(
             dlg, variable=prev_var,
@@ -7129,7 +7108,6 @@ class MainWindow:
                 "experiment_idxs": idxs,
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
-                "blip_free": bool(blip_var.get()),
             }
 
         def _ok(_e=None):
@@ -7154,7 +7132,6 @@ class MainWindow:
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
-            blip_var.set(False)
             declick_var.set(False)
 
         btns = ttk.Frame(dlg)

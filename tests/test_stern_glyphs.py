@@ -153,11 +153,16 @@ def test_parse_glyph_tables_rejects_corruption():
     ok = rad.parse_glyph_tables(blob, imgs)
     assert len(ok) == 1
     table_off = ok[0]["table_off"]
-    # a record char that doesn't match the char array -> table dropped
+    # a record char that doesn't match the char array: the array-paired walk
+    # drops it, but the ARRAY-LESS pass (outline-font support) legitimately
+    # accepts the record run on its own terms -- records carry their own
+    # ascending chars (0x21, 0x41, 0x42), so the table survives with THOSE
     bad = bytearray(blob)
     struct.pack_into("<H", bad, table_off + 8, 0x21)
-    assert rad.parse_glyph_tables(bytes(bad),
-                                  engine.parse_radium_images(bytes(bad))) == []
+    rescued = rad.parse_glyph_tables(bytes(bad),
+                                     engine.parse_radium_images(bytes(bad)))
+    assert [g["char"] for t in rescued for g in t["glyphs"]] == [0x21, 0x41,
+                                                                0x42]
     # a nonzero byte in a record's 8-zero tail -> table dropped
     bad = bytearray(blob)
     bad[table_off + 8 + len(_glyph_record(0x20, 3, (0, 0, 0, 0))) - 1] = 1
@@ -165,6 +170,32 @@ def test_parse_glyph_tables_rejects_corruption():
                                   engine.parse_radium_images(bytes(bad))) == []
     # plain data has no tables
     assert rad.parse_glyph_tables(b"\x00" * 4096, []) == []
+
+
+def test_parse_glyph_tables_arrayless_outline_variant():
+    """Outline companion fonts (Munsters Stern_CenturyBold_Outline) have NO
+    char array — [u64 N] runs straight into N records carrying their own
+    ascending chars, which may start with control glyphs (0x0000, 0x000D)."""
+    raw, _rgba = _atlas_raw(16, 16)
+    recs = [
+        _glyph_record(0x0000, 3, (0.0, 0.0, 0.0, 0.0), tex=0),
+        _glyph_record(0x000D, 4, (0.0, 0.0, 0.0, 0.0), tex=0),
+        _glyph_record(0x41, 5, (0.25, 0.25, 0.5, 0.5), tex=7,
+                      inline=(raw, 16, 16, 5)),
+    ]
+    name = "OutlineFace"
+    blob = b"\x7f" * 24
+    blob += struct.pack("<Q", len(name)) + name.encode()
+    blob += struct.pack("<Q", len(recs))
+    for r in recs:
+        blob += r
+    blob += b"\x7f" * 8
+    tables = rad.parse_glyph_tables(blob, engine.parse_radium_images(blob))
+    assert len(tables) == 1
+    t = tables[0]
+    assert t["name"] == name
+    assert [g["char"] for g in t["glyphs"]] == [0x0000, 0x000D, 0x41]
+    assert t["glyphs"][2]["atlas"] is not None
 
 
 def test_glyph_px_rect():

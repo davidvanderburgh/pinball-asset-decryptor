@@ -252,28 +252,48 @@ def _find_char_arrays(data, skip_ranges):
             cnt = struct.unpack_from("<Q", data, i)[0]
             if 2 <= cnt <= MAX_GLYPHS and i + 8 + 2 * cnt <= n:
                 chars = struct.unpack_from("<%dH" % cnt, data, i + 8)
-                if (chars[0] >= 0x20
-                        and all(a < b for a, b in zip(chars, chars[1:]))):
+                # No floor on chars[0]: outline fonts lead with control
+                # glyphs — Munsters Stern_CenturyBold starts 0x0000, 0x000D
+                # (null + newline) and was invisible while the old
+                # ``chars[0] >= 0x20`` rule stood.  Strict ascent plus the
+                # full record walk (repeat count, handles, UV ranges,
+                # kerning charset) still reject every false anchor.
+                if all(a < b for a, b in zip(chars, chars[1:])):
                     yield i, chars
         p = data.find(b"\x00\x00\x00\x00\x00\x00", p + 1)
 
 
-def _parse_glyph_records(data, off, chars):
-    """Parse ``len(chars)`` glyph records at *off*; every field is validated,
-    so a false anchor cannot survive.  Returns ``(glyphs, end_off)`` with
-    ``glyphs = [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None,
-    metrics, rot, kern)]`` -- ``metrics = (w, h, bearing_x, bearing_y,
-    advance)``, ``rot`` true when the bitmap is stored rotated 90° CW in the
-    atlas, ``kern = {right_char: advance_adjust}`` (usually empty) -- or
-    ``None`` on any mismatch."""
+def _parse_glyph_records(data, off, chars, count=None):
+    """Parse glyph records at *off*; every field is validated, so a false
+    anchor cannot survive.  Returns ``(glyphs, end_off)`` with ``glyphs =
+    [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None, metrics, rot,
+    kern)]`` -- ``metrics = (w, h, bearing_x, bearing_y, advance)``, ``rot``
+    true when the bitmap is stored rotated 90° CW in the atlas, ``kern =
+    {right_char: advance_adjust}`` (usually empty) -- or ``None`` on any
+    mismatch.
+
+    Two callers: with *chars* (records must match the char array 1:1 -- the
+    common table form) or with ``chars=None`` and *count* (ARRAY-LESS tables,
+    e.g. Munsters' Stern_CenturyBold_Outline: records carry their own char
+    codes, required to be strictly ascending; kerning chars are validated
+    against the collected set after the walk)."""
     n = len(data)
-    charset = set(chars)
+    arrayless = chars is None
+    charset = None if arrayless else set(chars)
+    want_iter = range(count) if arrayless else chars
+    prev_ch = -1
     glyphs = []
-    for want in chars:
+    for want in want_iter:
         if off + _GLYPH_TEX_OFF + 4 > n:
             return None
         ch, handle = _GLYPH_HEAD.unpack_from(data, off)
-        if ch != want or handle >> 24 != 0x80:
+        if handle >> 24 != 0x80:
+            return None
+        if arrayless:
+            if ch <= prev_ch:
+                return None
+            prev_ch = ch
+        elif ch != want:
             return None
         metrics = struct.unpack_from("<5f", data, off + 6)
         rot = bool(data[off + 6 + 28] & 1)
@@ -314,13 +334,20 @@ def _parse_glyph_records(data, off, chars):
         kern = {}
         for _k in range(kn):
             kch = struct.unpack_from("<H", data, pos)[0]
-            if kch not in charset:
+            if charset is not None and kch not in charset:
                 return None
             kern[kch] = struct.unpack_from("<f", data, pos + 2)[0]
             pos += 6
         glyphs.append((ch, (u0, v0, u1, v1), tex & 0xFFFFFF, atlas,
                        metrics, rot, kern))
         off = pos
+    if arrayless:
+        # kerning chars were unchecked during the walk (the charset wasn't
+        # known yet) -- enforce membership now so validation stays strict
+        got = {g[0] for g in glyphs}
+        for g in glyphs:
+            if not set(g[6]) <= got:
+                return None
     return glyphs, off
 
 
@@ -372,7 +399,21 @@ def parse_glyph_tables(data, images):
                 by_handle[h & 0xFFFFFF] = im
     ranges.sort()
 
+    def _emit(j, glyphs, end):
+        out.append({
+            "name": _nearest_name_before(data, j),
+            "table_off": j,
+            "glyphs": [
+                {"char": ch, "rect": rect,
+                 "atlas": (by_off.get(inl["data_off"]) if inl
+                           else by_handle.get(ref) if ref else None),
+                 "metrics": metrics, "rot": rot, "kern": kern}
+                for ch, rect, ref, inl, metrics, rot, kern in glyphs],
+        })
+        spans.append((j, end))
+
     out = []
+    spans = []                            # (table_off, end) claimed regions
     done_until = 0
     for arr_off, chars in _find_char_arrays(data, ranges):
         if arr_off < done_until:
@@ -386,20 +427,36 @@ def parse_glyph_tables(data, images):
             res = _parse_glyph_records(data, j + 8, chars)
             if res is not None:
                 glyphs, end = res
-                out.append({
-                    "name": _nearest_name_before(data, j),
-                    "table_off": j,
-                    "glyphs": [
-                        {"char": ch, "rect": rect,
-                         "atlas": (by_off.get(inl["data_off"]) if inl
-                                   else by_handle.get(ref) if ref else None),
-                         "metrics": metrics, "rot": rot, "kern": kern}
-                        for ch, rect, ref, inl, metrics, rot, kern
-                        in glyphs],
-                })
+                _emit(j, glyphs, end)
                 done_until = end
                 break
             j = data.find(needle, j + 1, arr_end + 4096)
+
+    # ---- pass 2: ARRAY-LESS tables ------------------------------------
+    # Outline companion fonts (e.g. Stern_CenturyBold_Outline) serialize
+    # [u64 N] straight into N records with NO preceding char array; the
+    # records carry their own strictly-ascending char codes.  Anchor on the
+    # same six-zero-bytes count pattern; the full record walk is the gate.
+    ri = 0
+    p = data.find(b"\x00\x00\x00\x00\x00\x00")
+    while p >= 0:
+        i = p - 2
+        while ri < len(ranges) and ranges[ri][1] <= i:
+            ri += 1
+        if ri < len(ranges) and ranges[ri][0] <= i:
+            p = data.find(b"\x00\x00\x00\x00\x00\x00", ranges[ri][1] + 2)
+            continue
+        if i >= 0 and not any(a <= i < b for a, b in spans):
+            cnt = struct.unpack_from("<Q", data, i)[0]
+            if 2 <= cnt <= MAX_GLYPHS:
+                res = _parse_glyph_records(data, i + 8, None, count=cnt)
+                if res is not None:
+                    glyphs, end = res
+                    _emit(i, glyphs, end)
+                    p = data.find(b"\x00\x00\x00\x00\x00\x00", end)
+                    continue
+        p = data.find(b"\x00\x00\x00\x00\x00\x00", p + 1)
+    out.sort(key=lambda t: t["table_off"])
     return out
 
 

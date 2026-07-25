@@ -301,11 +301,17 @@ def _core_chars(slots):
     return core or slots
 
 
-def fit_size(measure, slots, lo=2, hi=512):
+def fit_size(measure, slots, lo=2, hi=512, squeeze=1.0):
     """Largest integer size for which ``measure(size)`` — ``{char: (ink_w,
     ink_h) or None}`` — fits every CORE slot's upright box (letters/digits;
     see :func:`_core_chars`).  0 when even *lo* doesn't fit.  Pure bisection
-    so the sizing rule is unit-testable apart from any rasterizer."""
+    so the sizing rule is unit-testable apart from any rasterizer.
+
+    *squeeze* < 1 relaxes the WIDTH constraint: ink may be up to
+    ``lw / squeeze`` wide because the rasterizer will compress it
+    horizontally into the slot (Peter: a wide typeface otherwise lets its
+    'W' crush the whole font to a fraction of the slot height — height
+    should govern the size, width gets a bounded squeeze)."""
     core = _core_chars(slots)
 
     def ok(size):
@@ -314,7 +320,7 @@ def fit_size(measure, slots, lo=2, hi=512):
             ink = inks.get(ch)
             if ink is None:
                 continue                    # char unavailable: keep original
-            if ink[0] > g["lw"] or ink[1] > g["lh"]:
+            if ink[0] > g["lw"] / squeeze or ink[1] > g["lh"]:
                 return False
         return True
     if not ok(lo):
@@ -348,7 +354,7 @@ def _draw_char(ch, ttf, color, stroke, stroke_color):
 
 
 def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
-                  size_scale=1.0):
+                  size_scale=1.0, squeeze=0.6):
     """Fit the desktop font at *ttf_path* into *font*'s glyph slots.
 
     Picks ONE uniform pixel size — the largest at which every character's ink
@@ -356,6 +362,13 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
     *size_scale* (≤1 to taste) — then renders each character baseline-aligned
     into its slot, clamped inside it, centered horizontally.  Characters the
     TTF cannot draw keep their original bitmaps and are reported.
+
+    HEIGHT governs the size: a letter whose ink is too WIDE for its slot is
+    compressed horizontally at raster time, down to *squeeze* (0.6 = ink may
+    be squeezed to 60% of its natural width before the whole font shrinks
+    instead).  Without this, one wide 'W' crushes a wide typeface to a
+    fraction of the slot height (Peter's turtle font).  ``squeeze=1.0``
+    restores strict keep-aspect fitting.
 
     Returns ``(slices, size, kept)``: *slices* maps char → as-stored RGBA
     (rotated slots pre-rotated, exact atlas-rect dims — save these over the
@@ -396,7 +409,7 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
             out[ch] = (x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
         return out
 
-    size = fit_size(measure, slots)
+    size = fit_size(measure, slots, squeeze=squeeze)
     if size <= 0:
         raise FontError("the font doesn't fit this glyph table even at 2px")
     size = max(2, int(round(size * size_scale)))
@@ -411,10 +424,14 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
         ink, asc_ink, _desc_ink = r
         lw, lh = int(g["lw"]), int(g["lh"])
         if ink.size[0] > lw or ink.size[1] > lh:
-            # getbbox measured, the raster can bleed a px past it — shrink
-            s = min(lw / ink.size[0], lh / ink.size[1])
-            nw = max(1, int(ink.size[0] * s))
-            nh = max(1, int(ink.size[1] * s))
+            if ink.size[1] <= lh:
+                # width-only overflow: SQUEEZE horizontally into the slot —
+                # a wide typeface keeps its height instead of shrinking
+                nw, nh = lw, ink.size[1]
+            else:
+                s = min(lw / ink.size[0], lh / ink.size[1])
+                nw = max(1, int(ink.size[0] * s))
+                nh = max(1, int(ink.size[1] * s))
             asc_ink = asc_ink * nh / ink.size[1]
             ink = ink.resize((nw, nh), Image.LANCZOS)
         x = max(0, (lw - ink.size[0]) // 2)

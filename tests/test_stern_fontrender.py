@@ -238,6 +238,19 @@ def test_fit_size_core_chars_only():
     assert fr.fit_size(measure, {ord("_"): {"lw": 30, "lh": 3}}) == 3
 
 
+def test_fit_size_squeeze_lets_height_govern():
+    """Peter round 2: a wide typeface must not be crushed by its widest
+    letter — with squeeze, width may overflow (raster compresses it) and
+    HEIGHT picks the size."""
+    slots = {ord("A"): {"lw": 10, "lh": 20}}
+
+    def measure(size):
+        return {ord("A"): (2 * size, size)}     # twice as wide as tall
+
+    assert fr.fit_size(measure, slots) == 5                  # strict: width
+    assert fr.fit_size(measure, slots, squeeze=0.5) == 10    # height + squeeze
+
+
 def test_fit_size_unfittable():
     slots = {ord("A"): {"lw": 1, "lh": 1}}
     assert fr.fit_size(lambda s: {ord("A"): (s + 5, s + 5)}, slots) == 0

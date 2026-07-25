@@ -594,10 +594,23 @@ keeps a per-manufacturer dropdown of your recent paths (handy when you
 bounce between games), and the **?** button in the top bar opens a tips
 page for whichever tab you're on.
 
-Working several game versions at once? **⚙ → Save project…** snapshots
-the whole setup — manufacturer, every Extract/Write path, and the
-Extract options — into a `.pinproj` file, and **Load project…** puts it
-all back in one go (the loaded project's name shows in the title bar).
+Working several game versions at once? Every extraction folder is a
+**project**: the folder you extract into carries a hidden project file
+recording the manufacturer, the stock image it came from, and your
+Extract options, so picking that folder again later restores the whole
+setup in one go (the active project's name shows in the title bar).
+There's nothing to manage — the project file appears automatically the
+first time you extract into a folder or stage a change.  The blue
+**folder button** next to Home holds the project actions: **New
+project…** starts a clean folder (with a preview of the structure it
+builds), **Save project as…** forks your current project — a plain full
+copy of its edited state, minus the rebuildable `build\` output — and
+**Projects…** lists every project the app has seen with sizes on disk,
+notes, and an **Archive** action that shrinks a dormant project to just
+its unique bytes (opening it later re-extracts to refill the rest).
+The Extract tab's **Project Folder** is the single source of truth:
+the Replace/Write tabs show it read-only, and the build lands in the
+project's own `build\` folder (changeable per project in Properties).
 The log survives sessions too: the log pane opens with the previous
 sessions' lines already in it — dimmed, above a clear cut line — so an
 app update or restart no longer wipes what you were looking at. Prefer

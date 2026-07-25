@@ -55,6 +55,13 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     excluded = {d.replace("\\", "/").strip("/")
                 for d in (exclude_dirs or ())}
     excluded.add(ORIG_DIR)
+    # Batch 19: the project's build output and the hydrate parking lot are
+    # generated state living INSIDE the project folder — never assets.  A
+    # baselined build image would make every re-extract flag a multi-GB
+    # "modified file"; .hydrate/ holds edited files mid-hydrate.  (The walk
+    # only skips dot-FILES on its own, so the dot-DIR needs listing too.)
+    excluded.add("build")
+    excluded.add(".hydrate")
     files = []
     for dirpath, dirnames, filenames in os.walk(folder):
         rel_dir = os.path.relpath(dirpath, folder).replace("\\", "/")

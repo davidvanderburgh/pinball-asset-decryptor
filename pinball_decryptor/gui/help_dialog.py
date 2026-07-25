@@ -37,10 +37,20 @@ HELP_CONTENT = {
          "badge offers a one-click switch."),
         ("What gets extracted",
          "The Audio / Video / Images / Text checkboxes choose which asset "
-         "types to pull. Everything lands in the Output Folder, which then "
-         "becomes your working assets folder on the Replace, Write and Mod "
-         "Pack tabs. These choices (and the auto-name options) are "
-         "remembered per manufacturer across sessions."),
+         "types to pull. Everything lands in the Project Folder — the one "
+         "folder the Replace, Write and Mod Pack tabs all work out of "
+         "(their folder rows are read-only views of this one). These "
+         "choices (and the auto-name options) are remembered per "
+         "manufacturer across sessions."),
+        ("Projects",
+         "The folder you extract into IS your project: a hidden project "
+         "file appears in it automatically (first extract or first staged "
+         "change) recording the manufacturer, stock image and options — "
+         "picking that folder again later restores the whole setup. The "
+         "blue folder button in the header holds the project actions: New, "
+         "Open, Save as (a full fork copy, minus the rebuildable build "
+         "output), Recent, the Projects list (sizes, notes, Archive to "
+         "reclaim disk space from dormant projects), and Properties."),
         ("Auto-naming",
          "\"Auto-name call-outs\" transcribes speech locally (the first run "
          "downloads a ~75 MB model, after that it works offline). "
@@ -63,7 +73,11 @@ HELP_CONTENT = {
          "changed — leave it in place."),
         ("Re-extracting",
          "Extracting into a non-empty folder overwrites your edits (after a "
-         "confirmation). Use a fresh output folder per firmware version."),
+         "confirmation). Use a fresh project folder per firmware version — "
+         "each project is one folder, one game version. (Extracting into an "
+         "ARCHIVED project is different: that's the hydrate — your edited "
+         "files are set aside first and restored over the fresh extraction "
+         "automatically.)"),
     ],
     "Replace Audio": [
         ("Scan and assign",
@@ -235,9 +249,12 @@ HELP_CONTENT = {
          "own full comparison, so there's no need to wait for the scan to "
          "finish before building."),
         ("Output name",
-         "Built images get a distinct default name (e.g. \"…-modified.raw\", "
-         "where supported) so they can't be mistaken for the stock file. "
-         "Typing a full filename into Build Location overrides it."),
+         "Builds land in the project's own build\\ folder — one build per "
+         "project, overwritten on each rebuild — with a distinct default "
+         "name (e.g. \"…-modified.raw\", where supported) so it can't be "
+         "mistaken for the stock file. \"Change…\" next to Build Location "
+         "moves it for this project (say, a local drive when the project "
+         "lives on a NAS); the File Name box renames the built file."),
         ("Undo",
          "\"Revert all changes…\" restores every changed asset back to its "
          "extract original (the build inputs, not any card)."),

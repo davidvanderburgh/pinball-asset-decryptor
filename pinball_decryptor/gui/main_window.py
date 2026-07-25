@@ -38,7 +38,7 @@ _SANS_FONT, _MONO_FONT = platform_font()
 
 # _Tooltip used to live here; moved to gui/widgets.py so picker.py can
 # also use it without importing main_window (circular).
-from .widgets import _Tooltip  # noqa: E402
+from .widgets import _Tooltip, center_over  # noqa: E402
 
 
 # Hover-tooltip text for the generic per-type Extract checkboxes
@@ -1003,6 +1003,14 @@ class MainWindow:
                  on_build_flash=None,
                  on_save_project=None,
                  on_load_project=None,
+                 on_new_project=None,
+                 on_save_project_as=None,
+                 on_project_properties=None,
+                 on_open_project_manager=None,
+                 on_open_recent_project=None,
+                 recent_projects_provider=None,
+                 on_project_folder_picked=None,
+                 on_folder_state_written=None,
                  initial_show_log_history=True,
                  on_show_log_history_change=None):
         self.root = root
@@ -1024,6 +1032,18 @@ class MainWindow:
         self._on_build_flash = on_build_flash
         self._on_save_project = on_save_project
         self._on_load_project = on_load_project
+        # Batch 19 project callbacks (all app-side): the Project ▾ menu's
+        # actions, the Recent-projects provider (returns registry entries),
+        # and the two materialization hooks (folder picked / folder state
+        # written).
+        self._on_new_project = on_new_project
+        self._on_save_project_as = on_save_project_as
+        self._on_project_properties = on_project_properties
+        self._on_open_project_manager = on_open_project_manager
+        self._on_open_recent_project = on_open_recent_project
+        self._recent_projects_provider = recent_projects_provider
+        self._on_project_folder_picked = on_project_folder_picked
+        self._on_folder_state_written = on_folder_state_written
         self._on_recheck_prereqs = on_recheck_prereqs
         self._on_install_prereqs = on_install_prereqs
         self._on_back = on_back
@@ -1493,6 +1513,22 @@ class MainWindow:
 
         self.extract_input_var.trace_add("write", self._update_extract_badge)
         self.write_upd_var.trace_add("write", self._update_write_badge)
+        # Batch 19 field collapse: the Extract tab is the project's single
+        # source of truth.  Its Input IS the stock image (the Write tab's
+        # Original mirrors it read-only) and its Project Folder IS the
+        # shared assets folder (every Replace/Write/Mod-pack row mirrors it
+        # read-only).  One-way mirrors — the mirrored vars have no other
+        # writers left in the UI.
+        self.extract_input_var.trace_add(
+            "write", lambda *_: self._mirror_stock_image())
+        self.extract_output_var.trace_add(
+            "write", lambda *_: self._mirror_project_folder())
+        # Build output derives from the project folder (<project>/build, or
+        # the anchor's build_dir override) — tracked like the File Name
+        # auto-fill so a custom location is never clobbered.
+        self._write_output_auto = ""
+        self.write_assets_var.trace_add(
+            "write", lambda *_: self._derive_build_output())
         # Default the Write Output Folder off the original image's location
         # the first time an original is picked (monkeybug: the box starting
         # blank forced an extra Browse; the -modified suffix already prevents
@@ -1584,6 +1620,29 @@ class MainWindow:
             top, self._gear_glyph, "#7e57c2", "#9575cd",
             "Settings", self._open_settings_menu)
         self._gear_btn.pack(side=tk.RIGHT)
+        # Project button — the fourth round header icon (batch 19).  Blue
+        # folder, LEFT cluster right of the home button (David: it feels at
+        # home there — it's navigation/context, not a settings-side
+        # control).  Projects moved OUT of the gear: the gear's charter is
+        # app-wide once-in-a-while settings, a project is the all-day
+        # working context (monkeybug point 1 — and he named "an icon" as
+        # the expected shape).  Always visible, INCLUDING the picker screen
+        # (where home hides): Open/Recent + auto-load jump straight into a
+        # project without picking a manufacturer first.
+        # U+E8B7 = Segoe MDL2 "Folder" (an escape, not a literal, so the
+        # private-use char cannot be dropped by an editor); text fallback
+        # elsewhere, same pattern as the home button glyph.
+        project_glyph = ("\ue8b7" if sys.platform == "win32"
+                         else "\U0001f5c0")
+        self._project_btn = self._make_round_icon(
+            top, project_glyph, "#2980b9", "#4aa3df",
+            "Project", self._open_project_menu)
+        # before=title puts it ahead of the title in the LEFT pack order;
+        # show_mfr_view packs the home button before=this, giving
+        # [home] [project] [title] in the working view and [project] [title]
+        # on the picker.
+        self._project_btn.pack(side=tk.LEFT, padx=(0, 8),
+                               before=self._title_lbl)
         # Notification marks drawn over the gear circle's corners: red dot =
         # update available, amber dot = staging cleanup pending.  Hidden
         # until _refresh_gear_badge shows them; the amounts/details live in
@@ -1960,8 +2019,12 @@ class MainWindow:
 
         self._extract_output_row_ref = ttk.Frame(f)
         self._extract_output_row_ref.pack(fill=tk.X, **pad)
+        # "Project Folder", not "Output Folder" (batch 19): this folder IS
+        # the project — extraction lands here, every Replace/Write tab works
+        # out of it (their rows are read-only mirrors of this one), and a
+        # folder containing a project anchor auto-loads that project.
         ttk.Label(self._extract_output_row_ref,
-                  text="Output Folder:", width=14, anchor=tk.W).pack(
+                  text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
         self._path_combo(self._extract_output_row_ref,
                          self.extract_output_var, "extract_output").pack(
@@ -1969,6 +2032,9 @@ class MainWindow:
         ttk.Button(self._extract_output_row_ref, text="Browse...",
                    command=self._browse_extract_output).pack(
             side=tk.LEFT, padx=(8, 0))
+        ttk.Label(f, text="(the project folder — extraction lands here, and "
+                          "every other tab's assets come from here)",
+                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         # NOTE: a red "Output folder is not empty — files may be overwritten."
         # label used to live here, but the Extract click already raises a
@@ -2359,14 +2425,16 @@ class MainWindow:
             self._write_upd_row, text="Original:", width=16, anchor=tk.W)
         self._write_original_lbl.pack(side=tk.LEFT)
         self._write_col_labels.append(self._write_original_lbl)
-        self._path_combo(self._write_upd_row,
-                         self.write_upd_var, "write_original").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        # Batch 19: read-only mirror of the Extract tab's Input — the stock
+        # image is ONE shared file, referenced, never a second copy to keep
+        # in sync (the ⓘ badge still opens Image Info on it).
+        ttk.Entry(self._write_upd_row, textvariable=self.write_upd_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._make_info_badge(self._write_upd_row,
                               self.write_upd_var).pack(
             side=tk.LEFT, padx=(6, 0))
-        ttk.Button(self._write_upd_row, text="Browse...",
-                   command=self._browse_write_upd).pack(
+        ttk.Button(self._write_upd_row, text="Set on Extract tab",
+                   command=self._jump_to_extract_tab).pack(
             side=tk.LEFT, padx=(6, 0))
         self._write_upd_row.pack(fill=tk.X, **pad)
 
@@ -2428,15 +2496,12 @@ class MainWindow:
         self._write_assets_row_ref = ttk.Frame(f)
         self._write_assets_row_ref.pack(fill=tk.X, **pad)
         _assets_lbl = ttk.Label(self._write_assets_row_ref,
-                                text="Modified Assets:", width=16, anchor=tk.W)
+                                text="Project Folder:", width=16, anchor=tk.W)
         _assets_lbl.pack(side=tk.LEFT)
         self._write_col_labels.append(_assets_lbl)
-        self._path_combo(self._write_assets_row_ref,
-                         self.write_assets_var, "write_assets").pack(
+        self._project_path_display(self._write_assets_row_ref,
+                                   self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(self._write_assets_row_ref, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(8, 0))
 
         # Inline warning that appears when the picked Modified Assets
         # folder doesn't contain a `.checksums.md5` baseline (the user
@@ -2519,11 +2584,14 @@ class MainWindow:
                              text="Build Location:", width=16, anchor=tk.W)
         _out_lbl.pack(side=tk.LEFT)
         self._write_col_labels.append(_out_lbl)
-        self._path_combo(self._write_output_row_ref,
-                         self.write_output_var, "write_output").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(self._write_output_row_ref, text="Browse...",
-                   command=self._browse_write_output).pack(
+        # Batch 19: derived — <project>/build by default, one build per
+        # project, self-overwriting.  "Change…" stores a per-project
+        # override (a NAS project can build to a local drive).
+        ttk.Entry(self._write_output_row_ref,
+                  textvariable=self.write_output_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(self._write_output_row_ref, text="Change...",
+                   command=self._change_build_location).pack(
             side=tk.LEFT, padx=(8, 0))
 
         # Editable name for the built file.  Shown/hidden alongside the Output
@@ -2743,15 +2811,12 @@ class MainWindow:
         # path variable), and two names for one thing read as two things
         # (monkeybug batch 14).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
-        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+        ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        self._path_combo(row, self.write_assets_var, "write_assets").pack(
+        self._project_path_display(row, self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse...",
-                   command=self._browse_write_assets).pack(
-            side=tk.LEFT, padx=(8, 0))
-        ttk.Label(f, text="(the same folder every Replace tab and the Write "
-                          "tab use)",
+        ttk.Label(f, text="(the project folder — every Replace tab and the "
+                          "Write tab work out of it)",
                   font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
         ttk.Separator(f, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=8)
@@ -2908,10 +2973,10 @@ class MainWindow:
         # Assets folder row (shared with the Write / Mod Pack tabs).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         self._audio_assets_row = row
-        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+        ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        self._path_combo(row, self.write_assets_var, "write_assets").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(row, textvariable=self.write_assets_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "audio",
                                        self._scan_audio_slots_async)
 
@@ -4299,6 +4364,7 @@ class MainWindow:
         dlg.bind("<Return>", _ok)
         dlg.bind("<Escape>", _cancel)
         combo.focus_set()
+        center_over(root, dlg)
         dlg.grab_set()
         root.wait_window(dlg)
         return result[0] if result else None
@@ -4823,10 +4889,10 @@ class MainWindow:
         # Assets folder row (shared with the Write / Replace Audio tabs).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         self._video_assets_row = row
-        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+        ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        self._path_combo(row, self.write_assets_var, "write_assets").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(row, textvariable=self.write_assets_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "video",
                                        self._scan_video_slots_async)
 
@@ -5815,10 +5881,10 @@ class MainWindow:
         # Assets folder row (shared with the Write / Replace Audio/Video tabs).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         self._image_assets_row = row
-        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+        ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        self._path_combo(row, self.write_assets_var, "write_assets").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(row, textvariable=self.write_assets_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "image",
                                        self._scan_image_slots_async)
 
@@ -7242,6 +7308,12 @@ class MainWindow:
             except Exception:
                 pass
         staged_changes.save(assets_dir, data)
+        # Batch 19 anchor materialization: a staged change is the app
+        # writing state into the folder, which is exactly when a folder
+        # becomes a project (same rule as extract — never on read-only
+        # browsing).  The app-side hook no-ops if the anchor exists.
+        if self._on_folder_state_written:
+            self._on_folder_state_written(assets_dir)
 
     # ==================================================================
     # Replace Text tab — edit the player-facing on-screen strings Extract
@@ -8725,6 +8797,9 @@ class MainWindow:
         data = staged_changes.load(assets_dir)
         data["settings"] = {k: int(v) for k, v in changes.items()}
         staged_changes.save(assets_dir, data)
+        # Staged settings are folder state too — see _save_staged_changes.
+        if self._on_folder_state_written:
+            self._on_folder_state_written(assets_dir)
         self._settings_refresh_staged_state()
         self._settings_status.configure(
             text="%d setting(s) staged — they'll be baked into the next "
@@ -8976,7 +9051,8 @@ class MainWindow:
         # Starts tall enough for a typical report; _info_fit_height then
         # grows the window to the collected content (screen-capped) so a
         # full Spike 2 report needs no vertical scrolling (peanuts).
-        win.geometry("780x560")
+        # Opens centered over the app like every dialog (David).
+        center_over(self.root, win, 780, 560)
         win.minsize(520, 300)
         self._theme_toplevel(win)
         self._info_win = win
@@ -9189,10 +9265,10 @@ class MainWindow:
         # Assets folder row (shared with the Write / other Replace tabs).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         self._text_assets_row = row
-        ttk.Label(row, text="Assets Folder:", width=14, anchor=tk.W).pack(
+        ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        self._path_combo(row, self.write_assets_var, "write_assets").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(row, textvariable=self.write_assets_var,
+                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
 
         # Search + status toolbar.
@@ -9648,6 +9724,9 @@ class MainWindow:
             return 0
         try:
             text_manifest.save(self._text_scan_dir, self._text_rows)
+            # Staged text edits are folder state — see _save_staged_changes.
+            if self._on_folder_state_written:
+                self._on_folder_state_written(self._text_scan_dir)
         except Exception as e:
             messagebox.showerror(
                 "Couldn't save",
@@ -9836,9 +9915,11 @@ class MainWindow:
     def show_mfr_view(self):
         """Display the working view for the currently-selected mfr."""
         self._picker_view.pack_forget()
-        # Pack Back left of the title, then re-pack title so it sits
-        # to the right of the Back button.
-        self._back_btn.pack(side=tk.LEFT, padx=(0, 8))
+        # Pack Back (home) leftmost — before the project button, which is
+        # already in the left group — then re-pack title so the left
+        # cluster reads [home] [project] [title] (David).
+        self._back_btn.pack(side=tk.LEFT, padx=(0, 8),
+                            before=self._project_btn)
         self._title_lbl.pack_forget()
         self._title_lbl.pack(side=tk.LEFT)
         # Era switcher sits just right of the title (only for multi-era plugins;
@@ -11569,6 +11650,7 @@ class MainWindow:
         dlg.bind("<Escape>", _cancel)
         entry.focus_set()
         entry.selection_range(0, tk.END)
+        center_over(root, dlg)
         dlg.grab_set()
         root.wait_window(dlg)
         return result[0] if result else None
@@ -12226,8 +12308,14 @@ class MainWindow:
             for root_dir, dirs, files in os.walk(assets_path):
                 # Skip the .orig snapshot mirror (core.staged_originals): its
                 # files aren't in the baseline anyway, but pruning avoids
-                # hashing a backup copy of every edited asset.
-                dirs[:] = [d for d in dirs if d != ORIG_DIR]
+                # hashing a backup copy of every edited asset.  Batch 19 also
+                # prunes the project's build output (a multi-GB image that
+                # would list as "modified") and the .hydrate parking lot
+                # (whose nested files don't start with "." themselves).
+                dirs[:] = [d for d in dirs
+                           if d != ORIG_DIR
+                           and not (root_dir == assets_path
+                                    and d in ("build", ".hydrate"))]
                 for name in files:
                     # Superseded (re-scan or Cancel) → stop hashing NOW.  The
                     # old check only ran when a changed file turned up, so a
@@ -12483,13 +12571,14 @@ class MainWindow:
             pass
 
     def _make_assets_scan_buttons(self, row, tab_key, scan_cmd):
-        """Build the shared *Browse… / Scan* pair for a Replace tab's assets
-        row and register them under *tab_key* so :meth:`_set_tab_scanning` can
-        disable + relabel them while a scan runs.  All four Replace tabs share
-        the same two buttons (Browse is always the folder picker); only the
-        Scan command differs."""
-        browse = ttk.Button(row, text="Browse...",
-                            command=self._browse_write_assets)
+        """Build the shared *Set on Extract tab / Scan* pair for a Replace
+        tab's project-folder row and register them under *tab_key* so
+        :meth:`_set_tab_scanning` can disable + relabel them while a scan
+        runs.  Batch 19: the per-tab folder Browse is gone — the folder is
+        the project folder, set once on the Extract tab; the button jumps
+        there instead of pretending this tab has its own folder."""
+        browse = ttk.Button(row, text="Set on Extract tab",
+                            command=self._jump_to_extract_tab)
         browse.pack(side=tk.LEFT, padx=(8, 0))
         scan = ttk.Button(row, text="Scan", command=scan_cmd)
         scan.pack(side=tk.LEFT, padx=(4, 0))
@@ -12774,11 +12863,35 @@ class MainWindow:
 
     def _browse_extract_output(self):
         path = filedialog.askdirectory(
-            title="Select output folder",
+            title="Select project folder",
             initialdir=self._initialdir_for(
                 self.extract_output_var.get(), self.extract_input_var.get()))
-        if path:
-            self.extract_output_var.set(os.path.normpath(path))
+        if not path:
+            return
+        # Drilled-into-a-subfolder correction (ported from the old
+        # per-tab assets Browse): a picked folder with no `.checksums.md5`
+        # but an ancestor that has one is almost certainly a subfolder of
+        # an existing extraction (e.g. `sound/` instead of its parent).
+        # Offer the real project folder rather than silently accepting a
+        # path that'll scan empty.
+        if not os.path.isfile(os.path.join(path, ".checksums.md5")):
+            parent_with_checksums = self._find_checksums_ancestor(path)
+            if parent_with_checksums and messagebox.askyesno(
+                    "Use parent folder?",
+                    "The folder you picked doesn't contain a "
+                    "`.checksums.md5` baseline, but its parent "
+                    f"`{parent_with_checksums}` does — that's the "
+                    "folder Extract produced.\n\n"
+                    "Use the parent folder instead?"):
+                path = parent_with_checksums
+        path = os.path.normpath(path)
+        self.extract_output_var.set(path)
+        # Batch 19 auto-load: a picked folder that already IS a project
+        # (has the hidden anchor) restores that whole project — the 1:1
+        # folder↔project rule (monkeybug).  The app decides whether to
+        # apply silently (same manufacturer) or ask first (it switches).
+        if self._on_project_folder_picked:
+            self._on_project_folder_picked(path)
 
     def _browse_transfer_src(self):
         path = filedialog.askdirectory(
@@ -12876,44 +12989,10 @@ class MainWindow:
         else:
             self.transfer_output_var.set("")
 
-    def _browse_write_upd(self):
-        path = filedialog.askopenfilename(
-            title="Select original update file",
-            filetypes=self._input_filetypes(),
-            initialdir=self._initialdir_for(self.write_upd_var.get()))
-        if path:
-            self.write_upd_var.set(os.path.normpath(path))
-
-    def _browse_write_assets(self):
-        path = filedialog.askdirectory(
-            title="Select modified assets folder",
-            initialdir=self._initialdir_for(
-                self.write_assets_var.get(), self.extract_output_var.get()))
-        if not path:
-            return
-        # If the picked folder has no `.checksums.md5` but a parent
-        # within a couple of levels does, the user almost certainly
-        # drilled into a subfolder of the Extract output by mistake
-        # (e.g. picked `sound/` when the real folder is its parent).
-        # Offer to use the parent rather than silently accepting a
-        # path that'll fail at Scan time.
-        if not os.path.isfile(os.path.join(path, ".checksums.md5")):
-            parent_with_checksums = self._find_checksums_ancestor(path)
-            if parent_with_checksums:
-                use_parent = messagebox.askyesno(
-                    "Use parent folder?",
-                    "The folder you picked doesn't contain a "
-                    "`.checksums.md5` baseline, but its parent "
-                    f"`{parent_with_checksums}` does — that's the "
-                    "folder Extract produced.\n\n"
-                    "Use the parent folder instead?")
-                if use_parent:
-                    path = parent_with_checksums
-        self.write_assets_var.set(os.path.normpath(path))
-        # Picking a folder is a strong signal the user wants to work with it —
-        # kick off the scan for whichever replace tab is open instead of making
-        # them click Scan separately.
-        self._autoscan_active_assets_tab()
+    # (_browse_write_upd / _browse_write_assets removed in batch 19 — the
+    # Write Original and every assets row are read-only mirrors of the
+    # Extract tab now; the subfolder correction moved into
+    # _browse_extract_output.)
 
     def _autoscan_active_assets_tab(self):
         """Scan the assets folder for whichever tab is currently visible."""
@@ -13071,16 +13150,88 @@ class MainWindow:
         """Post the settings dropdown under the header gear.  Dropped just
         under the button, right-aligned to it so it never runs off the
         window's right edge."""
-        menu = self._build_settings_menu()
+        self._post_header_menu(self._build_settings_menu(), self._gear_btn)
+
+    def _open_project_menu(self):
+        """Post the Project dropdown under the blue folder icon (batch 19).
+        Same themed popup mechanism as the gear — a native menubar can't be
+        themed (stays light on the dark theme), so header icons + built-
+        fresh Menus are the app's menu idiom."""
+        self._post_header_menu(self._build_project_menu(), self._project_btn)
+
+    def _post_header_menu(self, menu, btn):
         try:
             self.root.update_idletasks()
-            x = (self._gear_btn.winfo_rootx()
-                 + self._gear_btn.winfo_width()
+            x = (btn.winfo_rootx() + btn.winfo_width()
                  - menu.winfo_reqwidth())
-            y = self._gear_btn.winfo_rooty() + self._gear_btn.winfo_height()
+            y = btn.winfo_rooty() + btn.winfo_height()
             menu.tk_popup(max(0, x), y)
         finally:
             menu.grab_release()
+
+    def _header_menu_kw(self):
+        """The shared style kwargs for header dropdown Menus — see the
+        color comments in _build_settings_menu."""
+        c = THEMES[self._current_theme]
+        return dict(tearoff=0, bg=c["bg"], fg=c["fg"],
+                    activebackground=c["accent"], activeforeground="#ffffff",
+                    disabledforeground=c["gray"], selectcolor=c["fg"])
+
+    def _build_project_menu(self):
+        """Construct the Project ▾ dropdown (batch 19): New / Open / Save /
+        Save As / Recent ▸ / Projects… / Properties….  Built fresh per click
+        like the gear menu.  In their own menu, Save/Load ARE at the top —
+        monkeybug's point 5 about ordering, solved by the move itself."""
+        kw = self._header_menu_kw()
+        menu = tk.Menu(self.root, **kw)
+        running = self._is_running()
+        have_project = bool((self.write_assets_var.get() or "").strip()
+                            and self._current_mfr is not None)
+
+        def _entry(label, cb, enabled=True):
+            menu.add_command(
+                label=label,
+                command=(lambda c=cb: c() if c else None),
+                state=(tk.NORMAL if cb and enabled and not running
+                       else tk.DISABLED))
+
+        _entry("New project…", self._on_new_project)
+        _entry("Open project…", self._on_load_project)
+        menu.add_separator()
+        _entry("Save project", self._on_save_project, enabled=have_project)
+        _entry("Save project as…  (fork)", self._on_save_project_as,
+               enabled=have_project)
+        menu.add_separator()
+        # Recent projects — the last few registry entries, folder basename
+        # as the label with the full path as a mercy tooltip-ish suffix.
+        # Plain cascade label, NOT _cascade_label (David: the appended
+        # arrow doubled up with the native one and read as a wrong font),
+        # and the entry stays ENABLED even when empty (a disabled item gets
+        # the Windows embossed rendering) — an empty list shows one
+        # disabled "(nothing yet)" child instead.
+        recent = (self._recent_projects_provider()
+                  if self._recent_projects_provider else [])
+        rec_menu = tk.Menu(menu, **kw)
+        if recent:
+            for ent in recent:
+                folder = ent.get("folder", "")
+                if not folder:
+                    continue
+                label = os.path.basename(folder.rstrip("\\/")) or folder
+                rec_menu.add_command(
+                    label="%s    (%s)" % (label, folder),
+                    command=(lambda f=folder:
+                             self._on_open_recent_project(f)
+                             if self._on_open_recent_project else None),
+                    state=(tk.DISABLED if running else tk.NORMAL))
+        else:
+            rec_menu.add_command(label="(nothing yet)", state=tk.DISABLED)
+        menu.add_cascade(label="Recent projects", menu=rec_menu)
+        _entry("Projects…", self._on_open_project_manager)
+        menu.add_separator()
+        _entry("Properties…", self._on_project_properties,
+               enabled=have_project)
+        return menu
 
     def _build_settings_menu(self):
         """Construct the ⚙ dropdown.
@@ -13159,24 +13310,9 @@ class MainWindow:
         menu.add_cascade(label=self._cascade_label("Logs"), menu=logs_menu)
         menu.add_separator()
 
-        # Projects — a saved snapshot of every path + option for one game /
-        # version, so bouncing between several test cards doesn't mean
-        # re-checking every box each time (monkeybug).
-        menu.add_command(
-            label="Save project…",
-            command=lambda: (self._on_save_project()
-                             if self._on_save_project else None),
-            state=(tk.NORMAL if (self._on_save_project
-                                 and self._current_mfr is not None
-                                 and not self._is_running())
-                   else tk.DISABLED))
-        menu.add_command(
-            label="Load project…",
-            command=lambda: (self._on_load_project()
-                             if self._on_load_project else None),
-            state=(tk.NORMAL if (self._on_load_project
-                                 and not self._is_running())
-                   else tk.DISABLED))
+        # (Save/Load project moved to the Project ▾ header menu — batch 19.
+        # The gear is back to its charter: app-wide once-in-a-while
+        # settings.)
 
         # Voice recognition quality — the faster-whisper model Auto-name
         # call-outs uses.  App-wide (persisted), shown even for plugins
@@ -13533,13 +13669,9 @@ class MainWindow:
                     f"a newer date — pick something after it.")
         return None
 
-    def _browse_write_output(self):
-        path = filedialog.askdirectory(
-            title="Select output folder",
-            initialdir=self._initialdir_for(
-                self.write_output_var.get(), self.write_assets_var.get()))
-        if path:
-            self.write_output_var.set(os.path.normpath(path))
+    # (_browse_write_output removed in batch 19 — the Build Location
+    # derives from the project folder; _change_build_location is the
+    # explicit override picker.)
 
     # ------------------------------------------------------------------
     # Dynamic badges
@@ -13776,6 +13908,108 @@ class MainWindow:
             parent = os.path.dirname(os.path.normpath(upd))
             if parent and os.path.isdir(parent):
                 self.write_output_var.set(parent)
+
+    # ------------------------------------------------------------------
+    # Batch 19 — project-folder field collapse (see the traces in __init__)
+    # ------------------------------------------------------------------
+
+    def _mirror_stock_image(self):
+        """Write-tab Original follows the Extract tab's Input — they were
+        always the same file in practice (Write rebuilds a copy of what you
+        extracted from), and two boxes meant two copies to keep in sync."""
+        val = self.extract_input_var.get()
+        if self.write_upd_var.get() != val:
+            self.write_upd_var.set(val)
+
+    def _mirror_project_folder(self):
+        """The shared assets folder follows the Extract tab's Project
+        Folder — the Replace/Write/Mod-pack rows are read-only views of it."""
+        val = self.extract_output_var.get()
+        if self.write_assets_var.get() != val:
+            self.write_assets_var.set(val)
+
+    def _derive_build_output(self):
+        """Point the Build Location at ``<project>/build`` (or the anchor's
+        build_dir override) whenever the project folder changes.
+
+        Same back-off contract as the File Name auto-fill: an empty box or
+        one still holding the last derived value re-derives; anything else
+        is the user's (or a legacy setting's) choice and is left alone —
+        that's what keeps a pre-batch-19 custom build location building to
+        yesterday's folder."""
+        folder = (self.write_assets_var.get() or "").strip()
+        if not folder:
+            return
+        from ..core import project_file
+        try:
+            derived = os.path.normpath(project_file.project_build_dir(folder))
+        except Exception:
+            derived = os.path.normpath(os.path.join(folder, "build"))
+        current = self.write_output_var.get().strip()
+        if current == derived:
+            # e.g. restored from settings — adopt it as "derived" so the
+            # next project-folder change re-derives instead of sticking.
+            self._write_output_auto = derived
+            return
+        # The pre-batch-19 default ("parent of the original image",
+        # _maybe_default_write_output) is an auto value too — the project
+        # derivation supersedes it, whichever order the fields were filled.
+        legacy_auto = ""
+        upd = (self.write_upd_var.get() or "").strip()
+        if upd:
+            legacy_auto = os.path.normpath(
+                os.path.dirname(os.path.normpath(upd)))
+        if (not current or current == self._write_output_auto
+                or (legacy_auto and current == legacy_auto)):
+            self._write_output_auto = derived
+            self.write_output_var.set(derived)
+
+    def _change_build_location(self):
+        """Build Location "Change…": pick a folder, remember it as this
+        project's build_dir override (plain stored path — no links) so the
+        derivation honours it from now on.  A NAS-hosted project can build
+        to a local drive this way."""
+        path = filedialog.askdirectory(
+            title="Select build output folder",
+            initialdir=self._initialdir_for(self.write_output_var.get(),
+                                            self.write_assets_var.get()))
+        if not path:
+            return
+        path = os.path.normpath(path)
+        self.write_output_var.set(path)
+        self._write_output_auto = ""       # custom — derivation backs off
+        folder = (self.write_assets_var.get() or "").strip()
+        from ..core import project_file
+        if folder and project_file.has_anchor(folder):
+            default = os.path.normpath(os.path.join(folder, "build"))
+            override = "" if path == default else path
+            if project_file.update_anchor(folder, build_dir=override):
+                self.append_log(
+                    "Project build location %s" % (
+                        "reset to the default build\\ folder" if not override
+                        else "set to %s" % path), "info")
+
+    def _jump_to_extract_tab(self):
+        """The read-only project rows' "Set on Extract tab" action."""
+        try:
+            self._notebook.select(self._tab_extract)
+        except tk.TclError:
+            pass
+
+    def _project_path_display(self, parent, var):
+        """The read-only path row the Replace/Write/Mod-pack tabs show for
+        project-derived fields: a readonly entry mirroring *var* plus a
+        button that jumps to the Extract tab, where the value is actually
+        set.  A plain disabled box with no exit reads as broken (monkeybug:
+        an editable per-tab box reads as per-tab state, which it never
+        was — it's been one shared variable since the tabs were built)."""
+        wrap = ttk.Frame(parent)
+        ttk.Entry(wrap, textvariable=var, state="readonly").pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(wrap, text="Set on Extract tab",
+                   command=self._jump_to_extract_tab).pack(
+            side=tk.LEFT, padx=(6, 0))
+        return wrap
 
     def _default_write_filename(self):
         """The name Write gives the built file before the user renames it: the

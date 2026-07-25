@@ -163,6 +163,14 @@ class App:
             on_build_flash=self._on_build_flash_request,
             on_save_project=self._save_project,
             on_load_project=self._load_project,
+            on_new_project=self._new_project,
+            on_save_project_as=self._save_project_as,
+            on_project_properties=self._open_project_properties,
+            on_open_project_manager=self._open_project_manager,
+            on_open_recent_project=self._open_project_folder_checked,
+            recent_projects_provider=self._recent_projects,
+            on_project_folder_picked=self._on_project_folder_picked,
+            on_folder_state_written=self._on_folder_state_written,
             initial_show_log_history=bool(
                 self._settings.get("show_log_history", True)),
             on_show_log_history_change=self._on_show_log_history_change,
@@ -213,6 +221,10 @@ class App:
         # run can stamp the output folder with the source image's identity
         # (see core.extract_source / the stale-source banner).
         self._last_extract_io = None
+        # Project folder mid-hydrate: set when an extract into an archived
+        # project starts (its edits are parked in .hydrate/), consumed by
+        # the done-handler to move them back.  See _start_extract.
+        self._pending_post_hydrate = None
 
         # Restore the user's last window size + position over MainWindow's
         # default (monkeybug: the app "does not remember my preferred sizing
@@ -511,16 +523,22 @@ class App:
         # so restore its UNC equivalent instead of a dead letter.
         from .core.admin import resolve_mapped_drive as _rmd
         section = self._manufacturers_section().get(key, {})
+        # Batch 19 field collapse: the Extract tab's Input mirrors onto the
+        # Write Original, and its Project Folder mirrors onto the shared
+        # assets var — so only the two source-of-truth fields are restored.
+        # Legacy divergent settings: the folder the tabs were ACTUALLY using
+        # (write_assets) wins as the project folder; a saved custom
+        # write_output is restored over the derived <project>/build so
+        # existing setups keep building to yesterday's location.
         self.window.extract_input_var.set(
-            _rmd(section.get("extract_input", "")))
-        self.window.extract_output_var.set(
-            _rmd(section.get("extract_output", "")))
-        # Output before original: setting the original fires the fill-empty-
-        # Output-Folder default (window._maybe_default_write_output), and a
-        # restore that then wrote "" over it would throw the default away.
-        self.window.write_output_var.set(_rmd(section.get("write_output", "")))
-        self.window.write_upd_var.set(_rmd(section.get("write_original", "")))
-        self.window.write_assets_var.set(_rmd(section.get("write_assets", "")))
+            _rmd(section.get("extract_input", "")
+                 or section.get("write_original", "")))
+        folder = (section.get("write_assets", "")
+                  or section.get("extract_output", ""))
+        self.window.extract_output_var.set(_rmd(folder))
+        saved_out = section.get("write_output", "")
+        if saved_out:
+            self.window.write_output_var.set(_rmd(saved_out))
         # Extract-tab checkbox state (auto-name / categories / JJP filters) —
         # per manufacturer, so the ticks stick across sessions (monkeybug).
         # apply_manufacturer() re-applies this after it rebuilds the dynamic
@@ -657,7 +675,20 @@ class App:
                 "Please select an output folder.")
             return
 
-        if self._extract_overwrite_risk(output_path):
+        # Batch 19: extracting into an ARCHIVED project is the hydrate —
+        # edited files step aside into .hydrate/ so the re-extract can't
+        # touch them, and the done-handler moves them back over the fresh
+        # content.  Skips the overwrite confirm (refilling is the point).
+        from .core import project_file, project_ops
+        hydrating = False
+        if project_file.has_anchor(output_path):
+            try:
+                hydrating = bool(project_file.load_anchor(
+                    output_path).get("archived"))
+            except (OSError, ValueError):
+                hydrating = False
+
+        if not hydrating and self._extract_overwrite_risk(output_path):
             # icon: a question mark undersells "your edits get clobbered"
             # (monkeybug) — this is a warning-grade confirm.
             if not messagebox.askyesno(
@@ -668,8 +699,26 @@ class App:
             ):
                 return
 
+        if hydrating:
+            try:
+                aside = project_ops.pre_hydrate(output_path)
+                self._pending_post_hydrate = output_path
+                self.window.append_log(
+                    "Hydrating archived project: %d edited file(s) set "
+                    "aside; they'll be restored over the fresh extraction."
+                    % aside, "info")
+            except OSError as e:
+                messagebox.showerror(
+                    "Hydrate", "Couldn't set the project's edited files "
+                    "aside:\n%s" % e)
+                return
+
         self._record_path_history(extract_input=in_path,
                                   extract_output=output_path)
+        # An extract writes state into the folder — that's the moment a
+        # folder becomes a project (batch 19 materialization rule; same as
+        # the sidecars we already drop silently).  Best-effort by design.
+        self._materialize_anchor(output_path)
         self._save_settings()
 
         # Point the shared assets folder at this extract's output dir so the
@@ -2661,6 +2710,33 @@ class App:
         # Replace/Write tabs can warn if that image is later swapped/reverted
         # on disk while these assets are still being edited.  File inputs only;
         # write_extract_source no-ops on device paths.
+        # Batch 19 hydrate bracket: a successful re-extract of an archived
+        # project gets its set-aside edits moved back OVER the fresh
+        # content; on failure/cancel they stay safe in .hydrate/ and the
+        # project stays archived, so the next open offers the hydrate again
+        # (pre_hydrate is first-move-wins — a re-run can't lose edits).
+        pending_hydrate = getattr(self, "_pending_post_hydrate", None)
+        self._pending_post_hydrate = None
+        if is_extract and pending_hydrate:
+            from .core import project_ops
+            if success:
+                try:
+                    restored = project_ops.post_hydrate(pending_hydrate)
+                    self.window.append_log(
+                        "Project hydrated: %d edited file(s) restored over "
+                        "the fresh extraction." % restored, "success")
+                except OSError as e:
+                    self.window.append_log(
+                        "Hydrate: couldn't restore the set-aside edits "
+                        "(%s) — they are still in %s." % (
+                            e, os.path.join(pending_hydrate,
+                                            project_ops.HYDRATE_DIR)),
+                        "error")
+            else:
+                self.window.append_log(
+                    "Hydrate incomplete — the project stays archived; its "
+                    "edited files are safe in .hydrate\\. Extract again to "
+                    "finish.", "error")
         if is_extract and success and self._last_extract_io:
             in_path, out_path = self._last_extract_io
             write_extract_source(out_path, in_path)
@@ -3004,7 +3080,7 @@ class App:
             pass
 
     # ------------------------------------------------------------------
-    # Project files (⚙ → Save project… / Load project…)
+    # Projects (batch 19: folder-scoped — the Project ▾ header menu)
     # ------------------------------------------------------------------
 
     def _project_paths_snapshot(self):
@@ -3016,72 +3092,236 @@ class App:
             "write_output": self.window.write_output_var.get().strip(),
         }
 
-    def _save_project(self):
-        """⚙ → Save project…: snapshot the current manufacturer + every path
-        + the Extract options into one shareable .pinproj file (monkeybug:
-        bouncing between game versions meant re-checking everything on every
-        switch — one file now restores the whole setup)."""
-        from .core import project_file
-        if self._current_mfr is None or self.window._is_running():
-            return
-        # Suggest a name from what's being worked on: the loaded project's
-        # name, else the extract input / original image's stem.
-        suggest = ""
-        if self._project_path:
-            suggest = os.path.basename(self._project_path)
-        else:
-            src = (self.window.extract_input_var.get().strip()
-                   or self.window.write_upd_var.get().strip())
-            if src:
-                suggest = (os.path.splitext(os.path.basename(src))[0]
-                           + project_file.EXTENSION)
-        path = filedialog.asksaveasfilename(
-            title="Save project as…",
-            defaultextension=project_file.EXTENSION,
-            filetypes=project_file.FILETYPES,
-            initialdir=self._settings.get("project_dir") or None,
-            initialfile=suggest or None)
-        if not path:
-            return
-        name_var = getattr(self.window, "write_filename_var", None)
-        try:
-            project_file.save(
-                path,
-                manufacturer_key=self._current_mfr.key,
-                paths=self._project_paths_snapshot(),
-                extract_options=self.window.get_extract_options(),
-                write_filename=(name_var.get().strip() if name_var else ""),
-                app_version=__version__)
-        except OSError as e:
-            messagebox.showerror(
-                "Save project", "Couldn't save the project:\n%s" % e)
-            return
-        self._settings["project_dir"] = os.path.dirname(path)
-        self._set_loaded_project(path)
-        self._save_settings()
-        self.window.append_log(
-            "Project saved: %s" % path, "success")
+    def _project_folder(self):
+        """The active project folder (the collapsed assets/extract-output
+        field), or ""."""
+        return (self.window.write_assets_var.get() or "").strip()
 
-    def _load_project(self):
-        """⚙ → Load project…: pick a .pinproj and restore everything in it."""
+    def _project_stamp(self):
+        return time.strftime("%Y-%m-%d %H:%M")
+
+    def _recent_projects(self):
+        from .core import project_registry
+        return project_registry.recent(self._settings, 8)
+
+    def _registry_touch(self, folder):
+        """Upsert *folder* in the known-projects registry.  Persistence
+        rides on the caller's _save_settings()."""
+        from .core import project_registry
+        project_registry.touch(
+            self._settings, folder,
+            manufacturer=(self._current_mfr.key if self._current_mfr
+                          else ""),
+            stamp=self._project_stamp())
+
+    def _materialize_anchor(self, folder):
+        """Write/refresh *folder*'s hidden project anchor from the current
+        UI state.  THE batch-19 materialization primitive — called exactly
+        when the app writes state into the folder (extract start, first
+        staged change, explicit Save/New/Save As), never on read-only
+        browsing.  Best-effort: a NAS hiccup or read-only folder must never
+        fail the flow that triggered it."""
+        from .core import project_file
+        if (self._current_mfr is None or not folder
+                or not os.path.isdir(folder)):
+            return
+        paths = self._project_paths_snapshot()
+        name_var = getattr(self.window, "write_filename_var", None)
+        write_filename = name_var.get().strip() if name_var else ""
+        opts = self.window.get_extract_options()
+        try:
+            if project_file.has_anchor(folder):
+                project_file.update_anchor(
+                    folder,
+                    manufacturer=self._current_mfr.key,
+                    stock_image=paths["extract_input"],
+                    paths=paths,
+                    write_filename=write_filename,
+                    extract_options=opts,
+                    saved_with=__version__)
+            else:
+                # First anchor for this folder.  Compat rule: a custom Build
+                # Location (anything but the derived <folder>/build) is
+                # carried into the per-project override, so a pre-batch-19
+                # setup keeps building to yesterday's location.
+                default_build = os.path.normpath(
+                    os.path.join(folder, "build"))
+                out = paths["write_output"]
+                build_dir = ("" if (not out or os.path.normpath(out)
+                                    == default_build) else out)
+                project_file.save(
+                    project_file.anchor_path(folder),
+                    manufacturer_key=self._current_mfr.key,
+                    paths=paths,
+                    extract_options=opts,
+                    write_filename=write_filename,
+                    app_version=__version__,
+                    stock_image=paths["extract_input"],
+                    build_dir=build_dir)
+                self.window.append_log(
+                    "This folder is now a project — picking it again "
+                    "restores this whole setup.", "info")
+        except OSError:
+            return
+        self._registry_touch(folder)
+        self._set_loaded_project(folder)
+
+    def _on_folder_state_written(self, folder):
+        """Window hook: a sidecar/manifest was just written into *folder*
+        (a staged change) — materialize the anchor if it doesn't exist."""
+        from .core import project_file
+        folder = (folder or "").strip()
+        if folder and not project_file.has_anchor(folder):
+            self._materialize_anchor(folder)
+            self._save_settings()
+
+    def _on_project_folder_picked(self, folder):
+        """Window hook: the Extract tab's Project Folder browse picked
+        *folder*.  If it's an anchored project (and not already the active
+        one), auto-load it — the 1:1 folder↔project rule."""
+        from .core import project_file
+        folder = os.path.normpath((folder or "").strip())
+        if not folder or not project_file.has_anchor(folder):
+            return                     # plain folder — materializes later
+        if (self._project_path
+                and os.path.normcase(os.path.normpath(self._project_path))
+                == os.path.normcase(folder)):
+            return                     # already the active project
+        self._open_project_folder_checked(folder)
+
+    def _open_project_folder_checked(self, folder):
+        """Open the project anchored in *folder*: confirm a manufacturer
+        switch (it visibly flips the whole UI), offer the hydrate when it's
+        archived, then apply.  Safe no-op mid-run."""
         from .core import project_file
         if self.window._is_running():
             return
-        path = filedialog.askopenfilename(
-            title="Load project",
-            filetypes=project_file.FILETYPES,
-            initialdir=self._settings.get("project_dir") or None)
-        if not path:
-            return
+        folder = os.path.normpath((folder or "").strip())
         try:
-            self._apply_project_file(path)
+            data = project_file.load_anchor(folder)
         except (OSError, ValueError) as e:
             messagebox.showerror(
-                "Load project", "Couldn't load the project:\n%s" % e)
+                "Open project", "Couldn't read the project in this "
+                "folder:\n%s" % e)
+            return
+        mfr = get_manufacturer(data["manufacturer"])
+        if mfr is None:
+            messagebox.showerror(
+                "Open project",
+                "This project is for a manufacturer this app doesn't have "
+                "loaded: %r" % data["manufacturer"])
+            return
+        if self._current_mfr is not mfr:
+            if not messagebox.askyesno(
+                    "Open project",
+                    "%s is a %s project.\n\nSwitch to %s and open it?"
+                    % (os.path.basename(folder), mfr.display, mfr.display)):
+                return
+        hydrate = False
+        if data.get("archived"):
+            # An archived project's extraction was deleted to save space;
+            # opening it without refilling would show empty tabs (and the
+            # staged-changes validator would prune entries whose slot files
+            # are missing) — so hydrate-or-don't-open.
+            if not messagebox.askyesno(
+                    "Archived project",
+                    "This project is archived — its extracted assets were "
+                    "removed to save disk space (your edits are kept).\n\n"
+                    "Re-extract now from the stock image to hydrate it?"):
+                self.window.append_log(
+                    "Archived project not opened (hydrate declined).",
+                    "info")
+                return
+            hydrate = True
+        self._apply_project_folder(folder, data)
+        if hydrate:
+            self._start_extract()
+
+    def _apply_project_folder(self, folder, data):
+        """Push an anchored project onto the UI: manufacturer, stock image,
+        the folder itself (build location derives), options, file name."""
+        from .core.admin import resolve_mapped_drive as _rmd
+        mfr = get_manufacturer(data["manufacturer"])
+        if self._current_mfr is not mfr:
+            self._on_manufacturer_change(mfr)
+            self.window.show_mfr_view()
+        self.window.extract_input_var.set(
+            _rmd(str(data.get("stock_image") or "")))
+        self.window.extract_output_var.set(_rmd(folder))
+        self.window.set_extract_options(data.get("extract_options", {}))
+        name = str(data.get("write_filename") or "").strip()
+        name_var = getattr(self.window, "write_filename_var", None)
+        if name and name_var is not None:
+            name_var.set(name)
+        self._registry_touch(folder)
+        self._set_loaded_project(folder)
+        self._save_settings()
+        self.window.invalidate_asset_scans()
+        self.window.append_log("Project loaded: %s" % folder, "success")
+
+    def _save_project(self):
+        """Project ▾ → Save: write the anchor into the active project
+        folder.  No dialog — the folder IS the project (batch 19)."""
+        folder = self._project_folder()
+        if (self._current_mfr is None or self.window._is_running()
+                or not folder):
+            return
+        if not os.path.isdir(folder):
+            messagebox.showerror(
+                "Save project",
+                "The project folder doesn't exist:\n%s" % folder)
+            return
+        self._materialize_anchor(folder)
+        self._save_settings()
+        self.window.append_log("Project saved: %s" % folder, "success")
+
+    def _load_project(self):
+        """Project ▾ → Open…: pick a project FOLDER (the anchor file is
+        hidden — the folder is the thing).  Routes legacy loose .pinproj
+        files (batch 18, David+monkeybug dev builds only) and offers to
+        adopt a not-yet-project folder."""
+        from .core import project_file
+        if self.window._is_running():
+            return
+        folder = filedialog.askdirectory(
+            title="Open project folder",
+            initialdir=self._settings.get("project_dir") or None)
+        if not folder:
+            return
+        folder = os.path.normpath(folder)
+        self._settings["project_dir"] = os.path.dirname(folder)
+        if project_file.has_anchor(folder):
+            self._open_project_folder_checked(folder)
+            return
+        # Legacy loose file(s) saved by the batch-18 flow?
+        try:
+            loose = sorted(
+                fn for fn in os.listdir(folder)
+                if fn.lower().endswith(project_file.EXTENSION)
+                and fn != project_file.ANCHOR_NAME)
+        except OSError:
+            loose = []
+        if loose:
+            try:
+                self._apply_project_file(os.path.join(folder, loose[0]))
+            except (OSError, ValueError) as e:
+                messagebox.showerror(
+                    "Open project", "Couldn't load the project:\n%s" % e)
+            return
+        if messagebox.askyesno(
+                "Open project",
+                "This folder isn't a project yet.\n\nUse it as the "
+                "project folder anyway? (It becomes a project the first "
+                "time you extract into it or stage a change.)"):
+            self.window.extract_output_var.set(folder)
+            self._save_settings()
 
     def _apply_project_file(self, path):
-        """Load *path* and push its manufacturer + paths + options onto the
-        UI.  Raises OSError/ValueError for the caller's error dialog."""
+        """Load a LEGACY loose .pinproj (batch 18 — population: David +
+        monkeybug's dev builds) under the collapsed batch-19 field model,
+        then offer to anchor it into its project folder so the folder
+        auto-loads from now on.  Raises OSError/ValueError for the caller's
+        error dialog."""
         from .core import project_file
         from .core.admin import resolve_mapped_drive as _rmd
         data = project_file.load(path)
@@ -3095,38 +3335,71 @@ class App:
         # project's own values override whatever that restored.
         if self._current_mfr is not mfr:
             self._on_manufacturer_change(mfr)
+            self.window.show_mfr_view()
         paths = data.get("paths", {})
-        # Apply order matters — see project_file.PATH_FIELDS.
-        var_by_field = {
-            "extract_input": self.window.extract_input_var,
-            "extract_output": self.window.extract_output_var,
-            "write_output": self.window.write_output_var,
-            "write_original": self.window.write_upd_var,
-            "write_assets": self.window.write_assets_var,
-        }
-        for field in project_file.PATH_FIELDS:
-            var_by_field[field].set(_rmd(str(paths.get(field) or "")))
+        # Field collapse: the folder the tabs actually used (write_assets)
+        # wins as the project folder; the stock image feeds the mirrored
+        # Input/Original pair; a saved custom write_output overrides the
+        # derived <project>/build.
+        folder = _rmd(str(paths.get("write_assets")
+                          or paths.get("extract_output") or "").strip())
+        self.window.extract_input_var.set(
+            _rmd(str(data.get("stock_image") or "")))
+        if folder:
+            self.window.extract_output_var.set(folder)
+        saved_out = str(paths.get("write_output") or "").strip()
+        if saved_out:
+            self.window.write_output_var.set(_rmd(saved_out))
         self.window.set_extract_options(data.get("extract_options", {}))
         name = str(data.get("write_filename") or "").strip()
         name_var = getattr(self.window, "write_filename_var", None)
         if name and name_var is not None:
             name_var.set(name)
         self._settings["project_dir"] = os.path.dirname(path)
-        self._set_loaded_project(path)
+        self._set_loaded_project(folder or path)
         self._save_settings()
         self.window.append_log("Project loaded: %s" % path, "success")
+        if (folder and os.path.isdir(folder)
+                and not project_file.has_anchor(folder)
+                and messagebox.askyesno(
+                    "Project",
+                    "Anchor this project into its folder so picking the "
+                    "folder auto-loads it from now on?\n\n%s" % folder)):
+            self._materialize_anchor(folder)
+            self._save_settings()
 
     def _set_loaded_project(self, path):
         """Remember the active project + show it in the title bar so juggling
-        several versions stays legible at a glance."""
+        several versions stays legible at a glance.  Batch 19: *path* is the
+        project FOLDER (legacy loose files pass their file path)."""
         self._project_path = path
         title = f"{APP_NAME} v{__version__}"
         if path:
-            title += " — %s" % os.path.basename(path)
+            title += " — %s" % (os.path.basename(path.rstrip("\\/")) or path)
         try:
             self.root.title(title)
         except tk.TclError:
             pass
+
+    # The New/Save As/Properties/Projects… dialogs live in gui.projects_ui
+    # (one module = one .iss manifest entry); each gets the app instance —
+    # they orchestrate across window + settings + registry.
+
+    def _new_project(self):
+        from .gui import projects_ui
+        projects_ui.new_project_dialog(self)
+
+    def _save_project_as(self):
+        from .gui import projects_ui
+        projects_ui.save_project_as(self)
+
+    def _open_project_properties(self):
+        from .gui import projects_ui
+        projects_ui.open_properties(self)
+
+    def _open_project_manager(self):
+        from .gui import projects_ui
+        projects_ui.open_manager(self)
 
     def _on_show_log_history_change(self, show):
         """Persist the ⚙ "Show previous sessions in the log" toggle."""

@@ -606,7 +606,10 @@ def test_project_apply_restores_everything(app, tmp_path):
     assert w.transcribe_var.get() is True
     assert w._extract_category_vars["audio"].get() is False
     assert w.write_filename_var.get() == "lz-test.raw"
-    assert "lz-2.10.pinproj" in app.root.title()
+    # Batch 19: a project's identity is its FOLDER (loose batch-18 files
+    # load under the collapsed field model), so the title shows the project
+    # folder's basename, not the .pinproj file name.
+    assert "out" in app.root.title()
 
 
 def test_project_load_rejects_unknown_manufacturer(app, tmp_path):

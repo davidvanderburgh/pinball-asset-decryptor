@@ -109,3 +109,35 @@ class _Tooltip:
         if self._tip:
             self._tip.destroy()
             self._tip = None
+
+
+def center_over(parent, win, min_w=0, min_h=0):
+    """Center *win* over *parent*'s window — the app-wide modal-positioning
+    rule (David: every modal appears centered over the app).  Same math the
+    flash/disk/diagnose dialogs' private ``_center`` methods established:
+    requested size (floored to *min_w*/*min_h*), parent-centered, falling
+    back to screen-center while the parent is unmapped (startup), clamped
+    to the top-left so a huge dialog never opens off-screen.
+
+    With no minimums the geometry sets POSITION only — pinning a WxH would
+    stop Tk auto-resizing a dialog whose content later changes (e.g. the
+    New-project structure preview)."""
+    try:
+        parent.update_idletasks()
+        win.update_idletasks()
+        dw = max(win.winfo_reqwidth(), min_w)
+        dh = max(win.winfo_reqheight(), min_h)
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        if pw <= 1 or ph <= 1:
+            sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+            x, y = (sw - dw) // 2, (sh - dh) // 2
+        else:
+            x = parent.winfo_rootx() + (pw - dw) // 2
+            y = parent.winfo_rooty() + (ph - dh) // 2
+        pos = "+%d+%d" % (max(0, x), max(0, y))
+        if min_w or min_h:
+            win.geometry("%dx%d%s" % (dw, dh, pos))
+        else:
+            win.geometry(pos)
+    except tk.TclError:
+        pass

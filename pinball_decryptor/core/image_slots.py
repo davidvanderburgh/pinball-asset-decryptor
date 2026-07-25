@@ -75,7 +75,14 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
     seen = set()
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            # Same prune as audio_slots: dot-dirs + the project's top-level
+            # build output (batch 19 — generated, never an asset slot).
+            dirs[:] = [d for d in dirs
+                       if not d.startswith(".")
+                       and not (d == "build"
+                                and os.path.normcase(os.path.normpath(root))
+                                == os.path.normcase(
+                                    os.path.normpath(assets_dir)))]
             for fn in files:
                 ext = os.path.splitext(fn)[1].lower()
                 # Dot-files are our sidecars (.blank.png, the transparent

@@ -149,7 +149,15 @@ def scan_audio_slots(assets_dir: str, roots=None, exts=None,
     seen = set()
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            # Dot-dirs are folder state (.orig/.hydrate); "build" at the
+            # assets root is the project's build output (batch 19) — a
+            # generated image, never an asset slot.
+            dirs[:] = [d for d in dirs
+                       if not d.startswith(".")
+                       and not (d == "build"
+                                and os.path.normcase(os.path.normpath(root))
+                                == os.path.normcase(
+                                    os.path.normpath(assets_dir)))]
             for fn in files:
                 ext = os.path.splitext(fn)[1].lower()
                 if ext not in allowed or ".stage." in fn:

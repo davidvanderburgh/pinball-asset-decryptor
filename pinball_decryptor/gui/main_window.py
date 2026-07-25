@@ -5930,6 +5930,26 @@ class MainWindow:
             "(in play order), so a whole animation can be reviewed — or "
             "bulk-replaced via right-click — as one unit.",
             lambda: self._current_theme)
+        # Fonts / Scenes tool windows (Peter): preview + import whole game
+        # fonts, and browse what each scene is made of.
+        fonts_btn = ttk.Button(tools, text="Fonts…", width=7,
+                               command=self._open_font_studio)
+        fonts_btn.pack(side=tk.LEFT, padx=(0, 4))
+        _Tooltip(
+            fonts_btn,
+            "Preview any game font (type your own text, rendered from the "
+            "real glyphs) and import a desktop font into it — letters are "
+            "auto-fitted into the space each character has. Stern Spike 2.",
+            lambda: self._current_theme)
+        scenes_btn = ttk.Button(tools, text="Scenes…", width=8,
+                                command=self._open_scene_browser)
+        scenes_btn.pack(side=tk.LEFT, padx=(0, 12))
+        _Tooltip(
+            scenes_btn,
+            "Browse the card scene by scene: the images, fonts and on-screen "
+            "text each scene is built from, with jumps to the matching rows "
+            "here and on Replace Text. Stern Spike 2.",
+            lambda: self._current_theme)
         self._image_status_lbl = ttk.Label(
             tools, textvariable=self.image_status_var,
             font=(_SANS_FONT, 9))
@@ -6616,6 +6636,18 @@ class MainWindow:
                 menu.add_separator()
                 menu.add_command(label="Clear replacement",
                                  command=self._image_clear_selected)
+            src = self._image_source_label(row)
+            if src in ("Glyph", "Radium", "Scene texture"):
+                menu.add_separator()
+                if src == "Glyph":
+                    menu.add_command(
+                        label="Open in Fonts window…",
+                        command=lambda r=row: self._open_font_studio(
+                            preselect_rel=r))
+                menu.add_command(
+                    label="Show scene contents…",
+                    command=lambda r=row: self._open_scene_browser(
+                        preselect_rel=r))
             slot = self._image_slots_by_rel.get(row)
             if slot is not None:
                 menu.add_separator()
@@ -6628,6 +6660,107 @@ class MainWindow:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    # ---- Fonts / Scenes tool windows (Peter) --------------------------
+
+    def _image_assets_dir_or_warn(self, noun):
+        """The Images-tab assets folder, or None with a friendly nudge."""
+        assets = (self.write_assets_var.get() or "").strip()
+        if not assets or not os.path.isdir(assets):
+            messagebox.showinfo(
+                noun, "Pick your extracted project folder first (Extract "
+                      "tab) — the %s window works on an extracted Stern "
+                      "Spike 2 card." % noun)
+            return None
+        return assets
+
+    def _open_font_studio(self, preselect_rel=None):
+        """Open the Fonts window, optionally preselecting the font that owns
+        the glyph slice at Images-tab row *preselect_rel*."""
+        assets = self._image_assets_dir_or_warn("Fonts")
+        if assets is None:
+            return
+        preselect = None
+        if preselect_rel:
+            rel = preselect_rel.replace("\\", "/")
+            if rel.startswith("images/"):
+                rel = rel[len("images/"):]
+            from ..plugins.stern import fontrender
+            try:
+                for fo in fontrender.load_fonts(assets):
+                    if any(g["rel"] == rel for g in fo["glyphs"].values()):
+                        preselect = fo["key"]
+                        break
+            except Exception:
+                pass
+        from .font_studio import open_font_studio
+        open_font_studio(self, assets, preselect=preselect)
+
+    def _open_scene_browser(self, preselect_rel=None):
+        """Open the Scenes window, optionally preselecting the scene that
+        contains the image at Images-tab row *preselect_rel*."""
+        assets = self._image_assets_dir_or_warn("Scenes")
+        if assets is None:
+            return
+        from .scene_browser import collect_scenes, open_scene_browser
+        preselect = None
+        if preselect_rel:
+            rel = preselect_rel.replace("\\", "/")
+            if "/glyphs/" in rel:
+                rel = self._glyph_atlas_rel(assets, rel) or rel
+            try:
+                for d, sc in collect_scenes(assets).items():
+                    if any(r == rel for _o, r in sc["images"]):
+                        preselect = d
+                        break
+            except Exception:
+                pass
+        open_scene_browser(self, assets, preselect=preselect)
+
+    @staticmethod
+    def _glyph_atlas_rel(assets, rel):
+        """A glyph slice's atlas PNG rel (``images/…``) via the glyph
+        manifest — scene lookups group by atlas, not slice."""
+        want = rel[len("images/"):] if rel.startswith("images/") else rel
+        try:
+            with open(os.path.join(assets, "images", "scene_textures",
+                                   "glyph_images.txt"),
+                      encoding="utf-8") as f:
+                for line in f:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if len(cols) >= 2 and cols[0] == want:
+                        return "images/" + cols[1]
+        except OSError:
+            pass
+        return None
+
+    def reveal_image_slot(self, rel):
+        """Scene Browser: show one image slot on the Images tab (clearing
+        any filters that would hide it)."""
+        self._notebook.select(self._tab_image)
+        tree = getattr(self, "_image_tree", None)
+        if tree is None:
+            return
+        if not tree.exists(rel):
+            self.image_search_var.set("")
+            self.image_source_filter_var.set("All sources")
+            self.image_changed_only_var.set(False)
+            self._refresh_image_list()
+        if tree.exists(rel):
+            tree.selection_set(rel)
+            tree.see(rel)
+            self._image_on_tree_select()
+
+    def reveal_text_string(self, text):
+        """Scene Browser: find one display string on the Replace Text tab."""
+        self._notebook.select(self._tab_text)
+        tree = getattr(self, "_text_tree", None)
+        if tree is not None and not tree.get_children():
+            try:
+                self._scan_text_strings()
+            except Exception:
+                pass
+        self.text_search_var.set(text)
 
     # ---- Replace Image: group bulk actions ---------------------------
 

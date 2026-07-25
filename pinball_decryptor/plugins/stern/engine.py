@@ -775,6 +775,19 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
         for table in (_radium.parse_glyph_tables(data, imgs) if imgs else ()):
             if cancel():
                 break
+            # One glyph table can span SEVERAL atlas pages (TMNT's Vera Mono
+            # splits a-z across two 512x512 atlases), so a per-atlas grouping
+            # splits a font.  The table column — the stem of the table's
+            # first atlas — is the stable whole-font identity the Font
+            # Preview / Import window groups on.
+            table_key = ""
+            for g in table["glyphs"]:
+                if g["atlas"] is not None:
+                    rel0 = off2rel.get(g["atlas"]["data_off"])
+                    if rel0:
+                        table_key = os.path.splitext(
+                            os.path.basename(rel0))[0]
+                        break
             rgba_cache = {}
             for g in table["glyphs"]:
                 px = _radium.glyph_px_rect(g)
@@ -802,10 +815,16 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 g_abs = os.path.join(output_dir, "images", *g_rel.split("/"))
                 os.makedirs(os.path.dirname(g_abs), exist_ok=True)
                 Image.fromarray(rgba[y:y + hh, x:x + w], "RGBA").save(g_abs)
+                # Trailing metrics columns (rot + the record's layout floats
+                # -- see radium.py's format comment) feed the Font Preview /
+                # Import renderer; older readers only parse the first 8.
+                gw, gh, bx, by, adv = g["metrics"]
                 glyph_manifest.append(
-                    "%s\t%s\t0x%04X\t%d\t%d\t%d\t%d\t%s"
+                    "%s\t%s\t0x%04X\t%d\t%d\t%d\t%d\t%s\t%d\t%g\t%g\t%g\t%g"
+                    "\t%g\t%s"
                     % (g_rel, atlas_rel, g["char"], x, y, w, hh,
-                       table["name"]))
+                       table["name"], int(g["rot"]), gw, gh, bx, by, adv,
+                       table_key))
                 n_glyphs += 1
             # every glyph of a table shares its per-atlas dedupe fate; mark
             # the table's atlases done only after the whole table is sliced
@@ -826,7 +845,9 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
         try:
             with open(os.path.join(tex_dir, _GLYPH_MANIFEST), "w",
                       encoding="utf-8") as f:
-                f.write("# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont\n"
+                f.write("# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont"
+                        "\trot\tglyph_w\tglyph_h\tbearing_x\tbearing_y"
+                        "\tadvance\ttable\n"
                         + "\n".join(glyph_manifest) + "\n")
         except Exception:
             pass

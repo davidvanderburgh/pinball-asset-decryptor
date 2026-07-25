@@ -185,9 +185,20 @@ def display_texts(data):
 #   glyph table:      [u64 N] then N records, chars matching the array 1:1:
 #       u16  char code
 #       u32  node handle          (top byte 0x80)
-#       7x f32 metrics            (bitmap w/h, bearing, advance...; not needed
-#                                  for slicing -- the UV rect is ground truth)
-#       u8   flag
+#       7x f32 metrics            derived on TMNT 1.59 (24.8k glyphs, 258
+#                                 fonts, zero contradictions):
+#                                   [0] logical bitmap width   (pre-rotation)
+#                                   [1] logical bitmap height
+#                                   [2] bearing X (pen -> ink left; can be <0)
+#                                   [3] bearing Y (baseline -> bitmap TOP,
+#                                       FreeType horiBearingY convention)
+#                                   [4] advance width
+#                                   [5] always 0   [6] ~0 (unknown, unused)
+#       u8   flag                 bit0 = the bitmap is stored ROTATED 90
+#                                 degrees CLOCKWISE in the atlas (the packer's
+#                                 choice; the atlas rect is then h x w --
+#                                 rotate the slice counter-clockwise to
+#                                 recover the upright glyph)
 #       4x f32 UV rect            (u0 v0 u1 v1, normalized by the atlas texture
 #                                  dims, top-down, x1/y1 exclusive)
 #       u32  texture              0 = no bitmap (e.g. space) | top byte 0x80 =
@@ -241,7 +252,9 @@ def _find_char_arrays(data, skip_ranges):
 def _parse_glyph_records(data, off, chars):
     """Parse ``len(chars)`` glyph records at *off*; every field is validated,
     so a false anchor cannot survive.  Returns ``(glyphs, end_off)`` with
-    ``glyphs = [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None)]`` or
+    ``glyphs = [(char, (u0, v0, u1, v1), tex_ref, inline_atlas_or_None,
+    metrics, rot)]`` -- ``metrics = (w, h, bearing_x, bearing_y, advance)``,
+    ``rot`` true when the bitmap is stored rotated 90° CW in the atlas -- or
     ``None`` on any mismatch."""
     n = len(data)
     glyphs = []
@@ -251,6 +264,8 @@ def _parse_glyph_records(data, off, chars):
         ch, handle = _GLYPH_HEAD.unpack_from(data, off)
         if ch != want or handle >> 24 != 0x80:
             return None
+        metrics = struct.unpack_from("<5f", data, off + 6)
+        rot = bool(data[off + 6 + 28] & 1)
         u0, v0, u1, v1 = struct.unpack_from("<4f", data, off + _GLYPH_RECT_OFF)
         for v in (u0, v0, u1, v1):
             if not (-0.001 <= v <= 1.001):
@@ -278,7 +293,8 @@ def _parse_glyph_records(data, off, chars):
         if data[pos:pos + 8] != b"\x00" * 8:
             return None
         pos += 8
-        glyphs.append((ch, (u0, v0, u1, v1), tex & 0xFFFFFF, atlas))
+        glyphs.append((ch, (u0, v0, u1, v1), tex & 0xFFFFFF, atlas,
+                       metrics, rot))
         off = pos
     return glyphs, off
 
@@ -313,8 +329,11 @@ def parse_glyph_tables(data, images):
     PNG the image extract writes.
 
     Returns ``[{"name", "table_off", "glyphs"}]`` with ``glyphs =
-    [{"char": int, "rect": (u0, v0, u1, v1), "atlas": image-dict-or-None}]``
-    (``atlas is None`` for glyphs with no bitmap, e.g. the space)."""
+    [{"char": int, "rect": (u0, v0, u1, v1), "atlas": image-dict-or-None,
+    "metrics": (w, h, bearing_x, bearing_y, advance), "rot": bool}]``
+    (``atlas is None`` for glyphs with no bitmap, e.g. the space; ``rot``
+    means the atlas rect holds the bitmap rotated 90° CW -- see the format
+    comment above)."""
     by_handle = {}
     by_off = {}
     ranges = []
@@ -348,8 +367,9 @@ def parse_glyph_tables(data, images):
                     "glyphs": [
                         {"char": ch, "rect": rect,
                          "atlas": (by_off.get(inl["data_off"]) if inl
-                                   else by_handle.get(ref) if ref else None)}
-                        for ch, rect, ref, inl in glyphs],
+                                   else by_handle.get(ref) if ref else None),
+                         "metrics": metrics, "rot": rot}
+                        for ch, rect, ref, inl, metrics, rot in glyphs],
                 })
                 done_until = end
                 break

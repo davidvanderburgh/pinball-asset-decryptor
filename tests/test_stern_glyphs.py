@@ -44,13 +44,15 @@ def _atlas_raw(w=16, h=16):
     return raw, dds.decode_bc3(raw, w, h)
 
 
-def _glyph_record(char, handle, rect, tex=0, inline=None):
+def _glyph_record(char, handle, rect, tex=0, inline=None,
+                  metrics=(1.0, 1.0, 0.0, 0.0, 20.0), flag=0):
     """One glyph-table record.  *inline* = ``(raw, w, h, fmt)`` embeds the
     atlas image (its first user introduces it); *tex* alone is a handle
-    back-reference (0 = no bitmap)."""
+    back-reference (0 = no bitmap).  *metrics* = (w, h, bearing_x,
+    bearing_y, advance); *flag* bit0 = stored rotated."""
     b = struct.pack("<HI", char, 0x80000000 | handle)
-    b += _f32s(1.0, 1.0, 0.0, 0.0, 20.0, 0.0, 0.0)     # metrics (unused)
-    b += b"\x00"                                        # flag byte
+    b += _f32s(*(tuple(metrics) + (0.0, 0.0)))
+    b += bytes([flag])
     b += _f32s(*rect)
     if inline is not None:
         raw, tw, th, fmt = inline
@@ -107,6 +109,9 @@ def test_parse_glyph_tables_inline_backref_and_none():
     assert gs[0x41]["atlas"] is imgs[0]          # inline introduction
     assert gs[0x42]["atlas"] is imgs[0]          # back-reference resolved
     assert gs[0x41]["rect"] == (0.25, 0.25, 0.5, 0.5)
+    # layout metrics + rotation flag pass through (Font Preview / Import)
+    assert gs[0x41]["metrics"] == (1.0, 1.0, 0.0, 0.0, 20.0)
+    assert gs[0x41]["rot"] is False
 
 
 def test_parse_glyph_tables_rejects_corruption():
@@ -303,6 +308,39 @@ def test_radium_image_writes_atlas_and_glyph_edit_uses_full_reencode(tmp_path):
     dec = dds.decode_bc3(bytes(writes[0][1]), 16, 16)
     assert (dec[4:12, 4:12] == (255, 255, 0, 255)).all()   # glyph pasted
     assert (dec[0:4, 0:4, 0] < 32).all()                   # atlas edit kept
+
+
+# ---- extract -> font loader round trip ---------------------------------------
+
+def test_extract_writes_metrics_and_font_loader_roundtrip(tmp_path):
+    """extract_radium_images writes the metrics + table columns and the Font
+    Preview loader reads them back — including a rotated slot whose atlas
+    rect is the logical dims swapped."""
+    raw, _rgba = _atlas_raw(16, 16)
+    recs = [
+        (0x41, _glyph_record(0x41, 4, (0.25, 0.25, 0.5, 0.5), tex=5,
+                             inline=(raw, 16, 16, 5),
+                             metrics=(4.0, 4.0, 1.0, 4.0, 6.0))),
+        (0x42, _glyph_record(0x42, 6, (0.5, 0.5, 0.75, 1.0), tex=5,
+                             metrics=(8.0, 4.0, 0.0, 4.0, 9.0), flag=1)),
+    ]
+    reader = _FakeGlyphReader("/g/scenex/scene.radium", _font_blob(recs))
+    assert engine.extract_radium_images(reader, str(tmp_path)) >= 1
+
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    fonts = fr.load_fonts(str(tmp_path))
+    assert len(fonts) == 1
+    fo = fonts[0]
+    assert fo["has_metrics"]
+    A = fo["glyphs"][0x41]
+    assert (A["lw"], A["lh"], A["bx"], A["by"], A["adv"]) == (4, 4, 1, 4, 6)
+    assert not A["rot"]
+    B = fo["glyphs"][0x42]
+    assert B["rot"]
+    assert (B["w"], B["h"]) == (4, 8)            # as stored in the atlas
+    assert (B["lw"], B["lh"]) == (8, 4)          # upright
+    img, missing = fr.render_text(fo, "AB")
+    assert missing == set() and img.size[1] >= 4
 
 
 # ---- GUI Source label ---------------------------------------------------------

@@ -210,6 +210,23 @@ HELP_CONTENT = {
          "and drops your replacement back into that character's exact "
          "rectangle — so you can redraw just the \"S\" and leave the rest "
          "alone. These sit under scene_textures/glyphs/ in the extract."),
+        ("Fonts window (preview + import)",
+         "The \"Fonts…\" toolbar button (where available) opens a preview "
+         "of every game font: pick one, type your own text, and see it "
+         "rendered from the real glyphs with the game's own spacing — "
+         "pending glyph edits show up live. \"Import font file…\" fits a "
+         "normal desktop font (TTF/OTF) into the game font automatically: "
+         "one size is chosen so every letter fits the space its character "
+         "has, each letter is baseline-aligned into its slot, and the ink "
+         "color starts matched to the original. Apply writes the glyph "
+         "PNGs (build on Write as usual); \"Revert font\" restores every "
+         "letter from the atlas."),
+        ("Scenes window",
+         "The \"Scenes…\" toolbar button (where available) lists every "
+         "scene on the card with the images, fonts and on-screen text it "
+         "is built from — double-click an item to jump to its row here, in "
+         "the Fonts window, or on Replace Text. Right-click any scene "
+         "image for \"Show scene contents\" to land there directly."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

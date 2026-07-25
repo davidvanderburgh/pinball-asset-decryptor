@@ -2714,3 +2714,57 @@ def test_jjp_dongle_extract_checkbox_and_phase_swap(app, manufacturers_by_key):
     app.root.update(); app.root.update()
     assert win._dongle_extract_frame.winfo_manager() == ""
     assert win.extract_dongle_var.get() is False
+
+
+def test_font_studio_and_scene_browser_smoke(app, tmp_path):
+    """The Fonts and Scenes tool windows (Peter) open on a synthetic Stern
+    extract, populate their lists from the manifests, render a preview, and
+    close cleanly.  Layout/pixel correctness lives in test_stern_fontrender;
+    this is construction + wiring only."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.core import text_manifest
+
+    _make_extract(tmp_path)
+    text_manifest.save(str(tmp_path), [
+        {"path": "/g/scene1/scene.radium", "original": "HELLO",
+         "replacement": ""}])
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+
+    w._open_font_studio()
+    fs = w._font_studio
+    assert fs.win.winfo_exists()
+    assert set(fs._tree.get_children()) == {"tbl", "tbl2"}
+    fs._text_var.set("AB")
+    fs._render_now()
+    assert fs._photo is not None                 # a preview actually rendered
+    # scene usage list filled for the selected font
+    assert fs._scenes_list.size() >= 1
+
+    # re-open with a glyph-row preselect resolves the owning font
+    w._open_font_studio(
+        preselect_rel="images/scene_textures/glyphs/"
+                      "radimg_bc1_8x8_00000003/U+0043_C.png")
+    assert fs._tree.selection() == ("tbl2",)
+
+    w._open_scene_browser()
+    sb = w._scene_browser
+    assert sb.win.winfo_exists()
+    kids = sb._tree.get_children()
+    assert "/g/scene1" in kids and "/g/scene2" in kids
+    sb._tree.selection_set("/g/scene1")
+    sb._on_select()
+    det = sb._detail.get_children()
+    assert len(det) == 3                         # Images / Fonts / Text
+    # double-clicking a text row lands on the Replace Text tab's search
+    sb._detail.selection_set(
+        sb._detail.get_children(det[2])[0])
+    sb._on_detail_double(None)
+    assert w.text_search_var.get() == "HELLO"
+
+    fs._close()
+    sb._close()
+    app.root.update()

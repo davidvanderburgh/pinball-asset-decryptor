@@ -1339,6 +1339,10 @@ class MainWindow:
         # _scan_image_groups): rel_path -> (group_key, label_base, order).
         self._image_groups = {}
         self._image_group_occ = {}       # rel_path -> on-card occurrence count
+        # rel_path -> every container it occurs in (home first); a shared
+        # radium image has several.  Search/grouping use it so a scene id
+        # finds its images even when they're filed under another scene.
+        self._image_groups_all = {}
         # User-authored display names for scene groups (group_key -> name,
         # <=50 chars) — the vendor's own element names are mostly
         # "unnamed_instance_N" (monkeybug).  Persisted in the staged-changes
@@ -2451,14 +2455,16 @@ class MainWindow:
         self._write_col_labels.append(self._write_original_lbl)
         # Batch 19: read-only mirror of the Extract tab's Input — the stock
         # image is ONE shared file, referenced, never a second copy to keep
-        # in sync (the ⓘ badge still opens Image Info on it).
-        ttk.Entry(self._write_upd_row, textvariable=self.write_upd_var,
-                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # in sync (the ⓘ badge still opens Image Info on it).  Batch 21:
+        # plain label, no "Set on Extract tab" button.
+        _orig_mirror = ttk.Label(self._write_upd_row,
+                                 textvariable=self.write_upd_var, anchor=tk.W)
+        _orig_mirror.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _Tooltip(_orig_mirror,
+                 "The master card image — it is set on the Extract tab.",
+                 lambda: self._current_theme)
         self._make_info_badge(self._write_upd_row,
                               self.write_upd_var).pack(
-            side=tk.LEFT, padx=(6, 0))
-        ttk.Button(self._write_upd_row, text="Set on Extract tab",
-                   command=self._jump_to_extract_tab).pack(
             side=tk.LEFT, padx=(6, 0))
         self._write_upd_row.pack(fill=tk.X, **pad)
 
@@ -2603,44 +2609,30 @@ class MainWindow:
 
         self._write_output_row_ref = ttk.Frame(f)
         self._write_output_row_ref.pack(fill=tk.X, **pad)
-        # "Build Location", not "Output Folder" — monkeybug read "Output" as
-        # ambiguous next to the build's File Name (batch 11).
+        # Batch 21 merged "Build Location" + "File Name" into one "Build
+        # Image" row showing the full destination path; Change… is a single
+        # Save-As picker that sets both the folder (remembered as this
+        # project's build_dir override — batch 19) and the file name.  The
+        # underlying write_output_var / write_filename_var stay the state
+        # the build flow reads; this row shows their join with the plugin's
+        # forced extension applied (which also retired the old standalone
+        # "saved as .raw" reminder).
         _out_lbl = ttk.Label(self._write_output_row_ref,
-                             text="Build Location:", width=16, anchor=tk.W)
+                             text="Build Image:", width=16, anchor=tk.W)
         _out_lbl.pack(side=tk.LEFT)
         self._write_col_labels.append(_out_lbl)
-        # Batch 19: derived — <project>/build by default, one build per
-        # project, self-overwriting.  "Change…" stores a per-project
-        # override (a NAS project can build to a local drive).
+        self._write_build_path_var = tk.StringVar()
         ttk.Entry(self._write_output_row_ref,
-                  textvariable=self.write_output_var,
+                  textvariable=self._write_build_path_var,
                   state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(self._write_output_row_ref, text="Change...",
                    command=self._change_build_location).pack(
             side=tk.LEFT, padx=(8, 0))
-
-        # Editable name for the built file.  Shown/hidden alongside the Output
-        # Folder row (both are meaningless in Direct-SSD mode, where the medium
-        # itself is the destination).  The hint label below flags a name that
-        # would overwrite an existing file.
-        self._write_filename_row = ttk.Frame(f)
-        self._write_filename_row.pack(fill=tk.X, **pad)
-        _fn_lbl = ttk.Label(self._write_filename_row,
-                            text="File Name:", width=16, anchor=tk.W)
-        _fn_lbl.pack(side=tk.LEFT)
-        self._write_col_labels.append(_fn_lbl)
-        # Static reminder of the extension the build is forced to carry, at the
-        # right edge of the row, so it's explicit what the file will be even
-        # before the user finishes typing (Stern Spike 2 = .raw, CGC = .img).
-        # Packed before the entry so it reserves the right edge and the entry
-        # fills the middle; blank for plugins that pin no extension.
-        self._write_ext_lbl = ttk.Label(
-            self._write_filename_row, text="",
-            foreground="#888888", font=(_SANS_FONT, 9, "italic"))
-        self._write_ext_lbl.pack(side=tk.RIGHT, padx=(6, 0))
-        self._write_filename_entry = ttk.Entry(
-            self._write_filename_row, textvariable=self.write_filename_var)
-        self._write_filename_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.write_output_var.trace_add(
+            "write", self._refresh_build_path_display)
+        self.write_filename_var.trace_add(
+            "write", self._refresh_build_path_display)
+        self._refresh_build_path_display()
 
         # Flush-left with the "File Name:" / "Output Folder:" row labels (padx
         # matches the rows' `pad`), not indented under the entry -- monkeybug
@@ -3006,7 +2998,7 @@ class MainWindow:
                                        self._scan_audio_slots_async)
 
         # Search + sort toolbar.
-        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.audio_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
@@ -3060,13 +3052,15 @@ class MainWindow:
             "Show only the slots with a pending replacement or already "
             "changed on disk by a previous build.",
             lambda: self._current_theme)
+        # Button rightmost (flush with the list edge), counter to its left
+        # (monkeybug batch 21).
+        self._audio_csv_btn = ttk.Button(
+            tools, text="Export CSV", command=self._audio_export_csv)
+        self._audio_csv_btn.pack(side=tk.RIGHT)
         self._audio_status_lbl = ttk.Label(
             tools, textvariable=self.audio_status_var,
             font=(_SANS_FONT, 9))
-        self._audio_status_lbl.pack(side=tk.RIGHT)
-        self._audio_csv_btn = ttk.Button(
-            tools, text="Export CSV", command=self._audio_export_csv)
-        self._audio_csv_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        self._audio_status_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         _Tooltip(
             self._audio_csv_btn,
             "Save the whole audio table (every slot, not just the filtered "
@@ -3077,7 +3071,7 @@ class MainWindow:
 
         # Slot list.
         list_frame = ttk.Frame(f)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         # "loop" and "keep" are optional toggle columns shown per capability
         # (apply_manufacturer sets displaycolumns) — "loop" for
         # audio_loop_inject (BOF), "keep" for audio_keep_length_override (JJP).
@@ -3413,6 +3407,9 @@ class MainWindow:
         if self.audio_group_dups_var.get():
             self._ensure_audio_dup_groups(quiet=True)
         self._refresh_audio_list()
+        # Default to the first slot so a fresh scan shows a preview, matching
+        # the Video / Images tabs (monkeybug batch 21).
+        self._select_first_tree_row(self._audio_tree, self._audio_on_tree_select)
         self._start_change_scan("audio")
         # Now fill in duration / format on a background thread so the list is
         # usable immediately even when the folder's contents are slow to read.
@@ -4917,7 +4914,7 @@ class MainWindow:
                                        self._scan_video_slots_async)
 
         # Search + sort toolbar.
-        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.video_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
@@ -4931,13 +4928,15 @@ class MainWindow:
             "Show only the slots with a pending replacement or already "
             "changed on disk by a previous build.",
             lambda: self._current_theme)
+        # Button rightmost (flush with the list edge), counter to its left
+        # (monkeybug batch 21).
+        self._video_csv_btn = ttk.Button(
+            tools, text="Export CSV", command=self._video_export_csv)
+        self._video_csv_btn.pack(side=tk.RIGHT)
         self._video_status_lbl = ttk.Label(
             tools, textvariable=self.video_status_var,
             font=(_SANS_FONT, 9))
-        self._video_status_lbl.pack(side=tk.RIGHT)
-        self._video_csv_btn = ttk.Button(
-            tools, text="Export CSV", command=self._video_export_csv)
-        self._video_csv_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        self._video_status_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         _Tooltip(
             self._video_csv_btn,
             "Save the whole video table (every slot, not just the filtered "
@@ -4948,7 +4947,7 @@ class MainWindow:
 
         # Slot list.
         list_frame = ttk.Frame(f)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         self._video_tree = ttk.Treeview(
             list_frame, columns=("len", "res", "fmt", "aud", "rep"),
             height=9, selectmode="browse")
@@ -4999,8 +4998,14 @@ class MainWindow:
         # never overlap. ---
         player = ttk.LabelFrame(f, text=" Preview ")
         player.pack(fill=tk.X, padx=10, pady=(4, 2))
+        # The conversion options sit in the preview box's spare left margin
+        # (monkeybug batch 21) instead of full-width rows under it; labels are
+        # short because ttk.Checkbutton can't wrap — the tooltips carry the
+        # detail.
+        opts = ttk.Frame(player)
+        opts.pack(side=tk.LEFT, padx=(10, 0))
         panes = ttk.Frame(player)
-        panes.pack(padx=6, pady=(2, 6))
+        panes.pack(side=tk.LEFT, expand=True, padx=6, pady=(2, 6))
         self._video_pane_orig = _VideoPreviewPane(
             self, panes, "Original",
             on_activate=lambda: self._video_activate_pane("orig"))
@@ -5016,11 +5021,10 @@ class MainWindow:
         self._video_pane_rep.clear("no replacement assigned")
 
         self._video_no_conversion_cb = ttk.Checkbutton(
-            f, text="No conversion — use my file as-is (it must already match "
-                    "the original's format)",
+            opts, text="No conversion — use my file as-is",
             variable=self.video_no_conversion_var,
             command=self._video_on_no_conversion_toggle)
-        self._video_no_conversion_cb.pack(anchor=tk.W, padx=12, pady=(4, 0))
+        self._video_no_conversion_cb.pack(anchor=tk.W, pady=(0, 6))
         _Tooltip(
             self._video_no_conversion_cb,
             "Skip re-encoding: the replacement is copied in byte-for-byte, so "
@@ -5031,10 +5035,10 @@ class MainWindow:
             lambda: self._current_theme)
 
         self._video_trim_cb = ttk.Checkbutton(
-            f, text="Trim / pad replacements to the original clip length",
+            opts, text="Trim / pad to the original clip length",
             variable=self.video_trim_var,
             command=self._save_staged_changes)
-        self._video_trim_cb.pack(anchor=tk.W, padx=12, pady=(0, 4))
+        self._video_trim_cb.pack(anchor=tk.W)
         # Hover tooltip — per-plugin guidance is appended in
         # apply_manufacturer.
         self._video_trim_tip = _Tooltip(
@@ -5269,9 +5273,16 @@ class MainWindow:
         if tree is None or not tree.exists(rel):
             return
         rep = self._video_assignments.get(rel)
-        rep_disp = os.path.basename(rep) if rep else "Choose…"
+        if rep:
+            rep_disp = os.path.basename(rep)
+        elif rel in self._video_changed_on_disk:
+            rep_disp = "✓ changed on disk"
+        else:
+            rep_disp = "Choose…"
         tree.item(rel, values=(slot.duration_str(), slot.resolution_str(),
-                               slot.format_summary(), rep_disp))
+                               slot.format_summary(),
+                               slot.info.audio_summary() if slot.info else "",
+                               rep_disp))
 
     def _refresh_video_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
@@ -5909,7 +5920,7 @@ class MainWindow:
                                        self._scan_image_slots_async)
 
         # Search + sort toolbar.
-        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
@@ -5977,7 +5988,7 @@ class MainWindow:
 
         # Slot list.
         list_frame = ttk.Frame(f)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         # "src" tells the three image stores apart (monkeybug: file-system
         # PNGs, scene textures and radium-embedded images were indistinguishable
         # beyond their paths) — see _image_source_label.
@@ -6091,6 +6102,7 @@ class MainWindow:
             self._image_slots_by_rel = {}
             self._image_groups = {}
             self._image_group_occ = {}
+            self._image_groups_all = {}
             self._refresh_image_list()
             self._image_empty.configure(
                 text="Set the project folder on the Extract tab, then click Scan.")
@@ -6120,20 +6132,22 @@ class MainWindow:
             except Exception:
                 slots = []
             try:
-                groups, group_occ = self._scan_image_groups(assets_path)
+                groups, group_occ, group_all = self._scan_image_groups(
+                    assets_path)
             except Exception:
-                groups, group_occ = {}, {}
+                groups, group_occ, group_all = {}, {}, {}
             if self._image_scan_id != scan_id:
                 return
             self._tk_root().after(
                 0, self._populate_image_after_scan,
-                slots, scan_id, assets_path, groups, group_occ)
+                slots, scan_id, assets_path, groups, group_occ, group_all)
 
         self._set_tab_scanning("image", True)
         threading.Thread(target=_work, daemon=True).start()
 
     def _populate_image_after_scan(self, slots, scan_id, scan_dir,
-                                   groups=None, group_occ=None):
+                                   groups=None, group_occ=None,
+                                   group_all=None):
         """Main-thread: store scan results and refresh the list."""
         if self._image_scan_id != scan_id:
             return
@@ -6142,6 +6156,7 @@ class MainWindow:
         self._image_slots_by_rel = {s.rel_path: s for s in slots}
         self._image_groups = groups or {}
         self._image_group_occ = group_occ or {}
+        self._image_groups_all = group_all or {}
         # Restore assignments persisted for a freshly-scanned folder; a re-scan
         # of the same folder keeps the live in-memory ones (see audio above).
         from ..core import staged_changes
@@ -6257,7 +6272,8 @@ class MainWindow:
     def _scan_image_groups(assets_path):
         """Parse the Stern extractor's image manifests (all optional) into the
         "Group by scene" mapping: ``({rel_path: (group_key, label_base,
-        order)}, {rel_path: occurrences})``.
+        order)}, {rel_path: occurrences}, {rel_path: [every occurrence's
+        (group_key, label_base, order)]})``.
 
         Grouping identity is the on-card container: the radium card path for
         radium-embedded images (ordered by data offset = the animation's
@@ -6267,10 +6283,16 @@ class MainWindow:
         PNG's home group, and *occurrences* remembers how many on-card slots
         it patches.  Cheap text parsing (a few thousand tab rows), run on the
         scan worker thread; a slot no manifest covers (every non-Stern plugin)
-        falls back to its parent folder in :meth:`_image_group_of`."""
+        falls back to its parent folder in :meth:`_image_group_of`.
+
+        The third mapping exists because a home group alone makes a shared
+        image findable under ONE scene only — a scene whose every image is
+        first seen elsewhere then has no row anywhere and searching its id
+        finds nothing (Peter's training scene).  Search and grouping use it to
+        show an image under whichever of its scenes you asked for."""
         import re as _re
 
-        groups, occ = {}, {}
+        groups, occ, where = {}, {}, {}
 
         def _rows(*parts):
             try:
@@ -6320,6 +6342,19 @@ class MainWindow:
             labels[card] = ("%s · %s" % (label, id8)) if label else id8
         for rel, (card, off) in primary.items():
             groups[rel] = ("rad::" + card, labels[card], off)
+        # Every container each image appears in, home group first (so a search
+        # that matches nothing in particular still lands on the home group).
+        for card, members in per_card.items():
+            for off, mrel in members:
+                entry = ("rad::" + card, labels[card], off)
+                lst = where.setdefault(mrel, [])
+                if entry not in lst:
+                    lst.append(entry)
+        for rel, lst in where.items():
+            home = groups.get(rel)
+            if home in lst:
+                lst.remove(home)
+                lst.insert(0, home)
 
         # scene.assets textures (output, card path, bytes, w, h, fmt): group =
         # the scene directory; manifest order stands in for play order.
@@ -6350,7 +6385,7 @@ class MainWindow:
             groups.setdefault("images/" + cols[0],
                               ("dir::" + folder, label, idx))
 
-        return groups, occ
+        return groups, occ, where
 
     def _image_group_of(self, rel):
         """``(group_key, label_base, order)`` for slot *rel*: the
@@ -6361,6 +6396,19 @@ class MainWindow:
             return g
         folder = os.path.dirname(rel).replace("\\", "/") or "(root)"
         return ("dir::" + folder, folder, 0)
+
+    def _image_groups_of(self, rel):
+        """Every container *rel* occurs in, home group first — one entry for
+        anything but a shared radium image."""
+        return self._image_groups_all.get(rel) or [self._image_group_of(rel)]
+
+    def _image_group_matches(self, group, query):
+        """True when *query* hits this container's display label, its user
+        rename, or its card path (so the full scene hash from a file listing
+        works, not just the 8-char shorthand)."""
+        key, label, _order = group
+        return (query in label.lower() or query in key.lower()
+                or query in self._image_group_tags.get(key, "").lower())
 
     def _refresh_image_list(self):
         """Apply the search filter + sort and repopulate the slot tree — flat
@@ -6399,22 +6447,24 @@ class MainWindow:
         if srcf and srcf != "All sources":
             slots = [s for s in slots
                      if self._image_source_label(s.rel_path) == srcf]
-        if grouped:
-            # The search matches the group label too — the manifest name
-            # AND the user's rename (see _image_group_rename) — so
-            # "Char_Select" or a custom tag finds a whole animation whose
-            # member files are just hashes.
-            def _match(s):
-                if query in s.rel_path.lower():
-                    return True
-                key, label, _o = self._image_group_of(s.rel_path)
-                return (query in label.lower()
-                        or query in self._image_group_tags.get(
-                            key, "").lower())
-            slots = [s for s in slots if not query or _match(s)]
-        else:
-            slots = [s for s in slots
-                     if not query or query in s.rel_path.lower()]
+        # The search matches a container too — the manifest name, the user's
+        # rename (see _image_group_rename) and the card path — so
+        # "Char_Select", a custom tag, or a scene id/hash finds a whole
+        # animation whose member files are just hashes.  It matches ANY scene
+        # an image appears in, not only its home group: a shared image belongs
+        # to one group but lives in many scenes, and searching for one of the
+        # others used to come up empty (Peter).
+        def _matched_group(s):
+            for g in self._image_groups_of(s.rel_path):
+                if self._image_group_matches(g, query):
+                    return g
+            return None
+
+        def _match(s):
+            return (query in s.rel_path.lower()
+                    or _matched_group(s) is not None)
+        if query:
+            slots = [s for s in slots if _match(s)]
         col, desc = self._image_sort
 
         def _key(s):
@@ -6459,9 +6509,17 @@ class MainWindow:
                         tags=(tag,) if tag else ())
 
         if grouped:
+            # A search for a scene shows its images UNDER THAT SCENE, even
+            # when their home group is another one — otherwise the hits
+            # scatter across the groups that happen to own them and the scene
+            # you asked for isn't on screen at all.
+            disp = {}                      # rel_path -> displayed container
+            for s in slots:
+                g = _matched_group(s) if query else None
+                disp[s.rel_path] = g or self._image_group_of(s.rel_path)
             by_grp = {}                    # key -> (label_base, [slots])
             for s in slots:
-                key, label, _order = self._image_group_of(s.rel_path)
+                key, label, _order = disp[s.rel_path]
                 by_grp.setdefault(key, (label, []))[1].append(s)
             # Groups stay label-sorted; a header click re-sorts the children
             # WITHIN each group — except "Images", which sorts the GROUPS by
@@ -6485,7 +6543,7 @@ class MainWindow:
                 label = _disp(key)
                 if col in ("#0", "n"):
                     members.sort(
-                        key=lambda s: (self._image_group_of(s.rel_path)[2],
+                        key=lambda s: (disp[s.rel_path][2],
                                        s.rel_path.lower()),
                         reverse=desc if col == "#0" else False)
                 else:
@@ -6974,9 +7032,17 @@ class MainWindow:
             snap = staged_originals.snapshot_path(self._image_scan_dir, rel)
             if snap:
                 opath = snap
-        self._image_set_orig_header(
-            "Current file (already modified)" if changed and not snap
-            else "Original")
+        # Identical copies across scenes extract to ONE PNG, so a replacement
+        # lands in every scene that carries it — say so where the user is
+        # about to replace it, not only in the Scenes window (Peter read the
+        # dedup as the app mixing unrelated scenes together).
+        hdr = ("Current file (already modified)" if changed and not snap
+               else "Original")
+        n_occ = self._image_group_occ.get(rel, 0) if rel is not None else 0
+        if n_occ > 1:
+            hdr += ("  ·  shared by %d scenes (replacing it changes all of "
+                    "them)" % n_occ)
+        self._image_set_orig_header(hdr)
         if rep is None and changed and snap and slot:
             rep = slot.abs_path
         self._image_render_thumb(
@@ -8382,34 +8448,23 @@ class MainWindow:
         self._settings_fw_path = None
         self._settings_table = None
         self._settings_busy = False
+        self._settings_loading = False   # True while the form is being filled
+        self._settings_stage_job = None  # debounced auto-stage timer id
         self._settings_rows = []          # [{name,label,kind,var,default,min,max}]
         self.settings_image_var = tk.StringVar()
 
-        intro = ttk.Label(
-            f, text="Preset the operator-adjustment DEFAULTS baked into a card "
-                    "image — free play, volume, pricing and more. A machine "
-                    "uses these on a fresh flash or after a factory reset; a "
-                    "machine that has already been set up keeps its own "
-                    "settings (Stern stores those on the board, not the card). "
-                    "Apply at Next Build stages the changes like any other "
-                    "mod — they're baked into the image you Build, and your "
-                    "master image stays untouched.",
-            font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
-        intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
-        intro.bind("<Configure>", lambda e: intro.configure(
-            wraplength=max(300, e.width - 8)))
-
+        # Batch 21: the explainer paragraph moved into Help, and the card
+        # image is a read-only mirror of the Extract tab's master image —
+        # the tab always edits the project's card, like every other tab.
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(row, text="Card Image:", width=12, anchor=tk.W).pack(
             side=tk.LEFT)
-        ent = self._path_combo(row, self.settings_image_var, "settings_image")
-        ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ent.bind("<Return>", lambda _e: self._settings_open_image())
-        ent.bind("<<ComboboxSelected>>",
-                 lambda _e: self._settings_open_image(), add="+")
-        ttk.Button(row, text="Browse…",
-                   command=self._settings_browse_image).pack(
-            side=tk.LEFT, padx=(6, 0))
+        mirror = ttk.Label(row, textvariable=self.settings_image_var,
+                           anchor=tk.W)
+        mirror.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _Tooltip(mirror, "The master card image these defaults are read "
+                         "from — it is set on the Extract tab.",
+                 lambda: self._current_theme)
 
         # Preset bar: save a set of defaults once and reuse (or auto-apply) it
         # so a user never has to revisit this tab for every card.
@@ -8448,11 +8503,13 @@ class MainWindow:
             "works across titles. Save a preset first to enable this.",
             lambda: self._current_theme)
 
-        # Scrollable form of one row per exposed setting.
-        body = ttk.Frame(f); body.pack(fill=tk.BOTH, expand=True, padx=10,
-                                       pady=(4, 4))
+        # Scrollable form of one row per exposed setting.  The canvas hugs the
+        # form's height (capped) instead of expanding into a sea of blank
+        # space below the rows (monkeybug batch 21) — the freed height flows
+        # to the Log pane via _resize_notebook_to_current_tab.
+        body = ttk.Frame(f); body.pack(fill=tk.X, padx=10, pady=(4, 4))
         self._settings_canvas = tk.Canvas(
-            body, highlightthickness=0, bd=0,
+            body, highlightthickness=0, bd=0, height=60,
             bg=THEMES.get(self._current_theme, {}).get("bg", "#2d2d2d"))
         sb = ttk.Scrollbar(body, orient="vertical",
                            command=self._settings_canvas.yview)
@@ -8464,56 +8521,35 @@ class MainWindow:
             (0, 0), window=self._settings_form, anchor="nw")
         self._settings_form.bind(
             "<Configure>", lambda e: self._settings_canvas.configure(
-                scrollregion=self._settings_canvas.bbox("all")))
+                scrollregion=self._settings_canvas.bbox("all"),
+                height=min(e.height, 520)))
         self._settings_canvas.bind(
             "<Configure>", lambda e: self._settings_canvas.itemconfigure(
                 self._settings_form_win, width=e.width))
         self._settings_empty = ttk.Label(
             self._settings_form,
-            text="Pick a card image above to edit its default settings.",
+            text="Set the card image on the Extract tab to edit its default "
+                 "settings.",
             foreground="#888888")
         self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
 
+        # Changes stage themselves as you edit (batch 21 — the explicit
+        # Apply / Clear buttons are gone); Reset Fields is the one action:
+        # back to the image's own defaults, nothing staged.
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
-        # Primary: stage the changes for the next Build — same model as every
-        # Replace tab, so the master image is never modified in place
-        # (monkeybug was surprised Save wrote into his master template).
-        self._settings_stage_btn = ttk.Button(
-            arow, text="Apply at Next Build", command=self._settings_stage,
-            state=tk.DISABLED)
-        self._settings_stage_btn.pack(side=tk.LEFT)
-        _Tooltip(
-            self._settings_stage_btn,
-            "Stages these defaults with the shared assets folder; the next "
-            "card you Build gets them baked in. Your master image on disk is "
-            "not touched.",
-            lambda: self._current_theme)
-        self._settings_clear_staged_btn = ttk.Button(
-            arow, text="Clear Staged", command=self._settings_clear_staged,
-            state=tk.DISABLED)
-        self._settings_clear_staged_btn.pack(side=tk.LEFT, padx=(6, 0))
         self._settings_reset_btn = ttk.Button(
             arow, text="Reset Fields", command=self._settings_reset,
             state=tk.DISABLED)
-        self._settings_reset_btn.pack(side=tk.LEFT, padx=(6, 0))
-        # Advanced: the old in-place write, for editing an image without
-        # rebuilding.  Explicit wording so nobody mistakes it for the staged
-        # flow.
-        self._settings_apply_btn = ttk.Button(
-            arow, text="Write into This Image Now…",
-            command=self._settings_apply, state=tk.DISABLED)
-        self._settings_apply_btn.pack(side=tk.LEFT, padx=(18, 0))
+        self._settings_reset_btn.pack(side=tk.LEFT)
         _Tooltip(
-            self._settings_apply_btn,
-            "Writes the changed defaults straight into the card image picked "
-            "above, in place. Use this only when you want to modify that "
-            "exact file — for the normal mod flow use Apply at Next Build.",
+            self._settings_reset_btn,
+            "Put every field back to the image's current defaults and clear "
+            "anything staged for the next Build.",
             lambda: self._current_theme)
         self._settings_status = ttk.Label(arow, text="",
                                           font=(_SANS_FONT, 9))
         self._settings_status.pack(side=tk.LEFT, padx=(10, 0))
         self._settings_refresh_presets()
-        self._settings_refresh_staged_state()
 
     # ---- Default Settings: presets ----------------------------------
     def _presets_blob(self):
@@ -8565,8 +8601,7 @@ class MainWindow:
                 self._settings_set_row(
                     r, int(vals[r["name"]]) // r.get("scale", 1))
         self._settings_status.configure(
-            text="Loaded preset \"%s\" — review, then Apply at Next Build."
-                 % name)
+            text="Loaded preset \"%s\"." % name)
 
     def _settings_save_preset(self):
         if not self._settings_rows:
@@ -8623,18 +8658,6 @@ class MainWindow:
             b["active"] = None
         self._settings_persist_presets()
 
-    def _settings_browse_image(self):
-        cur = self.settings_image_var.get()
-        path = filedialog.askopenfilename(
-            title="Select a Stern card image",
-            initialdir=(os.path.dirname(cur) if cur else
-                        self.last_browse_dir("settings_image")),
-            filetypes=[("Card image", "*.raw *.img"), ("All files", "*.*")])
-        if path:
-            self.settings_image_var.set(os.path.normpath(path))
-            self.remember_browse_dir("settings_image", path)
-            self._settings_open_image()
-
     def _settings_open_image(self):
         path = (self.settings_image_var.get() or "").strip()
         if not path or not os.path.isfile(path) or self._settings_busy:
@@ -8654,8 +8677,6 @@ class MainWindow:
         self._scan_msgs["settings"] = "Reading the image's firmware…"
         self._start_scan_spinner("settings")
         self._settings_status.configure(text="")
-        self._settings_stage_btn.config(state=tk.DISABLED)
-        self._settings_apply_btn.config(state=tk.DISABLED)
         self._settings_reset_btn.config(state=tk.DISABLED)
         import threading
         state = {"done": None}
@@ -8697,13 +8718,12 @@ class MainWindow:
                 return
             if res[0] == "err":
                 self._settings_table = None
-                self._settings_stage_btn.config(state=tk.DISABLED)
-                self._settings_apply_btn.config(state=tk.DISABLED)
                 self._settings_reset_btn.config(state=tk.DISABLED)
                 self._settings_empty.configure(
                     text="Couldn't read settings from this image:\n%s\n\n"
-                         "(Pick a Stern Spike 2 card image. Some newer game "
-                         "builds aren't decoded yet.)" % res[1])
+                         "(The Extract tab's card image must be a Stern "
+                         "Spike 2 card. Some newer game builds aren't "
+                         "decoded yet.)" % res[1])
                 self._settings_empty.grid()
                 return
             _ok, table, part, fw, rows, ipath = res
@@ -8812,30 +8832,47 @@ class MainWindow:
                     _m.configure(text="●" if changed else " ")
                 except tk.TclError:
                     pass
+                # Every edit re-stages the tab's diffs (debounced) — batch 21
+                # replaced the explicit Apply button with auto-staging.
+                self._settings_schedule_autostage()
             var.trace_add("write", _remark)
             ttk.Label(form, text=rng, font=(_SANS_FONT, 8),
                       foreground="#888888").grid(
                 row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
-        self._settings_stage_btn.config(state=tk.NORMAL)
-        self._settings_apply_btn.config(state=tk.NORMAL)
         self._settings_reset_btn.config(state=tk.NORMAL)
-        self._settings_refresh_staged_state()
-        staged_n = len(self.staged_default_settings(self._settings_staged_dir()))
-        self._settings_status.configure(
-            text="%d settings loaded." % len(rows)
-            + (" %d setting(s) already staged for the next Build."
-               % staged_n if staged_n else ""))
-        # If a preset is marked auto-apply, overlay it onto the freshly loaded
-        # form so the user sees (and can Apply) their preset without re-typing.
+        # Overlay in build-time order — the auto-apply preset first, then the
+        # folder's already-staged values on top (staged wins at Build too) —
+        # so the fields show exactly what the next Build will bake in.  The
+        # loading flag keeps these programmatic sets from re-staging.
         self._settings_refresh_presets()
-        active = self._presets_blob().get("active")
+        staged = self.staged_default_settings(self._settings_staged_dir())
+        self._settings_loading = True
+        try:
+            active = self._presets_blob().get("active")
+            if active in self._presets_blob()["presets"]:
+                self._settings_load_preset(active)
+            for r in self._settings_rows:
+                if r["name"] in staged:
+                    self._settings_set_row(
+                        r, int(staged[r["name"]]) // r.get("scale", 1))
+        finally:
+            self._settings_loading = False
+        bits = []
+        if staged:
+            bits.append("%d setting(s) staged for the next Build"
+                        % len(staged))
         if active in self._presets_blob()["presets"]:
-            self._settings_load_preset(active)
-            self._settings_status.configure(
-                text="%d settings loaded; preset \"%s\" applied to the form — "
-                     "it's baked into every card you Build automatically."
-                     % (len(rows), active))
+            bits.append("preset \"%s\" is baked into every card you Build"
+                        % active)
+        self._settings_status.configure(
+            text=("; ".join(bits) + ".") if bits else "")
+        # The form height changed — shrink the tab around it so the freed
+        # space flows to the Log pane instead of sitting blank.
+        try:
+            self._tk_root().after_idle(self._resize_notebook_to_current_tab)
+        except tk.TclError:
+            pass
 
     def _settings_set_row(self, r, display_value):
         """Set a row to a DISPLAY value, keeping an enum's dropdown in sync."""
@@ -8849,17 +8886,38 @@ class MainWindow:
                 pass
 
     def _settings_reset(self):
-        for r in self._settings_rows:
-            self._settings_set_row(r, r["default"])
-        self._settings_status.configure(text="Fields reset to the image's "
-                                             "current defaults.")
+        """Back to the image's own defaults AND nothing staged — with
+        auto-staging the two are one action (batch 21)."""
+        self._settings_loading = True
+        try:
+            for r in self._settings_rows:
+                self._settings_set_row(r, r["default"])
+        finally:
+            self._settings_loading = False
+        n = 0
+        assets_dir = self._settings_staged_dir()
+        if assets_dir:
+            from ..core import staged_changes
+            data = staged_changes.load(assets_dir)
+            n = len(data.get("settings") or {})
+            if "settings" in data:
+                del data["settings"]
+                staged_changes.save(assets_dir, data)
+                if self._on_folder_state_written:
+                    self._on_folder_state_written(assets_dir)
+        self._settings_status.configure(
+            text="Fields reset to the image's current defaults%s."
+                 % (" — cleared %d staged setting(s)" % n if n else ""))
+        if n:
+            self.append_log("Defaults: cleared %d staged setting(s)." % n,
+                            "info")
 
     # ---- Default Settings: staged-for-Build flow ---------------------
-    # The primary flow: changed defaults are recorded in the shared assets
-    # folder's .staged_changes.json (key "settings", internal units) and the
-    # Write flow bakes them into the OUTPUT image after a successful build —
-    # the same staged model as every Replace tab, so the master image on disk
-    # is never modified (monkeybug).
+    # Changed defaults are recorded (auto-staged, debounced — batch 21) in
+    # the shared assets folder's .staged_changes.json (key "settings",
+    # internal units) and the Write flow bakes them into the OUTPUT image
+    # after a successful build — the same staged model as every Replace tab,
+    # so the master image on disk is never modified (monkeybug).
 
     def _settings_staged_dir(self):
         """The shared assets folder staged settings ride with ('' if unset)."""
@@ -8881,66 +8939,62 @@ class MainWindow:
                 continue
         return out
 
-    def _settings_stage(self):
+    def _settings_schedule_autostage(self):
+        """Debounce an auto-stage: field edits arrive per keystroke / spinner
+        click, so the actual staging write runs once things settle."""
+        if self._settings_loading or self._settings_table is None:
+            return
+        job = getattr(self, "_settings_stage_job", None)
+        if job is not None:
+            try:
+                self._tk_root().after_cancel(job)
+            except tk.TclError:
+                pass
+        try:
+            self._settings_stage_job = self._tk_root().after(
+                500, self._settings_autostage)
+        except tk.TclError:
+            self._settings_stage_job = None
+
+    def _settings_autostage(self):
+        """Record the form's diffs as staged-for-Build (or clear the record
+        when the fields are back at the image's defaults)."""
+        self._settings_stage_job = None
         if self._settings_busy or self._settings_table is None:
             return
+        changes = self._settings_changes()
         assets_dir = self._settings_staged_dir()
         if not assets_dir:
-            messagebox.showinfo(
-                "No assets folder",
-                "Set the shared assets folder first (the Extract output the "
-                "Replace and Write tabs use) — staged settings ride with "
-                "that folder and are applied when you Build.")
-            return
-        changes = self._settings_changes()
-        if not changes:
-            self._settings_status.configure(
-                text="No changes to stage — edit a New default first.")
+            if changes:
+                self._settings_status.configure(
+                    text="Set the project folder on the Extract tab first — "
+                         "changes stage with the project.")
             return
         from ..core import staged_changes
         data = staged_changes.load(assets_dir)
-        data["settings"] = {k: int(v) for k, v in changes.items()}
+        before = data.get("settings") or {}
+        new = {k: int(v) for k, v in changes.items()}
+        if new == before:
+            return
+        if new:
+            data["settings"] = new
+        elif "settings" in data:
+            del data["settings"]
         staged_changes.save(assets_dir, data)
         # Staged settings are folder state too — see _save_staged_changes.
         if self._on_folder_state_written:
             self._on_folder_state_written(assets_dir)
-        self._settings_refresh_staged_state()
         self._settings_status.configure(
-            text="%d setting(s) staged — they'll be baked into the next "
-                 "card you Build." % len(changes))
-        self.append_log(
-            "Defaults: staged %d setting(s) for the next Build (%s)."
-            % (len(changes), ", ".join(sorted(changes))), "success")
-
-    def _settings_clear_staged(self):
-        assets_dir = self._settings_staged_dir()
-        if not assets_dir:
-            return
-        from ..core import staged_changes
-        data = staged_changes.load(assets_dir)
-        n = len(data.get("settings") or {})
-        if "settings" in data:
-            del data["settings"]
-            staged_changes.save(assets_dir, data)
-        self._settings_refresh_staged_state()
-        self._settings_status.configure(
-            text="Cleared %d staged setting(s)." % n if n
-            else "Nothing was staged.")
-
-    def _settings_refresh_staged_state(self):
-        """Reflect whether the shared assets folder has staged settings in
-        the Clear Staged button (and its tooltip-free count)."""
-        btn = getattr(self, "_settings_clear_staged_btn", None)
-        if btn is None:
-            return
-        assets_dir = self._settings_staged_dir()
-        n = len(self.staged_default_settings(assets_dir)) if assets_dir else 0
-        try:
-            btn.configure(
-                text=("Clear Staged (%d)" % n) if n else "Clear Staged",
-                state=(tk.NORMAL if n else tk.DISABLED))
-        except tk.TclError:
-            pass
+            text=("%d setting(s) staged — baked into the next card you "
+                  "Build." % len(new)) if new else "Nothing staged.")
+        # Log when the SET of staged settings changes (not every value tick,
+        # or spinner clicks would flood the session log).
+        if set(new) != set(before):
+            self.append_log(
+                "Defaults: %d setting(s) staged for the next Build%s."
+                % (len(new),
+                   " (%s)" % ", ".join(sorted(new)) if new else ""),
+                "info")
 
     def _settings_changes(self):
         """``{AD_name: internal_value}`` for rows whose display value differs
@@ -8958,103 +9012,6 @@ class MainWindow:
                 out[r["name"]] = v * r.get("scale", 1)
         return out
 
-    def _settings_apply(self):
-        if self._settings_busy or self._settings_table is None:
-            return
-        changes = self._settings_changes()
-        if not changes:
-            self._settings_status.configure(text="No changes to apply.")
-            return
-
-        def _shown(r):
-            v = int(r["var"].get())
-            if r.get("labels") and v in r["labels"]:
-                return r["labels"][v]
-            if r["kind"] == "toggle":
-                return "On" if v else "Off"
-            return str(v)
-        pretty = "\n".join(
-            "  %s -> %s" % (r["label"], _shown(r))
-            for r in self._settings_rows if r["name"] in changes)
-        if not messagebox.askyesno(
-                "Save settings to card image",
-                "This WRITES to the card image:\n\n  %s\n\nsetting these "
-                "defaults:\n\n%s\n\nThey take effect on a fresh flash or after "
-                "a factory reset. Keep a backup of the image if it's "
-                "precious.\n\nSave?"
-                % (os.path.normpath(self._settings_image_path), pretty),
-                icon="warning"):
-            return
-        self._settings_busy = True
-        self._settings_stage_btn.config(state=tk.DISABLED)
-        self._settings_apply_btn.config(state=tk.DISABLED)
-        self._settings_reset_btn.config(state=tk.DISABLED)
-        self._settings_status.configure(text="Writing…")
-        self.append_log("Settings: writing %d default(s) into %s"
-                        % (len(changes),
-                           os.path.normpath(self._settings_image_path)),
-                        "info")
-        import threading
-        img, part, fw = (self._settings_image_path, self._settings_part,
-                         self._settings_fw_path)
-        table = self._settings_table
-        state = {"done": None}
-
-        def _work():
-            try:
-                from ..plugins.stern.explorer import CardImage
-                with CardImage(img) as c:
-                    n, refreshed = c.write_adjustment_defaults(
-                        part, fw, table, changes)
-                state["done"] = ("ok", n, refreshed)
-            except Exception as e:
-                state["done"] = ("err", e)
-
-        def _poll():
-            if state["done"] is None:
-                try:
-                    self._tk_root().after(120, _poll)
-                except tk.TclError:
-                    pass
-                return
-            self._settings_busy = False
-            self._settings_stage_btn.config(state=tk.NORMAL)
-            self._settings_apply_btn.config(state=tk.NORMAL)
-            self._settings_reset_btn.config(state=tk.NORMAL)
-            res = state["done"]
-            if res[0] == "err":
-                self._settings_status.configure(text="Failed.")
-                self.append_log("Settings write failed: %s" % res[1], "error")
-                messagebox.showerror("Settings", "Couldn't write the image:\n%s"
-                                     % res[1])
-                return
-            _ok, n, refreshed = res
-            # The image now holds the new defaults — reflect them as the
-            # baseline so the fields show "no changes" until edited again.
-            for r in self._settings_rows:
-                if r["name"] in changes:
-                    r["default"] = changes[r["name"]]
-            note = ("" if refreshed else
-                    " (note: no validation manifest on this card)")
-            self._settings_status.configure(
-                text="Applied %d setting(s) at %s%s."
-                % (n, time.strftime("%I:%M %p").lstrip("0"), note))
-            self.append_log(
-                "Settings: applied %d default(s)%s — flash the image to use "
-                "them (fresh card / factory reset)." % (n, note), "success")
-
-        threading.Thread(target=_work, daemon=True).start()
-        _poll()
-
-    def _settings_default_from_partition(self):
-        """When the Partition Explorer already has an image open, offer it as
-        the Settings tab's default (both operate on the same card)."""
-        if (self.settings_image_var.get() or "").strip():
-            return
-        p = (self.partition_image_var.get() or "").strip() if hasattr(
-            self, "partition_image_var") else ""
-        if p and os.path.isfile(p):
-            self.settings_image_var.set(p)
 
     # ---- Image Info dialog ------------------------------------------
 
@@ -9628,7 +9585,7 @@ class MainWindow:
         self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
 
         # Search + status toolbar.
-        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=(8, 2))
+        tools = ttk.Frame(f); tools.pack(fill=tk.X, padx=10, pady=4)
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.text_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
@@ -9640,7 +9597,7 @@ class MainWindow:
 
         # String list.
         list_frame = ttk.Frame(f)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 4))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         self._text_tree = ttk.Treeview(
             list_frame, columns=("new", "max", "scene"),
             height=8, selectmode="browse")
@@ -10184,17 +10141,12 @@ class MainWindow:
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
-            # Default to the Extract input / Partition Explorer image so the
-            # user rarely re-picks the same card...
-            if not (self.settings_image_var.get() or "").strip():
-                self._settings_default_from_partition()
-                if not (self.settings_image_var.get() or "").strip():
-                    src = (self.extract_input_var.get() or "").strip()
-                    if src and os.path.isfile(src):
-                        self.settings_image_var.set(os.path.normpath(src))
-            # ...and auto-load it, so the settings box isn't an empty white
-            # panel on arrival (the image is already filled in).  Skip if this
-            # exact image is already loaded.
+            # The card image mirrors the Extract tab (batch 21 — it's not a
+            # separate picker any more): resync on every visit and (re)load
+            # whenever it changed.
+            src = (self.extract_input_var.get() or "").strip()
+            if src and os.path.isfile(src):
+                self.settings_image_var.set(os.path.normpath(src))
             img = (self.settings_image_var.get() or "").strip()
             if (img and os.path.isfile(img) and not self._settings_busy
                     and img != getattr(self, "_settings_image_path", None)):
@@ -10806,10 +10758,6 @@ class MainWindow:
                 pass
             if self._write_output_row_ref:
                 self._write_output_row_ref.pack(
-                    fill=tk.X, padx=10, pady=4,
-                    before=self._write_filename_lbl)
-            if getattr(self, "_write_filename_row", None) is not None:
-                self._write_filename_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._write_filename_lbl)
 
@@ -11843,11 +11791,9 @@ class MainWindow:
                                  "Apply Modifications"))
                 self._refresh_drives_async("write")
                 # SSD-write doesn't produce an output file — the SSD
-                # IS the output.  Hide the Output Folder + File Name rows.
+                # IS the output.  Hide the Build Image row.
                 if hasattr(self, "_write_output_row_ref"):
                     self._write_output_row_ref.pack_forget()
-                if getattr(self, "_write_filename_row", None) is not None:
-                    self._write_filename_row.pack_forget()
                 # Kick a preview scan in the background so the user
                 # sees the modified files without a separate click.
                 self._scan_write_preview()
@@ -11866,10 +11812,6 @@ class MainWindow:
                                  "Build update"))
                 if hasattr(self, "_write_output_row_ref"):
                     self._write_output_row_ref.pack(
-                        fill=tk.X, padx=10, pady=4,
-                        before=self._write_filename_lbl)
-                if getattr(self, "_write_filename_row", None) is not None:
-                    self._write_filename_row.pack(
                         fill=tk.X, padx=10, pady=4,
                         before=self._write_filename_lbl)
                 # Modified Files Preview in ISO mode too — useful for
@@ -14378,51 +14320,77 @@ class MainWindow:
             self.write_output_var.set(derived)
 
     def _change_build_location(self):
-        """Build Location "Change…": pick a folder, remember it as this
-        project's build_dir override (plain stored path — no links) so the
-        derivation honours it from now on.  A NAS-hosted project can build
-        to a local drive this way."""
-        path = filedialog.askdirectory(
-            title="Select build output folder",
+        """Build Image "Change…": one Save-As picker for the merged
+        folder + file-name row (batch 21).  The folder part is remembered as
+        this project's build_dir override (plain stored path — no links) so
+        the derivation honours it from now on — a NAS-hosted project can
+        build to a local drive this way."""
+        mfr = getattr(self, "_current_mfr", None)
+        ext = ""
+        if mfr is not None:
+            try:
+                ext = mfr.write_output_ext() or ""
+            except Exception:
+                ext = ""
+        initial = ((self.write_filename_var.get() or "").strip()
+                   or self._default_write_filename())
+        path = filedialog.asksaveasfilename(
+            title="Build image as",
             initialdir=self._initialdir_for(self.write_output_var.get(),
-                                            self.write_assets_var.get()))
+                                            self.write_assets_var.get()),
+            initialfile=initial,
+            defaultextension=(ext or ""),
+            filetypes=(([("Card image", "*" + ext)] if ext else [])
+                       + [("All files", "*.*")]),
+            confirmoverwrite=False)   # Build itself asks before overwriting
         if not path:
             return
         path = os.path.normpath(path)
-        self.write_output_var.set(path)
+        folder_part, name_part = os.path.split(path)
+        if mfr is not None:
+            name_part = mfr.force_write_ext(name_part)
+        self.write_output_var.set(folder_part)
+        self.write_filename_var.set(name_part)
         self._write_output_auto = ""       # custom — derivation backs off
         folder = (self.write_assets_var.get() or "").strip()
         from ..core import project_file
         if folder and project_file.has_anchor(folder):
             default = os.path.normpath(os.path.join(folder, "build"))
-            override = "" if path == default else path
+            override = "" if folder_part == default else folder_part
             if project_file.update_anchor(folder, build_dir=override):
                 self.append_log(
                     "Project build location %s" % (
                         "reset to the default build\\ folder" if not override
-                        else "set to %s" % path), "info")
+                        else "set to %s" % folder_part), "info")
+        self._update_write_filename_hint()
 
-    def _jump_to_extract_tab(self):
-        """The read-only project rows' "Set on Extract tab" action."""
+    def _refresh_build_path_display(self, *_a):
+        """Keep the Build Image row's text = the exact file Write will
+        produce (folder + name with the plugin's forced extension)."""
+        var = getattr(self, "_write_build_path_var", None)
+        if var is None:
+            return
+        target = ""
         try:
-            self._notebook.select(self._tab_extract)
-        except tk.TclError:
-            pass
+            target = self._target_write_path()
+        except Exception:
+            target = ""
+        if not target:
+            out = (self.write_output_var.get() or "").strip()
+            name = (self.write_filename_var.get() or "").strip()
+            target = os.path.join(out, name) if out and name else out
+        var.set(target)
 
     def _project_path_display(self, parent, var):
         """The read-only path row the Replace/Write/Mod-pack tabs show for
-        project-derived fields: a readonly entry mirroring *var* plus a
-        button that jumps to the Extract tab, where the value is actually
-        set.  A plain disabled box with no exit reads as broken (monkeybug:
-        an editable per-tab box reads as per-tab state, which it never
-        was — it's been one shared variable since the tabs were built)."""
-        wrap = ttk.Frame(parent)
-        ttk.Entry(wrap, textvariable=var, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(wrap, text="Set on Extract tab",
-                   command=self._jump_to_extract_tab).pack(
-            side=tk.LEFT, padx=(6, 0))
-        return wrap
+        project-derived fields: a plain label mirroring *var* — visibly not
+        an editable field, matching the Replace tabs' project mirror.  The
+        old "Set on Extract tab" jump button is gone (batch 21: both rows
+        only ever led back to the Extract tab, so labels say it instead)."""
+        lbl = ttk.Label(parent, textvariable=var, anchor=tk.W)
+        _Tooltip(lbl, "Shared by every tab — it is set on the Extract tab.",
+                 lambda: self._current_theme)
+        return lbl
 
     def _default_write_filename(self):
         """The name Write gives the built file before the user renames it: the
@@ -14498,25 +14466,11 @@ class MainWindow:
                 and self.write_input_source_var.get() == "ssd"):
             self._write_filename_lbl.configure(text="")
             return
-        self._update_write_ext_label()
         self._maybe_default_write_filename()
+        # The plugin's forced extension shows in the Build Image path itself
+        # (batch 21 — the old standalone "saved as .raw" label is gone).
+        self._refresh_build_path_display()
         self._update_write_filename_hint()
-
-    def _update_write_ext_label(self):
-        """Show the extension the current plugin forces on the build (e.g.
-        ".raw") beside the File Name box, or blank when it pins none — so the
-        user always sees what the file will be, even before typing a name."""
-        lbl = getattr(self, "_write_ext_lbl", None)
-        if lbl is None:
-            return
-        mfr = getattr(self, "_current_mfr", None)
-        ext = ""
-        if mfr is not None:
-            try:
-                ext = mfr.write_output_ext() or ""
-            except Exception:
-                ext = ""
-        lbl.configure(text=(f"saved as {ext}" if ext else ""))
 
     def _update_write_filename_hint(self):
         """Amber warning under the File Name box when the chosen name would

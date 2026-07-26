@@ -257,7 +257,7 @@ loop.
     the per-platform client gate (step 9) keeps the not-yet-built
     platforms silent.
 
-    Start TWO background tasks and END THE TURN:
+    Start THREE background tasks and END THE TURN:
     1. A "publish at first asset" watcher — polls the release and flips
        it live as soon as one asset is attached, then exits:
        ```bash
@@ -267,18 +267,35 @@ loop.
        done
        gh release edit vN.N.N --draft=false
        ```
-    2. The installer-run watch (`gh run watch <id> --exit-status`,
+    2. A **Windows-asset watcher** — the tester (monkeybug) is on
+       Windows, so the moment `*_Windows.exe` attaches is the moment the
+       final report + forward-to-tester message (step 10) go out.  Do
+       NOT hold that message for the macOS builds (the Intel Mac build
+       is ~4x slower and the tester can't use it anyway):
+       ```bash
+       until gh release view vN.N.N --json assets \
+               --jq '.assets[].name' 2>/dev/null | grep -q '_Windows\.exe$'; do
+         sleep 15
+       done
+       ```
+       When THIS watcher completes: make sure the release is live
+       (watcher 1 may have already flipped it; if not, flip it now),
+       then print the **final report + tester message** in that turn.
+    3. The installer-run watch (`gh run watch <id> --exit-status`,
        `--workflow=release.yml`) so the remaining assets finish
        attaching to the now-live release.
 
-    When the installer-run watch completes:
+    When the installer-run watch completes (this is AFTER the tester
+    message has usually gone out — it's a backfill confirmation, not a
+    gate):
     - If an upload step failed on a transient GitHub error,
       `gh run rerun <id> --failed` — builds are per-job, so only the
       failed uploads redo.  Start a fresh background watch on the rerun.
       (The release is already live with whatever assets DID build; the
       rerun just backfills the missing one — a partial-platform release
       is acceptable per the publish-early policy, but always backfill.)
-    - When green, verify all four assets are attached and print the URL:
+    - When green, verify all four assets are attached and print a short
+      all-assets confirmation with the URL:
     ```
     gh release view vN.N.N --json assets --jq '.assets[].name'
     # expect: *_Windows.exe, *_macOS_AppleSilicon.dmg,
@@ -287,7 +304,7 @@ loop.
 
 10. **Draft a message for the tester / user.**
 
-    After the release is published, write a SHORT, plain-text message the user can forward to whoever tests or requested the changes (e.g. monkeybug).  This is separate from the GitHub release notes — it's a casual DM, not documentation.
+    As soon as the WINDOWS asset is attached (step 9b watcher 2 — never wait for the macOS/Linux builds), write a SHORT, plain-text message the user can forward to whoever tests or requested the changes (e.g. monkeybug).  This is separate from the GitHub release notes — it's a casual DM, not documentation.  If the release answers questions the tester asked in their feedback, fold the answers into this message — it's the reply they actually read.
 
     Rules (this is text the USER sends onward, see `feedback_no_emdash_short_messages.md`):
     - **No em dashes.**  Keep it to a few lines.
@@ -338,9 +355,11 @@ after the push in step 7b (this is where the user walks away):
   watched in the background, and what happens next without them
   ("will tag, draft, and publish when CI is green — no action needed").
 
-**Final report** — printed in the background-notified turn after the
-release is published (step 9b), together with the forward-to-tester
-message from step 10:
+**Final report** — printed in the background-notified turn where the
+WINDOWS asset lands (step 9b watcher 2), together with the
+forward-to-tester message from step 10.  Do not hold either for the
+macOS / Linux assets; those get a one-line backfill confirmation later
+when the installer-run watch finishes:
 
 - New version + previous version.
 - Number of commits since last tag.

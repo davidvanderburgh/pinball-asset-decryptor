@@ -86,7 +86,9 @@ def _settings_form(w):
     return {r["name"]: r for r in w._settings_rows}
 
 
-def test_settings_stage_clear_roundtrip(app, tmp_path):
+def test_settings_autostage_reset_roundtrip(app, tmp_path):
+    """Batch 21: edits auto-stage (debounced -> _settings_autostage) and
+    Reset Fields is the one button — back to defaults, staging cleared."""
     from pinball_decryptor.core import staged_changes
 
     w = _stern(app)
@@ -94,43 +96,64 @@ def test_settings_stage_clear_roundtrip(app, tmp_path):
     w.write_assets_var.set(assets)
     by = _settings_form(w)
 
-    assert str(w._settings_stage_btn["state"]) == "normal"
-    assert str(w._settings_clear_staged_btn["state"]) == "disabled"
+    assert str(w._settings_reset_btn["state"]) == "normal"
 
     by["AD_FREE_PLAY"]["var"].set(1)
     by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(40)
-    w._settings_stage()
+    w._settings_autostage()          # what the debounce timer runs
 
     # Staged into the folder's sidecar, in internal units, other keys intact.
     assert w.staged_default_settings(assets) == {
         "AD_FREE_PLAY": 1, "AD_SOUND_MASTER_VOLUME_SETTING": 40}
-    assert str(w._settings_clear_staged_btn["state"]) == "normal"
-    assert "(2)" in str(w._settings_clear_staged_btn["text"])
 
     # Staging must not wipe the Replace tabs' sections of the sidecar.
     data = staged_changes.load(assets)
     data["audio"] = {"audio/a.wav": "C:\\rep.wav"}
     staged_changes.save(assets, data)
-    by["AD_FREE_PLAY"]["var"].set(1)
-    w._settings_stage()
+    by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(32)
+    w._settings_autostage()
     data = staged_changes.load(assets)
     assert data["audio"] == {"audio/a.wav": "C:\\rep.wav"}
-    assert "settings" in data
+    assert data["settings"] == {
+        "AD_FREE_PLAY": 1, "AD_SOUND_MASTER_VOLUME_SETTING": 32}
 
-    w._settings_clear_staged()
+    # A field going back to its default drops OUT of the staged set…
+    by["AD_SOUND_MASTER_VOLUME_SETTING"]["var"].set(64)
+    w._settings_autostage()
+    assert w.staged_default_settings(assets) == {"AD_FREE_PLAY": 1}
+
+    # …and Reset Fields clears the staging (other sections intact).
+    w._settings_reset()
     assert w.staged_default_settings(assets) == {}
     assert staged_changes.load(assets)["audio"] == {
         "audio/a.wav": "C:\\rep.wav"}
-    assert str(w._settings_clear_staged_btn["state"]) == "disabled"
+    assert int(by["AD_FREE_PLAY"]["var"].get()) == 0
 
 
-def test_settings_stage_without_changes_stages_nothing(app, tmp_path):
+def test_settings_autostage_without_changes_stages_nothing(app, tmp_path):
     w = _stern(app)
     assets = str(tmp_path / "extract2"); os.makedirs(assets)
     w.write_assets_var.set(assets)
     _settings_form(w)
-    w._settings_stage()                          # nothing edited
+    w._settings_autostage()                      # nothing edited
     assert w.staged_default_settings(assets) == {}
+
+
+def test_settings_form_reflects_already_staged_values(app, tmp_path):
+    """Reopening the form overlays the folder's staged values onto the
+    fields — with auto-staging the form IS the staging area, so they must
+    agree (else the next edit would silently clobber the staged set)."""
+    from pinball_decryptor.core import staged_changes
+
+    w = _stern(app)
+    assets = str(tmp_path / "extract4"); os.makedirs(assets)
+    w.write_assets_var.set(assets)
+    staged_changes.save(assets, {"settings": {"AD_FREE_PLAY": 1}})
+    by = _settings_form(w)
+    assert int(by["AD_FREE_PLAY"]["var"].get()) == 1
+    # An untouched rebuild re-stages the same set — nothing lost.
+    w._settings_autostage()
+    assert w.staged_default_settings(assets) == {"AD_FREE_PLAY": 1}
 
 
 def test_staged_default_settings_ignores_garbage(app, tmp_path):

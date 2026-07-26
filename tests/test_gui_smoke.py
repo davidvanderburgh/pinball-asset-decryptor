@@ -1305,9 +1305,10 @@ def test_write_output_ext_forces_correct_extension(manufacturers_by_key):
 def test_write_filename_forces_raw_extension_and_states_it(
         app, manufacturers_by_key, tmp_path):
     """Stern Spike 2 builds a raw card image (.raw): the default name lands as
-    .raw even when the original was a .img, the forced extension is stated
-    beside the box, and an extensionless typed name is forced to .raw with a
-    'Will build:' line spelling out the resulting file."""
+    .raw even when the original was a .img, the merged Build Image row shows
+    the forced-extension destination (batch 21 — the standalone "saved as
+    .raw" label is gone), and an extensionless typed name is forced to .raw
+    with a 'Will build:' line spelling out the resulting file."""
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     app.window.extract_input_var.set("")
@@ -1319,8 +1320,8 @@ def test_write_filename_forces_raw_extension_and_states_it(
         out_dir = tmp_path / "builds"
         out_dir.mkdir()
         w.write_output_var.set(str(out_dir))
-        # The forced extension is stated beside the File Name box.
-        assert w._write_ext_lbl.cget("text") == "saved as .raw"
+        # The old standalone extension label is gone (batch 21).
+        assert not hasattr(w, "_write_ext_lbl")
         # A .img original still defaults to a .raw build name.
         w.write_upd_var.set("C:/cards/game-1_0_0.sdcard.img")
         w._update_write_filename()
@@ -1331,6 +1332,8 @@ def test_write_filename_forces_raw_extension_and_states_it(
         w._update_write_filename_hint()
         assert w._write_filename_lbl.cget("text") == "Will build: my_mod.raw"
         assert w._target_write_path().endswith("my_mod.raw")
+        # The merged Build Image row shows the same forced destination.
+        assert w._write_build_path_var.get().endswith("my_mod.raw")
         # A name that already carries the right extension -> no surprise line.
         w.write_filename_var.set("my_mod.raw")
         w._update_write_filename_hint()
@@ -1738,10 +1741,10 @@ def _scan_images(window, assets_dir):
     the worker thread so the test is deterministic)."""
     from pinball_decryptor.core.image_slots import scan_image_slots
     slots = scan_image_slots(assets_dir, probe=False)
-    groups, occ = window._scan_image_groups(assets_dir)
+    groups, occ, where = window._scan_image_groups(assets_dir)
     window._image_scan_id += 1
     window._populate_image_after_scan(
-        slots, window._image_scan_id, assets_dir, groups, occ)
+        slots, window._image_scan_id, assets_dir, groups, occ, where)
     return slots
 
 
@@ -1751,7 +1754,7 @@ def test_image_group_scan_parses_manifests(tmp_path):
     for a folder with no manifests."""
     from pinball_decryptor.gui.main_window import MainWindow
     assets = _seed_image_assets(tmp_path)
-    groups, occ = MainWindow._scan_image_groups(assets)
+    groups, occ, _where = MainWindow._scan_image_groups(assets)
     key = "rad::/game/scenes/a1b2c3d4e5f6/scene.radium"
     rel1 = "images/scene_textures/radimg_Char_Select_8x8_00000001.png"
     # Label = element hint + searchable container-hash shorthand: hints
@@ -1767,7 +1770,74 @@ def test_image_group_scan_parses_manifests(tmp_path):
         "dir::/game/assets/loose", "game/assets/loose", 0)
     empty = tmp_path / "no_manifests"
     empty.mkdir()
-    assert MainWindow._scan_image_groups(str(empty)) == ({}, {})
+    assert MainWindow._scan_image_groups(str(empty)) == ({}, {}, {})
+
+
+def _seed_shared_image_assets(tmp_path):
+    """Two scenes that share one image: the extract dedupes it to a single
+    PNG whose HOME group is the first scene, so the second scene owns no
+    first-occurrence row at all (Peter's training scene)."""
+    st = tmp_path / "images" / "scene_textures"
+    st.mkdir(parents=True)
+    shared = "radimg_Logo_8x8_000000aa.png"
+    own = "radimg_Only_8x8_000000bb.png"
+    for fn in (shared, own):
+        (st / fn).write_bytes(b"\x89PNG-fake")
+    home = "/game/scenes/aaaaaaaa1111/scene.radium"
+    other = "/game/scenes/bbbbbbbb2222/scene.radium"
+    with open(st / "radium_images.txt", "w", encoding="utf-8") as f:
+        f.write("# output\tradium card path\tdata offset\tlength"
+                "\tpad_w\tpad_h\tfmt\n")
+        f.write("scene_textures/%s\t%s\t100\t16\t8\t8\t5\n" % (shared, home))
+        f.write("scene_textures/%s\t%s\t100\t16\t8\t8\t5\n" % (own, home))
+        # The second scene draws ONLY the shared image — nothing is first
+        # seen here, so before the fix this scene had no rows anywhere.
+        f.write("scene_textures/%s\t%s\t400\t16\t8\t8\t5\n" % (shared, other))
+    (tmp_path / ".checksums.md5").write_text("", encoding="utf-8")
+    return str(tmp_path), "images/scene_textures/" + shared
+
+
+def test_image_search_finds_scene_by_any_occurrence(app, manufacturers_by_key,
+                                                    tmp_path):
+    """Searching a scene id finds the images that scene draws even when they
+    are filed under another scene, and shows them UNDER the scene searched
+    for."""
+    from pinball_decryptor.gui.main_window import MainWindow
+    assets, shared = _seed_shared_image_assets(tmp_path)
+    groups, occ, where = MainWindow._scan_image_groups(assets)
+    home_key = "rad::/game/scenes/aaaaaaaa1111/scene.radium"
+    other_key = "rad::/game/scenes/bbbbbbbb2222/scene.radium"
+    # One home group, but both containers recorded — home first.
+    assert groups[shared][0] == home_key
+    assert [g[0] for g in where[shared]] == [home_key, other_key]
+    assert occ[shared] == 2
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update()
+    w.write_assets_var.set(assets)
+    _scan_images(w, assets)
+    tree = w._image_tree
+    w.image_group_by_scene_var.set(True)
+
+    # The second scene's id now finds its image, grouped under THAT scene.
+    w.image_search_var.set("bbbbbbbb")
+    tops = list(tree.get_children())
+    assert len(tops) == 1
+    assert tops[0] == "::grp::" + other_key
+    assert list(tree.get_children(tops[0])) == [shared]
+    # The full on-card scene hash (what a file listing shows) works too.
+    w.image_search_var.set("bbbbbbbb2222")
+    assert list(tree.get_children()) == ["::grp::" + other_key]
+    # Its home scene still lists it, alongside the image only that scene has.
+    w.image_search_var.set("aaaaaaaa")
+    tops = list(tree.get_children())
+    assert len(tops) == 1 and len(tree.get_children(tops[0])) == 2
+    # Flat mode searches scenes too (it used to match paths only).
+    w.image_group_by_scene_var.set(False)
+    w.image_search_var.set("bbbbbbbb")
+    assert list(tree.get_children()) == [shared]
+    w.image_search_var.set("")
 
 
 def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
@@ -2452,7 +2522,7 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     ]
     w._settings_build_form(rows)
     assert len(w._settings_rows) == 2
-    assert str(w._settings_apply_btn["state"]) == "normal"
+    assert str(w._settings_reset_btn["state"]) == "normal"
     assert w._settings_changes() == {}                 # nothing edited yet
     # Auto-apply belongs to a preset — greyed out while none is selected.
     assert "disabled" in w._settings_auto_cb.state()
@@ -2654,16 +2724,17 @@ def test_assign_and_clear_write_log_lines(app, manufacturers_by_key,
     assert "cleared replacement for audio/idx0001.wav" in log
 
 
-def test_write_tab_output_label_says_build_location(app, manufacturers_by_key):
-    """The Write tab's destination row reads "Build Location:", not the
-    ambiguous "Output Folder:" (monkeybug batch 11)."""
+def test_write_tab_output_label_says_build_image(app, manufacturers_by_key):
+    """The Write tab's destination row reads "Build Image:" — batch 21 merged
+    the old "Build Location:" (batch 11) + "File Name:" rows into one full
+    destination path."""
     from tkinter import ttk as _ttk
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
     labels = [c for c in w._write_output_row_ref.winfo_children()
               if isinstance(c, _ttk.Label)]
-    assert any(str(l.cget("text")) == "Build Location:" for l in labels)
+    assert any(str(l.cget("text")) == "Build Image:" for l in labels)
 
 
 # ---------------------------------------------------------------------------
@@ -2811,6 +2882,56 @@ def test_jjp_dongle_extract_checkbox_and_phase_swap(app, manufacturers_by_key):
     app.root.update(); app.root.update()
     assert win._dongle_extract_frame.winfo_manager() == ""
     assert win.extract_dongle_var.get() is False
+
+
+def test_font_studio_scene_scope_control(app, tmp_path):
+    """The Fonts window can limit a font edit to chosen scenes: picking scenes
+    persists a scope the Build reads, and switching back to "all" clears it."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+
+    # Default is every scene, and nothing is persisted until you narrow it.
+    assert fs._scope_var.get() == "all"
+    assert fs._scene_paths == ["/g/scene1/scene.radium",
+                               "/g/scene9/scene.radium"]
+    assert "all 2 scenes" in fs._scope_lbl.cget("text")
+    assert fr.get_font_scope(str(tmp_path), fs._current_font()) is None
+
+    # Narrow to the second scene -> saved for the Build to read.
+    fs._scope_var.set("some")
+    fs._on_scope_mode()
+    fs._scenes_list.selection_clear(0, "end")
+    fs._scenes_list.selection_set(1)
+    fs._on_scope_select()
+    assert fr.get_font_scope(str(tmp_path), fs._current_font()) == [
+        "/g/scene9/scene.radium"]
+    assert "Only 1 of 2" in fs._scope_lbl.cget("text")
+
+    # It survives a reload of the window (it lives in the project folder).
+    fs.reload("tbl")
+    assert fs._scope_var.get() == "some"
+    assert fs._scenes_list.curselection() == (1,)
+
+    # Back to all -> scope cleared.
+    fs._scope_var.set("all")
+    fs._on_scope_mode()
+    assert fr.get_font_scope(str(tmp_path), fs._current_font()) is None
+
+    # Close the tool window: it leaves a pending preview-render `after` job
+    # that would otherwise outlive the root and break teardown.
+    fs._close()
+    app.root.update()
 
 
 def test_font_studio_and_scene_browser_smoke(app, tmp_path):

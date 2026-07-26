@@ -3401,15 +3401,17 @@ class App:
             self._refresh_title()
 
     def _refresh_title(self):
-        """Compose the title bar: app + version, the detected game (batch 20),
-        and the loaded project's folder name (batch 19 — two projects for one
-        game version must stay tellable apart)."""
+        """Compose the title bar: app + version, then EITHER the loaded
+        project's name OR the detected game (batch 21 — like most apps, a
+        saved/loaded project names the window; the Stern official caption is
+        the default only until a project exists.  Batch 20 put the detected
+        game here; batch 19 the project)."""
         title = f"{APP_NAME} v{__version__}"
-        if self._detected_caption:
-            title += " — %s" % self._detected_caption
         path = self._project_path
         if path:
             title += " — %s" % (os.path.basename(path.rstrip("\\/")) or path)
+        elif self._detected_caption:
+            title += " — %s" % self._detected_caption
         try:
             self.root.title(title)
         except tk.TclError:

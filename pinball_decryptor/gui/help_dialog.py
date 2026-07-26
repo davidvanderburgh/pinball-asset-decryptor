@@ -267,12 +267,14 @@ HELP_CONTENT = {
          "own full comparison, so there's no need to wait for the scan to "
          "finish before building."),
         ("Output name",
-         "Builds land in the project's own build\\ folder — one build per "
-         "project, overwritten on each rebuild — with a distinct default "
-         "name (e.g. \"…-modified.raw\", where supported) so it can't be "
-         "mistaken for the stock file. \"Change…\" next to Build Location "
-         "moves it for this project (say, a local drive when the project "
-         "lives on a NAS); the File Name box renames the built file."),
+         "The Build Image line shows the exact file the build will "
+         "produce. Builds land in the project's own build\\ folder — one "
+         "build per project, overwritten on each rebuild — with a distinct "
+         "default name (e.g. \"…-modified.raw\", where supported) so it "
+         "can't be mistaken for the stock file. \"Change…\" is one Save-As "
+         "picker for both the folder and the name — handy when a "
+         "NAS-hosted project should build to a local drive; the required "
+         "extension is applied automatically."),
         ("Undo",
          "\"Revert all changes…\" restores every changed asset back to its "
          "extract original (the build inputs, not any card)."),
@@ -337,37 +339,37 @@ HELP_CONTENT = {
     "Default Settings": [
         ("What it's for",
          "Preset the operator-adjustment DEFAULTS baked into a card image — "
-         "free play, volume, pricing and more — so a machine comes up the way "
-         "you want without adjusting it by hand every time you flash a fresh "
-         "card."),
+         "free play, volume, pricing, brightness and more — so a machine "
+         "comes up the way you want without adjusting it by hand every time "
+         "you flash a fresh card. The Card Image shown is the master image "
+         "set on the Extract tab; the settings are read from its game "
+         "firmware."),
         ("Fresh cards only (important)",
          "A machine uses these defaults on a fresh flash or after a factory "
          "reset. A machine that has already been set up keeps its own "
          "settings — Stern stores those on the board, not on the card, so the "
          "app cannot change a machine that's already configured. Think of this "
          "as \"how a brand-new card boots\"."),
-        ("Edit + apply",
-         "Point \"Card Image\" at a card image; the app reads the game "
-         "firmware and lists the settings it can preset. \"On card\" is the "
-         "default currently baked into that image (Stern's factory value "
-         "unless it was changed here before); set \"New default\" to what you "
-         "want — a ● marks every row that deviates from the card. Press "
-         "\"Apply at Next Build\" and the changes are staged with your "
-         "assets folder like any other mod: the next card you Build gets "
-         "them baked in (validation record refreshed automatically) while "
-         "your master image stays untouched. \"Write into This Image Now…\" "
-         "is the advanced alternative — it edits the picked image in place, "
-         "for when you want to change that exact file without rebuilding; "
-         "keep a backup if it's precious."),
+        ("Edit + build",
+         "\"On card\" is the default currently baked into the image (Stern's "
+         "factory value unless it was changed here before); set \"New "
+         "default\" to what you want — a ● marks every row that deviates "
+         "from the card, and every change stages itself automatically, like "
+         "edits on the Replace tabs. The next card you Build gets the staged "
+         "defaults baked in (validation record refreshed automatically) "
+         "while your master image stays untouched. \"Reset Fields\" puts "
+         "everything back to the image's own defaults and clears the staged "
+         "changes."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
-         "it from the dropdown any time to fill the form. The auto-apply "
-         "checkbox belongs to the selected preset: tick it and that preset is "
-         "baked into every card you build on the Write tab, so you never have "
-         "to revisit this tab — only the settings a given game actually has "
-         "are applied, so one preset works across titles. Use presets without "
-         "auto-apply when different machines need different defaults; tick it "
-         "when one preset fits everything you build."),
+         "it from the dropdown any time to fill the form (the values stage "
+         "automatically). The auto-apply checkbox belongs to the selected "
+         "preset: tick it and that preset is baked into every card you build "
+         "on the Write tab, so you never have to revisit this tab — only the "
+         "settings a given game actually has are applied, so one preset "
+         "works across titles. Use presets without auto-apply when different "
+         "machines need different defaults; tick it when one preset fits "
+         "everything you build."),
     ],
 }
 

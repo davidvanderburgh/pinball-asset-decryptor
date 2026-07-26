@@ -244,6 +244,24 @@ CURATED = [
     ("AD_FREE_GAME_LIMIT", "Free Game Limit", "number", "", 1),
     ("AD_BALL_SAVE_TIME", "Ball Save Time", "number", "", 1),
     ("AD_TILT_WARNINGS", "Tilt Warnings", "number", "", 1),
+    # Brightness family (monkeybug batch 21 — he wants the in-game backbox
+    # default).  All are plain 0/25-100 ranges, i.e. the percentage the
+    # operator menu shows; display verification on hardware still pending,
+    # same caveat class as the master volume.
+    ("AD_BACKBOX_BRIGHTNESS", "Backbox Brightness", "number",
+     "Backbox brightness outside a game (attract / menus), as a "
+     "percentage.", 1),
+    ("AD_GAME_BACKBOX_BRIGHTNESS", "Backbox Brightness In Game", "number",
+     "Backbox brightness while a game is being played, as a percentage — "
+     "lower it to keep the backbox from washing out the playfield.", 1),
+    ("AD_CABINET_BRIGHTNESS", "Cabinet Brightness", "number",
+     "Cabinet lighting brightness, as a percentage.", 1),
+    ("AD_GI_BRIGHTNESS", "GI Brightness", "number",
+     "General-illumination brightness, as a percentage.", 1),
+    ("AD_LED_BRIGHTNESS", "LED Brightness", "number",
+     "Playfield LED brightness, as a percentage.", 1),
+    ("AD_FLASHER_BRIGHTNESS", "Flasher Brightness", "number",
+     "Flasher brightness, as a percentage.", 1),
 ]
 
 # Per-setting enum labels (index -> text).  Only for enums whose option list is

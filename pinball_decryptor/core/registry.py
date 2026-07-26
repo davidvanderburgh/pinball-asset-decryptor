@@ -415,6 +415,19 @@ class Manufacturer(ABC):
     def detect(self, path):
         """Return a :class:`Game` if this manufacturer claims *path*, else None."""
 
+    def title_caption(self, path, game):
+        """Short human caption for the title bar once *game* was detected on
+        *path* — e.g. "Led Zeppelin v1.22 LE".
+
+        The happy-path "Detected: …" badge moved into the window title
+        (monkeybug batch 20: repeating the game name, the platform, and "card
+        image" on the tab was redundant), so this should be the leanest string
+        that identifies the loaded game — no manufacturer/platform echo, plus
+        a version when the plugin can recover one cheaply (filename-level;
+        this runs on the Tk thread on every path change).  Default: the
+        game's display name."""
+        return game.display
+
     def image_info(self, path, assets_dir=None):
         """Platform-specific sections for the Image Info tab, as
         ``[(section_title, [(name, value), ...]), ...]``.

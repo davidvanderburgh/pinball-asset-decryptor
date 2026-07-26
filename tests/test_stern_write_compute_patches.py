@@ -69,15 +69,16 @@ def test_audio_edit_log_branch_has_no_dangling_names(tmp_path, monkeypatch):
             log=_log, progress=None, cancel=lambda: False)
 
 
-@pytest.mark.parametrize("raw,needle,level", [
-    (False, "Audio shaping on", "info"),
-    (True, "Audio shaping OFF", "warning"),
+@pytest.mark.parametrize("raw,expect_line", [
+    (True, False),    # RAW pinned by the app = THE standard build; no log line
+    (False, True),    # env cleared by hand = experimental shaping; warn loudly
 ])
-def test_audio_edit_logs_shaping_mode(tmp_path, monkeypatch, raw, needle, level):
-    # The match-to-callouts toggle persists across sessions, so a card built
-    # with the box unticked is indistinguishable after the fact unless the
-    # Write log says which mode ran (monkeybug's 2026-07 click A/B).  One line
-    # per Write, warning-level when shaping is off.
+def test_audio_edit_logs_shaping_mode(tmp_path, monkeypatch, raw, expect_line):
+    # Raw encode is the only GUI behavior now (the match-to-callouts shaper
+    # was retired — batch 20), so the standard build logs nothing about
+    # shaping; only the unusual hand-cleared-env case leaves a warning
+    # fingerprint (a card built during an experiment must be identifiable
+    # after the fact — monkeybug's 2026-07 click A/B).
     (tmp_path / "idx0001.wav").write_bytes(b"\x00\x01\x02\x03")
     if raw:
         monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")
@@ -101,9 +102,12 @@ def test_audio_edit_logs_shaping_mode(tmp_path, monkeypatch, raw, needle, level)
             io.BytesIO(b""), [], str(tmp_path),
             log=_cap_log, progress=None, cancel=lambda: False)
     hits = [(m, l) for m, l in lines if m.startswith("Audio shaping")]
-    assert len(hits) == 1
-    assert needle in hits[0][0]
-    assert hits[0][1] == level
+    if expect_line:
+        assert len(hits) == 1
+        assert "Audio shaping ON" in hits[0][0]
+        assert hits[0][1] == "warning"
+    else:
+        assert not hits
 
 
 # --- write_image: background-copy / patch overlap orchestration --------------

@@ -992,10 +992,9 @@ class MainWindow:
                  on_admin_warning_collapsed_change=None,
                  initial_voice_quality=None,
                  on_voice_quality_change=None,
-                 initial_audio_declick=True,
-                 on_audio_declick_change=None,
                  initial_audio_advanced=None,
                  on_audio_advanced_change=None,
+                 on_detected_game_change=None,
                  on_audio_profile=None,
                  on_partition_image_opened=None,
                  initial_default_presets=None,
@@ -1092,24 +1091,20 @@ class MainWindow:
             vq = VOICE_QUALITY_CHOICES[0][0]
         self.voice_quality_var = tk.StringVar(value=vq)
         self._on_voice_quality_change = on_voice_quality_change
-        # "Match audio replacements to the game's callouts" — fades the
-        # start/end of each replacement, caps its level, and band-limits it to
-        # the stock callout bandwidth (~5 kHz low-pass).  It was an attempt at
-        # monkeybug's callout click, but no machine has confirmed it removes the
-        # pop (this session's RE traced the pop to the machine's own audio
-        # output stage), so it is OFF by default and now lives inside the
-        # Advanced Audio Options dialog rather than on the tab.  Persisted in
-        # settings.json via ``on_audio_declick_change``; the App also mirrors it
-        # into the Stern encoder's env var.
-        self.audio_declick_var = tk.BooleanVar(
-            value=bool(initial_audio_declick))
-        self._on_audio_declick_change = on_audio_declick_change
-        # Advanced audio options (fade/cap/roll-off overrides + head/tail
-        # modes + machine-render previews) — experiment levers for the Spike 2
+        # Advanced audio options (head/tail modes + anti-pop seed +
+        # machine-render previews) — experiment levers for the Spike 2
         # trigger-pop hunt.  Persisted via ``on_audio_advanced_change``; the
-        # App mirrors them into the encoder's env vars.
+        # App mirrors them into the encoder's env vars.  (The
+        # match-to-callouts shaper and its fade/cap/roll-off knobs lived here
+        # too until monkeybug batch 20 — retired: it never fixed the click it
+        # chased, and the blip-free firmware patch did.)
         self._audio_advanced = dict(initial_audio_advanced or {})
         self._on_audio_advanced_change = on_audio_advanced_change
+        # Fired with a short caption ("Led Zeppelin v1.22 LE") when the
+        # Extract input detects a game, and with None when it no longer does —
+        # the App shows it in the title bar (batch 20: the tab's "Detected:"
+        # badge said the same thing three ways).
+        self._on_detected_game_change = on_detected_game_change
         self._on_audio_profile = on_audio_profile
         # Fired with the image path when the Partition Explorer successfully
         # opens a card — the App records it into the field's recent-paths
@@ -1191,6 +1186,16 @@ class MainWindow:
             "write", lambda *a: self._on_extract_input_changed())
         self.write_upd_var = tk.StringVar()
         self.write_assets_var = tk.StringVar()
+        # The Replace tabs' project-folder mirror labels track this var: the
+        # shared project folder, or a pointer at the Extract tab while no
+        # project is loaded (a bare empty label reads as broken — batch 20).
+        self._project_mirror_var = tk.StringVar()
+        self.write_assets_var.trace_add(
+            "write", lambda *a: self._project_mirror_var.set(
+                (self.write_assets_var.get() or "").strip()
+                or "(no project yet — extract into one on the Extract tab)"))
+        self._project_mirror_var.set(
+            "(no project yet — extract into one on the Extract tab)")
         self.write_output_var = tk.StringVar()
         # Editable name for the file Write builds.  Defaults to the original's
         # name plus the plugin's distinguishing suffix (e.g. "…-modified.raw"),
@@ -1201,8 +1206,11 @@ class MainWindow:
         self.write_filename_var = tk.StringVar()
         self._write_filename_auto = ""
         # Round icon buttons (ⓘ badges, header home/?/⚙) — plain Canvases,
-        # collected so _apply_theme can re-skin their backdrops.
+        # collected so _apply_theme can re-skin their backdrops.  Their
+        # anti-aliased disc images are cached per (size, fill, bg, dots);
+        # instance-level on purpose (PhotoImages die with this Tk interp).
         self._round_icons = []
+        self._disc_img_cache = {}
         # Image Info window state (the round ⓘ badge next to the image
         # pickers opens one singleton Toplevel, built on demand).
         self._info_win = None
@@ -1643,15 +1651,14 @@ class MainWindow:
         # on the picker.
         self._project_btn.pack(side=tk.LEFT, padx=(0, 8),
                                before=self._title_lbl)
-        # Notification marks drawn over the gear circle's corners: red dot =
-        # update available, amber dot = staging cleanup pending.  Hidden
-        # until _refresh_gear_badge shows them; the amounts/details live in
-        # the ⚙ menu entries.
-        self._gear_update_dot = self._gear_btn.create_oval(
-            16, 1, 23, 8, fill="#e74c3c", outline="#e74c3c", state="hidden")
-        self._gear_warn_dot = self._gear_btn.create_oval(
-            16, 16, 23, 23, fill="#f39c12", outline="#f39c12",
-            state="hidden")
+        # Notification marks over the gear circle's corners: red dot =
+        # update available, amber dot = staging cleanup pending.  Composited
+        # into the gear's anti-aliased disc image by _set_icon_dot (an oval
+        # item on top rendered jagged) — hidden until _refresh_gear_badge
+        # adds them; the amounts/details live in the ⚙ menu entries.
+        # Same geometry as the old ovals: (16,1)-(23,8) and (16,16)-(23,23).
+        self._GEAR_UPDATE_DOT = (19.5, 4.5, 3.5, "#e74c3c")
+        self._GEAR_WARN_DOT = (19.5, 19.5, 3.5, "#f39c12")
         # "Check for updates" busy flag — while the GitHub fetch is in flight
         # the menu entry reads "Checking…" and is disabled (the menu is built
         # fresh on every click, so a flag is all the state we need).
@@ -1999,13 +2006,15 @@ class MainWindow:
         self._extract_macos_fda_frame = (
             self._build_macos_fda_warning_frame(f))
 
-        # "Detected: <game>" badge.  Wrapped in a row with a field-label-width
-        # spacer so its left edge lines up under the path entry fields (not the
-        # labels) — see the path rows above, which all lead with a width=14
-        # anchor=W label.  The ROW is the positioned element (the source toggle
-        # in _on_input_source_change packs/forgets it); the badge stays inside.
+        # Detect-badge row — now warnings-only ("Looks like…", "Not
+        # recognised…", extract-only): the happy-path "Detected: <game>" moved
+        # to the title bar (batch 20).  Wrapped in a row with a
+        # field-label-width spacer so its left edge lines up under the path
+        # entry fields (not the labels) — see the path rows above, which all
+        # lead with a width=14 anchor=W label.  The ROW is the positioned
+        # element; built UNPACKED — _sync_badge_row packs it only while the
+        # badge carries text.
         self._extract_badge_row = ttk.Frame(f)
-        self._extract_badge_row.pack(fill=tk.X, padx=10, pady=(0, 2))
         ttk.Label(self._extract_badge_row, text="", width=14).pack(side=tk.LEFT)
         self._extract_badge = ttk.Label(self._extract_badge_row, text="",
                                         font=(_SANS_FONT, 9, "italic"))
@@ -2022,19 +2031,34 @@ class MainWindow:
         # "Project Folder", not "Output Folder" (batch 19): this folder IS
         # the project — extraction lands here, every Replace/Write tab works
         # out of it (their rows are read-only mirrors of this one), and a
-        # folder containing a project anchor auto-loads that project.
-        ttk.Label(self._extract_output_row_ref,
-                  text="Project Folder:", width=14, anchor=tk.W).pack(
-            side=tk.LEFT)
+        # folder containing a project anchor auto-loads that project.  That
+        # explanation lives in the Browse tooltip + the "?" help now — the
+        # always-on caption under the row burned a line after first read
+        # (batch 20).
+        _proj_lbl = ttk.Label(self._extract_output_row_ref,
+                              text="Project Folder:", width=14, anchor=tk.W)
+        _proj_lbl.pack(side=tk.LEFT)
+        _proj_tip = ("The project folder — extraction lands here, and every "
+                     "other tab works out of it. A folder that already holds "
+                     "a project loads that project when picked.")
+        _Tooltip(_proj_lbl, _proj_tip, lambda: self._current_theme)
         self._path_combo(self._extract_output_row_ref,
                          self.extract_output_var, "extract_output").pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(self._extract_output_row_ref, text="Browse...",
-                   command=self._browse_extract_output).pack(
-            side=tk.LEFT, padx=(8, 0))
-        ttk.Label(f, text="(the project folder — extraction lands here, and "
-                          "every other tab's assets come from here)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
+        # ⓘ — project stats (asset counts, size on disk, change counts,
+        # start date) for the current project folder; mirrors the Card
+        # image row's ⓘ badge (batch 20).
+        self._make_round_icon(
+            self._extract_output_row_ref, "i", self._INFO_BADGE_FILL,
+            self._INFO_BADGE_HOVER, "Stats about this project folder",
+            self._open_project_info, size=18,
+            font=("Georgia", 10, "bold italic")).pack(
+            side=tk.LEFT, padx=(6, 0))
+        _browse_btn = ttk.Button(self._extract_output_row_ref,
+                                 text="Browse...",
+                                 command=self._browse_extract_output)
+        _browse_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(_browse_btn, _proj_tip, lambda: self._current_theme)
 
         # NOTE: a red "Output folder is not empty — files may be overwritten."
         # label used to live here, but the Extract click already raises a
@@ -2475,11 +2499,12 @@ class MainWindow:
         self._write_macos_fda_frame = (
             self._build_macos_fda_warning_frame(f))
 
-        # "Detected: …" badge — indented with a width-16 spacer so it lines
-        # up with the entry fields (which follow width-16 labels), matching
-        # the Extract tab (monkeybug 4.8) instead of the old fixed padx.
+        # Detect-badge row (warnings-only, like the Extract tab's — batch 20;
+        # built unpacked, _sync_badge_row packs it while it has text) —
+        # indented with a width-16 spacer so it lines up with the entry
+        # fields (which follow width-16 labels), matching the Extract tab
+        # (monkeybug 4.8) instead of the old fixed padx.
         self._write_badge_row = ttk.Frame(f)
-        self._write_badge_row.pack(fill=tk.X, padx=10, pady=(0, 2))
         _badge_spacer = ttk.Label(self._write_badge_row, text="", width=16)
         _badge_spacer.pack(side=tk.LEFT)
         self._write_col_labels.append(_badge_spacer)
@@ -2975,8 +3000,8 @@ class MainWindow:
         self._audio_assets_row = row
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var,
-                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._project_mirror_label(row).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "audio",
                                        self._scan_audio_slots_async)
 
@@ -3130,7 +3155,7 @@ class MainWindow:
 
         self._audio_empty = ttk.Label(
             list_frame,
-            text="Pick your extracted assets folder above, then click Scan.",
+            text="Set the project folder on the Extract tab, then click Scan.",
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
@@ -3161,10 +3186,11 @@ class MainWindow:
 
         # Length-matching option + the Stern experiment buttons share one row:
         # the Trim/pad checkbox on the left, Advanced… / Profile vs stock on the
-        # right.  The checkbox is forced on + disabled for plugins whose Write
-        # always length-matches (audio_forces_length_match, set in
-        # apply_manufacturer); the buttons are Stern-only (apply_manufacturer
-        # hides them elsewhere).
+        # right.  The checkbox is HIDDEN for plugins whose Write always
+        # length-matches (audio_forces_length_match, via _apply_audio_trim_lock
+        # — batch 20: a forced-on disabled checkbox still read as a setting the
+        # user should worry about); the buttons are Stern-only
+        # (apply_manufacturer hides them elsewhere).
         self._audio_opts_row = ttk.Frame(f)
         self._audio_opts_row.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(4, 4))
         self._audio_trim_cb = ttk.Checkbutton(
@@ -3172,23 +3198,20 @@ class MainWindow:
             text="Trim / pad replacements to the original slot length",
             variable=self.audio_trim_var, command=self._save_staged_changes)
         self._audio_trim_cb.pack(side=tk.LEFT)
-        # Hover tooltip — its text is set per-manufacturer in apply_manufacturer
-        # (esp. WHY it's disabled for size-neutral formats like Spike 2).
+        # Hover tooltip — its text is set per-manufacturer in apply_manufacturer.
         self._audio_trim_tip = _Tooltip(
             self._audio_trim_cb, "", lambda: self._current_theme)
         # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
-        # encode overrides (incl. the match-to-callouts shaper, now off by
-        # default and living inside the dialog) + a stock characterization
-        # report.
+        # encode overrides + a stock characterization report.
         self._audio_adv_btn = ttk.Button(
             self._audio_opts_row, text="Advanced…", width=12,
             command=self._open_audio_advanced)
         _Tooltip(self._audio_adv_btn,
-                 "Fine-tune how replacements are encoded: the match-to-callouts "
-                 "shaper (fade, level cap, treble roll-off) and experimental "
-                 "head/tail block handling — plus machine-render preview WAVs "
-                 "on Build.\n\nThese are levers for chasing clicks heard on the "
-                 "real machine. Defaults match the standard behavior.",
+                 "Fine-tune how replacements are encoded: experimental "
+                 "head/tail block handling and the anti-pop codec seed — plus "
+                 "machine-render preview WAVs on Build.\n\nThese are levers "
+                 "for chasing clicks heard on the real machine. Defaults "
+                 "match the standard behavior.",
                  lambda: self._current_theme)
         self._audio_profile_btn = ttk.Button(
             self._audio_opts_row, text="Profile vs stock", width=15,
@@ -3246,7 +3269,7 @@ class MainWindow:
             self._refresh_audio_type_filter()
             self._refresh_audio_list()
             self._audio_empty.configure(
-                text="Pick your extracted assets folder above, then click Scan.")
+                text="Set the project folder on the Extract tab, then click Scan.")
             self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             self._set_tab_scanning("audio", False)
             return
@@ -3764,7 +3787,6 @@ class MainWindow:
         has run for this folder: one collapsed parent per group of
         byte-identical factory audio (longest first, the dup scan's order),
         its member slots nested, every unique slot flat below the groups."""
-        from ..core.name_memory import split_decode_name as _split_decode_name
         tree = getattr(self, "_audio_tree", None)
         if tree is None:
             return
@@ -3859,13 +3881,11 @@ class MainWindow:
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
             keep_disp = ("☑" if self._audio_keep_full_flags.get(s.rel_path)
                          else "☐")
-            if not tag:
-                # User-named rows (a label after the decode index) get their
-                # own colour so custom names read at a glance vs stock ones
-                # (monkeybug batch 14).  Staged/changed colours still win.
-                parts = _split_decode_name(os.path.basename(s.rel_path))
-                if parts and parts[1]:
-                    tag = "renamed"
+            # NOTE: user-renamed rows used to get their own (warning-hue)
+            # colour — batch 14.  Batch 20 reversed it: a colour change should
+            # mean "modified", full stop; with auto-naming recolouring half
+            # the list, the signal read as noise.  Only staged (green) and
+            # changed-on-disk (blue) rows colour now.
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp, keep_disp,
@@ -4891,8 +4911,8 @@ class MainWindow:
         self._video_assets_row = row
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var,
-                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._project_mirror_label(row).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "video",
                                        self._scan_video_slots_async)
 
@@ -4967,7 +4987,7 @@ class MainWindow:
 
         self._video_empty = ttk.Label(
             list_frame,
-            text="Pick your extracted assets folder above, then click Scan.",
+            text="Set the project folder on the Extract tab, then click Scan.",
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
@@ -5144,7 +5164,7 @@ class MainWindow:
             self._video_slots_by_rel = {}
             self._refresh_video_list()
             self._video_empty.configure(
-                text="Pick your extracted assets folder above, then click Scan.")
+                text="Set the project folder on the Extract tab, then click Scan.")
             self._video_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             self._set_tab_scanning("video", False)
             return
@@ -5883,8 +5903,8 @@ class MainWindow:
         self._image_assets_row = row
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var,
-                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._project_mirror_label(row).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "image",
                                        self._scan_image_slots_async)
 
@@ -6004,7 +6024,7 @@ class MainWindow:
 
         self._image_empty = ttk.Label(
             list_frame,
-            text="Pick your extracted assets folder above, then click Scan.",
+            text="Set the project folder on the Extract tab, then click Scan.",
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
@@ -6073,7 +6093,7 @@ class MainWindow:
             self._image_group_occ = {}
             self._refresh_image_list()
             self._image_empty.configure(
-                text="Pick your extracted assets folder above, then click Scan.")
+                text="Set the project folder on the Extract tab, then click Scan.")
             self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             self._set_tab_scanning("image", False)
             return
@@ -7081,8 +7101,15 @@ class MainWindow:
 
     def _apply_audio_trim_lock(self, mfr, assets_dir=None,
                                persisted_trim=None):
-        """Force the Trim/pad checkbox on + disabled when this plugin's Write
-        always length-matches, else leave it a free toggle.
+        """Force Trim/pad on — and HIDE its checkbox — when this plugin's
+        Write always length-matches, else show it as a free toggle.
+
+        Batch 20 (monkeybug): for formats where length-matching is structural
+        (Spike 2's size-neutral slots, JJP, CGC's Pulp Fiction banks) it's
+        standard behavior, not a choice — a forced-on disabled checkbox still
+        read as a setting to worry about, so it's not shown at all.  The
+        checkbox stays (`state` NORMAL) only where a longer replacement is
+        genuinely valid (loose-WAV formats).
 
         Re-callable: the manufacturer-select path passes no *assets_dir* (the
         plugin's default), and an audio scan passes the scanned folder so a
@@ -7094,7 +7121,6 @@ class MainWindow:
         """
         if not hasattr(self, "_audio_trim_cb") or mfr is None:
             return False
-        caps = getattr(mfr, "capabilities", None)
         try:
             forces = mfr.audio_forces_length_match(assets_dir)
         except TypeError:
@@ -7104,39 +7130,27 @@ class MainWindow:
             self.audio_trim_var.set(True)
         else:
             self.audio_trim_var.set(bool(persisted_trim))
+        # The disabled state stays the source of truth for
+        # _audio_trim_forced() even while the widget is unmapped.
         self._audio_trim_cb.configure(
             state=(tk.DISABLED if forces else tk.NORMAL))
+        if forces:
+            self._audio_trim_cb.pack_forget()
+        elif not self._audio_trim_cb.winfo_manager():
+            # winfo_manager, not winfo_ismapped: "packed" survives the tab
+            # being hidden, so an already-packed box isn't re-packed.
+            self._audio_trim_cb.pack(side=tk.LEFT)
         if hasattr(self, "_audio_trim_tip"):
             note = (mfr.audio_length_note() or "").strip()
-            if forces and getattr(caps, "audio_keep_length_override", False):
-                # Plugins that ALSO offer a per-slot "Full" override (JJP)
-                # aren't size-neutral — they trim by default but a longer file
-                # is valid; don't claim the size-neutral rationale (it
-                # contradicts the Full column).
-                self._audio_trim_tip.text = (
-                    "On by default — every replacement is trimmed or padded "
-                    "to its original slot length on Write.\n\nTo keep one "
-                    "track's full length instead, tick the “Full” box on "
-                    "that slot in the list."
-                    + (("\n\n" + note) if note else ""))
-            elif forces:
-                self._audio_trim_tip.text = (
-                    "Always on for this format — it can't be turned off.\n\n"
-                    "Write fits each replacement into the original sound's "
-                    "exact slot in place (size-neutral), so every replacement "
-                    "is automatically matched to the original length; a "
-                    "different length would strand every later offset."
-                    + (("\n\n" + note) if note else ""))
-            else:
-                self._audio_trim_tip.text = (
-                    "When on, a replacement longer or shorter than the "
-                    "original is trimmed or padded to the original slot "
-                    "length before Write. When off, the replacement is used "
-                    "as-is.")
+            # Tooltip only matters when the checkbox is visible (free toggle).
+            self._audio_trim_tip.text = (
+                "When on, a replacement longer or shorter than the "
+                "original is trimmed or padded to the original slot "
+                "length before Write. When off, the replacement is used "
+                "as-is." + (("\n\n" + note) if note else ""))
         return forces
 
     _AUDIO_ADV_DEFAULTS = {
-        "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
     }
@@ -7148,6 +7162,11 @@ class MainWindow:
         ("silence", "Encode the tail block to silence (default)"),
         ("stock", "Keep the stock tail scrap (pre-v0.71.1 behavior)"),
     )
+
+    # Description labels wrap at the dialog's natural width (set by the
+    # head/tail rows) instead of a narrower column, so no dead space is left
+    # to their right (monkeybug batch 20 item 4).
+    _AUDIO_ADV_WRAP = 640
 
     def _open_audio_advanced(self):
         """Advanced audio options: per-knob encode overrides for the Spike 2
@@ -7163,55 +7182,25 @@ class MainWindow:
         cfg = dict(self._AUDIO_ADV_DEFAULTS)
         cfg.update({k: v for k, v in self._audio_advanced.items()
                     if v is not None})
+        wrap = self._AUDIO_ADV_WRAP
 
         ttk.Label(
-            dlg, justify=tk.LEFT, wraplength=460,
+            dlg, justify=tk.LEFT, wraplength=wrap,
             text="Experiment levers for how Stern Spike 2 audio replacements "
                  "are encoded. Defaults match the standard behavior; change "
                  "one thing at a time when chasing a click on the real "
                  "machine.").pack(anchor=tk.W, padx=12, pady=(12, 8))
 
-        # Master switch for the callout-matching shaper (the fade / cap /
-        # roll-off knobs below are its parameters).  Applied on OK like the
-        # rest of this dialog.  Off by default: it was an attempt at the
-        # callout click, but no machine has confirmed it removes the pop.
-        declick_var = tk.BooleanVar(value=bool(self.audio_declick_var.get()))
-        ttk.Checkbutton(
-            dlg, variable=declick_var,
-            text="Match audio replacements to the game's callouts").pack(
-            anchor=tk.W, padx=12, pady=(4, 0))
-        ttk.Label(
-            dlg, justify=tk.LEFT, wraplength=460,
-            font=(_SANS_FONT, 8, "italic"),
-            text="Shapes each replacement to behave like the game's own "
-                 "callouts: smooths the very start and end, gently caps the "
-                 "level, and rolls the treble off above ~5 kHz (the fade, cap "
-                 "and roll-off below are its knobs). Off by default: it was an "
-                 "attempt at the callout click, but no machine has confirmed it "
-                 "removes the pop. When off, your audio is encoded exactly as "
-                 "provided.").pack(anchor=tk.W, padx=12, pady=(2, 8))
+        # Horizontal rules between the option groups break up the wall of
+        # text-and-knobs (monkeybug batch 20 item 5).
+        def _rule():
+            ttk.Separator(dlg, orient=tk.HORIZONTAL).pack(
+                fill=tk.X, padx=12, pady=(2, 8))
+
+        _rule()
 
         grid = ttk.Frame(dlg)
         grid.pack(fill=tk.X, padx=12)
-        fade_var = tk.StringVar(value=str(cfg["fade_ms"]))
-        cap_var = tk.StringVar(value=str(cfg["headroom_pct"]))
-        lp_var = tk.StringVar(value=str(cfg["lowpass_hz"]))
-
-        def _row(r, label, var, lo, hi, inc, hint):
-            ttk.Label(grid, text=label).grid(row=r, column=0, sticky=tk.W,
-                                             pady=2)
-            ttk.Spinbox(grid, textvariable=var, from_=lo, to=hi,
-                        increment=inc, width=8).grid(row=r, column=1,
-                                                     sticky=tk.W, padx=(8, 0))
-            ttk.Label(grid, text=hint, font=(_SANS_FONT, 8, "italic")).grid(
-                row=r, column=2, sticky=tk.W, padx=(8, 0))
-
-        _row(0, "Edge fade length (ms):", fade_var, 0, 500, 5,
-             "default 40 — stock callouts ease in over 40-77 ms")
-        _row(1, "Level cap (% of full scale):", cap_var, 5, 100, 5,
-             "default 80 — near stock callout loudness")
-        _row(2, "Treble roll-off (Hz):", lp_var, 0, 20000, 500,
-             "default 5000; 0 turns the filter off")
 
         head_var = tk.StringVar(value=dict(self._AUDIO_HEAD_CHOICES)[
             cfg["head_mode"] if cfg["head_mode"] in
@@ -7220,33 +7209,34 @@ class MainWindow:
             cfg["leadout"] if cfg["leadout"] in
             dict(self._AUDIO_LEADOUT_CHOICES) else "silence"])
         ttk.Label(grid, text="Head block (first 4.5 ms):").grid(
-            row=3, column=0, sticky=tk.W, pady=(8, 2))
+            row=0, column=0, sticky=tk.W, pady=2)
         ttk.Combobox(grid, textvariable=head_var, state="readonly", width=48,
                      values=[v for _k, v in self._AUDIO_HEAD_CHOICES]).grid(
-            row=3, column=1, columnspan=2, sticky=tk.W, padx=(8, 0),
-            pady=(8, 2))
+            row=0, column=1, columnspan=2, sticky=tk.W, padx=(8, 0), pady=2)
         ttk.Label(grid, text="Tail block (last 4.5 ms):").grid(
-            row=4, column=0, sticky=tk.W, pady=2)
+            row=1, column=0, sticky=tk.W, pady=2)
         ttk.Combobox(grid, textvariable=lead_var, state="readonly", width=48,
                      values=[v for _k, v in self._AUDIO_LEADOUT_CHOICES]).grid(
-            row=4, column=1, columnspan=2, sticky=tk.W, padx=(8, 0), pady=2)
+            row=1, column=1, columnspan=2, sticky=tk.W, padx=(8, 0), pady=2)
 
         idxs_var = tk.StringVar(value=str(cfg.get("experiment_idxs") or ""))
         ttk.Label(grid, text="Only these idx numbers:").grid(
-            row=5, column=0, sticky=tk.W, pady=2)
+            row=2, column=0, sticky=tk.W, pady=2)
         ttk.Entry(grid, textvariable=idxs_var, width=24).grid(
-            row=5, column=1, sticky=tk.W, padx=(8, 0), pady=2)
+            row=2, column=1, sticky=tk.W, padx=(8, 0), pady=2)
         ttk.Label(grid, text="head/tail modes only, e.g. 231, 258 — blank "
                              "= all; lets one card carry treated slots and "
                              "untouched controls",
                   font=(_SANS_FONT, 8, "italic")).grid(
-            row=5, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+            row=2, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+
+        _rule()
 
         # Anti-pop codec seed (the LZ start-pop fix).
         seed_var = tk.BooleanVar(value=bool(cfg.get("slot_seed")))
         seed_db_var = tk.StringVar(value=str(cfg.get("slot_seed_db") or 65))
         seed_row = ttk.Frame(dlg)
-        seed_row.pack(fill=tk.X, padx=12, pady=(8, 0))
+        seed_row.pack(fill=tk.X, padx=12)
         ttk.Checkbutton(
             seed_row, variable=seed_var,
             text="Anti-pop codec seed for silent / quiet callouts").pack(
@@ -7256,7 +7246,7 @@ class MainWindow:
                     increment=5, width=5).pack(side=tk.LEFT)
         ttk.Label(seed_row, text="dBFS").pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(
-            dlg, justify=tk.LEFT, wraplength=460,
+            dlg, justify=tk.LEFT, wraplength=wrap,
             font=(_SANS_FONT, 8, "italic"),
             text="Mixes an inaudible low tone (default -65 dBFS) into "
                  "replacements so a callout is never completely silent. On some "
@@ -7270,14 +7260,16 @@ class MainWindow:
                  "leave others as an on-card A/B. Experimental, "
                  "hardware-unverified.").pack(anchor=tk.W, padx=12, pady=(2, 8))
 
+        _rule()
+
         prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
         ttk.Checkbutton(
             dlg, variable=prev_var,
             text="On Build, export machine-render WAVs of every changed "
                  "sound (hear exactly what the card will play)").pack(
-            anchor=tk.W, padx=12, pady=(8, 0))
+            anchor=tk.W, padx=12)
         ttk.Label(
-            dlg, justify=tk.LEFT, wraplength=460,
+            dlg, justify=tk.LEFT, wraplength=wrap,
             font=(_SANS_FONT, 8, "italic"),
             text="Previews land in a <build name>_machine_previews folder "
                  "next to the built image. Note: they show what our decoder "
@@ -7298,9 +7290,6 @@ class MainWindow:
                             idxs_var.get().replace(";", ",").split(",")
                             if t.strip().isdigit())
             return {
-                "fade_ms": num(fade_var, 0, 500, 40),
-                "headroom_pct": num(cap_var, 5, 100, 80),
-                "lowpass_hz": num(lp_var, 0, 20000, 5000),
                 "head_mode": keys_h.get(head_var.get(), "encode"),
                 "leadout": keys_l.get(lead_var.get(), "silence"),
                 "previews": bool(prev_var.get()),
@@ -7313,32 +7302,24 @@ class MainWindow:
             self._audio_advanced = _collect()
             if self._on_audio_advanced_change:
                 self._on_audio_advanced_change(dict(self._audio_advanced))
-            # The match-to-callouts master switch persists + drives its own env
-            # var separately from the advanced dict; apply it here on OK too.
-            if bool(declick_var.get()) != bool(self.audio_declick_var.get()):
-                self.audio_declick_var.set(bool(declick_var.get()))
-                self._on_audio_declick_toggle()
             self._refresh_audio_adv_marker()
             dlg.destroy()
 
         def _defaults():
-            fade_var.set(str(self._AUDIO_ADV_DEFAULTS["fade_ms"]))
-            cap_var.set(str(self._AUDIO_ADV_DEFAULTS["headroom_pct"]))
-            lp_var.set(str(self._AUDIO_ADV_DEFAULTS["lowpass_hz"]))
             head_var.set(dict(self._AUDIO_HEAD_CHOICES)["encode"])
             lead_var.set(dict(self._AUDIO_LEADOUT_CHOICES)["silence"])
             prev_var.set(False)
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
-            declick_var.set(False)
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))
-        ttk.Button(btns, text="OK", command=_ok,
-                   style="Go.TButton").pack(side=tk.RIGHT)
-        ttk.Button(btns, text="Cancel", command=dlg.destroy,
-                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
+        # Plain grey OK / Cancel — the green/red pair read as a different
+        # convention from every other dialog (monkeybug batch 20 item 8).
+        ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(
+            side=tk.RIGHT, padx=(0, 6))
         ttk.Button(btns, text="Restore defaults", command=_defaults).pack(
             side=tk.LEFT)
         dlg.bind("<Return>", _ok)
@@ -7360,12 +7341,8 @@ class MainWindow:
             return
         d = dict(self._AUDIO_ADV_DEFAULTS)
         d.update({k: v for k, v in self._audio_advanced.items()
-                  if v is not None})
-        # The match-to-callouts switch lives in this dialog too; its non-default
-        # (on) state should raise the same star.
-        declick_on = bool(getattr(self, "audio_declick_var", None)
-                          and self.audio_declick_var.get())
-        off_default = d != self._AUDIO_ADV_DEFAULTS or declick_on
+                  if k in self._AUDIO_ADV_DEFAULTS and v is not None})
+        off_default = d != self._AUDIO_ADV_DEFAULTS
         btn.config(text="Advanced…*" if off_default else "Advanced…")
 
     def _audio_profile_click(self):
@@ -7380,12 +7357,6 @@ class MainWindow:
             return
         if self._on_audio_profile:
             self._on_audio_profile(assets)
-
-    def _on_audio_declick_toggle(self):
-        """Forward the Auto-fade + cap toggle to the App (persist + apply to
-        the encoder).  A no-op when the App didn't wire a handler (e.g. tests)."""
-        if self._on_audio_declick_change:
-            self._on_audio_declick_change(bool(self.audio_declick_var.get()))
 
     def _save_staged_changes(self):
         """Persist the current Replace assignments for the active assets folder.
@@ -9087,24 +9058,100 @@ class MainWindow:
 
     # ---- Image Info dialog ------------------------------------------
 
+    def _smooth_disc_image(self, size, fill, bg, dots=()):
+        """An anti-aliased filled disc as a ``tk.PhotoImage`` — Tk 8.6's
+        ``create_oval`` has no anti-aliasing, so the round header icons /
+        ⓘ badges rendered with visibly stair-stepped edges (David: "chunky").
+
+        Per-pixel analytic coverage (distance from the disc edge, clamped to
+        a 1-px feather) blended against the flat *bg* the canvas sits on —
+        an opaque pre-blend, so no reliance on partial-alpha display and no
+        Pillow dependency.  *dots* = ((cx, cy, r, "#color"), ...) composites
+        the gear's corner notification dots into the same image, which keeps
+        their edges smooth both over the disc and over the backdrop.
+
+        Cached per (size, fill, bg, dots) on the instance — PhotoImages die
+        with this window's interp, so the cache must not be class-level."""
+        key = (size, fill, bg, tuple(dots))
+        img = self._disc_img_cache.get(key)
+        if img is not None:
+            return img
+
+        def rgb(c):
+            return int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+
+        def lerp(a, b, t):
+            return tuple(int(round(x + (y - x) * t))
+                         for x, y in zip(a, b))
+
+        bgc, fillc = rgb(bg), rgb(fill)
+        dotc = [(dx, dy, dr, rgb(dcol)) for dx, dy, dr, dcol in dots]
+        centre = size / 2.0
+        radius = (size - 2) / 2.0     # same footprint as the old oval
+        rows = []
+        for y in range(size):
+            row = []
+            py = y + 0.5
+            for x in range(size):
+                px = x + 0.5
+                d = ((px - centre) ** 2 + (py - centre) ** 2) ** 0.5
+                cov = min(1.0, max(0.0, radius - d + 0.5))
+                c = lerp(bgc, fillc, cov)
+                for dx, dy, dr, dcol in dotc:
+                    dd = ((px - dx) ** 2 + (py - dy) ** 2) ** 0.5
+                    dcov = min(1.0, max(0.0, dr - dd + 0.5))
+                    if dcov:
+                        c = lerp(c, dcol, dcov)
+                row.append("#%02x%02x%02x" % c)
+            rows.append("{" + " ".join(row) + "}")
+        img = tk.PhotoImage(master=self.root, width=size, height=size)
+        img.put(" ".join(rows))
+        self._disc_img_cache[key] = img
+        return img
+
+    def _refresh_round_icon(self, cv):
+        """Re-render a round icon's disc image from its current state
+        (fill/hover/disabled color, theme backdrop, notification dots)."""
+        dots = tuple(v for _k, v in sorted(cv.icon_dots.items()))
+        cv.itemconfigure(cv.icon_img, image=self._smooth_disc_image(
+            cv.icon_size, cv.icon_current, cv.icon_bg, dots))
+
+    def _set_icon_dot(self, cv, key, dot):
+        """Add/replace (*dot* = ``(cx, cy, r, "#color")``) or remove (*dot*
+        None) a notification dot on a round icon, keyed so independent dots
+        (gear: update vs staging) don't fight."""
+        if dot is None:
+            cv.icon_dots.pop(key, None)
+        else:
+            cv.icon_dots[key] = tuple(dot)
+        self._refresh_round_icon(cv)
+
     def _make_round_icon(self, parent, glyph, fill, hover, tooltip_text,
                          command, size=24, font=None):
         """A round colorful icon button — colored circle, white glyph — the
         app's icon-button look (David: round colorful icons instead of
         square glyph buttons; drawn on a Canvas because Tk 8.6 renders no
-        color emoji).  Hover lightens the circle; the hand cursor marks it
+        color emoji).  The disc is a pre-rendered anti-aliased image
+        (_smooth_disc_image) — a Tk oval item drew chunky stair-stepped
+        edges.  Hover lightens the circle; the hand cursor marks it
         clickable; *tooltip_text* rides the shared _Tooltip.  The canvas
-        carries ``icon_oval`` / ``icon_fill`` / ``icon_hover`` /
-        ``icon_enabled`` so callers can restyle it (gear notification dots,
-        back-button disable via _set_round_icon_enabled), and registers in
-        _round_icons so _apply_theme keeps its backdrop on the theme."""
+        carries ``icon_fill`` / ``icon_hover`` / ``icon_enabled`` /
+        ``icon_dots`` so callers can restyle it (gear notification dots via
+        _set_icon_dot, back-button disable via _set_round_icon_enabled), and
+        registers in _round_icons so _apply_theme keeps its backdrop — and
+        the pre-blended disc — on the theme."""
+        bg = THEMES[self._current_theme]["bg"]
         cv = tk.Canvas(parent, width=size, height=size,
                        highlightthickness=0, borderwidth=0, cursor="hand2",
-                       bg=THEMES[self._current_theme]["bg"])
+                       bg=bg)
         cv.icon_fill, cv.icon_hover = fill, hover
         cv.icon_enabled = True
-        cv.icon_oval = cv.create_oval(1, 1, size - 1, size - 1,
-                                      fill=fill, outline=fill)
+        cv.icon_size = size
+        cv.icon_bg = bg
+        cv.icon_current = fill
+        cv.icon_dots = {}
+        cv.icon_img = cv.create_image(
+            0, 0, anchor=tk.NW, image=self._smooth_disc_image(size, fill, bg))
         if font is None:
             # Same glyph fonts the old square Icon.TButtons used: Segoe
             # MDL2 Assets on Windows, text glyphs elsewhere (negative
@@ -9115,7 +9162,8 @@ class MainWindow:
                        font=font)
 
         def _set_fill(color):
-            cv.itemconfigure(cv.icon_oval, fill=color, outline=color)
+            cv.icon_current = color
+            self._refresh_round_icon(cv)
 
         cv.bind("<Button-1>",
                 lambda _e: command() if cv.icon_enabled else None)
@@ -9127,13 +9175,12 @@ class MainWindow:
         self._round_icons.append(cv)
         return cv
 
-    @staticmethod
-    def _set_round_icon_enabled(cv, enabled):
+    def _set_round_icon_enabled(self, cv, enabled):
         """Enable/disable a _make_round_icon canvas: gray circle + arrow
         cursor while disabled (its click handler checks icon_enabled)."""
         cv.icon_enabled = bool(enabled)
-        fill = cv.icon_fill if enabled else "#9aa0a6"
-        cv.itemconfigure(cv.icon_oval, fill=fill, outline=fill)
+        cv.icon_current = cv.icon_fill if enabled else "#9aa0a6"
+        self._refresh_round_icon(cv)
         cv.configure(cursor="hand2" if enabled else "arrow")
 
     _INFO_BADGE_FILL = "#2f80ed"     # the classic "info blue"
@@ -9147,6 +9194,182 @@ class MainWindow:
             "Technical details about this image",
             lambda: self._open_image_info(var), size=18,
             font=("Georgia", 10, "bold italic"))
+
+    # ---- Project Info popup (ⓘ on the Extract tab's project row) -----
+
+    @staticmethod
+    def _collect_project_stats(folder):
+        """Walk *folder* and return the stats the Project Info popup shows,
+        as ``[(name, value), ...]``.  Worker-thread only (a NAS project can
+        take seconds to walk); touches no Tk."""
+        from ..core import project_file, staged_changes, staged_originals
+
+        audio_ext = {".wav", ".ogg", ".mp3", ".flac"}
+        video_ext = {".mp4", ".webm", ".avi", ".mov", ".mkv", ".m4v",
+                     ".mpg", ".mpeg"}
+        image_ext = {".png", ".jpg", ".jpeg", ".webp", ".dds", ".bmp",
+                     ".gif"}
+        counts = {"audio": [0, 0], "video": [0, 0],
+                  "image": [0, 0], "other": [0, 0]}
+        total_files = 0
+        total_bytes = 0
+        for root_, _dirs, files in os.walk(folder):
+            rel = os.path.relpath(root_, folder)
+            in_hidden = (rel != "." and any(
+                p.startswith(".") for p in rel.split(os.sep)))
+            for fn in files:
+                try:
+                    sz = os.path.getsize(os.path.join(root_, fn))
+                except OSError:
+                    continue
+                total_files += 1
+                total_bytes += sz
+                if in_hidden or fn.startswith("."):
+                    # Bookkeeping (baseline, .orig snapshots, anchor) counts
+                    # toward size on disk but isn't a project asset.
+                    continue
+                ext = os.path.splitext(fn)[1].lower()
+                kind = ("audio" if ext in audio_ext
+                        else "video" if ext in video_ext
+                        else "image" if ext in image_ext else "other")
+                counts[kind][0] += 1
+                counts[kind][1] += sz
+
+        human = MainWindow._pex_human
+
+        def _files(kind):
+            n, sz = counts[kind]
+            return "%d file(s)  —  %s" % (n, human(sz)) if n else "none"
+
+        try:
+            data = staged_changes.load(folder)
+            staged = sum(len(data.get(k) or {})
+                         for k in ("audio", "video", "image"))
+        except Exception:
+            staged = 0
+        try:
+            built = len(list(staged_originals.snapshot_rels(folder)))
+        except Exception:
+            built = 0
+        if staged or built:
+            changed = []
+            if staged:
+                changed.append("%d staged for the next build" % staged)
+            if built:
+                changed.append("%d changed by earlier builds" % built)
+            changed = ";  ".join(changed)
+        else:
+            changed = "nothing changed yet"
+
+        anchor = project_file.anchor_path(folder)
+        started = ""
+        try:
+            src = anchor if os.path.isfile(anchor) else folder
+            started = time.strftime("%Y-%m-%d",
+                                    time.localtime(os.stat(src).st_ctime))
+        except OSError:
+            pass
+
+        rows = [("Audio", _files("audio")),
+                ("Video", _files("video")),
+                ("Images", _files("image")),
+                ("Other files", _files("other")),
+                ("Total", "%d file(s)  —  %s on disk"
+                          % (total_files, human(total_bytes))),
+                ("Changed", changed)]
+        if started:
+            rows.append(("Project started", started))
+        return rows
+
+    def _open_project_info(self):
+        """Stats popup for the project folder (monkeybug batch 20: "fun
+        stats" behind a ⓘ like the Card image row's): what's in the project
+        (audio/video/images counts + sizes), its size on disk, how much of it
+        is changed, and when it started.  One singleton Toplevel; collection
+        runs on a worker thread with the Image-Info-style spinner + stale
+        results dropped by a bump-counter."""
+        folder = ((self.extract_output_var.get() or "").strip()
+                  or (self.write_assets_var.get() or "").strip())
+        if not folder or not os.path.isdir(folder):
+            messagebox.showinfo(
+                "No project folder",
+                "Pick (or extract into) a project folder first — the stats "
+                "describe that folder.")
+            return
+        folder = os.path.normpath(folder)
+
+        win = getattr(self, "_proj_info_win", None)
+        if win is None or not win.winfo_exists():
+            win = tk.Toplevel(self.root)
+            self._proj_info_win = win
+            win.title("Project Info")
+            win.transient(self.root)
+            win.resizable(False, False)
+            self._theme_toplevel(win)
+            self._proj_info_path_lbl = ttk.Label(
+                win, text="", font=(_SANS_FONT, 9, "bold"), wraplength=460,
+                justify=tk.LEFT)
+            self._proj_info_path_lbl.pack(anchor=tk.W, padx=12, pady=(12, 6))
+            self._proj_info_grid = ttk.Frame(win)
+            self._proj_info_grid.pack(fill=tk.X, padx=12)
+            self._proj_info_status = ttk.Label(win, text="",
+                                               font=(_SANS_FONT, 9, "italic"))
+            self._proj_info_status.pack(anchor=tk.W, padx=12, pady=(4, 0))
+            btns = ttk.Frame(win)
+            btns.pack(fill=tk.X, padx=12, pady=(8, 12))
+            ttk.Button(btns, text="Close", command=win.destroy).pack(
+                side=tk.RIGHT)
+            win.bind("<Escape>", lambda _e: win.destroy())
+            win.update_idletasks()
+            px, py = self.root.winfo_rootx(), self.root.winfo_rooty()
+            pw, ph = self.root.winfo_width(), self.root.winfo_height()
+            win.geometry("+%d+%d" % (px + max((pw - 480) // 2, 0),
+                                     py + max((ph - 240) // 3, 0)))
+        else:
+            win.deiconify()
+            win.lift()
+        win.focus_set()
+        self._proj_info_path_lbl.configure(text=folder)
+        for child in self._proj_info_grid.winfo_children():
+            child.destroy()
+
+        self._proj_info_seq = getattr(self, "_proj_info_seq", 0) + 1
+        seq = self._proj_info_seq
+        holder = {}
+
+        def _worker():
+            try:
+                holder["rows"] = self._collect_project_stats(folder)
+            except Exception as e:    # never leave the window on the spinner
+                holder["rows"] = [("Error", str(e))]
+
+        import threading
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        def _poll(i=0):
+            if (seq != self._proj_info_seq or win is None
+                    or not win.winfo_exists()):
+                return                # superseded / closed
+            if t.is_alive():
+                try:
+                    self._proj_info_status.configure(
+                        text="%s  Collecting…"
+                             % self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)])
+                except tk.TclError:
+                    return
+                self.root.after(120, _poll, i + 1)
+                return
+            self._proj_info_status.configure(text="")
+            for r, (name, value) in enumerate(holder.get("rows") or ()):
+                ttk.Label(self._proj_info_grid, text=name + ":",
+                          font=(_SANS_FONT, 9, "bold")).grid(
+                    row=r, column=0, sticky=tk.W, padx=(0, 12), pady=1)
+                ttk.Label(self._proj_info_grid, text=value, wraplength=360,
+                          justify=tk.LEFT).grid(
+                    row=r, column=1, sticky=tk.W, pady=1)
+
+        self.root.after(60, _poll)
 
     def _open_image_info(self, var):
         """Open (or retarget) the Image Info window for the image path in
@@ -9400,8 +9623,8 @@ class MainWindow:
         self._text_assets_row = row
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.write_assets_var,
-                  state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._project_mirror_label(row).pack(
+            side=tk.LEFT, fill=tk.X, expand=True)
         self._make_assets_scan_buttons(row, "text", self._scan_text_strings)
 
         # Search + status toolbar.
@@ -9448,7 +9671,7 @@ class MainWindow:
 
         self._text_empty = ttk.Label(
             list_frame,
-            text="Pick your extracted assets folder above, then click Scan.",
+            text="Set the project folder on the Extract tab, then click Scan.",
             foreground="#888888", anchor=tk.CENTER, justify=tk.CENTER)
         self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
@@ -9555,7 +9778,7 @@ class MainWindow:
             self._text_clear_edit_panel()
             self._refresh_text_list()
             self._text_empty.configure(
-                text="Pick your extracted assets folder above, then click Scan.")
+                text="Set the project folder on the Extract tab, then click Scan.")
             self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             return
 
@@ -11555,9 +11778,9 @@ class MainWindow:
                 self._extract_input_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._extract_output_row())
-                self._extract_badge_row.pack(
-                    fill=tk.X, padx=10, pady=(0, 2),
-                    before=self._extract_output_row())
+                # Badge row only if it currently carries a warning (the
+                # happy-path detection lives in the title bar — batch 20).
+                self._sync_badge_row("extract")
             self._refresh_extract_phases()
             # Re-evaluate the Extract button gate after a source flip.
             self._refresh_ssd_run_buttons()
@@ -11636,9 +11859,8 @@ class MainWindow:
                 self._write_upd_row.pack(
                     fill=tk.X, padx=10, pady=4,
                     before=self._write_assets_row())
-                self._write_badge_row.pack(
-                    fill=tk.X, padx=10, pady=(0, 2),
-                    before=self._write_assets_row())
+                # Badge row only if it currently carries a warning (batch 20).
+                self._sync_badge_row("write")
                 self._write_btn.configure(
                     text=getattr(self._current_mfr, "write_build_button",
                                  "Build update"))
@@ -12704,20 +12926,28 @@ class MainWindow:
             pass
 
     def _make_assets_scan_buttons(self, row, tab_key, scan_cmd):
-        """Build the shared *Set on Extract tab / Scan* pair for a Replace
-        tab's project-folder row and register them under *tab_key* so
-        :meth:`_set_tab_scanning` can disable + relabel them while a scan
-        runs.  Batch 19: the per-tab folder Browse is gone — the folder is
-        the project folder, set once on the Extract tab; the button jumps
-        there instead of pretending this tab has its own folder."""
-        browse = ttk.Button(row, text="Set on Extract tab",
-                            command=self._jump_to_extract_tab)
-        browse.pack(side=tk.LEFT, padx=(8, 0))
+        """Build the *Scan* button for a Replace tab's project-folder row and
+        register it under *tab_key* so :meth:`_set_tab_scanning` can disable +
+        relabel it while a scan runs.  Batch 19 removed the per-tab folder
+        Browse (the folder IS the project folder, set once on the Extract
+        tab); batch 20 removed its "Set on Extract tab" replacement too — the
+        row is a plain read-only mirror now, and anyone who reaches a Replace
+        tab already knows where the folder is set (monkeybug)."""
         scan = ttk.Button(row, text="Scan", command=scan_cmd)
-        scan.pack(side=tk.LEFT, padx=(4, 0))
-        self._browse_buttons[tab_key] = browse
+        scan.pack(side=tk.LEFT, padx=(8, 0))
         self._scan_buttons[tab_key] = scan
         self._scan_cmds[tab_key] = scan_cmd   # restore after a Cancel
+
+    def _project_mirror_label(self, parent):
+        """The read-only project-folder mirror the Replace tabs show: a plain
+        label tracking the shared project variable — visibly NOT an editable
+        field (batch 20: a readonly Entry still looked like per-tab state you
+        could change here).  A tooltip says where the value is actually set."""
+        lbl = ttk.Label(parent, textvariable=self._project_mirror_var,
+                        anchor=tk.W)
+        _Tooltip(lbl, "The project folder — shared by every tab. It is set "
+                      "on the Extract tab.", lambda: self._current_theme)
+        return lbl
 
     _SCAN_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"     # braille frames for the scanning animation
 
@@ -13705,12 +13935,12 @@ class MainWindow:
         available, amber when staging cleanup is pending (the amounts and
         actions live in the ⚙ menu entries)."""
         try:
-            self._gear_btn.itemconfigure(
-                self._gear_update_dot,
-                state="normal" if self._update_available else "hidden")
-            self._gear_btn.itemconfigure(
-                self._gear_warn_dot,
-                state="normal" if self._disk_badge_suffix else "hidden")
+            self._set_icon_dot(
+                self._gear_btn, "update",
+                self._GEAR_UPDATE_DOT if self._update_available else None)
+            self._set_icon_dot(
+                self._gear_btn, "warn",
+                self._GEAR_WARN_DOT if self._disk_badge_suffix else None)
         except tk.TclError:
             pass
 
@@ -13852,6 +14082,8 @@ class MainWindow:
 
         if not path or not os.path.isfile(path) or self._current_mfr is None:
             label.configure(text="")
+            self._notify_detected_game(mode, None)
+            self._sync_badge_row(mode)
             return
 
         # 1. Try the current manufacturer first — happy path.
@@ -13877,18 +14109,32 @@ class MainWindow:
                 if self._on_recheck_prereqs is not None:
                     self._on_recheck_prereqs()
                 return
-            extra = f" — {game.notes}" if game.notes else ""
-            # Era-switching plugins carry an era-agnostic picker badge (Stern's
-            # "SPIKE 2"), so it can't say that *this* file's era is capture/
-            # extract-only.  Flag it here when the era-resolved capabilities
-            # expose no Write/Replace surface (e.g. Stern Whitestar ROMs).
+            # Happy path: the detected game now lives in the TITLE BAR (via
+            # the App), not in a tab badge — "Detected: Led Zeppelin (Spike 2)
+            # — Spike 2 card image" repeated the header pills and burned a row
+            # (monkeybug batch 20).  The badge keeps only genuine warnings.
+            try:
+                caption = mfr.title_caption(path, game)
+            except Exception:
+                caption = game.display
+            self._notify_detected_game(mode, caption)
+            # Era-switching plugins carry an era-agnostic picker badge
+            # (Stern's "SPIKE 2"), so it can't say that *this* file's era is
+            # capture/extract-only.  Flag it here when the era-resolved
+            # capabilities expose no Write/Replace surface (e.g. Stern
+            # Whitestar ROMs).
             caps = mfr.capabilities
             if hasattr(mfr, "set_era") and not caps.write and not (
                     caps.replace_audio or caps.replace_video
                     or caps.replace_image or caps.replace_text):
-                extra += "  (extract only)"
-            label.configure(text=f"Detected: {game.display}{extra}")
+                label.configure(
+                    text="Extract only — this format has no Write/Replace "
+                         "support.")
+            else:
+                label.configure(text="")
+            self._sync_badge_row(mode)
             return
+        self._notify_detected_game(mode, None)
 
         # 2. Walk every other registered manufacturer.  If exactly one
         #    matches, offer to switch.  More than one match is ambiguous;
@@ -13917,6 +14163,40 @@ class MainWindow:
         else:
             label.configure(
                 text=f"Not recognised as {self._current_mfr.display}")
+        self._sync_badge_row(mode)
+
+    def _notify_detected_game(self, mode, caption):
+        """Forward the detected-game caption to the App (title bar).  Only the
+        Extract input drives it — the Write tab's Original is a read-only
+        mirror of the same file, so letting it fire too would just double-set
+        (and, mid-mirror, flicker) the title."""
+        if mode == "extract" and self._on_detected_game_change:
+            self._on_detected_game_change(caption)
+
+    def _sync_badge_row(self, mode):
+        """Pack a detect-badge row only while it carries text.  The happy path
+        keeps the badge empty now (the game moved to the title bar — batch
+        20), and an empty row just burned a line of vertical space.  SSD
+        source mode keeps its row hidden regardless, matching
+        _on_input_source_change (which also owns the pack position)."""
+        if mode == "extract":
+            row, badge = self._extract_badge_row, self._extract_badge
+            anchor = self._extract_output_row()
+            ssd = (getattr(self, "extract_input_source_var", None) is not None
+                   and self.extract_input_source_var.get() == "ssd")
+        else:
+            row, badge = self._write_badge_row, self._write_badge
+            anchor = self._write_assets_row()
+            ssd = (getattr(self, "write_input_source_var", None) is not None
+                   and self.write_input_source_var.get() == "ssd")
+        want = bool(badge.cget("text")) and not ssd
+        try:
+            if want and not row.winfo_manager() and anchor is not None:
+                row.pack(fill=tk.X, padx=10, pady=(0, 2), before=anchor)
+            elif not want and row.winfo_manager():
+                row.pack_forget()
+        except tk.TclError:
+            pass
 
     def _set_suggested_mfr(self, mode, mfr):
         if mode == "extract":
@@ -15064,9 +15344,13 @@ class MainWindow:
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
         # The round icon buttons (ⓘ badges, header home/?/⚙) are plain
         # Canvases, invisible to ttk styling — keep their backdrops on the
-        # theme's panel color.
+        # theme's panel color AND re-blend their anti-aliased disc images
+        # against it (the discs are pre-blended opaque, so a theme flip
+        # would otherwise leave a halo of the old backdrop).
         for _badge in self._round_icons:
             _badge.configure(bg=c["bg"])
+            _badge.icon_bg = c["bg"]
+            self._refresh_round_icon(_badge)
         # The Default Settings scroll canvas is a raw tk.Canvas (ttk can't
         # host a scrollable frame), so it needs its backdrop set explicitly or
         # it renders as a big white box in dark mode.
@@ -15122,11 +15406,6 @@ class MainWindow:
             # Already changed on disk by an earlier build — same hue as the
             # Write tab's "Modified" rows so the two views read as one truth.
             self._audio_tree.tag_configure("changed", foreground=c["link"])
-            # User-named slots (custom label after the decode index) — the
-            # warning hue marks "this name is yours, not stock"; staged /
-            # changed rows keep their colours (the tag is only applied when
-            # neither of those is).
-            self._audio_tree.tag_configure("renamed", foreground=c["warning"])
         for pane in (getattr(self, "_audio_pane_orig", None),
                      getattr(self, "_audio_pane_rep", None)):
             if pane is not None:

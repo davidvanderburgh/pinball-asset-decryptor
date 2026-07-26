@@ -129,8 +129,9 @@ def test_optional_toolbar_widgets_still_pack(app):
     app.root.update()
     assert w._audio_type_frame.winfo_ismapped(), \
         "Type filter lost its pack anchor"
-    # Stern shows the Trim/pad checkbox on the audio-options row.
-    assert w._audio_trim_cb.winfo_ismapped()
+    # Spike 2 always length-matches, so the Trim/pad checkbox is hidden for
+    # Stern (batch 20 — standard behavior isn't presented as an option).
+    assert not w._audio_trim_cb.winfo_ismapped()
     # ...and the Type filter still sits LEFT of the Changed-only checkbox.
     order = w._audio_type_frame.master.pack_slaves()
     assert order.index(w._audio_type_frame) < order.index(
@@ -138,21 +139,18 @@ def test_optional_toolbar_widgets_still_pack(app):
 
 
 def test_audio_options_row_aligned(app):
-    """The Trim/pad checkbox and the Advanced… / Profile vs stock buttons share
-    one row: the buttons sit to the right of the checkbox and are vertically
-    centered on it (David's alignment fix)."""
+    """The audio-options row for Stern: the Trim/pad checkbox is hidden (the
+    format always length-matches — batch 20), and the Advanced… / Profile vs
+    stock buttons sit right-aligned in the shared row."""
     w = _stern(app)
     _show_tab(app, w, w._tab_audio)
-    assert w._audio_trim_cb.winfo_ismapped()
+    assert not w._audio_trim_cb.winfo_ismapped()
     assert w._audio_adv_btn.winfo_ismapped()
     assert w._audio_profile_btn.winfo_ismapped()
-    # Buttons to the right of the checkbox, all in the same row frame.
-    assert w._audio_adv_btn.winfo_rootx() > w._audio_trim_cb.winfo_rootx()
+    # Both buttons in the shared row frame, Profile at the right edge.
     assert w._audio_adv_btn.master is w._audio_trim_cb.master
-    # Vertically centered on each other.
-    cb_c = w._audio_trim_cb.winfo_rooty() + w._audio_trim_cb.winfo_height() / 2
-    adv_c = w._audio_adv_btn.winfo_rooty() + w._audio_adv_btn.winfo_height() / 2
-    assert abs(cb_c - adv_c) <= 2, "checkbox/buttons not vertically centered"
+    assert (w._audio_profile_btn.winfo_rootx()
+            > w._audio_adv_btn.winfo_rootx())
 
 
 def test_video_checkboxes_are_left_aligned(app):

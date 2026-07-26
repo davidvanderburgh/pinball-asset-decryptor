@@ -13,6 +13,8 @@ generic loose-file ``replace_audio`` tab (which only repacks .wav/.ogg the
 normal Write copies verbatim).
 """
 
+import re
+
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from ...core.transcribe import TranscribePipeline
@@ -326,6 +328,24 @@ class SternManufacturer(Manufacturer):
         return Game(key=key, display=display_for_key(key, path),
                     manufacturer_key="stern", era="spike2",
                     notes="Spike 2 card image")
+
+    def title_caption(self, path, game):
+        # "Led Zeppelin v1.22 LE", not "Led Zeppelin (Spike 2) — Spike 2 card
+        # image": the title bar identifies the game; the era pill already says
+        # Spike 2 (monkeybug batch 20).  Version + edition parse straight off
+        # Stern's vendor filename — cheap enough for the Tk thread; a renamed
+        # card just shows the bare title.
+        disp = re.sub(r"\s*\((?:Spike 2|Whitestar[^)]*)\)$", "", game.display)
+        if game.era == "spike2":
+            from .info import version_from_filename
+            version, edition = version_from_filename(path)
+            if version:
+                disp += " v%s" % version
+            if edition:
+                disp += " %s" % edition
+        elif game.era == "whitestar" and game.notes:
+            disp += " (%s)" % game.notes
+        return disp
 
     def image_info(self, path, assets_dir=None):
         # Only the Spike 2 card probe — a Whitestar MAME zip gets just the

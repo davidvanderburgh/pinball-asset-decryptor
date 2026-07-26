@@ -14,7 +14,7 @@ from .core import modpack
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
-                            PrereqMsg, ProgressMsg)
+                            PrereqMsg, ProgressMsg, UiCallMsg)
 from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (check_for_update, download_installer,
@@ -77,6 +77,11 @@ class App:
         self._chain_flash_after_build = None
         # Path of the loaded/saved .pinproj (shown in the title bar), or None.
         self._project_path = None
+        # Detected-game caption for the title bar ("Led Zeppelin v1.22 LE"),
+        # or None while nothing is detected.  Set BEFORE MainWindow exists:
+        # its construction restores saved paths, whose traces can fire the
+        # detected-game callback immediately.
+        self._detected_caption = None
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
@@ -84,15 +89,16 @@ class App:
         # pane line is mirrored into it — see core.session_log).
         from .core import session_log
         session_log.start_session(__version__)
-        # Apply the saved "Match audio replacements to the game's callouts" pref
-        # before any Write can spawn encode workers (they inherit this env var).
-        # Default OFF: it's an unproven experiment for the callout click (now in
-        # the Advanced Audio Options dialog), so the encoder runs raw unless the
-        # user opts in.
-        self._apply_audio_declick_env(
-            bool(self._settings.get("audio_declick", False)))
-        # Same for the Advanced audio options (fade/cap/roll-off overrides,
-        # head/tail modes) — experiment levers for the Spike 2 click hunt.
+        # The Stern encoder always runs raw: the "Match audio replacements to
+        # the game's callouts" shaper (v0.49) never fixed the hardware click it
+        # chased — the real fixes were the blip-free firmware patch + anti-pop
+        # seed — so the option was retired from the Advanced dialog (monkeybug
+        # batch 20).  Set before any Write can spawn encode workers (they
+        # inherit this env var); the engine keeps the env semantics so tests /
+        # manual experiments still work.
+        os.environ["PAD_STERN_AUDIO_RAW"] = "1"
+        # Apply the saved Advanced audio options (head/tail modes, anti-pop
+        # seed) — experiment levers for the Spike 2 click hunt.
         self._apply_audio_advanced_env(
             self._settings.get("audio_advanced") or {})
 
@@ -195,11 +201,9 @@ class App:
                 self._on_admin_warning_collapsed_change),
             initial_voice_quality=self._settings.get("voice_quality"),
             on_voice_quality_change=self._on_voice_quality_change,
-            initial_audio_declick=bool(
-                self._settings.get("audio_declick", False)),
-            on_audio_declick_change=self._on_audio_declick_change,
             initial_audio_advanced=self._settings.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,
+            on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
             initial_default_presets=self._settings.get(
@@ -252,7 +256,12 @@ class App:
 
         self._poll_queue()
 
-        self.root.title(f"{APP_NAME} v{__version__}")
+        # Compose (not overwrite) the title: the manufacturer restore above
+        # may already have detected the saved card and set its caption —
+        # a bare title() here would clobber it, and the caption-change guard
+        # in _on_detected_game_change would then suppress every identical
+        # re-detection (caught in the v0.79.0 screenshot pass).
+        self._refresh_title()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.root.after(1500, self._check_for_update)
@@ -292,6 +301,11 @@ class App:
                     self.window.update_log_line(msg.key, msg.text, msg.level)
                 elif isinstance(msg, DoneMsg):
                     self._on_done(msg.success, msg.summary)
+                elif isinstance(msg, UiCallMsg):
+                    try:
+                        msg.fn()
+                    except tk.TclError:
+                        pass    # widget torn down while the msg was queued
                 elif isinstance(msg, PrereqMsg):
                     # Drop stale results if the user switched mfrs while
                     # the worker was still running.
@@ -3373,7 +3387,27 @@ class App:
         several versions stays legible at a glance.  Batch 19: *path* is the
         project FOLDER (legacy loose files pass their file path)."""
         self._project_path = path
+        self._refresh_title()
+
+    def _on_detected_game_change(self, caption):
+        """MainWindow detected a game on the Extract input (or lost it —
+        *caption* None): show it in the title bar.  Batch 20 (monkeybug): the
+        tab's "Detected: …" badge repeated the game name, the platform pill,
+        and "card image"; the title bar states it once, with the firmware
+        version where the plugin can recover one."""
+        caption = (caption or "").strip() or None
+        if caption != self._detected_caption:
+            self._detected_caption = caption
+            self._refresh_title()
+
+    def _refresh_title(self):
+        """Compose the title bar: app + version, the detected game (batch 20),
+        and the loaded project's folder name (batch 19 — two projects for one
+        game version must stay tellable apart)."""
         title = f"{APP_NAME} v{__version__}"
+        if self._detected_caption:
+            title += " — %s" % self._detected_caption
+        path = self._project_path
         if path:
             title += " — %s" % (os.path.basename(path.rstrip("\\/")) or path)
         try:
@@ -3522,38 +3556,19 @@ class App:
         self._settings["admin_warning_collapsed"] = bool(collapsed)
         self._save_settings()
 
-    def _apply_audio_declick_env(self, enabled):
-        """Reflect the "Match audio replacements to the game's callouts" toggle
-        into the env var the Stern spike2 encoder reads.  On (default) leaves it
-        unset; off sets ``PAD_STERN_AUDIO_RAW=1``.  Spawned encode workers inherit
-        os.environ at pool-creation time, so setting it here (the process that
-        runs Write) reaches both the serial and the parallel encode paths."""
-        if enabled:
-            os.environ.pop("PAD_STERN_AUDIO_RAW", None)
-        else:
-            os.environ["PAD_STERN_AUDIO_RAW"] = "1"
-
-    def _on_audio_declick_change(self, enabled):
-        """Persist the match-to-callouts toggle and apply it to the encoder
-        env var so the next Write uses it."""
-        enabled = bool(enabled)
-        self._settings["audio_declick"] = enabled
-        self._apply_audio_declick_env(enabled)
-        self._save_settings()
-
     # Advanced audio options (Audio tab -> Advanced...).  Experiment levers
     # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
     # Stern encoder reads, and a value at its default clears the var so the
     # engine baseline stays authoritative.
     _AUDIO_ADV_DEFAULTS = {
-        "fade_ms": 40, "headroom_pct": 80, "lowpass_hz": 5000,
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
     }
 
     def _apply_audio_advanced_env(self, cfg):
-        """Mirror the Advanced audio options into the encoder env vars (see
-        ``_apply_audio_declick_env`` for why env: spawned workers inherit)."""
+        """Mirror the Advanced audio options into the encoder env vars (env
+        because spawned encode workers inherit os.environ, so serial and
+        parallel writes agree without threading knobs through signatures)."""
         d = dict(self._AUDIO_ADV_DEFAULTS)
         d.update({k: v for k, v in (cfg or {}).items() if v is not None})
 
@@ -3563,15 +3578,13 @@ class App:
             else:
                 os.environ[name] = str(val)
 
-        try:
-            fade = float(d["fade_ms"])
-            cap = int(d["headroom_pct"])
-            lp = int(d["lowpass_hz"])
-        except (TypeError, ValueError):
-            fade, cap, lp = 40.0, 80, 5000
-        setenv("PAD_STERN_FADE_MS", None if fade == 40.0 else fade)
-        setenv("PAD_STERN_HEADROOM", None if cap == 80 else cap / 100.0)
-        setenv("PAD_STERN_LOWPASS_HZ", None if lp == 5000 else lp)
+        # Retired shaper knobs (fade / level cap / treble roll-off — removed
+        # with the match-to-callouts option, monkeybug batch 20): explicitly
+        # cleared so a stale persisted experiment from an old session can
+        # never silently shape a card built today.
+        setenv("PAD_STERN_FADE_MS", None)
+        setenv("PAD_STERN_HEADROOM", None)
+        setenv("PAD_STERN_LOWPASS_HZ", None)
         setenv("PAD_STERN_HEAD_MODE",
                "stock" if d.get("head_mode") == "stock" else None)
         setenv("PAD_STERN_LEADOUT",
@@ -3616,22 +3629,48 @@ class App:
     def _on_audio_profile_request(self, assets_dir):
         """Audio tab -> "Profile vs stock": characterize every sound in the
         extract folder and compare replacements against their stock originals
-        (engine.audio_profile_report), on a worker thread."""
+        (engine.audio_profile_report), on a worker thread.
+
+        Drives the main progress bar per sound and logs an unmistakable
+        completion line — a big extract over a NAS runs for a minute-plus and
+        used to look idle the whole time (monkeybug batch 20)."""
         if not assets_dir or not os.path.isdir(assets_dir):
             self.msg_queue.put(LogMsg(
                 "Profile vs stock: scan an extract folder on the Audio tab "
                 "first.", "warning"))
             return
 
+        # Runs on the Tk thread (button command), so touching the widget
+        # directly here is safe; the worker re-enables it via UiCallMsg.
+        btn = getattr(self.window, "_audio_profile_btn", None)
+        if btn is not None:
+            if str(btn.cget("state")) == "disabled":
+                return          # already profiling — ignore the double-click
+            btn.configure(state=tk.DISABLED)
+
         def _log(msg, level="info"):
             self.msg_queue.put(LogMsg(msg, level))
 
+        def _progress(i, total, name):
+            self.msg_queue.put(ProgressMsg(
+                i, total, "Profiling sound %d of %d — %s" % (i + 1, total,
+                                                             name)))
+
         def _run():
+            t0 = time.monotonic()
             try:
                 from .plugins.stern import engine as stern_engine
-                stern_engine.audio_profile_report(assets_dir, _log)
+                stern_engine.audio_profile_report(
+                    assets_dir, _log, progress=_progress)
+                _log("Profile vs stock finished in %.1f s." %
+                     (time.monotonic() - t0), "success")
             except Exception as e:
                 _log("Profile vs stock failed: %s" % e, "error")
+            finally:
+                self.msg_queue.put(ProgressMsg(0, 1, "Ready"))
+                if btn is not None:
+                    self.msg_queue.put(UiCallMsg(
+                        lambda: btn.configure(state=tk.NORMAL)))
 
         self.msg_queue.put(LogMsg(
             "Profiling sounds under %s ..." % assets_dir, "info"))

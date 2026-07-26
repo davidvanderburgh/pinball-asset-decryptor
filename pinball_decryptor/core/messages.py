@@ -48,3 +48,14 @@ class PrereqMsg:
     def __init__(self, mfr_key, result):
         self.mfr_key = mfr_key  # so a stale check from an old mfr is ignored
         self.result = result    # core.prereqs.PrerequisiteResult
+
+
+class UiCallMsg:
+    """Run *fn* (no args) on the Tk main loop.
+
+    For one-off UI touch-ups a worker thread needs at its end (re-enable a
+    button, reset a status) that don't warrant their own message type.  Tk is
+    not thread-safe, so workers must never call widget methods directly —
+    they enqueue one of these instead."""
+    def __init__(self, fn):
+        self.fn = fn

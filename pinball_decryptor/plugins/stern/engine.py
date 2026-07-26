@@ -2683,19 +2683,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         else:
             log("No .checksums.md5 baseline found; re-encoding all %d sound(s): "
                 "%s." % (len(audio_edits), listing), "warning")
-        # Say which shaping mode built this card.  The toggle persists across
-        # sessions, so a box unticked during an old A/B test silently makes
-        # every later card RAW — and a phone recording of the machine can't
-        # settle which mode a card was built with after the fact (monkeybug's
-        # 2026-07 click A/B: the answer had to come from this log line).
-        if os.environ.get("PAD_STERN_AUDIO_RAW") == "1":
-            log("Audio shaping OFF ('Match audio replacements to the game's "
-                "callouts' is unticked): replacements are written as provided "
-                "-- no edge fade, level cap, or 5 kHz roll-off. Hot or bright "
-                "clips can click on the real machine.", "warning")
-        else:
-            log("Audio shaping on: replacements get the stock-callout edge "
-                "fade, level cap, and 5 kHz roll-off.", "info")
+        # Raw encode (replacements written as provided) is THE behavior now —
+        # the GUI retired the match-to-callouts shaper (monkeybug batch 20) and
+        # pins PAD_STERN_AUDIO_RAW=1 at startup.  Only the unusual case gets a
+        # log line: shaping still fingerprints a card built with the env var
+        # cleared by hand (a phone recording of the machine can't settle which
+        # mode built a card after the fact — monkeybug's 2026-07 click A/B).
+        if os.environ.get("PAD_STERN_AUDIO_RAW") != "1":
+            log("Audio shaping ON (PAD_STERN_AUDIO_RAW unset): replacements "
+                "get the stock-callout edge fade, level cap, and 5 kHz "
+                "roll-off instead of being written as provided.", "warning")
         # Advanced audio options leave fingerprints in the log for the same
         # reason the shaping mode does: a card built during an experiment must
         # be identifiable as such after the fact.

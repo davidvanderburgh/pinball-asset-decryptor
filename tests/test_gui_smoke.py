@@ -5,6 +5,8 @@ swapping without actually running pipelines.  Skipped when Tk can't
 open a display (typical for headless Linux CI without xvfb).
 """
 
+import os
+
 import pytest
 
 from tests.conftest import HAS_DISPLAY
@@ -179,64 +181,153 @@ def test_audio_group_duplicates_checkbox_only_for_cgc(
 
 def test_audio_experiment_buttons_only_for_stern(app, manufacturers_by_key):
     """Advanced… / Profile vs stock drive env vars read solely by the Spike 2
-    encoder, so they are packed only for Stern.  The Trim/pad checkbox they
-    share a row with stays for every manufacturer."""
+    encoder, so they are packed only for Stern.  The Trim/pad checkbox that
+    shares their row is HIDDEN for Stern (Spike 2 always length-matches —
+    batch 20) but stays for plugins where the toggle is real."""
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update(); app.root.update()
-    assert win._audio_trim_cb.winfo_manager() == "pack"
+    assert win._audio_trim_cb.winfo_manager() == ""
+    assert win.audio_trim_var.get() is True     # forced on, just not shown
     assert win._audio_adv_btn.winfo_manager() == "pack"
     assert win._audio_profile_btn.winfo_manager() == "pack"
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update(); app.root.update()
     assert win._audio_adv_btn.winfo_manager() == ""
     assert win._audio_profile_btn.winfo_manager() == ""
-    # The shared row (Trim/pad checkbox) stays for non-Stern.
+    # The free toggle comes back for a plugin that doesn't force it.
     assert win._audio_trim_cb.winfo_manager() == "pack"
 
 
-def test_audio_declick_toggle_persists_and_sets_env(app, manufacturers_by_key):
-    """Off by default now (unproven experiment, moved into the Advanced
-    dialog): the encoder runs raw (PAD_STERN_AUDIO_RAW=1).  Ticking it on
-    clears the var so the shaper runs; unticking re-sets it.  The BooleanVar +
-    handler are unchanged — only the widget's home moved."""
+def test_audio_raw_encode_env_always_pinned(app):
+    """The match-to-callouts shaper is retired (batch 20): App startup pins
+    PAD_STERN_AUDIO_RAW=1 unconditionally, so the Stern encoder always writes
+    replacements as provided — no toggle, no persisted setting."""
     import os
+    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
+    assert not hasattr(app.window, "audio_declick_var")
+
+
+def test_stern_title_caption_from_vendor_filename(manufacturers_by_key):
+    """Batch 20: the title bar identifies the game leanly — no platform echo,
+    plus version + edition parsed off Stern's vendor filename."""
+    from pinball_decryptor.core.registry import Game
+    stern = manufacturers_by_key["stern"]
+    g = Game(key="led_zeppelin", display="Led Zeppelin (Spike 2)",
+             manufacturer_key="stern", era="spike2",
+             notes="Spike 2 card image")
+    cap = stern.title_caption(
+        "X:/cards/led_zeppelin_le-1_22_0.Release.8G.sdcard.raw", g)
+    assert cap == "Led Zeppelin v1.22.0 LE"
+    # A renamed card still shows the bare title, never the platform suffix.
+    assert stern.title_caption("X:/cards/backup.raw", g) == "Led Zeppelin"
+
+
+def test_detected_game_caption_drives_title_bar(app):
+    """The App composes the title bar from the detected-game caption (batch
+    20) plus the loaded project (batch 19); losing the detection drops the
+    caption again."""
+    app._on_detected_game_change("Led Zeppelin v1.22 LE")
+    assert "Led Zeppelin v1.22 LE" in app.root.title()
+    app._on_detected_game_change(None)
+    assert "Led Zeppelin" not in app.root.title()
+
+
+def test_badge_row_hidden_until_it_carries_text(app, manufacturers_by_key):
+    """Batch 20: the Extract detect-badge row packs only while it carries a
+    warning ("Not recognised…" etc.); the happy path keeps it hidden (the
+    game lives in the title bar) so it doesn't burn a blank line."""
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update()
-    assert win.audio_declick_var.get() is False
+    win.extract_input_var.set("")
+    app.root.update()
+    assert win._extract_badge_row.winfo_manager() == ""
+    # An existing file the plugin does NOT recognise -> warning text -> row.
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as fh:
+        fh.write(b"not a card")
+        bogus = fh.name
+    try:
+        win.extract_input_var.set(bogus)
+        app.root.update()
+        assert "Not recognised" in win._extract_badge.cget("text")
+        assert win._extract_badge_row.winfo_manager() == "pack"
+    finally:
+        win.extract_input_var.set("")
+        app.root.update()
+        os.unlink(bogus)
+    assert win._extract_badge_row.winfo_manager() == ""
 
-    # Enable it -> encoder shapes to callouts (env cleared).
-    win.audio_declick_var.set(True)
-    win._on_audio_declick_toggle()
-    assert "PAD_STERN_AUDIO_RAW" not in os.environ
-    assert app._settings["audio_declick"] is True
 
-    # Disable again -> raw encode (env set).
-    win.audio_declick_var.set(False)
-    win._on_audio_declick_toggle()
-    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
-    assert app._settings["audio_declick"] is False
+def test_collect_project_stats_counts_and_changes(tmp_path):
+    """The Project Info ⓘ stats (batch 20): asset counts by kind skip
+    bookkeeping dot-dirs, total size includes them, and the Changed row folds
+    staged picks + .orig build snapshots together."""
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.gui.main_window import MainWindow
+
+    proj = tmp_path / "proj"
+    (proj / "audio").mkdir(parents=True)
+    (proj / "audio" / "idx0001.wav").write_bytes(b"x" * 10)
+    (proj / "audio" / "idx0002.wav").write_bytes(b"x" * 10)
+    (proj / "video").mkdir()
+    (proj / "video" / "clip.mp4").write_bytes(b"x" * 30)
+    (proj / "images").mkdir()
+    (proj / "images" / "logo.png").write_bytes(b"x" * 5)
+    (proj / "notes.txt").write_bytes(b"x")
+    # Bookkeeping: counts toward size on disk, not toward the asset rows.
+    (proj / ".orig" / "audio").mkdir(parents=True)
+    (proj / ".orig" / "audio" / "idx0001.wav").write_bytes(b"y" * 10)
+    staged_changes.save(str(proj), {"audio": {"audio/idx0002.wav": "r.wav"}})
+
+    rows = dict(MainWindow._collect_project_stats(str(proj)))
+    assert rows["Audio"].startswith("2 file(s)")
+    assert rows["Video"].startswith("1 file(s)")
+    assert rows["Images"].startswith("1 file(s)")
+    assert rows["Other files"].startswith("1 file(s)")
+    assert "1 staged for the next build" in rows["Changed"]
+    assert "1 changed by earlier builds" in rows["Changed"]
+    assert "Project started" in rows
+
+
+def test_project_mirror_label_follows_shared_var(app):
+    """The Replace tabs' project rows are plain labels mirroring the shared
+    project var (batch 20 — no fake-editable box, no jump button), with a
+    pointer at the Extract tab while no project is loaded."""
+    win = app.window
+    win.write_assets_var.set("")
+    assert "Extract tab" in win._project_mirror_var.get()
+    win.write_assets_var.set(r"C:\proj\lz")
+    assert win._project_mirror_var.get() == r"C:\proj\lz"
+    win.write_assets_var.set("")
+    assert "Extract tab" in win._project_mirror_var.get()
 
 
 def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
     """Advanced audio options persist and mirror into the PAD_STERN_* env
     vars; defaults clear every var so the engine baseline stays
-    authoritative.  Machine-render previews point next to the build output."""
+    authoritative.  The retired shaper knobs (fade / cap / roll-off — batch
+    20) are actively CLEARED even when a stale persisted config still carries
+    them.  Machine-render previews point next to the build output."""
     import os
-    for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
-                "PAD_STERN_LOWPASS_HZ", "PAD_STERN_HEAD_MODE",
-                "PAD_STERN_LEADOUT", "PAD_STERN_PREVIEW_DIR",
-                "PAD_STERN_SLOT_SEED_DB"):
+    for var in ("PAD_STERN_HEAD_MODE", "PAD_STERN_LEADOUT",
+                "PAD_STERN_PREVIEW_DIR", "PAD_STERN_SLOT_SEED_DB"):
         monkeypatch.delenv(var, raising=False)
+    # Simulate an old session's leftover experiment env.
+    monkeypatch.setenv("PAD_STERN_FADE_MS", "80.0")
+    monkeypatch.setenv("PAD_STERN_HEADROOM", "0.6")
+    monkeypatch.setenv("PAD_STERN_LOWPASS_HZ", "0")
 
+    # A stale persisted cfg may still carry the retired keys — they must be
+    # ignored, not re-applied.
     cfg = {"fade_ms": 80, "headroom_pct": 60, "lowpass_hz": 0,
            "head_mode": "stock", "leadout": "stock", "previews": True,
            "slot_seed": True, "slot_seed_db": 65}
     app._on_audio_advanced_change(cfg)
-    assert os.environ["PAD_STERN_FADE_MS"] == "80.0"
-    assert os.environ["PAD_STERN_HEADROOM"] == "0.6"
-    assert os.environ["PAD_STERN_LOWPASS_HZ"] == "0"
+    for var in ("PAD_STERN_FADE_MS", "PAD_STERN_HEADROOM",
+                "PAD_STERN_LOWPASS_HZ"):
+        assert var not in os.environ, var
     assert os.environ["PAD_STERN_HEAD_MODE"] == "stock"
     assert os.environ["PAD_STERN_LEADOUT"] == "stock"
     assert os.environ["PAD_STERN_SLOT_SEED_DB"] == "-65"
@@ -258,10 +349,11 @@ def test_audio_advanced_env_mirror(app, manufacturers_by_key, monkeypatch):
     assert "PAD_STERN_PREVIEW_DIR" not in os.environ
 
 
-def test_audio_advanced_modal_declick_applies_on_ok(app, manufacturers_by_key):
-    """The match-to-callouts switch now lives in the Advanced dialog and is
-    applied on OK: opening the dialog, ticking it, and pressing OK must flip the
-    var, persist the setting, and clear PAD_STERN_AUDIO_RAW (raw -> shaped)."""
+def test_audio_advanced_modal_shaper_gone_and_grey_buttons(
+        app, manufacturers_by_key):
+    """Batch 20: the Advanced dialog no longer offers the match-to-callouts
+    shaper or its fade/cap/roll-off knobs, its OK/Cancel are standard grey,
+    and OK still applies the remaining options (anti-pop seed here)."""
     import os
 
     def _descendants(w):
@@ -274,26 +366,31 @@ def test_audio_advanced_modal_declick_applies_on_ok(app, manufacturers_by_key):
     win = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update()
-    # Baseline: off (raw encode).
-    win.audio_declick_var.set(False)
-    win._on_audio_declick_toggle()
-    assert os.environ.get("PAD_STERN_AUDIO_RAW") == "1"
 
     win._open_audio_advanced()
     app.root.update()
     dlg = [c for c in win.root.winfo_children()
            if isinstance(c, _tk_mod.Toplevel)][-1]
     kids = _descendants(dlg)
-    cb = next(w for w in kids if "text" in w.keys()
-              and "Match audio replacements" in str(w.cget("text")))
+    texts = [str(w.cget("text")) for w in kids if "text" in w.keys()]
+    assert not any("Match audio replacements" in t for t in texts)
+    assert not any("Edge fade length" in t for t in texts)
+    assert not any("Treble roll-off" in t for t in texts)
     ok = next(w for w in kids if "text" in w.keys()
               and str(w.cget("text")) == "OK")
-    cb.invoke()   # local var False -> True
-    ok.invoke()   # _ok applies the declick change
+    cancel = next(w for w in kids if "text" in w.keys()
+                  and str(w.cget("text")) == "Cancel")
+    assert str(ok.cget("style")) in ("", "TButton")
+    assert str(cancel.cget("style")) in ("", "TButton")
+    seed_cb = next(w for w in kids if "text" in w.keys()
+                   and "Anti-pop codec seed" in str(w.cget("text")))
+    seed_cb.invoke()
+    ok.invoke()
     app.root.update()
-    assert win.audio_declick_var.get() is True
-    assert "PAD_STERN_AUDIO_RAW" not in os.environ
-    assert app._settings["audio_declick"] is True
+    assert app._settings["audio_advanced"]["slot_seed"] is True
+    assert os.environ.get("PAD_STERN_SLOT_SEED_DB") == "-65"
+    # Leave a clean slate for later tests.
+    app._on_audio_advanced_change({})
 
 
 def test_audio_group_duplicates_renders_two_level_tree(
@@ -508,23 +605,25 @@ def test_back_returns_to_picker(app, manufacturers_by_key):
 def test_cgc_trim_lock_engages_only_for_pf_extract(app, manufacturers_by_key,
                                                    tmp_path):
     """Selecting CGC leaves the Trim/pad checkbox a free toggle; scanning a
-    Pulp Fiction extract (fixed-length bank slots) forces it on + disabled;
-    scanning a WPC-remake extract (loose WAVs) unlocks it again."""
-    import tkinter as tk
+    Pulp Fiction extract (fixed-length bank slots) forces trim on and HIDES
+    the checkbox (batch 20 — mandatory behavior isn't shown as an option);
+    scanning a WPC-remake extract (loose WAVs) brings the toggle back."""
     cgc = manufacturers_by_key["cgc"]
     app._on_manufacturer_change(cgc)
     app.root.update()
     win = app.window
 
-    # At manufacturer-select (no extract yet) the toggle is free.
+    # At manufacturer-select (no extract yet) the toggle is free + visible.
     assert str(win._audio_trim_cb.cget("state")) != "disabled"
+    assert win._audio_trim_cb.winfo_manager() == "pack"
 
     # A Pulp Fiction extract (has data/*.bnk) forces the lock on.
     pf = tmp_path / "pf"
     (pf / "data").mkdir(parents=True)
     (pf / "data" / "pfmusic.bnk").write_bytes(b"")
     win._apply_audio_trim_lock(cgc, str(pf))
-    assert str(win._audio_trim_cb.cget("state")) == "disabled"
+    assert win._audio_trim_cb.winfo_manager() == ""
+    assert win._audio_trim_forced() is True
     assert win.audio_trim_var.get() is True
 
     # A WPC-remake extract (loose WAVs, no bank) unlocks it again, and the
@@ -534,6 +633,7 @@ def test_cgc_trim_lock_engages_only_for_pf_extract(app, manufacturers_by_key,
     (afm / "afmdata" / "s1.wav").write_bytes(b"")
     win._apply_audio_trim_lock(cgc, str(afm), persisted_trim=False)
     assert str(win._audio_trim_cb.cget("state")) != "disabled"
+    assert win._audio_trim_cb.winfo_manager() == "pack"
     assert win.audio_trim_var.get() is False
 
 
@@ -898,31 +998,30 @@ def test_save_preserves_other_tabs_sections(
 # ---------------------------------------------------------------------------
 
 def test_scan_buttons_built_for_every_replace_tab(app):
-    # All four Replace tabs are built at construction, so their Scan/Browse
-    # buttons register up front (independent of the selected manufacturer).
+    # All four Replace tabs are built at construction, so their Scan buttons
+    # register up front (independent of the selected manufacturer).  Batch 20
+    # dropped the per-tab "Set on Extract tab" jump buttons — the project row
+    # is a plain read-only mirror now.
     for key in ("audio", "video", "image", "text"):
         assert key in app.window._scan_buttons
-        assert key in app.window._browse_buttons
+    assert not app.window._browse_buttons
 
 
 def test_set_tab_scanning_toggles_button_state(app):
     w = app.window
     scan = w._scan_buttons["audio"]
-    browse = w._browse_buttons["audio"]
 
-    # Scanning: the Scan button becomes an ENABLED Cancel (monkeybug), Browse
-    # is disabled, and a spinner animation is scheduled.
+    # Scanning: the Scan button becomes an ENABLED Cancel (monkeybug) and a
+    # spinner animation is scheduled.
     w._audio_empty.configure(text="Scanning for audio files…")
     w._set_tab_scanning("audio", True)
     assert "Cancel" in scan.cget("text")
     assert str(scan.cget("state")) == "normal"
-    assert str(browse.cget("state")) == "disabled"
     assert "audio" in w._scan_spinner_after          # animation running
 
     w._set_tab_scanning("audio", False)
     assert scan.cget("text") == "Scan"
     assert str(scan.cget("state")) == "normal"
-    assert str(browse.cget("state")) == "normal"
     assert "audio" not in w._scan_spinner_after       # animation stopped
 
 
@@ -941,7 +1040,6 @@ def test_scan_blanks_list_and_cancel_resets(app):
     w._cancel_scan("audio")
     assert w._audio_scan_id == before + 1
     assert w._scan_buttons["audio"].cget("text") == "Scan"
-    assert str(w._browse_buttons["audio"].cget("state")) == "normal"
     assert "cancelled" in w._audio_empty.cget("text").lower()
     assert "audio" not in w._scan_spinner_after
 
@@ -1466,15 +1564,14 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         assert w._update_check_busy
         w.set_update_check_running(False)
         assert not w._update_check_busy
-        # A found update lights the gear's red notification dot (the gear
-        # is a round canvas icon now), puts a Download entry at the top
-        # of the menu, and the outcome in the log (David).
-        assert w._gear_btn.itemcget(
-            w._gear_update_dot, "state") == "hidden"
+        # A found update lights the gear's red notification dot (composited
+        # into the gear's anti-aliased disc image — icon_dots is the state),
+        # puts a Download entry at the top of the menu, and the outcome in
+        # the log (David).
+        assert "update" not in w._gear_btn.icon_dots
         app._handle_update_check_result(
             ("99.0.0", "https://example.com/release", "", None), False)
-        assert w._gear_btn.itemcget(
-            w._gear_update_dot, "state") == "normal"
+        assert "update" in w._gear_btn.icon_dots
         upd_menu = w._build_settings_menu()
         assert "Download update v99.0.0" in upd_menu.entrycget(0, "label")
         assert "Update available: v99.0.0" in w._log_text.get("1.0", "end-1c")

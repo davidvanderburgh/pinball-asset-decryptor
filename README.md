@@ -611,6 +611,13 @@ its unique bytes (opening it later re-extracts to refill the rest).
 The Extract tab's **Project Folder** is the single source of truth:
 the Replace/Write tabs show it read-only, and the build lands in the
 project's own `build\` folder (changeable per project in Properties).
+An **ⓘ** button beside the folder pops up the project's stats at a
+glance — audio/video/image file counts and sizes, total size on disk,
+how many files are staged or already changed by builds, and when the
+project started — and once a card is recognised the **window title
+names the detected game and firmware version** (e.g. "Led Zeppelin
+v1.22.0 LE") alongside the project, so several open versions stay
+tellable apart in the taskbar.
 The log survives sessions too: the log pane opens with the previous
 sessions' lines already in it — dimmed, above a clear cut line — so an
 app update or restart no longer wipes what you were looking at. Prefer

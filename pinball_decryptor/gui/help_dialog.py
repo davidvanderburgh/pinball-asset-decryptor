@@ -30,11 +30,12 @@ HELP_CONTENT = {
          "that reads the physical media in a reader (needs Administrator on "
          "Windows)."),
         ("Detection",
-         "The \"Detected: …\" badge under the path confirms the game was "
-         "recognised. \"Not recognised\" usually means the wrong kind of file "
-         "— or a copy that is still in progress; try again once the copy "
-         "finishes. If the file belongs to a different manufacturer, the "
-         "badge offers a one-click switch."),
+         "Once the game is recognised, its name (and firmware version) "
+         "appears in the window's title bar. \"Not recognised\" under the "
+         "path usually means the wrong kind of file — or a copy that is "
+         "still in progress; try again once the copy finishes. If the file "
+         "belongs to a different manufacturer, that line offers a one-click "
+         "switch."),
         ("What gets extracted",
          "The Audio / Video / Images / Text checkboxes choose which asset "
          "types to pull. Everything lands in the Project Folder — the one "

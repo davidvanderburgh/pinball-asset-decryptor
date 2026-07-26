@@ -1659,7 +1659,7 @@ class App:
                     "Delta Applied", summary))
             except Exception as e:
                 self.msg_queue.put(LogMsg(f"Apply delta failed: {e}", "error"))
-                self.root.after(0, lambda: messagebox.showerror(
+                self.root.after(0, lambda e=e: messagebox.showerror(
                     "Apply Delta Failed", str(e)))
 
         threading.Thread(target=_run, daemon=True).start()
@@ -1807,7 +1807,7 @@ class App:
                     f"changes show up."))
             except Exception as e:
                 self.msg_queue.put(LogMsg(f"Import failed: {e}", "error"))
-                self.root.after(0, lambda: messagebox.showerror(
+                self.root.after(0, lambda e=e: messagebox.showerror(
                     "Import Failed", str(e)))
 
         threading.Thread(target=_run, daemon=True).start()
@@ -2901,10 +2901,17 @@ class App:
                 # macOS cause (no CA roots -> CERTIFICATE_VERIFY_FAILED)
                 # and made field reports undiagnosable.
                 result, failed = None, f"{type(e).__name__}: {e}"
-            self.root.after(
-                0, self._handle_update_check_result,
-                result, show_up_to_date_toast, failed,
-                publishing[0] if publishing else None)
+            try:
+                self.root.after(
+                    0, self._handle_update_check_result,
+                    result, show_up_to_date_toast, failed,
+                    publishing[0] if publishing else None)
+            except (tk.TclError, RuntimeError):
+                # The app closed while the check was in flight.  There is
+                # nothing left to tell, and raising here only surfaces as a
+                # stray worker-thread traceback at shutdown — which is also
+                # enough to break the NEXT GUI test's Tk interpreter.
+                pass
         threading.Thread(target=_run, daemon=True).start()
 
     def _handle_update_check_result(self, result, show_up_to_date_toast,

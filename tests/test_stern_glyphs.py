@@ -374,6 +374,108 @@ def test_radium_image_writes_atlas_and_glyph_edit_uses_full_reencode(tmp_path):
     assert (dec[0:4, 0:4, 0] < 32).all()                   # atlas edit kept
 
 
+# ---- font scope: an edit can be limited to chosen scenes ---------------------
+
+class _FakeTwoSceneReader:
+    """Two scene.radium files that embed the SAME atlas bytes (what the card
+    really looks like — every scene carries its own copy), at different disk
+    offsets so a write can be attributed to one scene."""
+
+    def __init__(self, paths, data):
+        self._files = [(p, {"size": len(data), "mode": 0, "flags": 0,
+                            "i_block": bytes([0x40 + i]) * 8, "base": base})
+                       for i, (p, base) in enumerate(paths)]
+        self._data = data
+
+    def iter_regular_files(self, min_size=1):
+        for p, node in self._files:
+            yield p, 0, node
+
+    def read_file_bytes(self, node):
+        return self._data
+
+    def disk_ranges(self, node, off, length):
+        return [(node["base"] + off, length)]
+
+
+def _make_two_scene_glyph_extract(tmp_path):
+    """The one-atlas glyph extract, but the atlas occurs in TWO scenes (one
+    deduped PNG, two manifest rows)."""
+    raw, rgba, data_off, gpng = _make_glyph_extract(tmp_path)
+    tex = tmp_path / "images" / "scene_textures"
+    row = ("scene_textures/radimg_16x16_cafe0001.png\t%s\t%d\t%d\t16\t16\t5\n")
+    (tex / "radium_images.txt").write_text(
+        "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
+        + row % ("/lz/a/scene.radium", data_off, len(raw))
+        + row % ("/lz/b/scene.radium", data_off, len(raw)),
+        encoding="utf-8")
+    return raw, rgba, data_off, gpng
+
+
+def test_radium_image_writes_scope_limits_edit_to_chosen_scene(tmp_path):
+    """With no scope a glyph edit patches BOTH scenes; scoped to one scene it
+    patches only that one, leaving the other on the stock font."""
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    raw, _rgba, data_off, gpng = _make_two_scene_glyph_extract(tmp_path)
+    baseline = read_checksums(str(tmp_path))
+    reader = _FakeTwoSceneReader(
+        [("/lz/a/scene.radium", 0), ("/lz/b/scene.radium", 10000)],
+        b"\x7f" * data_off + raw + b"\x7f" * 8)
+    tile = np.asarray(Image.open(gpng).convert("RGBA")).copy()
+    tile[:] = (255, 0, 255, 255)
+    Image.fromarray(tile, "RGBA").save(gpng)
+
+    # default: every occurrence is patched
+    writes, n, ov = engine._radium_image_writes(
+        reader, str(tmp_path), baseline, lambda *a, **k: None, lambda: False)
+    assert sorted(w[0] for w in writes) == [data_off, 10000 + data_off]
+    assert n == 1 and len(ov) == 2               # both scenes' sidx refreshed
+
+    # scoped to scene b: only its occurrence is written
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    fo = list(fonts.values())[0]
+    fr.set_font_scope(str(tmp_path), fo, ["/lz/b/scene.radium"])
+    logs = []
+    writes, n, ov = engine._radium_image_writes(
+        reader, str(tmp_path), baseline,
+        lambda m, lv="info": logs.append(m), lambda: False)
+    assert [w[0] for w in writes] == [10000 + data_off]
+    assert n == 1 and len(ov) == 1
+    assert any("limited to 1 scene" in m for m in logs)
+    # the payload is still the real edit, just delivered to one scene
+    assert (dds.decode_bc3(bytes(writes[0][1]), 16, 16)[4:12, 4:12]
+            == (255, 0, 255, 255)).all()
+
+    # clearing the scope restores the all-occurrences default
+    fr.set_font_scope(str(tmp_path), fo, None)
+    writes, _n, _ov = engine._radium_image_writes(
+        reader, str(tmp_path), baseline, lambda *a, **k: None, lambda: False)
+    assert sorted(w[0] for w in writes) == [data_off, 10000 + data_off]
+
+
+def test_radium_image_writes_scope_naming_absent_scene_warns(tmp_path):
+    """A scope pointing at scenes this project doesn't have writes nothing —
+    and says so, instead of looking like the edit silently didn't take."""
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    raw, _rgba, data_off, gpng = _make_two_scene_glyph_extract(tmp_path)
+    baseline = read_checksums(str(tmp_path))
+    reader = _FakeTwoSceneReader(
+        [("/lz/a/scene.radium", 0), ("/lz/b/scene.radium", 10000)],
+        b"\x7f" * data_off + raw + b"\x7f" * 8)
+    tile = np.asarray(Image.open(gpng).convert("RGBA")).copy()
+    tile[:] = (0, 255, 0, 255)
+    Image.fromarray(tile, "RGBA").save(gpng)
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    fr.set_font_scope(str(tmp_path), list(fonts.values())[0],
+                      ["/other/game/scene.radium"])
+    logs = []
+    writes, n, _ov = engine._radium_image_writes(
+        reader, str(tmp_path), baseline,
+        lambda m, lv="info": logs.append(m), lambda: False)
+    assert writes == [] and n == 0
+    assert any("aren't in this project" in m for m in logs)
+
+
 # ---- extract -> font loader round trip ---------------------------------------
 
 def test_extract_writes_metrics_and_font_loader_roundtrip(tmp_path):

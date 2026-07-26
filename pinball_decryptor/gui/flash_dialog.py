@@ -347,7 +347,10 @@ class FlashImageDialog:
                 pick = pick_best_game_ssd(drives, prefer=prefer)
             except Exception:
                 drives, pick = [], (None, None, None)
-            self._dlg.after(0, self._apply_drives, my_id, drives, pick)
+            try:
+                self._dlg.after(0, self._apply_drives, my_id, drives, pick)
+            except (tk.TclError, RuntimeError):
+                pass                     # dialog closed while enumerating
 
         threading.Thread(target=_worker, daemon=True).start()
 

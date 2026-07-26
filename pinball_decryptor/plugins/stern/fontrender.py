@@ -28,9 +28,19 @@ re-rotated on import (stored = upright turned 90° clockwise).
 """
 
 import os
+import re
+
+from ...core.longpath import ext as _lp
 
 GLYPH_MANIFEST = os.path.join("images", "scene_textures", "glyph_images.txt")
 LINE_GAP = 2          # extra px between lines (display nicety, not from card)
+
+#: Below this the letters are too few pixels tall for a desktop font to survive
+#: the fit — Peter, who restyled a whole game: "smaller fonts do look more and
+#: more strange the smaller they get… i guess they should be skipped and left
+#: alone (about smaller 30 pixel)".  Advisory: the Fonts window says so and
+#: asks, it never refuses.
+MIN_RESTYLE_PX = 30
 
 
 class FontError(Exception):
@@ -166,7 +176,7 @@ def load_slice(glyph, image=None):
     (:func:`save_slices` / :func:`revert_slices`) never do this — on-card
     bytes keep the opaque background."""
     Image = _pil()
-    img = image if image is not None else Image.open(glyph["abs"])
+    img = image if image is not None else Image.open(_lp(glyph["abs"]))
     img = img.convert("RGBA")
     if img.size != (glyph["w"], glyph["h"]):
         img = img.resize((glyph["w"], glyph["h"]), Image.LANCZOS)
@@ -256,8 +266,13 @@ def font_color(font, samples=8):
     """The font's dominant INK color over its widest glyphs — the default
     tint for an imported font, so a swap keeps the original's look.  Weighted
     by alpha x luminance: BC1 fonts are ink on an opaque black background, so
-    plain alpha weighting would average the ink into gray.  White when
-    unreadable."""
+    plain alpha weighting would average the ink into gray.
+
+    A font whose ink is genuinely BLACK defeats that weighting (every pixel
+    scores zero), so it falls back to plain alpha weighting rather than to
+    white — outline companions are solid black silhouettes, and answering
+    "white" for one turned an import into a white halo where the game wanted a
+    dark one.  Only a font with no readable ink at all returns white."""
     try:
         import numpy as np
     except Exception:
@@ -266,21 +281,27 @@ def font_color(font, samples=8):
                 key=lambda g: -(g["w"] * g["h"]))[:samples]
     tot = np.zeros(3)
     wsum = 0.0
+    a_tot = np.zeros(3)
+    a_sum = 0.0
     for g in gs:
         try:
             arr = np.asarray(load_slice(g), dtype=float)
         except (OSError, FontError):
             continue
+        alpha = arr[..., 3] / 255.0
         lum = arr[..., :3].max(axis=2) / 255.0
-        w2 = (arr[..., 3] / 255.0) * lum * lum
-        ws = w2.sum()
-        if ws <= 0:
-            continue
-        tot += (arr[..., :3] * w2[..., None]).sum(axis=(0, 1))
-        wsum += ws
-    if wsum <= 0:
-        return (255, 255, 255)
-    return tuple(int(round(c)) for c in (tot / wsum))
+        w2 = alpha * lum * lum
+        if w2.sum() > 0:
+            tot += (arr[..., :3] * w2[..., None]).sum(axis=(0, 1))
+            wsum += w2.sum()
+        if alpha.sum() > 0:
+            a_tot += (arr[..., :3] * alpha[..., None]).sum(axis=(0, 1))
+            a_sum += alpha.sum()
+    if wsum > 0:
+        return tuple(int(round(c)) for c in (tot / wsum))
+    if a_sum > 0:
+        return tuple(int(round(c)) for c in (a_tot / a_sum))
+    return (255, 255, 255)
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +375,7 @@ def _draw_char(ch, ttf, color, stroke, stroke_color):
 
 
 def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
-                  size_scale=1.0, squeeze=0.6):
+                  size_scale=1.0, squeeze=0.6, width_scale=1.0):
     """Fit the desktop font at *ttf_path* into *font*'s glyph slots.
 
     Picks ONE uniform pixel size — the largest at which every character's ink
@@ -369,6 +390,14 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
     instead).  Without this, one wide 'W' crushes a wide typeface to a
     fraction of the slot height (Peter's turtle font).  ``squeeze=1.0``
     restores strict keep-aspect fitting.
+
+    *width_scale* (< 1) draws each letter narrower than its slot, leaving a
+    side bearing inside the SAME atlas rect.  The game lays text out with the
+    card's own advances, which an import must not change, so a letter that
+    fills its slot edge to edge sits hard against its neighbour — Peter, after
+    restyling a card: "some of the letters are very near together".  Shrinking
+    the whole font (*size_scale*) opens the gaps but throws away height too;
+    this buys the gap for width alone.
 
     Returns ``(slices, size, kept)``: *slices* maps char → as-stored RGBA
     (rotated slots pre-rotated, exact atlas-rect dims — save these over the
@@ -409,6 +438,12 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
             out[ch] = (x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
         return out
 
+    width_scale = max(0.1, min(1.0, float(width_scale)))
+    # The FIT is untouched by the width budget on purpose: folding it in makes
+    # the size width-bound, and the letters lose the height they were asked to
+    # keep (measured — 80px became 63px at width 80%).  The budget is spent at
+    # placement instead, so letters stay tall and get a little more of the
+    # horizontal compression the squeeze rule already does.
     size = fit_size(measure, slots, squeeze=squeeze)
     if size <= 0:
         raise FontError("the font doesn't fit this glyph table even at 2px")
@@ -423,13 +458,16 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
             continue
         ink, asc_ink, _desc_ink = r
         lw, lh = int(g["lw"]), int(g["lh"])
-        if ink.size[0] > lw or ink.size[1] > lh:
+        # The cell stays the slot's size (the atlas rect must not change); the
+        # INK is what gets the narrower budget.
+        aw = max(1, int(round(lw * width_scale)))
+        if ink.size[0] > aw or ink.size[1] > lh:
             if ink.size[1] <= lh:
-                # width-only overflow: SQUEEZE horizontally into the slot —
+                # width-only overflow: SQUEEZE horizontally into the budget —
                 # a wide typeface keeps its height instead of shrinking
-                nw, nh = lw, ink.size[1]
+                nw, nh = aw, ink.size[1]
             else:
-                s = min(lw / ink.size[0], lh / ink.size[1])
+                s = min(aw / ink.size[0], lh / ink.size[1])
                 nw = max(1, int(ink.size[0] * s))
                 nh = max(1, int(ink.size[1] * s))
             asc_ink = asc_ink * nh / ink.size[1]
@@ -460,9 +498,39 @@ def save_slices(font, slices):
         g = font["glyphs"].get(ch)
         if g is None:
             continue
-        img.save(g["abs"])
+        img.save(_lp(g["abs"]))
         n += 1
     return n
+
+
+def blank_slices(font):
+    """Slice bitmaps that draw NOTHING, one per glyph — how a font is removed
+    from the screen without touching anything else.
+
+    "Nothing" is format-specific: a BC3 (fmt 5) slot goes fully transparent,
+    while a BC1 (fmt 4) slot has no usable alpha and must go opaque BLACK
+    instead, because the machine adds BC1 art to the frame and black adds
+    zero.  Punching transparency into a BC1 slot would instead write 1-bit
+    holes the stock atlas doesn't have."""
+    Image = _pil()
+    out = {}
+    for ch, g in font["glyphs"].items():
+        bg = (0, 0, 0, 255) if g.get("fmt") == 4 else (0, 0, 0, 0)
+        out[ch] = Image.new("RGBA", (max(1, int(g["w"])),
+                                     max(1, int(g["h"]))), bg)
+    return out
+
+
+def clear_font(font):
+    """Blank every glyph of *font* on disk.  Returns the file count.
+
+    This is Peter's "removing the shadow font in total": a title is drawn as an
+    outline instance UNDER a fill instance, so restyling only the fill leaves
+    the ORIGINAL typeface's black silhouette behind the new letters — the
+    "strange inconsistent black border" he could not place.  Blanking the
+    companion removes it, and the imported font's own Outline setting can draw
+    a new one.  Reversible with :func:`revert_slices`."""
+    return save_slices(font, blank_slices(font))
 
 
 def revert_slices(assets_dir, font):
@@ -479,16 +547,202 @@ def revert_slices(assets_dir, font):
         atlas = atlases.get(arel)
         if atlas is None:
             try:
-                atlas = atlases[arel] = Image.open(os.path.join(
-                    assets_dir, "images", *arel.split("/"))).convert("RGBA")
+                atlas = atlases[arel] = Image.open(_lp(os.path.join(
+                    assets_dir, "images", *arel.split("/")))).convert("RGBA")
             except OSError:
                 continue
         tile = atlas.crop((g["x"], g["y"], g["x"] + g["w"], g["y"] + g["h"]))
         try:
-            tile.save(g["abs"])
+            tile.save(_lp(g["abs"]))
             n += 1
         except OSError:
             pass
+    return n
+
+
+# ---------------------------------------------------------------------------
+# Outline companions
+# ---------------------------------------------------------------------------
+#
+# A Stern title is drawn TWICE: an outline instance, then a fill instance on
+# top of it at the same spot (proven on the AWARD popup, whose two instances
+# are `Instance_AwardTitle_Outline` and `Instance_AwardTitle`).  The outline
+# comes from its OWN glyph table — `Stern_CCZoinks_OUTLINE4`,
+# `Stern_Impact_Outline`, `Blackmoor_Outline` — whose glyphs are fattened BLACK
+# silhouettes of the same letters, and 246 of TMNT's 282 font-bearing scenes
+# carry one.
+#
+# So restyling the body font alone leaves the OLD typeface's silhouette drawn
+# behind the new letters.  That is Peter's "strange inconsistent black border",
+# his "everything else from white as black", and his "i do still see font
+# glyphs on some places" — one cause, three symptoms, and no way to find it
+# from the Fonts window because the companion is listed as an unrelated font.
+
+_OUTLINE_RE = re.compile(r"^(?P<base>.+?)[_ ]?(?:OUTLINE|Outline)\d*(?:_\d+)?$")
+
+
+def outline_base(name):
+    """The body-font name an outline companion belongs to, or ``""``.
+
+    Name-driven, and that is a deliberate limit: the suffix is Stern's
+    authoring convention and could differ per game, so :func:`outline_companion`
+    only ever accepts a match that is CORROBORATED by the two fonts appearing
+    in the same scenes."""
+    m = _OUTLINE_RE.match((name or "").strip())
+    base = m.group("base").strip(" _") if m else ""
+    return base if base and base.lower() != (name or "").strip().lower() else ""
+
+
+def _scene_index(assets_dir, fonts):
+    """``{font key: frozenset of scene card paths}`` in one pass over
+    ``radium_images.txt`` (per-font scanning is O(fonts x rows), and a card has
+    300+ fonts)."""
+    path = os.path.join(assets_dir, "images", "scene_textures",
+                        "radium_images.txt")
+    by_atlas = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line or line.startswith("#"):
+                    continue
+                cols = line.rstrip("\r\n").split("\t")
+                if len(cols) >= 2:
+                    by_atlas.setdefault(cols[0], set()).add(cols[1])
+    except OSError:
+        return {}
+    out = {}
+    for fo in fonts:
+        s = set()
+        for a in fo["atlas_rels"]:
+            s |= by_atlas.get(a, set())
+        out[fo["key"]] = frozenset(s)
+    return out
+
+
+def _metric_match(a, b, tol=0.51):
+    """How much of two fonts' shared alphabet has the SAME logical box.
+
+    An outline companion is baked at its body font's size and carries the body
+    font's metrics verbatim — measured on TMNT, `Stern_CCZoinks_OUTLINE6` and
+    `Stern_CCZoinks` at 66px agree on lw/lh/by to the pixel for every letter,
+    while the same typeface at another size does not.  Only the STORED bitmap
+    is bigger, which is the outline spread.  So this, not the name and not the
+    size label, is what says two fonts are the same letters."""
+    shared = set(a["glyphs"]) & set(b["glyphs"])
+    hits = tot = 0
+    for ch in shared:
+        ga, gb = a["glyphs"][ch], b["glyphs"][ch]
+        if ga["lh"] <= 1 or gb["lh"] <= 1:
+            continue
+        tot += 1
+        if (abs(ga["lw"] - gb["lw"]) < tol and abs(ga["lh"] - gb["lh"]) < tol
+                and abs(ga["by"] - gb["by"]) < tol):
+            hits += 1
+    return (hits / tot) if tot else 0.0
+
+
+def outline_companions(assets_dir, fonts, min_metric=0.6):
+    """``{body font key: companion font}`` for every outline pair in *fonts*.
+
+    Three things must agree before two fonts are called a pair, because acting
+    on this modifies a font the user did not select:
+
+    1. the name is a body font's name plus an outline suffix (Stern's
+       convention — necessary, nowhere near sufficient);
+    2. they are drawn in at least one scene TOGETHER;
+    3. most of their shared letters have the identical logical box
+       (:func:`_metric_match`), which is what actually makes them the same
+       letters at the same size.
+
+    Rule 3 is what stops a 54px outline being handed to an 88px body just
+    because that body appears in more scenes.  A companion nothing corroborates
+    (TMNT's `Blackmoor_Outline`, whose body font is on no shared screen) is
+    simply left unpaired rather than guessed at."""
+    scenes = _scene_index(assets_dir, fonts)
+    if not scenes:
+        return {}
+    bodies = {}
+    for fo in fonts:
+        if not outline_base(fo.get("name")):
+            bodies.setdefault((fo.get("name") or "").strip(), []).append(fo)
+    out = {}
+    for fo in fonts:
+        base = outline_base(fo.get("name"))
+        if not base:
+            continue
+        mine = scenes.get(fo["key"], frozenset())
+        best = None
+        for cand in bodies.get(base, ()):
+            shared = len(mine & scenes.get(cand["key"], frozenset()))
+            if not shared:
+                continue
+            m = _metric_match(fo, cand)
+            if m < min_metric:
+                continue
+            rank = (m, shared, -abs(cand["px"] - fo["px"]))
+            if best is None or rank > best[0]:
+                best = (rank, cand)
+        if best is not None:
+            out[best[1]["key"]] = fo
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Undo
+# ---------------------------------------------------------------------------
+#
+# "Revert" means back to STOCK (re-cut from the atlas).  That is not undo: a
+# user two imports deep who wants the previous one back has nowhere to go, and
+# "Revert all fonts" would otherwise be an unrecoverable click after an
+# afternoon of restyling.  Slices are tiny — 27,567 of them total 20 MB on a
+# TMNT project, 738 bytes each — so the previous bytes can simply be kept.
+
+def snapshot_fonts(fonts, progress=None):
+    """``{abs path: bytes or None}`` for every glyph slice of *fonts*, as they
+    are on disk right now.  ``None`` records a file that does not exist yet, so
+    restoring can delete it again.
+
+    *progress* is called ``(done, total)`` per font.  It is worth having: the
+    bytes are trivial (20 MB for a whole project) but the FILE COUNT is not —
+    27,567 slices read cold off a OneDrive folder took 35 s here, against 1 s
+    once the cache was warm."""
+    snap = {}
+    for i, fo in enumerate(fonts):
+        if progress:
+            progress(i, len(fonts))
+        for g in fo["glyphs"].values():
+            p = g["abs"]
+            if p in snap:
+                continue
+            try:
+                with open(_lp(p), "rb") as f:
+                    snap[p] = f.read()
+            except OSError:
+                snap[p] = None
+    return snap
+
+
+def snapshot_bytes(snap):
+    """How much memory a snapshot holds, so a caller can bound its history."""
+    return sum(len(v) for v in snap.values() if v)
+
+
+def restore_snapshot(snap):
+    """Put a :func:`snapshot_fonts` result back on disk.  Returns the count of
+    files restored."""
+    n = 0
+    for path, data in snap.items():
+        try:
+            if data is None:
+                if os.path.isfile(_lp(path)):
+                    os.remove(_lp(path))
+                    n += 1
+                continue
+            with open(_lp(path), "wb") as f:
+                f.write(data)
+            n += 1
+        except OSError:
+            continue
     return n
 
 
@@ -511,3 +765,94 @@ def scenes_for_font(assets_dir, font):
             if len(cols) >= 2 and cols[0] in want:
                 out.add(cols[1])
     return sorted(out)
+
+
+# ---------------------------------------------------------------------------
+# Which scenes a font edit lands in ("scope")
+# ---------------------------------------------------------------------------
+#
+# Scenes embed their own copy of every atlas, but identical copies extract to
+# ONE PNG (see ``extract_radium_images``), so by default editing a font
+# rewrites it in every scene that uses it — usually what you want ("restyle
+# the game"), sometimes not ("restyle only the training scene", Peter).
+#
+# The scope file is that opt-out: rows of ``atlas_rel <TAB> radium card path``
+# naming the ONLY scenes an atlas's edits may be written to.  An atlas with no
+# rows keeps the all-occurrences default, so the file is absent until someone
+# narrows a font, and deleting it restores stock behaviour.
+#
+# Scope selects WHERE one set of glyph bitmaps lands; it cannot give two
+# scenes DIFFERENT versions of the same font (that needs per-scene glyph PNGs,
+# which the content-deduped extract has no room for).
+
+SCOPE_MANIFEST = os.path.join("images", "scene_textures", "glyph_scope.txt")
+
+_SCOPE_HEADER = (
+    "# Font scope: limits an atlas's glyph edits to the scenes listed here.\n"
+    "# An atlas with no row here is written to EVERY scene that uses it.\n"
+    "# atlas_rel\tradium card path\n")
+
+
+def load_scopes(assets_dir):
+    """``{atlas_rel: set(radium card paths)}`` from the scope file — the
+    atlases whose edits are limited to specific scenes.  Empty dict when no
+    font has been narrowed (the normal case)."""
+    path = os.path.join(assets_dir, SCOPE_MANIFEST)
+    out = {}
+    if not os.path.isfile(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\r\n")
+                if not line or line.startswith("#"):
+                    continue
+                cols = line.split("\t")
+                if len(cols) >= 2 and cols[0] and cols[1]:
+                    out.setdefault(cols[0], set()).add(cols[1])
+    except OSError:
+        return {}
+    return out
+
+
+def get_font_scope(assets_dir, font):
+    """The scenes *font*'s edits are limited to, or ``None`` when it applies
+    to every scene that uses it (the default).  A font spanning several atlas
+    pages is scoped as a whole, so the union is the answer."""
+    scopes = load_scopes(assets_dir)
+    cards = set()
+    scoped = False
+    for arel in font["atlas_rels"]:
+        got = scopes.get(arel)
+        if got:
+            scoped = True
+            cards |= got
+    return sorted(cards) if scoped else None
+
+
+def set_font_scope(assets_dir, font, cards):
+    """Limit *font*'s glyph edits to the scene card paths *cards*; a falsy
+    *cards* clears the limit (back to every scene that uses the font).
+
+    Rewrites the scope file preserving every OTHER atlas's rows.  Returns the
+    number of rows written for this font."""
+    path = os.path.join(assets_dir, SCOPE_MANIFEST)
+    mine = set(font["atlas_rels"])
+    keep = []
+    for arel, paths in sorted(load_scopes(assets_dir).items()):
+        if arel not in mine:
+            keep.extend((arel, p) for p in sorted(paths))
+    rows = [(arel, p) for arel in sorted(mine) for p in sorted(cards or ())]
+    keep.extend(rows)
+    if not keep:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return 0
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(_SCOPE_HEADER)
+        for arel, p in keep:
+            f.write("%s\t%s\n" % (arel, p))
+    return len(rows)

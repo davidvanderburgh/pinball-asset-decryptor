@@ -8,23 +8,31 @@ app.  This window groups all of it by scene: pick a scene on the left, see
 its images / fonts / text on the right, and double-click to jump to the
 matching row on the Images tab, the Fonts window, or the Replace Text tab.
 
-A true WYSIWYG scene renderer would need the radium node graph (transforms,
-z-order, timelines) — not reverse-engineered; this browser is the honest
-subset: complete contents + navigation, no layout.
+It also SHOWS the scene: the radium node graph is read to a layout at extract
+time (:mod:`plugins.stern.scene_layout`) and composited here from the project
+folder's current files, so a replaced image or an imported font appears in the
+preview.  "Rebuild previews…" re-reads those layouts off the card alone — a
+few seconds against a full re-extract, and it leaves every PNG and glyph slice
+untouched, which a re-extract would not.
 
-Read-only over the manifests; singleton tool window like Image Info.
+Read-only over the manifests otherwise; singleton tool window like Image Info.
 """
 
 import os
 import re
+import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
+from ..plugins.stern import scene_render
 from .theme import THEMES, platform_font
 from .widgets import _Tooltip, center_over
 
 _RADIMG_NAME = re.compile(r"^radimg_(.+)_\d+x\d+_[0-9a-f]{8}\.png$",
                           re.IGNORECASE)
+# A TMNT TV-static loop is ~1900 frames; rendering every one to preview it
+# would stall the window and eat memory for a motion you can read in a second.
+_MAX_PREVIEW_FRAMES = 60
 
 
 def _rows(assets_dir, *parts):
@@ -42,16 +50,16 @@ def collect_scenes(assets_dir):
     """Group the extract manifests by scene directory.
 
     Returns ``{scene_dir: scene}`` where scene = ``{"label", "images":
-    [(order, rel)], "fonts": {table_key: (name, px)}, "texts": [str]}``.
-    Pure text parsing (a few thousand rows), no Tk — unit-tested apart from
-    the window."""
+    [(order, rel)], "fonts": {table_key: (name, px)}, "texts": [str],
+    "videos": [rel]}``.  Pure text parsing (a few thousand rows), no Tk —
+    unit-tested apart from the window."""
     scenes = {}
 
     def scene_for(d):
         sc = scenes.get(d)
         if sc is None:
-            sc = scenes[d] = {"label": "", "hint": "",
-                              "images": [], "fonts": {}, "texts": []}
+            sc = scenes[d] = {"label": "", "hint": "", "images": [],
+                              "fonts": {}, "texts": [], "videos": []}
         return sc
 
     # Radium-embedded images (one row per occurrence): scene = the radium's
@@ -110,6 +118,23 @@ def collect_scenes(assets_dir):
         for d in atlas_scenes.get(atlas, ()):
             scene_for(d)["fonts"].setdefault(table, name)
 
+    # Videos: the LCD clips a scene plays.  ``video/manifest.txt`` rows are
+    # (file name, card path, bytes) and a clip lives under the scene's own
+    # scene.assets, so the scene is derivable exactly as it is for textures —
+    # no new parsing, and a scene's video is the most visible thing in it.
+    for cols in _rows(assets_dir, "video", "manifest.txt"):
+        if len(cols) < 2:
+            continue
+        card = cols[1].replace("\\", "/")
+        if "/scene.assets/" in card:
+            d = card.rsplit("/scene.assets/", 1)[0]
+        else:
+            d = card.rsplit("/", 1)[0]
+        rel = "video/" + cols[0]
+        sc = scene_for(d)
+        if rel not in sc["videos"]:
+            sc["videos"].append(rel)
+
     # Editable display text, per radium.
     try:
         from ..core import text_manifest
@@ -139,6 +164,16 @@ class SceneBrowserWindow:
         self.assets_dir = assets_dir
         self._scenes = {}
         self._photo = None
+        self._layouts = {}         # card path -> static layout (from extract)
+        self._fonts = None         # fontrender fonts, parsed once on demand
+        self._preview_img = None   # PhotoImage ref (must stay alive)
+        self._preview_full = None  # full-size frame 1, for Save preview…
+        self._frames_full = []     # every full-size frame (GIF export)
+        self._frame_imgs = []      # canvas-sized PhotoImages, one per frame
+        self._preview_item = None  # canvas item the animation retargets
+        self._play_job = None      # pending after() for the animation
+        self._preview_token = 0    # discards superseded renders
+        self._rebuild = None       # {"cancel": bool} while a rebuild runs
         self._sans, _mono = platform_font()
         self._build()
         self.reload(preselect)
@@ -184,16 +219,18 @@ class SceneBrowserWindow:
         lf = ttk.Frame(left)
         lf.pack(fill=tk.BOTH, expand=True)
         self._tree = ttk.Treeview(
-            lf, columns=("imgs", "fonts", "texts"), height=22,
+            lf, columns=("imgs", "fonts", "texts", "vids"), height=22,
             selectmode="browse")
         self._tree.heading("#0", text="Scene", anchor=tk.W)
         self._tree.heading("imgs", text="Images", anchor=tk.W)
         self._tree.heading("fonts", text="Fonts", anchor=tk.W)
         self._tree.heading("texts", text="Text", anchor=tk.W)
-        self._tree.column("#0", width=240, minwidth=140)
+        self._tree.heading("vids", text="Video", anchor=tk.W)
+        self._tree.column("#0", width=220, minwidth=140)
         self._tree.column("imgs", width=56, minwidth=44, stretch=False)
         self._tree.column("fonts", width=48, minwidth=40, stretch=False)
         self._tree.column("texts", width=44, minwidth=36, stretch=False)
+        self._tree.column("vids", width=46, minwidth=38, stretch=False)
         sc1 = ttk.Scrollbar(lf, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=sc1.set)
         sc1.pack(side=tk.RIGHT, fill=tk.Y)
@@ -210,7 +247,7 @@ class SceneBrowserWindow:
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         rf = ttk.Frame(right)
         rf.pack(fill=tk.BOTH, expand=True)
-        self._detail = ttk.Treeview(rf, columns=("info",), height=18,
+        self._detail = ttk.Treeview(rf, columns=("info",), height=13,
                                     selectmode="browse")
         self._detail.heading("#0", text="Contents", anchor=tk.W)
         self._detail.heading("info", text="", anchor=tk.W)
@@ -224,13 +261,56 @@ class SceneBrowserWindow:
         self._detail.bind("<<TreeviewSelect>>", lambda _e: self._on_detail())
         self._detail.bind("<Double-1>", self._on_detail_double)
 
+        # ---- preview: the scene as the machine draws it -----------------
+        prev = ttk.Frame(right)
+        prev.pack(fill=tk.X, pady=(6, 0))
+        self._preview = tk.Canvas(prev, width=384, height=217,
+                                  bg="#101014", highlightthickness=1)
+        self._preview.pack(side=tk.LEFT)
+        pside = ttk.Frame(prev)
+        pside.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
+        ttk.Label(pside, text="Scene preview", font=(self._sans, 9, "bold")
+                  ).pack(anchor=tk.W)
+        self._save_btn = ttk.Button(pside, text="Save preview…",
+                                    command=self._save_preview,
+                                    state="disabled")
+        self._save_btn.pack(anchor=tk.W, pady=(4, 0))
+        self._rebuild_btn = ttk.Button(pside, text="Rebuild previews…",
+                                       command=self._rebuild_previews)
+        self._rebuild_btn.pack(anchor=tk.W, pady=(4, 0))
+        self._rebuild_lbl = ttk.Label(pside, text="", font=(self._sans, 8),
+                                      foreground=th["gray"], wraplength=200,
+                                      justify=tk.LEFT)
+        self._rebuild_lbl.pack(anchor=tk.W, pady=(2, 0))
+        _Tooltip(
+            self._rebuild_btn,
+            "Re-read the scene layouts from the card image on the Extract "
+            "tab, so an improved preview reaches this project folder.\n\n"
+            "Takes a few seconds and rewrites only the layout file — your "
+            "images, glyph slices and font imports are left alone (a full "
+            "re-extract would overwrite them).",
+            lambda: getattr(self.app, "_current_theme", "light"))
+        # Full width under the canvas: the caption says what is and isn't in
+        # the frame, and it doesn't fit beside a 384px preview.
+        self._preview_lbl = ttk.Label(
+            right, text="", font=(self._sans, 8), foreground=th["gray"],
+            wraplength=610, justify=tk.LEFT)
+        self._preview_lbl.pack(anchor=tk.W, pady=(3, 0))
+        _Tooltip(self._preview,
+                 "Composited from THIS project folder — replace an image or "
+                 "import a font and the preview redraws with your version.\n\n"
+                 "It is a still frame: the scene's animation timeline isn't "
+                 "decoded, so anything that slides or fades in is shown where "
+                 "it comes to rest.",
+                 lambda: getattr(self.app, "_current_theme", "light"))
+
         bottom = ttk.Frame(right)
         bottom.pack(fill=tk.X, pady=(6, 0))
-        self._thumb = tk.Canvas(bottom, width=200, height=112,
+        self._thumb = tk.Canvas(bottom, width=160, height=90,
                                 bg="#101014", highlightthickness=1)
         self._thumb.pack(side=tk.LEFT)
         self._detail_lbl = ttk.Label(bottom, text="", font=(self._sans, 9),
-                                     foreground=th["gray"], wraplength=480,
+                                     foreground=th["gray"], wraplength=560,
                                      justify=tk.LEFT)
         self._detail_lbl.pack(side=tk.LEFT, fill=tk.X, padx=(8, 0))
 
@@ -238,7 +318,7 @@ class SceneBrowserWindow:
         brow.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(brow, text="Close", command=self._close).pack(side=tk.RIGHT)
 
-        center_over(self.app.root, win, 1040, 640)
+        center_over(self.app.root, win, 1100, 800)
         win.deiconify()
         win.lift()
 
@@ -255,6 +335,10 @@ class SceneBrowserWindow:
             self._scenes = collect_scenes(self.assets_dir)
         except Exception:
             self._scenes = {}
+        self._layouts = scene_render.load_layouts(self.assets_dir)
+        # Glyph slices may have changed since the last look (a font import),
+        # so drop the cache and re-read them on the next preview.
+        self._fonts = None
         if not self._scenes:
             self._hint.configure(
                 text="No scene manifests found in this project folder. Run "
@@ -276,7 +360,7 @@ class SceneBrowserWindow:
                 continue
             tree.insert("", tk.END, iid=d, text=sc["label"],
                         values=(len(sc["images"]), len(sc["fonts"]),
-                                len(sc["texts"])))
+                                len(sc["texts"]), len(sc["videos"])))
         kids = tree.get_children()
         want = preselect if preselect in (kids or ()) else (
             kids[0] if kids else None)
@@ -291,11 +375,14 @@ class SceneBrowserWindow:
         self._thumb.delete("all")
         self._detail_lbl.configure(text="")
         sel = self._tree.selection()
-        if not sel:
+        if not sel or self._scenes.get(sel[0]) is None:
+            self._preview_token += 1          # abandon any in-flight render
+            self._preview.delete("all")
+            self._preview_img = self._preview_full = None
+            self._preview_lbl.configure(text="")
+            self._save_btn.configure(state="disabled")
             return
-        sc = self._scenes.get(sel[0])
-        if sc is None:
-            return
+        sc = self._scenes[sel[0]]
         self._detail_lbl.configure(text=sel[0])
         n_img = det.insert("", tk.END, text="Images (%d)" % len(sc["images"]),
                            open=True)
@@ -310,11 +397,292 @@ class SceneBrowserWindow:
             det.insert(n_f, tk.END, iid="font::" + table,
                        text="%s (%dpx)" % (name or table, px),
                        values=("double-click: open in Fonts window",))
+        if not sc["fonts"] and sc["texts"]:
+            # Not a parser gap: these scenes draw each letter as its own
+            # sprite (Letter_On/Letter_Off states) and carry no font at all.
+            det.insert(n_f, tk.END,
+                       text="no font — this scene draws its letters as images",
+                       values=("see the Images list above",))
         n_t = det.insert("", tk.END, text="Text (%d)" % len(sc["texts"]),
                          open=len(sc["texts"]) <= 12)
         for i, s in enumerate(sc["texts"]):
             det.insert(n_t, tk.END, iid="txt::%d" % i, text=s,
                        values=("double-click: find on Replace Text",))
+        n_v = det.insert("", tk.END, text="Videos (%d)" % len(sc["videos"]),
+                         open=True)
+        for rel in sc["videos"]:
+            det.insert(n_v, tk.END, iid="vid::" + rel,
+                       text=os.path.basename(rel),
+                       values=("double-click: show on Video tab",))
+        self._render_preview(sel[0])
+
+    # -- preview ---------------------------------------------------------
+
+    def _render_preview(self, scene_dir):
+        """Composite the selected scene off the UI thread.
+
+        Rendering itself is quick, but the first one has to parse the glyph
+        manifest (100k+ rows on a big card), so it all goes to a worker and
+        the fonts are cached for the window's lifetime.  A *token* makes stale
+        results from fast clicking discard themselves."""
+        self._preview_img = None
+        self._frame_imgs = []
+        self._frames_full = []
+        self._preview.delete("all")
+        self._save_btn.configure(state="disabled")
+        self._preview_token += 1          # also stops any running animation
+        token = self._preview_token
+        card, layout = scene_render.layout_for_scene_dir(
+            self._layouts, scene_dir)
+        if layout is None:
+            self._preview_lbl.configure(
+                text="No preview for this scene."
+                     + ("" if self._layouts else
+                        " This project was extracted before previews existed"
+                        " — re-extract with Images enabled to get them."))
+            # An empty canvas is near-black and so is a rendered night scene:
+            # say which this is ON the canvas, or "no preview" reads as "this
+            # scene is black" (David).
+            self._canvas_message("no preview for this scene")
+            return
+        self._preview_lbl.configure(text="Drawing…")
+        self._canvas_message("drawing…")
+
+        def work():
+            try:
+                if self._fonts is None:
+                    from ..plugins.stern import fontrender as fr
+                    self._fonts = fr.load_fonts(self.assets_dir)
+                n = scene_render.frame_count(layout)
+                frames = [scene_render.render_layout(
+                    self.assets_dir, layout, fonts=self._fonts, frame=i)
+                    for i in range(min(n, _MAX_PREVIEW_FRAMES))]
+            except Exception:
+                frames = []
+            try:
+                self.app._tk_root().after(
+                    0, lambda: self._show_preview(token, frames, layout))
+            except (tk.TclError, RuntimeError):
+                # The window (or the whole app) closed while this render was
+                # in flight — there is nothing left to draw on, and raising
+                # here only surfaces as a stray worker-thread traceback.
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _canvas_message(self, text):
+        """Write a word on the preview canvas itself."""
+        try:
+            self._preview.delete("all")
+            self._preview.create_text(
+                int(self._preview.cget("width")) // 2,
+                int(self._preview.cget("height")) // 2,
+                text=text, fill="#6b6b76", font=(self._sans, 10))
+        except tk.TclError:
+            pass
+
+    def _show_preview(self, token, frames, layout):
+        """Main thread: put a finished render on the canvas (ignoring one that
+        a newer selection has already superseded).  Several frames = an
+        animation, which then plays."""
+        if token != self._preview_token:
+            return
+        try:
+            if not self.win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        frames = [f for f in frames or () if f is not None]
+        note = scene_render.describe(layout)
+        if not frames:
+            self._preview_lbl.configure(
+                text="This scene's layout is known but it could not be drawn "
+                     "(a missing image or font in this project folder).")
+            self._canvas_message("nothing could be drawn")
+            return
+        self._preview_full = frames[0]
+        self._frames_full = frames
+        cw = int(self._preview.cget("width"))
+        chh = int(self._preview.cget("height"))
+        try:
+            from PIL import Image, ImageTk
+            self._frame_imgs = []
+            for f in frames:
+                shown = f.copy()
+                shown.thumbnail((cw, chh), Image.LANCZOS)
+                self._frame_imgs.append(ImageTk.PhotoImage(shown))
+        except Exception:
+            self._preview_lbl.configure(text=note)
+            return
+        self._preview_img = self._frame_imgs[0]
+        self._preview.delete("all")
+        self._preview_item = self._preview.create_image(
+            cw // 2, chh // 2, image=self._preview_img)
+        self._preview_lbl.configure(text=note)
+        self._save_btn.configure(state="normal")
+        if len(self._frame_imgs) > 1:
+            self._play(token, 0, scene_render.frame_rate(layout))
+
+    def _play(self, token, i, fps):
+        """Step the animation.  Keyed on the render token so switching scenes
+        stops the old one dead rather than leaving two loops running."""
+        if token != self._preview_token or not self._frame_imgs:
+            return
+        try:
+            if not self.win.winfo_exists():
+                return
+            self._preview_img = self._frame_imgs[i % len(self._frame_imgs)]
+            self._preview.itemconfigure(self._preview_item,
+                                        image=self._preview_img)
+        except tk.TclError:
+            return
+        delay = max(30, int(1000.0 / max(1.0, fps)))
+        self._play_job = self.win.after(
+            delay, lambda: self._play(token, i + 1, fps))
+
+    def _save_preview(self):
+        """Write the full-size render out — the canvas is a thumbnail of a
+        1360x768 frame, and it deserves a proper look.  An animated scene
+        offers a GIF so the motion survives the export."""
+        img = getattr(self, "_preview_full", None)
+        if img is None:
+            return
+        frames = [f for f in (self._frames_full or ()) if f is not None]
+        animated = len(frames) > 1
+        sel = self._tree.selection()
+        base = (self._scenes.get(sel[0], {}).get("label") if sel else "") or "scene"
+        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in base)
+        types = [("PNG image", "*.png")]
+        if animated:
+            types.insert(0, ("Animated GIF", "*.gif"))
+        path = filedialog.asksaveasfilename(
+            parent=self.win, title="Save scene preview",
+            defaultextension=".gif" if animated else ".png",
+            initialfile="%s.%s" % (safe, "gif" if animated else "png"),
+            filetypes=types)
+        if not path:
+            return
+        try:
+            if animated and path.lower().endswith(".gif"):
+                fps = scene_render.frame_rate(self._current_layout())
+                frames[0].save(
+                    path, save_all=True, append_images=frames[1:], loop=0,
+                    duration=max(30, int(1000.0 / max(1.0, fps))))
+            else:
+                img.save(path)
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Save failed", str(e), parent=self.win)
+            return
+        self._preview_lbl.configure(text="Saved %s" % os.path.basename(path))
+
+    # -- rebuild previews -------------------------------------------------
+
+    def card_image_path(self):
+        """The card image the previews would be rebuilt from — the Extract
+        tab's Input, which is where this project folder came from."""
+        var = getattr(self.app, "extract_input_var", None)
+        try:
+            return (var.get() or "").strip() if var is not None else ""
+        except tk.TclError:
+            return ""
+
+    def _rebuild_previews(self):
+        """Re-read the card's scene graphs and rewrite scene_layout.json.
+
+        An improved parser otherwise only reaches an existing project folder
+        through a full re-extract, which takes minutes AND overwrites every
+        atlas PNG and glyph slice — throwing away an imported font.  Parsing
+        the node graphs alone takes a few seconds and writes exactly one
+        file."""
+        if self._rebuild is not None:            # running: the button cancels
+            self._rebuild["cancel"] = True
+            self._rebuild_btn.configure(state="disabled")
+            self._rebuild_lbl.configure(text="Stopping…")
+            return
+        card = self.card_image_path()
+        if not card or not os.path.isfile(card):
+            messagebox.showinfo(
+                "Rebuild previews",
+                "Set the Extract tab's Input to the card image this project "
+                "folder was extracted from — the scene layouts are read back "
+                "off the card.", parent=self.win)
+            return
+        state = self._rebuild = {"cancel": False}
+        self._rebuild_btn.configure(text="Cancel")
+        self._rebuild_lbl.configure(text="Reading the card…")
+
+        def work():
+            from ..plugins.stern import engine
+            msgs = []
+            try:
+                n = engine.rebuild_scene_layouts_from_card(
+                    card, self.assets_dir,
+                    log=lambda m, lvl="info": msgs.append((m, lvl)),
+                    progress=lambda c, t, d="": self._rebuild_progress(
+                        state, c, t),
+                    cancel=lambda: state["cancel"])
+                err = None
+            except Exception as e:                # unreadable card, no perms…
+                n, err = 0, e
+            try:
+                self.app._tk_root().after(
+                    0, lambda: self._rebuild_done(state, n, err, msgs))
+            except (tk.TclError, RuntimeError):
+                pass                     # window closed mid-rebuild
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _rebuild_progress(self, state, cur, total):
+        """Worker thread: show how far along we are, ~every 10 scenes (301 on
+        a TMNT card, and a label update per scene is all jitter)."""
+        if state is not self._rebuild or (cur % 10 and cur + 1 != total):
+            return
+        try:
+            self.app._tk_root().after(
+                0, lambda: self._rebuild_tick(state, cur + 1, total))
+        except (tk.TclError, RuntimeError):
+            pass                         # window closed mid-rebuild
+
+    def _rebuild_tick(self, state, cur, total):
+        if state is not self._rebuild:
+            return
+        try:
+            self._rebuild_lbl.configure(text="Scene %d of %d…" % (cur, total))
+        except tk.TclError:
+            pass
+
+    def _rebuild_done(self, state, n, err, msgs):
+        """Main thread: report, then reload so the new layouts are on screen."""
+        if state is not self._rebuild:
+            return
+        self._rebuild = None
+        try:
+            self._rebuild_btn.configure(text="Rebuild previews…",
+                                        state="normal")
+        except tk.TclError:
+            return
+        if state["cancel"]:
+            self._rebuild_lbl.configure(text="Stopped — layouts unchanged.")
+            return
+        if err is not None or not n:
+            # The engine's own warning says WHY (no image manifest, no
+            # drawable scene); an unexpected exception has no such line.
+            why = next((m for m, lvl in msgs if lvl == "warning"), None)
+            self._rebuild_lbl.configure(text="Could not rebuild.")
+            messagebox.showwarning(
+                "Rebuild previews", why or str(err)
+                or "No scene layouts could be read from that card image.",
+                parent=self.win)
+            return
+        self._rebuild_lbl.configure(text="Rebuilt %d scene layout(s)." % n)
+        sel = self._tree.selection()
+        self.reload(sel[0] if sel else None)
+
+    def _current_layout(self):
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        return scene_render.layout_for_scene_dir(self._layouts, sel[0])[1]
 
     def _on_detail(self):
         self._thumb.delete("all")
@@ -326,9 +694,9 @@ class SceneBrowserWindow:
         try:
             from PIL import Image, ImageTk
             img = Image.open(path)
-            img.thumbnail((200, 112))
+            img.thumbnail((160, 90))
             self._photo = ImageTk.PhotoImage(img)
-            self._thumb.create_image(100, 56, image=self._photo)
+            self._thumb.create_image(80, 45, image=self._photo)
         except Exception:
             pass
 
@@ -347,6 +715,8 @@ class SceneBrowserWindow:
             elif iid.startswith("txt::"):
                 text = self._detail.item(iid, "text")
                 self.app.reveal_text_string(text)
+            elif iid.startswith("vid::"):
+                self.app.reveal_video_slot(iid[5:])
         except Exception:
             pass
 

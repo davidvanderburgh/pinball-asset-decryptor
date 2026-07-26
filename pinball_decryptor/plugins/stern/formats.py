@@ -14,6 +14,8 @@ pipeline does; ``detect`` stays lightweight so the picker is responsive.
 import os
 import struct
 
+from ...core.longpath import ext as _lp
+
 from .games import GAME_DB
 
 _MBR_SIG = b"\x55\xaa"
@@ -79,7 +81,7 @@ def parse_mbr_partitions(path):
     Reads only the first 512 bytes; never touches the filesystem.
     """
     try:
-        with open(path, "rb") as f:
+        with open(_lp(path), "rb") as f:
             mbr = f.read(512)
     except OSError:
         return []

@@ -328,6 +328,40 @@ def test_scenes_for_font(tmp_path):
         "/g/scene1/scene.radium", "/g/scene9/scene.radium"]
 
 
+# ---- font scope (which scenes an edit lands in) ------------------------------
+
+def test_font_scope_round_trip_and_clear(tmp_path):
+    """A font with no scope applies everywhere; scoping writes one row per
+    atlas page x scene and reads back; clearing removes the file."""
+    _make_extract(tmp_path)
+    fo = _font(tmp_path)
+    assert fr.get_font_scope(str(tmp_path), fo) is None      # default = all
+    fr.set_font_scope(str(tmp_path), fo, ["/g/scene9/scene.radium"])
+    assert fr.get_font_scope(str(tmp_path), fo) == [
+        "/g/scene9/scene.radium"]
+    # The font spans two atlas pages, so both are narrowed together.
+    scopes = fr.load_scopes(str(tmp_path))
+    assert set(scopes) == set(fo["atlas_rels"])
+    assert all(v == {"/g/scene9/scene.radium"} for v in scopes.values())
+    fr.set_font_scope(str(tmp_path), fo, None)
+    assert fr.get_font_scope(str(tmp_path), fo) is None
+    assert not os.path.exists(os.path.join(str(tmp_path), fr.SCOPE_MANIFEST))
+
+
+def test_font_scope_leaves_other_fonts_alone(tmp_path):
+    """Narrowing one font rewrites the file without disturbing another's
+    rows (they share one scope file)."""
+    _make_extract(tmp_path)
+    a, b = _font(tmp_path, "tbl"), _font(tmp_path, "tbl2")
+    fr.set_font_scope(str(tmp_path), a, ["/g/scene1/scene.radium"])
+    fr.set_font_scope(str(tmp_path), b, ["/g/scene2/scene.radium"])
+    assert fr.get_font_scope(str(tmp_path), a) == ["/g/scene1/scene.radium"]
+    assert fr.get_font_scope(str(tmp_path), b) == ["/g/scene2/scene.radium"]
+    fr.set_font_scope(str(tmp_path), a, None)
+    assert fr.get_font_scope(str(tmp_path), a) is None
+    assert fr.get_font_scope(str(tmp_path), b) == ["/g/scene2/scene.radium"]
+
+
 # ---- font_color --------------------------------------------------------------
 
 def test_font_color_ignores_bc1_black_background(tmp_path):
@@ -361,3 +395,210 @@ def test_collect_scenes_groups_manifests(tmp_path):
     assert s2["texts"] == ["WORLD"]
     # scene9 shares atlas page 1 -> same font, same first image
     assert scenes["/g/scene9"]["fonts"] == {"tbl": ("TestFont", 6)}
+
+
+# ---- outline companions ------------------------------------------------------
+#
+# A Stern title draws an outline instance with a fill instance on top, from two
+# DIFFERENT fonts.  Restyling only the fill leaves the original typeface's black
+# silhouette around the new letters — Peter reported that three times over
+# ("strange inconsistent black border", "everything else from white as black",
+# "i do still see font glyphs on some places") without being able to find it,
+# because the companion is listed here as an unrelated font.
+
+def _outline_row(rel, atlas, char, w, h, name, lw, lh, by, table):
+    return (rel, atlas, char, "0", "0", str(w), str(h), name, "0",
+            str(lw), str(lh), "0", str(by), str(lw + 1), table)
+
+
+def _make_outline_extract(tmp_path):
+    """A body font plus three would-be outline companions: one real, one whose
+    letters are a different size, and one drawn in no shared scene."""
+    tex = tmp_path / "images" / "scene_textures"
+    # Sized like a real title font (px = lh): small enough to build fast, big
+    # enough that MIN_RESTYLE_PX is not also in play here.
+    specs = [
+        # table,     atlas id, name,               lw, lh, by, scene
+        ("body",  "0001", "TestFont",         20, 34, 34, "/g/scene1"),
+        ("ok",    "0002", "TestFont_Outline", 20, 34, 34, "/g/scene1"),
+        ("wrong", "0003", "TestFont_OUTLINE4", 45, 70, 70, "/g/scene1"),
+        ("far",   "0004", "TestFont_Outline", 20, 34, 34, "/g/scene7"),
+        # the SAME typeface at a second size — on TMNT there are 94 of these
+        ("body2", "0005", "TestFont",         30, 50, 50, "/g/scene1"),
+    ]
+    img_rows, g_rows = [], []
+    for table, aid, name, lw, lh, by, scene in specs:
+        stem = "radimg_T_8x8_0000%s" % aid
+        arel = "scene_textures/%s.png" % stem
+        _png(str(tex / ("%s.png" % stem)), np.zeros((32, 32, 4), np.uint8))
+        img_rows.append("%s\t%s/scene.radium\t100\t256\t32\t32\t5" % (arel, scene))
+        if table == "ok":
+            # the companion ALSO turns up in a scene its body font is not in —
+            # on TMNT that happens 440 times, and blanking is card-wide
+            img_rows.append("%s\t/g/scene5/scene.radium\t100\t256\t32\t32\t5"
+                            % arel)
+        for ch, hexc in (("A", "0x0041"), ("B", "0x0042")):
+            tile = np.zeros((lh, lw, 4), np.uint8)
+            tile[:] = (0, 0, 0, 255) if table != "body" else RED
+            rel = "scene_textures/glyphs/%s/U+00%s_%s.png" % (
+                stem, hexc[-2:], ch)
+            _png(str(tmp_path / "images" / rel.replace("/", os.sep)), tile)
+            g_rows.append(_outline_row(rel, arel, hexc, lw, lh, name,
+                                       lw, lh, by, table))
+    (tex / "radium_images.txt").write_text(
+        "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
+        + "\n".join(img_rows) + "\n", encoding="utf-8")
+    (tex / "glyph_images.txt").write_text(
+        "# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont\trot\tglyph_w"
+        "\tglyph_h\tbearing_x\tbearing_y\tadvance\ttable\n"
+        + "".join("\t".join(r) + "\n" for r in g_rows), encoding="utf-8")
+    return tmp_path
+
+
+def test_outline_base_reads_sterns_suffixes():
+    assert fr.outline_base("Stern_CCZoinks_OUTLINE4") == "Stern_CCZoinks"
+    assert fr.outline_base("Stern_Impact_Outline_8") == "Stern_Impact"
+    assert fr.outline_base("Blackmoor_Outline") == "Blackmoor"
+    assert fr.outline_base("Stern_Impact") == ""
+    assert fr.outline_base("") == ""
+
+
+def test_outline_companion_needs_a_shared_scene_and_matching_letters(tmp_path):
+    """The name alone is Stern's authoring convention — acting on it would
+    modify a font the user never picked.  A pair is only accepted when the two
+    fonts are drawn in the same scene AND their letters have the identical
+    logical box, which is what actually makes them the same letters."""
+    _make_outline_extract(tmp_path)
+    fonts = fr.load_fonts(str(tmp_path))
+    by_key = {f["key"]: f for f in fonts}
+    comp = fr.outline_companions(str(tmp_path), fonts)
+    assert set(comp) == {"body"}, "only the corroborated pair may match"
+    assert comp["body"]["key"] == "ok"
+    # the two rejects are still recognisably outline fonts, just unpaired
+    assert fr.outline_base(by_key["wrong"]["name"]) == "TestFont"
+    assert fr.outline_base(by_key["far"]["name"]) == "TestFont"
+
+
+def test_clear_font_blanks_by_atlas_format(tmp_path):
+    """Removing the companion is Peter's own fix ("removing the shadow font in
+    total").  A BC3 slot goes transparent; a BC1 slot has no usable alpha, so
+    it goes opaque BLACK — the machine ADDS BC1 art, and black adds nothing."""
+    _make_extract(tmp_path)
+    bc3, bc1 = _font(tmp_path, "tbl"), _font(tmp_path, "tbl2")
+    assert fr.clear_font(bc3) == len(bc3["glyphs"])
+    assert fr.clear_font(bc1) == len(bc1["glyphs"])
+    a = np.asarray(Image.open(bc3["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert a[..., 3].max() == 0                      # nothing drawn
+    c = np.asarray(Image.open(bc1["glyphs"][0x43]["abs"]).convert("RGBA"))
+    assert c[..., 3].min() == 255 and c[..., :3].max() == 0
+    # and it is undoable, which is what makes it safe to offer
+    assert fr.revert_slices(str(tmp_path), bc3) == len(bc3["glyphs"])
+    back = np.asarray(Image.open(bc3["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert back[..., 3].max() == 255
+
+
+def test_font_color_reads_black_ink_instead_of_falling_back_to_white(tmp_path):
+    """Outline companions are solid BLACK, which zeroes the luminance
+    weighting; answering "white" for one made "match original" produce a white
+    halo where the game wanted a dark one."""
+    _make_outline_extract(tmp_path)
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    assert fr.font_color(fonts["ok"]) == (0, 0, 0)
+    assert max(fr.font_color(fonts["body"])) > 200      # red body ink
+
+
+def test_glyph_io_goes_through_the_long_path_form(tmp_path, monkeypatch):
+    """Glyph slices are the deepest files in a project (120+ characters below
+    the folder), so every read and write of one has to be able to exceed
+    Windows' 260-character limit.  This asserts the WIRING — that the calls go
+    through ``longpath.ext`` — because a machine with LongPathsEnabled opens
+    them either way and would hide a regression."""
+    from PIL import Image as _Image
+    from pinball_decryptor.core import longpath
+
+    _make_extract(tmp_path)
+    fo = _font(tmp_path, "tbl")
+    seen = []
+    real_open = _Image.open
+    monkeypatch.setattr(_Image, "open",
+                        lambda p, *a, **k: (seen.append(p), real_open(p, *a, **k))[1])
+    fr.load_slice(fo["glyphs"][0x41])
+    assert seen and seen[0] == longpath.ext(fo["glyphs"][0x41]["abs"])
+
+    saved = []
+    monkeypatch.setattr(type(_Image.new("RGBA", (1, 1))), "save",
+                        lambda self, p, *a, **k: saved.append(p))
+    fr.save_slices(fo, {0x41: _Image.new("RGBA", (4, 6))})
+    assert saved == [longpath.ext(fo["glyphs"][0x41]["abs"])]
+
+
+@pytest.mark.skipif(_system_ttf() is None, reason="no system TTF found")
+def test_width_scale_leaves_side_bearings_without_losing_height(tmp_path):
+    """The card's own advances lay text out and an import must not change
+    them, so a letter that fills its slot sits hard against its neighbour
+    (Peter: "some of the letters are very near together").  Narrowing the INK
+    inside the same slot buys the gap; shrinking the font would buy it by
+    giving up height, which is what Size already does."""
+    _make_outline_extract(tmp_path)
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    fo = fonts["body2"]
+
+    def ink_box(slices, ch):
+        a = np.asarray(slices[ch].convert("RGBA"))
+        cols = np.nonzero(a[..., 3].max(axis=0) > 24)[0]
+        rows = np.nonzero(a[..., 3].max(axis=1) > 24)[0]
+        return (cols.max() - cols.min() + 1, rows.max() - rows.min() + 1)
+
+    full, size_full, _k = fr.rasterize_ttf(fo, _system_ttf(),
+                                           color=(255, 255, 255))
+    narrow, size_narrow, _k2 = fr.rasterize_ttf(fo, _system_ttf(),
+                                                color=(255, 255, 255),
+                                                width_scale=0.7)
+    assert size_narrow == size_full, "the fitted size must not move"
+    for ch in (0x41, 0x42):
+        assert narrow[ch].size == full[ch].size, "the atlas rect is fixed"
+        wf, hf = ink_box(full, ch)
+        wn, hn = ink_box(narrow, ch)
+        assert wn < wf, "ink should be narrower, leaving a side bearing"
+        assert hn >= hf - 1, "…and keep its height"
+
+
+def test_snapshot_and_restore_round_trips_including_missing_files(tmp_path):
+    """Undo has to put back what was THERE — a previous import, a hand edit,
+    or stock — which is why it snapshots bytes rather than re-cutting from the
+    atlas the way Revert does."""
+    _make_extract(tmp_path)
+    fo = _font(tmp_path, "tbl")
+    before = fr.snapshot_fonts([fo])
+    assert len(before) == len(fo["glyphs"])
+    assert fr.snapshot_bytes(before) > 0
+
+    # a file that does not exist is recorded as None, so restoring removes it
+    gone = fo["glyphs"][0x41]["abs"]
+    os.remove(gone)
+    mid = fr.snapshot_fonts([fo])
+    assert mid[gone] is None
+
+    assert fr.restore_snapshot(before) == len(before)
+    assert os.path.isfile(gone)
+    with open(gone, "rb") as f:
+        assert f.read() == before[gone]
+
+    assert fr.restore_snapshot(mid) >= 1
+    assert not os.path.isfile(gone), "restoring a None entry deletes the file"
+
+
+def test_outline_companion_appears_beyond_its_body_font(tmp_path):
+    """Blanking a companion is CARD-WIDE — one atlas serves every scene that
+    draws it.  On TMNT a paired outline font turns up in 446 scene
+    occurrences but overlaps its body font in only 6, so a plain blank strips
+    outlines off 440 screens the user never touched.  That is what Peter did
+    by hand: "i did remove to much shadow, now on the normal font some are
+    missing too"."""
+    _make_outline_extract(tmp_path)
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    body, comp = fonts["body"], fonts["ok"]
+    mine = set(fr.scenes_for_font(str(tmp_path), body))
+    theirs = set(fr.scenes_for_font(str(tmp_path), comp))
+    assert theirs - mine, "the companion must reach beyond its body font"
+    assert mine & theirs, "…and still overlap it somewhere"

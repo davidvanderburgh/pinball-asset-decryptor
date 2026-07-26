@@ -2884,6 +2884,424 @@ def test_jjp_dongle_extract_checkbox_and_phase_swap(app, manufacturers_by_key):
     assert win.extract_dongle_var.get() is False
 
 
+def test_scene_browser_preview_and_videos(app, tmp_path):
+    """The Scenes window lists a scene's videos and previews the scene itself.
+
+    The render runs on a worker thread, so the threaded hop is exercised by
+    calling the two halves directly — a sleep-until-drawn loop would put real
+    wall-clock into the suite for no extra coverage."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import json
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.plugins.stern import scene_render
+
+    _make_extract(tmp_path)
+    # a video belonging to scene1, named the way the extractor names them
+    vdir = tmp_path / "video"
+    vdir.mkdir()
+    (vdir / "Intro_Clip.mp4").write_bytes(b"\x00" * 32)
+    (vdir / "manifest.txt").write_text(
+        "# output\tcard path\tbytes\n"
+        "Intro_Clip.mp4\t/g/scene1/scene.assets/3.asset/0.asset\t32\n",
+        encoding="utf-8")
+    layout = {"/g/scene1/scene.radium": {
+        "stage": [320, 180, 60.0], "partial": False, "unplaced": 0,
+        "offstage": 0, "sprites": [], "texts": [
+            {"name": "Line1", "x": 0, "y": 100, "text": "A",
+             "rect": [0, 0, 320, 180], "rgba": [1, 1, 1, 1], "align": 1,
+             "font": "radimg_TestA_8x8_00000001"}]}}
+    with open(str(tmp_path / scene_render.SCENE_LAYOUT_MANIFEST), "w",
+              encoding="utf-8") as f:
+        json.dump(layout, f)
+
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_scene_browser()
+    sb = w._scene_browser
+    sb._tree.selection_set("/g/scene1")
+    sb._on_select()
+
+    # the video shows up in Contents, and its row jumps to the Video tab
+    rows = {}
+    for sect in sb._detail.get_children():
+        name = sb._detail.item(sect, "text").split(" (")[0]
+        rows[name] = list(sb._detail.get_children(sect))
+    assert [sb._detail.item(r, "text") for r in rows["Videos"]] == [
+        "Intro_Clip.mp4"]
+    assert rows["Videos"][0] == "vid::video/Intro_Clip.mp4"
+
+    # the scene has a layout, so a render was scheduled
+    assert sb._preview_lbl.cget("text") == "Drawing…"
+    # finishing it enables Save and captions what the frame does/doesn't show
+    img = Image.new("RGB", (320, 180), (0, 0, 0))
+    sb._show_preview(sb._preview_token, [img],
+                     layout["/g/scene1/scene.radium"])
+    assert str(sb._save_btn.cget("state")) == "normal"
+    assert "Animation isn't shown" in sb._preview_lbl.cget("text")
+    assert sb._preview_full is img
+
+    # a superseded render is discarded rather than painted over the new scene
+    sb._show_preview(sb._preview_token - 1, [Image.new("RGB", (8, 8))], {})
+    assert sb._preview_full is img
+
+    # an animated scene hands over several frames and starts playing them
+    frames = [Image.new("RGB", (320, 180), c)
+              for c in ((10, 0, 0), (0, 10, 0), (0, 0, 10))]
+    animated = dict(layout["/g/scene1/scene.radium"])
+    animated["sprites"] = [{"name": "a", "x": 0, "y": 0, "image": "x.png",
+                            "frames": ["a.png", "b.png", "c.png"]}]
+    sb._show_preview(sb._preview_token, frames, animated)
+    assert len(sb._frame_imgs) == 3
+    assert sb._play_job is not None            # the loop is running
+    assert "Animation: 3 frames" in sb._preview_lbl.cget("text")
+    # switching scenes invalidates the token, which stops the old loop
+    before = sb._preview_token
+    sb._render_preview("/g/scene2")
+    assert sb._preview_token != before
+    assert sb._frame_imgs == []
+
+    # a scene with no recorded layout says so instead of drawing a black frame
+    sb._tree.selection_set("/g/scene2")
+    sb._on_select()
+    assert sb._preview_lbl.cget("text").startswith("No preview")
+    assert str(sb._save_btn.cget("state")) == "disabled"
+
+    sb._close()
+    app.root.update()
+
+
+def test_scene_browser_rebuild_previews_action(app, tmp_path, monkeypatch):
+    """"Rebuild previews…" re-reads the layouts off the card without a full
+    re-extract (which would overwrite the atlas PNGs and glyph slices, wiping
+    a font import).  The threaded read is covered in the engine tests; what
+    matters here is that it takes the card from the Extract tab, refuses
+    politely without one, and can be cancelled."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+
+    _make_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_scene_browser()
+    sb = w._scene_browser
+
+    said = []
+    monkeypatch.setattr(sb_mod.messagebox, "showinfo",
+                        lambda *a, **k: said.append(a))
+
+    # no card image on the Extract tab -> a nudge, and nothing starts
+    w.extract_input_var.set("")
+    sb._rebuild_previews()
+    assert len(said) == 1 and sb._rebuild is None
+
+    # a path that isn't a file is the same case (a stale saved setting)
+    w.extract_input_var.set(str(tmp_path / "not_a_card.raw"))
+    sb._rebuild_previews()
+    assert len(said) == 2 and sb._rebuild is None
+
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\x00" * 16)
+    w.extract_input_var.set(str(card))
+    assert sb.card_image_path() == str(card)
+
+    # while one runs the button cancels it, and a cancelled run leaves the
+    # layouts alone rather than reporting a rebuild
+    state = sb._rebuild = {"cancel": False}
+    sb._rebuild_btn.configure(text="Cancel")
+    sb._rebuild_previews()
+    assert state["cancel"] is True
+    sb._rebuild_done(state, 0, None, [])
+    assert "Stopped" in sb._rebuild_lbl.cget("text")
+    assert str(sb._rebuild_btn.cget("text")) == "Rebuild previews…"
+
+    # a finished run reports the count and reloads the window
+    reloaded = []
+    monkeypatch.setattr(type(sb), "reload",
+                        lambda self, preselect=None: reloaded.append(preselect))
+    state = sb._rebuild = {"cancel": False}
+    sb._rebuild_tick(state, 40, 297)
+    assert "40 of 297" in sb._rebuild_lbl.cget("text")
+    sb._rebuild_done(state, 297, None, [])
+    assert "297" in sb._rebuild_lbl.cget("text")
+    assert len(reloaded) == 1
+
+    # a stale worker's result (its state superseded) is ignored outright
+    sb._rebuild_done({"cancel": False}, 5, None, [])
+    assert len(reloaded) == 1
+
+    sb._close()
+    app.root.update()
+
+
+def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
+    """The Fonts window names the outline font drawn behind a typeface, and
+    can remove it with the import.
+
+    Peter restyled a whole game and kept getting "a strange inconsistent black
+    border" he blamed on his own stroke colour: it was the ORIGINAL typeface's
+    outline companion, a separate font he had no reason to open.  The window
+    now says so on the font that has one, and Apply can blank it."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+
+    # the body font is told what sits behind it, and offered the removal
+    fs._tree.selection_set("body")
+    fs._on_select()
+    assert fs._companion(fs._current_font())["key"] == "ok"
+    assert "in black behind" in fs._comp_lbl.cget("text")
+    assert fs._comp_ctrl.winfo_manager() != ""
+    assert "+outline" in fs._tree.item("body", "values")[0]
+
+    # the companion itself explains what it IS, with no action offered
+    fs._tree.selection_set("ok")
+    fs._on_select()
+    assert "This IS an outline font" in fs._comp_lbl.cget("text")
+    assert fs._comp_ctrl.winfo_manager() == ""
+
+    # a font with neither says nothing at all
+    fs._tree.selection_set("wrong")
+    fs._on_select()
+    assert fs._comp_row.winfo_manager() == "" or fs._comp_lbl.cget("text")
+
+    # Apply with "remove it" blanks the companion's slices…
+    fs._tree.selection_set("body")
+    fs._on_select()
+    fo = fs._current_font()
+    fs._pending[fo["key"]] = ({0x41: Image.new("RGBA", (4, 6), (9, 9, 9, 255))},
+                              6, [], "x.ttf")
+    fs._comp_var.set(fs_mod._COMP_CLEAR)
+    fs._apply()
+    comp = fs._companions["body"]
+    a = np.asarray(Image.open(comp["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert a[..., 3].max() == 0, "the old outline should draw nothing now"
+    assert "was blanked" in fs._status.cget("text")
+
+    # …and ONLY in the scenes this font is in.  Blanking is card-wide by
+    # default (one atlas serves every scene that draws it), so an unscoped
+    # removal strips the outline off screens the user never touched — on TMNT
+    # 446 scene occurrences against 6 that overlap the body font.  Peter did
+    # exactly that by hand: "i did remove to much shadow, now on the normal
+    # font some are missing too".
+    scoped = fr.get_font_scope(str(tmp_path), comp)
+    assert scoped == ["/g/scene1/scene.radium"], scoped
+    assert "/g/scene5/scene.radium" not in (scoped or []), \
+        "the scene without the body font must keep its outline"
+
+    # …and Revert puts it back, so the removal is never a one-way door
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._revert()
+    back = np.asarray(Image.open(comp["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert back.shape[:2] == a.shape[:2]
+
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
+                                                         monkeypatch):
+    """One typeface is baked at many sizes and each is its own font here —
+    TMNT lists Stern_CCZoinks 94 times.  Peter "replaced the font wherever i
+    found it" and still saw stock letters, because nobody does 94 imports by
+    hand.  Apply fits the same font file into every size."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract, _system_ttf
+    if _system_ttf() is None:
+        pytest.skip("no system TTF found")
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("body")
+    fs._on_select()
+
+    # the tick names the real count and is hidden for a one-off typeface
+    assert fs._same_typeface(fs._current_font())[0]["key"] == "body2"
+    assert "other 1 size" in fs._all_sizes_cb.cget("text")
+    assert fs._all_sizes_cb.winfo_manager() != ""
+
+    sib = fs._by_key["body2"]
+    before = open(sib["glyphs"][0x41]["abs"], "rb").read()
+    fs._ttf_paths["body"] = _system_ttf()
+    fs._rasterize()
+    assert fs._all_sizes_var.get() is True
+    fs._apply()
+    after = open(sib["glyphs"][0x41]["abs"], "rb").read()
+    assert after != before, "the other size should have been restyled too"
+    assert "1 more size" in fs._status.cget("text")
+
+    # Revert all puts the whole project back, which is how you start over
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._revert_all()
+    assert "restored to stock" in fs._status.cget("text")
+    a = np.asarray(Image.open(sib["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert a.shape[:2] == (sib["glyphs"][0x41]["h"], sib["glyphs"][0x41]["w"])
+
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_undo_steps_back_rather_than_to_stock(app, tmp_path,
+                                                          monkeypatch):
+    """Undo is not Revert.  Revert goes all the way back to the stock letters;
+    Undo goes back ONE step, to whatever was there before — the import you had
+    before this one, or the whole project before "Revert all fonts"."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._all_sizes_var.set(False)
+    fs._tree.selection_set("body")
+    fs._on_select()
+    fo = fs._current_font()
+    slot = fo["glyphs"][0x41]
+    stock = open(slot["abs"], "rb").read()
+    assert str(fs._undo_btn.cget("state")) == "disabled"
+
+    def apply_colour(rgb):
+        fs._pending[fo["key"]] = (
+            {0x41: Image.new("RGBA", (slot["w"], slot["h"]), rgb)},
+            34, [], "x.ttf")
+        fs._apply()
+        return open(slot["abs"], "rb").read()
+
+    first = apply_colour((10, 200, 10, 255))
+    assert first != stock
+    assert str(fs._undo_btn.cget("state")) == "normal"
+    assert "import" in fs._undo_btn.cget("text")
+    second = apply_colour((200, 10, 10, 255))
+    assert second != first
+
+    fs._undo_last()
+    assert open(slot["abs"], "rb").read() == first, "back one step, not to stock"
+    assert "Undid" in fs._status.cget("text")
+    fs._undo_last()
+    assert open(slot["abs"], "rb").read() == stock
+    assert str(fs._undo_btn.cget("state")) == "disabled"
+
+    # and the destructive action is recoverable too
+    third = apply_colour((10, 10, 200, 255))
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._revert_all()
+    assert open(slot["abs"], "rb").read() != third
+    fs._undo_last()
+    assert open(slot["abs"], "rb").read() == third, \
+        "Revert all fonts must be undoable"
+
+    # switching project folders drops the history: those are absolute paths in
+    # the OLD project, and undoing would write files back into it
+    apply_colour((0, 0, 0, 255))
+    assert fs._undo
+    fs.assets_dir = str(tmp_path / "elsewhere")
+    fs.reload()
+    assert fs._undo == []
+    assert str(fs._undo_btn.cget("state")) == "disabled"
+
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_will_not_lose_an_unapplied_import(app, tmp_path,
+                                                       monkeypatch):
+    """Peter: "on some i have forgotten to press the apply font :(".  A fitted
+    import that was never applied is invisible once the window closes, and he
+    found out on the machine."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("body")
+    fs._on_select()
+    fs._pending["body"] = ({0x41: Image.new("RGBA", (20, 34))}, 34, [], "x.ttf")
+    fs._refresh_font_list("body")
+    assert "NOT APPLIED" in fs._tree.item("body", "values")[0]
+
+    # closing asks first, and "no" keeps the window open
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: False)
+    fs._close()
+    assert fs.win.winfo_exists()
+
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_warns_before_restyling_a_tiny_font(app, tmp_path,
+                                                        monkeypatch):
+    """Peter: "smaller fonts do look more and more strange the smaller they
+    get… i guess they should be skipped".  The list marks them and Apply asks
+    once — it does not refuse, because his call is the one that counts."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+    fo = fs._current_font()
+    assert fo["px"] < fr.MIN_RESTYLE_PX
+    assert "tiny" in fs._tree.item("tbl", "values")[0]
+
+    asked = []
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno",
+                        lambda *a, **k: (asked.append(a), False)[1])
+    fs._pending[fo["key"]] = ({0x41: Image.new("RGBA", (4, 6))}, 6, [], "x.ttf")
+    fs._apply()
+    assert asked and "pixels tall" in asked[0][1]
+    assert fo["key"] in fs._pending, "declining must not write anything"
+
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._apply()
+    assert fo["key"] not in fs._pending
+
+    fs._close()
+    app.root.update()
+
+
 def test_font_studio_scene_scope_control(app, tmp_path):
     """The Fonts window can limit a font edit to chosen scenes: picking scenes
     persists a scope the Build reads, and switching back to "all" clears it."""
@@ -2976,7 +3394,8 @@ def test_font_studio_and_scene_browser_smoke(app, tmp_path):
     sb._tree.selection_set("/g/scene1")
     sb._on_select()
     det = sb._detail.get_children()
-    assert len(det) == 3                         # Images / Fonts / Text
+    sections = [sb._detail.item(d, "text").split(" (")[0] for d in det]
+    assert sections == ["Images", "Fonts", "Text", "Videos"]
     # double-clicking a text row lands on the Replace Text tab's search
     sb._detail.selection_set(
         sb._detail.get_children(det[2])[0])

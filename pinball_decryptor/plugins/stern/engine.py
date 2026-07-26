@@ -28,6 +28,12 @@ import struct
 import tempfile
 import wave
 
+# Glyph slices sit 120+ characters below the project folder and the build
+# output goes wherever the user pointed it, so both routinely pass Windows'
+# 260-character limit — with an error that reads as "file not found" (Peter's
+# build failed until he shortened the path).  _lp() opts each call out of it.
+from ...core.longpath import ext as _lp
+
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
 AVAILABLE = True
@@ -66,10 +72,10 @@ _MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 # --------------------------------------------------------------------------
 def _fingerprint(game_real_path, image_path):
     h = hashlib.sha256()
-    with open(game_real_path, "rb") as f:
+    with open(_lp(game_real_path), "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    with open(image_path, "rb") as f:
+    with open(_lp(image_path), "rb") as f:
         h.update(f.read(0x20000))   # header + master-directory source region
     return h.hexdigest()
 
@@ -556,7 +562,8 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
         used[base] = k + 1
         name = base if k == 0 else "%s_%d" % (base, k + 1)
         out_rel = "scene_textures/%s.png" % name
-        im.save(os.path.join(output_dir, "images", *out_rel.split("/")))
+        im.save(_lp(os.path.join(output_dir, "images",
+                                 *out_rel.split("/"))))
         manifest.append("%s\t%s\t%d\t%d\t%d\t%d"
                         % (out_rel, path, size, w, h, fmt))
         n_ok += 1
@@ -583,6 +590,14 @@ _RADIUM_IMAGE_MANIFEST = "radium_images.txt"
 # to its atlas PNG + pixel rectangle (see radium.parse_glyph_tables).
 _GLYPH_MANIFEST = "glyph_images.txt"
 _GLYPH_DIR = "glyphs"
+# Optional opt-out from the all-occurrences rule: rows of "atlas_rel <TAB>
+# radium card path" naming the ONLY scenes an atlas's edits may land in (the
+# Fonts window writes it; see fontrender.SCOPE_MANIFEST).  Absent = every
+# occurrence, which stays the default.
+_GLYPH_SCOPE_MANIFEST = "glyph_scope.txt"
+# Static scene layouts (positions/strings/colors per scene.radium) recorded at
+# extract so the Scenes window can composite a preview from the CURRENT PNGs.
+_SCENE_LAYOUT_MANIFEST = "scene_layout.json"
 
 
 def _glyph_png_name(char):
@@ -675,6 +690,65 @@ def parse_radium_images(data):
     return out
 
 
+def _scene_layout_entry(lay, off2rel):
+    """One ``scene_layout.json`` entry from a parsed layout, or ``None`` when
+    nothing drawable survives the translation.
+
+    The parser works in raw image OFFSETS inside the radium; the manifest has
+    to name the project folder's PNGs instead, so the preview composites from
+    the user's current (possibly replaced) files.  *off2rel* maps this
+    radium's image offsets to those rels.  Shared by :func:`extract_radium_images`
+    and :func:`rebuild_scene_layouts`, which re-derives layouts on their own —
+    a parser change must never mean two translations to keep in step."""
+    entry = {"stage": list(lay["stage"]), "partial": lay["partial"],
+             "unplaced": lay["unplaced"], "offstage": lay["offstage"],
+             "alternates": lay["alternates"],
+             # which corner the coordinates were measured from; kept so
+             # a preview can admit when it had to reinterpret them
+             "origin": lay["origin"], "scroll": lay.get("scroll", ""),
+             "texts": [], "sprites": []}
+    for t in lay["texts"]:
+        arel = off2rel.get(t["font_atlas_off"])
+        entry["texts"].append({
+            "name": t["name"], "x": t["x"], "y": t["y"],
+            "text": t["text"], "rect": t["rect"], "rgba": t["rgba"],
+            "align": t["align"],
+            # fontrender's whole-font key = the first atlas's stem
+            "font": (os.path.splitext(os.path.basename(arel))[0]
+                     if arel else ""),
+        })
+    for s in lay["sprites"]:
+        irel = off2rel.get(s["image_off"])
+        if not irel:
+            continue
+        sp = {"name": s["name"], "x": s["x"], "y": s["y"], "image": irel}
+        # An animated element carries its frames in play order, so the
+        # preview can run them instead of stacking them.
+        frames = [off2rel.get(o) for o in s.get("frames") or ()]
+        frames = [fr for fr in frames if fr]
+        if len(frames) > 1:
+            sp["frames"] = frames
+        entry["sprites"].append(sp)
+    if not entry["texts"] and not entry["sprites"]:
+        return None
+    return entry
+
+
+def _write_scene_layouts(tex_dir, layouts, log):
+    """Write ``scene_layout.json``.  Returns True on success."""
+    import json
+    try:
+        with open(os.path.join(tex_dir, _SCENE_LAYOUT_MANIFEST), "w",
+                  encoding="utf-8") as f:
+            json.dump(layouts, f, indent=1, sort_keys=True)
+    except OSError as e:
+        log("Could not write the scene layouts (%s)." % e, "warning")
+        return False
+    log("Recorded the layout of %d drawable scene(s) for previews."
+        % len(layouts), "info")
+    return True
+
+
 def extract_radium_images(reader, output_dir, log=None, progress=None,
                           cancel=None):
     """Decode every inline DXT5 image from the card's ``scene.radium`` files to
@@ -698,6 +772,7 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     cancel = cancel or (lambda: False)
     from . import dds as _dds
     from . import radium as _radium
+    from . import scene_layout as _scene_layout
     from ...core.checksums import md5_file  # noqa: F401  (kept for parity)
     import hashlib
     try:
@@ -719,6 +794,7 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     os.makedirs(tex_dir, exist_ok=True)
     manifest = []                 # one row per occurrence
     by_hash = {}                  # content hash -> output rel path (PNG written once)
+    layouts = {}                  # radium card path -> static layout
     glyph_manifest = []           # one row per unique glyph slice
     sliced_atlases = set()        # atlas out_rel already sliced (content-deduped)
     n_unique = n_occ = n_glyphs = 0
@@ -759,7 +835,8 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 bits.append("%dx%d" % (im["tex_w"], im["tex_h"]))
                 bits.append(h[:8])
                 out_rel = "scene_textures/%s.png" % "_".join(bits)
-                pic.save(os.path.join(output_dir, "images", *out_rel.split("/")))
+                pic.save(_lp(os.path.join(output_dir, "images",
+                                          *out_rel.split("/"))))
                 by_hash[h] = out_rel
                 n_unique += 1
             off2rel[im["data_off"]] = out_rel
@@ -772,7 +849,8 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
         # (the atlas is introduced inline by its first glyph), and identical
         # atlas content ⇒ identical font ⇒ identical rects, so slicing is
         # deduped per atlas PNG just like the atlases themselves.
-        for table in (_radium.parse_glyph_tables(data, imgs) if imgs else ()):
+        tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
+        for table in tables:
             if cancel():
                 break
             # One glyph table can span SEVERAL atlas pages (TMNT's Vera Mono
@@ -813,8 +891,9 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 g_rel = "scene_textures/%s/%s/%s" % (
                     _GLYPH_DIR, stem, _glyph_png_name(g["char"]))
                 g_abs = os.path.join(output_dir, "images", *g_rel.split("/"))
-                os.makedirs(os.path.dirname(g_abs), exist_ok=True)
-                Image.fromarray(rgba[y:y + hh, x:x + w], "RGBA").save(g_abs)
+                os.makedirs(_lp(os.path.dirname(g_abs)), exist_ok=True)
+                Image.fromarray(rgba[y:y + hh, x:x + w],
+                                "RGBA").save(_lp(g_abs))
                 # Trailing metrics columns (rot + the record's layout floats
                 # -- see radium.py's format comment) feed the Font Preview /
                 # Import renderer; older readers only parse the first 8.
@@ -835,6 +914,17 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 off2rel[g["atlas"]["data_off"]] for g in table["glyphs"]
                 if g["atlas"] is not None
                 and g["atlas"]["data_off"] in off2rel)
+        # ---- static scene layout (feeds the Scenes window's Preview) -------
+        # Record WHERE things are drawn, not a rendered picture: the GUI then
+        # composites from the user's current PNGs / glyph slices, so a preview
+        # shows their own replacements and font imports rather than stock art.
+        lay = _scene_layout.parse_scene_layout(data, imgs, tables)
+        if lay is not None:
+            entry = _scene_layout_entry(lay, off2rel)
+            if entry is not None:
+                layouts[path] = entry
+    if layouts:
+        _write_scene_layouts(tex_dir, layouts, log)
     if not manifest:
         return 0
     try:
@@ -861,6 +951,133 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
             % (n_glyphs, len(sliced_atlases), os.path.join(tex_dir, _GLYPH_DIR)),
             "success")
     return n_unique
+
+
+# --------------------------------------------------------------------------
+# Scene previews alone: re-read the card's node graphs and rewrite ONLY
+# scene_layout.json.  A full re-extract takes many minutes and, worse,
+# OVERWRITES every atlas PNG and glyph slice — which would silently throw away
+# an imported font — where re-parsing the layouts is ~12 s and touches one
+# file.  So a better parser reaches an existing project folder without costing
+# the user their work.
+# --------------------------------------------------------------------------
+def _radium_image_rels(output_dir):
+    """``{radium card path: {data offset: atlas PNG rel}}`` from the extract's
+    ``radium_images.txt``.
+
+    This is exactly the ``off2rel`` map :func:`extract_radium_images` builds as
+    it decodes, recovered from the manifest instead — which is what lets a
+    layout rebuild skip decoding (and therefore rewriting) any image at all."""
+    out = {}
+    path = os.path.join(output_dir, *_TEXTURE_DIR, _RADIUM_IMAGE_MANIFEST)
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                cols = line.rstrip("\r\n").split("\t")
+                if len(cols) < 3:
+                    continue
+                try:
+                    off = int(cols[2])
+                except ValueError:
+                    continue
+                out.setdefault(cols[1], {})[off] = cols[0]
+    except OSError:
+        return {}
+    return out
+
+
+def rebuild_scene_layouts(reader, output_dir, log=None, progress=None,
+                          cancel=None):
+    """Re-parse every ``scene.radium`` on the card and rewrite
+    ``images/scene_textures/scene_layout.json`` — and nothing else.
+
+    Returns the number of drawable scenes recorded, or 0 when the project
+    folder has no radium-image manifest to resolve the layouts against (i.e.
+    it was never extracted with Images enabled)."""
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    from . import radium as _radium
+    from . import scene_layout as _scene_layout
+    rels = _radium_image_rels(output_dir)
+    if not rels:
+        log("This project folder has no %s, so there is nothing to rebuild "
+            "the previews from — run Extract with Images enabled first."
+            % _RADIUM_IMAGE_MANIFEST, "warning")
+        return 0
+    radiums = []
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if cancel():
+            return 0
+        if path.endswith(_RADIUM_EXT) and node["size"] >= 32:
+            radiums.append((path, node))
+    layouts = {}
+    matched = 0
+    for ri, (path, node) in enumerate(radiums):
+        if cancel():
+            return 0
+        if progress:
+            progress(ri, len(radiums),
+                     "Scene %d/%d" % (ri + 1, len(radiums)))
+        off2rel = rels.get(path)
+        if not off2rel:
+            continue              # no images extracted from it -> not drawable
+        matched += 1
+        try:
+            data = reader.read_file_bytes(node)
+        except Exception:
+            continue
+        imgs = parse_radium_images(data)
+        tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
+        lay = _scene_layout.parse_scene_layout(data, imgs, tables)
+        if lay is None:
+            continue
+        entry = _scene_layout_entry(lay, off2rel)
+        if entry is not None:
+            layouts[path] = entry
+    # A card that isn't the one this project came from mostly fails to match by
+    # path and quietly produces a thin, wrong-looking set of previews.  Say so:
+    # the counts are the only thing that can tell the two cases apart, since a
+    # legitimate rebuild matches nearly every scene.
+    if rels and matched < len(rels) * 0.5:
+        log("Only %d of this project's %d scene(s) were found on that card — "
+            "it looks like a different card (or a different version), so most "
+            "previews would be missing. Nothing was changed."
+            % (matched, len(rels)), "warning")
+        return 0
+    if not layouts:
+        log("No drawable scene layouts were found on this card.", "warning")
+        return 0
+    tex_dir = os.path.join(output_dir, *_TEXTURE_DIR)
+    os.makedirs(tex_dir, exist_ok=True)
+    if not _write_scene_layouts(tex_dir, layouts, log):
+        return 0
+    return len(layouts)
+
+
+def rebuild_scene_layouts_from_card(image_path, output_dir, log=None,
+                                    progress=None, cancel=None,
+                                    open_disk=None, partitions=None):
+    """:func:`rebuild_scene_layouts` against a card image on disk.
+
+    Uses the same partition the extract read (the one holding ``image.bin``
+    next to the game ELF), so the card paths it writes match the ones already
+    in the manifests."""
+    log = log or (lambda *a, **k: None)
+    if partitions is None:
+        partitions = _linux_partitions(image_path)
+    disk_f = (open_disk() if open_disk is not None
+              else open(_lp(image_path), "rb"))
+    try:
+        reader, _fw, _img = _locate(disk_f, partitions)
+        return rebuild_scene_layouts(reader, output_dir, log=log,
+                                     progress=progress, cancel=cancel)
+    finally:
+        try:
+            disk_f.close()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -1214,7 +1431,8 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
 
     work = _work_dir(label)
     emu = None
-    disk_f = open_disk() if open_disk is not None else open(image_path, "rb")
+    disk_f = (open_disk() if open_disk is not None
+              else open(_lp(image_path), "rb"))
     try:
         os.makedirs(output_dir, exist_ok=True)
         gr_path, img_path, reader, _fw, _img = _extract_inputs(
@@ -2194,7 +2412,7 @@ def _prepare_texture_patches(reader, texture_edits, log, cancel):
             skipped += 1
             continue
         try:
-            im = Image.open(staged).convert("RGBA")
+            im = Image.open(_lp(staged)).convert("RGBA")
         except Exception as e:
             log("Texture %s: can't read PNG (%s); skipped." % (output, e),
                 "warning")
@@ -2276,7 +2494,7 @@ def _glyph_atlas_overrides(assets_dir, baseline, log):
     for atlas_rel, glyphs in per_atlas.items():
         staged_atlas = os.path.join(assets_dir, "images", *atlas_rel.split("/"))
         try:
-            atlas = Image.open(staged_atlas).convert("RGBA")
+            atlas = Image.open(_lp(staged_atlas)).convert("RGBA")
         except Exception as e:
             log("Glyph atlas %s: can't read PNG (%s); its %d glyph edit(s) "
                 "skipped." % (atlas_rel, e, len(glyphs)), "warning")
@@ -2284,7 +2502,7 @@ def _glyph_atlas_overrides(assets_dir, baseline, log):
         n = 0
         for g_rel, staged, x, y, w, h in glyphs:
             try:
-                tile = Image.open(staged).convert("RGBA")
+                tile = Image.open(_lp(staged)).convert("RGBA")
             except Exception as e:
                 log("Glyph %s: can't read PNG (%s); skipped." % (g_rel, e),
                     "warning")
@@ -2353,13 +2571,42 @@ def _splice_changed_blocks(raw, target, pad_w, pad_h, fmt):
     return bytes(out)
 
 
-def _changed_radium_images(assets_dir, baseline, extra_changed=()):
+def _load_glyph_scopes(assets_dir):
+    """``{atlas_output: set(radium card paths)}`` from the optional font-scope
+    file (see :data:`_GLYPH_SCOPE_MANIFEST`) — the atlases the user narrowed to
+    specific scenes in the Fonts window.  Empty dict = every edit applies to
+    every occurrence, the default."""
+    path = os.path.join(assets_dir, *_TEXTURE_DIR, _GLYPH_SCOPE_MANIFEST)
+    out = {}
+    if not os.path.isfile(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\r\n")
+                if not line or line.startswith("#"):
+                    continue
+                cols = line.split("\t")
+                if len(cols) >= 2 and cols[0] and cols[1]:
+                    out.setdefault(cols[0], set()).add(cols[1])
+    except OSError:
+        return {}
+    return out
+
+
+def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
     """Return ``[(output, radium_card_path, staged, data_off, length, pad_w,
     pad_h, fmt), ...]`` for the radium-embedded images whose PNG differs from the
     Extract baseline.  Empty when there's no ``radium_images.txt`` manifest.
     ``fmt`` defaults to BC3/DXT5 for manifests written before the BC1 column.
     Outputs in *extra_changed* are included even when their own PNG is
-    untouched (an atlas whose glyph slices were edited)."""
+    untouched (an atlas whose glyph slices were edited).
+
+    *scope* (``{output: set(card paths)}``, from :func:`_load_glyph_scopes`)
+    drops the occurrences of a narrowed atlas that live outside its chosen
+    scenes — those scenes keep their stock bytes because every occurrence
+    starts out identical, so simply not patching them IS leaving them stock.
+    An output absent from *scope* keeps the all-occurrences default."""
     from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
@@ -2384,6 +2631,9 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=()):
             staged = os.path.join(assets_dir, "images", *output.split("/"))
             if not os.path.isfile(staged):
                 continue
+            allowed = (scope or {}).get(output)
+            if allowed is not None and radium_path not in allowed:
+                continue                       # narrowed to other scenes
             if output not in extra_changed:
                 base = baseline.get("images/" + output)
                 try:
@@ -2414,8 +2664,25 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
     their atlas first (:func:`_glyph_atlas_overrides`), which makes the atlas
     count as edited and re-encode from the pasted-over pixels."""
     glyph_atlases = _glyph_atlas_overrides(assets_dir, baseline, log)
+    scope = _load_glyph_scopes(assets_dir)
     edits = _changed_radium_images(assets_dir, baseline,
-                                   extra_changed=set(glyph_atlases))
+                                   extra_changed=set(glyph_atlases),
+                                   scope=scope)
+    if scope:
+        kept = {o for (o, *_r) in edits}
+        for output, cards in sorted(scope.items()):
+            if output in kept:
+                log("Font atlas %s is limited to %d scene(s); its other "
+                    "scenes keep the stock font." % (output, len(cards)),
+                    "info")
+            elif output in glyph_atlases:
+                # Narrowed to scenes that no longer exist (a scope carried to
+                # another game's extract) — silence here would look like the
+                # edit simply didn't take.
+                log("Font atlas %s has edited glyphs but is limited to "
+                    "scene(s) that aren't in this project (%s); nothing was "
+                    "written for it."
+                    % (output, ", ".join(sorted(cards)[:3])), "warning")
     if not edits:
         return [], 0, {}
     from . import dds as _dds
@@ -2445,7 +2712,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
             override = glyph_atlases.get(output)
             try:
                 im = override if override is not None else (
-                    Image.open(staged).convert("RGBA"))
+                    Image.open(_lp(staged)).convert("RGBA"))
             except Exception as e:
                 log("Radium image %s: can't read PNG (%s); skipped."
                     % (output, e), "warning")
@@ -3057,7 +3324,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 
     def _bg_copy():
         try:
-            shutil.copyfile(original_path, output_path)
+            shutil.copyfile(_lp(original_path), _lp(output_path))
         except BaseException as e:          # surfaced to the caller after join
             copy_err.append(e)
 
@@ -3068,7 +3335,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     copier.start()
 
     parts = _linux_partitions(original_path)
-    disk_f = open(original_path, "rb")
+    disk_f = open(_lp(original_path), "rb")
     try:
         writes, counts, grow_plan = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label)
@@ -3088,7 +3355,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         return (0, 0, 0, 0)
 
     # the copy is already on disk; patch the changed bytes in place
-    with open(output_path, "r+b") as out:
+    with open(_lp(output_path), "r+b") as out:
         _apply_writes(out, writes)
         out.flush()
         os.fsync(out.fileno())
@@ -3183,7 +3450,8 @@ def revert_assets(source_path, assets_dir, rels, log=None, progress=None,
     reverted = []
     work = _work_dir(label, base="spike2_revert_")
     emu = None
-    disk_f = open_disk() if open_disk is not None else open(source_path, "rb")
+    disk_f = (open_disk() if open_disk is not None
+              else open(_lp(source_path), "rb"))
     try:
         parts = partitions if partitions is not None else _linux_partitions(
             source_path)
@@ -5636,8 +5904,9 @@ def _rmtree(path):
 
 def _safe_remove(path):
     """Best-effort unlink (used to discard a half-prepared output on a
-    cancelled / failed write)."""
+    cancelled / failed write).  Long-path aware: the output is user-chosen, and
+    failing to clean up leaves a multi-GB half-written image behind."""
     try:
-        os.remove(path)
+        os.remove(_lp(path))
     except OSError:
         pass

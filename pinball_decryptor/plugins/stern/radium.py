@@ -380,7 +380,7 @@ def parse_glyph_tables(data, images):
     ``atlas`` below is one of those very dicts and maps 1:1 onto the atlas
     PNG the image extract writes.
 
-    Returns ``[{"name", "table_off", "glyphs"}]`` with ``glyphs =
+    Returns ``[{"name", "table_off", "table_end", "glyphs"}]`` with ``glyphs =
     [{"char": int, "rect": (u0, v0, u1, v1), "atlas": image-dict-or-None,
     "metrics": (w, h, bearing_x, bearing_y, advance), "rot": bool}]``
     (``atlas is None`` for glyphs with no bitmap, e.g. the space; ``rot``
@@ -403,6 +403,10 @@ def parse_glyph_tables(data, images):
         out.append({
             "name": _nearest_name_before(data, j),
             "table_off": j,
+            # Where the record walk ended: the scene-layout parser needs the
+            # end of every decoded region, because a table's metric floats
+            # mimic node handles and strings in a naive scan.
+            "table_end": end,
             "glyphs": [
                 {"char": ch, "rect": rect,
                  "atlas": (by_off.get(inl["data_off"]) if inl

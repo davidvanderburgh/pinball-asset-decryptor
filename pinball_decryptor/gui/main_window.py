@@ -6829,6 +6829,21 @@ class MainWindow:
             tree.see(rel)
             self._image_on_tree_select()
 
+    def reveal_video_slot(self, rel):
+        """Scene Browser: show one video slot on the Video tab (clearing any
+        filter that would hide it)."""
+        self._notebook.select(self._tab_video)
+        tree = getattr(self, "_video_tree", None)
+        if tree is None:
+            return
+        if not tree.exists(rel):
+            self.video_search_var.set("")
+            self.video_changed_only_var.set(False)
+            self._refresh_video_list()
+        if tree.exists(rel):
+            tree.selection_set(rel)
+            tree.see(rel)
+
     def reveal_text_string(self, text):
         """Scene Browser: find one display string on the Replace Text tab."""
         self._notebook.select(self._tab_text)
@@ -12543,6 +12558,15 @@ class MainWindow:
             return
 
         def _scan():
+            def _post(fn, *args):
+                """Hop to the UI thread, unless the window has gone.
+                A scan outlives its window on close, and raising from
+                the worker only shows as a stray traceback."""
+                try:
+                    self._tk_root().after(0, fn, *args)
+                except (tk.TclError, RuntimeError):
+                    pass
+
             # ``.checksums.md5`` ships in two flavours depending on
             # which plugin wrote it:
             #   * JJP / md5sum style   — "<md5>  <path>"  (md5 first)
@@ -12574,8 +12598,7 @@ class MainWindow:
                         saved[fp.replace("\\", "/")] = md5_val
             except OSError:
                 # Couldn't read the baseline after all — restore the button.
-                self._tk_root().after(
-                    0, self._finish_write_preview_scan, 0, scan_id)
+                _post(self._finish_write_preview_scan, 0, scan_id)
                 return
 
             # BOF only: hide the imported-cache subtree from the
@@ -12645,15 +12668,12 @@ class MainWindow:
                         return  # superseded — drop this scan
                     changed.append(rel)
                     ext = os.path.splitext(name)[1].lstrip(".") or "?"
-                    self._tk_root().after(
-                        0, self._add_write_preview_row,
-                        rel, ext, "Modified", scan_id)
+                    _post(self._add_write_preview_row,
+                          rel, ext, "Modified", scan_id)
 
             hashcache.save(assets_path, hcache)
             if self._write_preview_scan_id == scan_id:
-                self._tk_root().after(
-                    0, self._finish_write_preview_scan,
-                    len(changed), scan_id)
+                _post(self._finish_write_preview_scan, len(changed), scan_id)
 
         # The scanning UI (spinner + Cancel button) has been active since the
         # top of this method — just launch the walk.

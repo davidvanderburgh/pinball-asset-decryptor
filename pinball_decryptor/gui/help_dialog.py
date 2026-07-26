@@ -221,13 +221,34 @@ HELP_CONTENT = {
          "has, each letter is baseline-aligned into its slot, and the ink "
          "color starts matched to the original. Apply writes the glyph "
          "PNGs (build on Write as usual); \"Revert font\" restores every "
-         "letter from the atlas."),
+         "letter from the atlas, \"Revert all fonts\" puts the whole "
+         "project back to stock, and \"Undo\" steps back one write at a "
+         "time. One typeface is baked at many sizes and each is its own "
+         "font here, so Apply offers to fit the same font file into every "
+         "size of it at once. If the font has an OUTLINE companion (a "
+         "second font the game draws in black behind the letters) it is "
+         "named above the buttons, and \"Remove it\" blanks that border in "
+         "the scenes this font is in — only there, so the same outline "
+         "stays put elsewhere. \"Outline\" is your own border in pixels, 0 "
+         "for none; \"Letter width\" draws letters narrower inside their "
+         "slots, which is what puts a gap between letters that touch (the "
+         "game's own spacing is fixed on the card). Fonts under 30px are "
+         "marked \"tiny\" because a desktop font rarely survives being "
+         "fitted that small."),
         ("Scenes window",
          "The \"Scenes…\" toolbar button (where available) lists every "
          "scene on the card with the images, fonts and on-screen text it "
          "is built from — double-click an item to jump to its row here, in "
          "the Fonts window, or on Replace Text. Right-click any scene "
-         "image for \"Show scene contents\" to land there directly."),
+         "image for \"Show scene contents\" to land there directly. It "
+         "also PREVIEWS the scene as the machine draws it, composited from "
+         "THIS project folder — replace an image or import a font and the "
+         "preview redraws with your version. Scenes that animate play "
+         "their frames, and \"Save preview…\" writes a PNG (or an animated "
+         "GIF). \"Rebuild previews…\" re-reads the scene layouts off the "
+         "card image on the Extract tab in a few seconds; it rewrites only "
+         "the layout file, so your images, glyph slices and font imports "
+         "are left alone (a full re-extract would overwrite them)."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

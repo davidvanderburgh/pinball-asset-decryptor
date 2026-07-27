@@ -8732,6 +8732,11 @@ class MainWindow:
         self._settings_loading = False   # True while the form is being filled
         self._settings_stage_job = None  # debounced auto-stage timer id
         self._settings_rows = []          # [{name,label,kind,var,default,min,max}]
+        # Factory high-score board (plugins.stern.high_scores) + its per-slot
+        # initials/name entry vars — batch 22.  None when this build's table
+        # can't be located; the tab then edits scores only, as before.
+        self._settings_hstd = None
+        self._settings_hstd_vars = []
         self.settings_image_var = tk.StringVar()
 
         # Batch 21: the explainer paragraph moved into Help, and the card
@@ -8968,8 +8973,18 @@ class MainWindow:
                 from ..plugins.stern.adjustments import curated_rows
                 with CardImage(path) as c:
                     table, part, fw = c.adjustment_table()
+                    elf = c.read_firmware(part, fw)
                 rows = curated_rows(table)
-                state["done"] = ("ok", table, part, fw, rows, path)
+                # The factory high-score board (initials + player names) is a
+                # separate table in the same ELF — batch 22.  Best-effort: a
+                # build we can't locate it in still gets the scores-only
+                # editor it had before.
+                try:
+                    from ..plugins.stern.high_scores import HighScoreDefaults
+                    hstd = HighScoreDefaults(elf, table)
+                except Exception:
+                    hstd = None
+                state["done"] = ("ok", table, part, fw, rows, path, hstd)
             except Exception as e:
                 state["done"] = ("err", e)
 
@@ -9007,11 +9022,12 @@ class MainWindow:
                          "decoded yet.)" % res[1])
                 self._settings_empty.grid()
                 return
-            _ok, table, part, fw, rows, ipath = res
+            _ok, table, part, fw, rows, ipath, hstd = res
             self._settings_table = table
             self._settings_part = part
             self._settings_fw_path = fw
             self._settings_image_path = ipath
+            self._settings_hstd = hstd
             self._settings_build_form(rows)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -9022,6 +9038,7 @@ class MainWindow:
             if w is not self._settings_empty:
                 w.destroy()
         self._settings_rows = []
+        self._settings_hstd_vars = []
 
     @staticmethod
     def _settings_fmt_num(v):
@@ -9047,6 +9064,20 @@ class MainWindow:
             return
         self._settings_empty.grid_remove()
         form = self._settings_form
+        # High-score slots get their own block below (score AND initials AND
+        # player name in one row per slot — batch 22), so hold their score
+        # adjustments back from the generic grid rather than listing each one
+        # twice.  They still register in _settings_rows, so staging, presets
+        # and Reset Fields keep working on them unchanged.
+        hstd = getattr(self, "_settings_hstd", None)
+        hs_adj = {r["adjustment"] for r in hstd.rows} if hstd else set()
+        hs_adj.discard(None)
+        grid_rows = [r for r in rows if r["name"] not in hs_adj]
+        by_adj = {r["name"]: r for r in rows if r["name"] in hs_adj}
+        if not grid_rows:
+            grid_rows = rows
+            by_adj = {}
+        rows = grid_rows
         # Wrap the form into side-by-side column groups so a long settings
         # list uses the tab's width instead of scrolling early (monkeybug).
         # Cap at two groups once a row needs a wide entry: the high-score
@@ -9140,6 +9171,7 @@ class MainWindow:
                       foreground="#888888").grid(
                 row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
+        self._settings_build_hstd_block(by_adj, accent)
         self._settings_reset_btn.config(state=tk.NORMAL)
         # Overlay in build-time order — the auto-apply preset first, then the
         # folder's already-staged values on top (staged wins at Build too) —
@@ -9174,6 +9206,133 @@ class MainWindow:
         except tk.TclError:
             pass
 
+    def _settings_build_hstd_block(self, by_adj, accent):
+        """The "High Scores" block: one row per slot on the machine's
+        high-score board — initials, player name and (where the firmware
+        exposes it as an adjustment) the default score.
+
+        monkeybug batch 22 asked to edit "the name or score".  The scores are
+        ordinary adjustments; the initials and names are their own string
+        table in the same ELF (see plugins.stern.high_scores) and are patched
+        in place, so each field is capped at the room its slot actually has.
+        """
+        hstd = getattr(self, "_settings_hstd", None)
+        self._settings_hstd_vars = []
+        if hstd is None or not hstd.rows:
+            return
+        form = self._settings_form
+        base_row = form.grid_size()[1] + 1
+        ttk.Separator(form, orient=tk.HORIZONTAL).grid(
+            row=base_row, column=0, columnspan=12, sticky="ew", pady=(10, 6))
+        head = ttk.Label(form, text="High Scores",
+                         font=(_SANS_FONT, 10, "bold"))
+        head.grid(row=base_row + 1, column=0, columnspan=3, sticky="w",
+                  padx=6)
+        _Tooltip(head,
+                 "The board the machine starts with on a fresh flash or after "
+                 "a factory reset — Stern ships it filled with the design "
+                 "team's initials. A machine that already has scores stored "
+                 "keeps them and ignores these.",
+                 lambda: self._current_theme)
+        base_row += 2
+        for col, txt in ((0, "Slot"), (1, "Initials"), (2, "Player name"),
+                         (3, "Default score")):
+            ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold")).grid(
+                row=base_row, column=col, sticky="w", padx=6, pady=(2, 4))
+        for i, rec in enumerate(hstd.rows):
+            grow = base_row + 1 + i
+            ttk.Label(form, text=rec["display"], anchor="w").grid(
+                row=grow, column=0, sticky="w", padx=6, pady=2)
+            entry_vars = {}
+            for col, key, width in ((1, "initials", 5), (2, "name", 14)):
+                cap = rec["%s_max" % key]
+                var = tk.StringVar(value=rec[key])
+                ent = ttk.Entry(form, textvariable=var,
+                                width=min(width, max(4, cap + 1)))
+                ent.grid(row=grow, column=col, sticky="w", padx=6, pady=2)
+                if cap <= 0:
+                    ent.state(["disabled"])
+                _Tooltip(ent, "Up to %d character(s) — the text is written "
+                              "into the slot's own space in the firmware, so "
+                              "it can't grow." % cap,
+                         lambda: self._current_theme)
+                entry_vars[key] = var
+
+                def _on_edit(*_a, _v=var, _cap=cap, _k=key):
+                    # Hard-cap as you type: a too-long value would only fail
+                    # later, at build time.
+                    t = _v.get()
+                    if len(t) > _cap:
+                        _v.set(t[:_cap])
+                        return          # the truncating set re-enters here
+                    self._settings_schedule_autostage()
+                var.trace_add("write", _on_edit)
+            score = by_adj.get(rec["adjustment"])
+            if score is not None:
+                svar = tk.IntVar(value=score["default"])
+                sw = ttk.Spinbox(
+                    form, from_=score["min"], to=score["max"],
+                    textvariable=svar,
+                    width=max(8, len("%d" % score["max"]) + 1),
+                    increment=score.get("step", 1))
+                sw.grid(row=grow, column=3, sticky="w", padx=6, pady=2)
+                mark = ttk.Label(form, text=" ", foreground=accent, width=2)
+                mark.grid(row=grow, column=4, sticky="w", pady=2)
+
+                def _remark(*_a, _r=score, _v=svar, _m=mark):
+                    try:
+                        changed = int(_v.get()) != _r["default"]
+                    except (tk.TclError, ValueError):
+                        changed = False
+                    try:
+                        _m.configure(text="●" if changed else " ")
+                    except tk.TclError:
+                        pass
+                    self._settings_schedule_autostage()
+                svar.trace_add("write", _remark)
+                ttk.Label(form,
+                          text="on card %s"
+                               % self._settings_fmt_num(score["default"]),
+                          font=(_SANS_FONT, 8),
+                          foreground="#888888").grid(
+                    row=grow, column=5, sticky="w", padx=6, pady=2)
+                self._settings_rows.append(dict(score, var=svar, widget=sw))
+            self._settings_hstd_vars.append(
+                {"label": rec["label"], "record": rec, "vars": entry_vars})
+
+    def _settings_hstd_changes(self):
+        """``{slot label: {initials, name}}`` for high-score slots whose text
+        differs from the image's — only the changed FIELDS are listed."""
+        out = {}
+        for row in getattr(self, "_settings_hstd_vars", []):
+            diff = {}
+            for key, var in row["vars"].items():
+                try:
+                    val = var.get()
+                except tk.TclError:
+                    continue
+                if val != row["record"][key]:
+                    diff[key] = val
+            if diff:
+                out[row["label"]] = diff
+        return out
+
+    def staged_high_scores(self, assets_dir):
+        """``{slot label: {initials, name}}`` staged for *assets_dir*, or
+        ``{}``.  Read by the app's Write flow after a successful build."""
+        from ..core import staged_changes
+        vals = staged_changes.load(assets_dir).get("high_scores")
+        if not isinstance(vals, dict):
+            return {}
+        out = {}
+        for label, fields in vals.items():
+            if isinstance(fields, dict):
+                clean = {k: str(v) for k, v in fields.items()
+                         if k in ("initials", "name")}
+                if clean:
+                    out[str(label)] = clean
+        return out
+
     def _settings_set_row(self, r, display_value):
         """Set a row to a DISPLAY value, keeping an enum's dropdown in sync."""
         v = max(r["min"], min(r["max"], int(display_value)))
@@ -9192,6 +9351,9 @@ class MainWindow:
         try:
             for r in self._settings_rows:
                 self._settings_set_row(r, r["default"])
+            for row in getattr(self, "_settings_hstd_vars", []):
+                for key, var in row["vars"].items():
+                    var.set(row["record"][key])
         finally:
             self._settings_loading = False
         n = 0
@@ -9199,9 +9361,11 @@ class MainWindow:
         if assets_dir:
             from ..core import staged_changes
             data = staged_changes.load(assets_dir)
-            n = len(data.get("settings") or {})
-            if "settings" in data:
-                del data["settings"]
+            n = len(data.get("settings") or {}) + len(
+                data.get("high_scores") or {})
+            if "settings" in data or "high_scores" in data:
+                data.pop("settings", None)
+                data.pop("high_scores", None)
                 staged_changes.save(assets_dir, data)
                 if self._on_folder_state_written:
                     self._on_folder_state_written(assets_dir)
@@ -9263,9 +9427,10 @@ class MainWindow:
         if self._settings_busy or self._settings_table is None:
             return
         changes = self._settings_changes()
+        hstd = self._settings_hstd_changes()
         assets_dir = self._settings_staged_dir()
         if not assets_dir:
-            if changes:
+            if changes or hstd:
                 self._settings_status.configure(
                     text="Set the project folder on the Extract tab first — "
                          "changes stage with the project.")
@@ -9273,20 +9438,26 @@ class MainWindow:
         from ..core import staged_changes
         data = staged_changes.load(assets_dir)
         before = data.get("settings") or {}
+        before_hs = data.get("high_scores") or {}
         new = {k: int(v) for k, v in changes.items()}
-        if new == before:
+        if new == before and hstd == before_hs:
             return
         if new:
             data["settings"] = new
         elif "settings" in data:
             del data["settings"]
+        if hstd:
+            data["high_scores"] = hstd
+        elif "high_scores" in data:
+            del data["high_scores"]
         staged_changes.save(assets_dir, data)
         # Staged settings are folder state too — see _save_staged_changes.
         if self._on_folder_state_written:
             self._on_folder_state_written(assets_dir)
+        total = len(new) + len(hstd)
         self._settings_status.configure(
-            text=("%d setting(s) staged — baked into the next card you "
-                  "Build." % len(new)) if new else "Nothing staged.")
+            text=("%d change(s) staged — baked into the next card you "
+                  "Build." % total) if total else "Nothing staged.")
         # Log when the SET of staged settings changes (not every value tick,
         # or spinner clicks would flood the session log).
         if set(new) != set(before):

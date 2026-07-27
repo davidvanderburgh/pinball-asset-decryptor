@@ -417,13 +417,32 @@ class CardImage:
         raise ValueError("no game firmware on this card exposes an adjustment "
                          "table (%s)" % (last_err or "unrecognised build"))
 
-    def write_adjustment_defaults(self, part_index, path, table, overrides):
-        """Patch the game ELF's compiled defaults with ``{name: value}`` and
-        write it back in place (exact-size, extent-mapped) with the ``.sidx``
-        record refreshed.  Returns ``(n_settings, sidx_refreshed)``."""
+    def write_adjustment_defaults(self, part_index, path, table, overrides,
+                                  high_scores=None, name_overrides=None):
+        """Patch the game ELF's compiled defaults and write it back in place
+        (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
+
+        *overrides* is ``{AD_name: value}`` for the numeric adjustment defaults.
+        *name_overrides* is ``{slot label: {initials, name}}`` for the factory
+        high-score board (see :mod:`.high_scores`); it needs the matching
+        ``HighScoreDefaults`` in *high_scores*.  Both patches are composed into
+        ONE buffer so the card is written — and its ``.sidx`` refreshed — once.
+
+        Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
+        adjustment and high-score slot changed.
+        """
         new = table.patched_bytes(overrides)
+        n = len(overrides)
+        if name_overrides and high_scores is not None:
+            # Re-bind to the already-patched bytes: the adjustment patch only
+            # touched 4-byte value fields, so every string offset still holds,
+            # but the object must own the buffer it edits.
+            from .high_scores import HighScoreDefaults
+            hs = HighScoreDefaults(new, table)
+            new = hs.patched_bytes(name_overrides)
+            n += len(name_overrides)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
-        return len(overrides), refreshed
+        return n, refreshed
 
     # ---- lifecycle ----------------------------------------------------------
     def close(self):

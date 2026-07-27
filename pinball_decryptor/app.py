@@ -3530,7 +3530,8 @@ class App:
         if not assets_dir or not os.path.isdir(assets_dir):
             return
         vals = self.window.staged_default_settings(assets_dir)
-        if not vals:
+        names = self.window.staged_high_scores(assets_dir)
+        if not vals and not names:
             return
         try:
             out = self.window._target_write_path()
@@ -3547,9 +3548,33 @@ class App:
                     if name in table.by_name:
                         e = table.get(name)
                         overrides[name] = max(e["min"], min(e["max"], int(v)))
-                if overrides:
+                # Staged high-score initials / player names (batch 22) ride
+                # into the SAME ELF write as the numeric defaults.  A slot the
+                # built image doesn't have (a version change since staging) is
+                # skipped rather than failing the whole apply.
+                hstd, name_overrides = None, {}
+                if names:
+                    from .plugins.stern.high_scores import HighScoreDefaults
+                    try:
+                        hstd = HighScoreDefaults(
+                            c.read_firmware(part, path), table)
+                        have = hstd.by_label()
+                        name_overrides = {k: v for k, v in names.items()
+                                          if k in have}
+                        missing = len(names) - len(name_overrides)
+                        if missing:
+                            self.window.append_log(
+                                "%d staged high-score slot(s) aren't in this "
+                                "image and were skipped." % missing, "warning")
+                    except Exception as e:
+                        self.window.append_log(
+                            "Couldn't read this image's high-score board "
+                            "(%s) — its initials/names were not applied." % e,
+                            "warning")
+                if overrides or name_overrides:
                     n, _ref = c.write_adjustment_defaults(
-                        part, path, table, overrides)
+                        part, path, table, overrides,
+                        high_scores=hstd, name_overrides=name_overrides)
                     self.window.append_log(
                         "Applied %d staged default setting(s) to the built "
                         "image (Defaults tab)." % n, "success")

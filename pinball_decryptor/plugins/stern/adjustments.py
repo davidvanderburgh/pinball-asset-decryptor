@@ -28,6 +28,11 @@ import struct
 
 _AD_RE = re.compile(rb"AD_[A-Z0-9_]{2,80}\x00")
 OFF_DEFAULT, OFF_MIN, OFF_MAX, OFF_STEP = 0x04, 0x08, 0x0c, 0x10
+# Later in the same descriptor: the operator menu's own caption for this
+# adjustment ("GRAND CHAMPION SCORE") and its one-line help ("Change the
+# default Grand Champion Score.").  Used by :mod:`.high_scores` to tie a
+# high-score record to the adjustment holding that slot's default score.
+OFF_MENU_LABEL, OFF_MENU_HELP = 0x18, 0x20
 
 # Values are shown in the firmware's own internal units.  We previously
 # assumed the master volume displayed as internal/4 (a 0-16 menu scale), but

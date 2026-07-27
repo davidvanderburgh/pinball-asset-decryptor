@@ -163,6 +163,16 @@ HELP_CONTENT = {
         ("No conversion",
          "Where shown, the \"No conversion\" option forces a verbatim copy "
          "of a same-container file and skips all re-encoding."),
+        ("The Convert column",
+         "Once you assign a replacement, the Convert column says what the "
+         "build will do with it: \"As-is\" means the clip already matches the "
+         "slot's container, codec, size and frame rate and is copied straight "
+         "in; \"Re-encode\" means ffmpeg converts it first, which is where a "
+         "long build spends its time. The answer is worked out in the "
+         "background, so a row can read \"…\" for a moment, and it re-checks "
+         "itself whenever you change \"No conversion\" or \"Trim / pad\" "
+         "(both change what counts as a match). Export CSV carries the "
+         "column too."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
@@ -408,6 +418,16 @@ HELP_CONTENT = {
          "while your master image stays untouched. \"Reset Fields\" puts "
          "everything back to the image's own defaults and clears the staged "
          "changes."),
+        ("High scores",
+         "The \"High Scores\" block is the board a fresh card boots with — "
+         "Stern ships it filled with the design team's initials. Each slot "
+         "takes new initials, a new player name and (where the firmware "
+         "exposes it) a new default score. Initials and names are written "
+         "into the slot's own space in the game firmware, so each field is "
+         "capped at the number of characters that slot has room for — "
+         "initials are always 3. Same \"fresh cards only\" rule as every "
+         "other default: a machine that already has scores stored keeps "
+         "them."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
          "it from the dropdown any time to fill the form (the values stage "

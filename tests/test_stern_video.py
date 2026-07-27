@@ -133,19 +133,28 @@ def test_prepare_video_patches_skips_when_inode_missing(tmp_path):
     assert skipped == 1
 
 
+def _isobmff(qt=False):
+    """Minimal ISO-BMFF head so ``isobmff_brand`` recognises the container."""
+    brand = b"qt  " if qt else b"isom"
+    return (20).to_bytes(4, "big") + b"ftyp" + brand + b"\x00" * 8
+
+
 def test_prepare_video_patches_grows_oversized_source(tmp_path, monkeypatch):
     # The user's assigned source is bigger than the on-card slot: instead of
     # crushing it in place, it becomes a GROW job (card_rel, source) — kept
     # intact for the ext4 driver to copy in.  No in-place patch is produced.
-    big = tmp_path / "orig.mp4"
-    big.write_bytes(b"B" * 500)              # 500 B > 80 B slot
+    big = tmp_path / "orig.mov"
+    big.write_bytes(_isobmff(qt=True) + b"B" * 500)   # > 80 B slot
     staged = tmp_path / "a.mov"
-    staged.write_bytes(b"x" * 999)           # transcoded staged copy (ignored)
+    staged.write_bytes(b"x" * 999)           # transcoded staged copy
     work = tmp_path / "work"; work.mkdir()
     reader = _FakeReader({"/g/1.asset": 80})
     edits = [("a.mov", "/g/1.asset", str(staged))]
     monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
                         lambda: (True, "ok"))
+    # No ffprobe reading these stubs: the container check is what decides.
+    monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
+                        lambda _p: None)
 
     patches, skipped, grow = engine._prepare_video_patches(
         reader, edits, str(work), log=lambda *a, **k: None,
@@ -160,8 +169,8 @@ def test_prepare_video_patches_replaces_fit_size_original_intact(
     # Even a source that FITS its slot is replaced intact via the ext4 driver
     # rather than re-encoded — any re-encode (even a container remux) is what
     # the game's content validation rejects.
-    small = tmp_path / "orig.mp4"
-    small.write_bytes(b"B" * 40)             # 40 B <= 80 B slot (fits)
+    small = tmp_path / "orig.mov"
+    small.write_bytes(_isobmff(qt=True) + b"B" * 20)  # <= 80 B slot (fits)
     staged = tmp_path / "a.mov"
     staged.write_bytes(b"x" * 70)
     work = tmp_path / "work"; work.mkdir()
@@ -169,12 +178,80 @@ def test_prepare_video_patches_replaces_fit_size_original_intact(
     edits = [("a.mov", "/g/1.asset", str(staged))]
     monkeypatch.setattr("pinball_decryptor.core.ext4_grow.available",
                         lambda: (True, "ok"))
+    monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
+                        lambda _p: None)
 
     patches, skipped, grow = engine._prepare_video_patches(
         reader, edits, str(work), log=lambda *a, **k: None,
         cancel=lambda: False, originals={"video/a.mov": str(small)})
     assert patches == []                     # NOT re-encoded / raw-patched
     assert grow == [("g/1.asset", str(small))]   # replaced intact instead
+
+
+# ---- _intact_copy_source: only a real drop-in goes on the card as-is -------
+
+class _Info:
+    def __init__(self, vcodec="h264", width=1280, height=720, fps=30.0,
+                 pix_fmt="yuv420p"):
+        self.vcodec, self.width, self.height = vcodec, width, height
+        self.fps, self.pix_fmt = fps, pix_fmt
+
+
+def _probe_map(monkeypatch, mapping):
+    monkeypatch.setattr("pinball_decryptor.core.video.detect_video_info",
+                        lambda p: mapping.get(os.path.basename(p)))
+
+
+def _sources(tmp_path, qt=True):
+    src = tmp_path / ("src.mov" if qt else "src.mp4")
+    src.write_bytes(_isobmff(qt=qt) + b"S" * 64)
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(_isobmff(qt=True) + b"T" * 64)
+    return src, staged
+
+
+def test_intact_copy_keeps_a_true_drop_in(tmp_path, monkeypatch):
+    src, staged = _sources(tmp_path)
+    _probe_map(monkeypatch, {"src.mov": _Info(), "a.mov": _Info()})
+    assert engine._intact_copy_source(
+        str(src), str(staged), "a.mov", lambda *a, **k: None) == str(src)
+
+
+def test_intact_copy_rejects_a_foreign_container(tmp_path, monkeypatch):
+    # An .mkv the user encoded themselves: the machine finds the audio and
+    # plays it over a black picture, which is the whole bug being fixed.
+    src = tmp_path / "src.mkv"
+    src.write_bytes(b"\x1a\x45\xdf\xa3" + b"S" * 64)   # Matroska, no ftyp
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(_isobmff(qt=True) + b"T" * 64)
+    msgs = []
+    got = engine._intact_copy_source(str(src), str(staged), "a.mov",
+                                     lambda m, lvl: msgs.append((m, lvl)))
+    assert got == str(staged)
+    assert msgs and msgs[0][1] == "warning" and "black picture" in msgs[0][0]
+
+
+def test_intact_copy_rejects_wrong_codec_depth_and_geometry(
+        tmp_path, monkeypatch):
+    src, staged = _sources(tmp_path)
+    slot = _Info()
+    for bad in (_Info(vcodec="hevc"),
+                _Info(pix_fmt="yuv420p10le"),
+                _Info(width=1920, height=1080),
+                _Info(fps=60.0)):
+        _probe_map(monkeypatch, {"src.mov": bad, "a.mov": slot})
+        assert engine._intact_copy_source(
+            str(src), str(staged), "a.mov",
+            lambda *a, **k: None) == str(staged)
+
+
+def test_intact_copy_rejects_a_brand_the_slot_does_not_use(
+        tmp_path, monkeypatch):
+    # Slot extension ".mp4" means the card's own clip was ISO-branded.
+    src, staged = _sources(tmp_path, qt=True)      # user supplied QuickTime
+    _probe_map(monkeypatch, {"src.mov": _Info(), "a.mov": _Info()})
+    assert engine._intact_copy_source(
+        str(src), str(staged), "a.mp4", lambda *a, **k: None) == str(staged)
 
 
 def test_prepare_video_patches_oversized_falls_back_to_fit_without_grow(

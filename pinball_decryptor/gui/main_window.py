@@ -517,6 +517,14 @@ class _VideoPreviewPane:
 
     MAX_W, MAX_H = 320, 180
 
+    # Where to look for the poster still, as a fraction of the clip, tried in
+    # turn while the decoded frame comes back solid black.  A clip that opens
+    # or closes on a fade would otherwise poster as an empty pane — and an
+    # empty pane is indistinguishable from a preview that isn't working at
+    # all, which is exactly the confusion a field report ran into.  Only the
+    # still moves; the playhead stays where it was.
+    POSTER_FRACTIONS = (0.5, 0.25, 0.75, 0.08)
+
     def __init__(self, win, parent, title, on_activate=None):
         self._win = win
         self._on_activate = on_activate
@@ -536,6 +544,7 @@ class _VideoPreviewPane:
         self._session = 0         # bump to invalidate a play session
         self._render_id = 0       # bump to drop stale single-frame renders
         self._frame_img = None    # PhotoImage ref (must stay alive)
+        self._frame_err = False   # a draw failure was already reported
         self._disp_w = self.MAX_W  # frame-canvas draw size (aspect-fit)
         self._disp_h = self.MAX_H
         self._tick_job = None     # after() id for the playback timer
@@ -586,6 +595,7 @@ class _VideoPreviewPane:
         self._cancel_scrub()
         self.stop_playback()
         self._hint = ""
+        self._frame_err = False
         self.path = path
         try:
             self.title_var.set("%s — %s" % (self.base_title,
@@ -602,9 +612,13 @@ class _VideoPreviewPane:
         # Poster a representative frame, not the frame at 0.0 -- many clips
         # open on a black leader frame, which looked like a broken/empty
         # preview.  Grab mid-clip when the duration is known, else a small
-        # offset in.  The playhead stays at 0.0; this only changes the still.
-        poster_pos = self.dur * 0.5 if self.dur > 0.2 else 0.5
-        self._render_poster(poster_pos)
+        # offset in, and keep looking if that frame is black too.  The
+        # playhead stays at 0.0; this only changes the still.
+        if self.dur > 0.2:
+            spots = [self.dur * f for f in self.POSTER_FRACTIONS]
+        else:
+            spots = [0.5]
+        self._render_poster(spots[0], fallbacks=spots[1:])
         self._update_time()
         if autoplay:
             self.start_playback(0.0)
@@ -658,9 +672,12 @@ class _VideoPreviewPane:
         self._disp_w = dw - (dw % 2)
         self._disp_h = dh - (dh % 2)
 
-    def _render_poster(self, pos):
+    def _render_poster(self, pos, fallbacks=None):
         """Decode a single frame at *pos* on a worker thread, then show it.
-        Stale renders (clip/seek changed) are dropped via a counter."""
+        Stale renders (clip/seek changed) are dropped via a counter.
+
+        *fallbacks* are further positions to try if the frame at *pos* comes
+        back solid black (see :data:`POSTER_FRACTIONS`)."""
         canvas = self.canvas
         path = self.path
         self._render_id += 1
@@ -686,30 +703,71 @@ class _VideoPreviewPane:
                 path, pos, self._disp_w, self._disp_h)
             if self._render_id != rid:
                 return
-            self._win._tk_root().after(0, self._show_poster, png, rid)
+            self._win._tk_root().after(0, self._show_poster, png, rid,
+                                       fallbacks)
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def _show_poster(self, png, rid):
+    def _show_poster(self, png, rid, fallbacks=None):
         if self._render_id != rid:
             return
         canvas = self.canvas
-        canvas.delete("all")
         cw = canvas.winfo_width() or self.MAX_W
         ch = canvas.winfo_height() or self.MAX_H
         if png and _HAVE_PIL:
             try:
                 import io
                 img = Image.open(io.BytesIO(png)).convert("RGB")
+            except Exception as e:  # noqa: BLE001 — any decode failure
+                canvas.delete("all")
+                self._frame_img = None
+                self._draw_canvas_note("Couldn't show this frame: %s" % e)
+                self._draw_playhead()
+                return
+            # An all-black still is where "the preview is broken" and "the
+            # clip is black here" look identical.  Try the next sample spot,
+            # and if the clip is black everywhere we looked, say so rather
+            # than leaving a bare black rectangle.
+            if img.getbbox() is None:
+                if fallbacks:
+                    self._render_poster(fallbacks[0], fallbacks[1:])
+                    return
+                canvas.delete("all")
+                self._frame_img = None
+                self._draw_canvas_note(
+                    "Every frame sampled is black — this clip may be an "
+                    "overlay that only shows over the scene behind it. "
+                    "Press ▶ to play it through.")
+                self._draw_playhead()
+                return
+            canvas.delete("all")
+            try:
                 self._frame_img = ImageTk.PhotoImage(img)
                 canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
                                     image=self._frame_img, tags=("frame",))
-            except Exception:
+            except Exception as e:  # noqa: BLE001 — Tk/Pillow mismatch
                 self._frame_img = None
+                self._draw_canvas_note(
+                    "Couldn't draw this frame: %s\n(Pillow's Tk support may "
+                    "be missing — on Linux install python3-pil.imagetk)" % e)
         else:
-            canvas.create_text(cw // 2, ch // 2, fill="#888888",
-                               text="(preview needs ffmpeg)")
+            canvas.delete("all")
+            self._draw_canvas_note(
+                "Couldn't decode a frame from this clip — check that ffmpeg "
+                "is installed and that the file plays in a video player.")
         self._draw_playhead()
+
+    def _draw_canvas_note(self, text):
+        """Centre *text* on the frame canvas.  Used wherever a frame can't be
+        shown: a bare black canvas gives the user nothing to act on, and
+        reads as a broken app even when the clip itself is the problem."""
+        canvas = self.canvas
+        cw = canvas.winfo_width() or self.MAX_W
+        ch = canvas.winfo_height() or self.MAX_H
+        if cw <= 10:
+            cw, ch = self.MAX_W, self.MAX_H
+        canvas.create_text(cw // 2, ch // 2, fill="#bbbbbb", width=cw - 16,
+                           justify=tk.CENTER, text=text, tags=("note",))
 
     def _show_frame_rgb(self, data):
         """Display one raw rgb24 frame (from the decode thread) on the canvas."""
@@ -725,10 +783,15 @@ class _VideoPreviewPane:
             cw = canvas.winfo_width() or self.MAX_W
             ch = canvas.winfo_height() or self.MAX_H
             canvas.delete("frame")
+            canvas.delete("note")
             canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
                                 image=self._frame_img, tags=("frame",))
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — report once, don't spam
+            if not self._frame_err:
+                self._frame_err = True
+                self.canvas.delete("all")
+                self._draw_canvas_note("Couldn't draw this clip's frames: %s"
+                                       % e)
 
     # ---- transport ----------------------------------------------------
 
@@ -5977,6 +6040,14 @@ class MainWindow:
             menu.add_separator()
             menu.add_command(label="Clear replacement",
                              command=self._video_clear_selected)
+        if getattr(self._current_mfr, "key", "") == "stern":
+            # Same route the Images tab offers: a clip belongs to one scene,
+            # and the Scenes window is where you see what plays around it.
+            menu.add_separator()
+            menu.add_command(
+                label="Show scene contents…",
+                command=lambda r=row: self._open_scene_browser(
+                    preselect_video=r))
         slot = self._video_slots_by_rel.get(row)
         if slot is not None:
             menu.add_separator()
@@ -7040,26 +7111,34 @@ class MainWindow:
         from .font_studio import open_font_studio
         open_font_studio(self, assets, preselect=preselect)
 
-    def _open_scene_browser(self, preselect_rel=None):
-        """Open the Scenes window, optionally preselecting the scene that
-        contains the image at Images-tab row *preselect_rel*."""
+    def _open_scene_browser(self, preselect_rel=None, preselect_video=None,
+                            preselect_dir=None, focus_text=None):
+        """Open the Scenes window, optionally on the scene that holds the
+        image at Images-tab row *preselect_rel*, the clip at Video-tab row
+        *preselect_video*, or the scene directory *preselect_dir* outright —
+        with *focus_text* selected in its contents list."""
         assets = self._image_assets_dir_or_warn("Scenes")
         if assets is None:
             return
         from .scene_browser import collect_scenes, open_scene_browser
-        preselect = None
-        if preselect_rel:
-            rel = preselect_rel.replace("\\", "/")
-            if "/glyphs/" in rel:
+        preselect = preselect_dir
+        if preselect is None and (preselect_rel or preselect_video):
+            rel = (preselect_rel or preselect_video).replace("\\", "/")
+            if preselect_rel and "/glyphs/" in rel:
                 rel = self._glyph_atlas_rel(assets, rel) or rel
             try:
                 for d, sc in collect_scenes(assets).items():
-                    if any(r == rel for _o, r in sc["images"]):
+                    if preselect_video:
+                        hit = rel in sc["videos"]
+                    else:
+                        hit = any(r == rel for _o, r in sc["images"])
+                    if hit:
                         preselect = d
                         break
             except Exception:
                 pass
-        open_scene_browser(self, assets, preselect=preselect)
+        open_scene_browser(self, assets, preselect=preselect,
+                           focus_text=focus_text)
 
     @staticmethod
     def _glyph_atlas_rel(assets, rel):
@@ -7078,9 +7157,70 @@ class MainWindow:
             pass
         return None
 
+    def _tool_windows(self):
+        """The Fonts / Scenes tool windows that are open right now."""
+        out = []
+        for attr in ("_scene_browser", "_font_studio"):
+            w = getattr(self, attr, None)
+            try:
+                if w is not None and w.win.winfo_exists():
+                    out.append(w.win)
+            except (AttributeError, tk.TclError):
+                pass
+        return out
+
+    def _step_aside_for_jump(self):
+        """Move any open tool window out from in front of the main window.
+
+        Peter: "when you have the font / scene folder open and jump to it with
+        a double click, it will visit the page in the background, it was hard
+        for me to find out that it did jump there."  The Fonts and Scenes
+        windows are ``transient`` children of the main window, and Windows
+        keeps an owned window above its owner — so raising the main window
+        cannot uncover the tab the jump landed on.  Lowering the tool window
+        below the root does work, and survives the user clicking the main
+        window afterwards.
+
+        TWO STEPS, IN THIS ORDER (measured — the z-order probes in this
+        session's scratchpad):
+
+        1. ``focus_force()`` the main window.  A double-click arrives while
+           the TOOL window is the active one, and Windows will not push the
+           foreground window below its own owner — lowering it alone is
+           silently ignored, which is exactly what Peter saw.
+        2. only then lower each tool window below the root.
+
+        Do NOT ``lift()`` the root instead: that re-applies the owner rule and
+        drags the tool window straight back on top.  Nothing is closed or
+        reset either — the Fonts… / Scenes… buttons (and Show in Scenes… on
+        the Replace Text tab) lift the window back exactly as it was."""
+        try:
+            root = self._tk_root()
+            root.focus_force()
+        except (AttributeError, tk.TclError):
+            return
+        for win in self._tool_windows():
+            try:
+                win.lower(root)
+            except tk.TclError:
+                pass
+
+    @staticmethod
+    def _land_on_row(tree, iid):
+        """Select *iid*, scroll it into view and give the tree keyboard focus,
+        so a cross-window jump ends somewhere visibly selected."""
+        try:
+            tree.selection_set(iid)
+            tree.see(iid)
+            tree.focus(iid)
+            tree.focus_set()
+        except tk.TclError:
+            pass
+
     def reveal_image_slot(self, rel):
         """Scene Browser: show one image slot on the Images tab (clearing
         any filters that would hide it)."""
+        self._step_aside_for_jump()
         self._notebook.select(self._tab_image)
         tree = getattr(self, "_image_tree", None)
         if tree is None:
@@ -7091,13 +7231,13 @@ class MainWindow:
             self.image_changed_only_var.set(False)
             self._refresh_image_list()
         if tree.exists(rel):
-            tree.selection_set(rel)
-            tree.see(rel)
+            self._land_on_row(tree, rel)
             self._image_on_tree_select()
 
     def reveal_video_slot(self, rel):
         """Scene Browser: show one video slot on the Video tab (clearing any
         filter that would hide it)."""
+        self._step_aside_for_jump()
         self._notebook.select(self._tab_video)
         tree = getattr(self, "_video_tree", None)
         if tree is None:
@@ -7107,11 +7247,11 @@ class MainWindow:
             self.video_changed_only_var.set(False)
             self._refresh_video_list()
         if tree.exists(rel):
-            tree.selection_set(rel)
-            tree.see(rel)
+            self._land_on_row(tree, rel)
 
     def reveal_text_string(self, text):
         """Scene Browser: find one display string on the Replace Text tab."""
+        self._step_aside_for_jump()
         self._notebook.select(self._tab_text)
         tree = getattr(self, "_text_tree", None)
         if tree is not None and not tree.get_children():
@@ -7120,6 +7260,14 @@ class MainWindow:
             except Exception:
                 pass
         self.text_search_var.set(text)
+        # The search alone leaves nothing selected, which reads as "nothing
+        # happened" — land on the row itself.
+        if tree is not None:
+            for i, r in enumerate(self._text_rows):
+                if r["original"] == text and tree.exists(str(i)):
+                    self._land_on_row(tree, str(i))
+                    self._text_on_tree_select()
+                    break
 
     # ---- Replace Image: group bulk actions ---------------------------
 
@@ -8819,10 +8967,60 @@ class MainWindow:
             foreground="#888888")
         self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
 
+        # Every setting the firmware carries, read-only, flagged with whether
+        # the machine's own menu can reach it (peanuts).  The editable form
+        # above stays the curated safe subset; this is the reference list, and
+        # it lives outside the scrolling canvas so it scrolls itself instead of
+        # nesting two scroll regions.
+        self._settings_all_frame = ttk.Frame(f)
+        hdr = ttk.Frame(self._settings_all_frame)
+        hdr.pack(fill=tk.X, padx=10, pady=(8, 2))
+        title = ttk.Label(hdr, text="All settings on this image",
+                          font=(_SANS_FONT, 10, "bold"))
+        title.pack(side=tk.LEFT)
+        _Tooltip(title,
+                 "Every adjustment the firmware carries, with the caption the "
+                 "machine itself prints. Read-only — the editable form above "
+                 "is the curated set that is safe to preset.",
+                 lambda: self._current_theme)
+        self._settings_hidden_only = tk.BooleanVar(value=False)
+        self._settings_hidden_cb = ttk.Checkbutton(
+            hdr, text="Only settings the machine's menu never shows",
+            variable=self._settings_hidden_only,
+            command=self._settings_fill_all_tree)
+        self._settings_hidden_cb.pack(side=tk.LEFT, padx=(16, 0))
+        tbody = ttk.Frame(self._settings_all_frame)
+        tbody.pack(fill=tk.BOTH, expand=True, padx=10)
+        self._settings_all_tree = ttk.Treeview(
+            tbody, columns=("value", "range", "status"), height=12,
+            selectmode="browse")
+        self._settings_all_tree.heading("#0", text="Setting", anchor=tk.W)
+        self._settings_all_tree.heading("value", text="On card", anchor=tk.W)
+        self._settings_all_tree.heading("range", text="Range", anchor=tk.W)
+        self._settings_all_tree.heading("status", text="Menu", anchor=tk.W)
+        self._settings_all_tree.column("#0", width=320, minwidth=180)
+        self._settings_all_tree.column("value", width=130, minwidth=80,
+                                       stretch=False)
+        self._settings_all_tree.column("range", width=150, minwidth=80,
+                                       stretch=False)
+        self._settings_all_tree.column("status", width=130, minwidth=90,
+                                       stretch=False)
+        avs = ttk.Scrollbar(tbody, orient="vertical",
+                            command=self._settings_all_tree.yview)
+        self._settings_all_tree.configure(yscrollcommand=avs.set)
+        self._settings_all_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        avs.pack(side=tk.LEFT, fill=tk.Y)
+        self._settings_all_legend = ttk.Label(
+            self._settings_all_frame, text="", foreground="#888888",
+            font=(_SANS_FONT, 8))
+        self._settings_all_legend.pack(fill=tk.X, padx=10, pady=(2, 0))
+        self._settings_all_rows = []
+
         # Changes stage themselves as you edit (batch 21 — the explicit
         # Apply / Clear buttons are gone); Reset Fields is the one action:
         # back to the image's own defaults, nothing staged.
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
+        self._settings_arow = arow
         self._settings_reset_btn = ttk.Button(
             arow, text="Reset Fields", command=self._settings_reset,
             state=tk.DISABLED)
@@ -8970,11 +9168,20 @@ class MainWindow:
         def _work():
             try:
                 from ..plugins.stern.explorer import CardImage
-                from ..plugins.stern.adjustments import curated_rows
+                from ..plugins.stern.adjustments import all_rows, curated_rows
+                from ..plugins.stern.menu_visibility import statuses
                 with CardImage(path) as c:
                     table, part, fw = c.adjustment_table()
                     elf = c.read_firmware(part, fw)
                 rows = curated_rows(table)
+                # Reference list of EVERY setting, flagged with whether the
+                # machine's menu can reach it.  Best-effort by design: a build
+                # whose menu can't be read still gets the list, just without
+                # the flags (never with wrong ones).
+                try:
+                    every = all_rows(table, statuses(table))
+                except Exception:
+                    every = []
                 # The factory high-score board (initials + player names) is a
                 # separate table in the same ELF — batch 22.  Best-effort: a
                 # build we can't locate it in still gets the scores-only
@@ -8984,7 +9191,8 @@ class MainWindow:
                     hstd = HighScoreDefaults(elf, table)
                 except Exception:
                     hstd = None
-                state["done"] = ("ok", table, part, fw, rows, path, hstd)
+                state["done"] = ("ok", table, part, fw, rows, path, hstd,
+                                 every)
             except Exception as e:
                 state["done"] = ("err", e)
 
@@ -9022,12 +9230,13 @@ class MainWindow:
                          "decoded yet.)" % res[1])
                 self._settings_empty.grid()
                 return
-            _ok, table, part, fw, rows, ipath, hstd = res
+            _ok, table, part, fw, rows, ipath, hstd, every = res
             self._settings_table = table
             self._settings_part = part
             self._settings_fw_path = fw
             self._settings_image_path = ipath
             self._settings_hstd = hstd
+            self._settings_every = every
             self._settings_build_form(rows)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -9039,6 +9248,66 @@ class MainWindow:
                 w.destroy()
         self._settings_rows = []
         self._settings_hstd_vars = []
+        self._settings_all_rows = []
+        try:
+            self._settings_all_frame.pack_forget()
+            self._settings_all_tree.delete(*self._settings_all_tree.get_children())
+        except (tk.TclError, AttributeError):
+            pass
+
+    # Status -> what the reference list calls it.  "service" is still a real
+    # operator setting, just edited on a different service-menu screen, so it
+    # must not read as "debug" (see plugins/stern/menu_visibility.py).
+    _SETTINGS_STATUS_TEXT = {"": "Adjustments", "service": "Service menu",
+                             "debug": "Debug", None: ""}
+
+    def _settings_fill_all_tree(self):
+        """(Re)populate the read-only all-settings list from the last load."""
+        tree = self._settings_all_tree
+        tree.delete(*tree.get_children())
+        rows = self._settings_all_rows
+        if not rows:
+            self._settings_all_legend.configure(text="")
+            return
+        known = rows[0].get("status") is not None
+        only_hidden = bool(self._settings_hidden_only.get())
+        shown = 0
+        for r in rows:
+            st = r.get("status")
+            if only_hidden and st in ("", None):
+                continue
+            if r.get("labels") and r["default"] in r["labels"]:
+                val = "%d - %s" % (r["default"], r["labels"][r["default"]])
+            else:
+                val = self._settings_fmt_num(r["default"])
+            if r["min"] == 0 and r["max"] == 1:
+                rng = "off / on"
+            else:
+                rng = "%s - %s" % (self._settings_fmt_num(r["min"]),
+                                   self._settings_fmt_num(r["max"]))
+            tree.insert("", "end",
+                        text="%s  (0x%02X)" % (r["label"], r["id"]),
+                        values=(val, rng,
+                                self._SETTINGS_STATUS_TEXT.get(st, "")),
+                        tags=(st or "unknown",))
+            shown += 1
+        if not known:
+            self._settings_all_legend.configure(
+                text="%d setting(s). This build's operator menu couldn't be "
+                     "read, so settings hidden from it aren't flagged."
+                     % len(rows))
+            return
+        n_dbg = sum(1 for r in rows if r["status"] == "debug")
+        n_svc = sum(1 for r in rows if r["status"] == "service")
+        self._settings_all_legend.configure(
+            text="%d setting(s)%s. \"Adjustments\" = in the machine's "
+                 "Adjustments menu; \"Service menu\" = %d edited on another "
+                 "service screen (volume, speakers, software update, "
+                 "tournament, redemption); \"Debug\" = %d the machine never "
+                 "shows at all."
+                 % (len(rows),
+                    ", %d listed" % shown if only_hidden else "",
+                    n_svc, n_dbg))
 
     @staticmethod
     def _settings_fmt_num(v):
@@ -9057,6 +9326,15 @@ class MainWindow:
 
     def _settings_build_form(self, rows):
         self._settings_clear_form()
+        # The reference list stands on its own: a build with no *editable*
+        # settings still gets it, so "what does this firmware carry?" is always
+        # answerable.
+        self._settings_all_rows = list(getattr(self, "_settings_every", None)
+                                       or [])
+        if self._settings_all_rows:
+            self._settings_all_frame.pack(fill=tk.BOTH, expand=True,
+                                          before=self._settings_arow)
+            self._settings_fill_all_tree()
         if not rows:
             self._settings_empty.configure(
                 text="No editable settings were found in this firmware.")
@@ -10062,6 +10340,18 @@ class MainWindow:
             side=tk.LEFT, padx=(4, 12))
         ttk.Button(tools, text="Clear all edits",
                    command=self._text_clear_all).pack(side=tk.LEFT)
+        # Peter: "Could you jump from the text tab into the scene?"  The
+        # Scenes window already jumps here; this is the way back, and it is
+        # how you get from a line of text to a picture of where it appears.
+        self._text_scene_btn = ttk.Button(
+            tools, text="Show in Scenes…", command=self._text_show_in_scene)
+        self._text_scene_btn.pack(side=tk.LEFT, padx=(8, 0))
+        _Tooltip(
+            self._text_scene_btn,
+            "Open the Scenes window on the scene that draws the selected "
+            "line, with the line picked out — so you can see it in place, "
+            "and recolour it there. Stern Spike 2.",
+            lambda: self._current_theme)
         self._text_status_lbl = ttk.Label(
             tools, textvariable=self.text_status_var, font=(_SANS_FONT, 9))
         self._text_status_lbl.pack(side=tk.RIGHT)
@@ -10372,6 +10662,8 @@ class MainWindow:
             pass
         menu.add_command(label="Edit…",
                          command=lambda: self._text_new_entry.focus_set())
+        menu.add_command(label="Show in Scenes…",
+                         command=lambda r=row: self._text_show_in_scene(r))
         try:
             edited = self._text_is_edited(self._text_rows[int(row)])
         except (ValueError, IndexError):
@@ -10384,6 +10676,32 @@ class MainWindow:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _text_show_in_scene(self, iid=None):
+        """Peter: "Could you jump from the text tab into the scene?"
+
+        Open the Scenes window on the scene that draws the selected string,
+        with the line itself picked out in the contents list — the scene is
+        already the row's own ``path``, so this is the same lookup the Scene
+        column shows, not a new search."""
+        if iid is None:
+            sel = self._text_tree.selection()
+            iid = sel[0] if sel else self._text_current_iid
+        try:
+            r = self._text_rows[int(iid)]
+        except (TypeError, ValueError, IndexError):
+            messagebox.showinfo(
+                "Scenes",
+                "Pick a line of text first — the Scenes window then opens on "
+                "the scene that draws it.")
+            return
+        scene_dir = (r["path"] or "").replace("\\", "/").rsplit("/", 1)[0]
+        if not scene_dir:
+            messagebox.showinfo(
+                "Scenes", "This string isn't recorded against a scene file.")
+            return
+        self._open_scene_browser(preselect_dir=scene_dir,
+                                 focus_text=r["original"])
 
     def _text_enable_edit(self, on):
         state = tk.NORMAL if on else tk.DISABLED

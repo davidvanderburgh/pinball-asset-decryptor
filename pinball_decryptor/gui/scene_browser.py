@@ -175,9 +175,11 @@ class SceneBrowserWindow:
     """The Scenes tool window.  One per app; ``open_scene_browser`` re-uses
     it."""
 
-    def __init__(self, app, assets_dir, preselect=None):
+    def __init__(self, app, assets_dir, preselect=None, focus_text=None):
         self.app = app
         self.assets_dir = assets_dir
+        self._suspend_search = False   # guards the search-var trace
+        self._focus_want = None        # (scene, line) to pick out on rebuild
         self._scenes = {}
         self._photo = None
         self._layouts = {}         # card path -> static layout (from extract)
@@ -194,7 +196,7 @@ class SceneBrowserWindow:
         self._rebuild = None       # {"cancel": bool} while a rebuild runs
         self._sans, _mono = platform_font()
         self._build()
-        self.reload(preselect)
+        self.reload(preselect, focus_text)
 
     def _theme(self):
         return THEMES.get(getattr(self.app, "_current_theme", "light"),
@@ -217,8 +219,10 @@ class SceneBrowserWindow:
             body,
             text="Every scene on the card, with the images, fonts and "
                  "on-screen text it is built from. Double-click an item to "
-                 "jump to it on the matching tab; right-click it to recolour "
-                 "a line of text or blank a font out of the picture.",
+                 "jump to it on the matching tab — this window steps behind "
+                 "the main one so you can see where you landed, and the "
+                 "Scenes… button brings it back. Right-click an item to "
+                 "recolour a line of text or blank a font out of the picture.",
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=980, justify=tk.LEFT)
         self._hint.pack(anchor=tk.W, pady=(0, 6))
@@ -232,7 +236,9 @@ class SceneBrowserWindow:
         srow.pack(fill=tk.X, pady=(0, 2))
         ttk.Label(srow, text="Search:").pack(side=tk.LEFT)
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", lambda *_a: self._refresh_list())
+        self._search_var.trace_add(
+            "write",
+            lambda *_a: None if self._suspend_search else self._refresh_list())
         ttk.Entry(srow, textvariable=self._search_var, width=18).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         lf = ttk.Frame(left)
@@ -406,7 +412,7 @@ class SceneBrowserWindow:
 
     # -- data ------------------------------------------------------------
 
-    def reload(self, preselect=None):
+    def reload(self, preselect=None, focus_text=None):
         try:
             self._scenes = collect_scenes(self.assets_dir)
         except Exception:
@@ -420,7 +426,7 @@ class SceneBrowserWindow:
                 text="No scene manifests found in this project folder. Run "
                      "Extract (with Images and Text enabled) on a Stern "
                      "Spike 2 card image first.")
-        self._refresh_list(preselect)
+        self._refresh_list(preselect, focus_text)
 
     def _sort_by(self, col):
         """Heading click: sort on *col*, or flip the direction if it is already
@@ -449,7 +455,23 @@ class SceneBrowserWindow:
             out.reverse()
         return out
 
-    def _refresh_list(self, preselect=None):
+    def _haystack(self, d):
+        """Everything the Search box matches a scene on."""
+        sc = self._scenes[d]
+        return (sc["label"] + " " + d + " "
+                + " ".join(n for n, _p in sc["fonts"].values()) + " "
+                + " ".join(sc["texts"])).lower()
+
+    def _quiet_search(self, value):
+        """Set the Search box without re-entering ``_refresh_list`` through
+        its own trace."""
+        self._suspend_search = True
+        try:
+            self._search_var.set(value)
+        finally:
+            self._suspend_search = False
+
+    def _refresh_list(self, preselect=None, focus_text=None):
         tree = self._tree
         tree.delete(*tree.get_children())
         arrow = " ▾" if self._sort_rev else " ▴"
@@ -457,12 +479,16 @@ class SceneBrowserWindow:
             tree.heading(col,
                          text=title + (arrow if col == self._sort_col else ""))
         q = (self._search_var.get() or "").strip().lower()
+        # A jump in from another tab beats a search left in this window: with
+        # the filter still on, the scene asked for isn't in the list at all
+        # and the fallback below would quietly land on a different one.
+        if q and preselect in self._scenes and q not in self._haystack(
+                preselect):
+            self._quiet_search("")
+            q = ""
         for d in self._sorted_dirs():
             sc = self._scenes[d]
-            hay = (sc["label"] + " " + d + " "
-                   + " ".join(n for n, _p in sc["fonts"].values()) + " "
-                   + " ".join(sc["texts"])).lower()
-            if q and q not in hay:
+            if q and q not in self._haystack(d):
                 continue
             tree.insert("", tk.END, iid=d, text=sc["label"],
                         values=(len(sc["images"]), len(sc["fonts"]),
@@ -470,10 +496,32 @@ class SceneBrowserWindow:
         kids = tree.get_children()
         want = preselect if preselect in (kids or ()) else (
             kids[0] if kids else None)
+        # Remembered rather than selected here: ``selection_set`` below
+        # delivers <<TreeviewSelect>> on the NEXT event-loop turn, so the
+        # contents pane is rebuilt once more after this function returns and
+        # anything picked out now would be wiped.  ``_on_select`` applies it
+        # every time it builds THAT scene's contents, and drops it as soon as
+        # another scene is selected.
+        self._focus_want = (want, focus_text) if (want and focus_text) else None
         if want:
             tree.selection_set(want)
             tree.see(want)
         self._on_select()
+
+    def _focus_text_row(self, text):
+        """Pick out one display string in the contents list — the landing
+        spot for "Show in Scenes…" on the Replace Text tab.  The Text group
+        is collapsed on a scene with many lines, so open it first."""
+        det = self._detail
+        for grp in det.get_children():
+            for kid in det.get_children(grp):
+                if kid.startswith("txt::") and det.item(kid, "text") == text:
+                    det.item(grp, open=True)
+                    det.selection_set(kid)
+                    det.see(kid)
+                    self._on_detail()
+                    return True
+        return False
 
     def _on_select(self):
         det = self._detail
@@ -532,6 +580,12 @@ class SceneBrowserWindow:
             det.insert(n_v, tk.END, iid="vid::" + rel,
                        text=os.path.basename(rel),
                        values=("double-click: show on Video tab",))
+        if self._focus_want:
+            scene, line = self._focus_want
+            if scene == sel[0]:
+                self._focus_text_row(line)
+            else:
+                self._focus_want = None     # the user moved on
         self._render_preview(sel[0])
 
     # -- preview ---------------------------------------------------------
@@ -1099,7 +1153,7 @@ class SceneBrowserWindow:
             self._jump(sel[0])
 
 
-def open_scene_browser(app, assets_dir, preselect=None):
+def open_scene_browser(app, assets_dir, preselect=None, focus_text=None):
     """Open (or re-use and refocus) the app's Scenes window."""
     win = getattr(app, "_scene_browser", None)
     if win is not None:
@@ -1107,15 +1161,18 @@ def open_scene_browser(app, assets_dir, preselect=None):
             if win.win.winfo_exists():
                 if win.assets_dir != assets_dir:
                     win.assets_dir = assets_dir
-                    win.reload(preselect)
-                elif preselect:
-                    win.reload(preselect)
+                    win.reload(preselect, focus_text)
+                elif preselect or focus_text:
+                    win.reload(preselect, focus_text)
                 win.win.deiconify()
+                # lift() also undoes a _step_aside_for_jump() that pushed this
+                # window behind the main one.
                 win.win.lift()
                 win.win.focus_set()
                 return win
         except tk.TclError:
             pass
-    win = SceneBrowserWindow(app, assets_dir, preselect=preselect)
+    win = SceneBrowserWindow(app, assets_dir, preselect=preselect,
+                             focus_text=focus_text)
     app._scene_browser = win
     return win

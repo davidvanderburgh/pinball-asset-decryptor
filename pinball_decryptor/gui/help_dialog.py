@@ -159,7 +159,18 @@ HELP_CONTENT = {
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
          "A replacement that already matches the slot's format is copied "
-         "through verbatim — no quality loss."),
+         "through verbatim — no quality loss. On Stern Spike 2 an oversized "
+         "clip skips that budget entirely: the slot is grown on the card so "
+         "the clip keeps full quality."),
+        ("What the machine can actually play",
+         "A clip only goes onto a Spike 2 card untouched when it's a real "
+         "drop-in for the one it replaces — same container, H.264, 8-bit "
+         "4:2:0, and the slot's own resolution and frame rate. The machine's "
+         "decoder isn't a desktop player: give it an MKV, HEVC, a 10-bit "
+         "clip or the wrong size and it plays the sound over a black "
+         "picture. Anything that isn't a drop-in is converted first (still "
+         "at full size, no byte budget) and the build log says which clip "
+         "and why."),
         ("No conversion",
          "Where shown, the \"No conversion\" option forces a verbatim copy "
          "of a same-container file and skips all re-encoding."),
@@ -176,6 +187,10 @@ HELP_CONTENT = {
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
+        ("Seeing where a clip plays",
+         "Right-click a slot and pick \"Show scene contents…\" to open the "
+         "Scenes window on the scene that plays it, with the images, fonts "
+         "and text it shares the screen with."),
     ],
     "Replace Images": [
         ("Scan and assign",
@@ -307,6 +322,11 @@ HELP_CONTENT = {
          "\"Apply to every scene with the same original text\" repeats the "
          "edit everywhere that exact original string occurs (many strings "
          "repeat once per scene/keyframe)."),
+        ("Seeing the line in its scene",
+         "\"Show in Scenes…\" (also on the right-click menu) opens the "
+         "Scenes window on the scene that draws the selected line, with the "
+         "line itself picked out — so you can see the font, the colour and "
+         "the art it sits on before changing the words."),
     ],
     "Write": [
         ("What a build does",

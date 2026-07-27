@@ -120,7 +120,7 @@ class VideoInfo:
     def __init__(self, path, vcodec="", width=0, height=0, fps=0.0,
                  duration=0.0, has_audio=False, has_alpha=False,
                  pix_fmt="", container="", nframes=0,
-                 audio_rate=0, audio_channels=0):
+                 audio_rate=0, audio_channels=0, profile="", level=0):
         self.path = path
         self.vcodec = vcodec          # "h264", "vp9", "theora", "prores", …
         self.width = width
@@ -128,6 +128,8 @@ class VideoInfo:
         self.fps = fps                # frames per second (0.0 if unknown)
         self.duration = duration      # seconds
         self.has_audio = has_audio
+        self.profile = profile        # "Main" / "High" / "Constrained Baseline"
+        self.level = level            # H.264 level_idc x10 (31 == level 3.1)
         self.audio_rate = audio_rate          # Hz (0 = unknown)
         self.audio_channels = audio_channels  # 1 mono / 2 stereo (0 = unknown)
         self.has_alpha = has_alpha    # True for ProRes 4444 / VP9-alpha / …
@@ -225,6 +227,11 @@ def detect_video_info(path):
     except (ValueError, TypeError):
         dur = 0.0
 
+    try:
+        level = int(vstream.get("level", 0) or 0)
+    except (TypeError, ValueError):
+        level = 0
+
     return VideoInfo(
         path=path,
         vcodec=vstream.get("codec_name", "") or "",
@@ -232,6 +239,8 @@ def detect_video_info(path):
         height=int(vstream.get("height", 0) or 0),
         fps=fps,
         duration=dur,
+        profile=vstream.get("profile", "") or "",
+        level=level if level > 0 else 0,
         has_audio=has_audio,
         audio_rate=int((astream or {}).get("sample_rate", 0) or 0),
         audio_channels=int((astream or {}).get("channels", 0) or 0),
@@ -263,6 +272,12 @@ def parse_video_banner(text, path):
     # second is the pix_fmt ("yuv420p(tv, bt709, progressive)").
     fields = line.split(",")
     vcodec = fields[0].split()[0].strip() if fields[0].split() else ""
+    # "h264 (Constrained Baseline) (avc1 / 0x31637661)" -> the FIRST
+    # parenthesised group is the profile; the second is the container fourcc.
+    pm = re.match(r"\s*[A-Za-z0-9_]+\s*\(([^)]+)\)", fields[0])
+    profile = pm.group(1).strip() if pm else ""
+    if profile.lower().startswith("0x") or "/" in profile:
+        profile = ""              # that was the fourcc group, not a profile
     pix_fmt = ""
     if len(fields) > 1:
         pm = re.match(r"\s*([A-Za-z0-9]+)", fields[1])
@@ -277,6 +292,7 @@ def parse_video_banner(text, path):
         height=int(sm.group(2)) if sm else 0,
         fps=float(fm.group(1)) if fm else 0.0,
         duration=parse_banner_duration(text),
+        profile=profile,
         has_audio=": Audio:" in (text or ""),
         audio_rate=_banner_audio_rate(text),
         audio_channels=_banner_audio_channels(text),
@@ -312,6 +328,30 @@ def _banner_audio_channels(text):
     if "5.1" in line:
         return 6
     return 0
+
+
+def isobmff_brand(path):
+    """The ISO-BMFF major brand of *path* (``b"isom"``, ``b"qt  "``, …), or
+    ``None`` when the file isn't an MP4/QuickTime container at all.
+
+    A 12-byte read, no ffmpeg — so a plugin can tell "this really is the same
+    kind of container as the asset it's replacing" even on a machine with no
+    ffmpeg installed.  Matches the ``ftyp`` sniff Extract uses to find the
+    clips in the first place.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+    except OSError:
+        return None
+    if len(head) < 12 or head[4:8] != b"ftyp":
+        return None
+    return head[8:12]
+
+
+# 8-bit 4:2:0 — the only pixel format an embedded H.264 decoder is guaranteed
+# to handle (yuvj420p is the same layout with full-range flags).
+SAFE_PIX_FMTS = {"yuv420p", "yuvj420p", ""}
 
 
 def probe_video_duration(path):
@@ -477,6 +517,39 @@ def _video_codec_args(ext, alpha):
     return (None, None)
 
 
+# ffprobe profile name -> the x264 ``-profile:v`` value that reproduces it.
+# Anything not listed (High 10, High 4:2:2, …) has no 8-bit 4:2:0 equivalent,
+# so we leave x264 on its own default rather than pinning something wrong.
+_X264_PROFILES = {
+    "baseline": "baseline",
+    "constrained baseline": "baseline",
+    "main": "main",
+    "high": "high",
+}
+
+
+def _h264_profile_args(info, scaled_to_slot):
+    """``-profile:v`` / ``-level`` flags reproducing *info*'s H.264 profile.
+
+    The clip already on the card is proof of what the machine's decoder
+    accepts, so an H.264 replacement is encoded to the *same* profile rather
+    than to libx264's default (High).  Embedded players — Spike 2's i.MX6
+    among them — commonly decode a lower profile only, and a stream above it
+    demuxes fine (the sound plays) while the picture stays black.  The level
+    is pinned only when the output keeps the slot's exact dimensions, since a
+    level is a statement about resolution/bitrate limits.
+    """
+    if not info or (info.vcodec or "").lower() != "h264":
+        return []
+    prof = _X264_PROFILES.get((info.profile or "").strip().lower())
+    if not prof:
+        return []
+    args = ["-profile:v", prof]
+    if scaled_to_slot and info.level and 9 < info.level < 100:
+        args += ["-level", "%.1f" % (info.level / 10.0)]
+    return args
+
+
 def _encode_timeout(duration):
     """Wall-clock cap in seconds for one ffmpeg encode of a *duration*-second
     clip.
@@ -591,6 +664,8 @@ def transcode_video_to(src_path, dst_path, original_info,
 
     actions = []
     vf = []
+    scaled_to_slot = bool(original_info and original_info.width > 0
+                          and original_info.height > 0)
     if original_info and original_info.width > 0 and original_info.height > 0:
         # Scale to the slot's exact dimensions (games expect a fixed canvas);
         # pad after a decrease-fit so odd aspect ratios letterbox instead of
@@ -629,6 +704,8 @@ def transcode_video_to(src_path, dst_path, original_info,
     if original_info and original_info.fps > 0:
         cmd += ["-r", f"{original_info.fps:.4f}"]
     cmd += vargs
+    if "libx264" in vargs:
+        cmd += _h264_profile_args(original_info, scaled_to_slot)
     if "libvpx-vp9" in vargs:
         # Pin constant-quality mode: with no explicit rate control the
         # libvpx-vp9 default varies by ffmpeg build (older ones target
@@ -709,8 +786,11 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
             cmd += ["-vf", ",".join(vf)]
         if info and info.fps > 0:
             cmd += ["-r", f"{info.fps:.4f}"]
-        cmd += vargs + ["-b:v", str(vbps), "-maxrate", str(vbps),
-                        "-bufsize", str(vbps * 2)]
+        cmd += vargs
+        if "libx264" in vargs:
+            cmd += _h264_profile_args(info, scaled_to_slot=bool(vf))
+        cmd += ["-b:v", str(vbps), "-maxrate", str(vbps),
+                "-bufsize", str(vbps * 2)]
         if abps:
             cmd += aargs + ["-b:a", str(abps)]
         else:

@@ -3795,3 +3795,234 @@ def test_video_convert_column_reports_as_is_vs_reencode(app, tmp_path):
     # Unresolved rows read "…"; unassigned rows stay blank.
     assert w._video_conv_cached("video/a.mov", str(rep)) == "…"
     assert w._video_conv_cached("video/a.mov", None) == ""
+
+
+def _poster_pane(app):
+    """A video preview pane parented on the live window, with a stub renderer
+    so no ffmpeg runs — tests drive ``_show_poster`` directly."""
+    import tkinter as tk
+    from pinball_decryptor.gui import main_window as mw
+    pane = mw._VideoPreviewPane(app.window, tk.Frame(app.window._tk_root()),
+                                "Original")
+    pane.path = "clip.mp4"
+    pane.dur = 10.0
+    return pane
+
+
+def _png(color):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 18), color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_video_poster_keeps_looking_when_the_frame_is_black(app):
+    """A black still and a broken preview look identical, which is exactly
+    what a field report couldn't tell apart.  Sample on past a black frame,
+    and when the clip really is black everywhere, say so instead of leaving a
+    bare black rectangle."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    asked = []
+    pane._render_poster = lambda pos, fallbacks=None: asked.append(pos)
+
+    # Black frame + somewhere else to look -> try the next spot, silently.
+    pane._show_poster(_png((0, 0, 0)), pane._render_id, (2.5, 7.5))
+    assert asked == [2.5]
+    assert pane.canvas.find_withtag("note") == ()
+
+    # Black everywhere we looked -> a note, not an empty pane.
+    pane._show_poster(_png((0, 0, 0)), pane._render_id, ())
+    assert pane.canvas.find_withtag("note")
+
+    # A frame with picture in it just draws, no note.
+    pane._show_poster(_png((10, 90, 200)), pane._render_id, (2.5,))
+    assert pane.canvas.find_withtag("frame")
+    assert pane.canvas.find_withtag("note") == ()
+
+
+def test_video_poster_explains_a_frame_it_cannot_show(app):
+    """Neither a dead decode nor a Pillow/Tk failure may fall through to a
+    silent black canvas — each has to name itself on the pane."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+
+    pane._show_poster(None, pane._render_id)          # ffmpeg gave us nothing
+    assert pane.canvas.find_withtag("note")
+
+    pane._show_poster(b"not a png at all", pane._render_id)
+    notes = pane.canvas.find_withtag("note")
+    assert notes
+    assert "Couldn't show this frame" in pane.canvas.itemcget(notes[0], "text")
+
+
+# ---------------------------------------------------------------------------
+# Peter round 6 — jumping between the scene, the text and the tabs
+# ---------------------------------------------------------------------------
+
+def _stern_text_extract(tmp_path):
+    """A synthetic Stern extract with two scenes' worth of display text."""
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.core import text_manifest
+    _make_extract(tmp_path)
+    text_manifest.save(str(tmp_path), [
+        {"path": "/g/scene1/scene.radium", "original": "HELLO",
+         "replacement": ""},
+        {"path": "/g/scene2/scene.radium", "original": "BALL ONE",
+         "replacement": ""}])
+    return str(tmp_path)
+
+
+def _load_text_rows(w, assets):
+    from pinball_decryptor.core import text_manifest
+    w._set_tab_scanning("text", True)
+    w._populate_text_after_scan(text_manifest.load(assets), None,
+                                w._text_scan_id, assets)
+
+
+def test_a_jump_steps_the_tool_windows_out_of_the_way(app, tmp_path):
+    """Peter: "when you have the font / scene folder open and jump to it with
+    a double click, it will visit the page in the background, it was hard for
+    me to find out that it did jump there."
+
+    Both tool windows are ``transient`` children of the main window, which on
+    Windows pins them ABOVE it — raising the main window cannot uncover the
+    tab.  Lowering them BELOW the root can and does, so that is what a jump
+    has to do (and it must be below the root specifically, not just lowered
+    among its siblings)."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+
+    assets = _stern_text_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(assets)
+    w._open_font_studio()
+    w._open_scene_browser()
+    fs, sb = w._font_studio, w._scene_browser
+
+    lowered = []
+    sb.win.lower = lambda below=None: lowered.append(("scenes", below))
+    fs.win.lower = lambda below=None: lowered.append(("fonts", below))
+
+    w.reveal_image_slot("images/scene_textures/radimg_TestA_8x8_00000001.png")
+    assert sorted(n for n, _b in lowered) == ["fonts", "scenes"]
+    assert all(b is w._tk_root() for _n, b in lowered)
+    assert w._notebook.select() == str(w._tab_image)
+
+    # Every jump target does it, not just the Images tab.
+    lowered.clear()
+    _load_text_rows(w, assets)
+    w.reveal_text_string("HELLO")
+    assert sorted(n for n, _b in lowered) == ["fonts", "scenes"]
+    assert w._notebook.select() == str(w._tab_text)
+    # ...and lands ON the row: the search filter alone left nothing selected,
+    # which reads as "nothing happened".
+    assert w._text_tree.selection() == ("0",)
+    assert w._text_orig_var.get() == "HELLO"
+
+    lowered.clear()
+    w.reveal_video_slot("video/nope.mp4")
+    assert sorted(n for n, _b in lowered) == ["fonts", "scenes"]
+
+    fs._close()
+    sb._close()
+    app.root.update()
+
+
+def test_text_tab_jumps_into_the_scene(app, tmp_path):
+    """Peter: "Could you jump from the text tab into the scene?"  Show in
+    Scenes… opens the Scenes window on the scene that draws the selected
+    string, with the line itself picked out."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+
+    assets = _stern_text_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(assets)
+    _load_text_rows(w, assets)
+
+    # Select "BALL ONE" (scene2) — the second manifest row.
+    row = next(str(i) for i, r in enumerate(w._text_rows)
+               if r["original"] == "BALL ONE")
+    w._text_tree.selection_set(row)
+    w._text_on_tree_select()
+    w._text_show_in_scene()
+
+    sb = w._scene_browser
+    assert sb.win.winfo_exists()
+    # <<TreeviewSelect>> is delivered a turn later and rebuilds the contents
+    # pane, so pump the loop: a row picked out before that is wiped, which is
+    # exactly what the real window did.
+    app.root.update()
+    assert sb._tree.selection() == ("/g/scene2",)
+    sel = sb._detail.selection()
+    assert sel and sel[0].startswith("txt::")
+    assert sb._detail.item(sel[0], "text") == "BALL ONE"
+
+    # A search left in the Scenes window must not swallow the jump: with the
+    # filter still on, the scene asked for isn't in the list at all and the
+    # fallback would quietly land on a different one.
+    sb._search_var.set("scene1")
+    assert sb._tree.get_children() == ("/g/scene1",)
+    row1 = next(str(i) for i, r in enumerate(w._text_rows)
+                if r["original"] == "HELLO")
+    w._text_tree.selection_set(row1)
+    w._text_on_tree_select()
+    sb._search_var.set("scene2")            # now hiding scene1 instead
+    w._text_show_in_scene()
+    app.root.update()
+    assert sb._search_var.get() == ""
+    assert sb._tree.selection() == ("/g/scene1",)
+    assert sb._detail.item(sb._detail.selection()[0], "text") == "HELLO"
+
+    # Moving to another scene drops the remembered line rather than dragging
+    # the selection along.
+    sb._tree.selection_set("/g/scene2")
+    app.root.update()
+    assert sb._focus_want is None
+
+    sb._close()
+    app.root.update()
+
+
+def test_scene_jumps_from_the_font_and_video_lists(app, tmp_path):
+    """The other two ways into a scene: right-clicking a scene in the Fonts
+    window's usage list, and a video row on the Video tab.  The Fonts one is
+    right-click on purpose — that listbox's selection IS the font's scene
+    scope, and a jump must not rewrite where an import lands."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+
+    assets = _stern_text_extract(tmp_path)
+    vdir = tmp_path / "video"
+    vdir.mkdir()
+    (vdir / "manifest.txt").write_text(
+        "# output\tcard path\tbytes\n"
+        "Intro.mp4\t/g/scene2/scene.assets/3.asset/0.asset\t32\n",
+        encoding="utf-8")
+
+    w = app.window
+    w.write_assets_var.set(assets)
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+    assert fs._scene_paths                      # scenes using the font
+    before = list(fs._scenes_list.curselection())
+    fs._show_scene(fs._scene_paths[0])
+    sb = w._scene_browser
+    assert sb._tree.selection() == (
+        fs._scene_paths[0].rsplit("/", 1)[0],)
+    assert list(fs._scenes_list.curselection()) == before   # scope untouched
+
+    # Video row -> the scene that plays the clip.
+    w._open_scene_browser(preselect_video="video/Intro.mp4")
+    assert sb._tree.selection() == ("/g/scene2",)
+
+    fs._close()
+    sb._close()
+    app.root.update()

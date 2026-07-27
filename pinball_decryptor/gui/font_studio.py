@@ -150,13 +150,17 @@ class FontStudioWindow:
         self._scenes_list.pack(fill=tk.X)
         self._scenes_list.bind("<<ListboxSelect>>",
                                lambda _e: self._on_scope_select())
+        for seq in ("<Button-3>", "<Button-2>"):     # Windows/Linux, macOS
+            self._scenes_list.bind(seq, self._scene_popup)
         _Tooltip(self._scenes_list,
                  "The scene files whose atlases hold this font — the same "
                  "8-character scene shorthand the Images tab's scene groups "
                  "use.\n\nEvery scene carries its own copy, so \"only the "
                  "scenes I select\" leaves the rest on the stock font. One "
                  "font can still only look ONE way: the selection decides "
-                 "where your import lands, not a different import per scene.",
+                 "where your import lands, not a different import per scene."
+                 "\n\nRight-click a scene to go and look at it in the Scenes "
+                 "window (clicking it here only changes the scope).",
                  lambda: getattr(self.app, "_current_theme", "light"))
         self._scope_lbl = ttk.Label(left, text="", font=(self._sans, 8),
                                     foreground=th["gray"], wraplength=400,
@@ -539,6 +543,42 @@ class FontStudioWindow:
     def _current_font(self):
         sel = self._tree.selection()
         return self._by_key.get(sel[0]) if sel else None
+
+    # -- go and look at a scene this font is in ---------------------------
+
+    def _scene_popup(self, event):
+        """Right-click a scene in the list: open it in the Scenes window.
+
+        Right-click and not double-click on purpose — the selection in this
+        listbox IS the font's scene scope, and a jump must not quietly
+        rewrite which scenes an import lands in."""
+        if not self._scene_paths:
+            return
+        i = self._scenes_list.nearest(event.y)
+        if not 0 <= i < len(self._scene_paths):
+            return
+        card = self._scene_paths[i]
+        th = self._theme()
+        menu = tk.Menu(self._scenes_list, tearoff=0)
+        try:
+            menu.configure(background=th.get("field_bg"),
+                           foreground=th.get("fg"),
+                           activebackground=th.get("select_bg"),
+                           activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        menu.add_command(label="Show \"%s\" in Scenes…" % scene_label(card),
+                         command=lambda c=card: self._show_scene(c))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _show_scene(self, card):
+        from .scene_browser import open_scene_browser
+        open_scene_browser(
+            self.app, self.assets_dir,
+            preselect=card.replace("\\", "/").rsplit("/", 1)[0])
 
     # -- preview ---------------------------------------------------------
 

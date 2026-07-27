@@ -1985,6 +1985,75 @@ def _fit_video_payload(staged_path, target, work_dir, log):
     return _pad_isobmff(shrunk, target)
 
 
+def _intact_copy_source(src, staged, fname, log):
+    """Pick which file may be copied onto the card verbatim for *fname*.
+
+    The intact path exists to keep a full-quality replacement off the byte-fit
+    re-encoder, and it does that by copying the user's *assigned* file — but
+    that file is whatever they picked in the file dialog, in whatever format
+    their encoder produced.  The machine's decoder is an i.MX6 VPU, not a
+    desktop player: hand it a Matroska container, HEVC, a 10-bit / 4:2:2
+    stream, or a resolution the scene never sized a surface for, and the
+    demuxer still finds the sound (which plays) while the picture stays
+    **black**.  That is not a quality trade-off, it's a broken asset, and the
+    user doesn't find out until the game is running.
+
+    So a source only goes on the card untouched when it really is a drop-in
+    for the clip already there: same container family, H.264, 8-bit 4:2:0,
+    and the slot's own resolution and frame rate.  *staged* is the yardstick
+    for the last two — Replace-Video already format-matched it to this exact
+    slot, so its geometry *is* the slot's (and when the user's file needed no
+    conversion, or they ticked "no conversion", *staged* is a byte-copy of
+    *src* and every check passes trivially).
+
+    Anything failing a check falls back to *staged*, which still grows to full
+    size on the card; the only thing lost is the re-encode the user's own file
+    would have avoided.  Returns the path to copy (``src`` or ``staged``).
+    """
+    from ...core import video as _video
+
+    def _reject(why):
+        log("Video %s: %s, so it can't go on the card as-is — the machine "
+            "would play the sound over a black picture. Writing the "
+            "format-matched copy instead (full size, no quality budget)."
+            % (fname, why), "warning")
+        return staged
+
+    # Container: the extract extension records the brand the card itself used
+    # (".mov" for QuickTime-branded clips, ".mp4" for the rest).
+    brand = _video.isobmff_brand(src)
+    if brand is None:
+        return _reject("%s isn't an MP4/QuickTime container like the clip it "
+                       "replaces" % os.path.basename(src))
+    want_qt = os.path.splitext(fname)[1].lower() == ".mov"
+    if (brand == b"qt  ") != want_qt:
+        return _reject("%s is a %s file but this slot holds %s"
+                       % (os.path.basename(src),
+                          "QuickTime" if brand == b"qt  " else "MP4",
+                          "QuickTime" if want_qt else "MP4"))
+
+    info = _video.detect_video_info(src)
+    if info is None:
+        return src            # no ffprobe/ffmpeg — the container check stands
+    codec = (info.vcodec or "").lower()
+    if codec and codec != "h264":
+        return _reject("it's %s and Spike 2 plays H.264" % codec.upper())
+    if (info.pix_fmt or "") not in _video.SAFE_PIX_FMTS:
+        return _reject("it's %s and the machine's decoder handles only 8-bit "
+                       "4:2:0" % info.pix_fmt)
+
+    slot = _video.detect_video_info(staged)
+    if slot is None or not slot.width or not slot.height:
+        return src            # nothing to compare against; the above stands
+    if (info.width, info.height) != (slot.width, slot.height):
+        return _reject("it's %dx%d and this slot's clip is %dx%d"
+                       % (info.width, info.height, slot.width, slot.height))
+    if slot.fps > 0 and info.fps > 0 and abs(info.fps - slot.fps) > 0.5:
+        return _reject("it runs at %.3g fps and this slot's clip is %.3g fps"
+                       % (info.fps, slot.fps))
+    return src
+
+
 def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
                            originals=None, dest_is_device=False):
     """Resolve each changed video to its card inode and prepare it for Write.
@@ -2042,11 +2111,17 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
     patches, grow_jobs = [], []
     for fname, card_path, node, src, staged in intact:
         if can_grow:
-            grow_jobs.append((card_path.lstrip("/"), src))
-            sz = os.path.getsize(src)
-            log("Video %s: replacing the slot with the intact %d B original "
-                "(slot was %d B) — full quality, no re-encode."
-                % (fname, sz, node["size"]), "info")
+            source = _intact_copy_source(src, staged, fname, log)
+            grow_jobs.append((card_path.lstrip("/"), source))
+            sz = os.path.getsize(source)
+            if source == src:
+                log("Video %s: replacing the slot with the intact %d B original "
+                    "(slot was %d B) — full quality, no re-encode."
+                    % (fname, sz, node["size"]), "info")
+            else:
+                log("Video %s: writing the format-matched %d B copy at full "
+                    "size (slot was %d B) — no byte-budget crush."
+                    % (fname, sz, node["size"]), "info")
         else:
             fit.append((fname, card_path, node, staged))
 

@@ -357,3 +357,54 @@ def test_stage_reports_failure_for_missing_replacement(tmp_path):
         slots, {"a.mp4": str(tmp_path / "nope.mp4")})
     assert staged == 0
     assert failures and failures[0][0] == "a.mp4"
+
+
+# ---- container sniffing + H.264 profile matching --------------------------
+
+def test_isobmff_brand_reads_the_major_brand(tmp_path):
+    from pinball_decryptor.core.video import isobmff_brand
+    mp4 = tmp_path / "a.mp4"
+    mp4.write_bytes((20).to_bytes(4, "big") + b"ftypisom" + b"\x00" * 8)
+    mov = tmp_path / "a.mov"
+    mov.write_bytes((20).to_bytes(4, "big") + b"ftypqt  " + b"\x00" * 8)
+    mkv = tmp_path / "a.mkv"
+    mkv.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x00" * 16)
+
+    assert isobmff_brand(str(mp4)) == b"isom"
+    assert isobmff_brand(str(mov)) == b"qt  "
+    assert isobmff_brand(str(mkv)) is None          # not ISO-BMFF at all
+    assert isobmff_brand(str(tmp_path / "gone.mp4")) is None
+
+
+def test_h264_profile_args_match_the_slots_own_stream():
+    from pinball_decryptor.core.video import VideoInfo, _h264_profile_args
+
+    def info(profile, level=31, vcodec="h264"):
+        return VideoInfo(path="x", vcodec=vcodec, width=1280, height=720,
+                         profile=profile, level=level)
+
+    # The stock clip proves what the machine's decoder accepts, so match it.
+    assert _h264_profile_args(info("Constrained Baseline"), True) == \
+        ["-profile:v", "baseline", "-level", "3.1"]
+    assert _h264_profile_args(info("Main"), True) == \
+        ["-profile:v", "main", "-level", "3.1"]
+    # Level is a statement about resolution, so it's only pinned when the
+    # output keeps the slot's dimensions.
+    assert _h264_profile_args(info("High"), False) == ["-profile:v", "high"]
+    # Nothing sensible to copy -> leave x264 on its own default.
+    assert _h264_profile_args(info("High 4:2:2"), True) == []
+    assert _h264_profile_args(info("Main", vcodec="vp9"), True) == []
+    assert _h264_profile_args(None, True) == []
+
+
+def test_banner_parse_picks_up_the_profile():
+    from pinball_decryptor.core.video import parse_video_banner
+    banner = (
+        "  Duration: 00:00:04.00, start: 0.000000, bitrate: 500 kb/s\n"
+        "  Stream #0:0[0x1](und): Video: h264 (Constrained Baseline) "
+        "(avc1 / 0x31637661), yuv420p(tv, bt709), 1280x720 [SAR 1:1 DAR 16:9],"
+        " 480 kb/s, 30 fps, 30 tbr, 15360 tbn\n")
+    info = parse_video_banner(banner, "x.mp4")
+    assert info.vcodec == "h264"
+    assert info.profile == "Constrained Baseline"
+    assert (info.width, info.height) == (1280, 720)

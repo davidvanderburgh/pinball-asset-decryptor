@@ -540,7 +540,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    and gives you the container, codec, H.264 profile and level, frame
    size, frame rate and whether it carries audio, plus a copyable
    ffmpeg command that pins only the flags that have to match — so
-   your own bitrate and key-frame settings stay yours.
+   your own bitrate and key-frame settings stay yours. Get everything
+   but the container right and nothing is re-encoded: a clip that is
+   already this slot's video in the wrong wrapper is repackaged with a
+   stream copy, so every frame survives untouched. The **Convert**
+   column tells you which of the three you are getting — `As-is`,
+   `Repackage` or `Re-encode` — before you build.
 7. **Write tab** — the original image and project folder carry over
    from the Extract tab (shown read-only), and a single **Build
    Image** line shows the exact file the build will produce; click

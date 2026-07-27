@@ -354,6 +354,21 @@ def isobmff_brand(path):
 SAFE_PIX_FMTS = {"yuv420p", "yuvj420p", ""}
 
 
+def same_pix_fmt(a, b):
+    """Whether two pixel formats are interchangeable to a hardware decoder.
+
+    The 8-bit 4:2:0 family is one format as far as the machine is concerned
+    (``yuv420p`` and ``yuvj420p`` are the same layout with different range
+    flags, and ``""`` is "we couldn't read it"); anything else — 10-bit, 4:2:2,
+    4:4:4 — has to match the slot's own clip exactly, because that clip is the
+    only proof of what the decoder accepts.
+    """
+    a, b = (a or ""), (b or "")
+    if a in SAFE_PIX_FMTS and b in SAFE_PIX_FMTS:
+        return True
+    return a == b
+
+
 def probe_video_duration(path):
     """Best-effort total duration in seconds (via ffprobe), else 0.0."""
     return probe_duration(path)
@@ -526,6 +541,23 @@ _X264_PROFILES = {
     "main": "main",
     "high": "high",
 }
+
+
+# The same profiles ordered lowest-first.  A decoder that plays a stream at
+# one profile plays everything below it, so the clip already in the slot puts
+# a CEILING on what a replacement may use: above it the stream still demuxes
+# (the sound plays) and the picture stays black.
+_PROFILE_RANK = {"baseline": 0, "constrained baseline": 0, "main": 1,
+                 "high": 2}
+
+
+def profile_rank(info):
+    """Where *info*'s H.264 profile sits in :data:`_PROFILE_RANK`, or ``None``
+    when it isn't H.264 or isn't a profile we can order (High 10, 4:2:2, …).
+    ``None`` means "no opinion" — callers compare only when both sides rank."""
+    if info is None or (info.vcodec or "").lower() != "h264":
+        return None
+    return _PROFILE_RANK.get((info.profile or "").strip().lower())
 
 
 def _h264_profile_args(info, scaled_to_slot):
@@ -808,6 +840,50 @@ def transcode_video_to(src_path, dst_path, original_info,
     if rc == 0 and os.path.isfile(dst_path) \
             and os.path.getsize(dst_path) > 0:
         return True, ", ".join(a for a in actions if a)
+    err = stderr.decode("utf-8", "replace").strip().splitlines()
+    return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
+
+
+def remux_video_to(src_path, dst_path, original_info, cancel_cb=None):
+    """Repackage *src_path* into *dst_path*'s container without re-encoding it.
+
+    For the replacement that already IS the clip the slot needs and is only
+    wrapped wrong: aly encoded his to the slot's codec, resolution and frame
+    rate but wrote it as ``.mp4`` where the card's clip is QuickTime, and the
+    build then refused it as a drop-in (right — the wrapper really is part of
+    what the machine reads).  Re-encoding to fix a container costs a whole
+    generation of quality for nothing; a stream copy rewrites only the
+    container boxes and leaves every coded frame bit-for-bit identical.
+
+    The slot's AUDIO shape still applies (see :func:`transcode_video_to`): a
+    silent slot gets a silent replacement, since the machine really does play
+    a soundtrack the clip brought with it.  Returns ``(ok, actions)``.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return False, "need ffmpeg to repackage video"
+    ext = os.path.splitext(dst_path)[1].lower()
+    cmd = [ffmpeg, "-y", "-i", src_path, "-c", "copy"]
+    actions = ["repackaged as %s (no re-encode)" % (ext or "the slot's format")]
+    if original_info is not None and not original_info.has_audio:
+        cmd += ["-an"]
+        actions.append("no audio (slot has none)")
+    cmd.append(dst_path)
+
+    limit = _encode_timeout(probe_duration(src_path))
+    try:
+        rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
+    except OSError as e:
+        return False, str(e)
+    if abort == "cancelled":
+        return False, "cancelled"
+    if abort == "stall":
+        return False, _stall_error()
+    if abort == "timeout":
+        return False, _timeout_error(limit)
+    if rc == 0 and os.path.isfile(dst_path) \
+            and os.path.getsize(dst_path) > 0:
+        return True, ", ".join(actions)
     err = stderr.decode("utf-8", "replace").strip().splitlines()
     return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
 

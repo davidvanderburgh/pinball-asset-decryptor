@@ -2002,8 +2002,17 @@ def _same_bytes(a, b):
         return False
 
 
-def _intact_copy_source(src, staged, fname, log):
-    """Pick which file may be copied onto the card verbatim for *fname*.
+def _size(path):
+    """File size in bytes, 0 when it can't be read (log text only)."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _intact_copy_source(src, staged, fname, slot_size, log):
+    """Pick which file may be copied onto the card verbatim for *fname*, and
+    log the one line that says which it was and why.
 
     The intact path exists to keep a full-quality replacement off the byte-fit
     re-encoder, and it does that by copying the user's *assigned* file — but
@@ -2016,18 +2025,28 @@ def _intact_copy_source(src, staged, fname, log):
     user doesn't find out until the game is running.
 
     So a source only goes on the card untouched when it really is a drop-in
-    for the clip already there: same container family, H.264, 8-bit 4:2:0,
-    and the slot's own resolution and frame rate.  *staged* is the yardstick
-    for the last two — Replace-Video already format-matched it to this exact
-    slot, so its geometry *is* the slot's (and when the user's file needed no
-    conversion, or they ticked "no conversion", *staged* is a byte-copy of
-    *src* and every check passes trivially).
+    for the clip already there: same container family, H.264, 8-bit 4:2:0, the
+    slot's own resolution and frame rate, and an H.264 profile no higher than
+    the slot's own (that clip is a decode CEILING — every re-encode is pinned
+    to it, so the intact path can't be the one place a higher one gets
+    through).  *staged* is the yardstick for the last three — Replace-Video
+    already format-matched it to this exact slot, so its geometry *is* the
+    slot's (and when the user's file needed no conversion, or they ticked "no
+    conversion", *staged* is a byte-copy of *src* and every check passes
+    trivially).
 
     Anything failing a check falls back to *staged*, which still grows to full
     size on the card; the only thing lost is the re-encode the user's own file
-    would have avoided.  Returns the path to copy (``src`` or ``staged``).
+    would have avoided (and when Replace-Video only had to repackage it, not
+    even that).  Returns the path to copy (``src`` or ``staged``).
     """
     from ...core import video as _video
+
+    def _accept():
+        log("Video %s: replacing the slot with the intact %d B original (slot "
+            "was %d B) — full quality, no re-encode."
+            % (fname, _size(src), slot_size), "info")
+        return src
 
     def _reject(why):
         # "No conversion" makes *staged* a byte-copy of *src*, so there is no
@@ -2036,19 +2055,24 @@ def _intact_copy_source(src, staged, fname, log):
         # there was simply untrue, and it was the only thing standing between
         # monkeybug and an attract video that played black on the machine with
         # nothing in the log to explain it (batch 23).  Same bytes = say so,
-        # as an error, and name the checkbox that decides it.
+        # as an error, and name what decides it.
         if _same_bytes(src, staged):
-            log("Video %s: %s. \"Use my files as-is\" told the app to copy it "
-                "on untouched, so that is what goes on the card and the "
-                "machine will play its sound over a black picture. Untick "
-                "\"Use my files as-is\" on the Video tab and Build again to "
-                "have it converted to a clip the machine can play."
+            log("Video %s: %s. Nothing converted it — either \"Use my files "
+                "as-is\" is ticked on the Video tab or ffmpeg isn't installed "
+                "— so your file goes on the card untouched and the machine "
+                "will play its sound over a black picture. Untick the box (or "
+                "install ffmpeg) and Build again to have it converted."
                 % (fname, why), "error")
             return staged
-        log("Video %s: %s, so it can't go on the card as-is — the machine "
-            "would play the sound over a black picture. Writing the "
-            "format-matched copy instead (full size, no quality budget)."
-            % (fname, why), "warning")
+        # Not a failure: the user left conversion on, so the format-matched
+        # copy is exactly what they asked for and it goes on at full size.
+        # This used to log a black-picture WARNING plus a second line saying
+        # the same thing, which read like something had gone wrong when the
+        # build was doing the right thing (aly).
+        log("Video %s: %s, so the app's format-matched %d B copy goes on the "
+            "card instead of your file (slot was %d B) — full size, no "
+            "byte-budget crush." % (fname, why, _size(staged), slot_size),
+            "info")
         return staged
 
     # Container: the extract extension records the brand the card itself used
@@ -2066,7 +2090,7 @@ def _intact_copy_source(src, staged, fname, log):
 
     info = _video.detect_video_info(src)
     if info is None:
-        return src            # no ffprobe/ffmpeg — the container check stands
+        return _accept()      # no ffprobe/ffmpeg — the container check stands
     codec = (info.vcodec or "").lower()
     if codec and codec != "h264":
         return _reject("it's %s and Spike 2 plays H.264" % codec.upper())
@@ -2076,14 +2100,22 @@ def _intact_copy_source(src, staged, fname, log):
 
     slot = _video.detect_video_info(staged)
     if slot is None or not slot.width or not slot.height:
-        return src            # nothing to compare against; the above stands
+        return _accept()      # nothing to compare against; the above stands
     if (info.width, info.height) != (slot.width, slot.height):
         return _reject("it's %dx%d and this slot's clip is %dx%d"
                        % (info.width, info.height, slot.width, slot.height))
     if slot.fps > 0 and info.fps > 0 and abs(info.fps - slot.fps) > 0.5:
         return _reject("it runs at %.3g fps and this slot's clip is %.3g fps"
                        % (info.fps, slot.fps))
-    return src
+    # Profile is a decode ceiling, not a preference: Replace-Video pins every
+    # re-encode to the slot's own profile for exactly this reason, so the
+    # intact path can't be the one place a higher one slips through.
+    rank, slot_rank = _video.profile_rank(info), _video.profile_rank(slot)
+    if rank is not None and slot_rank is not None and rank > slot_rank:
+        return _reject("it's H.264 %s profile and this slot's clip is %s — "
+                       "above what the slot proves the machine decodes"
+                       % (info.profile, slot.profile))
+    return _accept()
 
 
 def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
@@ -2143,17 +2175,9 @@ def _prepare_video_patches(reader, video_edits, work_dir, log, cancel,
     patches, grow_jobs = [], []
     for fname, card_path, node, src, staged in intact:
         if can_grow:
-            source = _intact_copy_source(src, staged, fname, log)
+            # Logs its own one-line verdict (which file, and why that one).
+            source = _intact_copy_source(src, staged, fname, node["size"], log)
             grow_jobs.append((card_path.lstrip("/"), source))
-            sz = os.path.getsize(source)
-            if source == src:
-                log("Video %s: replacing the slot with the intact %d B original "
-                    "(slot was %d B) — full quality, no re-encode."
-                    % (fname, sz, node["size"]), "info")
-            else:
-                log("Video %s: writing the format-matched %d B copy at full "
-                    "size (slot was %d B) — no byte-budget crush."
-                    % (fname, sz, node["size"]), "info")
         else:
             fit.append((fname, card_path, node, staged))
 

@@ -192,9 +192,9 @@ def test_prepare_video_patches_replaces_fit_size_original_intact(
 
 class _Info:
     def __init__(self, vcodec="h264", width=1280, height=720, fps=30.0,
-                 pix_fmt="yuv420p"):
+                 pix_fmt="yuv420p", profile="Main"):
         self.vcodec, self.width, self.height = vcodec, width, height
-        self.fps, self.pix_fmt = fps, pix_fmt
+        self.fps, self.pix_fmt, self.profile = fps, pix_fmt, profile
 
 
 def _probe_map(monkeypatch, mapping):
@@ -210,11 +210,19 @@ def _sources(tmp_path, qt=True):
     return src, staged
 
 
+def _decide(src, staged, fname, msgs=None):
+    """Run the gate and return the path it picked, collecting its log line."""
+    sink = msgs if msgs is not None else []
+    return engine._intact_copy_source(
+        str(src), str(staged), fname, 999, lambda m, lvl: sink.append((m, lvl)))
+
+
 def test_intact_copy_keeps_a_true_drop_in(tmp_path, monkeypatch):
     src, staged = _sources(tmp_path)
     _probe_map(monkeypatch, {"src.mov": _Info(), "a.mov": _Info()})
-    assert engine._intact_copy_source(
-        str(src), str(staged), "a.mov", lambda *a, **k: None) == str(src)
+    msgs = []
+    assert _decide(src, staged, "a.mov", msgs) == str(src)
+    assert msgs and msgs[0][1] == "info" and "intact" in msgs[0][0]
 
 
 def test_intact_copy_rejects_a_foreign_container(tmp_path, monkeypatch):
@@ -225,10 +233,11 @@ def test_intact_copy_rejects_a_foreign_container(tmp_path, monkeypatch):
     staged = tmp_path / "a.mov"
     staged.write_bytes(_isobmff(qt=True) + b"T" * 64)
     msgs = []
-    got = engine._intact_copy_source(str(src), str(staged), "a.mov",
-                                     lambda m, lvl: msgs.append((m, lvl)))
-    assert got == str(staged)
-    assert msgs and msgs[0][1] == "warning" and "black picture" in msgs[0][0]
+    assert _decide(src, staged, "a.mov", msgs) == str(staged)
+    # One line, and not an alarm: the converted copy going on IS the plan when
+    # the user left conversion on (aly read the old warning as a failure).
+    assert len(msgs) == 1 and msgs[0][1] == "info"
+    assert "format-matched" in msgs[0][0]
 
 
 def test_intact_copy_rejects_wrong_codec_depth_and_geometry(
@@ -238,11 +247,19 @@ def test_intact_copy_rejects_wrong_codec_depth_and_geometry(
     for bad in (_Info(vcodec="hevc"),
                 _Info(pix_fmt="yuv420p10le"),
                 _Info(width=1920, height=1080),
-                _Info(fps=60.0)):
+                _Info(fps=60.0),
+                _Info(profile="High")):      # slot's clip is Main
         _probe_map(monkeypatch, {"src.mov": bad, "a.mov": slot})
-        assert engine._intact_copy_source(
-            str(src), str(staged), "a.mov",
-            lambda *a, **k: None) == str(staged)
+        assert _decide(src, staged, "a.mov") == str(staged)
+
+
+def test_intact_copy_allows_a_profile_below_the_slots(tmp_path, monkeypatch):
+    # The slot's clip is the CEILING, not the target: Baseline decodes on a
+    # machine whose clip is Main, so it still goes on intact.
+    src, staged = _sources(tmp_path)
+    _probe_map(monkeypatch, {"src.mov": _Info(profile="Constrained Baseline"),
+                             "a.mov": _Info(profile="Main")})
+    assert _decide(src, staged, "a.mov") == str(src)
 
 
 def test_intact_copy_rejects_a_brand_the_slot_does_not_use(
@@ -250,8 +267,23 @@ def test_intact_copy_rejects_a_brand_the_slot_does_not_use(
     # Slot extension ".mp4" means the card's own clip was ISO-branded.
     src, staged = _sources(tmp_path, qt=True)      # user supplied QuickTime
     _probe_map(monkeypatch, {"src.mov": _Info(), "a.mov": _Info()})
-    assert engine._intact_copy_source(
-        str(src), str(staged), "a.mp4", lambda *a, **k: None) == str(staged)
+    assert _decide(src, staged, "a.mp4") == str(staged)
+
+
+def test_intact_copy_flags_an_unconverted_file_as_an_error(tmp_path,
+                                                           monkeypatch):
+    # Nothing converted it (as-is ticked, or no ffmpeg), so the staged bytes
+    # ARE the user's bytes: there's no format-matched copy to fall back to and
+    # the machine gets an unplayable clip — say so as an error (batch 23).
+    src = tmp_path / "src.mp4"
+    src.write_bytes(_isobmff(qt=False) + b"S" * 64)
+    staged = tmp_path / "a.mov"
+    staged.write_bytes(src.read_bytes())           # byte-for-byte copy
+    _probe_map(monkeypatch, {"src.mp4": _Info(), "a.mov": _Info()})
+    msgs = []
+    assert _decide(src, staged, "a.mov", msgs) == str(staged)
+    assert len(msgs) == 1 and msgs[0][1] == "error"
+    assert "black picture" in msgs[0][0]
 
 
 def test_prepare_video_patches_oversized_falls_back_to_fit_without_grow(

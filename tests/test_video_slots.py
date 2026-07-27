@@ -279,6 +279,107 @@ def test_stage_copies_through_when_already_matching(tmp_path):
         assert fh.read() == rep_bytes  # copied through, not re-encoded
 
 
+def _ftyp(brand):
+    """Minimal ISO-BMFF head carrying *brand* (enough for isobmff_brand)."""
+    return b"\x00\x00\x00\x14ftyp" + brand + b"\x00" * 8
+
+
+def _slot_with(tmp_path, name, brand, **info_kw):
+    """A VideoSlot over a stub file with *brand*, described by *info_kw*."""
+    from pinball_decryptor.core.video import VideoInfo
+    path = tmp_path / name
+    path.write_bytes(_ftyp(brand))
+    kw = dict(vcodec="h264", width=160, height=120, fps=10.0,
+              pix_fmt="yuv420p", profile="Main")
+    kw.update(info_kw)
+    return VideoSlot(rel_path=name, abs_path=str(path),
+                     ext=os.path.splitext(name)[1],
+                     info=VideoInfo(str(path), **kw), size=1)
+
+
+def _probe_as(monkeypatch, **info_kw):
+    from pinball_decryptor.core.video import VideoInfo
+    kw = dict(vcodec="h264", width=160, height=120, fps=10.0,
+              pix_fmt="yuv420p", profile="Main")
+    kw.update(info_kw)
+    monkeypatch.setattr("pinball_decryptor.core.video_slots.detect_video_info",
+                        lambda p: VideoInfo(p, **kw))
+
+
+def test_copy_through_refuses_a_ten_bit_lookalike(tmp_path, monkeypatch):
+    # Same container, codec, size and frame rate — but 10-bit, which the
+    # machine's decoder can't do.  Copying it through with conversion ON is
+    # how an unplayable clip reached the card with nothing in the log to say
+    # so; it has to be re-encoded instead.
+    from pinball_decryptor.core import video_slots as vs
+    slot = _slot_with(tmp_path, "intro.mp4", b"isom")
+    rep = tmp_path / "rep.mp4"
+    rep.write_bytes(_ftyp(b"isom"))
+    _probe_as(monkeypatch, pix_fmt="yuv420p10le")
+    assert vs._already_matches(slot, str(rep), ".mp4") is False
+    assert vs._remuxable(slot, str(rep)) is False      # a re-encode, not a remux
+
+
+def test_copy_through_refuses_a_profile_above_the_slots(tmp_path, monkeypatch):
+    from pinball_decryptor.core import video_slots as vs
+    slot = _slot_with(tmp_path, "intro.mp4", b"isom", profile="Main")
+    rep = tmp_path / "rep.mp4"
+    rep.write_bytes(_ftyp(b"isom"))
+    _probe_as(monkeypatch, profile="High")
+    assert vs._already_matches(slot, str(rep), ".mp4") is False
+    _probe_as(monkeypatch, profile="Baseline")         # below the ceiling: fine
+    assert vs._already_matches(slot, str(rep), ".mp4") is True
+
+
+def test_matching_extension_is_not_a_matching_container(tmp_path, monkeypatch):
+    # A ".mov" some encoder wrote with an MP4 brand is a different wrapper than
+    # the QuickTime one the card uses — repackage it, don't copy it through.
+    from pinball_decryptor.core import video_slots as vs
+    slot = _slot_with(tmp_path, "intro.mov", b"qt  ")
+    rep = tmp_path / "rep.mov"
+    rep.write_bytes(_ftyp(b"isom"))
+    _probe_as(monkeypatch)
+    assert vs._already_matches(slot, str(rep), ".mov") is False
+    assert vs._remuxable(slot, str(rep)) is True
+
+
+def test_stage_repackages_a_wrong_container_without_re_encoding(tmp_path):
+    # aly's case: an .mp4 encoded to the slot's codec/resolution/frame rate for
+    # a QuickTime slot.  Only the wrapper is wrong, so the staged copy must be
+    # a stream copy — the coded frames come out bit-for-bit identical.
+    from pinball_decryptor.core.video import find_ffmpeg, find_ffprobe
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "intro.mov")
+    if not _make_testsrc(slot, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mov"):
+        pytest.skip("ffmpeg could not render the test clip")
+    rep = str(tmp_path / "src" / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=160, height=120, fps=10,
+                         ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(
+        str(tmp_path), roots=[str(tmp_path / "clips")], exts=(".mov",))}
+    rel = "clips/intro.mov"
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert staged == 1 and failures == []
+
+    from pinball_decryptor.core.video import isobmff_brand
+    assert isobmff_brand(slot) == b"qt  "        # rewrapped for the slot
+
+    def _elementary(path, out):
+        subprocess.run([find_ffmpeg(), "-y", "-i", path, "-c", "copy",
+                        "-bsf:v", "h264_mp4toannexb", "-f", "h264", out],
+                       capture_output=True)
+        with open(out, "rb") as fh:
+            return fh.read()
+
+    assert _elementary(slot, str(tmp_path / "a.h264")) == \
+        _elementary(rep, str(tmp_path / "b.h264"))   # not re-encoded
+
+
 def test_stage_reencodes_when_resolution_differs(tmp_path):
     # The negative of the copy-through case: a same-container clip whose
     # resolution differs is still re-encoded (bytes change, dims match slot).

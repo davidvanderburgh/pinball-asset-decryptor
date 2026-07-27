@@ -18,8 +18,10 @@ Pinball TBL .cdmd, BoF .ctex with no inverse encoder yet) don't enable the
 ``replace_video`` capability, so their dead-end files never surface here.
 
 This mirrors :mod:`core.audio_slots`.  A replacement that already matches the
-slot's container / codec / resolution / frame rate / alpha is copied through
-verbatim (no conversion); otherwise matching it is a re-encode and needs
+slot's container / codec / resolution / frame rate / alpha / pixel format /
+profile is copied through verbatim (no conversion); one that matches in
+everything but the container it's wrapped in is repackaged (a stream copy —
+still no quality lost); anything else is a re-encode.  The last two need
 ffmpeg.
 """
 
@@ -30,7 +32,9 @@ from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
-                    encode_replacement, find_ffmpeg, transcode_video_to)
+                    encode_replacement, find_ffmpeg, isobmff_brand,
+                    profile_rank, remux_video_to, same_pix_fmt,
+                    transcode_video_to)
 
 
 @dataclass
@@ -157,25 +161,33 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
     return slots
 
 
-def _already_matches(slot: VideoSlot, replacement_path: str, rep_ext: str,
-                     match_length: bool = False, fps_tol: float = 0.05) -> bool:
-    """True when *replacement_path* is already in the slot's exact container,
-    codec, resolution, frame rate and alpha (and, when *match_length*, also its
-    duration) — so it can be copied through verbatim rather than re-encoded.
+def _remove(path: str) -> None:
+    """Delete *path* if it's there, ignoring an OS that says otherwise."""
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _stream_matches(slot: VideoSlot, ri: Optional[VideoInfo],
+                    match_length: bool = False, fps_tol: float = 0.05) -> bool:
+    """Whether the probed replacement *ri* is the same VIDEO as the slot's own
+    clip — codec, resolution, frame rate, alpha, pixel format and (H.264)
+    profile — ignoring the container it is wrapped in.
 
     Deliberately strict: any unknown/ambiguous field returns False so we fall
-    back to a (lossy but correct) re-encode rather than copying through a file
-    that might not drop cleanly into the slot.  Pixel-format/profile nuances
-    aren't compared, so a hardware decoder *could* still object — but the user
-    supplied a byte-for-byte-format-matching clip, which is exactly the
-    "no conversion" path they asked for.
+    back to a (lossy but correct) re-encode rather than staging a file that
+    might not drop cleanly into the slot.  Pixel format and profile are part of
+    the test because the machine's decoder is an embedded VPU, not a desktop
+    player: hand it 10-bit, 4:2:2, or a profile above the one the slot's clip
+    proves it accepts, and the demuxer still finds the sound (which plays)
+    while the picture stays **black**.  A profile BELOW the slot's is fine —
+    the ceiling is what matters.
     """
-    if rep_ext != slot.ext:
-        return False
     si = slot.info
     if si is None or not si.width or not si.height:
         return False                      # can't prove a match → re-encode
-    ri = detect_video_info(replacement_path)
     if ri is None:
         return False
     if (ri.width, ri.height) != (si.width, si.height):
@@ -186,9 +198,59 @@ def _already_matches(slot: VideoSlot, replacement_path: str, rep_ext: str,
         return False
     if bool(ri.has_alpha) != bool(si.has_alpha):
         return False
+    if not same_pix_fmt(ri.pix_fmt, si.pix_fmt):
+        return False
+    rank, slot_rank = profile_rank(ri), profile_rank(si)
+    if rank is not None and slot_rank is not None and rank > slot_rank:
+        return False
     if match_length and si.duration > 0 and abs(ri.duration - si.duration) > 0.05:
         return False
     return True
+
+
+def _same_container(a: str, b: str) -> bool:
+    """Whether two files are wrapped in the same kind of container.
+
+    The extension isn't the answer: ``.mov`` and ``.mp4`` are both ISO-BMFF and
+    a ``.mov`` some encoder wrote with an MP4 brand is a different wrapper than
+    the QuickTime one the card uses.  Files that aren't ISO-BMFF at all (.webm,
+    .ogv) have no brand to read, so their extension is all there is.
+    """
+    ba, bb = isobmff_brand(a), isobmff_brand(b)
+    if ba is None and bb is None:
+        return True
+    if ba is None or bb is None:
+        return False
+    return (ba == b"qt  ") == (bb == b"qt  ")
+
+
+def _already_matches(slot: VideoSlot, replacement_path: str, rep_ext: str,
+                     match_length: bool = False, fps_tol: float = 0.05) -> bool:
+    """True when *replacement_path* is already in the slot's exact container,
+    codec, resolution, frame rate, alpha, pixel format and profile (and, when
+    *match_length*, also its duration) — so it can be copied through verbatim
+    rather than re-encoded.  See :func:`_stream_matches` for the video half."""
+    if rep_ext != slot.ext:
+        return False
+    if not _stream_matches(slot, detect_video_info(replacement_path),
+                           match_length=match_length, fps_tol=fps_tol):
+        return False
+    return _same_container(replacement_path, slot.abs_path)
+
+
+def _remuxable(slot: VideoSlot, replacement_path: str,
+               match_length: bool = False, fps_tol: float = 0.05) -> bool:
+    """True when *replacement_path* is the slot's clip in the wrong wrapper —
+    identical video stream, different container — so repackaging it is enough
+    and a re-encode would only cost a generation of quality.
+
+    Only reached once :func:`_already_matches` has said no, so a True here
+    means the container (extension or ISO-BMFF brand) is the *only* difference.
+    """
+    if backend_for(slot.abs_path) is not None:
+        return False                      # .cdmd and friends must be encoded
+    return _stream_matches(slot, detect_video_info(replacement_path),
+                           match_length=match_length, fps_tol=fps_tol)
 
 
 def stage_replacement(slot: VideoSlot, replacement_path: str,
@@ -203,8 +265,10 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
 
     Otherwise: when the replacement is *already* in the slot's exact container /
     codec / resolution / frame rate / alpha (see :func:`_already_matches`) it's
-    copied through verbatim — no re-encode, no generation loss.  Failing that
-    it's re-encoded into the slot's container / codec, scaled to the slot's
+    copied through verbatim — no re-encode, no generation loss.  When only the
+    container differs (see :func:`_remuxable`) it's repackaged with a stream
+    copy, which is lossless too.  Failing both it's
+    re-encoded into the slot's container / codec, scaled to the slot's
     resolution (preserving alpha for formats that carry it), and written
     atomically over ``slot.abs_path``.  Slots in a custom-backend format
     (``.cdmd``) are routed to that backend's encoder instead.  When ffmpeg is
@@ -258,16 +322,27 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
             shutil.copy2(replacement_path, tmp)
             detail = "copied through (already matches — no re-encode)"
         elif find_ffmpeg():
-            ok, detail = transcode_video_to(
-                replacement_path, tmp, slot.info,
-                match_length=trim_to_length, cancel_cb=cancel_cb)
-            if not ok:
-                if os.path.exists(tmp):
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
-                return False, detail
+            # The clip may be the slot's own video in the wrong wrapper (aly's
+            # .mp4 for a QuickTime slot).  Repackaging keeps every coded frame
+            # bit-for-bit; only a real mismatch is worth a re-encode.
+            repacked = False
+            if _remuxable(slot, replacement_path, match_length=trim_to_length):
+                ok, detail = remux_video_to(replacement_path, tmp, slot.info,
+                                            cancel_cb=cancel_cb)
+                repacked = ok
+                if not ok:
+                    _remove(tmp)
+                    if detail == "cancelled":
+                        return False, detail
+                    # Anything else (an ffmpeg that won't take the stream) is
+                    # not fatal — fall through to the re-encode.
+            if not repacked:
+                ok, detail = transcode_video_to(
+                    replacement_path, tmp, slot.info,
+                    match_length=trim_to_length, cancel_cb=cancel_cb)
+                if not ok:
+                    _remove(tmp)
+                    return False, detail
         elif rep_ext == slot.ext:
             # No ffmpeg, but the user supplied the same container — copy it
             # through unchanged (it won't be resolution/codec-matched).

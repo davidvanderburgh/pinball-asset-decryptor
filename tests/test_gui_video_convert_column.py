@@ -174,3 +174,30 @@ def test_recipe_needs_a_probed_slot():
                                               dropin_spec)
     assert dropin_spec(None, ".mov") is None
     assert dropin_ffmpeg_command(None, ".mov") is None
+
+
+# ---------------------------------------------------------------------------
+# Conversion left ON.  aly encoded his replacement to the slot's codec, size
+# and frame rate but wrote it as .mp4 for a QuickTime slot: only the wrapper is
+# wrong, so it's repackaged (lossless), not re-encoded.
+# ---------------------------------------------------------------------------
+
+def _convert_probe(monkeypatch, info, ffmpeg="ffmpeg"):
+    monkeypatch.setattr("pinball_decryptor.core.video_slots.detect_video_info",
+                        lambda _p: info)
+    monkeypatch.setattr("pinball_decryptor.core.video_slots.find_ffmpeg",
+                        lambda: ffmpeg)
+
+
+def test_wrong_container_alone_reads_as_repackage(monkeypatch):
+    _convert_probe(monkeypatch, _rep())
+    assert MainWindow._video_conv_mode(
+        _slot(".mov"), "/x/newfrankic.mp4",
+        no_conversion=False, trim=False) == "Repackage"
+
+
+def test_a_real_mismatch_still_reads_as_re_encode(monkeypatch):
+    _convert_probe(monkeypatch, _rep(w=1920, h=1080))
+    assert MainWindow._video_conv_mode(
+        _slot(".mov"), "/x/newfrankic.mp4",
+        no_conversion=False, trim=False) == "Re-encode"

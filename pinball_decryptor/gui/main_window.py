@@ -1386,7 +1386,7 @@ class MainWindow:
         self._image_changed_on_disk = set()
         self._change_scan_id = 0         # bump-counter for the background diff
         # Replace-Video "Convert" column: (rel, replacement, no_conversion,
-        # trim) -> "As-is" / "Re-encode" / "".  Answering a row can cost an
+        # trim) -> "As-is" / "Repackage" / "Re-encode" / "".  A row can cost an
         # ffprobe of the replacement, so it's resolved on a background pass
         # (_video_probe_conv_async) and cached until a pick or flag changes.
         self._video_conv_cache = {}
@@ -5358,7 +5358,9 @@ class MainWindow:
             "clip the machine can't decode plays its sound over a black "
             "picture, and the Convert column says \"✗ won't play\" when it "
             "can see that coming.\n\nOff: anything that isn't already a match "
-            "is converted to suit the slot, at full size.",
+            "is converted to suit the slot, at full size — and a clip that is "
+            "already this slot's video in the wrong container is repackaged "
+            "rather than re-encoded, so it loses nothing either.",
             lambda: self._current_theme)
 
         self._video_trim_cb = ttk.Checkbutton(
@@ -5444,6 +5446,12 @@ class MainWindow:
         if sinfo.fps > 0 and info.fps > 0 and abs(info.fps - sinfo.fps) > 0.5:
             return ("%s runs at %.3g fps and this slot's clip is %.3g fps"
                     % (name, info.fps, sinfo.fps))
+        rank = _video.profile_rank(info)
+        slot_rank = _video.profile_rank(sinfo)
+        if rank is not None and slot_rank is not None and rank > slot_rank:
+            return ("%s is H.264 %s profile and this slot's clip is %s — above "
+                    "what the slot proves the machine decodes"
+                    % (name, info.profile, sinfo.profile))
         return None
 
     @staticmethod
@@ -5472,6 +5480,11 @@ class MainWindow:
     # Values shown in the video list's "Convert" column.
     _VIDEO_CONV_ASIS = "As-is"
     _VIDEO_CONV_REENC = "Re-encode"
+    # The clip IS this slot's video, just wrapped in the wrong container — a
+    # stream copy fixes the wrapper and every frame survives untouched, so
+    # it belongs with "As-is", not with the re-encodes (aly's 1360x768 H.264
+    # .mp4 for a QuickTime slot).
+    _VIDEO_CONV_REPACK = "Repackage"
     # "No conversion" is on and this pick would go on the card untouched but
     # the machine can't play it, or Write would refuse it outright.  The column
     # used to go BLANK for both, which is why 27 of monkeybug's 29 rows said
@@ -5485,15 +5498,16 @@ class MainWindow:
     @staticmethod
     def _video_conv_mode(slot, path, no_conversion, trim):
         """What Write will do with *path* for *slot*: copy it in verbatim
-        (``As-is``) or re-encode it (``Re-encode``); "" when it can't be
-        determined (no ffprobe, unreadable file, or a pick the copy-through
-        would reject — the pick-time warning covers that one).
+        (``As-is``), rewrite only its container (``Repackage`` — lossless too)
+        or re-encode it (``Re-encode``); "" when it can't be determined (no
+        ffprobe, unreadable file, or a pick the copy-through would reject —
+        the pick-time warning covers that one).
 
         Mirrors :meth:`_video_conversion_note`'s branch order, but takes the
         two option flags as plain arguments and touches no Tk state, so the
         background pass can call it off the main thread."""
-        from ..core.video_slots import (_already_matches, backend_for,
-                                        find_ffmpeg)
+        from ..core.video_slots import (_already_matches, _remuxable,
+                                        backend_for, find_ffmpeg)
         if slot is None or not path:
             return ""
         rep_ext = os.path.splitext(path)[1].lower()
@@ -5520,7 +5534,12 @@ class MainWindow:
         if matches:
             return MainWindow._VIDEO_CONV_ASIS
         if find_ffmpeg():
-            return MainWindow._VIDEO_CONV_REENC
+            try:
+                repack = _remuxable(slot, path, match_length=trim)
+            except Exception:
+                repack = False
+            return (MainWindow._VIDEO_CONV_REPACK if repack
+                    else MainWindow._VIDEO_CONV_REENC)
         if rep_ext == slot.ext:
             # No ffmpeg to re-encode with, but the container already fits, so
             # Write copies it in unchanged.
@@ -5610,8 +5629,8 @@ class MainWindow:
         slot = self._video_slots_by_rel.get(rel)
         if slot is None:
             return ""
-        from ..core.video_slots import (_already_matches, backend_for,
-                                        find_ffmpeg)
+        from ..core.video_slots import (_already_matches, _remuxable,
+                                        backend_for, find_ffmpeg)
         rep_ext = os.path.splitext(path)[1].lower()
         if self.video_no_conversion_var.get():
             # A rejectable pick is reported by the caller's own warning.
@@ -5628,6 +5647,14 @@ class MainWindow:
         if matches:
             return "already matches this slot — will be copied in, no re-encode"
         if find_ffmpeg():
+            try:
+                repack = _remuxable(
+                    slot, path, match_length=bool(self.video_trim_var.get()))
+            except Exception:
+                repack = False
+            if repack:
+                return ("already this slot's video — only its %s container "
+                        "will be repackaged, no re-encode" % slot.ext)
             return "will be re-encoded to match this slot"
         if rep_ext == slot.ext:
             return "will be copied in unchanged (no ffmpeg — not re-encoded)"

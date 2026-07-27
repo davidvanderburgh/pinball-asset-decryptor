@@ -305,3 +305,91 @@ def test_iss_prereq_task_name_matches_mergetasks_switch():
     assert 'Name: "runprereqs"' in iss, (
         "the .iss prereq task was renamed/removed — update "
         "updater.INSTALLER_ARGS' /MERGETASKS switch to match.")
+
+
+# ---------------------------------------------------------------------------
+# Re-check before installing (monkeybug batch 23)
+#
+# The banner is filled in by one check 1.5 s after launch and then stands until
+# the app restarts, so a window left open across a release keeps offering the
+# version that was newest when it opened.  He pressed Install on a laptop
+# showing 0.81 and got 0.81 — days stale.  _freshest_update re-asks at the
+# moment of the click.
+# ---------------------------------------------------------------------------
+
+class _FakeWindow:
+    def __init__(self):
+        self.lines = []
+
+    def append_log(self, msg, *_a, **_k):
+        self.lines.append(msg)
+
+
+class _FakeApp:
+    """Just enough of the App to drive _freshest_update."""
+
+    def __init__(self):
+        from pinball_decryptor.app import App
+        self._freshest_update = App._freshest_update.__get__(self)
+        self.window = _FakeWindow()
+        self._current_mfr = None
+        self.root = type("R", (), {"update_idletasks": lambda _s: None})()
+
+
+STALE = {"name": "old.exe", "url": "https://example.com/old.exe", "size": 1}
+FRESH = {"name": "new.exe", "url": "https://example.com/new.exe", "size": 2}
+
+
+def _patch_check(monkeypatch, result):
+    def _fake(*_a, **_k):
+        if isinstance(result, Exception):
+            raise result
+        return result
+    monkeypatch.setattr("pinball_decryptor.app.check_for_update", _fake)
+
+
+def test_a_newer_release_is_offered_instead(monkeypatch):
+    app = _FakeApp()
+    _patch_check(monkeypatch, ("0.86.0", "u", "notes", FRESH))
+    monkeypatch.setattr("pinball_decryptor.app.messagebox.askyesno",
+                        lambda *a, **k: True)
+    assert app._freshest_update("0.81.0", STALE) == ("0.86.0", FRESH)
+    assert any("0.86.0" in m and "0.81.0" in m for m in app.window.lines)
+
+
+def test_declining_the_newer_one_cancels_rather_than_installing_the_stale(
+        monkeypatch):
+    """Saying "no thanks" to 0.86 must not quietly install 0.81 over the top —
+    that is the one outcome he did not ask for."""
+    app = _FakeApp()
+    _patch_check(monkeypatch, ("0.86.0", "u", "notes", FRESH))
+    monkeypatch.setattr("pinball_decryptor.app.messagebox.askyesno",
+                        lambda *a, **k: False)
+    version, installer = app._freshest_update("0.81.0", STALE)
+    assert installer is None
+    assert any("cancelled" in m for m in app.window.lines)
+
+
+def test_banner_already_current_installs_without_asking(monkeypatch):
+    app = _FakeApp()
+    _patch_check(monkeypatch, ("0.81.0", "u", "notes", FRESH))
+
+    def _no(*_a, **_k):
+        raise AssertionError("must not prompt when nothing newer exists")
+    monkeypatch.setattr("pinball_decryptor.app.messagebox.askyesno", _no)
+    assert app._freshest_update("0.81.0", STALE) == ("0.81.0", STALE)
+
+
+def test_nothing_newer_at_all_installs_what_the_banner_had(monkeypatch):
+    app = _FakeApp()
+    _patch_check(monkeypatch, None)
+    assert app._freshest_update("0.81.0", STALE) == ("0.81.0", STALE)
+
+
+def test_a_failed_recheck_does_not_block_the_install(monkeypatch):
+    """Being offline is not a reason to refuse an install that was already on
+    offer — say so and go ahead."""
+    app = _FakeApp()
+    _patch_check(monkeypatch, OSError("no route to host"))
+    assert app._freshest_update("0.81.0", STALE) == ("0.81.0", STALE)
+    assert any("Couldn't re-check" in m for m in app.window.lines)

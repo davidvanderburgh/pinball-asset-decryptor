@@ -408,3 +408,48 @@ def test_banner_parse_picks_up_the_profile():
     assert info.vcodec == "h264"
     assert info.profile == "Constrained Baseline"
     assert (info.width, info.height) == (1280, 720)
+
+
+def test_transcode_strips_audio_for_a_silent_slot(monkeypatch, tmp_path):
+    """Spike 2 clips are nearly all silent and the game plays its own sound,
+    so a converted replacement must not smuggle its source's soundtrack onto
+    the card (monkeybug batch 23)."""
+    from pinball_decryptor.core import video as _video
+    seen = {}
+
+    def _fake_run(cmd, limit, cancel_cb=None):
+        seen["cmd"] = list(cmd)
+        return 0, "", None
+    monkeypatch.setattr(_video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(_video, "_run_ffmpeg_watched", _fake_run)
+    monkeypatch.setattr(_video, "probe_duration", lambda _p: 5.0)
+    dst = tmp_path / "out.mov"
+    dst.write_bytes(b"x")                    # the success check stats the file
+    info = _video.VideoInfo(path="slot.mov", vcodec="h264", width=1360,
+                            height=768, fps=30.0, duration=5.0,
+                            has_audio=False, pix_fmt="yuv420p")
+    _video.transcode_video_to(str(tmp_path / "src.mov"), str(dst), info)
+    assert "-an" in seen["cmd"]
+    assert "-c:a" not in seen["cmd"]
+
+
+def test_transcode_keeps_audio_when_the_slot_has_it(monkeypatch, tmp_path):
+    """Deadpool 1.14 LE really does carry audio on 7 of its 99 clips, so this
+    is matched per slot rather than stripped as a blanket rule."""
+    from pinball_decryptor.core import video as _video
+    seen = {}
+
+    def _fake_run(cmd, limit, cancel_cb=None):
+        seen["cmd"] = list(cmd)
+        return 0, "", None
+    monkeypatch.setattr(_video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(_video, "_run_ffmpeg_watched", _fake_run)
+    monkeypatch.setattr(_video, "probe_duration", lambda _p: 5.0)
+    dst = tmp_path / "out.mov"
+    dst.write_bytes(b"x")
+    info = _video.VideoInfo(path="slot.mov", vcodec="h264", width=1360,
+                            height=768, fps=30.0, duration=5.0,
+                            has_audio=True, pix_fmt="yuv420p")
+    _video.transcode_video_to(str(tmp_path / "src.mov"), str(dst), info)
+    assert "-an" not in seen["cmd"]
+    assert "-c:a" in seen["cmd"]

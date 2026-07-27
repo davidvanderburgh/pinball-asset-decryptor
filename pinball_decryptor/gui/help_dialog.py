@@ -94,14 +94,27 @@ HELP_CONTENT = {
          "update on the Write tab."),
         ("Change markers",
          "Green = assigned this session (staged when you build). "
-         "\"✓ changed on disk\" = the file already differs from the extract "
-         "baseline (an earlier build or a hand edit). The counter shows every "
-         "change the next build will pack — not just this session's."),
+         "\"✓ changed on disk\" = the file sitting in your PROJECT FOLDER no "
+         "longer matches the one Extract put there — because an earlier build "
+         "replaced it, or because you copied a file over it yourself. It says "
+         "nothing about your source card image (never touched) or about a "
+         "card you have already written. Either way the next build packs it, "
+         "which is why replacing files in the project folder by hand works: "
+         "batch-process them however you like, drop them over the originals, "
+         "press Scan, and they show up here as changed. The counter shows "
+         "every change the next build will pack, not just this session's."),
         ("Preview",
          "Two players side by side — the original on the left, your "
          "replacement on the right — each with its own controls, so you can "
          "compare them before you commit to a build. Starting one pauses "
          "the other."),
+        ("Play through the list",
+         "Tick it and a finished clip selects and plays the next row on its "
+         "own, following whatever sort, search and Type filter you have set — "
+         "so you can listen through a whole card without clicking each row. "
+         "It stops at the end of the list, and pressing ■ or clicking another "
+         "row stops it. Anything you notice on the way is already selected, "
+         "so hit F2 or right-click it there and then."),
         ("Undo",
          "Right-click a slot: \"Remove replacement\" cancels an un-built "
          "assignment; \"Revert to original\" restores an already-changed "
@@ -171,19 +184,47 @@ HELP_CONTENT = {
          "picture. Anything that isn't a drop-in is converted first (still "
          "at full size, no byte budget) and the build log says which clip "
          "and why."),
-        ("No conversion",
-         "Where shown, the \"No conversion\" option forces a verbatim copy "
-         "of a same-container file and skips all re-encoding."),
+        ("Encoding your own clips",
+         "Right-click a slot and pick \"What this slot needs…\" to see exactly "
+         "what a replacement has to be to go on the card untouched: container, "
+         "codec, H.264 profile and level, frame size, frame rate and whether "
+         "the clip has an audio track. It also gives you an ffmpeg command "
+         "that produces one, with only the flags that have to match, so you "
+         "can add your own bitrate, key-frame interval and preset around "
+         "them. Every value is read off the clip already in that slot, which "
+         "is the only real authority on what the machine will play — Spike 2 "
+         "decodes H.264 in hardware and nothing else, so a ProRes or HEVC "
+         "file plays its sound over a black picture no matter how good it "
+         "looks on a PC."),
+        ("Audio in a video file",
+         "Most game clips have no audio track at all, and the game plays its "
+         "own sound over them. A replacement that keeps its source's audio "
+         "adds a soundtrack the machine really will play on top. Converting "
+         "now matches the slot (a silent slot gets a silent replacement), and "
+         "a file you copy in as-is is flagged in the Convert column as \"As-is "
+         "⚠ audio\" so you can strip it first. Slots that do have their own "
+         "audio keep it."),
+        ("Use my files as-is",
+         "This one checkbox covers EVERY replacement you have picked, not "
+         "just the slot showing in the preview — tick or untick it any time "
+         "and the Convert column re-answers for the whole list. You never "
+         "have to pick files again to change your mind about converting "
+         "them. On, each replacement is copied in byte-for-byte and has to "
+         "already be game-ready; off, anything that isn't already a match is "
+         "converted to suit the slot, still at full size."),
         ("The Convert column",
          "Once you assign a replacement, the Convert column says what the "
          "build will do with it: \"As-is\" means the clip already matches the "
          "slot's container, codec, size and frame rate and is copied straight "
          "in; \"Re-encode\" means ffmpeg converts it first, which is where a "
-         "long build spends its time. The answer is worked out in the "
-         "background, so a row can read \"…\" for a moment, and it re-checks "
-         "itself whenever you change \"No conversion\" or \"Trim / pad\" "
-         "(both change what counts as a match). Export CSV carries the "
-         "column too."),
+         "long build spends its time. With \"Use my files as-is\" on you may "
+         "also see \"✗ needs .mov\" (the build would refuse a different "
+         "container) or \"✗ won't play\" (it would be copied on untouched, "
+         "but the machine can't decode it, so it would play its sound over a "
+         "black picture) — untick the box for those and they get converted "
+         "instead. The answer is worked out in the background, so a row can "
+         "read \"…\" for a moment, and it re-checks itself whenever you "
+         "change either checkbox. Export CSV carries the column too."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
@@ -428,16 +469,41 @@ HELP_CONTENT = {
          "settings — Stern stores those on the board, not on the card, so the "
          "app cannot change a machine that's already configured. Think of this "
          "as \"how a brand-new card boots\"."),
+        ("How the list is ordered",
+         "Settings are grouped under headings — Game, Sound, Lighting, "
+         "Insider Connected, High scores — and every score on the machine's "
+         "high-score board is collected into the High Scores block at the "
+         "bottom, whether or not the firmware carries a player name to go "
+         "with it. \"Allow High Scores\" and \"Reset High Scores After\" sit "
+         "just above that block because they govern the board without being "
+         "places on it."),
         ("Edit + build",
          "\"On card\" is the default currently baked into the image (Stern's "
          "factory value unless it was changed here before); set \"New "
          "default\" to what you want — a ● marks every row that deviates "
          "from the card, and every change stages itself automatically, like "
-         "edits on the Replace tabs. The next card you Build gets the staged "
-         "defaults baked in (validation record refreshed automatically) "
-         "while your master image stays untouched. \"Reset Fields\" puts "
-         "everything back to the image's own defaults and clears the staged "
-         "changes."),
+         "edits on the Replace tabs. The log names each field you change and "
+         "both values, once you leave the field. The next card you Build gets "
+         "the staged defaults baked in (validation record refreshed "
+         "automatically) while your master image stays untouched. \"Reset "
+         "Fields\" puts everything back to the image's own defaults and "
+         "clears the staged changes."),
+        ("When the Range looks wrong",
+         "A few settings ship with a default outside the range the firmware "
+         "itself declares for them — Led Zeppelin 1.22's two ELECTRIC MAGIC "
+         "champions default to 2,000,000 against a stated minimum of "
+         "5,000,000. That is the firmware, not a misread: the Range column "
+         "says so, the row counts as unchanged until you touch it, and if "
+         "you do edit it the value written is pulled into the declared range "
+         "(the game rejects anything else)."),
+        ("Settings the machine edits elsewhere",
+         "Hovering a setting's name tells you when the machine won't show it "
+         "in its Adjustments menu. The master volume is the one to know "
+         "about: it lives on a service screen, and on titles with a "
+         "first-boot Guided Setup the wizard picks a volume of its own — so "
+         "the number the operator menu shows may not be the default you set "
+         "here. See the Menu column in the all-settings list below the form "
+         "for the same information on every setting."),
         ("High scores",
          "The \"High Scores\" block is the board a fresh card boots with — "
          "Stern ships it filled with the design team's initials. Each slot "

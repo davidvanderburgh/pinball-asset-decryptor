@@ -3781,11 +3781,14 @@ def test_video_convert_column_reports_as_is_vs_reencode(app, tmp_path):
     # "No conversion" on + matching container = copied through verbatim.
     assert w._video_conv_mode(slot, str(rep), True, False) == \
         w._VIDEO_CONV_ASIS
-    # ...and a container the copy-through would reject reports nothing (the
-    # pick-time warning owns that case).
+    # ...and a container the copy-through would reject NAMES what it needs.
+    # This used to report nothing at all, which is why 27 of monkeybug's 29
+    # rows sat blank and he asked why only one said "As-is" (batch 23); see
+    # test_gui_video_convert_column.py for the rest of that behaviour.
     other = tmp_path / "rep.mp4"
     other.write_bytes(b"x")
-    assert w._video_conv_mode(slot, str(other), True, False) == ""
+    assert w._video_conv_mode(slot, str(other), True, False) == \
+        w._VIDEO_CONV_WRONG_TYPE % ".mov"
 
     # The cache is keyed on the pick AND both option flags, so flipping a
     # checkbox can't leave a stale answer on screen.

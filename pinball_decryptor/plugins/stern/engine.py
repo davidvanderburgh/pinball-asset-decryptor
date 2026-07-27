@@ -1985,6 +1985,23 @@ def _fit_video_payload(staged_path, target, work_dir, log):
     return _pad_isobmff(shrunk, target)
 
 
+def _same_bytes(a, b):
+    """Whether two files hold identical bytes.  Sizes first, so the usual
+    "these are obviously different" answer costs two stats and no reading."""
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                ca, cb = fa.read(1 << 20), fb.read(1 << 20)
+                if ca != cb:
+                    return False
+                if not ca:
+                    return True
+    except OSError:
+        return False
+
+
 def _intact_copy_source(src, staged, fname, log):
     """Pick which file may be copied onto the card verbatim for *fname*.
 
@@ -2013,6 +2030,21 @@ def _intact_copy_source(src, staged, fname, log):
     from ...core import video as _video
 
     def _reject(why):
+        # "No conversion" makes *staged* a byte-copy of *src*, so there is no
+        # format-matched copy to fall back TO — the rejected clip goes on the
+        # card either way.  Saying "writing the format-matched copy instead"
+        # there was simply untrue, and it was the only thing standing between
+        # monkeybug and an attract video that played black on the machine with
+        # nothing in the log to explain it (batch 23).  Same bytes = say so,
+        # as an error, and name the checkbox that decides it.
+        if _same_bytes(src, staged):
+            log("Video %s: %s. \"Use my files as-is\" told the app to copy it "
+                "on untouched, so that is what goes on the card and the "
+                "machine will play its sound over a black picture. Untick "
+                "\"Use my files as-is\" on the Video tab and Build again to "
+                "have it converted to a clip the machine can play."
+                % (fname, why), "error")
+            return staged
         log("Video %s: %s, so it can't go on the card as-is — the machine "
             "would play the sound over a black picture. Writing the "
             "format-matched copy instead (full size, no quality budget)."

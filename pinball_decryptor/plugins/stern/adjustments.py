@@ -247,66 +247,125 @@ class AdjustmentTable:
 # than shown as raw numbers.  ``kind`` drives the editor widget:
 #   "toggle" (on/off), "number" (spinbox, in display units), "enum" (dropdown).
 # ---------------------------------------------------------------------------
-# (name, label, kind, help, scale) — scale is the internal-per-display factor
-# (internal = display * scale); 1 for everything except the master volume.
+# (name, label, kind, help, scale, group) — scale is the internal-per-display
+# factor (internal = display * scale); 1 for everything except the master
+# volume.  ``group`` heads the block the row is drawn under, and the list is
+# kept in group order: monkeybug read one flat column and asked "is there any
+# particular logic to the order of the fields?", which there was, but nothing
+# on screen said so.
+GROUP_GAME = "Game"
+GROUP_SOUND = "Sound"
+GROUP_LIGHTING = "Lighting"
+GROUP_INSIDER = "Insider Connected"
+GROUP_HIGH_SCORES = "High scores"
+
 CURATED = [
     ("AD_FREE_PLAY", "Free Play", "toggle",
-     "Boot the game in free play (no credits needed).", 1),
+     "Boot the game in free play (no credits needed).", 1, GROUP_GAME),
+    ("AD_LANGUAGE", "Language", "enum",
+     "Default menu / game language.", 1, GROUP_GAME),
+    ("AD_REPLAY_PERCENTAGE", "Replay Percentage", "number",
+     "Target percentage of games that earn a replay.", 1, GROUP_GAME),
+    ("AD_CREDIT_LIMIT", "Credit Limit", "number",
+     "Maximum credits the machine will bank.", 1, GROUP_GAME),
+    ("AD_MAX_PLAYERS_PER_GAME", "Max Players Per Game", "number", "", 1,
+     GROUP_GAME),
+    ("AD_BALLS_PER_GAME", "Balls Per Game", "number", "", 1, GROUP_GAME),
+    ("AD_FREE_GAME_LIMIT", "Free Game Limit", "number", "", 1, GROUP_GAME),
+    ("AD_BALL_SAVE_TIME", "Ball Save Time", "number", "", 1, GROUP_GAME),
+    ("AD_TILT_WARNINGS", "Tilt Warnings", "number", "", 1, GROUP_GAME),
     ("AD_SOUND_MASTER_VOLUME_SETTING", "Master Volume", "number",
      "Default master volume, in the firmware's own 0-64 units. UNVERIFIED "
      "on real machines: titles with a first-boot setup wizard (Guided "
-     "Setup) pick their own volume and may ignore this default.", 1),
-    ("AD_LANGUAGE", "Language", "enum",
-     "Default menu / game language.", 1),
-    ("AD_REPLAY_PERCENTAGE", "Replay Percentage", "number",
-     "Target percentage of games that earn a replay.", 1),
-    ("AD_CREDIT_LIMIT", "Credit Limit", "number",
-     "Maximum credits the machine will bank.", 1),
-    ("AD_MAX_PLAYERS_PER_GAME", "Max Players Per Game", "number", "", 1),
-    ("AD_BALLS_PER_GAME", "Balls Per Game", "number", "", 1),
-    ("AD_FREE_GAME_LIMIT", "Free Game Limit", "number", "", 1),
-    ("AD_BALL_SAVE_TIME", "Ball Save Time", "number", "", 1),
-    ("AD_TILT_WARNINGS", "Tilt Warnings", "number", "", 1),
+     "Setup) pick their own volume and may ignore this default.", 1,
+     GROUP_SOUND),
+    # The two attenuation trims monkeybug asked for (batch 23).  They sit in
+    # the game's own adjustments rather than the standard/general ones, and
+    # unlike most settings they are SIGNED — -60..+60 around 0, so a negative
+    # value is the thing you actually want when call-outs are too loud.  There
+    # is no game-SFX sibling on Led Zeppelin 1.22; only these two exist, so
+    # only these two are offered (the Defaults tab's all-settings list is the
+    # place to check a title that might carry more).
+    ("AD_MUSIC_ATTENUATION", "Music Attenuation", "number",
+     "Trim applied to music, in the firmware's own units — negative makes "
+     "music quieter relative to everything else, 0 leaves it alone.", 1,
+     GROUP_SOUND),
+    ("AD_SPEECH_ATTENUATION", "Speech Attenuation", "number",
+     "Trim applied to speech / call-outs — negative makes them quieter "
+     "relative to music and effects, 0 leaves them alone.", 1, GROUP_SOUND),
+    ("AD_KNOCKER_VOLUME", "Knocker Volume", "number",
+     "How loud the knocker fires.", 1, GROUP_SOUND),
     # Brightness family (monkeybug batch 21 — he wants the in-game backbox
     # default).  All are plain 0/25-100 ranges, i.e. the percentage the
     # operator menu shows; display verification on hardware still pending,
     # same caveat class as the master volume.
     ("AD_BACKBOX_BRIGHTNESS", "Backbox Brightness", "number",
      "Backbox brightness outside a game (attract / menus), as a "
-     "percentage.", 1),
+     "percentage.", 1, GROUP_LIGHTING),
     ("AD_GAME_BACKBOX_BRIGHTNESS", "Backbox Brightness In Game", "number",
      "Backbox brightness while a game is being played, as a percentage — "
-     "lower it to keep the backbox from washing out the playfield.", 1),
+     "lower it to keep the backbox from washing out the playfield.", 1,
+     GROUP_LIGHTING),
     ("AD_CABINET_BRIGHTNESS", "Cabinet Brightness", "number",
-     "Cabinet lighting brightness, as a percentage.", 1),
+     "Cabinet lighting brightness, as a percentage.", 1, GROUP_LIGHTING),
     ("AD_GI_BRIGHTNESS", "GI Brightness", "number",
-     "General-illumination brightness, as a percentage.", 1),
+     "General-illumination brightness, as a percentage.", 1, GROUP_LIGHTING),
     ("AD_LED_BRIGHTNESS", "LED Brightness", "number",
-     "Playfield LED brightness, as a percentage.", 1),
+     "Playfield LED brightness, as a percentage.", 1, GROUP_LIGHTING),
     ("AD_FLASHER_BRIGHTNESS", "Flasher Brightness", "number",
-     "Flasher brightness, as a percentage.", 1),
+     "Flasher brightness, as a percentage.", 1, GROUP_LIGHTING),
+    # Insider Connected (monkeybug batch 23).  Note there is NO master
+    # on/off adjustment: whether the machine talks to Insider Connected at
+    # all is decided by its registration and its dongle, not by a setting the
+    # card carries.  What IS card-settable is how it behaves once connected,
+    # which is what these are.  The MESSAGE OF THE DAY setting only decides
+    # whether the message is DISPLAYED — the text is served to the machine,
+    # not stored on the card, so there is nothing here to type it into.
+    ("AD_INSIDER_CONNECTED_MESSAGE_OF_DAY", "Display Message Of The Day",
+     "toggle",
+     "Show the Insider Connected message of the day in attract mode. The "
+     "text itself comes from Insider Connected, not from the card.", 1,
+     GROUP_INSIDER),
+    ("AD_HOW_TO_CONNECT_MESSAGE", "Show How To Connect Message", "toggle",
+     "Show the \"how to connect\" prompt in attract mode.", 1, GROUP_INSIDER),
+    ("AD_INSIDER_CONNECTED_HOME_TEAM_ACTIVE_MODE", "Enable Home Team",
+     "number", "Home Team mode.", 1, GROUP_INSIDER),
+    ("AD_INSIDER_CONNECTED_HOME_TEAM_PRELOAD_FIRST_USER",
+     "Home Team Menu Logs In User #1", "toggle", "", 1, GROUP_INSIDER),
+    ("AD_INSIDER_CONNECTED_HOME_TEAM_GUEST_RETENTION",
+     "Home Team Guest Retention", "number", "", 1, GROUP_INSIDER),
+    ("AD_NET_LOGIN_TIMER", "Insider Login Timer", "number",
+     "Seconds the login prompt stays up.", 1, GROUP_INSIDER),
+    ("AD_NET_PLAY_AGAIN_TIMER", "Insider Play Again Timer", "number",
+     "Seconds the play-again prompt stays up.", 1, GROUP_INSIDER),
+    ("AD_CUSTOM_MESSAGE", "Custom Message", "toggle",
+     "Show the game's custom attract message. The wording itself is an "
+     "on-screen string — edit it on the Replace Text tab.", 1, GROUP_INSIDER),
     # High-score defaults (monkeybug batch 22).  These are the scores the
     # machine seeds its high-score table with on a fresh flash / factory
-    # reset.  The INITIALS that go with them are not in this table — they
-    # come from the board's NVRAM, which the card can't set (see
-    # plans/spike2_settings_defaults_handoff.md), so only the scores are
-    # editable here.
+    # reset.  The initials and player names that go with them live in their
+    # own table in the same ELF and are edited in the High Scores block the
+    # GUI builds out of these rows (see plugins.stern.high_scores).
     ("AD_ALLOW_HIGH_SCORES", "Allow High Scores", "toggle",
-     "Whether the game records high scores at all.", 1),
-    ("AD_GRAND_CHAMPION_SCORE", "Grand Champion Score", "number",
-     "Default Grand Champion score on a fresh flash / factory reset. The "
-     "GC initials come from board NVRAM and can't be set from the card.", 1),
-    ("AD_HIGH_SCORE_1_SCORE", "High Score 1", "number",
-     "Default first-place score on a fresh flash / factory reset.", 1),
-    ("AD_HIGH_SCORE_2_SCORE", "High Score 2", "number",
-     "Default second-place score on a fresh flash / factory reset.", 1),
-    ("AD_HIGH_SCORE_3_SCORE", "High Score 3", "number",
-     "Default third-place score on a fresh flash / factory reset.", 1),
-    ("AD_HIGH_SCORE_4_SCORE", "High Score 4", "number",
-     "Default fourth-place score on a fresh flash / factory reset.", 1),
+     "Whether the game records high scores at all.", 1, GROUP_HIGH_SCORES),
     ("AD_HSTD_RESET_COUNT", "Reset High Scores After", "number",
      "Number of games after which the high-score table resets itself "
-     "(0 = never).", 1),
+     "(0 = never).", 1, GROUP_HIGH_SCORES),
+    ("AD_GRAND_CHAMPION_SCORE", "Grand Champion Score", "number",
+     "Default Grand Champion score on a fresh flash / factory reset.", 1,
+     GROUP_HIGH_SCORES),
+    ("AD_HIGH_SCORE_1_SCORE", "High Score 1", "number",
+     "Default first-place score on a fresh flash / factory reset.", 1,
+     GROUP_HIGH_SCORES),
+    ("AD_HIGH_SCORE_2_SCORE", "High Score 2", "number",
+     "Default second-place score on a fresh flash / factory reset.", 1,
+     GROUP_HIGH_SCORES),
+    ("AD_HIGH_SCORE_3_SCORE", "High Score 3", "number",
+     "Default third-place score on a fresh flash / factory reset.", 1,
+     GROUP_HIGH_SCORES),
+    ("AD_HIGH_SCORE_4_SCORE", "High Score 4", "number",
+     "Default fourth-place score on a fresh flash / factory reset.", 1,
+     GROUP_HIGH_SCORES),
 ]
 
 # Per-mode champion thresholds are title-specific — Led Zeppelin ships ~30 of
@@ -348,9 +407,10 @@ def _label_from_name(name):
 
 
 def champion_rows(table):
-    """``(name, label, kind, help, scale)`` tuples for every per-mode champion
-    threshold this build carries, in adjustment-id order (which is the order
-    the game's own menu lists them in).  Empty for titles without them.
+    """``(name, label, kind, help, scale, group)`` tuples for every per-mode
+    champion threshold this build carries, in adjustment-id order (which is
+    the order the game's own menu lists them in).  Empty for titles without
+    them.
 
     Names already listed in :data:`CURATED` are skipped so the Grand Champion
     doesn't appear twice."""
@@ -365,8 +425,31 @@ def champion_rows(table):
             continue
         rows.append((name, _label_from_name(name), "number",
                      "Default champion score for this mode on a fresh flash "
-                     "/ factory reset.", 1))
+                     "/ factory reset.", 1, GROUP_HIGH_SCORES))
     return rows
+
+
+#: Curated names that hold one of the high-score board's own values, so the
+#: GUI can draw them in its High Scores block instead of the settings grid.
+_CURATED_SCORE_NAMES = frozenset((
+    "AD_GRAND_CHAMPION_SCORE", "AD_HIGH_SCORE_1_SCORE",
+    "AD_HIGH_SCORE_2_SCORE", "AD_HIGH_SCORE_3_SCORE",
+    "AD_HIGH_SCORE_4_SCORE"))
+
+
+def is_score_adjustment(name):
+    """True when *name* holds a score on the machine's high-score board.
+
+    The GUI keeps every one of these together under High Scores.  Matching by
+    NAME rather than by "did we find its initials/player-name record?" is the
+    point: Led Zeppelin's BLACK DOG CHAMPION has no such record, so it used to
+    be the one champion left stranded up in the settings grid between Allow
+    High Scores and Reset High Scores After (monkeybug's red circle)."""
+    if name in _CURATED_SCORE_NAMES:
+        return True
+    if name in _NOT_SLOTS or name.endswith(("_AWARD", "_AWARDS")):
+        return False
+    return bool(_CHAMPION_SUFFIX_RE.search(name))
 
 
 # Every score the machine's high-score board records — the four high scores,
@@ -527,23 +610,31 @@ def all_rows(table, statuses=None):
     return rows
 
 
-def curated_rows(table):
+def curated_rows(table, statuses=None):
     """One row per curated setting this build exposes, in DISPLAY units.
 
     Each row: ``{name, label, kind, help, default, min, max, step, scale,
-    labels}`` where default/min/max/step are what the operator menu shows
-    (internal value // scale), ``scale`` is the internal-per-display factor
-    (so internal = display * scale), ``step`` is the adjustment's own
+    labels, group, status}`` where default/min/max/step are what the operator
+    menu shows (internal value // scale), ``scale`` is the internal-per-display
+    factor (so internal = display * scale), ``step`` is the adjustment's own
     increment (high scores step by a million, not by one), and ``labels``
     maps a display value to its text for enums (else None).  A scale that
     doesn't divide the internal range evenly is ignored (shown as stored) so
     a build that doesn't match the assumption can't produce nonsense.
 
+    ``group`` is the heading the row belongs under.  ``status`` is what
+    :mod:`.menu_visibility` says about reaching it on the machine — ``""`` in
+    the Adjustments menu, ``"service"`` edited on some other service screen,
+    ``"debug"`` never shown, ``None`` when the caller didn't pass *statuses*
+    or this build's menu couldn't be read.  Pass ``statuses(table)`` to get
+    it; it is advisory only and never changes which rows are offered.
+
     The curated list comes first, then this build's per-mode champion
     thresholds (title-specific, matched generically — see
     :func:`champion_rows`)."""
     rows = []
-    for name, label, kind, help_, scale in list(CURATED) + champion_rows(table):
+    for name, label, kind, help_, scale, group in (
+            list(CURATED) + champion_rows(table)):
         if name not in table.by_name:
             continue
         e = table.get(name)
@@ -554,7 +645,8 @@ def curated_rows(table):
             ("enum" if labels else kind)
         rows.append({
             "name": name, "label": label, "kind": k, "help": help_,
-            "scale": scale, "labels": labels,
+            "scale": scale, "labels": labels, "group": group,
+            "status": (statuses or {}).get(table.by_name[name]),
             "default": e["default"] // scale,
             "min": e["min"] // scale,
             "max": e["max"] // scale,

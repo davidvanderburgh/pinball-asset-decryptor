@@ -2970,6 +2970,9 @@ class App:
         there a smarter way" than the per-update security pass).
         """
         import tempfile
+        version, installer = self._freshest_update(version, installer)
+        if installer is None:
+            return
         dest = os.path.join(tempfile.gettempdir(), installer["name"])
         cancel = threading.Event()
         dialog = self.window.open_update_download_dialog(version, cancel.set)
@@ -2994,6 +2997,61 @@ class App:
             self.root.after(
                 0, self._launch_downloaded_installer, dialog, dest, version)
         threading.Thread(target=_run, daemon=True).start()
+
+    def _freshest_update(self, version, installer):
+        """``(version, installer)`` to actually install, re-checked now.
+
+        The banner is filled in by ONE check, 1.5 s after launch, and then
+        stands until the app is restarted — so a window left open across a
+        release offers whatever was latest when it opened.  monkeybug pressed
+        Install on a laptop showing 0.81 and got 0.81, days after it stopped
+        being the newest, and asked for exactly this: notice, and let him
+        choose.
+
+        A failed re-check is not a reason to block an install that was already
+        on offer — say so and go ahead with what the banner had.  Returns
+        ``(version, None)`` when the user declines, which cancels the install.
+        """
+        mfr_repo = (self._current_mfr.update_repo
+                    if self._current_mfr else None)
+        # One 5-second-capped request on the click that is about to start a
+        # download anyway; paint the reason first so the pause is explained.
+        self.window.append_log(
+            "Checking whether %s is still the newest release..." % version,
+            "info")
+        try:
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+        try:
+            fresh = check_for_update(__version__, repo=mfr_repo)
+        except Exception as e:
+            self.window.append_log(
+                "Couldn't re-check for a newer release before installing "
+                "(%s) — installing %s, the version this window was offered."
+                % (e, version), "warning")
+            return version, installer
+        if not fresh:
+            return version, installer
+        newest, _url, _notes, newest_installer = fresh
+        if newest == version or newest_installer is None:
+            return version, installer
+        self.window.append_log(
+            "Version %s has been published since this window last checked "
+            "(it was offering %s)." % (newest, version), "info")
+        if not messagebox.askyesno(
+                "A newer version is available",
+                "This window was offering version %s, but %s has been "
+                "released since it last checked.\n\nInstall %s instead?"
+                % (version, newest, newest),
+                default="yes"):
+            # Declining means "not that one" — installing the stale build over
+            # the top would be the one thing he did not ask for.
+            self.window.append_log(
+                "Update cancelled — %s was left in place." % __version__,
+                "info")
+            return version, None
+        return newest, newest_installer
 
     def _install_update_failed(self, dialog, err):
         """Main-thread continuation when the installer download fails."""

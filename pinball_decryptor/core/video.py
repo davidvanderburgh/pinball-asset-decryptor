@@ -550,6 +550,67 @@ def _h264_profile_args(info, scaled_to_slot):
     return args
 
 
+def dropin_spec(info, ext):
+    """What a replacement must look like to go onto the card untouched, as an
+    ordered ``[(label, value)]`` describing the clip already in the slot.
+
+    The clip on the card is the only authority on what the machine's decoder
+    accepts, so every line is read off *info* rather than asserted here.
+    ``None`` when there is nothing probed to read.
+    """
+    if info is None:
+        return None
+    out = [("Container", "QuickTime (.mov)" if ext == ".mov"
+            else "MP4 (%s)" % (ext or ".mp4"))]
+    out.append(("Video codec", (info.vcodec or "?").upper()))
+    if info.profile:
+        lvl = ("  level %.1f" % (info.level / 10.0)
+               if info.level and 9 < info.level < 100 else "")
+        out.append(("Profile", "%s%s" % (info.profile, lvl)))
+    out.append(("Pixel format", "%s (8-bit 4:2:0)" % info.pix_fmt
+                if info.pix_fmt in SAFE_PIX_FMTS and info.pix_fmt
+                else (info.pix_fmt or "?")))
+    if info.width and info.height:
+        out.append(("Frame size", "%d x %d" % (info.width, info.height)))
+    if info.fps:
+        out.append(("Frame rate", "%.6g fps" % info.fps))
+    if info.duration:
+        out.append(("Length", "%.2f s" % info.duration))
+    # Worth stating outright: most Spike 2 clips carry no audio track, and a
+    # replacement that brings one adds sound the game never had, which the
+    # machine plays (monkeybug: "I forgot to drop the audio off some files").
+    out.append(("Audio", "none" if not info.has_audio
+                else "%d Hz, %d ch" % (info.audio_rate, info.audio_channels)))
+    return out
+
+
+def dropin_ffmpeg_command(info, ext, src="input.mov", dst="output"):
+    """An ffmpeg command line that turns *src* into a drop-in for the clip
+    *info* describes, or ``None`` when it can't be built.
+
+    For users who would rather encode their own files than let the app do it —
+    monkeybug tunes his own key-frame interval so long clips play smoothly on
+    the machine, and without knowing the target he was guessing.  Everything
+    that isn't dictated by the slot (bitrate, key-frame interval, preset) is
+    deliberately left out, so it can be tuned without fighting the parts that
+    have to match.
+    """
+    if info is None or not info.width or not info.height:
+        return None
+    args = ["ffmpeg", "-i", src, "-c:v", "libx264"]
+    prof = _X264_PROFILES.get((info.profile or "").strip().lower())
+    if prof:
+        args += ["-profile:v", prof]
+        if info.level and 9 < info.level < 100:
+            args += ["-level", "%.1f" % (info.level / 10.0)]
+    args += ["-pix_fmt", "yuv420p",
+             "-vf", "scale=%d:%d" % (info.width, info.height)]
+    if info.fps:
+        args += ["-r", "%.6g" % info.fps]
+    args += ["-an", dst + (ext or ".mov")]
+    return " ".join(args)
+
+
 def _encode_timeout(duration):
     """Wall-clock cap in seconds for one ffmpeg encode of a *duration*-second
     clip.
@@ -651,6 +712,16 @@ def transcode_video_to(src_path, dst_path, original_info,
     ``(ok, actions)`` — *actions* is a short human-readable summary; on
     failure *ok* is False and *actions* is an error.
 
+    The slot's own AUDIO shape is matched too: a slot whose clip has no audio
+    track gets a replacement with none either.  Nearly every Spike 2 clip is
+    silent and the game plays its own sound, so a replacement that keeps its
+    source's audio adds a second soundtrack the machine really does play over
+    the top (monkeybug: "I forgot to drop the audio off some files").  The
+    test is per-SLOT, not a blanket rule: a census of 2251 clips across five
+    titles found Led Zeppelin, Godzilla, Jaws and John Wick entirely silent
+    but Deadpool carrying audio on 7 of its 99, so the clip being replaced is
+    the only thing worth matching.
+
     Requires ffmpeg.
     """
     ffmpeg = find_ffmpeg()
@@ -712,7 +783,13 @@ def transcode_video_to(src_path, dst_path, original_info,
         # 256kbps — visibly blocky at slot resolutions).  This path has no
         # byte budget; shrink_video_to_size sets its own -b:v.
         cmd += ["-crf", "32", "-b:v", "0"]
-    cmd += aargs
+    # Match the slot's audio shape (see the docstring).  Only when we actually
+    # probed the slot: an unprobed original is not evidence that it is silent.
+    if original_info is not None and not original_info.has_audio:
+        cmd += ["-an"]
+        actions.append("no audio (slot has none)")
+    else:
+        cmd += aargs
     if cap_to is not None:
         cmd += ["-t", f"{cap_to:.3f}"]
     cmd.append(dst_path)

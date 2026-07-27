@@ -143,6 +143,11 @@ class _AudioPreviewPane:
     def __init__(self, win, parent, title, on_activate=None):
         self._win = win
         self._on_activate = on_activate
+        # Called with this pane when a clip finishes ON ITS OWN.  Deliberately
+        # NOT called by stop_playback: a user pressing ■, switching tabs or
+        # loading another slot is not the track ending, and auditioning a whole
+        # card would otherwise run away from whoever tried to stop it.
+        self.on_finished = None
         self.sibling = None       # the other pane; paused when this one plays
         self.path = None          # file currently loaded in the strip
         self.dur = 0.0            # its duration (s)
@@ -433,6 +438,8 @@ class _AudioPreviewPane:
             self.pos = 0.0  # reset so ▶ replays from the start
             self._set_play_btn(False)
             self._draw_playhead()
+            if self.on_finished is not None:
+                self.on_finished(self)
             return
         self._draw_playhead()
         self._schedule_tick()
@@ -1106,6 +1113,7 @@ class MainWindow:
                  initial_show_log_history=True,
                  on_show_log_history_change=None):
         self.root = root
+        self._install_callback_error_logger(root)
         # Default Settings presets: {"presets": {name: {AD_name: value}},
         # "active": name}.  Persisted via on_default_presets_change.
         self._default_presets = dict(initial_default_presets or {})
@@ -1334,6 +1342,10 @@ class MainWindow:
         # require exact-length slots (JJP/Spooky) already trim/pad in their
         # own Write step regardless of this toggle.
         self.audio_trim_var = tk.BooleanVar(value=False)
+        # Audition mode: a finished clip selects and plays the next visible
+        # row.  Session-only (not persisted) — it is a thing you switch on to
+        # listen through a card, not a preference.
+        self.audio_play_through_var = tk.BooleanVar(value=False)
         self.audio_status_var = tk.StringVar(value="")
         self._audio_slots = []           # list[AudioSlot] from last scan
         self._audio_slots_by_rel = {}    # rel_path -> AudioSlot
@@ -3331,6 +3343,8 @@ class MainWindow:
             on_activate=lambda: self._audio_activate_pane("rep"))
         self._audio_pane_orig.sibling = self._audio_pane_rep
         self._audio_pane_rep.sibling = self._audio_pane_orig
+        self._audio_pane_orig.on_finished = self._audio_on_clip_finished
+        self._audio_pane_rep.on_finished = self._audio_on_clip_finished
         self._audio_pane_orig.frame.grid(row=0, column=0, sticky="ew",
                                          padx=(0, 4))
         self._audio_pane_rep.frame.grid(row=0, column=1, sticky="ew",
@@ -3354,6 +3368,19 @@ class MainWindow:
         # Hover tooltip — its text is set per-manufacturer in apply_manufacturer.
         self._audio_trim_tip = _Tooltip(
             self._audio_trim_cb, "", lambda: self._current_theme)
+        # Audition the card hands-free (monkeybug batch 23: "select a file and
+        # it starts playing the next file in the list ... to run through all
+        # the audio files without manual intervention").
+        self._audio_playthrough_cb = ttk.Checkbutton(
+            self._audio_opts_row, text="Play through the list",
+            variable=self.audio_play_through_var)
+        self._audio_playthrough_cb.pack(side=tk.LEFT, padx=(18, 0))
+        _Tooltip(self._audio_playthrough_cb,
+                 "When a clip finishes, select and play the next row in the "
+                 "list, following whatever sort, search and Type filter are "
+                 "showing.\n\nStops at the end of the list, and any ■ (or "
+                 "clicking another row) stops it.",
+                 lambda: self._current_theme)
         # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
         # encode overrides + a stock characterization report.
         self._audio_adv_btn = ttk.Button(
@@ -4615,14 +4642,33 @@ class MainWindow:
         except OSError as e:
             messagebox.showerror("Audio Properties", "Rename failed:\n%s" % e)
             return
-        rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
+        # From here on the file is ALREADY renamed on disk, so nothing below
+        # may abort the update of what the user is looking at.  Re-pointing the
+        # baseline opens it for writing, which on a NAS share can fail; when it
+        # threw, the exception took the list refresh with it and the slot both
+        # kept its old row and came back from the next scan marked "changed on
+        # disk" — the two halves of monkeybug's batch-23 report.  Say what
+        # happened and carry on.
+        try:
+            rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
+        except OSError as e:
+            self.append_log(
+                "Replace Audio: renamed the file, but couldn't re-point the "
+                "extract baseline (%s) — the slot will read as \"changed on "
+                "disk\" until the next Extract, even though its audio is "
+                "untouched." % e, "error")
         if md5:
             # Record the bucket picked in the dialog with the name, so the
             # renamed file keeps (or moves to) its Type on future extracts
             # (an SFX he renames stays under Sound FX — monkeybug's report of
             # a rename turning into a "callout").
-            name_memory.remember(md5, new_label,   # blank forgets
-                                 category=new_cat)
+            try:
+                name_memory.remember(md5, new_label,   # blank forgets
+                                     category=new_cat)
+            except OSError as e:
+                self.append_log(
+                    "Replace Audio: couldn't remember \"%s\" for future "
+                    "extracts (%s)." % (new_label, e), "error")
         # Re-key every bit of session state pinned to the old rel, then update
         # the slot IN PLACE and re-sort the visible list.  No folder rescan:
         # only this one file changed, and the full re-walk both took minutes
@@ -4640,9 +4686,27 @@ class MainWindow:
         slot.abs_path = dst
         self._audio_slots_by_rel.pop(rel, None)
         self._audio_slots_by_rel[new_rel] = slot
+        # The duplicate-group cache holds rel paths too, and it is only rebuilt
+        # by a folder rescan — leaving the old one in it dropped the renamed
+        # slot out of its own group and broke "Apply to all copies" for every
+        # other copy in it.
+        self._audio_rekey_dup_groups(rel, new_rel)
         if self._audio_current_rel == rel:
             self._audio_clear_preview()        # reselecting reloads the pane
-        self._save_staged_changes()
+        # Repaint BEFORE persisting.  The rename is already done on disk and in
+        # memory at this point, so the list must show it no matter what the
+        # sidecar write does; when this ran the other way round, a save that
+        # raised (the assets folder is routinely a NAS share) left the tree
+        # holding the pre-rename rows — old name, old Type, and an iid no
+        # longer in _audio_slots_by_rel, so clicking the row loaded nothing
+        # and only a rescan fixed it (monkeybug batch 23).
+        self._refresh_audio_type_filter()
+        self._refresh_audio_list()             # re-applies the active sort
+        try:                                   # keep the renamed row in view
+            self._audio_tree.selection_set(new_rel)
+            self._audio_tree.see(new_rel)
+        except tk.TclError:
+            pass
         if not md5:
             note = " (not remembered: the slot is modded and has no baseline)"
         elif new_label:
@@ -4651,13 +4715,21 @@ class MainWindow:
             note = " (forgotten)"
         self.append_log("Replace Audio: renamed %s → %s%s"
                         % (rel, new_base, note), "info")
-        self._refresh_audio_type_filter()
-        self._refresh_audio_list()             # re-applies the active sort
-        try:                                   # keep the renamed row in view
-            self._audio_tree.selection_set(new_rel)
-            self._audio_tree.see(new_rel)
-        except tk.TclError:
-            pass
+        self._save_staged_changes()
+
+    def _audio_rekey_dup_groups(self, old_rel, new_rel):
+        """Follow a renamed slot into the cached duplicate groups.
+
+        The cache is keyed by rel path and is otherwise only rebuilt by a
+        folder rescan, so without this a rename silently evicts the slot from
+        its own group (see _refresh_audio_list / _audio_dup_siblings)."""
+        groups = getattr(self, "_audio_dup_groups", None)
+        if not groups:
+            return
+        for _label, _dur, rels in groups:
+            for i, r in enumerate(rels):
+                if r == old_rel:
+                    rels[i] = new_rel
 
     def _audio_export_csv(self):
         """Save the audio table as a CSV — every slot with its metadata,
@@ -4769,6 +4841,71 @@ class MainWindow:
         self._audio_load_track(rel, autoplay="rep")
 
     # ---- Replace Audio: preview panes (Original | Replacement) -------
+
+    def _audio_visible_rels(self):
+        """Every slot row the tree is currently showing, top to bottom.
+
+        Duplicate-group parents are containers, not slots, so only their
+        children count — and the order is the tree's own, which is whatever
+        the active sort, search and Type filter produced."""
+        tree = getattr(self, "_audio_tree", None)
+        if tree is None:
+            return []
+        out = []
+        for iid in tree.get_children():
+            if iid.startswith(_AUD_DUP_GROUP_IID):
+                out.extend(tree.get_children(iid))
+            else:
+                out.append(iid)
+        return out
+
+    def _audio_next_visible_rel(self, rel):
+        """The row after *rel* in the list, or None at the end of it."""
+        rels = self._audio_visible_rels()
+        try:
+            i = rels.index(rel)
+        except ValueError:
+            return None
+        return rels[i + 1] if i + 1 < len(rels) else None
+
+    def _audio_on_clip_finished(self, pane):
+        """A preview finished on its own — step to the next row when "Play
+        through the list" is on (monkeybug batch 23).
+
+        Only the pane that was actually playing drives this, and only while
+        the Audio tab still owns the slot it just played, so a finished clip
+        can't hijack a selection the user has since moved."""
+        if not self.audio_play_through_var.get():
+            return
+        rel = self._audio_current_rel
+        if rel is None:
+            return
+        side = "rep" if pane is self._audio_pane_rep else "orig"
+        nxt = self._audio_next_visible_rel(rel)
+        if nxt is None:
+            self.append_log(
+                "Replace Audio: played through to the end of the list.",
+                "info")
+            return
+
+        def _advance():
+            # Selecting the row drives the usual debounced preview load, so
+            # the list, the panes and the title all stay in step; ask it to
+            # keep playing on the same side.
+            try:
+                self._audio_tree.selection_set(nxt)
+                self._audio_tree.see(nxt)
+            except tk.TclError:
+                return
+            self._cancel_audio_select_job()
+            self._audio_load_track(nxt, autoplay=side)
+        # Off the player's own callback: _tick is mid-teardown of the process
+        # that just exited, and starting the next one from inside it races
+        # that cleanup.
+        try:
+            self._tk_root().after(120, _advance)
+        except tk.TclError:
+            pass
 
     def _audio_load_track(self, rel, autoplay=None):
         """Load *rel* into both preview panes — its original on the left, its
@@ -5200,18 +5337,28 @@ class MainWindow:
                                         padx=(4, 0))
         self._video_pane_rep.clear("no replacement assigned")
 
+        # This applies to EVERY replacement, not to the slot on screen — it
+        # sits beside the preview, which read as per-clip, and monkeybug
+        # thought changing it meant re-picking all his files one by one
+        # (batch 23).  The label says so, and flipping it re-answers the
+        # Convert column for the whole list on the spot.
         self._video_no_conversion_cb = ttk.Checkbutton(
-            opts, text="No conversion — use my file as-is",
+            opts, text="Use my files as-is — never re-encode (all slots)",
             variable=self.video_no_conversion_var,
             command=self._video_on_no_conversion_toggle)
         self._video_no_conversion_cb.pack(anchor=tk.W, pady=(0, 6))
         _Tooltip(
             self._video_no_conversion_cb,
-            "Skip re-encoding: the replacement is copied in byte-for-byte, so "
-            "it must already be the original clip's container, codec, "
-            "resolution and frame rate (a different container is rejected). "
-            "Faster and lossless, but the file has to be game-ready. Leave this "
-            "off to have the app auto-convert any video to match the slot.",
+            "Applies to every replacement you have picked, not just the "
+            "selected one — tick or untick it any time and the Convert column "
+            "re-answers for the whole list. Nothing has to be picked again.\n\n"
+            "On: replacements are copied in byte-for-byte, so each one has to "
+            "already be the clip's container, codec, resolution and frame "
+            "rate. Lossless and fast, but the file has to be game-ready — a "
+            "clip the machine can't decode plays its sound over a black "
+            "picture, and the Convert column says \"✗ won't play\" when it "
+            "can see that coming.\n\nOff: anything that isn't already a match "
+            "is converted to suit the slot, at full size.",
             lambda: self._current_theme)
 
         self._video_trim_cb = ttk.Checkbutton(
@@ -5229,11 +5376,25 @@ class MainWindow:
 
         self._refresh_video_ffmpeg_warning()
 
-    def _video_noconv_conflict(self, rel, path):
+    def _video_noconv_conflict(self, rel, path, deep=True):
         """Why *path* can't be copied through as-is for slot *rel* under
-        'No conversion' (mirrors stage_replacement's rejections), or None
-        if it's fine.  Used to warn at pick/toggle time instead of letting
-        the mismatch surface only as a build-time failure (monkeybug)."""
+        'No conversion', or None if it's fine.  Used to warn at pick/toggle
+        time instead of letting the mismatch surface only as a build-time
+        failure (monkeybug).
+
+        This checks what the MACHINE needs, not just what Write will accept.
+        Write only refuses the wrong container; everything else it copies
+        through byte-for-byte because the user vouched for it — and an i.MX6
+        VPU handed ProRes, HEVC, 10-bit, or the wrong geometry finds the sound
+        and shows a black picture, which is what monkeybug's attract video did
+        (batch 23).  Same rules as the build's own drop-in gate
+        (plugins.stern.engine._intact_copy_source), applied where he can still
+        do something about it.
+
+        *deep* controls the ffprobe-backed half.  It costs one probe per file,
+        which is fine for the one clip just picked but not for the whole
+        assignment list at once — the bulk callers pass ``deep=False`` and let
+        the Convert column's background pass answer instead."""
         slot = self._video_slots_by_rel.get(rel)
         if slot is None:
             return None
@@ -5246,11 +5407,80 @@ class MainWindow:
             return ("%s needs a %s file, but %s is %s" % (
                 rel, slot.ext, os.path.basename(path),
                 rep_ext or "extension-less"))
+        if not deep:
+            return None
+        return (self._video_playability_conflict(slot, path)
+                or self._video_extra_audio(slot, path))
+
+    @staticmethod
+    def _video_playability_conflict(slot, path):
+        """Why the machine wouldn't play *path* in *slot*, or None.
+
+        Touches no Tk state, so the Convert column's worker thread can call it.
+        Best-effort: without ffprobe there is nothing to measure, and a file
+        we can't read is not evidence of a problem — both return None rather
+        than guessing."""
+        from ..core import video as _video
+        name = os.path.basename(path)
+        info = _video.detect_video_info(path)
+        if info is None:
+            return None
+        codec = (info.vcodec or "").lower()
+        if codec and codec != "h264":
+            return ("%s is %s and the machine plays H.264"
+                    % (name, codec.upper()))
+        pix = info.pix_fmt or ""
+        if pix and pix not in _video.SAFE_PIX_FMTS:
+            return ("%s is %s and the machine's decoder handles only 8-bit "
+                    "4:2:0" % (name, pix))
+        sinfo = getattr(slot, "info", None)
+        if sinfo is None or not sinfo.width or not sinfo.height:
+            return None
+        if info.width and info.height and (
+                (info.width, info.height) != (sinfo.width, sinfo.height)):
+            return ("%s is %dx%d and this slot's clip is %dx%d"
+                    % (name, info.width, info.height,
+                       sinfo.width, sinfo.height))
+        if sinfo.fps > 0 and info.fps > 0 and abs(info.fps - sinfo.fps) > 0.5:
+            return ("%s runs at %.3g fps and this slot's clip is %.3g fps"
+                    % (name, info.fps, sinfo.fps))
         return None
+
+    @staticmethod
+    def _video_extra_audio(slot, path):
+        """Why *path*'s soundtrack is a problem for *slot*, or None.
+
+        Kept apart from :meth:`_video_playability_conflict` because it is not
+        a decode failure — the picture plays perfectly.  The machine just also
+        plays the audio track the file brought with it, on top of whatever the
+        game is doing.  Judged against THIS slot's clip rather than a blanket
+        rule: most Spike 2 clips are silent, but not all of them are (Deadpool
+        1.14 LE has audio on 7 of its 99), so only a silent slot getting a
+        noisy replacement is worth mentioning (monkeybug: "I forgot to drop
+        the audio off some files")."""
+        from ..core import video as _video
+        sinfo = getattr(slot, "info", None)
+        if sinfo is None or sinfo.has_audio:
+            return None
+        info = _video.detect_video_info(path)
+        if info is None or not info.has_audio:
+            return None
+        return ("%s carries an audio track and this slot's clip has none, so "
+                "the machine will play it over the game's own sound"
+                % os.path.basename(path))
 
     # Values shown in the video list's "Convert" column.
     _VIDEO_CONV_ASIS = "As-is"
     _VIDEO_CONV_REENC = "Re-encode"
+    # "No conversion" is on and this pick would go on the card untouched but
+    # the machine can't play it, or Write would refuse it outright.  The column
+    # used to go BLANK for both, which is why 27 of monkeybug's 29 rows said
+    # nothing at all and he asked why only one was "As-is" (batch 23).
+    _VIDEO_CONV_REJECT = "✗ won't play"
+    _VIDEO_CONV_WRONG_TYPE = "✗ needs %s"
+    # Goes on as-is and the picture is right, but it brings a soundtrack the
+    # slot's own clip doesn't have and the machine will play it.
+    _VIDEO_CONV_ASIS_NOISY = "As-is ⚠ audio"
 
     @staticmethod
     def _video_conv_mode(slot, path, no_conversion, trim):
@@ -5268,8 +5498,18 @@ class MainWindow:
             return ""
         rep_ext = os.path.splitext(path)[1].lower()
         if no_conversion:
-            if backend_for(slot.abs_path) is not None or rep_ext != slot.ext:
-                return ""
+            if backend_for(slot.abs_path) is not None:
+                return MainWindow._VIDEO_CONV_REJECT
+            if rep_ext != slot.ext:
+                return MainWindow._VIDEO_CONV_WRONG_TYPE % slot.ext
+            # It WILL be copied on untouched — so the honest answer is whether
+            # the machine can play what's being copied, not just whether Write
+            # will accept it.
+            if MainWindow._video_playability_conflict(slot, path):
+                return MainWindow._VIDEO_CONV_REJECT
+            if MainWindow._video_extra_audio(slot, path):
+                # The picture is fine; it is the extra soundtrack that isn't.
+                return MainWindow._VIDEO_CONV_ASIS_NOISY
             return MainWindow._VIDEO_CONV_ASIS
         if backend_for(slot.abs_path) is not None:
             return MainWindow._VIDEO_CONV_REENC
@@ -5407,18 +5647,21 @@ class MainWindow:
         self._update_video_trim_enabled()
         self._save_staged_changes()
         # Turning it ON with replacements already picked: flag any that the
-        # verbatim copy would reject, now rather than at build time.
+        # verbatim copy would reject, now rather than at build time.  Shallow
+        # (no ffprobe per file) — this runs over every assignment on the main
+        # thread, and the deeper "would the machine play it?" answer arrives in
+        # the Convert column from its own worker pass.
         if self.video_no_conversion_var.get():
             bad = [w for w in (
-                self._video_noconv_conflict(rel, p)
+                self._video_noconv_conflict(rel, p, deep=False)
                 for rel, p in sorted(self._video_assignments.items()))
                 if w is not None]
             if bad:
                 messagebox.showwarning(
-                    "No conversion is on",
+                    "Using your files as-is",
                     "These assigned replacements can't be used as-is and "
-                    "would be rejected at build time:\n\n%s\n\nUncheck "
-                    "\"No conversion\" to have them converted automatically."
+                    "would be rejected at build time:\n\n%s\n\nUntick \"Use "
+                    "my files as-is\" to have them converted automatically."
                     % "\n".join("  • %s" % w for w in bad))
         # The flag decides every row's Convert answer — redraw so the column
         # tracks the checkbox.
@@ -5937,17 +6180,17 @@ class MainWindow:
             why = self._video_noconv_conflict(rel, path)
             if why is not None:
                 if messagebox.askyesno(
-                        "No conversion is on",
-                        "%s.\n\nWith \"No conversion\" checked this file "
-                        "would be rejected at build time.\n\nUncheck \"No "
-                        "conversion\" so replacements are converted "
-                        "automatically?" % why, icon="warning"):
+                        "Using your files as-is",
+                        "%s.\n\nWith \"Use my files as-is\" ticked, this file "
+                        "goes onto the card exactly as it is.\n\nUntick it so "
+                        "replacements are converted to suit the slot?"
+                        % why, icon="warning"):
                     self.video_no_conversion_var.set(False)
                     self._video_on_no_conversion_toggle()
                 else:
                     self.append_log(
-                        "Replace Video: %s — %s; it will be REJECTED at "
-                        "build time unless 'No conversion' is unchecked."
+                        "Replace Video: %s — %s; it goes on the card as it is "
+                        "unless 'Use my files as-is' is unticked."
                         % (rel, why), "error")
         self._video_assignments[rel] = path
         self._save_staged_changes()
@@ -6056,6 +6299,9 @@ class MainWindow:
         if slot is not None:
             menu.add_separator()
             menu.add_command(
+                label="What this slot needs…",
+                command=lambda r=row: self._video_show_target_spec(r))
+            menu.add_command(
                 label=self._reveal_menu_label(),
                 command=lambda p=slot.abs_path: self._reveal_in_file_manager(p))
             self._add_find_in_partition_item(menu, "video", row)
@@ -6063,6 +6309,96 @@ class MainWindow:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _video_show_target_spec(self, rel):
+        """"What this slot needs…": the exact shape of a drop-in for *rel*,
+        plus an ffmpeg command that produces one.
+
+        monkeybug encodes his own clips on purpose — he tunes the key-frame
+        interval so long videos play smoothly on the machine — and avoids the
+        app's conversion for that reason.  He was doing it blind: his attract
+        clip was ProRes in a .mov, which the i.MX6's decoder cannot touch, so
+        it went on the card as-is and played its sound over a black picture.
+        The clip already in the slot is the authority on what the machine
+        accepts, so this just reads it out."""
+        from ..core import video as _video
+        slot = self._video_slots_by_rel.get(rel)
+        if slot is None:
+            return
+        info = slot.info
+        if info is None:
+            messagebox.showinfo(
+                "What this slot needs",
+                "This clip hasn't been probed yet — its Length / Resolution / "
+                "Format cells still read \"…\".\n\nGive the scan a moment and "
+                "try again. (Without ffmpeg on this machine the app can't "
+                "read the clip's format at all.)")
+            return
+        spec = _video.dropin_spec(info, slot.ext)
+        cmd = _video.dropin_ffmpeg_command(info, slot.ext)
+
+        dlg = tk.Toplevel(self._tk_root())
+        dlg.title("What this slot needs")
+        dlg.transient(self._tk_root())
+        self._theme_toplevel(dlg)
+        ttk.Label(dlg, text=rel, font=(_SANS_FONT, 10, "bold")).pack(
+            anchor=tk.W, padx=12, pady=(12, 2))
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=560,
+            text="A replacement matching this goes onto the card untouched, "
+                 "at full quality. Anything else has to be converted first — "
+                 "untick \"Use my files as-is\" and the app will do it.").pack(
+            anchor=tk.W, padx=12, pady=(0, 8))
+        grid = ttk.Frame(dlg)
+        grid.pack(anchor=tk.W, padx=12)
+        for i, (label, value) in enumerate(spec or ()):
+            ttk.Label(grid, text=label + ":", foreground="#888888").grid(
+                row=i, column=0, sticky="w", padx=(0, 10), pady=1)
+            ttk.Label(grid, text=value).grid(row=i, column=1, sticky="w",
+                                             pady=1)
+        if cmd:
+            ttk.Label(
+                dlg, justify=tk.LEFT, wraplength=560,
+                text="To encode your own, start from this and tune whatever "
+                     "you like around it (bitrate, key-frame interval, "
+                     "preset) — the flags below are the parts that have to "
+                     "match:").pack(anchor=tk.W, padx=12, pady=(10, 4))
+            _c = THEMES.get(self._current_theme, {})
+            box = tk.Text(dlg, height=3, wrap=tk.WORD, width=68,
+                          font=(_MONO_FONT, 9), relief=tk.FLAT,
+                          bg=_c.get("field_bg"), fg=_c.get("fg"),
+                          selectbackground=_c.get("select_bg"),
+                          highlightthickness=1,
+                          highlightbackground=_c.get("border"))
+            box.insert("1.0", cmd)
+            box.configure(state=tk.DISABLED)   # selectable, not editable
+            box.pack(fill=tk.X, padx=12)
+            if not info.has_audio:
+                ttk.Label(
+                    dlg, justify=tk.LEFT, wraplength=560,
+                    font=(_SANS_FONT, 8),
+                    text="The -an is deliberate: this slot's clip has no "
+                         "audio track, and one you add will be played.").pack(
+                    anchor=tk.W, padx=12, pady=(2, 0))
+
+        row = ttk.Frame(dlg)
+        row.pack(fill=tk.X, padx=12, pady=12)
+
+        def _copy():
+            try:
+                self._tk_root().clipboard_clear()
+                self._tk_root().clipboard_append(cmd)
+            except tk.TclError:
+                return
+            self.append_log("Copied the ffmpeg command for %s." % rel, "info")
+        if cmd:
+            ttk.Button(row, text="Copy command", command=_copy).pack(
+                side=tk.LEFT)
+        ttk.Button(row, text="Close", command=dlg.destroy,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        center_over(self._tk_root(), dlg)
+        dlg.resizable(False, False)
 
     def _video_clear_selected(self):
         rel = self._video_selected_rel()
@@ -8883,6 +9219,11 @@ class MainWindow:
         self._settings_busy = False
         self._settings_loading = False   # True while the form is being filled
         self._settings_stage_job = None  # debounced auto-stage timer id
+        self._settings_log_job = None    # debounced "say what changed" timer
+        # Field state as of the last log line — None until a card is loaded,
+        # which is how the first look adopts what's already staged in silence
+        # (see _settings_flush_log).
+        self._settings_logged = None
         self._settings_rows = []          # [{name,label,kind,var,default,min,max}]
         # Factory high-score board (plugins.stern.high_scores) + its per-slot
         # initials/name entry vars — batch 22.  None when this build's table
@@ -9182,13 +9523,17 @@ class MainWindow:
                 with CardImage(path) as c:
                     table, part, fw = c.adjustment_table()
                     elf = c.read_firmware(part, fw)
-                rows = curated_rows(table)
-                # Reference list of EVERY setting, flagged with whether the
-                # machine's menu can reach it.  Best-effort by design: a build
-                # whose menu can't be read still gets the list, just without
-                # the flags (never with wrong ones).
+                # Which settings the machine's own menu can reach.  Best-effort
+                # by design: a build whose menu can't be read still gets the
+                # list and the editor, just without the flags (never with
+                # wrong ones).
                 try:
-                    every = all_rows(table, statuses(table))
+                    menu = statuses(table)
+                except Exception:
+                    menu = {}
+                rows = curated_rows(table, menu)
+                try:
+                    every = all_rows(table, menu)
                 except Exception:
                     every = []
                 # The factory high-score board (initials + player names) is a
@@ -9252,9 +9597,29 @@ class MainWindow:
         _poll()
 
     def _settings_clear_form(self):
-        for w in self._settings_form.winfo_children():
-            if w is not self._settings_empty:
-                w.destroy()
+        # Destroying a focused field fires <FocusOut>, which is one of the
+        # things that flushes the staged-edit log — so tearing the form down
+        # would narrate the outgoing card on the way out.  The loading flag is
+        # what tells the log "these values are not somebody typing".
+        was_loading = self._settings_loading
+        self._settings_loading = True
+        try:
+            for w in self._settings_form.winfo_children():
+                if w is not self._settings_empty:
+                    w.destroy()
+        finally:
+            self._settings_loading = was_loading
+        job, self._settings_log_job = (
+            getattr(self, "_settings_log_job", None), None)
+        if job is not None:
+            try:
+                self._tk_root().after_cancel(job)
+            except tk.TclError:
+                pass
+        # A different card's fields are a different conversation — the next
+        # flush adopts them silently instead of reporting the old card's
+        # edits as if they had just been made.
+        self._settings_logged = None
         self._settings_rows = []
         self._settings_hstd_vars = []
         self._settings_all_rows = []
@@ -9288,8 +9653,7 @@ class MainWindow:
             if r["min"] == 0 and r["max"] == 1:
                 val, rng = ("On" if r["default"] else "Off"), "off / on"
             else:
-                rng = "%s - %s" % (self._settings_fmt_num(r["min"]),
-                                   self._settings_fmt_num(r["max"]))
+                rng = self._settings_range_text(r)
                 if r.get("labels") and r["default"] in r["labels"]:
                     val = "%d - %s" % (r["default"], r["labels"][r["default"]])
                 else:
@@ -9325,6 +9689,22 @@ class MainWindow:
         return "{:,}".format(v) if abs(v) >= 100000 else str(v)
 
     @classmethod
+    def _settings_range_text(cls, r):
+        """The "Range" cell for a row — ``min - max``, plus a note when the
+        card's own default falls outside it.
+
+        Stern does ship those: Led Zeppelin 1.22's ELECTRIC MAGIC FRENZY and
+        MULTIBALL champions default to 2,000,000 against a declared minimum of
+        5,000,000.  Saying so is the difference between "the app is showing me
+        a wrong number" and "the firmware really is like that"."""
+        rng = "%s - %s" % (cls._settings_fmt_num(r["min"]),
+                           cls._settings_fmt_num(r["max"]))
+        if not (r["min"] <= r["default"] <= r["max"]):
+            rng += "  (card ships %s, outside its own range)" % (
+                cls._settings_fmt_num(r["default"]))
+        return rng
+
+    @classmethod
     def _settings_fmt_value(cls, r, v):
         """A row's value the way the operator menu shows it."""
         if r["kind"] == "toggle":
@@ -9356,14 +9736,25 @@ class MainWindow:
         # adjustments back from the generic grid rather than listing each one
         # twice.  They still register in _settings_rows, so staging, presets
         # and Reset Fields keep working on them unchanged.
+        from ..plugins.stern.adjustments import is_score_adjustment
         hstd = getattr(self, "_settings_hstd", None)
         hs_adj = {r["adjustment"] for r in hstd.rows} if hstd else set()
         hs_adj.discard(None)
-        grid_rows = [r for r in rows if r["name"] not in hs_adj]
+        # EVERY board score goes to the High Scores block, not just the ones
+        # whose initials/player-name record we found.  Matching only on the
+        # record left Led Zeppelin's BLACK DOG CHAMPION sitting alone up in
+        # the settings grid (monkeybug: "these items seem outside the score
+        # area") — it has no record, but it is still a champion score and
+        # belongs with the rest.
+        grid_rows = [r for r in rows
+                     if r["name"] not in hs_adj
+                     and not is_score_adjustment(r["name"])]
         by_adj = {r["name"]: r for r in rows if r["name"] in hs_adj}
-        if not grid_rows:
+        extra_scores = [r for r in rows
+                        if r["name"] not in hs_adj
+                        and is_score_adjustment(r["name"])]
+        if not grid_rows and not by_adj and not extra_scores:
             grid_rows = rows
-            by_adj = {}
         rows = grid_rows
         # ONE column of settings (David, batch 22).  This used to wrap into
         # two or three side-by-side groups to use the tab's width, but the
@@ -9373,42 +9764,59 @@ class MainWindow:
         # reach controls you couldn't see were there.  A single column can't
         # overflow at any width, and it reads the same way as the High Scores
         # block below it; the canvas scrolls vertically as it always has.
-        ncols = 1
-        per = len(rows)
+        base = 0
         accent = THEMES.get(self._current_theme, {}).get("link", "#d78f2c")
-        for g in range(ncols):
-            base = g * 6
-            for col, txt, tip in (
-                    (0, "Setting", None),
-                    (1, "On card", "The default currently baked into this "
-                        "image — Stern's factory value unless it was changed "
-                        "here before."),
-                    (2, "New default", "What the machine will use on a fresh "
-                        "flash or after a factory reset, once saved to the "
-                        "image.")):
-                h = ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold"))
-                h.grid(row=0, column=base + col, sticky="w", padx=6,
-                       pady=(2, 4))
-                if tip:
-                    _Tooltip(h, tip, lambda: self._current_theme)
-            ttk.Label(form, text="Range", font=(_SANS_FONT, 8),
-                      foreground="#888888").grid(
-                row=0, column=base + 4, sticky="w", padx=6, pady=(2, 4))
-            if g < ncols - 1:
-                form.grid_columnconfigure(base + 5, minsize=30)
-        for i, r in enumerate(rows):
-            g, ri = divmod(i, per)
-            base, grow = g * 6, ri + 1
+        for col, txt, tip in (
+                (0, "Setting", None),
+                (1, "On card", "The default currently baked into this "
+                    "image — Stern's factory value unless it was changed "
+                    "here before."),
+                (2, "New default", "What the machine will use on a fresh "
+                    "flash or after a factory reset, once saved to the "
+                    "image.")):
+            h = ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold"))
+            h.grid(row=0, column=col, sticky="w", padx=6, pady=(2, 4))
+            if tip:
+                _Tooltip(h, tip, lambda: self._current_theme)
+        ttk.Label(form, text="Range", font=(_SANS_FONT, 8),
+                  foreground="#888888").grid(
+            row=0, column=4, sticky="w", padx=6, pady=(2, 4))
+        grow = 0
+        group = None
+        for r in rows:
+            # A heading whenever the block changes, so the running order has
+            # a visible reason (monkeybug asked what the logic was).
+            if r.get("group") and r["group"] != group:
+                group = r["group"]
+                grow += 1
+                ttk.Label(form, text=group,
+                          font=(_SANS_FONT, 10, "bold")).grid(
+                    row=grow, column=0, columnspan=3, sticky="w", padx=6,
+                    pady=(10, 2))
+            grow += 1
             lbl = ttk.Label(form, text=r["label"], anchor="w")
             lbl.grid(row=grow, column=base, sticky="w", padx=6, pady=2)
-            if r["help"]:
-                _Tooltip(lbl, r["help"], lambda: self._current_theme)
+            help_text = r["help"]
+            # Say when the machine will not show this one in its Adjustments
+            # menu.  It is still worth setting from the card (the firmware
+            # reads the same default either way), but "I changed it and the
+            # operator menu doesn't agree" has a real answer — the master
+            # volume is the one monkeybug hit.
+            if r.get("status") == "service":
+                help_text = (help_text + "\n\n" if help_text else "") + (
+                    "This machine edits this on a different service screen, "
+                    "not in the Adjustments menu — so the value there may "
+                    "not match what you set here.")
+            elif r.get("status") == "debug":
+                help_text = (help_text + "\n\n" if help_text else "") + (
+                    "This machine's menus never show this setting at all.")
+            if help_text:
+                _Tooltip(lbl, help_text, lambda: self._current_theme)
             ttk.Label(form, text=self._settings_fmt_value(r, r["default"]),
                       foreground="#888888").grid(
                 row=grow, column=base + 1, sticky="w", padx=6, pady=2)
             var = tk.IntVar(value=r["default"])
-            rng = "%s - %s" % (self._settings_fmt_num(r["min"]),
-                               self._settings_fmt_num(r["max"]))
+            rng = self._settings_range_text(r)
             if r["kind"] == "toggle":
                 w = ttk.Checkbutton(form, variable=var, text="On")
                 rng = "off / on"
@@ -9420,7 +9828,11 @@ class MainWindow:
                 opts = ["%d - %s" % (v, labels[v])
                         for v in range(r["min"], r["max"] + 1)]
                 w = ttk.Combobox(form, state="readonly", values=opts, width=16)
-                w.current(r["default"] - r["min"])
+                # A shipped default outside its own range has no option to
+                # select — leave the box blank rather than picking the wrong
+                # end of the list (see _settings_changes).
+                if r["min"] <= r["default"] <= r["max"]:
+                    w.current(r["default"] - r["min"])
 
                 def _sel(_e=None, _w=w, _v=var, _lo=r["min"]):
                     _v.set(_lo + _w.current())
@@ -9431,11 +9843,16 @@ class MainWindow:
                 # defaults run to 1,000,000,000 and step by a million, so a
                 # width-8 box with increment=1 was unusable for them
                 # (monkeybug batch 22).
+                # The spinner's own travel stretches to take in a shipped
+                # default that sits outside the declared range, so the arrows
+                # can always get back to the value the card actually has.
                 w = ttk.Spinbox(
-                    form, from_=r["min"], to=r["max"], textvariable=var,
+                    form, from_=min(r["min"], r["default"]),
+                    to=max(r["max"], r["default"]), textvariable=var,
                     width=max(8, len("%d" % r["max"]) + 1),
                     increment=r.get("step", 1))
             w.grid(row=grow, column=base + 2, sticky="w", padx=6, pady=2)
+            self._settings_bind_commit(w)
             # "●" lights up while the field deviates from the on-card value —
             # the at-a-glance answer to "am I changing anything here?".
             mark = ttk.Label(form, text=" ", foreground=accent, width=2)
@@ -9458,7 +9875,7 @@ class MainWindow:
                       foreground="#888888").grid(
                 row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
-        self._settings_build_hstd_block(by_adj, accent)
+        self._settings_build_hstd_block(by_adj, accent, extra_scores)
         self._settings_reset_btn.config(state=tk.NORMAL)
         # Overlay in build-time order — the auto-apply preset first, then the
         # folder's already-staged values on top (staged wins at Build too) —
@@ -9493,7 +9910,7 @@ class MainWindow:
         except tk.TclError:
             pass
 
-    def _settings_build_hstd_block(self, by_adj, accent):
+    def _settings_build_hstd_block(self, by_adj, accent, extra_scores=()):
         """The "High Scores" block: one row per slot on the machine's
         high-score board — initials, player name and (where the firmware
         exposes it as an adjustment) the default score.
@@ -9502,10 +9919,19 @@ class MainWindow:
         ordinary adjustments; the initials and names are their own string
         table in the same ELF (see plugins.stern.high_scores) and are patched
         in place, so each field is capped at the room its slot actually has.
+
+        *extra_scores* are curated score rows the ELF has no name record for
+        (Led Zeppelin's BLACK DOG CHAMPION); they are drawn as score-only
+        lines so every champion is in one place.
         """
         hstd = getattr(self, "_settings_hstd", None)
         self._settings_hstd_vars = []
-        if hstd is None or not hstd.rows:
+        hs_rows = list(hstd.rows) if hstd is not None else []
+        # Champion scores with no initials/player-name record of their own get
+        # a score-only line here rather than being stranded in the settings
+        # grid (see is_score_adjustment).
+        extra_scores = list(extra_scores or [])
+        if not hs_rows and not extra_scores:
             return
         form = self._settings_form
         base_row = form.grid_size()[1] + 1
@@ -9522,11 +9948,59 @@ class MainWindow:
                  "keeps them and ignores these.",
                  lambda: self._current_theme)
         base_row += 2
-        for col, txt in ((0, "Slot"), (1, "Initials"), (2, "Player name"),
-                         (3, "Default score")):
-            ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold")).grid(
-                row=base_row, column=col, sticky="w", padx=6, pady=(2, 4))
-        for i, rec in enumerate(hstd.rows):
+        # Same column order as the settings grid above — reference value
+        # first, then the field you edit.  It used to trail the row as bare
+        # grey "on card 75,000,000" text with no header, which read as a
+        # duplicate of the box beside it rather than as the card's own value
+        # (monkeybug: "is this useful information?").
+        for col, txt, tip in (
+                (0, "Slot", None),
+                (1, "Initials", None),
+                (2, "Player name", None),
+                (3, "On card", "The default score currently baked into this "
+                    "image — Stern's factory value unless it was changed "
+                    "here before."),
+                (4, "Default score", "What the machine will seed this place "
+                    "with on a fresh flash or after a factory reset.")):
+            h = ttk.Label(form, text=txt, font=(_SANS_FONT, 9, "bold"))
+            h.grid(row=base_row, column=col, sticky="w", padx=6, pady=(2, 4))
+            if tip:
+                _Tooltip(h, tip, lambda: self._current_theme)
+        def _score_widgets(grow, score):
+            """Draw one slot's on-card value + editable default, and register
+            it as an ordinary settings row so staging, presets and Reset
+            Fields keep working on it unchanged."""
+            ttk.Label(form, text=self._settings_fmt_num(score["default"]),
+                      foreground="#888888").grid(
+                row=grow, column=3, sticky="w", padx=6, pady=2)
+            svar = tk.IntVar(value=score["default"])
+            sw = ttk.Spinbox(
+                form, from_=min(score["min"], score["default"]),
+                to=max(score["max"], score["default"]), textvariable=svar,
+                width=max(8, len("%d" % score["max"]) + 1),
+                increment=score.get("step", 1))
+            sw.grid(row=grow, column=4, sticky="w", padx=6, pady=2)
+            self._settings_bind_commit(sw)
+            mark = ttk.Label(form, text=" ", foreground=accent, width=2)
+            mark.grid(row=grow, column=5, sticky="w", pady=2)
+
+            def _remark(*_a, _r=score, _v=svar, _m=mark):
+                try:
+                    changed = int(_v.get()) != _r["default"]
+                except (tk.TclError, ValueError):
+                    changed = False
+                try:
+                    _m.configure(text="●" if changed else " ")
+                except tk.TclError:
+                    pass
+                self._settings_schedule_autostage()
+            svar.trace_add("write", _remark)
+            ttk.Label(form, text=self._settings_range_text(score),
+                      font=(_SANS_FONT, 8), foreground="#888888").grid(
+                row=grow, column=6, sticky="w", padx=6, pady=2)
+            self._settings_rows.append(dict(score, var=svar, widget=sw))
+
+        for i, rec in enumerate(hs_rows):
             grow = base_row + 1 + i
             ttk.Label(form, text=rec["display"], anchor="w").grid(
                 row=grow, column=0, sticky="w", padx=6, pady=2)
@@ -9539,9 +10013,11 @@ class MainWindow:
                 ent.grid(row=grow, column=col, sticky="w", padx=6, pady=2)
                 if cap <= 0:
                     ent.state(["disabled"])
-                _Tooltip(ent, "Up to %d character(s) — the text is written "
-                              "into the slot's own space in the firmware, so "
-                              "it can't grow." % cap,
+                self._settings_bind_commit(ent)
+                _Tooltip(ent, "On card: \"%s\".\nUp to %d character(s) — the "
+                              "text is written into the slot's own space in "
+                              "the firmware, so it can't grow."
+                              % (rec[key], cap),
                          lambda: self._current_theme)
                 entry_vars[key] = var
 
@@ -9556,36 +10032,14 @@ class MainWindow:
                 var.trace_add("write", _on_edit)
             score = by_adj.get(rec["adjustment"])
             if score is not None:
-                svar = tk.IntVar(value=score["default"])
-                sw = ttk.Spinbox(
-                    form, from_=score["min"], to=score["max"],
-                    textvariable=svar,
-                    width=max(8, len("%d" % score["max"]) + 1),
-                    increment=score.get("step", 1))
-                sw.grid(row=grow, column=3, sticky="w", padx=6, pady=2)
-                mark = ttk.Label(form, text=" ", foreground=accent, width=2)
-                mark.grid(row=grow, column=4, sticky="w", pady=2)
-
-                def _remark(*_a, _r=score, _v=svar, _m=mark):
-                    try:
-                        changed = int(_v.get()) != _r["default"]
-                    except (tk.TclError, ValueError):
-                        changed = False
-                    try:
-                        _m.configure(text="●" if changed else " ")
-                    except tk.TclError:
-                        pass
-                    self._settings_schedule_autostage()
-                svar.trace_add("write", _remark)
-                ttk.Label(form,
-                          text="on card %s"
-                               % self._settings_fmt_num(score["default"]),
-                          font=(_SANS_FONT, 8),
-                          foreground="#888888").grid(
-                    row=grow, column=5, sticky="w", padx=6, pady=2)
-                self._settings_rows.append(dict(score, var=svar, widget=sw))
+                _score_widgets(grow, score)
             self._settings_hstd_vars.append(
                 {"label": rec["label"], "record": rec, "vars": entry_vars})
+        for j, score in enumerate(extra_scores):
+            grow = base_row + 1 + len(hs_rows) + j
+            ttk.Label(form, text=score["label"], anchor="w").grid(
+                row=grow, column=0, sticky="w", padx=6, pady=2)
+            _score_widgets(grow, score)
 
     def _settings_hstd_changes(self):
         """``{slot label: {initials, name}}`` for high-score slots whose text
@@ -9621,8 +10075,15 @@ class MainWindow:
         return out
 
     def _settings_set_row(self, r, display_value):
-        """Set a row to a DISPLAY value, keeping an enum's dropdown in sync."""
-        v = max(r["min"], min(r["max"], int(display_value)))
+        """Set a row to a DISPLAY value, keeping an enum's dropdown in sync.
+
+        The row's own on-card default always goes in verbatim: clamping it
+        would turn "put this back the way the card has it" into an edit on
+        the rows whose shipped default sits outside their declared range (see
+        :meth:`_settings_changes`), so Reset Fields staged them instead of
+        clearing them."""
+        v = (int(display_value) if int(display_value) == r["default"]
+             else max(r["min"], min(r["max"], int(display_value))))
         r["var"].set(v)
         w = r.get("widget")
         if r["kind"] == "enum" and isinstance(w, ttk.Combobox):
@@ -9707,6 +10168,123 @@ class MainWindow:
         except tk.TclError:
             self._settings_stage_job = None
 
+    # ---- Defaults: what the session log says about staged edits -------
+    # The log used to fire off the debounced stage itself and name only the
+    # raw AD_ ids of the whole staged SET, so a half-typed player name emitted
+    # "2 setting(s) staged (AD_ELECTRIC_MAGIC_FRENZY_CHAMPION, …)" — settings
+    # monkeybug had never opened, no values, and again on the next keystroke.
+    # Logging is its own step now: one line per field that actually moved,
+    # with the caption and the old and new value, and only once the field is
+    # done being edited (focus left it, Return/Tab, or it went quiet).
+
+    def _settings_bind_commit(self, widget):
+        """Flush the staged-edit log the moment *widget* is done being edited
+        — focus left it, or Return/Tab committed it."""
+        for seq in ("<FocusOut>", "<Return>", "<KP_Enter>"):
+            try:
+                widget.bind(seq, self._settings_flush_log, add="+")
+            except tk.TclError:
+                pass
+
+    def _settings_log_state(self):
+        """The edited fields as ``{key: (what, old_display, new_display)}``.
+
+        One entry per field that differs from the card, keyed so the diff
+        against the previously logged state names exactly what moved."""
+        state = {}
+        for r in self._settings_rows:
+            try:
+                v = int(r["var"].get())
+            except (tk.TclError, ValueError):
+                continue
+            if v == r["default"]:
+                continue
+            state[("set", r["name"])] = (
+                r["label"], self._settings_fmt_value(r, r["default"]),
+                self._settings_fmt_value(r, v))
+        for row in getattr(self, "_settings_hstd_vars", []):
+            for key, var in row["vars"].items():
+                try:
+                    val = var.get()
+                except tk.TclError:
+                    continue
+                old = row["record"][key]
+                if val == old:
+                    continue
+                state[("hs", row["label"], key)] = (
+                    "%s %s" % (row["label"],
+                               "initials" if key == "initials" else "name"),
+                    '"%s"' % old, '"%s"' % val)
+        return state
+
+    def _settings_schedule_log(self, delay=1400):
+        """Say what changed once the field settles — a longer wait than the
+        stage write, so typing a name logs the name, not each letter."""
+        job = getattr(self, "_settings_log_job", None)
+        if job is not None:
+            try:
+                self._tk_root().after_cancel(job)
+            except tk.TclError:
+                pass
+        try:
+            self._settings_log_job = self._tk_root().after(
+                delay, self._settings_flush_log)
+        except tk.TclError:
+            self._settings_log_job = None
+
+    def _settings_flush_log(self, _event=None):
+        """Log every field that moved since the last time we said so.
+
+        Bound to the fields' <FocusOut>/<Return> as well as the idle timer:
+        leaving a field is the moment the user is done with it, which is what
+        monkeybug asked for ("doesn't fire off until you exit the text box").
+
+        A stage write still waiting on its own debounce is brought forward
+        first, so leaving a field records it AND reports it in one step and
+        the log can never describe an edit that isn't staged yet."""
+        self._settings_log_job = None
+        if self._settings_loading or self._settings_table is None:
+            return
+        if getattr(self, "_settings_stage_job", None) is not None:
+            try:
+                self._tk_root().after_cancel(self._settings_stage_job)
+            except tk.TclError:
+                pass
+            self._settings_stage_job = None
+            self._settings_autostage()        # re-schedules a log job…
+            job, self._settings_log_job = self._settings_log_job, None
+            if job is not None:
+                try:
+                    self._tk_root().after_cancel(job)   # …which is this call
+                except tk.TclError:
+                    pass
+        state = self._settings_log_state()
+        before = getattr(self, "_settings_logged", None)
+        if before is None:
+            # First look at this card: adopt the state (a preset or an
+            # already-staged folder) without narrating it — the status line
+            # and the form's ● marks already say what's staged.
+            self._settings_logged = state
+            return
+        if state == before:
+            return
+        for key in sorted(set(state) | set(before), key=lambda k: k[1:]):
+            now, was = state.get(key), before.get(key)
+            if now == was:
+                continue
+            if now is None:
+                what, card, _prev = was
+                self.append_log(
+                    "Defaults: %s back to the card's %s — no longer staged."
+                    % (what, card), "info")
+            else:
+                what, card, val = now
+                self.append_log(
+                    "Defaults: %s %s → %s staged for the next Build "
+                    "(card has %s)." % (what, (was or now)[2], val, card),
+                    "info")
+        self._settings_logged = state
+
     def _settings_autostage(self):
         """Record the form's diffs as staged-for-Build (or clear the record
         when the fields are back at the image's defaults)."""
@@ -9745,29 +10323,38 @@ class MainWindow:
         self._settings_status.configure(
             text=("%d change(s) staged — baked into the next card you "
                   "Build." % total) if total else "Nothing staged.")
-        # Log when the SET of staged settings changes (not every value tick,
-        # or spinner clicks would flood the session log).
-        if set(new) != set(before):
-            self.append_log(
-                "Defaults: %d setting(s) staged for the next Build%s."
-                % (len(new),
-                   " (%s)" % ", ".join(sorted(new)) if new else ""),
-                "info")
+        # What to SAY about it is decided separately, once the field settles
+        # — see _settings_flush_log.
+        self._settings_schedule_log()
 
     def _settings_changes(self):
         """``{AD_name: internal_value}`` for rows whose display value differs
         from the image's current default.  Values are converted from the
         machine-facing display units back to the firmware's internal units
-        (internal = display * scale) — that's what gets written."""
+        (internal = display * scale) — that's what gets written.
+
+        The "is this row changed?" test is the RAW one — the field against the
+        on-card default, exactly what the ``●`` marker shows — and only a row
+        that really is changed then gets clamped into the adjustment's own
+        range for writing.  Clamping first was a bug: Stern ships some
+        defaults OUTSIDE the range the same descriptor declares (Led Zeppelin
+        1.22's ELECTRIC MAGIC FRENZY / MULTIBALL champions default to
+        2,000,000 with a minimum of 5,000,000), so the clamp moved the value
+        off its own default and every one of those rows staged itself the
+        moment the tab loaded, with no ● lit and nothing touched — monkeybug
+        saw two settings he never opened staged while typing a player name."""
         out = {}
         for r in self._settings_rows:
             try:
                 v = int(r["var"].get())
             except (tk.TclError, ValueError):
                 continue
+            if v == r["default"]:
+                continue                  # untouched, in range or not
             v = max(r["min"], min(r["max"], v))
-            if v != r["default"]:
-                out[r["name"]] = v * r.get("scale", 1)
+            if v == r["default"]:
+                continue                  # edit landed back on the default
+            out[r["name"]] = v * r.get("scale", 1)
         return out
 
 
@@ -15585,6 +16172,39 @@ class MainWindow:
             t.insert(tk.END, "\n")
             t.see(tk.END)
         t.configure(state=tk.DISABLED)
+
+    def _install_callback_error_logger(self, root):
+        """Send exceptions raised inside Tk callbacks to the session log.
+
+        Tk's default handler prints the traceback to stderr, which a windowed
+        build has nowhere to show — so a button or an edit that half-completed
+        looked to the user like a dead control with no error anywhere.  That is
+        how monkeybug's F2 rename read: the file was renamed but the exception
+        skipped the list refresh, leaving a row with the old name that clicked
+        into nothing (batch 23).  One line in the log, and the traceback in the
+        session log for a bug report.
+
+        Best-effort and non-fatal: the handler never raises out of itself, and
+        an interpreter that won't take the assignment is left as it was."""
+        import traceback
+
+        def _report(exc_type, exc_value, exc_tb):
+            try:
+                detail = "".join(traceback.format_exception(
+                    exc_type, exc_value, exc_tb))
+                session_log.append(detail)
+                self.append_log(
+                    "Internal error in %s: %s — the action may be half done; "
+                    "re-scan the folder to be sure of what the list shows. "
+                    "The details are in the session log."
+                    % (getattr(exc_type, "__name__", "?"), exc_value),
+                    "error")
+            except Exception:
+                pass
+        try:
+            root.report_callback_exception = _report
+        except Exception:
+            pass
 
     def append_log_link(self, text, url):
         ts = time.strftime("%H:%M:%S")

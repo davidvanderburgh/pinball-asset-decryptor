@@ -155,6 +155,10 @@ class _AudioPreviewPane:
         self._start_pos = 0.0     # ffplay -ss offset in flight
         self._start_t = 0.0       # monotonic clock at playback start
         self._proc = None         # ffplay handle, if any
+        # True while the running player caps its own playback (ffplay, via
+        # -autoexit / -t).  The OS-native fallback can't, so only that case
+        # gets the wall-clock kill in _tick — see start_playback.
+        self._self_capping = False
         self._tick_job = None     # after() id for the position timer
         self._render_id = 0       # bump to drop stale async renders
         self._spec_img = None     # PhotoImage ref (must stay alive)
@@ -367,12 +371,19 @@ class _AudioPreviewPane:
                 "your replacements still get staged and written.")
             return
         self._proc = proc
+        self._self_capping = bool(_audio.find_ffplay())
         self._start_pos = pos
         self._start_t = time.monotonic()
         self.pos = pos
         self.playing = True
         self._set_play_btn(True)
         self._schedule_tick()
+
+    # Seconds of slack past a self-capping player's own stop point before we
+    # kill it anyway.  Covers ffplay's spawn + audio-device latency (the whole
+    # reason the wall clock can't be the end signal) and still catches a
+    # player that wedged and never exited.
+    _SELF_CAP_GRACE = 3.0
 
     def _schedule_tick(self):
         if self._tick_job is not None:
@@ -388,14 +399,34 @@ class _AudioPreviewPane:
         if not self.playing:
             return
         proc = self._proc
-        self.pos = self._start_pos + (time.monotonic() - self._start_t)
+        elapsed = time.monotonic() - self._start_t
+        self.pos = self._start_pos + elapsed
         # Stop at the trim point if there is one, else the file's end.
         stop_at = self.limit if self.limit is not None else self.dur
-        ended = (proc is None or proc.poll() is not None
-                 or (stop_at > 0 and self.pos >= stop_at))
+        if self._self_capping:
+            # ffplay caps ITSELF (-autoexit, and -t for a trim point), so the
+            # process exiting is the only honest end-of-playback signal.  The
+            # wall clock starts at spawn, but audio doesn't come out until
+            # ffplay has started and opened the device (~0.2-0.4 s) — killing
+            # on `pos >= stop_at` therefore cut the tail off every clip, which
+            # on a short callout ("Jackpot!", 0.7 s) is most of it (monkeybug
+            # batch 22).  _SELF_CAP_GRACE is only a runaway guard for a player
+            # that never exits.
+            ended = proc is None or proc.poll() is not None or (
+                stop_at > 0 and elapsed >= stop_at - self._start_pos
+                + self._SELF_CAP_GRACE)
+            # Don't let the playhead / clock run past the end while we wait
+            # for the process to go away.
+            if stop_at > 0:
+                self.pos = min(self.pos, stop_at)
+        else:
+            # OS-native fallback (afplay / aplay / paplay): it can't cap, so
+            # the wall clock is all we have.
+            ended = (proc is None or proc.poll() is not None
+                     or (stop_at > 0 and self.pos >= stop_at))
         if ended:
-            # ffplay -t exits itself at the cap, but the OS-native fallback
-            # can't -- kill it so the preview really stops at the trim point.
+            # The fallback player has to be killed to honor a trim point; a
+            # self-capping ffplay has normally exited on its own already.
             from ..core import audio as _audio
             _audio.stop_audio(proc)
             self._proc = None
@@ -1280,6 +1311,12 @@ class MainWindow:
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
         self._change_scan_id = 0         # bump-counter for the background diff
+        # Replace-Video "Convert" column: (rel, replacement, no_conversion,
+        # trim) -> "As-is" / "Re-encode" / "".  Answering a row can cost an
+        # ffprobe of the replacement, so it's resolved on a background pass
+        # (_video_probe_conv_async) and cached until a pick or flag changes.
+        self._video_conv_cache = {}
+        self._video_conv_pass_id = 0
         # Preview players: Original + Replacement side-by-side panes
         # (_AudioPreviewPane), built with the tab; None for plugins without it.
         self._audio_pane_orig = None
@@ -1512,6 +1549,10 @@ class MainWindow:
         self._scan_idle_labels = {}     # tab_key -> idle button label (default "Scan")
         self._scan_spinner_after = {}   # tab_key -> after-id of the running spinner
         self._scan_msgs = {}            # tab_key -> message the spinner animates
+        # tab_key -> why the next scan was started, appended to its log line
+        # and consumed by it (batch 22 — an unexplained scan reads as the app
+        # doing needless work).
+        self._scan_reasons = {}
         self._scan_empty_font = {}      # tab_key -> normal empty-label font to restore
 
         # Intro/description labels whose wraplength tracks the window width so
@@ -2425,6 +2466,12 @@ class MainWindow:
         # a destination, not a source, so "Build USB ISO" /
         # "Write to SSD" reads more naturally than "From ISO" /
         # "From SSD".  Mirrors the standalone JJP decryptor.
+        # monkeybug batch 22 read this pair as a duplicate of the
+        # "Build / flash SD card…" dialog's two checkboxes.  It isn't: the
+        # dialog builds a whole image and dd-writes the ENTIRE card, while this
+        # mode patches only the changed files onto a connected card in place.
+        # Tooltips spell that out on each radio so the two never read as the
+        # same choice again.
         self._write_source_frame = ttk.Frame(f)
         self._write_iso_radio = ttk.Radiobutton(
             self._write_source_frame, text="Build USB ISO",
@@ -2433,6 +2480,8 @@ class MainWindow:
             command=lambda: self._on_input_source_change("write"),
         )
         self._write_iso_radio.pack(side=tk.LEFT, padx=(10, 12))
+        self._write_iso_tip = _Tooltip(
+            self._write_iso_radio, "", lambda: self._current_theme)
         self._write_ssd_radio = ttk.Radiobutton(
             self._write_source_frame, text="Write to SSD",
             value="ssd",
@@ -2440,6 +2489,8 @@ class MainWindow:
             command=lambda: self._on_input_source_change("write"),
         )
         self._write_ssd_radio.pack(side=tk.LEFT)
+        self._write_ssd_tip = _Tooltip(
+            self._write_ssd_radio, "", lambda: self._current_theme)
 
         # The Write tab's field-label column.  Everything created with
         # width=16 below registers here so apply_manufacturer can widen the
@@ -2459,7 +2510,10 @@ class MainWindow:
         # plain label, no "Set on Extract tab" button.
         _orig_mirror = ttk.Label(self._write_upd_row,
                                  textvariable=self.write_upd_var, anchor=tk.W)
-        _orig_mirror.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # NOT fill/expand: the ⓘ badge belongs right after the path text, and
+        # an expanding label shoved it to the far edge of the window — on a
+        # short path that left a huge gap between the two (monkeybug batch 22).
+        _orig_mirror.pack(side=tk.LEFT)
         _Tooltip(_orig_mirror,
                  "The master card image — it is set on the Extract tab.",
                  lambda: self._current_theme)
@@ -2653,25 +2707,27 @@ class MainWindow:
             f, text=" Modified Files ", padding=4)
         # Pack-managed by apply_manufacturer + _on_input_source_change.
 
-        # Toolbar across the top of the preview frame, grouped by role
-        # (monkeybug batch 9): the SCAN control (Refresh + its live activity
-        # text) sits on the LEFT; every "act on these changes" action —
-        # Flash ▸ Revert ▸ Build — is grouped on the RIGHT.  Keeping the scan
-        # Cancel physically apart from the run Cancel stops the two reading
-        # as duplicates when both are active at once.
+        # Toolbar across the top of the preview frame.  Batch 9 put the SCAN
+        # control on the LEFT and the "act on these changes" actions —
+        # Flash ▸ Revert ▸ Build — on the RIGHT, so the scan Cancel couldn't
+        # be mistaken for a run Cancel.  Batch 22: monkeybug asked for the
+        # scan button right-justified like every other tab's, so it joins the
+        # right-hand group as its LEFTMOST member with a wide gap before the
+        # action buttons — same reading order, still visibly a separate group
+        # (and "Cancel scan" vs a run's "Cancel" keeps them apart in words).
         preview_toolbar = ttk.Frame(self._write_preview_frame)
         preview_toolbar.pack(fill=tk.X, padx=4, pady=(0, 4))
         self._write_preview_toolbar = preview_toolbar
         self._write_preview_refresh_btn = ttk.Button(
             preview_toolbar, text="Refresh",
-            command=self._scan_write_preview)
-        self._write_preview_refresh_btn.pack(side=tk.LEFT)
+            command=self._rescan_write_preview_clicked)
+        self._write_preview_refresh_btn.pack(side=tk.RIGHT, padx=(0, 24))
         # Register with the shared scan-state machinery so the preview scan
         # gets the same treatment as the Replace tabs — list blanked, big
         # animated spinner, Refresh flips to a live Cancel (monkeybug batch 8:
         # the old disabled "⏳ Scanning…" button looked like nothing else).
         self._scan_buttons["write_preview"] = self._write_preview_refresh_btn
-        self._scan_cmds["write_preview"] = self._scan_write_preview
+        self._scan_cmds["write_preview"] = self._rescan_write_preview_clicked
         self._scan_idle_labels["write_preview"] = "Refresh"
         # The single Build button doubles as a live Cancel while a build runs
         # (monkeybug 4.4 — no separate Cancel widget any more); its label and
@@ -2730,22 +2786,20 @@ class MainWindow:
         self._write_preview_empty.place(
             relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # Status strip under the tree (monkeybug batch 9).  Left: live
-        # scan-activity text — pending rows hide the tree's big spinner
-        # overlay as soon as they land, which left a long MD5 walk (network
-        # shares especially) with NO visible sign anything was still running,
-        # so the Cancel button just looked stuck; the shared spinner ticker
-        # animates this label until the walk finishes or is cancelled.
-        # Right: "Total changes: N" — a running tally of every Modified +
-        # Pending row so the user doesn't have to count/scroll the list
-        # (blank when empty; the placeholder already covers that state).
+        # Status strip under the tree (monkeybug batch 9).  Left: the legend
+        # for the two Status words.  Right: "Total changes: N" — a running
+        # tally of every Modified + Pending row so the user doesn't have to
+        # count/scroll the list (blank when empty; the placeholder already
+        # covers that state).
+        #
+        # Batch 9 also put a live scan-activity label here, because rows
+        # trickling into the tree hid the big spinner overlay for most of a
+        # long MD5 walk.  Batch 22 holds the rows back until the scan
+        # finishes, so the overlay (with its running "N found") is visible the
+        # whole time and this second, smaller indicator is gone — monkeybug
+        # read the two as inconsistent with every other tab.
         preview_status_row = ttk.Frame(self._write_preview_frame)
         preview_status_row.pack(fill=tk.X, padx=4, pady=(2, 0))
-        self._write_preview_scan_status = ttk.Label(
-            preview_status_row, text="", font=(_SANS_FONT, 9))
-        self._write_preview_scan_status.pack(side=tk.LEFT)
-        # One-line legend for the two Status words (monkeybug batch 14 asked
-        # what turns Pending into Modified).
         legend = ttk.Label(
             preview_status_row,
             text="Pending = staged this session, applied when you Build · "
@@ -2817,51 +2871,51 @@ class MainWindow:
 
     def _build_modpack_tab(self):
         f = self._tab_modpack
-        pad = {"padx": 10, "pady": 6}
 
-        ttk.Label(f,
-                  text="Share or apply mod packs — zips containing only your "
-                  "modified files.",
-                  font=(_SANS_FONT, 9, "italic")).pack(anchor=tk.W, **pad)
+        # Batch 22: the tab's intro paragraph and the "(the project folder —
+        # every Replace tab…)" gloss under the path both moved into the "?"
+        # tips window — the tab is two actions and one transfer form, and the
+        # prose was costing rows monkeybug wanted for the form.
 
         # Same label as the Replace tabs — it's the SAME folder (one shared
         # path variable), and two names for one thing read as two things
         # (monkeybug batch 14).
-        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=4)
+        row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=(8, 4))
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
         self._project_path_display(row, self.write_assets_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(f, text="(the project folder — every Replace tab and the "
-                          "Write tab work out of it)",
-                  font=(_SANS_FONT, 8, "italic")).pack(anchor=tk.W, padx=24)
 
-        ttk.Separator(f, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10, pady=8)
-
-        export_frame = ttk.LabelFrame(f, text="Export Mod Pack")
-        export_frame.pack(fill=tk.X, padx=10, pady=4)
-        ttk.Label(export_frame,
-                  text="Create a zip of only your modified files to share.",
-                  font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=8, pady=(4, 2))
-        ttk.Button(export_frame, text="Export Mod Pack...",
-                   command=self._on_export, style="Go.TButton").pack(
-            anchor=tk.W, padx=8, pady=(2, 6))
-
-        import_frame = ttk.LabelFrame(f, text="Import Mod Pack")
-        import_frame.pack(fill=tk.X, padx=10, pady=4)
-        ttk.Label(import_frame,
-                  text="Apply a mod pack zip from another user.",
-                  font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=8, pady=(4, 2))
-        ttk.Button(import_frame, text="Import Mod Pack...",
-                   command=self._on_import, style="Go.TButton").pack(
-            anchor=tk.W, padx=8, pady=(2, 6))
+        # One "Mod Pack" box with both buttons, right-aligned like every other
+        # tab's action row (batch 22 — two stacked LabelFrames each holding one
+        # sentence and one left-aligned button burned six rows to say one
+        # thing).  The sentence each frame carried is now the button's tooltip.
+        pack_frame = ttk.LabelFrame(f, text="Mod Pack")
+        pack_frame.pack(fill=tk.X, padx=10, pady=(4, 4))
+        pack_row = ttk.Frame(pack_frame)
+        pack_row.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(pack_row,
+                  text="Share your changes as a zip, or apply someone else's.",
+                  font=(_SANS_FONT, 9)).pack(side=tk.LEFT)
+        _import_btn = ttk.Button(pack_row, text="Import Mod Pack...",
+                                 command=self._on_import, style="Go.TButton")
+        _import_btn.pack(side=tk.RIGHT)
+        _Tooltip(_import_btn,
+                 "Apply a mod pack zip from another user onto this project's "
+                 "extracted assets.", lambda: self._current_theme)
+        _export_btn = ttk.Button(pack_row, text="Export Mod Pack...",
+                                 command=self._on_export, style="Go.TButton")
+        _export_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        _Tooltip(_export_btn,
+                 "Create a zip holding only your modified files, small enough "
+                 "to share.", lambda: self._current_theme)
 
         # Gated per-plugin (caps.mod_transfer) in apply_manufacturer — this tab
         # is shared, but the feature (and its wording) only fits plugins whose
         # vendor re-lays-out the card across versions, e.g. Stern Spike 2.
         self._modpack_transfer_frame = ttk.LabelFrame(
             f, text="Transfer Mods to New Version")
-        ttk.Label(
+        _transfer_intro = ttk.Label(
             self._modpack_transfer_frame,
             text="New game code shipped? Pull your mods from your old extract "
                  "onto a fresh extract of the new version, then build the new "
@@ -2869,8 +2923,9 @@ class MainWindow:
                  "folders (and, if you have it, the optional one for a more "
                  "accurate transfer). Works even for code modded outside this "
                  "app.",
-            font=(_SANS_FONT, 9), wraplength=560, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=8, pady=(4, 2))
+            font=(_SANS_FONT, 9), justify=tk.LEFT)
+        _transfer_intro.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(4, 2))
+        self._register_responsive_wrap(_transfer_intro)
         self.transfer_src_var = tk.StringVar()
         self.transfer_dst_var = tk.StringVar()
         # Optional stock extract of the OLD version — its presence (not a
@@ -2892,17 +2947,29 @@ class MainWindow:
         tf.pack(fill=tk.X, padx=8, pady=(2, 2))
         tf.columnconfigure(1, weight=1)
 
-        def _picker(row, label, var, browse, ver_var=None):
-            ttk.Label(tf, text=label).grid(
-                row=row, column=0, sticky=tk.W, pady=2)
+        # Version hints live in the row's own trailing column.  monkeybug batch
+        # 22 asked whether they were worth showing: they are — every one is
+        # parsed from a source filename and they are the only on-screen check
+        # that field 2 and field 4 are the SAME new version — so they stay, but
+        # as a compact chip that can't stretch the grid (the entry column owns
+        # the slack), with a tooltip saying where the number comes from.
+        def _picker(row, label, var, browse, ver_var=None, tip=None):
+            lbl = ttk.Label(tf, text=label)
+            lbl.grid(row=row, column=0, sticky=tk.W, pady=2)
+            if tip:
+                _Tooltip(lbl, tip, lambda: self._current_theme)
             ttk.Entry(tf, textvariable=var).grid(
                 row=row, column=1, sticky=tk.EW, padx=6, pady=2)
             ttk.Button(tf, text="Browse...", command=browse).grid(
                 row=row, column=2, pady=2)
             if ver_var is not None:
-                ttk.Label(tf, textvariable=ver_var, foreground="#4a90d9",
-                          font=(_SANS_FONT, 8)).grid(
-                    row=row, column=3, sticky=tk.W, padx=(6, 0))
+                vl = ttk.Label(tf, textvariable=ver_var, foreground="#4a90d9",
+                               font=(_SANS_FONT, 8), anchor=tk.W, width=22)
+                vl.grid(row=row, column=3, sticky=tk.W, padx=(6, 0))
+                _Tooltip(vl, "Version guessed from this item's own file name "
+                             "— a cross-check, not something the card stores. "
+                             "Fields 2 and 4 should show the SAME version.",
+                         lambda: self._current_theme)
 
         _picker(0, "1. Old extract (has your mods):",
                 self.transfer_src_var, self._browse_transfer_src,
@@ -2912,36 +2979,61 @@ class MainWindow:
                 self.transfer_dst_ver_var)
         _picker(2, "3. Stock extract of the OLD version (optional):",
                 self.transfer_oldstock_var, self._browse_transfer_oldstock)
-        ttk.Label(
+        # Full-width hint (monkeybug batch 22: it was capped at 560px inside a
+        # much wider tab) — the responsive wrap tracks the content width.
+        _oldstock_hint = ttk.Label(
             tf,
-            text="     Leave empty to compare your old extract straight "
+            text="Leave empty to compare your old extract straight "
                  "against the new one (finds image + video mods). Provide a "
                  "clean, unmodified extract of the SAME old version to also "
                  "carry AUDIO and TEXT and to avoid mistaking the factory's "
                  "own between-version changes for your mods.",
-            font=(_SANS_FONT, 8, "italic"), wraplength=560,
-            justify=tk.LEFT).grid(row=3, column=0, columnspan=4,
-                                  sticky=tk.W, pady=(0, 4))
+            font=(_SANS_FONT, 8, "italic"), justify=tk.LEFT)
+        _oldstock_hint.grid(row=3, column=1, columnspan=3,
+                            sticky=tk.EW, padx=6, pady=(0, 4))
+        self._register_responsive_wrap(_oldstock_hint, margin=330)
+        # Field 4 is NOT an alternative to field 2 — monkeybug batch 22 read
+        # the folder and the .raw as two ways to say the same thing and asked
+        # which won.  Both are required and they do different jobs, so the
+        # label says which one it is derived from.
         _picker(4, "4. New version card image (.raw) to build onto:",
                 self.transfer_newimg_var, self._browse_transfer_newimg,
-                self.transfer_img_ver_var)
-        ttk.Label(tf, textvariable=self.transfer_output_var,
-                  font=(_SANS_FONT, 8, "italic"), wraplength=560,
-                  justify=tk.LEFT).grid(row=5, column=0, columnspan=4,
-                                        sticky=tk.W, pady=(0, 2))
+                self.transfer_img_ver_var,
+                tip="The stock image the new extract came from — the base the "
+                    "build patches your transferred mods onto. Auto-filled "
+                    "from field 2's extract; it is needed as well as field 2, "
+                    "not instead of it.")
+        _newimg_hint = ttk.Label(
+            tf,
+            text="Auto-filled from field 2 (the new extract records the image "
+                 "it came from). Both fields are required.",
+            font=(_SANS_FONT, 8, "italic"), justify=tk.LEFT)
+        _newimg_hint.grid(row=5, column=1, columnspan=3, sticky=tk.EW,
+                          padx=6, pady=(0, 2))
+        self._register_responsive_wrap(_newimg_hint, margin=330)
 
-        ttk.Button(self._modpack_transfer_frame,
-                   text="Transfer mods → new version...",
+        # Action row: button right-aligned like every other tab, with the
+        # output-name preview on its left.  That preview answers "what am I
+        # about to end up with" (monkeybug batch 22 asked if it was still
+        # relevant — it is the only place the built file's NAME appears before
+        # the build), so it stays, beside the button that causes it.
+        arow = ttk.Frame(self._modpack_transfer_frame)
+        arow.pack(fill=tk.X, padx=8, pady=(4, 2))
+        ttk.Button(arow, text="Transfer mods → new version...",
                    command=(self._on_transfer_mods
                             if self._on_transfer_mods else lambda: None),
-                   style="Go.TButton").pack(
-            anchor=tk.W, padx=8, pady=(2, 2))
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Label(arow, textvariable=self.transfer_output_var,
+                  font=(_SANS_FONT, 8, "italic"),
+                  justify=tk.LEFT).pack(side=tk.LEFT)
         # Filled after a successful transfer with the exact next step (also
         # written to the log, so it survives once this panel scrolls away).
-        ttk.Label(self._modpack_transfer_frame,
-                  textvariable=self.transfer_next_var, foreground="#3aa76d",
-                  font=(_SANS_FONT, 9, "bold"), wraplength=560,
-                  justify=tk.LEFT).pack(anchor=tk.W, padx=8, pady=(0, 6))
+        _next_lbl = ttk.Label(
+            self._modpack_transfer_frame,
+            textvariable=self.transfer_next_var, foreground="#3aa76d",
+            font=(_SANS_FONT, 9, "bold"), justify=tk.LEFT)
+        _next_lbl.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(0, 6))
+        self._register_responsive_wrap(_next_lbl)
 
         # Recompute version hints + output name whenever a field changes; the
         # new-extract field also auto-fills the base image (row 4).
@@ -3142,6 +3234,11 @@ class MainWindow:
         # click a row, tap space to listen, arrow on.  "break" stops the
         # Treeview's own space handling from re-toggling the selection.
         self._audio_tree.bind("<space>", self._audio_space_toggle)
+        # F2 = Properties (rename / Type), the Explorer-standard rename key —
+        # monkeybug batch 22 kept reaching for it while renaming a batch of
+        # callouts.  Same gate as the context-menu entry: decode-shaped names
+        # only (see _audio_on_tree_right).
+        self._audio_tree.bind("<F2>", self._audio_properties_shortcut)
         # Hover over the Loop column → tooltip explaining the feature.
         self._audio_tree.bind("<Motion>", self._audio_on_tree_motion, add="+")
         self._audio_tree.bind(
@@ -4698,6 +4795,19 @@ class MainWindow:
             self._audio_pane_orig.toggle_play()
         return "break"
 
+    def _audio_properties_shortcut(self, _event=None):
+        """F2 on the audio list → the selected slot's Properties dialog (name
+        / Type), the same action as the context menu's entry.  Silently does
+        nothing on a row that can't be renamed (a duplicate-group parent, or a
+        plugin whose audio isn't decode-named — see _audio_on_tree_right)."""
+        from ..core import name_memory as _nmem
+        rel = self._audio_selected_rel()
+        if (rel is None or rel not in self._audio_slots_by_rel
+                or not _nmem.split_decode_name(os.path.basename(rel))):
+            return "break"
+        self._audio_rename_slot(rel)
+        return "break"
+
     def _draw_audio_icon(self, canvas, kind):
         """Draw a crisp, borderless transport icon (play triangle / pause two
         bars / stop square) filled with the theme foreground — one visual
@@ -4949,7 +5059,7 @@ class MainWindow:
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         self._video_tree = ttk.Treeview(
-            list_frame, columns=("len", "res", "fmt", "aud", "rep"),
+            list_frame, columns=("len", "res", "fmt", "aud", "rep", "conv"),
             height=9, selectmode="browse")
         self._video_tree.heading("#0", text="Original Video", anchor=tk.W)
         self._video_tree.heading("len", text="Length", anchor=tk.W)
@@ -4957,6 +5067,11 @@ class MainWindow:
         self._video_tree.heading("fmt", text="Format", anchor=tk.W)
         self._video_tree.heading("aud", text="Audio", anchor=tk.W)
         self._video_tree.heading("rep", text="Replacement", anchor=tk.W)
+        # What Write will DO with the assigned clip.  It was only ever
+        # visible as a log line at pick time, so re-doing a batch of videos
+        # meant scrolling the log to find which ones went in untouched
+        # (monkeybug batch 22).
+        self._video_tree.heading("conv", text="Convert", anchor=tk.W)
         self._video_tree.column("#0", width=300, minwidth=160)
         self._video_tree.column("len", width=56, minwidth=46, anchor=tk.W)
         self._video_tree.column("res", width=90, minwidth=70, anchor=tk.W)
@@ -4964,13 +5079,16 @@ class MainWindow:
         self._video_tree.column("aud", width=104, minwidth=70, anchor=tk.W,
                                 stretch=False)
         self._video_tree.column("rep", width=200, minwidth=110)
+        self._video_tree.column("conv", width=84, minwidth=60, anchor=tk.W,
+                                stretch=False)
         self._persist_tree_columns(
             self._video_tree, "video",
-            ("#0", "len", "res", "fmt", "aud", "rep"))
+            ("#0", "len", "res", "fmt", "aud", "rep", "conv"))
         self._video_sort_cfg = [
             ("#0", "Original Video", False), ("len", "Length", True),
             ("res", "Resolution", True), ("fmt", "Format", False),
-            ("aud", "Audio", False), ("rep", "Replacement", False)]
+            ("aud", "Audio", False), ("rep", "Replacement", False),
+            ("conv", "Convert", False)]
         self._wire_sort_headings(self._video_tree, self._video_sort_cfg,
                                  "_video_sort", self._refresh_video_list)
         video_scroll = ttk.Scrollbar(
@@ -5037,7 +5155,7 @@ class MainWindow:
         self._video_trim_cb = ttk.Checkbutton(
             opts, text="Trim / pad to the original clip length",
             variable=self.video_trim_var,
-            command=self._save_staged_changes)
+            command=self._on_video_trim_toggle)
         self._video_trim_cb.pack(anchor=tk.W)
         # Hover tooltip — per-plugin guidance is appended in
         # apply_manufacturer.
@@ -5067,6 +5185,116 @@ class MainWindow:
                 rel, slot.ext, os.path.basename(path),
                 rep_ext or "extension-less"))
         return None
+
+    # Values shown in the video list's "Convert" column.
+    _VIDEO_CONV_ASIS = "As-is"
+    _VIDEO_CONV_REENC = "Re-encode"
+
+    @staticmethod
+    def _video_conv_mode(slot, path, no_conversion, trim):
+        """What Write will do with *path* for *slot*: copy it in verbatim
+        (``As-is``) or re-encode it (``Re-encode``); "" when it can't be
+        determined (no ffprobe, unreadable file, or a pick the copy-through
+        would reject — the pick-time warning covers that one).
+
+        Mirrors :meth:`_video_conversion_note`'s branch order, but takes the
+        two option flags as plain arguments and touches no Tk state, so the
+        background pass can call it off the main thread."""
+        from ..core.video_slots import (_already_matches, backend_for,
+                                        find_ffmpeg)
+        if slot is None or not path:
+            return ""
+        rep_ext = os.path.splitext(path)[1].lower()
+        if no_conversion:
+            if backend_for(slot.abs_path) is not None or rep_ext != slot.ext:
+                return ""
+            return MainWindow._VIDEO_CONV_ASIS
+        if backend_for(slot.abs_path) is not None:
+            return MainWindow._VIDEO_CONV_REENC
+        try:
+            matches = _already_matches(slot, path, rep_ext, match_length=trim)
+        except Exception:
+            return ""
+        if matches:
+            return MainWindow._VIDEO_CONV_ASIS
+        if find_ffmpeg():
+            return MainWindow._VIDEO_CONV_REENC
+        if rep_ext == slot.ext:
+            # No ffmpeg to re-encode with, but the container already fits, so
+            # Write copies it in unchanged.
+            return MainWindow._VIDEO_CONV_ASIS
+        return ""
+
+    def _video_conv_key(self, rel, path):
+        """Cache key for a row's Convert answer — it changes with the pick and
+        with either option flag."""
+        return (rel, path, bool(self.video_no_conversion_var.get()),
+                bool(self.video_trim_var.get()))
+
+    def _video_conv_cached(self, rel, path):
+        """The Convert column's text for a row, from cache only.  Rows with no
+        replacement show nothing; an unresolved row shows "…" until the
+        background pass answers it."""
+        if not path:
+            return ""
+        return self._video_conv_cache.get(self._video_conv_key(rel, path), "…")
+
+    def _video_probe_conv_async(self):
+        """Resolve the Convert column for every assigned row that isn't cached
+        yet, on a worker thread (each answer can cost an ffprobe of the
+        replacement file), then repaint just those rows.
+
+        Kept apart from the slot-metadata pass because it keys off the
+        REPLACEMENT file, not the slot, and re-runs whenever a pick or an
+        option flag changes."""
+        import threading
+        self._video_conv_pass_id += 1
+        pass_id = self._video_conv_pass_id
+        no_conv = bool(self.video_no_conversion_var.get())
+        trim = bool(self.video_trim_var.get())
+        pending = [(rel, path) for rel, path
+                   in sorted(self._video_assignments.items())
+                   if self._video_conv_key(rel, path)
+                   not in self._video_conv_cache]
+        if not pending:
+            return
+        slots = {rel: self._video_slots_by_rel.get(rel) for rel, _p in pending}
+
+        def _work():
+            out = []
+            for rel, path in pending:
+                if self._video_conv_pass_id != pass_id:
+                    return
+                out.append(((rel, path, no_conv, trim),
+                            self._video_conv_mode(slots.get(rel), path,
+                                                  no_conv, trim)))
+            try:
+                self._tk_root().after(0, self._apply_video_conv, pass_id, out)
+            except (tk.TclError, RuntimeError):
+                pass                      # window closed mid-pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_video_conv(self, pass_id, results):
+        """Main thread: store the resolved Convert answers and repaint their
+        rows in place (a full list refresh would fight the user's scroll)."""
+        if self._video_conv_pass_id != pass_id:
+            return
+        tree = getattr(self, "_video_tree", None)
+        for key, mode in results:
+            self._video_conv_cache[key] = mode
+            rel = key[0]
+            if tree is None:
+                continue
+            try:
+                if not tree.exists(rel):
+                    continue
+                vals = list(tree.item(rel, "values"))
+                if len(vals) >= 6:
+                    vals[5] = mode
+                    tree.item(rel, values=vals)
+            except tk.TclError:
+                pass
 
     def _video_conversion_note(self, rel, path):
         """Short note on what Write will DO to *path* for slot *rel*: copy it
@@ -5103,6 +5331,13 @@ class MainWindow:
             return "will be copied in unchanged (no ffmpeg — not re-encoded)"
         return ""
 
+    def _on_video_trim_toggle(self):
+        """Trim/pad also decides whether a clip counts as already matching its
+        slot, so flipping it can flip the Convert column — persist, then
+        redraw so the column agrees with the checkbox."""
+        self._save_staged_changes()
+        self._refresh_video_list()
+
     def _video_on_no_conversion_toggle(self):
         """No-conversion copies the file through verbatim, so trim/pad (a
         re-encode-time option) doesn't apply — grey it out while it's on, then
@@ -5123,6 +5358,9 @@ class MainWindow:
                     "would be rejected at build time:\n\n%s\n\nUncheck "
                     "\"No conversion\" to have them converted automatically."
                     % "\n".join("  • %s" % w for w in bad))
+        # The flag decides every row's Convert answer — redraw so the column
+        # tracks the checkbox.
+        self._refresh_video_list()
 
     def _update_video_trim_enabled(self):
         """Enable the trim/pad checkbox only when we'll actually re-encode
@@ -5282,7 +5520,7 @@ class MainWindow:
         tree.item(rel, values=(slot.duration_str(), slot.resolution_str(),
                                slot.format_summary(),
                                slot.info.audio_summary() if slot.info else "",
-                               rep_disp))
+                               rep_disp, self._video_conv_cached(rel, rep)))
 
     def _refresh_video_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
@@ -5317,6 +5555,12 @@ class MainWindow:
                 if rep:
                     return (0, os.path.basename(rep).lower())
                 return (1, "") if s.rel_path in changed else (2, "")
+            if col == "conv":
+                mode = self._video_conv_cached(
+                    s.rel_path, self._video_assignments.get(s.rel_path))
+                # Unassigned / not-yet-determined rows sort last, so the
+                # answered ones group at the top.
+                return ((0, mode) if mode else (1, ""), s.rel_path.lower())
             return (s.rel_path.lower(),)  # "#0" name/path
 
         slots.sort(key=_key, reverse=desc)
@@ -5339,7 +5583,8 @@ class MainWindow:
                 aud = s.info.audio_summary() if s.info else ""
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(length, res, s.format_summary(), aud,
-                                rep_disp),
+                                rep_disp,
+                                self._video_conv_cached(s.rel_path, rep)),
                         tags=(tag,) if tag else ())
 
         total = len(self._video_slots)
@@ -5356,7 +5601,9 @@ class MainWindow:
                 f"{changed_total} of {total} slots changed{extra}")
             self._video_empty.place_forget()
         self._autosize_tree_columns(
-            tree, "video", ("#0", "len", "res", "fmt", "aud", "rep"))
+            tree, "video", ("#0", "len", "res", "fmt", "aud", "rep", "conv"))
+        # Fill in any "…" Convert cells the rebuild just drew.
+        self._video_probe_conv_async()
 
     def _video_export_csv(self):
         """Save the video table as a CSV — the audio tab's Export CSV, mirrored
@@ -5380,14 +5627,18 @@ class MainWindow:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
                 w.writerow(["Original Video", "Length", "Resolution", "Format",
-                            "Audio", "Replacement", "Changed On Disk"])
+                            "Audio", "Replacement", "Convert",
+                            "Changed On Disk"])
                 for s in sorted(self._video_slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
+                    rep = self._video_assignments.get(rel, "")
                     w.writerow([
                         rel, s.duration_str(), s.resolution_str(),
                         s.format_summary(),
                         s.info.audio_summary() if s.info else "",
-                        self._video_assignments.get(rel, ""),
+                        rep,
+                        self._video_conv_cache.get(
+                            self._video_conv_key(rel, rep), "") if rep else "",
                         "yes" if rel in self._video_changed_on_disk else "",
                     ])
         except OSError as e:
@@ -5408,7 +5659,7 @@ class MainWindow:
         if out and os.path.isdir(out):
             self.write_assets_var.set(out)
 
-    def invalidate_asset_scans(self):
+    def invalidate_asset_scans(self, rescan_visible=True):
         """Force the Replace tabs to re-scan on their next visit, even when the
         assets-folder path is unchanged.  The per-tab auto-scan is keyed on the
         folder path (``assets_path != self._*_scan_dir``), so a fresh extract
@@ -5419,7 +5670,10 @@ class MainWindow:
         The stamps are remembered in ``_scan_dir_prev`` so the in-memory
         assignments (which this does NOT clear — the next scan re-homes them
         from the folder's sidecar) keep their folder identity for the
-        Build/Export folder-mismatch warning."""
+        Build/Export folder-mismatch warning.
+
+        *rescan_visible* also re-scans the tab that is on screen right now;
+        callers that go on to re-scan every tab anyway pass False."""
         for key, cur in (("audio", self._audio_scan_dir),
                          ("video", self._video_scan_dir),
                          ("image", self._image_scan_dir)):
@@ -5429,6 +5683,17 @@ class MainWindow:
         self._video_scan_dir = ""
         self._image_scan_dir = ""
         self._text_scan_dir = ""
+        # A cleared stamp only makes the NEXT tab visit re-scan — and the tab
+        # you are already looking at never gets a <<NotebookTabChanged>>, so
+        # after a Save As / Open project it kept showing the old project's
+        # slots until you left the tab and came back (monkeybug batch 22, on a
+        # fork).  Re-scan the visible tab here so what's on screen always
+        # belongs to the project that's loaded.
+        if rescan_visible:
+            try:
+                self._scan_assets_tab_by_name(self._current_tab_key())
+            except (tk.TclError, AttributeError):
+                pass
 
     def reload_assets_tabs(self):
         """Drop every Replace tab's scan stamp and re-scan ALL assets tabs
@@ -5443,7 +5708,7 @@ class MainWindow:
         (and the build would apply them via the sidecar fallback).  Re-scanning
         every tab re-points each one's assignments at the new folder so the tabs,
         the warning check, and the build all agree."""
-        self.invalidate_asset_scans()
+        self.invalidate_asset_scans(rescan_visible=False)
         try:
             self._rescan_all_assets_tabs()
         except Exception:
@@ -5510,6 +5775,7 @@ class MainWindow:
                 self._start_change_scan(kind)
         if hasattr(self, "_write_preview_tree"):
             try:
+                self._scan_reasons["write_preview"] = "after Revert all changes"
                 self._scan_write_preview()
             except tk.TclError:
                 pass
@@ -8758,13 +9024,19 @@ class MainWindow:
         self._settings_rows = []
 
     @staticmethod
-    def _settings_fmt_value(r, v):
+    def _settings_fmt_num(v):
+        """Group thousands once a value is big enough to be hard to read at a
+        glance — high-score defaults run to ten digits (monkeybug batch 22)."""
+        return "{:,}".format(v) if abs(v) >= 100000 else str(v)
+
+    @classmethod
+    def _settings_fmt_value(cls, r, v):
         """A row's value the way the operator menu shows it."""
         if r["kind"] == "toggle":
             return "On" if v else "Off"
         if r.get("labels") and v in r["labels"]:
             return "%d - %s" % (v, r["labels"][v])
-        return str(v)
+        return cls._settings_fmt_num(v)
 
     def _settings_build_form(self, rows):
         self._settings_clear_form()
@@ -8777,7 +9049,13 @@ class MainWindow:
         form = self._settings_form
         # Wrap the form into side-by-side column groups so a long settings
         # list uses the tab's width instead of scrolling early (monkeybug).
-        ncols = min(3, max(1, -(-len(rows) // 8)))
+        # Cap at two groups once a row needs a wide entry: the high-score
+        # defaults run to ten digits, and at three groups the third one's
+        # spinbox arrows and Range column fell off the right edge (the form
+        # window is pinned to the canvas width, so there is no h-scroll to
+        # rescue it) — batch 22.
+        wide = any(len("%d" % r["max"]) > 8 for r in rows)
+        ncols = min(2 if wide else 3, max(1, -(-len(rows) // 8)))
         per = -(-len(rows) // ncols)
         accent = THEMES.get(self._current_theme, {}).get("link", "#d78f2c")
         for g in range(ncols):
@@ -8811,7 +9089,8 @@ class MainWindow:
                       foreground="#888888").grid(
                 row=grow, column=base + 1, sticky="w", padx=6, pady=2)
             var = tk.IntVar(value=r["default"])
-            rng = "%d - %d" % (r["min"], r["max"])
+            rng = "%s - %s" % (self._settings_fmt_num(r["min"]),
+                               self._settings_fmt_num(r["max"]))
             if r["kind"] == "toggle":
                 w = ttk.Checkbutton(form, variable=var, text="On")
                 rng = "off / on"
@@ -8830,8 +9109,14 @@ class MainWindow:
                 w.bind("<<ComboboxSelected>>", _sel)
                 rng = "%d options" % len(opts)
             else:
-                w = ttk.Spinbox(form, from_=r["min"], to=r["max"],
-                                textvariable=var, width=8, increment=1)
+                # Step + width come from the adjustment itself: high-score
+                # defaults run to 1,000,000,000 and step by a million, so a
+                # width-8 box with increment=1 was unusable for them
+                # (monkeybug batch 22).
+                w = ttk.Spinbox(
+                    form, from_=r["min"], to=r["max"], textvariable=var,
+                    width=max(8, len("%d" % r["max"]) + 1),
+                    increment=r.get("step", 1))
             w.grid(row=grow, column=base + 2, sticky="w", padx=6, pady=2)
             # "●" lights up while the field deviates from the on-card value —
             # the at-a-glance answer to "am I changing anything here?".
@@ -9739,10 +10024,17 @@ class MainWindow:
     def _scan_text_strings(self):
         """Load ``text/strings.tsv`` from the assets folder into the list.  A
         replacement equal to its original is normalised to '' (unchanged) so the
-        New-Text column reads blank for everything the user hasn't touched."""
+        New-Text column reads blank for everything the user hasn't touched.
+
+        Runs the read on a worker thread behind the same big animated
+        indicator + Cancel-scan button as the other Replace tabs — it used to
+        be synchronous, so a manifest on a slow share froze the window with no
+        sign anything was happening (monkeybug batch 22)."""
+        import threading
         from ..core import text_manifest
         assets_path = (self.write_assets_var.get() or "").strip()
         self._text_scan_id += 1
+        scan_id = self._text_scan_id
 
         if not assets_path or not os.path.isdir(assets_path):
             self._text_rows = []
@@ -9752,15 +10044,38 @@ class MainWindow:
             self._text_empty.configure(
                 text="Set the project folder on the Extract tab, then click Scan.")
             self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            self._set_tab_scanning("text", False)
             return
 
-        try:
-            loaded = text_manifest.load(assets_path)
-        except Exception as e:
-            loaded = []
+        self._text_empty.configure(text="Scanning for on-screen text…")
+        self._text_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        def _work():
+            try:
+                loaded, err = text_manifest.load(assets_path), None
+            except Exception as e:
+                loaded, err = [], e
+            if self._text_scan_id != scan_id:
+                return
+            try:
+                self._tk_root().after(
+                    0, self._populate_text_after_scan,
+                    loaded, err, scan_id, assets_path)
+            except (tk.TclError, RuntimeError):
+                pass                       # window closed mid-scan
+
+        self._set_tab_scanning("text", True)
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _populate_text_after_scan(self, loaded, err, scan_id, scan_dir):
+        """Main thread: store the loaded manifest and refresh the list."""
+        if self._text_scan_id != scan_id:
+            return
+        self._set_tab_scanning("text", False)
+        if err is not None:
             messagebox.showerror(
                 "Couldn't read text",
-                "Couldn't read the on-screen-text manifest:\n%s" % e)
+                "Couldn't read the on-screen-text manifest:\n%s" % err)
         rows = []
         for r in loaded:
             rep = r["replacement"]
@@ -9769,7 +10084,7 @@ class MainWindow:
             rows.append({"path": r["path"], "original": r["original"],
                          "replacement": rep})
         self._text_rows = rows
-        self._text_scan_dir = assets_path
+        self._text_scan_dir = scan_dir
         self._text_clear_edit_panel()
         self._refresh_text_list()
         if not rows:
@@ -10699,6 +11014,20 @@ class MainWindow:
                 text=getattr(mfr, "write_iso_label", "Build USB ISO"))
             self._write_ssd_radio.configure(
                 text=getattr(mfr, "write_ssd_label", "Write to SSD"))
+            # Say what each destination actually DOES — batch 22 (monkeybug
+            # thought these repeated the Build / flash dialog's checkboxes).
+            _noun = getattr(mfr, "direct_medium_noun", "SSD")
+            self._write_iso_tip.text = (
+                "Build a modified copy of the whole image to a FILE on this "
+                "PC. Nothing is written to a %s — use \"Build / flash %s…\" "
+                "below to put the finished image onto one (that erases and "
+                "rewrites the entire %s)." % (_noun, _noun, _noun))
+            self._write_ssd_tip.text = (
+                "Write your changed files straight onto a connected %s, in "
+                "place — no image file, and the rest of the %s is left alone. "
+                "This is NOT the same as flashing: \"Build / flash %s…\" "
+                "replaces the whole %s with a fresh image."
+                % (_noun, _noun, _noun, _noun))
             # Medium-aware red safety banner + admin panel (JJP=SSD/ISO,
             # Stern=SD card); fall back to the JJP-flavoured defaults.
             safety = getattr(mfr, "direct_safety_text", None)
@@ -10945,6 +11274,13 @@ class MainWindow:
                 side=tk.RIGHT, padx=(0, 6), after=anchor)
         else:
             self._revert_all_btn.pack_forget()
+
+        # The scan control goes LAST in the right-hand group's packing order,
+        # which for side=RIGHT puts it at the group's LEFT end (batch 22:
+        # right-justified like every other tab's Scan, but still visibly
+        # separate from the action buttons via the wide trailing gap).
+        self._write_preview_refresh_btn.pack_forget()
+        self._write_preview_refresh_btn.pack(side=tk.RIGHT, padx=(0, 24))
 
         # Refresh detect badges (file might already be selected from
         # the previous manufacturer's settings — unusual but possible).
@@ -11811,6 +12147,7 @@ class MainWindow:
                     self._write_output_row_ref.pack_forget()
                 # Kick a preview scan in the background so the user
                 # sees the modified files without a separate click.
+                self._scan_reasons["write_preview"] = "write destination changed"
                 self._scan_write_preview()
             else:
                 # ISO layout: source → original ISO → badge → assets
@@ -11835,6 +12172,7 @@ class MainWindow:
                 self._write_preview_frame.pack(
                     fill=tk.BOTH, expand=True, padx=10, pady=(4, 4),
                     before=self._write_filename_lbl)
+                self._scan_reasons["write_preview"] = "write destination changed"
                 self._scan_write_preview()
             # The filename/output label is source-dependent (blank in
             # SD-card mode) — refresh it now that the source flipped.
@@ -12522,22 +12860,20 @@ class MainWindow:
 
         # Enter the shared scanning state (same treatment as the Replace tabs
         # — monkeybug batch 8): blanks the tree, overlays the big animated
-        # spinner, and flips Refresh into a live Cancel.  Any pending rows
-        # added just below hide the overlay again, same as rows trickling in.
+        # spinner, and flips Refresh into a live Cancel.  Batch 22: rows are
+        # now held back until the walk finishes (see _finish_write_preview_scan)
+        # so the big indicator stays up for the WHOLE scan, exactly like every
+        # other tab — the old trickle-in hid it after the first hit and left a
+        # small line in the toolbar as the only sign of life.
         self._write_preview_empty.configure(
             text="Scanning for modified files…")
         self._set_tab_scanning("write_preview", True)
 
-        # In-memory Replace-Audio / Replace-Video assignments are staged onto
-        # disk only at build time, so the MD5 scan below can't see them yet.
-        # List them up front as "Pending" so the preview reflects what the
-        # build will actually apply (otherwise a staged replacement looks like
-        # nothing's changed).
-        pending_n = self._add_pending_preview_rows(assets_path, scan_id)
-
         # Every early return below leaves no worker running — drop back out of
-        # the scanning state and show the right placeholder instead.
+        # the scanning state, list the pending rows (there'll be no on-disk
+        # ones) and show the right placeholder instead.
         if not assets_path or not os.path.isdir(assets_path):
+            pending_n = self._add_pending_preview_rows(assets_path, scan_id)
             self._set_tab_scanning("write_preview", False)
             if not pending_n:
                 self._write_preview_empty.configure(
@@ -12548,6 +12884,7 @@ class MainWindow:
             return
         checksums_file = os.path.join(assets_path, ".checksums.md5")
         if not os.path.isfile(checksums_file):
+            pending_n = self._add_pending_preview_rows(assets_path, scan_id)
             self._set_tab_scanning("write_preview", False)
             if not pending_n:
                 self._write_preview_empty.configure(
@@ -12597,8 +12934,9 @@ class MainWindow:
                             fp = fp[2:]
                         saved[fp.replace("\\", "/")] = md5_val
             except OSError:
-                # Couldn't read the baseline after all — restore the button.
-                _post(self._finish_write_preview_scan, 0, scan_id)
+                # Couldn't read the baseline after all — restore the button
+                # (staged edits still list; there are just no on-disk hits).
+                _post(self._finish_write_preview_scan, 0, scan_id, assets_path)
                 return
 
             # BOF only: hide the imported-cache subtree from the
@@ -12666,14 +13004,18 @@ class MainWindow:
                     if self._write_preview_scan_id != scan_id:
                         hashcache.save(assets_path, hcache)
                         return  # superseded — drop this scan
-                    changed.append(rel)
                     ext = os.path.splitext(name)[1].lstrip(".") or "?"
-                    _post(self._add_write_preview_row,
-                          rel, ext, "Modified", scan_id)
+                    changed.append((rel, ext))
+                    # No row insert here — the whole batch lands at the end so
+                    # the big scanning indicator isn't hidden mid-walk.  The
+                    # running count goes into the indicator's own text instead,
+                    # so a long walk still visibly progresses.
+                    _post(self._write_preview_progress, len(changed), scan_id)
 
             hashcache.save(assets_path, hcache)
             if self._write_preview_scan_id == scan_id:
-                _post(self._finish_write_preview_scan, len(changed), scan_id)
+                _post(self._finish_write_preview_scan, changed, scan_id,
+                      assets_path)
 
         # The scanning UI (spinner + Cancel button) has been active since the
         # top of this method — just launch the walk.
@@ -12748,6 +13090,23 @@ class MainWindow:
                     self._add_write_preview_row(
                         f"{original}  →  {repl}", "text",
                         "Pending (Replace Text)", scan_id, tag="pending")
+                    n += 1
+            # Recoloured text lives in its own manifest (the colour is a scene
+            # property, not a font one) but it is still a pending text edit and
+            # belongs in the same list, or a colour-only build looks like
+            # nothing to write.
+            try:
+                from ..plugins.stern import text_colors
+                recolored = text_colors.load(assets_path)
+            except Exception:
+                recolored = {}
+            for _path, per_text in recolored.items():
+                for text, (src, dst) in per_text.items():
+                    self._add_write_preview_row(
+                        "%s  —  %s → %s" % (text, text_colors.to_hex(src),
+                                            text_colors.to_hex(dst)),
+                        "text", "Pending (text colour)", scan_id,
+                        tag="pending")
                     n += 1
         return n
 
@@ -12926,7 +13285,7 @@ class MainWindow:
         Write scan crawled after a mod-pack transfer and nothing recorded
         when or how long)."""
         names = {"audio": "Audio", "video": "Video", "image": "Images",
-                 "write_preview": "Write change"}
+                 "text": "Text", "write_preview": "Write change"}
         label = names.get(tab_key, tab_key)
         t0s = getattr(self, "_scan_t0", None)
         if t0s is None:
@@ -12934,7 +13293,15 @@ class MainWindow:
         if active:
             if tab_key not in t0s:      # re-entrant starts: keep first t0
                 t0s[tab_key] = time.monotonic()
-                self.append_log("%s scan started." % label, "info")
+                # Say WHY, when the caller set a reason.  monkeybug batch 22
+                # saw a 40-second Write change scan start on its own right
+                # after saving a project and read it as the save doing needless
+                # work; the save triggers nothing, but a bare "scan started"
+                # gave him no way to tell that.
+                why = self._scan_reasons.pop(tab_key, None)
+                self.append_log(
+                    "%s scan started%s." % (label, " (%s)" % why if why else ""),
+                    "info")
             self._begin_scan_ui(tab_key)
         else:
             t0 = t0s.pop(tab_key, None)
@@ -13093,10 +13460,36 @@ class MainWindow:
         except tk.TclError:
             pass
 
-    def _finish_write_preview_scan(self, n_changed, scan_id):
-        """End-of-scan housekeeping (main-thread only)."""
+    def _write_preview_progress(self, n_found, scan_id):
+        """Keep the running "N found" inside the big scanning indicator's text
+        while the MD5 walk runs (main-thread only).  The spinner ticker reads
+        ``_scan_msgs`` on its next frame, so this only has to update it."""
         if self._write_preview_scan_id != scan_id:
             return
+        self._scan_msgs["write_preview"] = (
+            "Scanning for modified files…   %d found" % n_found)
+
+    def _finish_write_preview_scan(self, changed, scan_id, assets_path=None):
+        """End-of-scan housekeeping (main-thread only).
+
+        *changed* is the list of ``(rel, ext)`` files the walk found modified
+        on disk (or a bare count from the baseline-unreadable path).  Batch 22:
+        the rows are inserted HERE rather than trickling in during the walk, so
+        the tab keeps the same big scanning indicator as every other tab for
+        the whole scan."""
+        if self._write_preview_scan_id != scan_id:
+            return
+        if isinstance(changed, int):        # baseline unreadable — nothing found
+            n_changed, changed = changed, []
+        else:
+            n_changed = len(changed)
+        # Staged Replace-Audio/Video/Image/Text edits live only in memory (or
+        # the folder's sidecar) until build time, so the MD5 walk can't see
+        # them — list them alongside the on-disk hits.
+        if assets_path is not None:
+            self._add_pending_preview_rows(assets_path, scan_id)
+        for rel, ext in changed:
+            self._add_write_preview_row(rel, ext, "Modified", scan_id)
         # Latest scan finished — leave the scanning state (spinner stops,
         # Cancel flips back to Refresh; the duration is logged there), and
         # log what it found so slow scans + change counts are traceable.
@@ -13122,6 +13515,12 @@ class MainWindow:
                 relx=0.5, rely=0.5, anchor=tk.CENTER)
         # Authoritative end-of-scan state for the Revert button.
         self._update_revert_btn_state()
+
+    def _rescan_write_preview_clicked(self):
+        """The Modified Files "Refresh" button — a plain scan, tagged so its
+        log line says the user asked for it."""
+        self._scan_reasons["write_preview"] = "Refresh clicked"
+        self._scan_write_preview()
 
     def _maybe_rescan_write_preview(self):
         """Re-scan only when the Write tab is the active view AND the
@@ -13154,6 +13553,8 @@ class MainWindow:
         if (getattr(self, "_write_scan_fingerprint", None) is not None
                 and fp == self._write_scan_fingerprint):
             return
+        self._scan_reasons.setdefault(
+            "write_preview", "staged changes differ from the last scan")
         self._scan_write_preview()
 
     def _current_write_fingerprint(self):
@@ -13182,6 +13583,13 @@ class MainWindow:
             changed = text_manifest.changed(assets_path)
             parts.append(sorted((p, list(pairs))
                                 for p, pairs in changed.items()))
+        except Exception:
+            parts.append(None)
+        try:
+            from ..plugins.stern import text_colors
+            parts.append(sorted(
+                (p, sorted(per.items()))
+                for p, per in text_colors.load(assets_path).items()))
         except Exception:
             parts.append(None)
         return parts
@@ -13309,7 +13717,7 @@ class MainWindow:
                              "-modified") or "-modified"
             stem, ext = os.path.splitext(os.path.basename(img))
             self.transfer_output_var.set(
-                "     After transfer, the Write tab builds: %s%s%s"
+                "After transfer, the Write tab builds: %s%s%s"
                 % (stem, suffix, ext))
         else:
             self.transfer_output_var.set("")
@@ -14877,6 +15285,7 @@ class MainWindow:
                     pass
             if getattr(self, "_rescan_preview_after_run", False):
                 self._rescan_preview_after_run = False
+                self._scan_reasons["write_preview"] = "the run just finished"
                 self._maybe_rescan_write_preview()
             self.set_back_enabled(True)
             self._progress_bar.stop()

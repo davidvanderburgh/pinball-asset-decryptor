@@ -503,6 +503,79 @@ def save_slices(font, slices):
     return n
 
 
+def tint_slice(img, rgb):
+    """Repaint one DISPLAY bitmap (:func:`load_slice` output) in *rgb*.
+
+    Display bitmaps are uniform in a way the stored files are not: ``load_slice``
+    has already turned a BC1 slot's brightness into alpha, so for both formats
+    the alpha is the letter and replacing the ink is all there is to it.  That
+    makes the preview a per-glyph operation, which is what lets the colour
+    follow a selection down a 300-font list without repainting whole fonts."""
+    Image = _pil()
+    try:
+        import numpy as np
+    except Exception:
+        return img
+    arr = np.asarray(img.convert("RGBA")).copy()
+    arr[..., 0], arr[..., 1], arr[..., 2] = (
+        max(0, min(255, int(c))) for c in tuple(rgb)[:3])
+    return Image.fromarray(arr, "RGBA")
+
+
+def recolor_slices(font, rgb):
+    """Repaint the font's CURRENT letters in *rgb*, keeping their shape.
+
+    The colour picker used to reach only an imported desktop font, so choosing
+    a colour with no font file did nothing at all — the swatch turned green and
+    the preview stayed white.  This is the other half: take the letters that
+    are already there (stock, or a previous import, or a hand edit) and change
+    their ink.
+
+    Shape comes from whichever channel actually carries it, which is
+    format-specific:
+
+    * BC3 (fmt 5) glyphs are a flat ink colour with the letter cut out of the
+      ALPHA, so the ink is replaced outright and the alpha kept.  That is what
+      lets an outline companion — a solid BLACK silhouette — be recoloured at
+      all; scaling it by its own brightness would multiply by zero.
+    * BC1 (fmt 4) glyphs have no usable alpha (ink sits on opaque black and the
+      machine adds it), so BRIGHTNESS is the shape: the new colour is scaled by
+      it, which keeps the anti-aliased edges and leaves the black background
+      black.
+
+    Returns ``{char: RGBA image}`` in the same as-stored orientation and size
+    as :func:`rasterize_ttf`, so :func:`save_slices` writes it unchanged."""
+    Image = _pil()
+    try:
+        import numpy as np
+    except Exception:
+        raise FontError("Recolouring needs numpy, which isn't available here.")
+    r, g_, b = (max(0, min(255, int(c))) for c in tuple(rgb)[:3])
+    out = {}
+    for ch, gl in font["glyphs"].items():
+        try:
+            img = Image.open(_lp(gl["abs"])).convert("RGBA")
+        except (OSError, ValueError):
+            continue
+        arr = np.asarray(img).astype(np.float32)
+        alpha = arr[..., 3]
+        lum = arr[..., :3].max(axis=2)
+        # A fmt-5 slot whose alpha is flat carries no shape there after all;
+        # fall back to brightness rather than flooding the whole cell.
+        by_alpha = gl.get("fmt") != 4 and alpha.min() != alpha.max()
+        new = arr.copy()
+        if by_alpha:
+            new[..., 0], new[..., 1], new[..., 2] = r, g_, b
+        else:
+            k = lum / 255.0
+            new[..., 0], new[..., 1], new[..., 2] = r * k, g_ * k, b * k
+            new[..., 3] = 255 if gl.get("fmt") == 4 else alpha
+        out[ch] = Image.fromarray(new.clip(0, 255).astype("uint8"), "RGBA")
+    if not out:
+        raise FontError("None of this font's letter files could be read.")
+    return out
+
+
 def blank_slices(font):
     """Slice bitmaps that draw NOTHING, one per glyph — how a font is removed
     from the screen without touching anything else.

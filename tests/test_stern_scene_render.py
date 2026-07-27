@@ -533,6 +533,91 @@ def test_render_tints_text_by_keyframe_color():
         assert len(ink) and (ink[:, 2] > ink[:, 0]).all()   # blue, not white
 
 
+def _relayout(assets, mutate):
+    """Edit the seeded layout in place (the fixture only covers one shape)."""
+    path = os.path.join(assets, scene_render.SCENE_LAYOUT_MANIFEST)
+    with open(path, encoding="utf-8") as f:
+        lay = json.load(f)
+    mutate(lay["/g/s1/scene.radium"])
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(lay, f)
+
+
+def test_background_black_is_the_render_that_has_always_been_drawn():
+    """The machine draws on black, so "Black" must stay byte-for-byte the frame
+    this module produced before backdrops existed — the others only fill in
+    where nothing was drawn."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        assets = _seed_preview_extract(pathlib.Path(td))
+        base = scene_render.render_scene(assets, "/g/s1/scene.radium")
+        black = scene_render.render_scene(assets, "/g/s1/scene.radium",
+                                          background="Black")
+        assert np.array_equal(np.asarray(base), np.asarray(black))
+        white = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", background="White"))
+        assert tuple(white[2, 2]) == (255, 255, 255)      # untouched pixel
+        assert tuple(white[15, 30]) == (255, 0, 0)        # the art is intact
+        # an unknown name falls back to black rather than failing
+        assert np.array_equal(np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", background="Puce")),
+            np.asarray(base))
+
+
+def test_black_ink_is_invisible_on_black_and_shows_on_a_light_backdrop():
+    """Peter asked for other backgrounds to "check the black border stuff".
+    Black ink adds nothing to a black frame — on the machine as here — so it
+    can only be looked at over something else."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        assets = _seed_preview_extract(pathlib.Path(td))
+        _relayout(assets, lambda sc: (sc["texts"][0].__setitem__(
+            "rgba", [0.0, 0.0, 0.0, 1.0]), sc.__setitem__("sprites", [])))
+        on_black = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium"))
+        assert on_black.max() == 0, "black ink somehow lit a black frame"
+        on_white = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", background="White"))
+        band = on_white[52:60, :].reshape(-1, 3)
+        assert (band.max(axis=1) < 40).any(), "the black letter never showed"
+
+
+def test_render_shows_a_colour_the_user_has_picked_but_not_built():
+    """The Scenes window passes pending colours straight into the render, so a
+    recolour is visible before the card is written."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        assets = _seed_preview_extract(pathlib.Path(td))
+        a = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", colors={"A": (255, 0, 0)}))
+        band = a[52:60, :].reshape(-1, 3)
+        ink = band[band.max(axis=1) > 200]
+        assert len(ink) and (ink[:, 0] > ink[:, 2]).all()   # red, not white
+
+
+def test_text_tints_reports_what_each_font_is_drawn_in():
+    """The Fonts window can only explain "your green came out olive" if it
+    knows the colours the scenes multiply that font by."""
+    layouts = {
+        "/g/a.radium": {"texts": [
+            {"font": "tbl", "text": "A", "rgba": [1, 1, 1, 1]},
+            {"font": "tbl", "text": "B", "rgba": [1, 1, 1, 1]},
+            {"font": "tbl", "text": "C", "rgba": [0, 0, 0, 1]},
+            {"font": "", "text": "D", "rgba": [1, 0, 0, 1]},   # no font: skip
+        ]},
+        "/g/b.radium": {"texts": [
+            {"font": "other", "text": "E", "rgba": [1.0, 0.4, 0.2, 1]}]},
+    }
+    tints = scene_render.text_tints(layouts)
+    assert tints["tbl"] == {(255, 255, 255): 2, (0, 0, 0): 1}
+    assert tints["other"] == {(255, 102, 51): 1}
+    assert "" not in tints
+    assert scene_render.text_tints({}) == {}
+
+
 def test_render_missing_pieces_degrades_quietly():
     """No layout file, an unknown scene, and a layout whose assets are gone
     all yield None rather than raising or drawing a fake frame."""

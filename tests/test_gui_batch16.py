@@ -186,8 +186,16 @@ def test_video_export_csv_writes_every_slot(app, tmp_path, monkeypatch):
         rows = list(csv.reader(f))
     assert rows[0][0] == "Original Video"
     assert [r[0] for r in rows[1:]] == ["video/a.mp4", "video/b.mp4"]
-    assert rows[1][5] == "C:\\rep.mp4"        # Replacement
-    assert rows[2][6] == "yes"                # Changed On Disk
+    # Column order is part of the contract — index by the header rather than by
+    # a literal, so adding a column (batch 22 inserted "Convert" before
+    # "Changed On Disk") can't silently shift what these assertions read.
+    col = {name: i for i, name in enumerate(rows[0])}
+    assert rows[1][col["Replacement"]] == "C:\\rep.mp4"
+    assert rows[2][col["Changed On Disk"]] == "yes"
+    # A slot with no replacement has nothing to convert; one with a
+    # replacement carries whatever the background probe resolved (blank until
+    # it has, which is the case here).
+    assert rows[2][col["Convert"]] == ""
 
 
 def test_video_export_csv_empty_table_is_a_no_op(app, monkeypatch):

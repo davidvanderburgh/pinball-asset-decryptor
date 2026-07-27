@@ -24,11 +24,13 @@ import os
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
+from ..plugins.stern import scene_render as _scene_render
 from .theme import THEMES, platform_font
 from .widgets import _Tooltip, center_over
 
 _PREVIEW_DEFAULT = "THE QUICK BROWN FOX 0123456789"
 _PREVIEW_BG = "#101014"
+_SCENE_BG_NAMES = _scene_render.BACKGROUND_NAMES
 _COMP_CLEAR = "Remove it (my outline instead)"
 _COMP_KEEP = "Leave it as it is"
 # How much undo history to keep.  A whole-project snapshot is ~20 MB (27,567
@@ -61,6 +63,7 @@ class FontStudioWindow:
         self._companions = {}    # body font key -> its outline companion font
         self._undo = []          # [(label, {abs path: bytes or None})]
         self._undo_dir = assets_dir   # the folder that history belongs to
+        self._tints = None       # font key -> {rgb: lines}, read on demand
         self._photo = None       # PhotoImage ref (must stay alive)
         self._render_job = None
         self._color = (255, 255, 255)
@@ -184,9 +187,24 @@ class FontStudioWindow:
         self._show_combo = ttk.Combobox(
             prow, textvariable=self._show_var, width=16, state="readonly",
             values=("Current glyphs",))
-        self._show_combo.pack(side=tk.LEFT, padx=(2, 0))
+        self._show_combo.pack(side=tk.LEFT, padx=(2, 8))
         self._show_combo.bind("<<ComboboxSelected>>",
                               lambda _e: self._schedule_render())
+        # A black outline on a black preview is as invisible here as it is on
+        # the machine, which is no use when the outline is what you are looking
+        # at (Peter).
+        ttk.Label(prow, text="Behind:").pack(side=tk.LEFT)
+        self._bg_var = tk.StringVar(value=_SCENE_BG_NAMES[0])
+        bgc = ttk.Combobox(prow, textvariable=self._bg_var, width=12,
+                           state="readonly", values=list(_SCENE_BG_NAMES))
+        bgc.pack(side=tk.LEFT, padx=(2, 0))
+        bgc.bind("<<ComboboxSelected>>", lambda _e: self._schedule_render())
+        _Tooltip(bgc,
+                 "What the letters are shown against. The machine draws on "
+                 "black; a lighter backdrop (or the checkerboard) is how you "
+                 "see a black outline, a shadow, or exactly where a letter's "
+                 "box ends.",
+                 lambda: getattr(self.app, "_current_theme", "light"))
 
         cv_frame = ttk.Frame(right)
         cv_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 2))
@@ -227,9 +245,14 @@ class FontStudioWindow:
         self._color_btn.pack(side=tk.LEFT, padx=(4, 2))
         self._color_btn.bind("<Button-1>", lambda _e: self._pick_color())
         _Tooltip(self._color_btn,
-                 "Ink color for the imported letters. Starts on the color "
-                 "sampled from the game font, so the swap keeps its look — "
-                 "click to choose your own.",
+                 "Ink color for these letters. Starts on the color sampled "
+                 "from the game font, so a swap keeps its look — click to "
+                 "choose your own.\n\nWith a font file imported it colors the "
+                 "new letters; on its own it repaints the letters already "
+                 "there, which you then Apply like any other edit.\n\n"
+                 "Remember the SCENE multiplies this: a font a scene draws "
+                 "black stays black whatever you pick here. The line under "
+                 "these controls says which colors this font is drawn in.",
                  lambda: getattr(self.app, "_current_theme", "light"))
         self._auto_color_var = tk.BooleanVar(value=True)
         acb = ttk.Checkbutton(orow, text="match original",
@@ -258,6 +281,16 @@ class FontStudioWindow:
                      "\"transparent\" colour to pick, the width is the "
                      "switch.",
                      lambda: getattr(self.app, "_current_theme", "light"))
+        # What the SCENES do to this font's ink.  Peter, after painting an
+        # atlas: "as i understand the Font color is in the scene itself... maybe
+        # something to switch the color to turtle green... does the color thing
+        # on your font menu work[?] i played around with it, but it did not
+        # produce what i wanted."  It works — it is just multiplied by a tint
+        # the glyph files say nothing about, so this line says what that is.
+        self._tint_lbl = ttk.Label(imp, text="", font=(self._sans, 8),
+                                   foreground=th["gray"], wraplength=620,
+                                   justify=tk.LEFT)
+
         srow3 = ttk.Frame(imp)
         srow3.pack(fill=tk.X, padx=8, pady=(0, 2))
         ttk.Label(srow3, text="Size:").pack(side=tk.LEFT)
@@ -356,6 +389,21 @@ class FontStudioWindow:
                  "\"Revert font\", which goes all the way back to the stock "
                  "letters.",
                  lambda: getattr(self.app, "_current_theme", "light"))
+        # Blanking used to happen only as a side effect of importing into the
+        # font an outline sits behind, which is no help when the font you want
+        # gone is the one you are looking at (Peter: "Not sure what i want to do
+        # with Outline/shadow fonts. Is there an easy way to blank it out?").
+        self._blank_btn = ttk.Button(brow, text="Blank font",
+                                     command=self._blank)
+        self._blank_btn.pack(side=tk.LEFT, padx=(8, 0))
+        _Tooltip(self._blank_btn,
+                 "Erases every letter of this font so it draws nothing — the "
+                 "way to drop an outline or shadow font you don't want. The "
+                 "scene still draws it, it just has nothing to draw.\n\n"
+                 "It follows the scene choice on the left, so you can blank it "
+                 "in one scene and leave the rest alone. \"Revert font\" puts "
+                 "the letters back.",
+                 lambda: getattr(self.app, "_current_theme", "light"))
         self._revert_btn = ttk.Button(brow, text="Revert font",
                                       command=self._revert)
         self._revert_btn.pack(side=tk.LEFT, padx=(8, 0))
@@ -405,6 +453,7 @@ class FontStudioWindow:
     def reload(self, preselect=None):
         """(Re)load the fonts from the assets folder and refresh the list."""
         from ..plugins.stern import fontrender as fr
+        self._tints = None
         if self._undo_dir != self.assets_dir:
             # History holds absolute paths in the OLD project; undoing after a
             # switch would write files back into a folder the user has left.
@@ -517,9 +566,63 @@ class FontStudioWindow:
             self._ttf_lbl.configure(
                 text=os.path.basename(ttf) if ttf else "no file chosen")
         self._sync_companion(fo)
+        self._sync_tint(fo)
         self._sync_all_sizes(fo)
         self._sync_show_combo()
         self._schedule_render()
+
+    # -- what the scenes do to this font's colour --------------------------
+
+    def _tints_for(self, font):
+        """``[((r, g, b), lines)]`` the scenes draw *font* in, commonest first.
+
+        Read from the recorded scene layouts, lazily — the file is small but
+        there is no point touching it for a project that has none."""
+        if self._tints is None:
+            try:
+                self._tints = _scene_render.text_tints(
+                    _scene_render.load_layouts(self.assets_dir))
+            except Exception:
+                self._tints = {}
+        per = self._tints.get(font["key"]) if font else None
+        return sorted((per or {}).items(), key=lambda kv: -kv[1])
+
+    def _sync_tint(self, font):
+        """Say what the game multiplies this font's ink by, and what that means
+        for the colour picker above."""
+        th = self._theme()
+        self._tint_lbl.pack_forget()
+        if font is None:
+            return
+        tints = self._tints_for(font)
+        if not tints:
+            return
+        total = sum(n for _c, n in tints)
+        white = sum(n for c, n in tints if min(c) >= 250)
+        black = sum(n for c, n in tints if max(c) <= 5)
+        listed = ", ".join(
+            "%s x%d" % ("white" if min(c) >= 250 else
+                        ("black" if max(c) <= 5 else "#%02x%02x%02x" % c), n)
+            for c, n in tints[:5])
+        if white == total:
+            msg = ("The scenes draw this font white (%d line%s), so the ink "
+                   "colour above is exactly what shows on the machine."
+                   % (total, "" if total == 1 else "s"))
+            fg = th["gray"]
+        else:
+            msg = ("The scenes tint this font: %s. That colour MULTIPLIES the "
+                   "ink you import, so your colour only comes out as picked "
+                   "where the scene is white%s. To colour a line itself, "
+                   "right-click it in the Scenes window."
+                   % (listed,
+                      " — and not at all on the %d line(s) tinted black"
+                      % black if black else ""))
+            fg = th["warning"] if black else th["gray"]
+        self._tint_lbl.configure(text=msg, foreground=fg)
+        # ...above the buttons: packed in call order it lands under them and
+        # runs off the bottom of the window.
+        self._tint_lbl.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(2, 0),
+                            before=self._arow)
 
     # -- outline companion ------------------------------------------------
 
@@ -653,6 +756,19 @@ class FontStudioWindow:
         except OSError as e:
             self._status.configure(text="Could not save the scene scope: %s" % e)
 
+    def _custom_color(self):
+        """True when the user has chosen an ink colour of their own.
+
+        It is a SETTING, not a per-font edit: once picked it follows you down
+        the font list and every preview shows it, because "what colour are my
+        letters" is a decision about the restyle, not about one 96px entry
+        (David: "when i change the font selection, the color preview does not
+        carry over")."""
+        try:
+            return not self._auto_color_var.get()
+        except tk.TclError:
+            return False
+
     def _sync_show_combo(self):
         fo = self._current_font()
         has_pending = fo is not None and fo["key"] in self._pending
@@ -661,8 +777,12 @@ class FontStudioWindow:
         self._show_combo.configure(values=vals)
         if not has_pending:
             self._show_var.set("Current glyphs")
+        # A colour on its own is enough to apply: it repaints the letters that
+        # are already there, no font file needed.
         self._apply_btn.configure(
-            state="normal" if has_pending else "disabled")
+            state="normal" if (has_pending or (fo is not None
+                                               and self._custom_color()))
+            else "disabled")
 
     def _schedule_render(self):
         if self._render_job is not None:
@@ -683,9 +803,17 @@ class FontStudioWindow:
         text = self._text_var.get().replace("\\n", "\n") or " "
         loader = None
         pend = self._pending.get(fo["key"])
-        if pend and self._show_var.get().startswith("Imported"):
+        recolored = False
+        if pend and self._show_var.get() != "Current glyphs":
             slices = pend[0]
             loader = (lambda g: fr.load_slice(g, slices.get(g["char"])))
+        elif self._custom_color():
+            # Show the chosen ink on THIS font's own letters.  Only the glyphs
+            # actually drawn are repainted, so moving down a 300-font list stays
+            # instant — the full repaint happens once, on Apply.
+            recolored = True
+            rgb = self._color
+            loader = (lambda g: fr.tint_slice(fr.load_slice(g), rgb))
         try:
             img, missing = fr.render_text(fo, text, slice_loader=loader)
         except fr.FontError as e:
@@ -699,16 +827,31 @@ class FontStudioWindow:
             from PIL import Image
             img = img.resize((img.size[0] * zoom, img.size[1] * zoom),
                              Image.NEAREST)
+        bg = self._bg_var.get()
+        try:
+            img = _scene_render.flatten_over_background(img, bg)
+        except Exception:
+            pass                      # a preview is never worth an exception
         try:
             from PIL import ImageTk
             self._photo = ImageTk.PhotoImage(img)
         except Exception as e:
             self._status.configure(text="Preview failed: %s" % e)
             return
+        spec = _scene_render.background_spec(bg)
+        try:
+            canvas.configure(bg=("#%02x%02x%02x" % spec
+                                 if isinstance(spec, tuple) else "#96969c"))
+        except tk.TclError:
+            pass
         canvas.create_image(8, 8, image=self._photo, anchor=tk.NW)
         canvas.configure(scrollregion=(0, 0, img.size[0] + 16,
                                        img.size[1] + 16))
         bits = []
+        if recolored:
+            bits.append("showing this font's letters in %s — \"Apply to this "
+                        "font\" repaints all %d of them"
+                        % ("#%02x%02x%02x" % self._color, len(fo["glyphs"])))
         if pend:
             bits.append("import fitted at %dpx (%d letters redrawn%s)"
                         % (pend[1], len(pend[0]),
@@ -771,6 +914,11 @@ class FontStudioWindow:
             self._paint_swatches()
         if fo["key"] in self._ttf_paths:
             self._rasterize()
+        else:
+            # No font file: the colour is previewed straight onto this font's
+            # own letters, and Apply is what writes it.
+            self._sync_show_combo()
+            self._schedule_render()
 
     def _import_options(self):
         """The rasterizer settings the option row currently shows.  One place,
@@ -922,14 +1070,37 @@ class FontStudioWindow:
         fo = self._current_font()
         if fo is None:
             return
-        pend = self._pending.get(fo["key"])
-        if not pend:
-            return
         from ..plugins.stern import fontrender as fr
+        pend = self._pending.get(fo["key"])
+        # No import staged, but a colour of the user's own is on screen: Apply
+        # means "repaint this font's letters in it".  Computed HERE rather than
+        # when the colour was picked, so browsing the font list never pays for
+        # a repaint the user didn't ask to keep.
+        recolor = pend is None
+        if recolor:
+            if not self._custom_color():
+                return
+            try:
+                self.win.configure(cursor="watch")
+                self.win.update_idletasks()
+                pend = (fr.recolor_slices(fo, self._color), fo["px"], [], None)
+            except Exception as e:
+                messagebox.showerror(
+                    "Recolour failed",
+                    "Couldn't repaint these letters:\n\n%s" % e,
+                    parent=self.win)
+                return
+            finally:
+                try:
+                    self.win.configure(cursor="")
+                except tk.TclError:
+                    pass
+            self._pending[fo["key"]] = pend
         # Restyling a font too small to carry a typeface is Peter's "smaller
         # fonts do look more and more strange the smaller they get"; say so
-        # once, with the number, rather than refusing.
-        if fo["px"] < fr.MIN_RESTYLE_PX and not messagebox.askyesno(
+        # once, with the number, rather than refusing.  A recolour is exempt:
+        # it keeps every letter's shape, so size has nothing to do with it.
+        if not recolor and fo["px"] < fr.MIN_RESTYLE_PX and not messagebox.askyesno(
                 "Small font",
                 "\"%s\" is only %d pixels tall. Below about %d a desktop font "
                 "loses its shape when it is fitted into letters this small, "
@@ -941,7 +1112,8 @@ class FontStudioWindow:
         sibs_planned = (self._same_typeface(fo)
                         if self._all_sizes_var.get() else [])
         self._push_undo(
-            "the import into \"%s\"" % (fo["name"] or fo["key"]),
+            "the %s \"%s\"" % ("recolour of" if recolor else "import into",
+                               fo["name"] or fo["key"]),
             [fo, self._companion(fo)] + sibs_planned
             + [self._companion(s) for s in sibs_planned])
         n, n_comp = self._write_font(fo, pend[0])
@@ -960,12 +1132,17 @@ class FontStudioWindow:
             try:
                 for i, sib in enumerate(sibs):
                     self._status.configure(
-                        text="Fitting \"%s\" into size %d of %d…"
-                             % (os.path.basename(ttf), i + 1, len(sibs)))
+                        text="%s size %d of %d…"
+                             % ("Repainting" if recolor else
+                                "Fitting \"%s\" into" % os.path.basename(ttf),
+                                i + 1, len(sibs)))
                     self.win.update_idletasks()
                     try:
-                        slices, _sz, _kept = fr.rasterize_ttf(
-                            sib, ttf, **self._import_options())
+                        if recolor:
+                            slices = fr.recolor_slices(sib, self._color)
+                        else:
+                            slices, _sz, _kept = fr.rasterize_ttf(
+                                sib, ttf, **self._import_options())
                     except Exception:
                         # One size that can't take the font must not abandon
                         # the rest; the count below says how many missed.
@@ -997,8 +1174,9 @@ class FontStudioWindow:
                      % len(self._scenes_list.curselection()))
         else:
             where = "all %d scene(s) using this font" % len(self._scene_paths)
-        msg = ("%d letter(s) written to the project folder, for %s"
-               % (n, where))
+        msg = ("%d letter(s) %s in the project folder, for %s"
+               % (n, "repainted %s" % ("#%02x%02x%02x" % self._color)
+                  if recolor else "written", where))
         if n_comp:
             msg += ("; its outline font \"%s\" was blanked (%d letter(s)) so "
                     "the old border is gone — only in the scenes this font is "
@@ -1008,8 +1186,9 @@ class FontStudioWindow:
             msg += ("; its outline font \"%s\" was left as it is"
                     % (comp["name"] or comp["key"]))
         if n_sib:
-            msg += ("; the same font was fitted into %d more size(s) of "
-                    "\"%s\"" % (n_sib, fo["name"] or fo["key"]))
+            msg += ("; %d more size(s) of \"%s\" %s too"
+                    % (n_sib, fo["name"] or fo["key"],
+                       "were repainted" if recolor else "took the same font"))
             if self._scope_var.get() == "some":
                 msg += (" (those keep their own scene choice, which is every "
                         "scene unless you narrow them)")
@@ -1067,6 +1246,52 @@ class FontStudioWindow:
                 else:
                     errors.append("%s: %s" % (comp["name"] or comp["key"], e))
         return n, n_comp
+
+    def _blank(self):
+        """Erase this font's letters so it draws nothing.
+
+        Deliberately NOT the same as reverting: revert goes back to Stern's
+        letters, this leaves the font in place with empty ones.  It is how an
+        outline or shadow font is removed, and it honours the scene scope
+        chosen on the left — blanking is card-wide otherwise, which is how
+        Peter lost borders on screens he had never opened."""
+        fo = self._current_font()
+        if fo is None:
+            return
+        from ..plugins.stern import fontrender as fr
+        some = self._scope_var.get() == "some"
+        n_sel = len(self._scenes_list.curselection())
+        if some and not n_sel:
+            self._status.configure(
+                text="Pick the scenes to blank it in first, or switch to "
+                     "\"Change in all of them\".")
+            return
+        where = ("the %d scene(s) selected on the left" % n_sel if some
+                 else "all %d scene(s) using it" % len(self._scene_paths))
+        if not messagebox.askyesno(
+                "Blank font",
+                "Erase every letter of \"%s\" (%dpx) so it draws nothing, in "
+                "%s?\n\nThe scene still draws this font — it just has nothing "
+                "to draw, which is how an outline or shadow is removed. "
+                "\"Revert font\" restores Stern's letters, and \"Undo\" steps "
+                "back to whatever was there a moment ago."
+                % (fo["name"] or fo["key"], fo["px"], where), parent=self.win):
+            return
+        self._push_undo("blanking \"%s\"" % (fo["name"] or fo["key"]), [fo])
+        try:
+            n = fr.clear_font(fo)
+        except Exception as e:
+            messagebox.showerror("Blank font",
+                                 "Couldn't blank this font:\n\n%s" % e,
+                                 parent=self.win)
+            return
+        self._pending.pop(fo["key"], None)
+        self._sync_show_combo()
+        self._schedule_render()
+        self._notify_changed()
+        self._status.configure(
+            text="%d letter(s) blanked in %s — build on the Write tab to put "
+                 "it on the card." % (n, where))
 
     def _revert(self):
         fo = self._current_font()

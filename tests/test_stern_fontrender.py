@@ -479,6 +479,45 @@ def test_outline_companion_needs_a_shared_scene_and_matching_letters(tmp_path):
     assert fr.outline_base(by_key["far"]["name"]) == "TestFont"
 
 
+def test_recolor_slices_repaints_by_the_channel_that_holds_the_shape(tmp_path):
+    """A colour with no font file imported used to do nothing at all.  Now it
+    repaints the current letters — and which channel carries the letter's shape
+    is format-specific, so the two atlas formats take different routes."""
+    _make_extract(tmp_path)
+    green = (51, 204, 51)
+
+    # BC3 ('A' is flat red with the shape in alpha): the ink is replaced and
+    # the alpha kept, which is what lets a solid-black outline be recoloured.
+    out = fr.recolor_slices(_font(tmp_path, "tbl"), green)
+    a = np.asarray(out[0x41])
+    assert a.shape[:2] == (6, 4)
+    ink = a[a[..., 3] > 0]
+    assert len(ink) and (ink[:, :3] == green).all()
+
+    # BC1 ('C' is white ink on OPAQUE black): brightness is the shape, so the
+    # colour is scaled by it — the background stays black and the slot stays
+    # opaque, because a BC1 slot has no usable alpha.
+    c = np.asarray(fr.recolor_slices(_font(tmp_path, "tbl2"), green)[0x43])
+    assert (c[..., 3] == 255).all(), "a BC1 slot must not gain transparency"
+    assert tuple(c[0, 0][:3]) == (0, 0, 0), "the black background must stay"
+    assert tuple(c[2, 1][:3]) == green
+
+
+def test_recolor_slices_round_trips_through_save_and_revert(tmp_path):
+    """A recolour is an ordinary glyph edit: it saves over the slice PNGs and
+    Revert re-cuts the originals from the atlas."""
+    _make_extract(tmp_path)
+    font = _font(tmp_path, "tbl")
+    before = np.asarray(Image.open(font["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert fr.save_slices(font, fr.recolor_slices(font, (51, 204, 51))) >= 1
+    after = np.asarray(Image.open(font["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert after.shape == before.shape
+    assert not np.array_equal(after, before)
+    fr.revert_slices(str(tmp_path), font)
+    back = np.asarray(Image.open(font["glyphs"][0x41]["abs"]).convert("RGBA"))
+    assert np.array_equal(back, before)
+
+
 def test_clear_font_blanks_by_atlas_format(tmp_path):
     """Removing the companion is Peter's own fix ("removing the shadow font in
     total").  A BC3 slot goes transparent; a BC1 slot has no usable alpha, so

@@ -26,6 +26,7 @@ authoritative size guard runs in the flash pipeline.
 """
 
 import os
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -201,6 +202,24 @@ class FlashImageDialog:
                 body, text=safety, bg=th["bg"], fg=th["error"],
                 font=(self._sans, 9), wraplength=560, justify="left",
                 anchor="w").pack(fill="x", pady=(6, 0))
+
+        # Windows + already elevated: mapped network-drive letters (W:) are
+        # invisible to an elevated process, so a build reading its assets or
+        # writing its output through one silently sees nothing there.  The
+        # Write tab carries this warning for Direct-SD mode; monkeybug batch 22
+        # asked for it here too, since this dialog is where a build is actually
+        # started.  Only shown when it can bite (Windows, elevated, building).
+        self._unc_note = None
+        if sys.platform == "win32" and is_admin():
+            self._unc_note = tk.Label(
+                body,
+                text=("Running as administrator: Windows hides mapped network "
+                      "drive letters (e.g. W:) from elevated apps. If your "
+                      "project or build location is on a network share, use "
+                      "its full \\\\server\\share path, not a drive letter."),
+                bg=th["bg"], fg=th["gray"], font=(self._sans, 9),
+                wraplength=560, justify="left", anchor="w")
+            self._unc_note.pack(fill="x", pady=(6, 0))
 
         # A flash writes raw sectors, which needs elevation — but the app no
         # longer has to be launched elevated.  When it isn't already

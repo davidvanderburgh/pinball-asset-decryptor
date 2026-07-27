@@ -6,10 +6,11 @@ carry the firmware version), the MBR partition table, the ``.sidx`` validation
 manifest (game folder, indexed-file count, record format, ``image.bin`` size),
 the plaintext count words in the ``image.bin`` container header (sounds +
 sound requests), the game ELF's objective namespace (the title's three-letter
-code, e.g. ``VEN``), plus on-card asset counts (videos by the same 12-byte
-``ftyp`` sniff the extract uses, images/scenes by name).  Apart from one pass
-over the game ELF for the title code, the probe walks directory metadata and
-never reads more than a magic-sniff of any file, so it stays quick even on a
+code, e.g. ``VEN``) and its adjustment table (how many operator settings and
+high-score places the game has), plus on-card asset counts (videos by the
+same 12-byte ``ftyp`` sniff the extract uses, images/scenes by name).  Apart
+from one pass over the game ELF, the probe walks directory metadata and never
+reads more than a magic-sniff of any file, so it stays quick even on a
 multi-GB image.
 """
 
@@ -180,6 +181,37 @@ def _game_elf_bytes(reader, found):
         return b""
 
 
+def _adjustment_rows(fw):
+    """``[("Adjustments", …), ("High scores", …)]`` from the game ELF's own
+    adjustment table, or ``[]`` when this build's table can't be located.
+
+    Both numbers are firmware facts, not card contents: the operator's *chosen*
+    settings and the scores actually on the board live in the machine's i2c
+    NVRAM, which a card reader never sees.  What the card carries is the table
+    the game seeds a fresh machine from, and that table is also the definitive
+    list of what the menu offers (peanuts asked for both counts).
+    """
+    try:
+        from .adjustments import AdjustmentTable, high_score_names
+        table = AdjustmentTable(fw)
+    except Exception:
+        return []
+    # Id 0 is the AD_INVALID placeholder, never an operator-visible setting.
+    total = table.count - (1 if table.names[:1] == ["AD_INVALID"] else 0)
+    slots = high_score_names(table.names)
+    rows = [("Adjustments",
+             "%s — operator settings in the machine's menu; the Defaults tab "
+             "edits the values a fresh machine starts from"
+             % format(total, ","))]
+    if slots:
+        rows.append(
+            ("High scores",
+             "%s — high-score and champion places the game keeps (the scores "
+             "themselves are stored in the machine, not on the card)"
+             % format(len(slots), ",")))
+    return rows
+
+
 def _data_partition_probe(card):
     """``(firmware_rows, asset_rows, sidx_name, title_code)`` from the card's
     data partition.
@@ -261,11 +293,15 @@ def _data_partition_probe(card):
             ("Music banks", "%d (per-category image-scNN.bin song banks)"
              % found["music_banks"]))
 
+    # One ELF read serves both the title code and the adjustment/high-score
+    # counts, so the extra rows cost a parse rather than another pass over the
+    # card.
     title_code = None
     try:
         fw = _game_elf_bytes(reader, found)
         if fw:
             title_code = title_code_from_firmware(fw)
+            rows.extend(_adjustment_rows(fw))
     except Exception:
         title_code = None
     return rows, asset_rows, os.path.basename(sidx_path), title_code

@@ -111,6 +111,20 @@ class AdjustmentTable:
         return s if s.isprintable() else None
 
     # --- discovery ---
+    def _words(self, po, fsz):
+        """``(base_offset, memoryview of u32)`` over a PT_LOAD's aligned words.
+
+        The name hunt has to look at every word of every loadable segment, and
+        the biggest game ELFs are ~190 MB (Rush) — a per-word
+        ``struct.unpack_from`` there costs seconds, a cast memoryview about a
+        fifth of that.
+        """
+        base = (po + 3) & ~3
+        n = (po + fsz - base) // 4
+        if n <= 0:
+            return base, memoryview(b"").cast("I")
+        return base, memoryview(self.data)[base:base + n * 4].cast("I")
+
     def _find_names(self):
         ad_va = {}
         for m in _AD_RE.finditer(self.data):
@@ -120,17 +134,16 @@ class AdjustmentTable:
         va_set = set(ad_va)
         best = []
         for po, pv, fsz in self._loads:
-            i, run = po, []
-            while i < po + fsz - 3:
-                w = struct.unpack_from("<I", self.data, i)[0]
+            base, words = self._words(po, fsz)
+            run = []
+            for j, w in enumerate(words):
                 if w in va_set:
-                    v = pv + (i - po)
+                    v = pv + (base + 4 * j - po)
                     if run and v - run[-1] != 4:
                         if len(run) > len(best):
                             best = run
                         run = []
                     run.append(v)
-                i += 4
             if len(run) > len(best):
                 best = run
         if not best:
@@ -262,7 +275,137 @@ CURATED = [
      "Playfield LED brightness, as a percentage.", 1),
     ("AD_FLASHER_BRIGHTNESS", "Flasher Brightness", "number",
      "Flasher brightness, as a percentage.", 1),
+    # High-score defaults (monkeybug batch 22).  These are the scores the
+    # machine seeds its high-score table with on a fresh flash / factory
+    # reset.  The INITIALS that go with them are not in this table — they
+    # come from the board's NVRAM, which the card can't set (see
+    # plans/spike2_settings_defaults_handoff.md), so only the scores are
+    # editable here.
+    ("AD_ALLOW_HIGH_SCORES", "Allow High Scores", "toggle",
+     "Whether the game records high scores at all.", 1),
+    ("AD_GRAND_CHAMPION_SCORE", "Grand Champion Score", "number",
+     "Default Grand Champion score on a fresh flash / factory reset. The "
+     "GC initials come from board NVRAM and can't be set from the card.", 1),
+    ("AD_HIGH_SCORE_1_SCORE", "High Score 1", "number",
+     "Default first-place score on a fresh flash / factory reset.", 1),
+    ("AD_HIGH_SCORE_2_SCORE", "High Score 2", "number",
+     "Default second-place score on a fresh flash / factory reset.", 1),
+    ("AD_HIGH_SCORE_3_SCORE", "High Score 3", "number",
+     "Default third-place score on a fresh flash / factory reset.", 1),
+    ("AD_HIGH_SCORE_4_SCORE", "High Score 4", "number",
+     "Default fourth-place score on a fresh flash / factory reset.", 1),
+    ("AD_HSTD_RESET_COUNT", "Reset High Scores After", "number",
+     "Number of games after which the high-score table resets itself "
+     "(0 = never).", 1),
 ]
+
+# Per-mode champion thresholds are title-specific — Led Zeppelin ships ~30 of
+# them, an older title none — so they can't be listed in CURATED by name.  They
+# are picked up generically instead, and the label is derived from the name.
+# The naming shapes come from the same 34-card census as
+# :data:`_SLOT_SUFFIX_RE` below, minus the multi-place high-score TABLES
+# (AD_..._HIGH_SCORE_n_SCORE, AD_..._HSTD_n): those are the co-op / 2-team /
+# home-team boards, whose four-plus places would swamp the editor and whose
+# main slots are already curated by name.  The _AWARD / _AWARDS siblings are
+# award counts, not scores, so they never match.
+_CHAMPION_SUFFIX_RE = re.compile(
+    r"_(?:CHAMPION_SCORE|CHAMP_SCORE|CHAMPION|CHAMP)$")
+
+# Words that must not be title-cased when a label is derived from an AD_ name.
+_ACRONYMS = {"GI", "LED", "TOTC", "HSTD", "EM", "4P", "2P", "3P"}
+
+# Words whose plain capitalisation reads wrong (the co-op / team boards).
+_WORD_FIXES = {"COOP": "Co-op", "2TEAM": "2-Team", "3TEAM": "3-Team",
+               "4TEAM": "4-Team", "2112": "2112"}
+
+
+def _label_from_name(name):
+    """Human label for an ``AD_*`` adjustment with no curated entry:
+    ``AD_ELECTRIC_MAGIC_FRENZY_CHAMPION`` -> ``Electric Magic Frenzy
+    Champion``.  Known acronyms keep their capitals."""
+    words = name[3:].split("_") if name.startswith("AD_") else name.split("_")
+    out = []
+    for w in words:
+        if not w:
+            continue
+        if w in _WORD_FIXES:
+            out.append(_WORD_FIXES[w])
+        elif w in _ACRONYMS:
+            out.append(w)
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
+def champion_rows(table):
+    """``(name, label, kind, help, scale)`` tuples for every per-mode champion
+    threshold this build carries, in adjustment-id order (which is the order
+    the game's own menu lists them in).  Empty for titles without them.
+
+    Names already listed in :data:`CURATED` are skipped so the Grand Champion
+    doesn't appear twice."""
+    curated = {c[0] for c in CURATED}
+    rows = []
+    for name, _idx in sorted(table.by_name.items(), key=lambda kv: kv[1]):
+        if name in curated or name in _NOT_SLOTS:
+            continue
+        if name.endswith(("_AWARD", "_AWARDS")):
+            continue                    # what you win, not a score to beat
+        if not _CHAMPION_SUFFIX_RE.search(name):
+            continue
+        rows.append((name, _label_from_name(name), "number",
+                     "Default champion score for this mode on a fresh flash "
+                     "/ factory reset.", 1))
+    return rows
+
+
+# Every score the machine's high-score board records — the four high scores,
+# the Grand Champion, and each mode/challenge champion — is one adjustment in
+# this same table, but Stern renamed the family several times over the Spike 2
+# years.  A census of all 34 vendor cards on hand turned up six shapes:
+#
+#   AD_HIGH_SCORE_1_SCORE      four-place table (and its COOP_/2TEAM_/
+#                              IMPOSSIBLE_/HOME_TEAM_/2P_COOP_… variants)
+#   AD_GRAND_CHAMPION_SCORE    ..._CHAMPION_SCORE, incl. the co-op boards
+#   AD_KASHMIR_CHAMPION        Led Zeppelin, Venom, Godzilla, TMNT, X-Men …
+#   AD_SKILL_SHOT_CHAMP        James Bond 60th
+#   AD_LOOP_CHAMPION_SCORE     Sword of Rage
+#   AD_TOTC_CHALLENGE_TIME_HSTD_1   timed challenge boards (LZ, Rush,
+#                              Jurassic Park, Avengers, Godzilla)
+#
+# plus a handful of one-off names (Iron Maiden's AD_SPINNER_MASTER,
+# AD_FOI_COMBO_KING, …) that are recognised instead by having their own
+# _AWARD/_AWARDS companion, which only a recorded champion carries.
+_SLOT_SUFFIX_RE = re.compile(
+    r"_(?:HIGH_SCORE_\d+_SCORE|CHAMPION_SCORE|CHAMP_SCORE"
+    r"|CHAMPION|CHAMP|HSTD_\d+)$")
+
+# "What do you win for beating one" settings, shared by every slot on the
+# titles that have them — they read like slots but record nothing.
+_NOT_SLOTS = frozenset(("AD_HSTD_CHAMPION", "AD_GAME_FEATURE_CHAMPION",
+                        "AD_FEATURE_HSTD_TABLES"))
+
+
+def high_score_names(names):
+    """The adjustment names that are recorded high-score slots, in id order.
+
+    Counting these answers "how many high scores does this game keep?" without
+    an Extract (peanuts).  Note this is deliberately broader than
+    :func:`champion_rows`, which only offers the plain ``_CHAMPION`` scores for
+    editing: here a co-op board or a timed-challenge board counts too.
+    """
+    known = {n for n in names if n}
+    out = []
+    for name in names:
+        if not name or name.endswith(("_AWARD", "_AWARDS")):
+            continue
+        if name in _NOT_SLOTS:
+            continue
+        if (_SLOT_SUFFIX_RE.search(name)
+                or name + "_AWARD" in known or name + "_AWARDS" in known):
+            out.append(name)
+    return out
+
 
 # Per-setting enum labels (index -> text).  Only for enums whose option list is
 # known; others stay out of CURATED.
@@ -283,15 +426,20 @@ def _labels_for(name, e):
 def curated_rows(table):
     """One row per curated setting this build exposes, in DISPLAY units.
 
-    Each row: ``{name, label, kind, help, default, min, max, scale, labels}``
-    where default/min/max are what the operator menu shows (internal value //
-    scale), ``scale`` is the internal-per-display factor (so internal =
-    display * scale), and ``labels`` maps a display value to its text for
-    enums (else None).  A scale that doesn't divide the internal range evenly
-    is ignored (shown as stored) so a build that doesn't match the assumption
-    can't produce nonsense."""
+    Each row: ``{name, label, kind, help, default, min, max, step, scale,
+    labels}`` where default/min/max/step are what the operator menu shows
+    (internal value // scale), ``scale`` is the internal-per-display factor
+    (so internal = display * scale), ``step`` is the adjustment's own
+    increment (high scores step by a million, not by one), and ``labels``
+    maps a display value to its text for enums (else None).  A scale that
+    doesn't divide the internal range evenly is ignored (shown as stored) so
+    a build that doesn't match the assumption can't produce nonsense.
+
+    The curated list comes first, then this build's per-mode champion
+    thresholds (title-specific, matched generically — see
+    :func:`champion_rows`)."""
     rows = []
-    for name, label, kind, help_, scale in CURATED:
+    for name, label, kind, help_, scale in list(CURATED) + champion_rows(table):
         if name not in table.by_name:
             continue
         e = table.get(name)
@@ -306,5 +454,8 @@ def curated_rows(table):
             "default": e["default"] // scale,
             "min": e["min"] // scale,
             "max": e["max"] // scale,
+            # A step of 0 (or one that the scale doesn't divide) would make a
+            # spinbox useless — fall back to 1.
+            "step": max(1, e["step"] // scale) if e["step"] else 1,
         })
     return rows

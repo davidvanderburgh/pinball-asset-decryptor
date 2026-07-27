@@ -22,9 +22,9 @@ import os
 import re
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 
-from ..plugins.stern import scene_render
+from ..plugins.stern import scene_render, text_colors
 from .theme import THEMES, platform_font
 from .widgets import _Tooltip, center_over
 
@@ -217,7 +217,8 @@ class SceneBrowserWindow:
             body,
             text="Every scene on the card, with the images, fonts and "
                  "on-screen text it is built from. Double-click an item to "
-                 "jump to it on the matching tab.",
+                 "jump to it on the matching tab; right-click it to recolour "
+                 "a line of text or blank a font out of the picture.",
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=980, justify=tk.LEFT)
         self._hint.pack(anchor=tk.W, pady=(0, 6))
@@ -282,6 +283,14 @@ class SceneBrowserWindow:
         self._detail.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._detail.bind("<<TreeviewSelect>>", lambda _e: self._on_detail())
         self._detail.bind("<Double-1>", self._on_detail_double)
+        # Right-click acts ON the scene — recolour a line of its text, blank a
+        # font out of it.  Peter, about an outline font he wanted gone: "Is
+        # there an easy way to blank it out from the scene menu? when i do
+        # doubleclick on it, it will go the import windows, but it will not
+        # blank it out there."
+        self._menu = tk.Menu(self._detail, tearoff=0)
+        for seq in ("<Button-3>", "<Button-2>"):    # Windows/Linux, macOS
+            self._detail.bind(seq, self._popup_menu)
 
         # ---- preview: the scene as the machine draws it -----------------
         prev = ttk.Frame(right)
@@ -306,7 +315,8 @@ class SceneBrowserWindow:
         self._rebuild_lbl.pack(anchor=tk.W, pady=(2, 0))
         frow = ttk.Frame(pside)
         frow.pack(anchor=tk.W, pady=(8, 0))
-        ttk.Label(frow, text="Speed", font=(self._sans, 8)).pack(side=tk.LEFT)
+        ttk.Label(frow, text="Speed", font=(self._sans, 8), width=6).pack(
+            side=tk.LEFT)
         self._fps_var = tk.StringVar(value=_FPS_FROM_FILE)
         self._fps_box = ttk.Combobox(frow, textvariable=self._fps_var,
                                      values=list(_FPS_CHOICES), width=10,
@@ -314,6 +324,29 @@ class SceneBrowserWindow:
         self._fps_box.pack(side=tk.LEFT, padx=(4, 0))
         self._fps_box.bind("<<ComboboxSelected>>",
                            lambda _e: self._restart_animation())
+        # Peter: "would it be possible to do some different backgrounds? The
+        # black does work most, but if you want to check the black border stuff
+        # something different may help."
+        bgrow = ttk.Frame(pside)
+        bgrow.pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(bgrow, text="Behind", font=(self._sans, 8), width=6).pack(
+            side=tk.LEFT)
+        self._bg_var = tk.StringVar(value=scene_render.BACKGROUND_NAMES[0])
+        self._bg_box = ttk.Combobox(
+            bgrow, textvariable=self._bg_var, width=12, state="readonly",
+            values=list(scene_render.BACKGROUND_NAMES))
+        self._bg_box.pack(side=tk.LEFT, padx=(4, 0))
+        self._bg_box.bind("<<ComboboxSelected>>",
+                          lambda _e: self._rerender())
+        _Tooltip(
+            self._bg_box,
+            "What the scene is laid over.\n\n"
+            "The machine draws on BLACK, so that is the true picture — but a "
+            "black outline on a black frame is as invisible here as it is "
+            "there. Pick a light backdrop (or the checkerboard) to see the "
+            "black borders and the edges of the art; nothing about the scene "
+            "itself changes, only what shows through behind it.",
+            lambda: getattr(self.app, "_current_theme", "light"))
         _Tooltip(
             self._fps_box,
             "How fast an animated scene plays.\n\n"
@@ -360,6 +393,7 @@ class SceneBrowserWindow:
         brow.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(brow, text="Close", command=self._close).pack(side=tk.RIGHT)
 
+        self._apply_canvas_bg()
         center_over(self.app.root, win, 1100, 800)
         win.deiconify()
         win.lift()
@@ -477,9 +511,21 @@ class SceneBrowserWindow:
                        values=("see the Images list above",))
         n_t = det.insert("", tk.END, text="Text (%d)" % len(sc["texts"]),
                          open=len(sc["texts"]) <= 12)
+        stock, picked = self._scene_text_colors(sel[0])
         for i, s in enumerate(sc["texts"]):
-            det.insert(n_t, tk.END, iid="txt::%d" % i, text=s,
-                       values=("double-click: find on Replace Text",))
+            # The colour is the scene's, not the font's, so it belongs on the
+            # line and not in the Fonts window — say what it is and what it
+            # will become.
+            src = stock.get(s)
+            if src is None:
+                info = "double-click: find on Replace Text"
+            elif s in picked:
+                info = "%s → %s (not built yet)" % (text_colors.to_hex(src),
+                                                    text_colors.to_hex(
+                                                        picked[s]))
+            else:
+                info = "%s · right-click to recolour" % text_colors.to_hex(src)
+            det.insert(n_t, tk.END, iid="txt::%d" % i, text=s, values=(info,))
         n_v = det.insert("", tk.END, text="Videos (%d)" % len(sc["videos"]),
                          open=True)
         for rel in sc["videos"]:
@@ -519,6 +565,10 @@ class SceneBrowserWindow:
             return
         self._preview_lbl.configure(text="Drawing…")
         self._canvas_message("drawing…")
+        # Read the Tk vars HERE: the render runs on a worker thread and Tk is
+        # not safe to touch from one.
+        bg = self._background_name()
+        colors = self._pending_colors(card)
 
         def work():
             try:
@@ -527,7 +577,8 @@ class SceneBrowserWindow:
                     self._fonts = fr.load_fonts(self.assets_dir)
                 n = scene_render.frame_count(layout)
                 frames = [scene_render.render_layout(
-                    self.assets_dir, layout, fonts=self._fonts, frame=i)
+                    self.assets_dir, layout, fonts=self._fonts, frame=i,
+                    background=bg, colors=colors)
                     for i in range(min(n, _MAX_PREVIEW_FRAMES))]
             except Exception:
                 frames = []
@@ -541,6 +592,96 @@ class SceneBrowserWindow:
                 pass
 
         threading.Thread(target=work, daemon=True).start()
+
+    # -- text colour -------------------------------------------------------
+
+    def _scene_text_colors(self, scene_dir):
+        """``(stock, picked)`` for one scene: the colour the game draws each
+        line in (from the recorded layout) and any colour the user has chosen
+        but not built yet."""
+        card, layout = scene_render.layout_for_scene_dir(self._layouts,
+                                                         scene_dir)
+        stock = {}
+        for tx in (layout or {}).get("texts") or ():
+            stock.setdefault(tx.get("text") or "",
+                             text_colors.from_floats(tx.get("rgba") or ()))
+        picked = self._pending_colors(card) if card else {}
+        return stock, picked
+
+    def _pending_colors(self, card):
+        try:
+            return text_colors.colors_for(self.assets_dir, card) if card else {}
+        except Exception:
+            return {}
+
+    def _pick_text_color(self, text, reset=False):
+        """Recolour (or restore) one line of the selected scene's text."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        card, _layout = scene_render.layout_for_scene_dir(self._layouts, sel[0])
+        stock, picked = self._scene_text_colors(sel[0])
+        src = stock.get(text)
+        if card is None or src is None:
+            messagebox.showinfo(
+                "Text colour",
+                "This line's colour isn't in the recorded scene layout, so "
+                "there is nothing to change it from.\n\nRun \"Rebuild "
+                "previews…\" (or re-extract with Images enabled) and try "
+                "again.", parent=self.win)
+            return
+        if reset:
+            new = None
+        else:
+            start = picked.get(text, src)
+            rgb = colorchooser.askcolor(
+                color=text_colors.to_hex(start), parent=self.win,
+                title="Colour for \"%s\"" % text[:40])[0]
+            if not rgb:
+                return
+            new = tuple(int(c) for c in rgb)
+        try:
+            text_colors.set_color(self.assets_dir, card, text, src, new)
+        except OSError as e:
+            messagebox.showerror("Text colour", str(e), parent=self.win)
+            return
+        self._folder_state_written()
+        self._on_select()               # re-lists the rows AND re-renders
+
+    def _folder_state_written(self):
+        """Tell the main window this project folder's pending edits changed, so
+        the Write tab's preview picks the recolour up."""
+        cb = getattr(self.app, "_on_folder_state_written", None)
+        if cb is not None:
+            try:
+                cb(self.assets_dir)
+            except Exception:
+                pass
+
+    def _background_name(self):
+        """The chosen backdrop, read on the main thread."""
+        try:
+            return self._bg_var.get()
+        except tk.TclError:
+            return scene_render.BACKGROUND_NAMES[0]
+
+    def _apply_canvas_bg(self):
+        """Match the canvas letterbox to the backdrop, so a preview narrower
+        than the canvas doesn't sit in a black frame that isn't part of it."""
+        spec = scene_render.background_spec(self._background_name())
+        rgb = spec if isinstance(spec, tuple) else (128, 128, 132)
+        try:
+            self._preview.configure(bg="#%02x%02x%02x" % rgb)
+        except tk.TclError:
+            pass
+
+    def _rerender(self):
+        """Redraw the selected scene (a backdrop or colour change — the layout
+        itself is unchanged, so there is nothing to reload)."""
+        self._apply_canvas_bg()
+        sel = self._tree.selection()
+        if sel:
+            self._render_preview(sel[0])
 
     def _canvas_message(self, text):
         """Write a word on the preview canvas itself."""
@@ -811,11 +952,133 @@ class SceneBrowserWindow:
         except Exception:
             pass
 
-    def _on_detail_double(self, _event):
-        sel = self._detail.selection()
+    # -- right-click actions ----------------------------------------------
+
+    def _popup_menu(self, event):
+        """Build the menu for the row under the cursor and post it."""
+        iid = self._detail.identify_row(event.y)
+        if not iid or "::" not in iid:
+            return
+        self._detail.selection_set(iid)
+        m = self._menu
+        m.delete(0, tk.END)
+        if iid.startswith("txt::"):
+            text = self._detail.item(iid, "text")
+            sel = self._tree.selection()
+            _stock, picked = (self._scene_text_colors(sel[0]) if sel
+                              else ({}, {}))
+            m.add_command(label="Text colour…",
+                          command=lambda: self._pick_text_color(text))
+            if text in picked:
+                m.add_command(
+                    label="Back to the original colour",
+                    command=lambda: self._pick_text_color(text, reset=True))
+            m.add_separator()
+            m.add_command(label="Find on the Replace Text tab",
+                          command=lambda: self._jump(iid))
+        elif iid.startswith("font::"):
+            key = iid[6:]
+            m.add_command(label="Blank this font in this scene",
+                          command=lambda: self._blank_font(key, True))
+            m.add_command(label="Blank this font everywhere it is used",
+                          command=lambda: self._blank_font(key, False))
+            m.add_separator()
+            m.add_command(label="Open in the Fonts window",
+                          command=lambda: self._jump(iid))
+        elif iid.startswith("img::"):
+            m.add_command(label="Show on the Images tab",
+                          command=lambda: self._jump(iid))
+        elif iid.startswith("vid::"):
+            m.add_command(label="Show on the Video tab",
+                          command=lambda: self._jump(iid))
+        else:
+            return
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    def _blank_font(self, table_key, this_scene_only):
+        """Erase every letter of a font so it draws nothing.
+
+        This is how an outline / shadow font gets removed: the game still
+        draws it, it just has nothing to draw.  Blanking is otherwise CARD-WIDE
+        — one atlas serves every scene using it — so "in this scene" writes a
+        scene scope first, which is the difference between losing one border
+        and losing it on several hundred screens you never opened."""
+        from ..plugins.stern import fontrender as fr
+        sel = self._tree.selection()
         if not sel:
             return
-        iid = sel[0]
+        scene_dir = sel[0]
+        try:
+            fonts = fr.load_fonts(self.assets_dir)
+        except Exception as e:
+            messagebox.showerror("Blank font", str(e), parent=self.win)
+            return
+        font = next((f for f in fonts if f["key"] == table_key), None)
+        if font is None:
+            messagebox.showinfo(
+                "Blank font",
+                "This font isn't in the project folder's glyph manifest — "
+                "re-extract with Images enabled to edit it.", parent=self.win)
+            return
+        try:
+            used_in = fr.scenes_for_font(self.assets_dir, font)
+        except Exception:
+            used_in = []
+        here = [p for p in used_in
+                if p.replace("\\", "/").rsplit("/", 1)[0] == scene_dir]
+        name = font.get("name") or font["key"]
+        if this_scene_only and not here:
+            messagebox.showinfo(
+                "Blank font",
+                "Couldn't work out which scene file this font belongs to, so "
+                "blanking it here would blank it everywhere. Use \"everywhere "
+                "it is used\" if that is what you want.", parent=self.win)
+            return
+        where = ("this scene only (it is used in %d)" % len(used_in)
+                 if this_scene_only
+                 else "all %d scene(s) that use it" % max(1, len(used_in)))
+        if not messagebox.askyesno(
+                "Blank font",
+                "Erase every letter of \"%s\" (%dpx) so it draws nothing, in "
+                "%s?\n\nThis is the way to drop an outline or shadow font. "
+                "\"Revert font\" in the Fonts window puts the letters back "
+                "from the atlas image."
+                % (name, font.get("px", 0), where), parent=self.win):
+            return
+        try:
+            fr.set_font_scope(self.assets_dir, font, here if this_scene_only
+                              else None)
+            n = fr.clear_font(font)
+        except Exception as e:
+            messagebox.showerror("Blank font",
+                                 "Couldn't blank \"%s\":\n\n%s" % (name, e),
+                                 parent=self.win)
+            return
+        self._fonts = None              # the preview must re-read the glyphs
+        self._rerender()
+        self._refresh_font_studio()
+        try:
+            self.app._start_change_scan("image")
+        except Exception:
+            pass
+        self._preview_lbl.configure(
+            text="Blanked %d letter(s) of \"%s\" — %s. Build on the Write tab "
+                 "to put it on the card." % (n, name, where))
+
+    def _refresh_font_studio(self):
+        """Keep an open Fonts window in step with a blank done from here."""
+        fs = getattr(self.app, "_font_studio", None)
+        try:
+            if fs is not None and fs.win.winfo_exists():
+                fs.reload()
+        except Exception:
+            pass
+
+    def _jump(self, iid):
+        """The double-click action, reachable from the menu too."""
         try:
             if iid.startswith("img::"):
                 self.app.reveal_image_slot(iid[5:])
@@ -824,12 +1087,16 @@ class SceneBrowserWindow:
                 open_font_studio(self.app, self.assets_dir,
                                  preselect=iid[6:])
             elif iid.startswith("txt::"):
-                text = self._detail.item(iid, "text")
-                self.app.reveal_text_string(text)
+                self.app.reveal_text_string(self._detail.item(iid, "text"))
             elif iid.startswith("vid::"):
                 self.app.reveal_video_slot(iid[5:])
         except Exception:
             pass
+
+    def _on_detail_double(self, _event):
+        sel = self._detail.selection()
+        if sel:
+            self._jump(sel[0])
 
 
 def open_scene_browser(app, assets_dir, preselect=None):

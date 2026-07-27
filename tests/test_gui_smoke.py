@@ -2134,13 +2134,13 @@ def test_set_cancelling_only_relabels_live_cancel(app):
         w.set_running(False, mode="extract")
 
 
-def test_write_toolbar_groups_scan_left_actions_right(
+def test_write_toolbar_right_justifies_scan_and_actions(
         app, manufacturers_by_key):
-    """Modified Files toolbar grouping (monkeybug batch 9): Refresh (the scan
-    control) sits on the left; the action buttons are grouped on the right.
-    For a flash-capable plugin the plain Build button is hidden (David: the
-    consolidated Build / flash button replaces it), so the right-hand group
-    is Build / flash + Revert."""
+    """Modified Files toolbar (monkeybug batch 22): every button is
+    right-justified, with the scan control at the LEFT end of that group —
+    i.e. last in the side=RIGHT packing order.  For a flash-capable plugin the
+    plain Build button is hidden (David: the consolidated Build / flash button
+    replaces it), so the group is scan + Revert + Build / flash."""
     w = app.window
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
@@ -2148,32 +2148,36 @@ def test_write_toolbar_groups_scan_left_actions_right(
     stern.set_era("spike2")
     w.apply_manufacturer(stern, reset_era=False)
     app.root.update()
-    assert w._write_preview_refresh_btn.pack_info()["side"] == "left"
     assert w._write_btn.winfo_manager() == ""     # consolidated away
-    for btn in (w._flash_btn, w._revert_all_btn):
+    for btn in (w._write_preview_refresh_btn, w._flash_btn,
+                w._revert_all_btn):
         assert btn.pack_info()["side"] == "right"
+    order = w._write_preview_toolbar.pack_slaves()
+    assert order[-1] is w._write_preview_refresh_btn
     app._on_back_to_picker()
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
 
 
 def test_write_preview_scan_status_ticks_and_clears(app):
-    """The toolbar scan-activity label animates while the Modified Files scan
-    runs (pending rows hide the tree overlay, so this is the only sign a long
-    walk is still going) and blanks when the scan ends or is cancelled."""
+    """The Modified Files scan shows the SAME big animated overlay as every
+    other tab, carrying a running "N found", and resets when the scan ends or
+    is cancelled (monkeybug batch 22 — the old small toolbar label is gone)."""
     w = app.window
     w._write_preview_empty.configure(text="Scanning for modified files…")
     w._set_tab_scanning("write_preview", True)
     try:
         assert "Scanning for modified files" in \
-            w._write_preview_scan_status.cget("text")
+            w._write_preview_empty.cget("text")
+        # The running count goes into the overlay's own text.
+        w._write_preview_progress(7, w._write_preview_scan_id)
+        assert "7 found" in w._scan_msgs["write_preview"]
     finally:
         w._set_tab_scanning("write_preview", False)
-    assert w._write_preview_scan_status.cget("text") == ""
-    # Cancel path clears it too.
+    # Cancel path resets the overlay to its idle message.
     w._set_tab_scanning("write_preview", True)
     w._cancel_scan("write_preview")
-    assert w._write_preview_scan_status.cget("text") == ""
+    assert "Scan cancelled" in w._write_preview_empty.cget("text")
 
 
 def test_write_preview_total_changes_readout(app):
@@ -3048,6 +3052,255 @@ def test_scene_browser_rebuild_previews_action(app, tmp_path, monkeypatch):
     app.root.update()
 
 
+def _seed_scene_with_text(tmp_path, text="CLOCK NOT SET",
+                          rgba=(1.0, 1.0, 1.0, 1.0)):
+    """``_make_extract`` plus one editable string and a layout drawing it, so
+    the Scenes window has a Text row with a known colour."""
+    import json
+    from pinball_decryptor.plugins.stern import scene_render
+    (tmp_path / "text").mkdir(exist_ok=True)
+    (tmp_path / "text" / "strings.tsv").write_text(
+        "# asset_path\toriginal\treplacement\n"
+        "/g/scene1/scene.radium\t%s\t\n" % text, encoding="utf-8")
+    layout = {"/g/scene1/scene.radium": {
+        "stage": [320, 180, 60.0], "unplaced": 0, "offstage": 0,
+        "sprites": [], "texts": [
+            {"name": "Line1", "x": 0, "y": 100, "text": text,
+             "rect": [0, 0, 320, 180], "rgba": list(rgba), "align": 1,
+             "font": "tbl"}]}}
+    with open(str(tmp_path / scene_render.SCENE_LAYOUT_MANIFEST), "w",
+              encoding="utf-8") as f:
+        json.dump(layout, f)
+
+
+def test_scene_browser_recolours_a_line_and_offers_backdrops(app, tmp_path,
+                                                             monkeypatch):
+    """Peter: "as i understand the Font color is in the scene itself... maybe
+    something to switch the color to turtle green" — and, separately, "would it
+    be possible to do some different backgrounds?".
+
+    Recolouring is a scene edit, not a font edit, so it lives on the text row
+    and records what the colour was as well as what it becomes."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+    from pinball_decryptor.plugins.stern import scene_render, text_colors
+
+    _make_extract(tmp_path)
+    _seed_scene_with_text(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_scene_browser()
+    sb = w._scene_browser
+    sb._tree.selection_set("/g/scene1")
+    sb._on_select()
+
+    def _text_row():
+        for sect in sb._detail.get_children():
+            for row in sb._detail.get_children(sect):
+                if row.startswith("txt::"):
+                    return sb._detail.item(row, "values")[0]
+        return ""
+
+    # the row says the colour the GAME draws that line in
+    assert "#ffffff" in _text_row()
+
+    monkeypatch.setattr(sb_mod.colorchooser, "askcolor",
+                        lambda *a, **k: ((51, 204, 51), "#33cc33"))
+    sb._pick_text_color("CLOCK NOT SET")
+    assert text_colors.load(str(tmp_path)) == {
+        "/g/scene1/scene.radium": {
+            "CLOCK NOT SET": ((255, 255, 255), (51, 204, 51))}}
+    # ...shown as a pending change, and handed to the preview render
+    assert "#ffffff → #33cc33" in _text_row()
+    assert "not built yet" in _text_row()
+    assert sb._pending_colors("/g/scene1/scene.radium") == {
+        "CLOCK NOT SET": (51, 204, 51)}
+
+    # backdrops: the machine's black plus somewhere to see a black border
+    assert "Checkerboard" in list(sb._bg_box.cget("values"))
+    sb._bg_var.set("White")
+    sb._rerender()
+    assert sb._background_name() == "White"
+    assert sb._preview.cget("bg") == "#ffffff"
+    assert scene_render.background_spec("White") == (255, 255, 255)
+
+    # and it can be put back, which removes the row rather than storing a no-op
+    sb._pick_text_color("CLOCK NOT SET", reset=True)
+    assert text_colors.load(str(tmp_path)) == {}
+    assert "right-click to recolour" in _text_row()
+
+    sb._close()
+    app.root.update()
+
+
+def test_scene_browser_blanks_a_font_out_of_one_scene(app, tmp_path,
+                                                      monkeypatch):
+    """Peter, about an outline/shadow font: "Is there an easy way to blank it
+    out from the scene menu? when i do doubleclick on it, it will go the import
+    windows, but it will not blank it out there."
+
+    It blanks scoped to the scene it was asked from — the atlas is shared, so
+    an unscoped blank strips the same border off every other scene."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_extract(tmp_path)
+    _seed_scene_with_text(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_scene_browser()
+    sb = w._scene_browser
+    sb._tree.selection_set("/g/scene1")
+    sb._on_select()
+
+    font = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}["tbl"]
+    glyph = font["glyphs"][0x41]["abs"]
+    assert np.asarray(Image.open(glyph).convert("RGBA"))[..., 3].max() > 0
+
+    monkeypatch.setattr(sb_mod.messagebox, "askyesno", lambda *a, **k: True)
+    sb._blank_font("tbl", True)
+    assert np.asarray(Image.open(glyph).convert("RGBA"))[..., 3].max() == 0
+    # this font is also in /g/scene9; the blank must not reach it
+    assert fr.get_font_scope(str(tmp_path), font) == [
+        "/g/scene1/scene.radium"]
+    assert "Blanked" in sb._preview_lbl.cget("text")
+
+    sb._close()
+    app.root.update()
+
+
+def test_font_studio_blank_button_and_scene_tint_note(app, tmp_path,
+                                                      monkeypatch):
+    """The Fonts window can blank a font on its own (it used to happen only as
+    a side effect of importing into the font an outline sits behind), and says
+    what the scenes multiply the ink by — which is why Peter's colour picks
+    "did not produce what i wanted"."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_extract(tmp_path)
+    # the scenes draw this font BLACK: no ink colour can ever show there
+    _seed_scene_with_text(tmp_path, rgba=(0.0, 0.0, 0.0, 1.0))
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+
+    assert fs._tint_lbl.winfo_manager() != ""
+    note = fs._tint_lbl.cget("text")
+    assert "MULTIPLIES" in note and "tinted black" in note
+
+    # the preview can be put on something other than black
+    assert "Checkerboard" in fs_mod._SCENE_BG_NAMES
+    fs._bg_var.set("Checkerboard")
+    fs._render_now()                       # must not raise
+
+    glyph = fs._current_font()["glyphs"][0x41]["abs"]
+    assert np.asarray(Image.open(glyph).convert("RGBA"))[..., 3].max() > 0
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._blank()
+    assert np.asarray(Image.open(glyph).convert("RGBA"))[..., 3].max() == 0
+    assert "blanked" in fs._status.cget("text")
+
+    # blanking is undoable — it is a write like any other, not a one-way door
+    fs._undo_last()
+    assert np.asarray(Image.open(glyph).convert("RGBA"))[..., 3].max() > 0
+
+    # a font no scene is recorded as drawing says nothing at all rather than
+    # guessing white
+    assert "tbl2" in {f["key"] for f in fr.load_fonts(str(tmp_path))}
+    fs._tree.selection_set("tbl2")
+    fs._on_select()
+    assert fs._tint_lbl.winfo_manager() == ""
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_colour_alone_repaints_the_current_letters(app, tmp_path,
+                                                               monkeypatch):
+    """The Color swatch used to reach only an imported desktop font: pick a
+    colour with no font file and the swatch went green while the preview stayed
+    white (David hit exactly this).  A colour on its own now stages a repaint of
+    the letters already there, applied like any other edit."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+    assert str(fs._apply_btn.cget("state")) == "disabled"
+
+    monkeypatch.setattr(fs_mod.colorchooser, "askcolor",
+                        lambda *a, **k: ((51, 204, 51), "#33cc33"))
+    fs._pick_color()
+
+    # previewable and applyable with no font file anywhere, and NOT staged as
+    # a pending import (browsing the list must not fill it with edits)
+    assert "tbl" not in fs._pending
+    assert fs._custom_color() is True
+    assert str(fs._apply_btn.cget("state")) == "normal"
+    fs._render_now()
+    assert "in #33cc33" in fs._status.cget("text")
+
+    # the colour is a SETTING: it follows the selection down the list, which is
+    # what David reported missing ("when i change the font selection, the color
+    # preview does not carry over")
+    fs._tree.selection_set("tbl2")
+    fs._on_select()
+    fs._render_now()
+    assert fs._custom_color() is True
+    assert "in #33cc33" in fs._status.cget("text")
+    assert str(fs._apply_btn.cget("state")) == "normal"
+
+    fs._tree.selection_set("tbl")
+    fs._on_select()
+    glyph = fs._current_font()["glyphs"][0x41]["abs"]
+    fs._apply()
+    on_disk = np.asarray(Image.open(glyph).convert("RGBA"))
+    assert (on_disk[on_disk[..., 3] > 0][:, :3] == (51, 204, 51)).all()
+    assert "repainted #33cc33" in fs._status.cget("text")
+
+    # ...and it undoes like any other write
+    fs._undo_last()
+    back = np.asarray(Image.open(glyph).convert("RGBA"))
+    assert not (back[back[..., 3] > 0][:, :3] == (51, 204, 51)).all()
+
+    # back on "match original" there is nothing of the user's left to apply
+    fs._auto_color_var.set(True)
+    fs._on_option_change()
+    assert fs._custom_color() is False
+    assert str(fs._apply_btn.cget("state")) == "disabled"
+
+    fs._close()
+    app.root.update()
+
+
 def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
     """The Fonts window names the outline font drawn behind a typeface, and
     can remove it with the import.
@@ -3427,3 +3680,99 @@ def test_font_studio_and_scene_browser_smoke(app, tmp_path):
     fs._close()
     sb._close()
     app.root.update()
+
+
+# ---------------------------------------------------------------------------
+# monkeybug batch 22
+# ---------------------------------------------------------------------------
+
+def test_write_original_row_keeps_the_info_badge_beside_the_path(app):
+    """The ⓘ badge sits right after the Original path, not shoved to the far
+    edge of the window by an expanding label (monkeybug batch 22)."""
+    w = app.window
+    kids = w._write_upd_row.pack_slaves()
+    path_lbl = kids[1]
+    assert path_lbl.pack_info().get("expand") in (0, "0", False)
+
+
+def test_text_scan_uses_the_shared_scanning_state(app, tmp_path):
+    """Replace Text scans on a worker thread behind the same big animated
+    indicator + Cancel-scan button as the other Replace tabs (monkeybug batch
+    22: it used to freeze the window with no sign of life)."""
+    w = app.window
+    w._set_tab_scanning("text", True)
+    try:
+        assert w._scan_buttons["text"].cget("text") == "Cancel scan"
+        assert "18" in str(w._text_empty.cget("font"))     # the big font
+    finally:
+        w._set_tab_scanning("text", False)
+    assert w._scan_buttons["text"].cget("text") == "Scan"
+
+    # The worker's result lands through the main-thread half, which leaves the
+    # scanning state and reports an empty manifest.  (The worker itself posts
+    # via a cross-thread after(), which only runs under a real mainloop — the
+    # same shape as the audio/video/image scans.)
+    w._set_tab_scanning("text", True)
+    w._populate_text_after_scan([], None, w._text_scan_id, str(tmp_path))
+    assert w._scan_buttons["text"].cget("text") == "Scan"
+    assert w._text_rows == []
+    assert w._text_scan_dir == str(tmp_path)
+    assert "No editable on-screen text" in w._text_empty.cget("text")
+
+    # A result from a superseded scan is dropped, stamp and all.
+    w._set_tab_scanning("text", True)
+    stale = w._text_scan_id
+    w._text_scan_id += 1
+    w._populate_text_after_scan(
+        [{"path": "p", "original": "A", "replacement": "B"}], None, stale, "x")
+    assert w._text_rows == []
+    w._set_tab_scanning("text", False)
+
+
+def test_invalidating_scans_rescans_the_visible_tab(app, manufacturers_by_key):
+    """Opening/forking a project clears the scan stamps, and the tab already on
+    screen gets no <<NotebookTabChanged>> — so it is re-scanned directly
+    (monkeybug batch 22: after a fork the Video tab kept the old project's
+    slots until he left and came back)."""
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    called = []
+    w._scan_assets_tab_by_name = lambda text: called.append(text)
+    w.invalidate_asset_scans()
+    assert len(called) == 1
+    # The scan-every-tab path must not double up on the visible one.
+    called.clear()
+    w._rescan_all_assets_tabs = lambda: called.append("all")
+    w.reload_assets_tabs()
+    assert called == ["all"]
+
+
+def test_video_convert_column_reports_as_is_vs_reencode(app, tmp_path):
+    """The video list says what Write will DO with each assigned clip, instead
+    of leaving it in the log at pick time (monkeybug batch 22)."""
+    from pinball_decryptor.core.video_slots import VideoSlot
+    w = app.window
+    slot = VideoSlot(rel_path="video/a.mov",
+                     abs_path=str(tmp_path / "a.mov"),
+                     ext=".mov", info=None, size=1)
+    rep = tmp_path / "rep.mov"
+    rep.write_bytes(b"x")
+
+    # "No conversion" on + matching container = copied through verbatim.
+    assert w._video_conv_mode(slot, str(rep), True, False) == \
+        w._VIDEO_CONV_ASIS
+    # ...and a container the copy-through would reject reports nothing (the
+    # pick-time warning owns that case).
+    other = tmp_path / "rep.mp4"
+    other.write_bytes(b"x")
+    assert w._video_conv_mode(slot, str(other), True, False) == ""
+
+    # The cache is keyed on the pick AND both option flags, so flipping a
+    # checkbox can't leave a stale answer on screen.
+    key_off = w._video_conv_key("video/a.mov", str(rep))
+    w.video_trim_var.set(not w.video_trim_var.get())
+    assert w._video_conv_key("video/a.mov", str(rep)) != key_off
+    # Unresolved rows read "…"; unassigned rows stay blank.
+    assert w._video_conv_cached("video/a.mov", str(rep)) == "…"
+    assert w._video_conv_cached("video/a.mov", None) == ""

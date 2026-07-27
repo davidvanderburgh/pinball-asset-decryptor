@@ -2297,6 +2297,82 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
     return writes, n_strings, overlays
 
 
+def _changed_radium_text_colors(assets_dir):
+    """The user's scene text-colour edits: ``{radium card path: {string:
+    (from_rgb, to_rgb)}}``.  Every row in the manifest is an edit."""
+    from . import text_colors as _tc
+    return _tc.load(assets_dir)
+
+
+def _radium_color_writes(reader, assets_dir, log, cancel):
+    """Resolve the scene text-colour edits to in-place writes, in the same shape
+    (and with the same overlay bookkeeping) as :func:`_radium_text_writes`.
+
+    A line's colour is four floats in its keyframe, so this is the most
+    size-neutral patch there is: twelve bytes of RGB per keyframe, alpha left
+    exactly as it was.  Alpha is what fades a line in, and rewriting it would
+    turn a fade into a pop.
+
+    Only keyframes whose colour still matches the edit's ``from`` are touched.
+    One string can be drawn twice — a black outline instance under a coloured
+    fill — and repainting both is how you lose the border while thinking you
+    only changed the colour."""
+    import struct as _struct
+    from . import radium as _radium
+    from . import scene_layout as _scene_layout
+
+    edits = _changed_radium_text_colors(assets_dir)
+    if not edits:
+        return [], 0, {}
+    nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
+
+    writes = []
+    overlays = {}
+    n_lines = 0
+    for card_path, per_text in edits.items():
+        if cancel():
+            break
+        node = nodes.get(card_path)
+        if node is None:
+            log("Text colour: radium %s wasn't found on the card; %d edit(s) "
+                "skipped." % (card_path, len(per_text)), "warning")
+            continue
+        ib = bytes(node["i_block"])
+        data = reader.read_file_bytes(node)
+        imgs = parse_radium_images(data)
+        tables = _radium.parse_glyph_tables(data, imgs) if imgs else []
+        found = _scene_layout.text_color_offsets(data, imgs, tables)
+        for text, (src, dst) in sorted(per_text.items()):
+            hits = found.get(text) or ()
+            payload = _struct.pack("<3f", *[c / 255.0 for c in dst])
+            n_hit = 0
+            for off, rgba in hits:
+                # Match on the colour the user picked FROM, at the tolerance a
+                # float that came from a byte can be recovered at.
+                if any(abs(rgba[i] * 255.0 - src[i]) > 0.6 for i in range(3)):
+                    continue
+                n_hit += 1
+                buf = payload
+                for disk, n in reader.disk_ranges(node, off, len(payload)):
+                    writes.append((disk, buf[:n]))
+                    buf = buf[n:]
+                overlays.setdefault(ib, (node, {}))[1][off] = payload
+            if not n_hit:
+                log("Text colour in %s: \"%s\" is no longer drawn in %s on the "
+                    "card, so its colour was left alone."
+                    % (card_path, text, _hex_rgb(src)), "warning")
+                continue
+            n_lines += 1
+            log("Text colour in %s: \"%s\" %s -> %s (%d keyframe(s))."
+                % (card_path, text, _hex_rgb(src), _hex_rgb(dst), n_hit),
+                "info")
+    return writes, n_lines, overlays
+
+
+def _hex_rgb(rgb):
+    return "#%02x%02x%02x" % tuple(int(c) for c in tuple(rgb)[:3])
+
+
 def _fit_image_payload(staged_path, target, work_dir, log):
     """Return exactly *target* bytes to overwrite the original ``.png``, or
     ``None`` if the replacement can't be made to fit.  An image ``<= target``
@@ -2950,10 +3026,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)
+    # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
+    # not in the font, so this is a radium patch too.
+    color_edits = _changed_radium_text_colors(assets_dir)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
-            and not text_edits):
+            and not text_edits and not color_edits):
         raise FileNotFoundError(
             "Nothing to write: every sound (idxNNNN.wav / music_catNN_*.wav) "
             "still matches the Extract baseline (.checksums.md5) and no replaced "
@@ -3029,6 +3108,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if text_edits:
         log("Found edited display text in %d radium scene(s) to write."
             % len(text_edits), "info")
+    if color_edits:
+        log("Found %d recoloured text line(s) across %d radium scene(s) to "
+            "write." % (sum(len(v) for v in color_edits.values()),
+                        len(color_edits)), "info")
 
     def _read_prog(c, t):
         if progress:
@@ -3174,6 +3257,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             if cancel():
                 return None, None, None
 
+        # Recoloured display text -> the same kind of in-place radium patch,
+        # on different bytes of the same scenes, so the two compose.
+        color_writes = []
+        n_color = 0
+        if color_edits:
+            if progress:
+                progress(95, 100, "Preparing text colours...")
+            color_writes, n_color, _c_ov = _radium_color_writes(
+                reader, assets_dir, log, cancel)
+            _merge_radium_overlays(radium_overlays, _c_ov)
+            if cancel():
+                return None, None, None
+
         # Edited radium-embedded DXT5 images -> also already-flat (disk_offset,
         # bytes) writes (patched in place inside the scene.radium inode).
         radimg_writes = []
@@ -3224,7 +3320,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if (not audio_patches and not music_patches and not video_patches
                 and not video_grow_jobs and not image_patches
                 and not texture_patches and not radimg_writes
-                and not text_writes):
+                and not text_writes and not color_writes):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
                 "video or image could be fit to its original slot, and no "
@@ -3237,7 +3333,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # image copy (write_image) or the card itself (write_device).
         # Display-text writes are already (disk_offset, bytes) (the radium-text
         # helper resolved them through disk_ranges itself).
-        writes = list(text_writes) + list(radimg_writes)
+        writes = list(text_writes) + list(color_writes) + list(radimg_writes)
         for body_off, body in audio_patches.items():
             for disk, n in reader.disk_ranges(img_node, body_off, len(body)):
                 writes.append((disk, body[:n]))
@@ -3295,10 +3391,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
         # stays the same shape.
+        # Recoloured lines fold into the text count: they ARE display-text
+        # edits, just of the colour rather than the letters.
         counts = (len(audio_patches) + len(music_patches),
                   len(video_patches) + len(video_grow_jobs),
                   len(image_patches) + len(texture_patches) + n_radimg,
-                  n_text)
+                  n_text + n_color)
         return writes, counts, grow_plan
     finally:
         _rmtree(work)

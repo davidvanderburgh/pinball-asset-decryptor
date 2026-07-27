@@ -10,7 +10,8 @@ import struct
 import pytest
 
 from pinball_decryptor.plugins.stern.adjustments import (AdjustmentTable,
-                                                         curated_rows)
+                                                         curated_rows,
+                                                         high_score_names)
 
 BASE = 0x10000
 ELEM = 44
@@ -145,3 +146,124 @@ def test_patch_rejects_out_of_range_and_unknown():
 def test_non_elf_rejected():
     with pytest.raises(ValueError):
         AdjustmentTable(b"not an elf at all" * 8)
+
+
+# One name from each shape the 34-card census found, so a future firmware
+# generation that renames the family fails here rather than silently
+# under-counting the Image Info "High scores" row.
+HS_SLOTS = [
+    "AD_GRAND_CHAMPION_SCORE",              # every title
+    "AD_HIGH_SCORE_1_SCORE",
+    "AD_HIGH_SCORE_4_SCORE",
+    "AD_COOP_GRAND_CHAMPION_SCORE",         # TMNT / Venom / D&D co-op boards
+    "AD_2TEAM_HIGH_SCORE_3_SCORE",
+    "AD_4P_COOP_HIGH_SCORE_2_SCORE",        # Jaws / King Kong / Jurassic Park
+    "AD_HOME_TEAM_HIGH_SCORE_8_SCORE",      # Insider Connected board (Venom)
+    "AD_KASHMIR_CHAMPION",                  # Led Zeppelin-era mode champions
+    "AD_SKILL_SHOT_CHAMP",                  # James Bond 60th shortens it
+    "AD_LOOP_CHAMPION_SCORE",               # Sword of Rage spells it out
+    "AD_TOTC_CHALLENGE_TIME_HSTD_2",        # timed challenge boards
+    "AD_2112_CHALLENGE_SCORE_HSTD_1",       # Rush
+    "AD_SPINNER_MASTER",                    # Iron Maiden one-off, see below
+]
+HS_NOT_SLOTS = [
+    "AD_INVALID",
+    "AD_ALLOW_HIGH_SCORES",                 # a toggle, not a place
+    "AD_HSTD_INITIALS",
+    "AD_HSTD_RESET_COUNT",
+    "AD_REDEMPTION_OVERRIDE_ALLOW_HIGH_SCORES",
+    "AD_REPLAY_LEVEL_1",                    # a score, but not a record
+    "AD_REDEMPTION_TARGET_SCORE",
+    "AD_TOURNAMENT_BUMP_N_WIN_BASE",
+    "AD_HIGH_SCORE_AWARD",                  # what you win, shared by all
+    "AD_KASHMIR_CHAMPION_AWARD",
+    "AD_GRAND_CHAMPION_AWARDS",
+    "AD_HSTD_CHAMPION_AWARDS",
+    "AD_HSTD_CHAMPION",                     # the shared award's own setting
+    "AD_GAME_FEATURE_CHAMPION",
+    "AD_SMART_MISSILES_AWARDS",             # a game feature that grants awards
+]
+
+
+def test_high_score_names_covers_every_naming_generation():
+    names = HS_SLOTS + HS_NOT_SLOTS + ["AD_SPINNER_MASTER_AWARD"]
+    found = high_score_names(names)
+    assert found == HS_SLOTS          # id order preserved, nothing extra
+    for n in HS_NOT_SLOTS:
+        assert n not in found
+
+
+def test_high_score_names_needs_the_award_companion_for_odd_names():
+    """Iron Maiden's champions have arbitrary names (AD_SPINNER_MASTER,
+    AD_FOI_COMBO_KING) — only their own _AWARD sibling marks them."""
+    assert high_score_names(["AD_FOI_COMBO_KING"]) == []
+    assert high_score_names(["AD_FOI_COMBO_KING",
+                             "AD_FOI_COMBO_KING_AWARDS"]) == \
+        ["AD_FOI_COMBO_KING"]
+
+
+def test_high_score_names_ignores_blanks():
+    assert high_score_names(["", None, "AD_KASHMIR_CHAMPION"]) == \
+        ["AD_KASHMIR_CHAMPION"]
+
+
+# ---- batch 22: high-score + per-mode champion defaults ---------------------
+
+HS_SPECS = SPECS + [
+    ("AD_ALLOW_HIGH_SCORES", 1, 0, 1),
+    ("AD_GRAND_CHAMPION_SCORE", 75_000_000, 1_000_000, 1_000_000_000),
+    ("AD_HIGH_SCORE_1_SCORE", 55_000_000, 1_000_000, 1_000_000_000),
+    ("AD_HSTD_RESET_COUNT", 2000, 0, 9900),
+    ("AD_KASHMIR_CHAMPION", 10_000_000, 5_000_000, 1_000_000_000),
+    ("AD_KASHMIR_CHAMPION_AWARD", 1, 0, 5),
+    ("AD_SKILL_SHOT_CHAMP", 500_000, 100_000, 1_000_000_000),
+    ("AD_LOOP_CHAMPION_SCORE", 25, 1, 99),
+    ("AD_HSTD_CHAMPION", 1, 0, 5),
+    # A co-op board's extra places: recorded scores, but not offered for
+    # editing — the four curated places already cover the main table.
+    ("AD_COOP_HIGH_SCORE_2_SCORE", 30_000_000, 1_000_000, 1_000_000_000),
+]
+
+
+def test_high_score_and_champion_rows_are_offered_for_editing():
+    """monkeybug batch 22 asked for the high scores on the Defaults tab.  The
+    named places come from CURATED; the per-mode champions are matched
+    generically across every naming shape Stern has used."""
+    rows = {r["name"]: r for r in curated_rows(AdjustmentTable(
+        make_elf(HS_SPECS)))}
+    for name in ("AD_ALLOW_HIGH_SCORES", "AD_GRAND_CHAMPION_SCORE",
+                 "AD_HIGH_SCORE_1_SCORE", "AD_HSTD_RESET_COUNT",
+                 "AD_KASHMIR_CHAMPION",        # ..._CHAMPION (LZ era)
+                 "AD_SKILL_SHOT_CHAMP",        # ..._CHAMP (Bond 60th)
+                 "AD_LOOP_CHAMPION_SCORE"):    # ..._CHAMPION_SCORE (SoR)
+        assert name in rows, name
+    assert rows["AD_ALLOW_HIGH_SCORES"]["kind"] == "toggle"
+    assert rows["AD_GRAND_CHAMPION_SCORE"]["default"] == 75_000_000
+    # The award companion is what you WIN, not a score to beat; the shared
+    # award setting and the co-op board's extra places stay out too.
+    for name in ("AD_KASHMIR_CHAMPION_AWARD", "AD_HSTD_CHAMPION",
+                 "AD_COOP_HIGH_SCORE_2_SCORE"):
+        assert name not in rows, name
+
+
+def test_curated_rows_never_list_a_setting_twice():
+    """The Grand Champion matches the generic champion rule as well as its
+    CURATED entry — it must still appear once."""
+    names = [r["name"] for r in curated_rows(AdjustmentTable(
+        make_elf(HS_SPECS)))]
+    assert len(names) == len(set(names))
+
+
+def test_curated_rows_carry_the_adjustments_own_step():
+    """High-score defaults step by a million, so the editor's spinbox has to
+    use the table's step rather than 1 (monkeybug batch 22)."""
+    elf = bytearray(make_elf(HS_SPECS))
+    t = AdjustmentTable(bytes(elf))
+    # step lives 12 bytes past the default field (OFF_STEP - OFF_DEFAULT).
+    struct.pack_into("<i", elf,
+                     t.default_file_offset("AD_GRAND_CHAMPION_SCORE") + 12,
+                     1_000_000)
+    rows = {r["name"]: r for r in curated_rows(AdjustmentTable(bytes(elf)))}
+    assert rows["AD_GRAND_CHAMPION_SCORE"]["step"] == 1_000_000
+    # A zero step would make a spinbox useless — it falls back to 1.
+    assert rows["AD_CREDIT_LIMIT"]["step"] == 1

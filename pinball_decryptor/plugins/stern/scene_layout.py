@@ -819,6 +819,54 @@ def parse_scene_layout(data, images, tables=None):
         return None
 
 
+# Where the RGBA floats sit inside a keyframe block: handle (4) + seq (4) +
+# the zero u64 (8) + the rect's four floats (16).  See ``_parse_keyframe``.
+_KF_RGBA_AT = 32
+
+
+def text_color_offsets(data, images, tables=None):
+    """``{display string: [(file offset of the keyframe RGBA, rgba), ...]}``.
+
+    The colour a line of text is drawn in lives in the scene, not the glyphs
+    (the atlas is white ink precisely so the scene can tint it), so recolouring
+    text means rewriting floats in the ``scene.radium``.  This finds them by
+    exactly the scan :func:`parse_scene_layout` uses for the same blocks, so the
+    offsets belong to the keyframes whose colours the Scenes window shows.
+
+    One string can have SEVERAL keyframes and they are not interchangeable: on
+    TMNT's AWARD popup "AWARD" has four, two of them the pure-black OUTLINE
+    instance drawn under the coloured fill.  That is why the current rgba comes
+    back with each offset — a recolour has to match the colour the user picked
+    from, or it repaints the outline as well and the letters lose their border.
+
+    Never raises: an unreadable scene yields ``{}`` and its colours are left
+    alone."""
+    out = {}
+    try:
+        start = _tail_start(images, tables)
+        if start <= 0 or start >= len(data):
+            return out
+        found = _find_stage(data, start)
+        if found is None:
+            return out
+        _stage, after_stage = found
+        j, n = start, 0
+        while j < after_stage and n < _MAX_ELEMENTS:
+            got = _parse_keyframe(data, j)
+            if got is None:
+                j += 1
+                continue
+            kf, end = got
+            if kf["text"]:
+                out.setdefault(kf["text"], []).append(
+                    (j + _KF_RGBA_AT, list(kf["rgba"])))
+                n += 1
+            j = end
+    except Exception:
+        return out
+    return out
+
+
 def _glyph_atlas_offs(tables):
     """Every inline image a glyph table draws from — i.e. the FONT ATLAS pages.
 

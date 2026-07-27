@@ -274,6 +274,55 @@ def test_card_info_counts_version_id_and_sidx_version(tmp_path, monkeypatch):
     assert assets["Music banks"].startswith("1 ")
 
 
+def test_card_info_skips_counts_when_the_elf_is_unreadable(tmp_path,
+                                                           monkeypatch):
+    """COUNTED_TREE's stub ELF has no program headers, so the adjustment table
+    can't be located — the probe drops those two rows rather than guessing."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    install_fake_reader(monkeypatch, spec=COUNTED_TREE)
+    img = write_fake_card(tmp_path / "backup_of_my_card.raw")
+    fw = dict(dict(card_info(img))["Firmware"])
+    assert "Adjustments" not in fw and "High scores" not in fw
+
+
+# A firmware carrying a real (synthetic) adjustment table: two settings, the
+# Grand Champion + a high-score place + a mode champion, and the award
+# counters that go with them but are not themselves scores.
+_ADJ_SPECS = [
+    ("AD_INVALID", 0, 0, 0),
+    ("AD_FREE_PLAY", 0, 0, 1),
+    ("AD_ALLOW_HIGH_SCORES", 1, 0, 1),
+    ("AD_GRAND_CHAMPION_SCORE", 75000000, 1000000, 1000000000),
+    ("AD_HIGH_SCORE_1_SCORE", 55000000, 1000000, 1000000000),
+    ("AD_HIGH_SCORE_1_AWARDS", 1, 0, 4),
+    ("AD_KASHMIR_CHAMPION", 10000000, 5000000, 1000000000),
+    ("AD_KASHMIR_CHAMPION_AWARD", 0, 0, 2),
+]
+
+
+def test_card_info_adjustment_and_high_score_counts(tmp_path, monkeypatch):
+    """peanuts: how many settings does this machine's menu have, and how many
+    high scores does it keep?  Both come off the game firmware, no Extract."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    from tests.test_stern_adjustments import make_elf
+    install_fake_reader(monkeypatch, spec={
+        "spk": {"index": {"turtles_pro-1_58_0.sidx": _make_sidx(
+            ["turtles_pro/image.bin", "turtles_pro/game"])}},
+        "turtles_pro": {"image.bin": _container_header(578, 549),
+                        "game": make_elf(_ADJ_SPECS)},
+    })
+    img = write_fake_card(tmp_path / "backup_of_my_card.raw")
+
+    fw = dict(dict(card_info(img))["Firmware"])
+    # 8 entries less the AD_INVALID placeholder id 0.
+    assert fw["Adjustments"].startswith("7 — ")
+    assert "Defaults tab" in fw["Adjustments"]
+    # GC + High Score #1 + Kashmir; the two _AWARD(S) counters and the
+    # allow-high-scores toggle are not places on the board.
+    assert fw["High scores"].startswith("3 — ")
+    assert "not on the card" in fw["High scores"]
+
+
 def test_card_info_unopenable_image_degrades(tmp_path):
     img = tmp_path / "not_a_card.raw"
     img.write_bytes(b"junk")

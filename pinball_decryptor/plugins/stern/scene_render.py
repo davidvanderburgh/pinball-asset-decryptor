@@ -23,6 +23,14 @@ output:
   so ink is composited additively rather than alpha-blended over the
   background (:func:`fontrender.load_slice` already keys alpha off luminance
   for those, which is what makes this work).
+
+The machine draws on black, so black is the truthful backdrop and the default.
+A preview is also something you *inspect*, though, and black ink on a black
+frame is invisible in it exactly as it is on the machine — which is no help
+when the thing you are checking IS the black border round a letter (Peter).
+So the render tracks COVERAGE as it composites and lays the finished frame over
+a backdrop of the caller's choosing; over black the result is byte-identical to
+drawing straight onto black, and over anything else the black bits finally show.
 """
 
 import json
@@ -30,6 +38,21 @@ import os
 
 SCENE_LAYOUT_MANIFEST = os.path.join("images", "scene_textures",
                                      "scene_layout.json")
+
+# Backdrops a preview may be laid over.  Black is what the machine does; the
+# rest exist to make one kind of ink visible — light greys and white for black
+# outlines, the checkerboard for both at once, magenta for "is this pixel drawn
+# at all?".
+BACKGROUNDS = (
+    ("Black", (0, 0, 0)),
+    ("Dark grey", (46, 46, 52)),
+    ("Mid grey", (128, 128, 128)),
+    ("White", (255, 255, 255)),
+    ("Checkerboard", "checker"),
+    ("Magenta", (255, 0, 255)),
+)
+BACKGROUND_NAMES = tuple(name for name, _spec in BACKGROUNDS)
+_CHECKER = ((104, 104, 110), (150, 150, 156), 16)   # dark, light, square px
 
 
 def load_layouts(assets_dir):
@@ -42,6 +65,31 @@ def load_layouts(assets_dir):
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def text_tints(layouts):
+    """``{font key: {(r, g, b) 0-255: how many lines}}`` over every layout.
+
+    What a font actually LOOKS like on the machine is its ink multiplied by the
+    colour the scene draws it in, and the stock ink is white precisely so the
+    scene can decide.  Importing a green font therefore produces green only
+    where the scene tints white — and nothing at all where it tints black.
+    That is invisible from the glyph files, so the Fonts window says it."""
+    out = {}
+    for lay in (layouts or {}).values():
+        for tx in (lay or {}).get("texts") or ():
+            key = tx.get("font") or ""
+            if not key:
+                continue
+            rgba = tx.get("rgba") or (1, 1, 1, 1)
+            try:
+                rgb = tuple(max(0, min(255, int(round(float(c) * 255.0))))
+                            for c in tuple(rgba)[:3])
+            except (TypeError, ValueError):
+                continue
+            per = out.setdefault(key, {})
+            per[rgb] = per.get(rgb, 0) + 1
+    return out
 
 
 def describe(layout):
@@ -119,7 +167,12 @@ def _tint(img, rgba):
 
 def _add(canvas, img, x, y):
     """Composite *img* onto *canvas* additively (the machine's blend for
-    ink-on-black art), clipped to the canvas."""
+    ink-on-black art), clipped to the canvas.
+
+    The alpha channel is not part of that blend — it accumulates COVERAGE, so
+    :func:`_over_background` can tell "nothing was drawn here" from "black was
+    drawn here".  Those are the same pixel on the machine and had to become
+    different ones here, or a black outline could never be looked at."""
     import numpy as np
     ch, cw = canvas.shape[:2]
     a = np.asarray(img.convert("RGBA"))
@@ -136,7 +189,68 @@ def _add(canvas, img, x, y):
     alpha = (src[..., 3:4] / 255.0)
     out = dst[..., :3] + src[..., :3] * alpha
     canvas[dy0:dy0 + h, dx0:dx0 + w, :3] = out.clip(0, 255).astype("uint8")
-    canvas[dy0:dy0 + h, dx0:dx0 + w, 3] = 255
+    cov = alpha + (dst[..., 3:4] / 255.0) * (1.0 - alpha)
+    canvas[dy0:dy0 + h, dx0:dx0 + w, 3:] = (
+        cov * 255.0).round().clip(0, 255).astype("uint8")
+
+
+def background_spec(name):
+    """The backdrop *name* asks for, defaulting to the machine's black."""
+    for nm, spec in BACKGROUNDS:
+        if nm == name:
+            return spec
+    return BACKGROUNDS[0][1]
+
+
+def _background_plane(w, h, spec):
+    """An ``(h, w, 3)`` float array of the chosen backdrop."""
+    import numpy as np
+    if spec == "checker":
+        dark, light, sq = _CHECKER
+        yy, xx = np.mgrid[0:h, 0:w]
+        mask = (((yy // sq) + (xx // sq)) % 2).astype(bool)
+        plane = np.empty((h, w, 3), np.float32)
+        plane[...] = np.asarray(dark, np.float32)
+        plane[mask] = np.asarray(light, np.float32)
+        return plane
+    return np.broadcast_to(
+        np.asarray(spec, np.float32), (h, w, 3))
+
+
+def flatten_over_background(img, name):
+    """Lay a straight-alpha RGBA image over the named backdrop -> RGB.
+
+    For pictures that are already alpha-composited (a rendered line of text in
+    the Fonts window) rather than additively accumulated — those go through
+    ``_over_background`` instead."""
+    from PIL import Image
+    spec = background_spec(name)
+    w, h = img.size
+    if spec == "checker":
+        back = Image.fromarray(
+            _background_plane(w, h, spec).astype("uint8"), "RGB").convert(
+                "RGBA")
+    else:
+        back = Image.new("RGBA", (w, h), tuple(spec) + (255,))
+    return Image.alpha_composite(back, img.convert("RGBA")).convert("RGB")
+
+
+def _over_background(canvas, spec):
+    """Lay the accumulated frame over *spec* and return an RGB ``PIL.Image``.
+
+    The accumulated RGB is already premultiplied by the ink's own alpha (``_add``
+    adds ``src * a``), so the composite is the ordinary ``src + bg * (1 - a)``.
+    Over black that is ``src`` unchanged — the default preview is exactly the
+    frame this module has always produced."""
+    import numpy as np
+    from PIL import Image
+    h, w = canvas.shape[:2]
+    if spec == (0, 0, 0):
+        return Image.fromarray(canvas, "RGBA").convert("RGB")
+    cov = canvas[..., 3:4].astype(np.float32) / 255.0
+    out = canvas[..., :3].astype(np.float32) + \
+        _background_plane(w, h, spec) * (1.0 - cov)
+    return Image.fromarray(out.clip(0, 255).astype("uint8"), "RGB")
 
 
 def frame_count(layout):
@@ -170,11 +284,17 @@ def frame_rate(layout, cap=60.0):
     return min(fps, cap)
 
 
-def render_layout(assets_dir, layout, fonts=None, frame=0):
+def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
+                  colors=None):
     """Composite *layout* into an RGB ``PIL.Image``, or ``None`` if nothing
     could be drawn.  Pass *fonts* (``fontrender.load_fonts`` output) to render
     many scenes without re-reading the glyph manifest each time, and *frame* to
-    pick which frame animated elements show."""
+    pick which frame animated elements show.
+
+    *background* names one of :data:`BACKGROUNDS` (default black, the machine's
+    own).  *colors* is ``{display string: (r, g, b)}`` of pending text-colour
+    edits, so the preview shows a colour the user has picked but not built yet.
+    """
     try:
         import numpy as np
         from PIL import Image
@@ -190,8 +310,8 @@ def render_layout(assets_dir, layout, fonts=None, frame=0):
     if not (0 < w <= 8192 and 0 < h <= 8192):
         return None
     from . import fontrender as fr
+    # Alpha starts EMPTY: it is coverage, not opacity (see ``_add``).
     canvas = np.zeros((h, w, 4), np.uint8)
-    canvas[..., 3] = 255
     drew = False
 
     # Art first, then text over it (a scene's text is an overlay; true z-order
@@ -228,7 +348,14 @@ def render_layout(assets_dir, layout, fonts=None, frame=0):
                 ink, _missing = fr.render_text(font, tx["text"])
             except Exception:
                 continue
-            ink = _tint(ink, tx.get("rgba") or (1, 1, 1, 1))
+            rgba = list(tx.get("rgba") or (1, 1, 1, 1))
+            # A colour the user picked but hasn't built yet: the scene's own
+            # alpha is kept, because that is what fades the line in.
+            pick = (colors or {}).get(tx.get("text"))
+            if pick:
+                rgba = [c / 255.0 for c in pick[:3]] + [
+                    rgba[3] if len(rgba) > 3 else 1.0]
+            ink = _tint(ink, rgba)
             rect = list(tx.get("rect") or (0, 0, w, h)) + [0, 0, 0, 0]
             # The keyframe's rect is LEFT, TOP, RIGHT, BOTTOM — not x/y/w/h.
             # Reading it as a width put the box in the wrong place: as edges,
@@ -254,14 +381,16 @@ def render_layout(assets_dir, layout, fonts=None, frame=0):
             drew = True
     if not drew:
         return None
-    return Image.fromarray(canvas, "RGBA").convert("RGB")
+    return _over_background(canvas, background_spec(background))
 
 
-def render_scene(assets_dir, card_path, fonts=None, layouts=None):
+def render_scene(assets_dir, card_path, fonts=None, layouts=None,
+                 background=None, colors=None):
     """Preview for one scene by its ``scene.radium`` card path, or ``None``."""
     if layouts is None:
         layouts = load_layouts(assets_dir)
-    return render_layout(assets_dir, layouts.get(card_path), fonts=fonts)
+    return render_layout(assets_dir, layouts.get(card_path), fonts=fonts,
+                         background=background, colors=colors)
 
 
 def layout_for_scene_dir(layouts, scene_dir):

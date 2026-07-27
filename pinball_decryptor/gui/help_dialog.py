@@ -234,7 +234,16 @@ HELP_CONTENT = {
          "slots, which is what puts a gap between letters that touch (the "
          "game's own spacing is fixed on the card). Fonts under 30px are "
          "marked \"tiny\" because a desktop font rarely survives being "
-         "fitted that small."),
+         "fitted that small. \"Blank font\" erases a font's letters so it "
+         "draws nothing, which is how an outline or shadow font is removed "
+         "on its own. \"Behind\" puts the preview on something other than "
+         "black, the only way to see a black outline or where a letter's "
+         "box ends. The \"Color\" swatch works with no font file too: pick "
+         "a colour and it previews on whatever font you select, then Apply "
+         "repaints that font's existing letters in it. Remember the SCENE "
+         "multiplies that colour — the line under the controls says which "
+         "colours the scenes draw this font in, and a font a scene tints "
+         "black stays black whatever you pick."),
         ("Scenes window",
          "The \"Scenes…\" toolbar button (where available) lists every "
          "scene on the card with the images, fonts and on-screen text it "
@@ -253,7 +262,15 @@ HELP_CONTENT = {
          "layouts off the card image on the Extract tab in a few seconds; "
          "it rewrites only the layout file, so your images, glyph slices "
          "and font imports are left alone (a full re-extract would "
-         "overwrite them)."),
+         "overwrite them). \"Behind\" lays the preview over a lighter "
+         "backdrop or a checkerboard instead of the machine's black — the "
+         "only way to see a black border or the edge of a piece of art. "
+         "RIGHT-CLICK anything in the Contents list to act on it: a text "
+         "line offers \"Text colour…\", which is where a text colour "
+         "actually lives (the font is white on purpose so the scene can "
+         "tint it), and a font offers \"Blank this font in this scene\" or "
+         "everywhere it is used — one atlas is shared by every scene that "
+         "draws it, so prefer the scoped one."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "
@@ -320,6 +337,11 @@ HELP_CONTENT = {
          "Administrator. (Other machines keep a plain Build button.)"),
     ],
     "Mod Pack": [
+        ("What it's for",
+         "Mod packs are zips holding only your modified files, so a mod is "
+         "small enough to hand to someone else. The Project Folder shown at "
+         "the top is the same one every Replace tab and the Write tab work "
+         "out of — packs export from it and import into it."),
         ("Export",
          "Export bundles everything you've changed (versus the extract "
          "baseline) into a single shareable mod-pack file. That means ALL "
@@ -421,6 +443,16 @@ _IMAGE_INFO_SECTIONS = [
      "container's own header words. \"Sounds\" is what an Extract decodes "
      "to WAVs; \"Sound requests\" is the (larger) set of sound events the "
      "game can trigger — several requests can share one recording."),
+    ("Adjustments and high scores",
+     "\"Adjustments\" is how many operator settings this firmware defines — "
+     "the settings list in the machine's own service menu — and \"High "
+     "scores\" is how many places its high-score board keeps: the four high "
+     "scores, the Grand Champion, and every mode or challenge champion the "
+     "game tracks. Both are read from the game firmware on the card. What "
+     "the card cannot tell you is the machine's current state: the settings "
+     "an operator has chosen and the scores actually played are kept in the "
+     "machine's own memory, not on the SD card. The Defaults tab edits the "
+     "values a freshly flashed machine starts from."),
 ]
 
 # Non-tab help appended to the tabs whose UI hosts the feature.

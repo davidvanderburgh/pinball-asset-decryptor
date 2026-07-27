@@ -7,8 +7,8 @@ it silently from the already-elevated app (no UAC), and the installer
 relaunches the app (/RELAUNCH=1).  These tests pin the pieces:
 
   * asset picking — Windows gets the *_Windows.exe asset (+ sha256 from
-    the API's digest field); other platforms get None and keep the
-    browser flow.
+    the API's digest field) and Linux gets its own-arch .AppImage;
+    macOS gets None and keeps the browser flow.
   * download — streamed with progress, cancellable, digest-verified,
     and NEVER leaves a partial/corrupt exe behind on any failure (the
     caller runs the destination file elevated).
@@ -20,6 +20,7 @@ relaunches the app (/RELAUNCH=1).  These tests pin the pieces:
 import hashlib
 import io
 import json
+import platform as _platform
 from pathlib import Path
 
 import pytest
@@ -101,7 +102,20 @@ def test_pick_installer_asset_no_windows_asset():
     assert updater._pick_installer_asset(None, platform="win32") is None
 
 
-def test_check_for_update_carries_installer(monkeypatch):
+@pytest.mark.parametrize("platform,expected_url", [
+    ("win32", "win.exe"),
+    ("linux", "https://example.com/linux"),
+    ("darwin", None),
+])
+def test_check_for_update_carries_installer(monkeypatch, platform,
+                                            expected_url):
+    """The whole chain, per platform.
+
+    Parametrised rather than branching on the host: the old version
+    asked ``if sys.platform == "win32"`` and so only ever exercised the
+    one branch the runner happened to be, which is why Linux gaining an
+    installer asset broke it on CI and nowhere else.
+    """
     class FakeResp(io.BytesIO):
         def __enter__(self):
             return self
@@ -117,11 +131,15 @@ def test_check_for_update_carries_installer(monkeypatch):
     }).encode()
     monkeypatch.setattr(net, "urlopen",
                         lambda req, timeout: FakeResp(body))
-    version, url, notes, installer = updater.check_for_update("0.1.0")
-    if updater.sys.platform == "win32":
-        assert installer and installer["url"].endswith("win.exe")
-    else:
+    monkeypatch.setattr(updater.sys, "platform", platform)
+    # Pin the arch too, or this reads the runner's own and the Linux case
+    # passes on x86_64 CI and fails on an arm64 dev box.
+    monkeypatch.setattr(_platform, "machine", lambda: "x86_64")
+    _version, _url, _notes, installer = updater.check_for_update("0.1.0")
+    if expected_url is None:
         assert installer is None
+    else:
+        assert installer and installer["url"].endswith(expected_url)
 
 
 # ---------------------------------------------------------------------------

@@ -73,7 +73,10 @@ def test_appimage_falls_back_to_downloads_when_read_only(monkeypatch, tmp_path):
     not writable -- a failed write there must not sink the update."""
     downloads = tmp_path / "home" / "Downloads"
     downloads.mkdir(parents=True)
-    monkeypatch.setenv("APPIMAGE", "/opt/pad/PAD.AppImage")
+    # A directory that does not exist, rather than a real read-only one:
+    # CI containers often run as root, where os.access(W_OK) is true of
+    # everything and a "read-only" fixture would silently test nothing.
+    monkeypatch.setenv("APPIMAGE", str(tmp_path / "opt" / "PAD.AppImage"))
     monkeypatch.setattr(os.path, "expanduser",
                         lambda p: str(tmp_path / "home") if p == "~" else p)
     assert _App()._update_download_dir(APPIMAGE) == str(downloads)

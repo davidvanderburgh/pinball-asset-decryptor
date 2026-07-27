@@ -152,6 +152,64 @@ def _radium(tail, head_len=64):
 
 
 # ---------------------------------------------------------------------------
+# alternative-state pruning
+# ---------------------------------------------------------------------------
+
+def _art(node, x, y, off):
+    return {"name": "i%d" % node, "node": node, "x": x, "y": y,
+            "image_off": off}
+
+
+def _line(node, x, y, text, w=300.0, h=60.0):
+    return {"name": "t%d" % node, "node": node, "x": x, "y": y, "text": text,
+            "rect": [0.0, 0.0, w, h]}
+
+
+def test_letters_in_a_row_are_not_alternative_states():
+    """A word spelled out of letter SPRITES keeps every letter.
+
+    Letter art is a padded slot — TMNT's "APRIL" is five 280x336 images about
+    160px apart, so each covers 55% of its neighbour's box while sharing none
+    of its ink.  Judged that way every second letter was deleted as a repeat
+    and the screen read "A R L" (David).  Each letter is its own subtree of
+    two states (off + on), which is what made them eligible at all."""
+    xs = [252.0, 413.0, 567.0, 729.0, 854.0]
+    dims, sprites, parent_of = {}, [], {}
+    for i, x in enumerate(xs):
+        for state in (0, 1):
+            off = 100 + i * 2 + state
+            dims[off] = (280, 336)
+            sprites.append(_art(off, x, 207.0, off))
+            parent_of[off] = 10 + i        # each letter is its own subtree
+    texts, kept, dropped = scene_layout._drop_overlapping_subtrees(
+        [], sprites, parent_of, dims)
+    assert texts == [] and dropped == 0
+    assert sorted({s["x"] for s in kept}) == xs
+
+    # ...while art genuinely redrawn in the same place is still one state
+    dup = [_art(1, 100.0, 100.0, 1), _art(2, 100.0, 100.0, 2),
+           _art(3, 104.0, 102.0, 3), _art(4, 104.0, 102.0, 4)]
+    dims2 = {n: (400, 300) for n in (1, 2, 3, 4)}
+    _t, kept2, dropped2 = scene_layout._drop_overlapping_subtrees(
+        [], dup, {1: 20, 2: 20, 3: 21, 4: 21}, dims2)
+    assert dropped2 == 2 and len(kept2) == 2
+
+
+def test_repeated_text_placeholders_still_collapse():
+    """A group holding TEXT keeps the stricter test: a text element's box IS
+    its text, so overlapping really does mean drawing on top.  A template
+    screen repeating "INFORMATION" across the same band must still show one —
+    loosening this for text piled six copies into an unreadable smear."""
+    lines = [_line(1, 90.0, 200.0, "INFORMATION"),
+             _line(2, 100.0, 205.0, "TOTAL"),
+             _line(3, 250.0, 200.0, "INFORMATION"),
+             _line(4, 260.0, 205.0, "TOTAL")]
+    texts, _s, dropped = scene_layout._drop_overlapping_subtrees(
+        lines, [], {1: 30, 2: 30, 3: 31, 4: 31}, {})
+    assert dropped == 2 and len(texts) == 2
+
+
+# ---------------------------------------------------------------------------
 # parse_scene_layout
 # ---------------------------------------------------------------------------
 
@@ -646,12 +704,17 @@ def test_render_aligns_text_by_the_keyframe_align_word():
         assert xs[0] < xs[1] < xs[2], xs           # left, center, right
 
 
-def test_frame_rate_is_capped_and_falls_back():
-    """The stage rate is the honest basis, capped because per-frame timing is
-    undecoded; a nonsense stage still yields something playable."""
-    assert scene_render.frame_rate({"stage": [1360, 768, 30.0]}) == 20.0
+def test_frame_rate_uses_the_scenes_own_rate():
+    """The stage header's rate is authored per scene (12/24/30/60 all occur on
+    one card), so it is played as written — an old 20 fps cap made every 30 fps
+    scene run at two thirds speed.  A nonsense stage still yields something
+    playable, and 240 fps junk is still refused."""
+    assert scene_render.frame_rate({"stage": [1360, 768, 30.0]}) == 30.0
+    assert scene_render.frame_rate({"stage": [1360, 768, 60.0]}) == 60.0
+    assert scene_render.frame_rate({"stage": [1360, 768, 24.0]}) == 24.0
     assert scene_render.frame_rate({"stage": [1360, 768, 12.0]}) == 12.0
     assert scene_render.frame_rate({"stage": [1360, 768, 0.0]}) == 12.0
+    assert scene_render.frame_rate({"stage": [1360, 768, 1e9]}) == 12.0
     assert scene_render.frame_rate(None) == 12.0
     assert scene_render.frame_count(None) == 1
 

@@ -511,6 +511,72 @@ def test_extract_writes_metrics_and_font_loader_roundtrip(tmp_path):
     assert missing == set() and img.size[1] >= 4
 
 
+class _FakeMultiReader:
+    """Several scene.radium files, each with its OWN bytes."""
+
+    def __init__(self, files):
+        self._files = [(p, {"size": len(d), "mode": 0, "flags": 0,
+                            "i_block": bytes([0x40 + i]) * 8, "data": d})
+                       for i, (p, d) in enumerate(files)]
+
+    def iter_regular_files(self, min_size=1):
+        for p, node in self._files:
+            yield p, 0, node
+
+    def read_file_bytes(self, node):
+        return node["data"]
+
+    def disk_ranges(self, node, off, length):
+        return [(off, length)]
+
+
+def test_extract_keeps_every_page_of_a_font_whose_atlas_was_already_sliced(
+        tmp_path):
+    """A font spread over two atlas pages keeps ALL its characters even when an
+    earlier scene already sliced one of those pages.
+
+    Atlas PNGs are content-deduped across the whole card, and the slicer used
+    to skip a glyph whose atlas PNG had already been written — dropping its
+    MANIFEST ROW too.  That split one font into one table key per page, and a
+    text line only ever draws from one key, so every character living on a
+    later page came out blank: TMNT's clock screen rendered "CLOCK NOT SET" as
+    "CL CK N  E" (O, S and T are on HelveticaNeueBlack's second page) and an
+    award screen turned "Level 4 Award" into "Le el 4 A ard" (David)."""
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    p1, _ = _atlas_raw(8, 8)             # page one: 'A' lives here
+    p2, _ = _atlas_raw(16, 16)           # page two: 'B' lives here
+    assert p1 != p2
+
+    # Scene one draws page two only, so it slices that PNG first.
+    first = _font_blob([
+        (0x42, _glyph_record(0x42, 4, (0.25, 0.25, 0.75, 0.75), tex=5,
+                             inline=(p2, 16, 16, 5))),
+        (0x43, _glyph_record(0x43, 6, (0.25, 0.5, 0.75, 1.0), tex=5)),
+    ], name="Shared")
+    # Scene two's font spans BOTH pages — B and C re-use the deduped page two.
+    second = _font_blob([
+        (0x41, _glyph_record(0x41, 4, (0.25, 0.25, 0.75, 0.75), tex=5,
+                             inline=(p1, 8, 8, 5))),
+        (0x42, _glyph_record(0x42, 6, (0.25, 0.25, 0.75, 0.75), tex=7,
+                             inline=(p2, 16, 16, 5))),
+        (0x43, _glyph_record(0x43, 8, (0.25, 0.5, 0.75, 1.0), tex=7)),
+    ], name="Shared")
+    reader = _FakeMultiReader([("/g/one/scene.radium", first),
+                              ("/g/two/scene.radium", second)])
+    assert engine.extract_radium_images(reader, str(tmp_path)) >= 1
+
+    # The two-page font must be complete under a SINGLE key, not half a font.
+    fonts = fr.load_fonts(str(tmp_path))
+    two_page = [f for f in fonts if len(f["atlas_rels"]) == 2]
+    assert len(two_page) == 1, [(f["key"], sorted(f["glyphs"])) for f in fonts]
+    fo = two_page[0]
+    assert sorted(fo["glyphs"]) == [0x41, 0x42, 0x43]
+    _img, missing = fr.render_text(fo, "ABC")
+    assert missing == set()
+    # the already-sliced page was re-referenced, not decoded and rewritten
+    assert os.path.isfile(fo["glyphs"][0x42]["abs"])
+
+
 # ---- GUI Source label ---------------------------------------------------------
 
 def test_image_source_label_glyph():

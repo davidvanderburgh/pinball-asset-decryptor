@@ -61,8 +61,9 @@ def describe(layout):
     stage = " on a %dx%d stage" % (w, h) if w and h else ""
     n_frames = frame_count(layout)
     if n_frames > 1:
-        msg = ("Animation: %d frames of %s%s, played evenly because the real "
-               "per-frame timing isn't decoded. " % (n_frames, what, stage))
+        msg = ("Animation: %d frames of %s%s at the scene's own %g fps, each "
+               "frame held for one tick (per-frame holds aren't decoded). "
+               % (n_frames, what, stage, frame_rate(layout)))
     else:
         msg = "Still frame: %s%s. Animation isn't shown. " % (what, stage)
     # Say WHAT is missing, not merely that something is: nearly every real
@@ -148,12 +149,18 @@ def frame_count(layout):
                       for sp in layout.get("sprites") or ()])
 
 
-def frame_rate(layout, cap=20.0):
+def frame_rate(layout, cap=60.0):
     """Frames per second to play a preview at.
 
-    The stage's own rate is the honest starting point, capped because the real
-    per-frame timing lives in the undecoded keyframe timeline — a 1900-frame
-    loop run at 30 fps would claim precision we don't have."""
+    The stage header carries the scene's OWN rate as an f32 and it is really
+    authored per scene, not a constant — across one corpus of TMNT and Munsters
+    radiums it reads 12, 24, 30 and 60 — so it is the rate to play at, not a
+    starting guess.  It used to be capped at 20 out of caution about the
+    undecoded per-frame timeline; that made every 30 fps scene play at two
+    thirds speed and every 60 fps one at a third (David: "this animation is
+    running slow").  What is still undecoded is whether individual frames HOLD
+    for more than one tick, which can only make playback too fast, never too
+    slow — and the window offers a manual speed anyway."""
     try:
         fps = float((layout or {}).get("stage", (0, 0, 0))[2])
     except (TypeError, ValueError, IndexError):

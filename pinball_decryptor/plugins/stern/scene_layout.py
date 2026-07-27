@@ -297,17 +297,39 @@ def _drop_exact_duplicates(texts, sprites):
                                        round(s["x"], 1), round(s["y"], 1))))
 
 
+def _intersection(a, b):
+    iw = min(a[2], b[2]) - max(a[0], b[0])
+    ih = min(a[3], b[3]) - max(a[1], b[1])
+    return (iw * ih) if (iw > 0 and ih > 0) else 0.0
+
+
 def _overlap_fraction(a, b):
     """Intersection area as a fraction of the smaller box (0 when either is
     empty)."""
-    iw = min(a[2], b[2]) - max(a[0], b[0])
-    ih = min(a[3], b[3]) - max(a[1], b[1])
-    if iw <= 0 or ih <= 0:
+    inter = _intersection(a, b)
+    if not inter:
         return 0.0
     area_a = (a[2] - a[0]) * (a[3] - a[1])
     area_b = (b[2] - b[0]) * (b[3] - b[1])
     smaller = min(area_a, area_b)
-    return (iw * ih) / smaller if smaller > 0 else 0.0
+    return inter / smaller if smaller > 0 else 0.0
+
+
+def _iou(a, b):
+    """Intersection over UNION — how nearly two boxes are the same box.
+
+    Intersection-over-smaller can't tell "drawn in the same place" from
+    "standing next to each other": five 280x336 letter sprites 160px apart
+    each cover 55% of their neighbour, which read as alternative states and
+    deleted every other letter of a word (TMNT's "APRIL" drew as "A R L").
+    Over the union those neighbours score 0.38 while a page redrawn on top of
+    another page scores near 1."""
+    inter = _intersection(a, b)
+    if not inter:
+        return 0.0
+    union = ((a[2] - a[0]) * (a[3] - a[1])
+             + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    return inter / union if union > 0 else 0.0
 
 
 def _drop_overlapping_states(texts, sprites, dims, thresh=0.3):
@@ -382,7 +404,8 @@ def _subtree_roots(elements, parent_of):
     return out
 
 
-def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3):
+def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3,
+                               art_thresh=0.5):
     """Where two GROUPS sit on top of each other, keep one.
 
     The element-level rule in :func:`_drop_overlapping_states` only compares
@@ -395,7 +418,17 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3):
 
     Only groups of TWO OR MORE elements are compared, so a caption sitting on
     its own icon (single-element siblings, which is the whole award grid) can
-    never be mistaken for an alternative page."""
+    never be mistaken for an alternative page.
+
+    ART-ONLY groups are judged on :func:`_iou` instead, because a sprite's box
+    is a padded artwork slot: TMNT spells "APRIL" and "LAIR" out of 280x336
+    letter images about 160px apart, so each letter covers 55% of its
+    neighbour's BOX while sharing none of its ink, and every second letter was
+    deleted as an alternative state.  Over the union those letters score 0.38
+    while a page redrawn on top of another page still scores near 1.  A group
+    holding TEXT keeps the stricter test — a text element's box IS its text,
+    so trespassing on it really does mean drawing over it, and that is what
+    collapses the repeated "INFORMATION" placeholders of a template screen."""
     if not parent_of:
         return texts, sprites, 0
     els = list(texts) + list(sprites)
@@ -411,7 +444,7 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3):
     def box(el):
         return (_text_box(el) if "text" in el else _sprite_box(el, dims))
 
-    kept_boxes = []
+    kept = []                         # (bounding box, holds text?)
     drop = set()
     for r in order:
         members = groups[r]
@@ -420,10 +453,15 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3):
         bs = [box(el) for el in members]
         bb = (min(b[0] for b in bs), min(b[1] for b in bs),
               max(b[2] for b in bs), max(b[3] for b in bs))
-        if any(_overlap_fraction(bb, k) >= thresh for k in kept_boxes):
+        texty = any("text" in el for el in members)
+        covered = any(
+            _overlap_fraction(bb, kb) >= thresh if (texty or ktexty)
+            else _iou(bb, kb) >= art_thresh
+            for kb, ktexty in kept)
+        if covered:
             drop.update(id(el) for el in members)
         else:
-            kept_boxes.append(bb)
+            kept.append((bb, texty))
     if not drop:
         return texts, sprites, 0
     return ([t for t in texts if id(t) not in drop],

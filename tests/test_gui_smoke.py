@@ -2957,6 +2957,16 @@ def test_scene_browser_preview_and_videos(app, tmp_path):
     assert len(sb._frame_imgs) == 3
     assert sb._play_job is not None            # the loop is running
     assert "Animation: 3 frames" in sb._preview_lbl.cget("text")
+    # the scene's own 60 fps rate is played, not an arbitrary cap (David: the
+    # animation ran slow), and the Speed box can pin a fixed rate instead
+    assert "60 fps" in sb._preview_lbl.cget("text")
+    assert sb._effective_fps(animated) == 60.0
+    sb._fps_var.set("4 fps")
+    sb._restart_animation()
+    assert sb._effective_fps(animated) == 4.0
+    assert sb._play_job is not None            # still running, just slower
+    sb._fps_var.set("Scene rate")
+    assert sb._effective_fps(animated) == 60.0
     # switching scenes invalidates the token, which stops the old loop
     before = sb._preview_token
     sb._render_preview("/g/scene2")
@@ -3391,6 +3401,18 @@ def test_font_studio_and_scene_browser_smoke(app, tmp_path):
     assert sb.win.winfo_exists()
     kids = sb._tree.get_children()
     assert "/g/scene1" in kids and "/g/scene2" in kids
+    # every heading sorts, counts descending first, and clicking again flips
+    by_imgs = lambda: [int(sb._tree.set(k, "imgs"))
+                       for k in sb._tree.get_children()]
+    sb._sort_by("imgs")
+    assert by_imgs() == sorted(by_imgs(), reverse=True)
+    sb._sort_by("imgs")
+    assert by_imgs() == sorted(by_imgs())
+    assert "▴" in sb._tree.heading("imgs", "text")
+    sb._sort_by("#0")
+    names = [sb._tree.item(k, "text").lower()
+             for k in sb._tree.get_children()]
+    assert names == sorted(names)
     sb._tree.selection_set("/g/scene1")
     sb._on_select()
     det = sb._detail.get_children()

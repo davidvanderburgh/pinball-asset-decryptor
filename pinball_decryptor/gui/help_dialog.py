@@ -243,12 +243,17 @@ HELP_CONTENT = {
          "image for \"Show scene contents\" to land there directly. It "
          "also PREVIEWS the scene as the machine draws it, composited from "
          "THIS project folder — replace an image or import a font and the "
-         "preview redraws with your version. Scenes that animate play "
-         "their frames, and \"Save preview…\" writes a PNG (or an animated "
-         "GIF). \"Rebuild previews…\" re-reads the scene layouts off the "
-         "card image on the Extract tab in a few seconds; it rewrites only "
-         "the layout file, so your images, glyph slices and font imports "
-         "are left alone (a full re-extract would overwrite them)."),
+         "preview redraws with your version. Click any column heading to "
+         "sort the list — by image count to find the big scenes, by Video "
+         "to find the ones that play a clip. Scenes that animate play "
+         "their frames at the frame rate written in the scene itself "
+         "(it varies per scene), and the \"Speed\" box overrides it if you "
+         "want a closer look at a fast one. \"Save preview…\" writes a PNG "
+         "(or an animated GIF). \"Rebuild previews…\" re-reads the scene "
+         "layouts off the card image on the Extract tab in a few seconds; "
+         "it rewrites only the layout file, so your images, glyph slices "
+         "and font imports are left alone (a full re-extract would "
+         "overwrite them)."),
         ("Size limits",
          "Patching is size-neutral: the encoded replacement must fit the "
          "original slot's byte budget — a small enough image drops "

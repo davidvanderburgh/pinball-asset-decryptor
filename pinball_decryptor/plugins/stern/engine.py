@@ -797,6 +797,7 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
     layouts = {}                  # radium card path -> static layout
     glyph_manifest = []           # one row per unique glyph slice
     sliced_atlases = set()        # atlas out_rel already sliced (content-deduped)
+    glyph_rows = set()            # (table key, glyph rel) already in the manifest
     n_unique = n_occ = n_glyphs = 0
     for ri, (path, node) in enumerate(radiums):
         if cancel():
@@ -872,28 +873,45 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 if px is None:
                     continue                     # no bitmap (e.g. space)
                 atlas_rel = off2rel.get(g["atlas"]["data_off"])
-                if atlas_rel is None or atlas_rel in sliced_atlases:
+                if atlas_rel is None:
                     continue
-                a = g["atlas"]
-                rgba = rgba_cache.get(a["data_off"])
-                if rgba is None:
-                    try:
-                        decode = (_dds.decode_bc1 if a["fmt"] == _DXT1_FORMAT
-                                  else _dds.decode_bc3)
-                        rgba = decode(
-                            data[a["data_off"]:a["data_off"] + a["length"]],
-                            a["pad_w"], a["pad_h"])
-                    except Exception:
-                        continue
-                    rgba_cache[a["data_off"]] = rgba
                 x, y, w, hh = px
                 stem = os.path.splitext(os.path.basename(atlas_rel))[0]
                 g_rel = "scene_textures/%s/%s/%s" % (
                     _GLYPH_DIR, stem, _glyph_png_name(g["char"]))
-                g_abs = os.path.join(output_dir, "images", *g_rel.split("/"))
-                os.makedirs(_lp(os.path.dirname(g_abs)), exist_ok=True)
-                Image.fromarray(rgba[y:y + hh, x:x + w],
-                                "RGBA").save(_lp(g_abs))
+                if (table_key, g_rel) in glyph_rows:
+                    continue        # the same table met again on another card
+                                    # path — one row per (font, glyph) is enough
+                glyph_rows.add((table_key, g_rel))
+                # A page already sliced by an earlier table still belongs to
+                # THIS table: skip the decode and the PNG (identical content
+                # ⇒ identical slice at an identical path), but keep the
+                # manifest row.  Skipping the row split fonts across table
+                # keys, one key per atlas page, and a text line only ever
+                # draws from ONE key — so every character that happened to
+                # live on a later page came out blank.  TMNT's clock screen
+                # rendered "CLOCK NOT SET" as "CL CK N  E" (O, S and T are on
+                # HelveticaNeueBlack's second page) and an award screen turned
+                # "Level 4 Award" into "Le el 4 A ard" (David).
+                if atlas_rel not in sliced_atlases:
+                    a = g["atlas"]
+                    rgba = rgba_cache.get(a["data_off"])
+                    if rgba is None:
+                        try:
+                            decode = (_dds.decode_bc1
+                                      if a["fmt"] == _DXT1_FORMAT
+                                      else _dds.decode_bc3)
+                            rgba = decode(
+                                data[a["data_off"]:a["data_off"] + a["length"]],
+                                a["pad_w"], a["pad_h"])
+                        except Exception:
+                            continue
+                        rgba_cache[a["data_off"]] = rgba
+                    g_abs = os.path.join(output_dir, "images",
+                                         *g_rel.split("/"))
+                    os.makedirs(_lp(os.path.dirname(g_abs)), exist_ok=True)
+                    Image.fromarray(rgba[y:y + hh, x:x + w],
+                                    "RGBA").save(_lp(g_abs))
                 # Trailing metrics columns (rot + the record's layout floats
                 # -- see radium.py's format comment) feed the Font Preview /
                 # Import renderer; older readers only parse the first 8.

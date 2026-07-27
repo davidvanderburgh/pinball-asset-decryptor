@@ -34,6 +34,22 @@ _RADIMG_NAME = re.compile(r"^radimg_(.+)_\d+x\d+_[0-9a-f]{8}\.png$",
 # would stall the window and eat memory for a motion you can read in a second.
 _MAX_PREVIEW_FRAMES = 60
 
+# Playback speed: the scene's own stage rate by default, with manual rates for
+# looking closely at a fast animation (and because a frame's HOLD time is still
+# undecoded, so the file rate can run a sequence faster than the machine does).
+_FPS_FROM_FILE = "Scene rate"
+_FPS_CHOICES = (_FPS_FROM_FILE, "60 fps", "30 fps", "24 fps", "20 fps",
+                "15 fps", "12 fps", "8 fps", "4 fps", "2 fps")
+
+# Which scene-list column each heading sorts on, and how to read a row for it.
+_SORT_KEYS = {
+    "#0": lambda sc: sc["label"].lower(),
+    "imgs": lambda sc: len(sc["images"]),
+    "fonts": lambda sc: len(sc["fonts"]),
+    "texts": lambda sc: len(sc["texts"]),
+    "vids": lambda sc: len(sc["videos"]),
+}
+
 
 def _rows(assets_dir, *parts):
     try:
@@ -173,6 +189,8 @@ class SceneBrowserWindow:
         self._preview_item = None  # canvas item the animation retargets
         self._play_job = None      # pending after() for the animation
         self._preview_token = 0    # discards superseded renders
+        self._sort_col = "#0"      # scene-list sort column / direction
+        self._sort_rev = False
         self._rebuild = None       # {"cancel": bool} while a rebuild runs
         self._sans, _mono = platform_font()
         self._build()
@@ -221,11 +239,15 @@ class SceneBrowserWindow:
         self._tree = ttk.Treeview(
             lf, columns=("imgs", "fonts", "texts", "vids"), height=22,
             selectmode="browse")
-        self._tree.heading("#0", text="Scene", anchor=tk.W)
-        self._tree.heading("imgs", text="Images", anchor=tk.W)
-        self._tree.heading("fonts", text="Fonts", anchor=tk.W)
-        self._tree.heading("texts", text="Text", anchor=tk.W)
-        self._tree.heading("vids", text="Video", anchor=tk.W)
+        # Every heading sorts: "which scenes have the most images / any video"
+        # is how you find the interesting ones in a list of 300.
+        self._headings = (("#0", "Scene"), ("imgs", "Images"),
+                          ("fonts", "Fonts"), ("texts", "Text"),
+                          ("vids", "Video"))
+        for col, title in self._headings:
+            self._tree.heading(
+                col, text=title, anchor=tk.W,
+                command=lambda c=col: self._sort_by(c))
         self._tree.column("#0", width=220, minwidth=140)
         self._tree.column("imgs", width=56, minwidth=44, stretch=False)
         self._tree.column("fonts", width=48, minwidth=40, stretch=False)
@@ -282,6 +304,26 @@ class SceneBrowserWindow:
                                       foreground=th["gray"], wraplength=200,
                                       justify=tk.LEFT)
         self._rebuild_lbl.pack(anchor=tk.W, pady=(2, 0))
+        frow = ttk.Frame(pside)
+        frow.pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(frow, text="Speed", font=(self._sans, 8)).pack(side=tk.LEFT)
+        self._fps_var = tk.StringVar(value=_FPS_FROM_FILE)
+        self._fps_box = ttk.Combobox(frow, textvariable=self._fps_var,
+                                     values=list(_FPS_CHOICES), width=10,
+                                     state="readonly")
+        self._fps_box.pack(side=tk.LEFT, padx=(4, 0))
+        self._fps_box.bind("<<ComboboxSelected>>",
+                           lambda _e: self._restart_animation())
+        _Tooltip(
+            self._fps_box,
+            "How fast an animated scene plays.\n\n"
+            "\"Scene rate\" is the frame rate written in the scene itself — "
+            "it really is per scene (12, 24, 30 and 60 all appear on one "
+            "card). Pick a fixed rate to slow a fast sequence down for a "
+            "closer look, or if a scene's own rate looks wrong: how long each "
+            "individual frame is held is still undecoded, so a sequence with "
+            "held frames plays faster here than on the machine.",
+            lambda: getattr(self.app, "_current_theme", "light"))
         _Tooltip(
             self._rebuild_btn,
             "Re-read the scene layouts from the card image on the Extract "
@@ -346,12 +388,42 @@ class SceneBrowserWindow:
                      "Spike 2 card image first.")
         self._refresh_list(preselect)
 
+    def _sort_by(self, col):
+        """Heading click: sort on *col*, or flip the direction if it is already
+        the sort column.  Counts start descending (the big scenes are the ones
+        worth finding), names start A-Z."""
+        if col == self._sort_col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col, self._sort_rev = col, (col != "#0")
+        sel = self._tree.selection()
+        self._refresh_list(preselect=sel[0] if sel else None)
+
+    def _sorted_dirs(self):
+        """Scene dirs in the current sort order.  The label is always the tie
+        break so equal counts stay in a stable, readable order."""
+        key = _SORT_KEYS.get(self._sort_col, _SORT_KEYS["#0"])
+        scenes = self._scenes
+
+        def rank(d):
+            sc = scenes[d]
+            return (key(sc), sc["label"].lower()) if self._sort_col != "#0" \
+                else (sc["label"].lower(),)
+
+        out = sorted(scenes, key=rank)
+        if self._sort_rev:
+            out.reverse()
+        return out
+
     def _refresh_list(self, preselect=None):
         tree = self._tree
         tree.delete(*tree.get_children())
+        arrow = " ▾" if self._sort_rev else " ▴"
+        for col, title in self._headings:
+            tree.heading(col,
+                         text=title + (arrow if col == self._sort_col else ""))
         q = (self._search_var.get() or "").strip().lower()
-        for d in sorted(self._scenes,
-                        key=lambda d: self._scenes[d]["label"].lower()):
+        for d in self._sorted_dirs():
             sc = self._scenes[d]
             hay = (sc["label"] + " " + d + " "
                    + " ".join(n for n, _p in sc["fonts"].values()) + " "
@@ -518,10 +590,43 @@ class SceneBrowserWindow:
         self._preview.delete("all")
         self._preview_item = self._preview.create_image(
             cw // 2, chh // 2, image=self._preview_img)
+        # describe() counts every frame the layout has; say so when the render
+        # cap means fewer are actually on screen, or the caption over-promises.
+        n_all = scene_render.frame_count(layout)
+        if len(frames) > 1 and n_all > len(frames):
+            note += (" Showing the first %d of them — the rest are rendered "
+                     "only on Save preview…" % len(frames))
         self._preview_lbl.configure(text=note)
         self._save_btn.configure(state="normal")
         if len(self._frame_imgs) > 1:
-            self._play(token, 0, scene_render.frame_rate(layout))
+            self._play(token, 0, self._effective_fps(layout))
+
+    def _effective_fps(self, layout):
+        """The rate to play at: the Speed box's fixed choice, else the rate
+        the scene itself carries."""
+        try:
+            choice = self._fps_var.get()
+        except tk.TclError:
+            choice = _FPS_FROM_FILE
+        if choice and choice != _FPS_FROM_FILE:
+            try:
+                return float(choice.split()[0])
+            except (ValueError, IndexError):
+                pass
+        return scene_render.frame_rate(layout)
+
+    def _restart_animation(self):
+        """Speed changed: kill the running chain (its pending after() IS the
+        chain) and start again at the new rate, without re-rendering."""
+        if self._play_job is not None:
+            try:
+                self.win.after_cancel(self._play_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._play_job = None
+        if len(self._frame_imgs) > 1:
+            self._play(self._preview_token, 0,
+                       self._effective_fps(self._current_layout()))
 
     def _play(self, token, i, fps):
         """Step the animation.  Keyed on the render token so switching scenes
@@ -536,7 +641,10 @@ class SceneBrowserWindow:
                                         image=self._preview_img)
         except tk.TclError:
             return
-        delay = max(30, int(1000.0 / max(1.0, fps)))
+        # Floor of 10ms, not 30: a 30ms floor silently capped every scene at
+        # 33 fps, so a 60 fps one played at half speed no matter what the rate
+        # said.  Tk's timer granularity still limits how close to 60 we get.
+        delay = max(10, int(round(1000.0 / max(1.0, fps))))
         self._play_job = self.win.after(
             delay, lambda: self._play(token, i + 1, fps))
 
@@ -564,10 +672,13 @@ class SceneBrowserWindow:
             return
         try:
             if animated and path.lower().endswith(".gif"):
-                fps = scene_render.frame_rate(self._current_layout())
+                fps = self._effective_fps(self._current_layout())
+                # GIF frame delays are stored in 10ms units and most viewers
+                # clamp anything under 20ms, so that is the honest floor here
+                # even when the scene asks for 60 fps.
                 frames[0].save(
                     path, save_all=True, append_images=frames[1:], loop=0,
-                    duration=max(30, int(1000.0 / max(1.0, fps))))
+                    duration=max(20, int(round(1000.0 / max(1.0, fps)))))
             else:
                 img.save(path)
         except (OSError, ValueError) as e:

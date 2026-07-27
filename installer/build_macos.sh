@@ -52,6 +52,16 @@ pip3 install -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg fast
 # per-plugin list — PyInstaller's tracer DOES follow each
 # __init__.py → manufacturer.py → pipeline.py chain once we tell
 # it to start from the package root.)
+#
+# Pillow gets --collect-all, not a couple of --hidden-imports.  Naming
+# only PIL + PIL.Image bundles enough to *open* an image and not enough
+# to *show* one: every preview canvas in the app goes through
+# PIL.ImageTk, whose Tk glue pulls in PIL._tkinter_finder and the
+# _imagingtk extension module, and neither is reachable by static
+# analysis.  The Linux AppImage shipped without them and every video
+# frame preview came up "No module named 'PIL._tkinter_finder'" (aly,
+# v0.86 through v0.88).  --collect-all takes the submodules, the data
+# AND the native .so/.dylib files, so the whole of Pillow is there.
 pyinstaller \
     --name "Pinball Asset Decryptor" \
     --windowed \
@@ -70,8 +80,9 @@ pyinstaller \
     --collect-all "UnityPy" \
     --collect-all "fsb5" \
     --collect-all "pyogg" \
-    --hidden-import "PIL" \
-    --hidden-import "PIL.Image" \
+    --collect-all "PIL" \
+    --hidden-import "PIL.ImageTk" \
+    --hidden-import "PIL._tkinter_finder" \
     --hidden-import "pinball_decryptor.plugins.pb" \
     --hidden-import "pinball_decryptor.plugins.ap" \
     --hidden-import "pinball_decryptor.plugins.spooky" \

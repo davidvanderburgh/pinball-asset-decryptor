@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from . import __version__
-from .core import modpack
+from .core import desktop, modpack
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
@@ -2958,9 +2958,9 @@ class App:
                 self.window.show_up_to_date_toast()
 
     def _install_update(self, version, installer):
-        """Banner/gear "Install update" click (Windows only).
+        """Banner/gear "Install update" / "Download update" click.
 
-        Downloads the release's setup exe ourselves and runs it silently.
+        Windows downloads the release's setup exe and runs it silently.
         The app download carries no Mark-of-the-Web, so SmartScreen never
         fires (a browser download of the same unsigned exe re-runs the
         "Windows protected your PC" gauntlet on every release), and the
@@ -2968,12 +2968,17 @@ class App:
         prompt either.  The installer's /RELAUNCH=1 hook reopens the app
         when the silent install-over-the-top finishes (jim-beam: "is
         there a smarter way" than the per-update security pass).
+
+        Linux downloads the AppImage and offers to start it — same
+        download machinery, different ending, because an AppImage isn't
+        installed anywhere.  See core/updater._pick_installer_asset for
+        why Linux stopped going through a browser at all.
         """
-        import tempfile
         version, installer = self._freshest_update(version, installer)
         if installer is None:
             return
-        dest = os.path.join(tempfile.gettempdir(), installer["name"])
+        dest = os.path.join(self._update_download_dir(installer),
+                            installer["name"])
         cancel = threading.Event()
         dialog = self.window.open_update_download_dialog(version, cancel.set)
         total = int(installer.get("size") or 0)
@@ -2995,8 +3000,95 @@ class App:
                 self.root.after(0, self._install_update_failed, dialog, err)
                 return
             self.root.after(
-                0, self._launch_downloaded_installer, dialog, dest, version)
+                0, self._update_downloaded, dialog, dest, version,
+                installer.get("kind"))
         threading.Thread(target=_run, daemon=True).start()
+
+    def _update_download_dir(self, installer):
+        """Where the downloaded update should land.
+
+        The Windows setup exe is a throwaway — it installs itself over
+        the top and the file is never wanted again, so temp is right.
+        The AppImage is the opposite: it *is* the new app, so it has to
+        land somewhere the user will find it and can keep.  Next to the
+        AppImage they're running now is the best of those (that's where
+        they chose to keep it, and the new one lands beside the old);
+        ~/Downloads and then $HOME are the fallbacks for the read-only
+        cases — /opt, /usr/local, a mounted image.
+
+        A candidate that would write *over the AppImage we are running
+        from* is skipped: normally impossible (the download is a
+        different version, so a different filename), but a user who
+        renamed theirs to the incoming name would otherwise have the
+        running app truncated under it — too cheap a check to skip for
+        how bad that is.
+        """
+        import tempfile
+        if (installer.get("kind") or "") != "appimage":
+            return tempfile.gettempdir()
+        current = os.environ.get("APPIMAGE")   # set by the AppImage runtime
+        candidates = []
+        if current:
+            candidates.append(os.path.dirname(os.path.abspath(current)))
+        home = os.path.expanduser("~")
+        candidates.append(os.path.join(home, "Downloads"))
+        candidates.append(home)
+        for d in candidates:
+            if not d or not os.path.isdir(d) or not os.access(d, os.W_OK):
+                continue
+            if current and (os.path.abspath(os.path.join(d, installer["name"]))
+                            == os.path.abspath(current)):
+                continue
+            return d
+        return tempfile.gettempdir()
+
+    def _update_downloaded(self, dialog, path, version, kind):
+        """Main-thread continuation once the update file is on disk."""
+        if kind == "appimage":
+            self._finish_appimage_update(dialog, path, version)
+        else:
+            self._launch_downloaded_installer(dialog, path, version)
+
+    def _finish_appimage_update(self, dialog, path, version):
+        """Linux: the download IS the new app — make it runnable and offer
+        to start it.
+
+        Deliberately not an install: nothing is overwritten and the old
+        AppImage stays exactly where it is, so a bad update costs the
+        user a delete rather than a working copy of the app.  The chmod
+        is the part that can't be skipped — an AppImage without the
+        execute bit is a file that does nothing when double-clicked,
+        which is the very complaint this whole change answers.
+        """
+        dialog.close()
+        try:
+            os.chmod(path, 0o755)
+        except OSError as e:
+            self.window.append_log(
+                f"Downloaded v{version}, but couldn't mark it executable "
+                f"({e}) — run `chmod +x` on it before starting it.", "warning")
+        self.window.append_log(f"Update v{version} downloaded to {path}.",
+                               "success")
+        if not messagebox.askyesno(
+                "Update downloaded",
+                f"Version {version} has been saved to:\n\n{path}\n\n"
+                "Start it now?  This window will close.\n\n"
+                "The version you're running now is untouched — delete its "
+                "AppImage whenever you're happy with the new one.",
+                default="yes"):
+            return
+        ok, err = desktop.run_detached([path])
+        if not ok:
+            self.window.append_log(
+                f"Couldn't start the downloaded AppImage — {err}.", "error")
+            messagebox.showerror(
+                "Couldn't start the new version",
+                f"v{version} downloaded fine, but wouldn't start:\n\n"
+                f"{err}\n\nRun it yourself from:\n{path}")
+            return
+        self.window.append_log(f"Started v{version} — closing this window.",
+                               "info")
+        self._on_close()
 
     def _freshest_update(self, version, installer):
         """``(version, installer)`` to actually install, re-checked now.

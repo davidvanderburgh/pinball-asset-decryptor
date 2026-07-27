@@ -381,6 +381,36 @@ def test_pyinstaller_bundles_ffmpeg(script):
         f"ffmpeg binary actually lands in the frozen app.")
 
 
+@pytest.mark.parametrize("script", PYINSTALLER_BUILD_SCRIPTS, ids=lambda p: p.name)
+def test_pyinstaller_collects_all_of_pillow(script):
+    """Every preview canvas needs PIL.ImageTk, which needs more of Pillow
+    than static analysis finds.
+
+    Naming ``PIL`` + ``PIL.Image`` bundles enough to open an image and not
+    enough to draw one: ImageTk's Tk glue reaches PIL._tkinter_finder and
+    the _imagingtk extension by paths PyInstaller's tracer never walks.
+    The v0.86-v0.88 AppImages shipped exactly that way and every video
+    frame preview came up "No module named 'PIL._tkinter_finder'" (aly) --
+    a frozen bundle the user cannot pip-fix.  --collect-all takes the
+    submodules, the data and the native libraries together.
+    """
+    if not script.exists():
+        pytest.skip(f"{script.name} not present in this checkout")
+    src = script.read_text(encoding="utf-8", errors="replace")
+    assert ('--collect-all "PIL"' in src or "--collect-all 'PIL'" in src
+            or "--collect-all PIL" in src), (
+        f"{script.name} must --collect-all PIL — hidden-importing PIL/PIL.Image "
+        f"alone drops PIL._tkinter_finder and _imagingtk, which kills every "
+        f"image and video preview in the frozen app.")
+    for mod in ("PIL.ImageTk", "PIL._tkinter_finder"):
+        assert (f'--hidden-import "{mod}"' in src
+                or f"--hidden-import '{mod}'" in src
+                or f"--hidden-import {mod}" in src), (
+            f"{script.name} must --hidden-import {mod} — belt-and-braces "
+            f"alongside --collect-all PIL, because these two are the exact "
+            f"modules whose absence broke previews in the AppImage.")
+
+
 def test_windows_build_installs_runtime_deps():
     """Regression guard — Windows fresh-install missing Stern deps (monkeybug).
 

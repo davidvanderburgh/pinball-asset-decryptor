@@ -707,9 +707,23 @@ and the update never re-runs the prerequisites installer (the app checks
 for missing prerequisites at runtime and offers **Install Missing** if
 any actually are).
 The download is verified against the release asset's SHA-256 before it
-runs. On macOS and Linux the banner keeps the plain *Download* button
-that opens the release page (their .dmg / AppImage have no silent-install
-path).
+runs.
+
+On Linux the banner offers **Download update**, which fetches the new
+AppImage itself rather than handing the release page to a browser. From
+inside an AppImage a browser handoff is unreliable — the opener inherits
+the bundle's environment and can fail to start at all — so the *Download*
+button could look completely dead. Fetching the file needs no browser.
+The new AppImage lands next to the one you're running (or in
+`~/Downloads` if that folder is read-only), is marked executable, and the
+app offers to start it and close itself. Nothing is installed and nothing
+is overwritten: the version you were running stays exactly where it is,
+so you can delete it whenever you're happy with the new one.
+
+macOS keeps the plain *Download* button that opens the release page —
+`open` isn't affected by the bundle environment, and a .dmg still has to
+be mounted and dragged by hand, so downloading it for you would save
+nothing.
 
 The release tag format is `vMAJOR.MINOR.PATCH`; see
 [core/updater.py](pinball_decryptor/core/updater.py) for the

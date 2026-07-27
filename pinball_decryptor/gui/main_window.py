@@ -87,6 +87,37 @@ _BLANK_PNG_B64 = (
     "AggAAAQQAAGvRYgsAAAAAElFTkSuQmCC")
 
 
+def _pil_tk_hint():
+    """What to tell the user when Pillow can't hand an image to Tk.
+
+    The advice has to split on frozen: "install python3-pil.imagetk" is
+    right for a source checkout and useless inside an AppImage or .app,
+    where there is no site-packages to install into and the missing
+    piece is something the BUILD dropped (--collect-all PIL, see
+    installer/build_linux.sh).  aly got the apt advice from an AppImage
+    and it could not have helped him.
+    """
+    if getattr(sys, "frozen", False):
+        return ("(This build is missing part of Pillow's Tk support — "
+                "please report it; updating to the next release should "
+                "fix it.)")
+    return ("(Pillow's Tk support may be missing — on Linux install "
+            "python3-pil.imagetk)")
+
+
+def _update_action_verb(installer):
+    """Label for the banner/gear in-app update button.
+
+    Windows genuinely installs (silent setup exe over the top); Linux
+    downloads an AppImage and offers to start it, installing nothing —
+    promising an install there would be a lie about where the user's
+    files end up.
+    """
+    if (installer or {}).get("kind") == "appimage":
+        return "Download update"
+    return "Install update"
+
+
 def _render_pinmame_frame(data, w, h, depth, scale, color):
     """Render a libpinmame RAW DMD frame to an amber-tinted PIL image.
 
@@ -754,8 +785,8 @@ class _VideoPreviewPane:
             except Exception as e:  # noqa: BLE001 — Tk/Pillow mismatch
                 self._frame_img = None
                 self._draw_canvas_note(
-                    "Couldn't draw this frame: %s\n(Pillow's Tk support may "
-                    "be missing — on Linux install python3-pil.imagetk)" % e)
+                    "Couldn't draw this frame: %s\n%s"
+                    % (e, _pil_tk_hint()))
         else:
             canvas.delete("all")
             self._draw_canvas_note(
@@ -796,8 +827,9 @@ class _VideoPreviewPane:
             if not self._frame_err:
                 self._frame_err = True
                 self.canvas.delete("all")
-                self._draw_canvas_note("Couldn't draw this clip's frames: %s"
-                                       % e)
+                self._draw_canvas_note(
+                    "Couldn't draw this clip's frames: %s\n%s"
+                    % (e, _pil_tk_hint()))
 
     # ---- transport ----------------------------------------------------
 
@@ -15534,9 +15566,10 @@ class MainWindow:
         if self._update_available:
             version, url, installer = self._update_available
             if installer and self._on_install_update:
-                # One-click silent install (see _build_update_banner).
+                # One-click in-app update (see _build_update_banner).
                 menu.add_command(
-                    label=f"● Install update v{version}…",
+                    label="● %s v%s…" % (_update_action_verb(installer),
+                                         version),
                     command=self._install_update_clicked)
             else:
                 menu.add_command(
@@ -16938,12 +16971,16 @@ class MainWindow:
             anchor=tk.W)
         self._update_banner_text.pack(
             side=tk.LEFT, padx=0, pady=4, fill=tk.X, expand=True)
-        # Install button — Windows in-app update: the app downloads the
-        # setup exe itself (no browser download => no Mark-of-the-Web =>
-        # no SmartScreen "Windows protected your PC" pass on every
-        # release) and runs it silently.  Built here but packed only by
-        # show_update_banner when the release actually carries a Windows
-        # installer asset and app.py wired the flow (jim-beam).
+        # Install button — the in-app update path, on the platforms that
+        # have one.  Windows downloads the setup exe itself (no browser
+        # download => no Mark-of-the-Web => no SmartScreen "Windows
+        # protected your PC" pass on every release) and runs it silently;
+        # Linux downloads the AppImage and offers to start it, because
+        # from inside an AppImage a browser handoff is unreliable enough
+        # that the Download button did nothing at all (aly).  Built here
+        # but packed only by show_update_banner when the release carries
+        # this platform's asset and app.py wired the flow (jim-beam).
+        # Its verb is set there too — Linux installs nothing.
         self._update_install_btn = tk.Button(
             self._update_banner, text="Install update",
             bg="#3794ff", fg="#ffffff",
@@ -16988,8 +17025,8 @@ class MainWindow:
         still dismiss it after.
 
         ``installer`` (updater._pick_installer_asset dict) enables the
-        one-click "Install update" button; without it the banner keeps
-        the plain open-the-release-page Download button.
+        one-click update button; without it the banner keeps the plain
+        open-the-release-page Download button.
         """
         from pinball_decryptor import __version__ as _current
         self._update_banner_url = url
@@ -17003,6 +17040,8 @@ class MainWindow:
                 self._update_install_btn.pack(
                     side=tk.LEFT, padx=4, pady=4,
                     before=self._update_download_btn)
+            self._update_install_btn.configure(
+                text=_update_action_verb(installer))
             self._update_download_btn.configure(text="Release notes")
         else:
             self._update_install_btn.pack_forget()

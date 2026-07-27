@@ -1605,14 +1605,30 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         # banner to the one-click flow (jim-beam): Install button shown,
         # browser button demoted to Release notes, gear entry = Install.
         fake_asset = {"name": "setup.exe", "url": "https://x/w.exe",
-                      "size": 1, "sha256": None}
+                      "size": 1, "sha256": None,
+                      "kind": "windows-installer"}
         app._handle_update_check_result(
             ("99.0.0", "https://example.com/release", "", fake_asset), False)
         app.root.update_idletasks()
         assert w._update_install_btn.winfo_ismapped()
+        assert w._update_install_btn.cget("text") == "Install update"
         assert w._update_download_btn.cget("text") == "Release notes"
         upd_menu = w._build_settings_menu()
         assert "Install update v99.0.0" in upd_menu.entrycget(0, "label")
+        # Linux gets the same one-click flow with an honest verb: an
+        # AppImage download installs nothing, it just lands next to the
+        # one being run (aly -- the browser handoff it replaces was dead).
+        appimage_asset = {"name": "PAD_v99_Linux_x86_64.AppImage",
+                          "url": "https://x/pad.AppImage",
+                          "size": 1, "sha256": None, "kind": "appimage"}
+        app._handle_update_check_result(
+            ("99.0.0", "https://example.com/release", "", appimage_asset),
+            False)
+        app.root.update_idletasks()
+        assert w._update_install_btn.winfo_ismapped()
+        assert w._update_install_btn.cget("text") == "Download update"
+        upd_menu = w._build_settings_menu()
+        assert "Download update v99.0.0" in upd_menu.entrycget(0, "label")
         # The dropdown itself builds (this is the code a real ⚙ click runs —
         # nothing else exercises it) and carries the expected entries.
         menu = w._build_settings_menu()

@@ -239,6 +239,21 @@ def open_url(url, env=None):
     return False, err
 
 
+def run_detached(argv, env=None, grace=_LAUNCH_GRACE):
+    """Start *argv* as an independent program; ``(ok, error_text)``.
+
+    Same scrubbed environment as the openers above, for the same reason:
+    the one program we launch this way is the *newly downloaded
+    AppImage*, and handing it our ``LD_LIBRARY_PATH`` /
+    ``PYTHONHOME`` would point the new app at the old bundle's
+    interpreter and libraries — the failure this module exists to stop,
+    aimed at ourselves.
+    """
+    if not argv:
+        return False, "nothing to run"
+    return _launch(list(argv), desktop_env() if env is None else env, grace)
+
+
 def open_path(path, env=None):
     """Open a file or folder with its desktop default.  ``(ok, error)``."""
     if not path:

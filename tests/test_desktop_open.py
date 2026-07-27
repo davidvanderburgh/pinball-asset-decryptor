@@ -217,3 +217,58 @@ def test_path_opener_list_excludes_browsers(linux, monkeypatch, tmp_path):
         seen))
     desktop.open_path(str(tmp_path))
     assert not {"firefox", "chromium", "google-chrome"} & {a[0] for a in seen}
+
+
+# ---------------------------------------------------------------------------
+# run_detached — starting the freshly downloaded AppImage
+# ---------------------------------------------------------------------------
+
+def test_run_detached_reports_a_program_that_died(monkeypatch):
+    """The whole reason this returns a boolean.  ``webbrowser.open``-style
+    optimism is what made the update button look dead for four releases;
+    a new AppImage that exits immediately must not read as 'started'."""
+    monkeypatch.setattr(subprocess, "Popen",
+                        _fake_popen({"/tmp/new.AppImage":
+                                     _Proc(rc=127, err=b"no FUSE")}, []))
+    ok, err = desktop.run_detached(["/tmp/new.AppImage"])
+    assert ok is False and "no FUSE" in err
+
+
+def test_run_detached_still_running_is_success(monkeypatch):
+    """A GUI app that's still alive after the grace period is the app
+    running — that IS the success case here, not a hang."""
+    monkeypatch.setattr(subprocess, "Popen",
+                        _fake_popen({"/tmp/new.AppImage": _Proc(hang=True)},
+                                    []))
+    assert desktop.run_detached(["/tmp/new.AppImage"]) == (True, "")
+
+
+def test_run_detached_scrubs_the_bundle_env(monkeypatch, tmp_path):
+    """The one program launched this way is the NEW AppImage: handing it
+    our PYTHONHOME/LD_LIBRARY_PATH would point the new app at the old
+    bundle's interpreter — this module's own failure, self-inflicted."""
+    bundle = tmp_path / "mount"
+    bundle.mkdir()
+    monkeypatch.setattr(desktop, "_bundle_dirs", lambda: [str(bundle)])
+    monkeypatch.setenv("PYTHONHOME", str(bundle))
+    monkeypatch.setenv("LD_LIBRARY_PATH", str(bundle))
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib")
+    captured = {}
+
+    def _popen(argv, **kw):
+        captured.update({"env": kw.get("env") or {},
+                         "session": kw.get("start_new_session")})
+        return _Proc(hang=True)
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    assert desktop.run_detached(["/tmp/new.AppImage"])[0] is True
+    assert "PYTHONHOME" not in captured["env"]
+    assert captured["env"]["LD_LIBRARY_PATH"] == "/usr/lib"
+    # Detached, or the new app dies with the old one that started it.
+    assert captured["session"] is True
+
+
+def test_run_detached_with_nothing_to_run(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: pytest.fail("launched nothing"))
+    assert desktop.run_detached([])[0] is False

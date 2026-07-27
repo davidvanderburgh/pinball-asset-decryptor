@@ -54,7 +54,8 @@ def test_pick_installer_asset_windows():
     got = updater._pick_installer_asset(ASSETS, platform="win32")
     assert got == {"name": "Pinball_Asset_Decryptor_v9.0.0_Windows.exe",
                    "url": "https://example.com/win.exe",
-                   "size": 42, "sha256": "ab" * 32}
+                   "size": 42, "sha256": "ab" * 32,
+                   "kind": "windows-installer"}
 
 
 def test_pick_installer_asset_no_digest_is_ok():
@@ -64,11 +65,32 @@ def test_pick_installer_asset_no_digest_is_ok():
     assert got["sha256"] is None and got["size"] == 0
 
 
-@pytest.mark.parametrize("platform", ["darwin", "linux"])
-def test_pick_installer_asset_non_windows_gets_none(platform):
-    # macOS/Linux keep the browser-download flow (no silent-install path
-    # for a .dmg / AppImage) — auto-install must not be offered there.
-    assert updater._pick_installer_asset(ASSETS, platform=platform) is None
+def test_pick_installer_asset_linux_gets_the_appimage():
+    """Linux must get an in-app download.  Its browser handoff was the
+    unreliable one: from inside an AppImage the desktop URL opener
+    inherits a bundle environment it can't run in, so the banner's
+    Download button did nothing at all, silently, for four releases
+    (aly, v0.85-v0.88).  Fetching the file ourselves needs no browser."""
+    got = updater._pick_installer_asset(ASSETS, platform="linux",
+                                        machine="x86_64")
+    assert got == {
+        "name": "Pinball_Asset_Decryptor_v9.0.0_Linux_x86_64.AppImage",
+        "url": "https://example.com/linux",
+        "size": 1, "sha256": None, "kind": "appimage"}
+
+
+def test_pick_installer_asset_linux_wont_hand_over_a_foreign_arch():
+    """An AppImage is a binary — the wrong arch simply won't run, and a
+    download that can't run is worse than the release page."""
+    assert updater._pick_installer_asset(ASSETS, platform="linux",
+                                         machine="aarch64") is None
+
+
+def test_pick_installer_asset_macos_gets_none():
+    # macOS keeps the browser-download flow: `open` isn't affected by the
+    # bundle environment, and a .dmg still has to be mounted and dragged
+    # by hand, so fetching it for the user saves nothing.
+    assert updater._pick_installer_asset(ASSETS, platform="darwin") is None
 
 
 def test_pick_installer_asset_no_windows_asset():

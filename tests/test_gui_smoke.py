@@ -20,7 +20,13 @@ pytestmark = [
 ]
 
 
+import re as _re_mod
 import tkinter as _tk_mod
+
+# The two shapes Tcl reports when its runtime scripts can't be loaded: the
+# direct read failure, and the follow-on symptom once a half-built interpreter
+# is left behind.  Deliberately narrow — see the `app` fixture.
+_TCL_RUNTIME_UNAVAILABLE = _re_mod.compile(r"init\.tcl|tcl_findLibrary")
 
 
 def _make_invisible(win):
@@ -81,10 +87,23 @@ def app(tmp_path, monkeypatch):
     from pinball_decryptor.app import App
     # NOTE: tk.Tk() can intermittently fail here on Windows with "couldn't
     # read file .../init.tcl" (antivirus/indexer briefly locking the Tcl
-    # runtime scripts).  Don't retry in-process — a failed create leaves a
-    # zombie Tcl interpreter that poisons every Tk instance created after
-    # it in the same run.  Just re-run the suite.
-    a = App()
+    # runtime scripts; GitHub's windows-latest runner hits it too).  Don't
+    # retry in-process — a failed create leaves a zombie Tcl interpreter that
+    # poisons every Tk instance created after it in the same run.
+    #
+    # SKIP rather than error: the Tcl runtime failing to load is a property of
+    # the machine, not of the code under test — it lands on a different,
+    # always-unrelated test each time, and it failed two consecutive CI runs of
+    # one release commit whose local runs passed.  A release must not hinge on
+    # whether an indexer happened to hold init.tcl for a moment.  ONLY this
+    # signature skips; any other TclError still fails the test, so a real GUI
+    # regression can't hide behind it.
+    try:
+        a = App()
+    except _tk_mod.TclError as exc:
+        if _TCL_RUNTIME_UNAVAILABLE.search(str(exc)):
+            pytest.skip("Tcl runtime transiently unavailable: %s" % exc)
+        raise
     a.root.update()
     yield a
     # Cancel every pending after() callback before destroying so the

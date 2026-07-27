@@ -9078,16 +9078,16 @@ class MainWindow:
             grid_rows = rows
             by_adj = {}
         rows = grid_rows
-        # Wrap the form into side-by-side column groups so a long settings
-        # list uses the tab's width instead of scrolling early (monkeybug).
-        # Cap at two groups once a row needs a wide entry: the high-score
-        # defaults run to ten digits, and at three groups the third one's
-        # spinbox arrows and Range column fell off the right edge (the form
-        # window is pinned to the canvas width, so there is no h-scroll to
-        # rescue it) — batch 22.
-        wide = any(len("%d" % r["max"]) > 8 for r in rows)
-        ncols = min(2 if wide else 3, max(1, -(-len(rows) // 8)))
-        per = -(-len(rows) // ncols)
+        # ONE column of settings (David, batch 22).  This used to wrap into
+        # two or three side-by-side groups to use the tab's width, but the
+        # form window is pinned to the canvas width and there is no horizontal
+        # scrollbar, so on anything but a very wide window the right-hand
+        # group's entries were simply cropped — you had to widen the window to
+        # reach controls you couldn't see were there.  A single column can't
+        # overflow at any width, and it reads the same way as the High Scores
+        # block below it; the canvas scrolls vertically as it always has.
+        ncols = 1
+        per = len(rows)
         accent = THEMES.get(self._current_theme, {}).get("link", "#d78f2c")
         for g in range(ncols):
             base = g * 6

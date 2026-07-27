@@ -520,7 +520,7 @@ HELP_CONTENT = {
          "them."),
         ("All settings on this image (and what \"Debug\" means)",
          "Below the editable form is every adjustment the firmware carries, "
-         "read-only, with the caption the machine itself prints and its id. "
+         "with the caption the machine itself prints and its id. "
          "The \"Menu\" column says where you can reach it on the machine. "
          "\"Adjustments\" is the ordinary operator Adjustments menu. "
          "\"Service menu\" is a real setting the machine edits on a different "
@@ -531,6 +531,34 @@ HELP_CONTENT = {
          "menu's own pages out of the game binary and works out what they "
          "can't reach. A build whose menu can't be read says so and flags "
          "nothing rather than guessing."),
+        ("Changing a setting the form doesn't draw",
+         "Double-click any row in that list to set its default, including the "
+         "Debug ones. It stages and logs exactly like the form above, and the "
+         "\"New default\" column shows what the next Build will bake in. Two "
+         "differences from the form: the value is in the firmware's own units "
+         "(the form converts a few, like the master volume, into what the "
+         "machine displays), and there is no help text or safety curation "
+         "behind it — a factory tuning value set to something the game never "
+         "expected is on you. \"Back to card value\" in the dialog unstages "
+         "it again. Same fresh-cards-only rule as everything else here."),
+        ("Showing hidden settings on the machine itself",
+         "A Debug setting is hidden because the machine's Feature Adjustments "
+         "page stops before it — nothing marks the setting itself. \"Show "
+         "hidden settings in the machine's menu…\" moves where that page "
+         "stops, so the machine lists and edits those settings like any "
+         "other. Pick how far it opens: the page is one straight run of "
+         "settings, so everything between the current end and your pick comes "
+         "with it — you cannot expose one and skip its neighbour. It is "
+         "staged for the next Build like any other change, and by name rather "
+         "than by number, so rebuilding on a different game version can't "
+         "expose whatever that number happens to mean there. Worth knowing "
+         "before you use it: this rewrites one instruction in the game's code "
+         "rather than changing a value (the card stays the same size and its "
+         "validation record is refreshed as usual), it has been checked "
+         "against the firmware but not yet on a real machine, and the tail it "
+         "reaches usually mixes genuinely useful settings with factory test "
+         "entries and the game's own internal bookkeeping flags. Titles whose "
+         "menu the app couldn't fully read don't offer the button at all."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
          "it from the dropdown any time to fill the form (the values stage "

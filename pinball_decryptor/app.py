@@ -3589,7 +3589,8 @@ class App:
             return
         vals = self.window.staged_default_settings(assets_dir)
         names = self.window.staged_high_scores(assets_dir)
-        if not vals and not names:
+        expose = self.window.staged_menu_expose(assets_dir)
+        if not vals and not names and not expose:
             return
         try:
             out = self.window._target_write_path()
@@ -3629,13 +3630,42 @@ class App:
                             "Couldn't read this image's high-score board "
                             "(%s) — its initials/names were not applied." % e,
                             "warning")
-                if overrides or name_overrides:
+                # Widening the operator menu's Feature Adjustments page so the
+                # machine will show its hidden/debug settings (peanuts).  It is
+                # staged by NAME, like the settings themselves, so a rebuild on
+                # a different game version can't silently expose whatever that
+                # id happens to mean there — an image that doesn't have the
+                # setting, or whose menu can't be read, is skipped and said so.
+                menu_last_id, menu_plan, n_exposed = None, None, 0
+                if expose:
+                    from .plugins.stern import menu_visibility
+                    menu_plan = menu_visibility.widen_plan(table)
+                    idx = table.by_name.get(expose)
+                    cands = (menu_plan or {}).get("candidates") or []
+                    if idx is not None and any(cd["id"] == idx
+                                               for cd in cands):
+                        menu_last_id = idx
+                        n_exposed = sum(1 for cd in cands if cd["id"] <= idx)
+                    else:
+                        self.window.append_log(
+                            "This image's operator menu can't be opened up to "
+                            "\"%s\" (it isn't one of this build's hidden "
+                            "settings) — the rest of the staged defaults were "
+                            "still applied." % expose, "warning")
+                if overrides or name_overrides or menu_last_id is not None:
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
-                        high_scores=hstd, name_overrides=name_overrides)
-                    self.window.append_log(
-                        "Applied %d staged default setting(s) to the built "
-                        "image (Defaults tab)." % n, "success")
+                        high_scores=hstd, name_overrides=name_overrides,
+                        menu_last_id=menu_last_id, menu_plan=menu_plan)
+                    if n:
+                        self.window.append_log(
+                            "Applied %d staged default setting(s) to the built "
+                            "image (Defaults tab)." % n, "success")
+                    if menu_last_id is not None:
+                        self.window.append_log(
+                            "The machine's Adjustments menu will now show %d "
+                            "setting(s) it normally hides, through \"%s\"."
+                            % (n_exposed, expose), "success")
         except Exception as e:
             self.window.append_log(
                 "Couldn't apply the staged default settings to the build "

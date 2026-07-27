@@ -418,18 +418,25 @@ class CardImage:
                          "table (%s)" % (last_err or "unrecognised build"))
 
     def write_adjustment_defaults(self, part_index, path, table, overrides,
-                                  high_scores=None, name_overrides=None):
+                                  high_scores=None, name_overrides=None,
+                                  menu_last_id=None, menu_plan=None):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
         *overrides* is ``{AD_name: value}`` for the numeric adjustment defaults.
         *name_overrides* is ``{slot label: {initials, name}}`` for the factory
         high-score board (see :mod:`.high_scores`); it needs the matching
-        ``HighScoreDefaults`` in *high_scores*.  Both patches are composed into
-        ONE buffer so the card is written — and its ``.sidx`` refreshed — once.
+        ``HighScoreDefaults`` in *high_scores*.  *menu_last_id* raises the
+        operator menu's Feature Adjustments page to end at that adjustment id,
+        which is what makes the settings above it reachable on the machine (see
+        :mod:`.menu_visibility`); pass the caller's ``widen_plan`` as
+        *menu_plan* to save re-scanning the firmware for it.  Every patch is
+        composed into ONE buffer so the card is written — and its ``.sidx``
+        refreshed — once.
 
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
-        adjustment and high-score slot changed.
+        adjustment and high-score slot changed (the menu page is one edit to
+        the firmware's code, not a setting, and isn't counted).
         """
         new = table.patched_bytes(overrides)
         n = len(overrides)
@@ -441,6 +448,12 @@ class CardImage:
             hs = HighScoreDefaults(new, table)
             new = hs.patched_bytes(name_overrides)
             n += len(name_overrides)
+        if menu_last_id is not None:
+            # Last, and on the composed buffer: it rewrites one instruction in
+            # .text, which no earlier patch touches, and it verifies itself by
+            # re-reading the page out of the result.
+            from .menu_visibility import widened_bytes
+            new = widened_bytes(table, new, int(menu_last_id), plan=menu_plan)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
 

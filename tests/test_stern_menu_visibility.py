@@ -11,11 +11,15 @@ a real build that only exposes one of them.
 """
 import struct
 
+import pytest
+
 from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable, all_rows
 from pinball_decryptor.plugins.stern.menu_visibility import (DEBUG, SERVICE,
                                                              VISIBLE,
                                                              MenuVisibility,
-                                                             statuses)
+                                                             statuses,
+                                                             widen_plan,
+                                                             widened_bytes)
 
 BASE = 0x10000
 ELEM = 44
@@ -67,12 +71,16 @@ def _bl(at, target):
     return 0xEB000000 | (off & 0xFFFFFF)
 
 
-def make_elf(pages=("list", "range"), caption=b"MENU CAPTION\x00"):
+def make_elf(pages=("list", "range"), caption=b"MENU CAPTION\x00",
+             end_form="mov", ranges=1):
     """Synthetic ELF: strings, names[], descriptors, section record, an id
     list, then a .text carrying the accessor, the renderer and the callers.
 
     ``pages`` selects which page callers to emit, so a build that only exposes
-    one of them can be exercised."""
+    one of them can be exercised.  ``end_form`` picks the instruction the range
+    caller sets its LAST id with (real titles use both), and ``ranges`` emits
+    more than one range page — the shape that makes "which page is Feature
+    Adjustments?" a guess."""
     def va(off):
         return BASE + off
 
@@ -130,15 +138,19 @@ def make_elf(pages=("list", "range"), caption=b"MENU CAPTION\x00"):
     callers = []
     call_base = renderer + 4 * 5
     if "range" in pages:
-        callers += [
-            0xE52DE004,             # str lr, [sp, #-4]!
-            _mov_imm(0, 0),
-            _mov_imm(1, FEATURE_FIRST),
-            _mov_imm(2, FEATURE_LAST),
-            0xE58D0000,             # str r0, [sp]   (a spill, not a def)
-            _bl(call_base + 4 * 5, renderer),
-            0xE49DF004,             # pop {pc}
-        ]
+        for n in range(ranges):
+            at = call_base + 4 * len(callers)
+            end = _movw(2, FEATURE_LAST) if end_form == "movw" else \
+                _mov_imm(2, FEATURE_LAST)
+            callers += [
+                0xE52DE004,             # str lr, [sp, #-4]!
+                _mov_imm(0, 0),
+                _mov_imm(1, FEATURE_FIRST - n),
+                end,
+                0xE58D0000,             # str r0, [sp]   (a spill, not a def)
+                _bl(at + 4 * 5, renderer),
+                0xE49DF004,             # pop {pc}
+            ]
     if "list" in pages:
         at = call_base + 4 * len(callers)
         callers += [
@@ -231,3 +243,77 @@ def test_caption_falls_back_to_the_name():
     t = AdjustmentTable(make_elf(caption=b"\xff\xfe\x00"))
     rows = {r["name"]: r for r in all_rows(t, None)}
     assert rows["AD_TOPPER_CHEATS"]["label"] == "Topper Cheats"
+
+
+# ---------------------------------------------------------------------------
+# Widening the feature page so the machine SHOWS the hidden tail (peanuts).
+# ---------------------------------------------------------------------------
+
+HIDDEN = ["AD_TEST_THIS_IS_THE_WAY", "AD_TOPPER_CHEATS"]
+
+
+@pytest.mark.parametrize("end_form", ["mov", "movw"])
+def test_widen_plan_offers_exactly_the_hidden_tail(end_form):
+    t = AdjustmentTable(make_elf(end_form=end_form))
+    plan = widen_plan(t)
+    assert (plan["first"], plan["last"]) == (FEATURE_FIRST, FEATURE_LAST)
+    assert plan["form"] == end_form
+    assert [c["name"] for c in plan["candidates"]] == HIDDEN
+
+
+@pytest.mark.parametrize("end_form", ["mov", "movw"])
+def test_widening_exposes_through_the_chosen_setting_only(end_form):
+    """The page is a range, so a pick takes everything up to it and nothing
+    beyond — and the rest of the menu must read back untouched."""
+    t = AdjustmentTable(make_elf(end_form=end_form))
+    before = statuses(t)
+    out = widened_bytes(t, t.data, t.by_name["AD_TEST_THIS_IS_THE_WAY"])
+    assert len(out) == len(t.data)
+    # Size-neutral, and every changed byte inside ONE aligned instruction —
+    # that is what keeps the existing exact-size ELF write applicable.
+    diff = [i for i in range(len(out)) if out[i] != t.data[i]]
+    assert diff and len({i // 4 for i in diff}) == 1
+    after = statuses(AdjustmentTable(out))
+    assert after[t.by_name["AD_TEST_THIS_IS_THE_WAY"]] == VISIBLE
+    assert after[t.by_name["AD_TOPPER_CHEATS"]] == DEBUG      # not asked for
+    moved = {i for i in before if before[i] != after[i]}
+    assert moved == {t.by_name["AD_TEST_THIS_IS_THE_WAY"]}
+
+
+def test_widening_to_the_end_exposes_the_whole_tail():
+    t = AdjustmentTable(make_elf())
+    after = statuses(AdjustmentTable(
+        widened_bytes(t, t.data, t.by_name["AD_TOPPER_CHEATS"])))
+    assert all(after[t.by_name[n]] == VISIBLE for n in HIDDEN)
+
+
+@pytest.mark.parametrize("bad", ["last", "past_the_table", "narrower"])
+def test_widening_refuses_anything_but_a_hidden_id(bad):
+    """A no-op, an id off the end of the table, and NARROWING the menu (which
+    would take working settings away from the operator) are all refused."""
+    t = AdjustmentTable(make_elf())
+    target = {"last": FEATURE_LAST, "past_the_table": len(SPECS) + 5,
+              "narrower": FEATURE_LAST - 1}[bad]
+    with pytest.raises(ValueError):
+        widened_bytes(t, t.data, target)
+
+
+def test_widening_refuses_a_build_whose_menu_was_not_fully_read():
+    """James Bond 60th's shape: no verdict on the pages means no patch."""
+    for only in (("list",), ("range",)):
+        assert widen_plan(AdjustmentTable(make_elf(pages=only))) is None
+
+
+def test_widening_refuses_when_the_feature_page_is_ambiguous():
+    """Two range pages: widening one of them would be a guess at which."""
+    t = AdjustmentTable(make_elf(ranges=2))
+    assert len([k for k, _ids in MenuVisibility(t).pages() if k == "range"]) == 2
+    assert widen_plan(t) is None
+
+
+def test_widening_refuses_a_firmware_that_changed_size():
+    """The patch is offset-based, so it may only be applied to the bytes it
+    was planned against."""
+    t = AdjustmentTable(make_elf())
+    with pytest.raises(ValueError):
+        widened_bytes(t, t.data + b"\x00", t.by_name["AD_TOPPER_CHEATS"])

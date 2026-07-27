@@ -9339,11 +9339,12 @@ class MainWindow:
             foreground="#888888")
         self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
 
-        # Every setting the firmware carries, read-only, flagged with whether
-        # the machine's own menu can reach it (peanuts).  The editable form
-        # above stays the curated safe subset; this is the reference list, and
-        # it lives outside the scrolling canvas so it scrolls itself instead of
-        # nesting two scroll regions.
+        # Every setting the firmware carries, flagged with whether the
+        # machine's own menu can reach it (peanuts).  The form above is the
+        # curated set with friendly units and help; this is everything else,
+        # editable by double-click since peanuts asked to set the hidden and
+        # debug ones too.  It lives outside the scrolling canvas so it scrolls
+        # itself instead of nesting two scroll regions.
         self._settings_all_frame = ttk.Frame(f)
         hdr = ttk.Frame(self._settings_all_frame)
         hdr.pack(fill=tk.X, padx=10, pady=(8, 2))
@@ -9352,8 +9353,9 @@ class MainWindow:
         title.pack(side=tk.LEFT)
         _Tooltip(title,
                  "Every adjustment the firmware carries, with the caption the "
-                 "machine itself prints. Read-only — the editable form above "
-                 "is the curated set that is safe to preset.",
+                 "machine itself prints. Double-click one to set the default "
+                 "it ships with — including the ones the machine's menus "
+                 "never show.",
                  lambda: self._current_theme)
         self._settings_hidden_only = tk.BooleanVar(value=False)
         self._settings_hidden_cb = ttk.Checkbutton(
@@ -9366,22 +9368,39 @@ class MainWindow:
                  "reach: the ones it edits on another service screen, and the "
                  "factory/debug ones it never shows at all.",
                  lambda: self._current_theme)
+        # Widening the operator menu so the machine SHOWS its debug settings —
+        # a firmware code patch, so it is its own deliberate action rather
+        # than something a value edit does behind the user's back.
+        self._settings_menu_btn = ttk.Button(
+            hdr, text="Show hidden settings in the machine's menu…",
+            command=self._settings_menu_dialog, state=tk.DISABLED)
+        self._settings_menu_btn.pack(side=tk.RIGHT)
+        _Tooltip(self._settings_menu_btn,
+                 "Extends the machine's Feature Adjustments page so the "
+                 "settings below can be found and changed on the machine "
+                 "itself, instead of only being preset from here.",
+                 lambda: self._current_theme)
         tbody = ttk.Frame(self._settings_all_frame)
         tbody.pack(fill=tk.BOTH, expand=True, padx=10)
         self._settings_all_tree = ttk.Treeview(
-            tbody, columns=("value", "range", "status"), height=12,
+            tbody, columns=("value", "new", "range", "status"), height=12,
             selectmode="browse")
         self._settings_all_tree.heading("#0", text="Setting", anchor=tk.W)
         self._settings_all_tree.heading("value", text="On card", anchor=tk.W)
+        self._settings_all_tree.heading("new", text="New default", anchor=tk.W)
         self._settings_all_tree.heading("range", text="Range", anchor=tk.W)
         self._settings_all_tree.heading("status", text="Menu", anchor=tk.W)
         self._settings_all_tree.column("#0", width=320, minwidth=180)
         self._settings_all_tree.column("value", width=130, minwidth=80,
                                        stretch=False)
+        self._settings_all_tree.column("new", width=130, minwidth=80,
+                                       stretch=False)
         self._settings_all_tree.column("range", width=150, minwidth=80,
                                        stretch=False)
         self._settings_all_tree.column("status", width=130, minwidth=90,
                                        stretch=False)
+        self._settings_all_tree.bind("<Double-1>", self._settings_all_edit)
+        self._settings_all_tree.bind("<Return>", self._settings_all_edit)
         avs = ttk.Scrollbar(tbody, orient="vertical",
                             command=self._settings_all_tree.yview)
         self._settings_all_tree.configure(yscrollcommand=avs.set)
@@ -9392,6 +9411,10 @@ class MainWindow:
             font=(_SANS_FONT, 8))
         self._settings_all_legend.pack(fill=tk.X, padx=10, pady=(2, 0))
         self._settings_all_rows = []
+        self._settings_all_items = {}     # tree item id -> its row
+        # menu_visibility.widen_plan for the loaded image (None = this build's
+        # menu can't be widened, or has nothing hidden to expose).
+        self._settings_menu_plan = None
 
         # Changes stage themselves as you edit (batch 21 — the explicit
         # Apply / Clear buttons are gone); Reset Fields is the one action:
@@ -9524,6 +9547,7 @@ class MainWindow:
         if not path or not os.path.isfile(path) or self._settings_busy:
             return
         self._settings_busy = True
+        self._settings_menu_plan = None
         self._settings_clear_form()
         # Same big animated indicator the Replace tabs' scans use, so the
         # (possibly slow, NAS-bound) firmware read never looks idle
@@ -9546,7 +9570,8 @@ class MainWindow:
             try:
                 from ..plugins.stern.explorer import CardImage
                 from ..plugins.stern.adjustments import all_rows, curated_rows
-                from ..plugins.stern.menu_visibility import statuses
+                from ..plugins.stern.menu_visibility import (statuses,
+                                                             widen_plan)
                 with CardImage(path) as c:
                     table, part, fw = c.adjustment_table()
                     elf = c.read_firmware(part, fw)
@@ -9558,6 +9583,13 @@ class MainWindow:
                     menu = statuses(table)
                 except Exception:
                     menu = {}
+                # ...and whether that menu can be widened to reach the hidden
+                # ones.  Same read of the same pages, so it costs nothing extra
+                # and is equally refused on a build that wasn't fully read.
+                try:
+                    plan = widen_plan(table)
+                except Exception:
+                    plan = None
                 rows = curated_rows(table, menu)
                 try:
                     every = all_rows(table, menu)
@@ -9573,7 +9605,7 @@ class MainWindow:
                 except Exception:
                     hstd = None
                 state["done"] = ("ok", table, part, fw, rows, path, hstd,
-                                 every)
+                                 every, plan)
             except Exception as e:
                 state["done"] = ("err", e)
 
@@ -9611,13 +9643,14 @@ class MainWindow:
                          "decoded yet.)" % res[1])
                 self._settings_empty.grid()
                 return
-            _ok, table, part, fw, rows, ipath, hstd, every = res
+            _ok, table, part, fw, rows, ipath, hstd, every, plan = res
             self._settings_table = table
             self._settings_part = part
             self._settings_fw_path = fw
             self._settings_image_path = ipath
             self._settings_hstd = hstd
             self._settings_every = every
+            self._settings_menu_plan = plan
             self._settings_build_form(rows)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -9650,7 +9683,12 @@ class MainWindow:
         self._settings_rows = []
         self._settings_hstd_vars = []
         self._settings_all_rows = []
+        self._settings_all_items = {}
+        # _settings_menu_plan is NOT cleared here: the loader sets it before
+        # building the form, and the form is what reads it (same as
+        # _settings_every).  It is cleared when a load starts instead.
         try:
+            self._settings_menu_btn.config(state=tk.DISABLED)
             self._settings_all_frame.pack_forget()
             self._settings_all_tree.delete(*self._settings_all_tree.get_children())
         except (tk.TclError, AttributeError):
@@ -9662,52 +9700,397 @@ class MainWindow:
     _SETTINGS_STATUS_TEXT = {"": "Adjustments", "service": "Service menu",
                              "debug": "Debug", None: ""}
 
+    def _settings_pending(self):
+        """``{AD_name: internal value}`` for every field currently set away
+        from the image's own default — whichever editor set it."""
+        out = {}
+        for r in self._settings_rows:
+            try:
+                v = int(r["var"].get())
+            except (tk.TclError, ValueError):
+                continue
+            scale = r.get("scale", 1)
+            if v != r["default"]:
+                out[r["name"]] = v * scale
+        return out
+
+    def _settings_all_value_text(self, r, v):
+        """A value from the all-settings list, the way the machine shows it."""
+        if r["min"] == 0 and r["max"] == 1:
+            return "On" if v else "Off"
+        if r.get("labels") and v in r["labels"]:
+            return "%d - %s" % (v, r["labels"][v])
+        return self._settings_fmt_num(v)
+
     def _settings_fill_all_tree(self):
-        """(Re)populate the read-only all-settings list from the last load."""
+        """(Re)populate the all-settings list from the last load."""
         tree = self._settings_all_tree
+        # An edit refills the whole list, so remember which setting the user
+        # was on — losing it would move the selection out from under a second
+        # double-click on the same row.
+        was = self._settings_all_items.get(tree.focus())
+        was = was["name"] if was else None
+        keep = None
         tree.delete(*tree.get_children())
+        self._settings_all_items = {}
         rows = self._settings_all_rows
         if not rows:
             self._settings_all_legend.configure(text="")
             return
         known = rows[0].get("status") is not None
         only_hidden = bool(self._settings_hidden_only.get())
+        pending = self._settings_pending()
         shown = 0
         for r in rows:
             st = r.get("status")
             if only_hidden and st in ("", None):
                 continue
-            if r["min"] == 0 and r["max"] == 1:
-                val, rng = ("On" if r["default"] else "Off"), "off / on"
-            else:
-                rng = self._settings_range_text(r)
-                if r.get("labels") and r["default"] in r["labels"]:
-                    val = "%d - %s" % (r["default"], r["labels"][r["default"]])
-                else:
-                    val = self._settings_fmt_num(r["default"])
-            tree.insert("", "end",
-                        text="%s  (0x%02X)" % (r["label"], r["id"]),
-                        values=(val, rng,
-                                self._SETTINGS_STATUS_TEXT.get(st, "")),
-                        tags=(st or "unknown",))
+            val = self._settings_all_value_text(r, r["default"])
+            rng = ("off / on" if r["min"] == 0 and r["max"] == 1
+                   else self._settings_range_text(r))
+            new = pending.get(r["name"])
+            if new == r["default"]:       # a scaled row that round-trips
+                new = None
+            item = tree.insert(
+                "", "end", text="%s  (0x%02X)" % (r["label"], r["id"]),
+                values=(val,
+                        "" if new is None
+                        else self._settings_all_value_text(r, new),
+                        rng, self._SETTINGS_STATUS_TEXT.get(st, "")),
+                tags=(st or "unknown",))
+            self._settings_all_items[item] = r
+            if r["name"] == was:
+                keep = item
             shown += 1
+        if keep:
+            tree.focus(keep)
+            tree.selection_set(keep)
+            tree.see(keep)
         if not known:
             self._settings_all_legend.configure(
-                text="%d setting(s). This build's operator menu couldn't be "
+                text="%d setting(s) — double-click one to change the default "
+                     "it ships with. This build's operator menu couldn't be "
                      "read, so settings hidden from it aren't flagged."
                      % len(rows))
             return
         n_dbg = sum(1 for r in rows if r["status"] == "debug")
         n_svc = sum(1 for r in rows if r["status"] == "service")
         self._settings_all_legend.configure(
-            text="%d setting(s)%s. \"Adjustments\" = in the machine's "
-                 "Adjustments menu; \"Service menu\" = %d edited on another "
-                 "service screen (volume, speakers, software update, "
-                 "tournament, redemption); \"Debug\" = %d the machine never "
-                 "shows at all."
+            text="%d setting(s)%s — double-click one to change the default it "
+                 "ships with. \"Adjustments\" = in the machine's Adjustments "
+                 "menu; \"Service menu\" = %d edited on another service screen "
+                 "(volume, speakers, software update, tournament, "
+                 "redemption); \"Debug\" = %d the machine never shows at all."
                  % (len(rows),
                     ", %d listed" % shown if only_hidden else "",
                     n_svc, n_dbg))
+
+    # ---- Default Settings: editing anything in the all-settings list ----
+    # peanuts asked to set the values the machine hides as well as read them.
+    # The curated form stays the friendly path (display units, help text,
+    # presets); this is the long tail, edited one at a time through a dialog
+    # rather than 500 live widgets.  An edited row joins _settings_rows like
+    # any other, so staging, the log, presets and Reset Fields need no cases.
+
+    def _settings_add_extra_row(self, all_row):
+        """Register a setting from the all-settings list as an editable row.
+
+        It has no widget of its own — the list is its editor — and it is in
+        the firmware's own internal units, so ``scale`` is 1 and the value
+        shown is the value written."""
+        labels = all_row.get("labels")
+        if all_row["min"] == 0 and all_row["max"] == 1:
+            kind = "toggle"
+        elif labels:
+            kind = "enum"
+        else:
+            kind = "number"
+        row = {"name": all_row["name"], "label": all_row["label"],
+               "kind": kind, "help": "", "scale": 1, "labels": labels,
+               "group": None, "status": all_row.get("status"),
+               "default": all_row["default"], "min": all_row["min"],
+               "max": all_row["max"], "step": all_row.get("step") or 1,
+               "var": tk.IntVar(value=all_row["default"]), "widget": None,
+               "extra": True}
+        row["var"].trace_add(
+            "write", lambda *_a: self._settings_schedule_autostage())
+        self._settings_rows.append(row)
+        return row
+
+    def _settings_all_edit(self, _event=None):
+        """Double-click / Return on the all-settings list: set that setting's
+        default."""
+        tree = self._settings_all_tree
+        item = ""
+        if _event is not None and getattr(_event, "num", 0) == 1:
+            item = tree.identify_row(_event.y)      # the row clicked on
+        row = self._settings_all_items.get(item or tree.focus())
+        if row is None or self._settings_table is None:
+            return
+        value = self._settings_ask_value(row)
+        if value is None:
+            return
+        existing = next((r for r in self._settings_rows
+                         if r["name"] == row["name"]), None)
+        if existing is None:
+            existing = self._settings_add_extra_row(row)
+        self._settings_set_row(existing, int(value) // existing.get("scale", 1))
+        self._settings_fill_all_tree()
+        # There is no field to leave here, so report it now rather than
+        # waiting for a focus change that will never come.
+        self._settings_flush_log()
+
+    def _settings_ask_value(self, row):
+        """Modal editor for one setting's default.  Returns the new value in
+        the firmware's internal units, or None if nothing changed."""
+        root = self._tk_root()
+        dlg = tk.Toplevel(root)
+        dlg.title("Default setting")
+        dlg.transient(root)
+        dlg.resizable(False, False)
+        self._theme_toplevel(dlg)
+        ttk.Label(dlg, text="%s  (0x%02X)" % (row["label"], row["id"]),
+                  font=(_SANS_FONT, 10, "bold")).pack(
+            anchor=tk.W, padx=12, pady=(12, 0))
+        ttk.Label(dlg, text=row["name"], foreground="#888888",
+                  font=(_SANS_FONT, 8)).pack(anchor=tk.W, padx=12)
+        ttk.Label(dlg, text="On card: %s        %s"
+                           % (self._settings_all_value_text(row,
+                                                            row["default"]),
+                              self._settings_range_text(row)),
+                  font=(_SANS_FONT, 9)).pack(anchor=tk.W, padx=12, pady=(6, 0))
+        note = None
+        if row.get("status") == "debug":
+            note = ("The machine's menus never show this one, so it can only "
+                    "be set from here — unless you also open the menu up to "
+                    "it with the button above the list.")
+        elif row.get("status") == "service":
+            note = ("The machine edits this on a different service screen, "
+                    "so what it shows there may not match this default.")
+        ttk.Label(dlg, text="A fresh flash or a factory reset picks this up; "
+                            "a machine that already has a value keeps it.",
+                  foreground="#888888", font=(_SANS_FONT, 8),
+                  wraplength=380, justify=tk.LEFT).pack(
+            anchor=tk.W, padx=12, pady=(6, 0))
+        if note:
+            ttk.Label(dlg, text=note, foreground="#888888",
+                      font=(_SANS_FONT, 8), wraplength=380,
+                      justify=tk.LEFT).pack(anchor=tk.W, padx=12, pady=(4, 0))
+        cur = self._settings_pending().get(row["name"], row["default"])
+        var = tk.IntVar(value=cur)
+        erow = ttk.Frame(dlg)
+        erow.pack(fill=tk.X, padx=12, pady=(10, 8))
+        ttk.Label(erow, text="New default:").pack(side=tk.LEFT)
+        if row["min"] == 0 and row["max"] == 1:
+            w = ttk.Checkbutton(erow, variable=var, text="On")
+        elif row.get("labels"):
+            opts = ["%d - %s" % (v, row["labels"].get(v, v))
+                    for v in range(row["min"], row["max"] + 1)]
+            w = ttk.Combobox(erow, state="readonly", values=opts, width=22)
+            if row["min"] <= cur <= row["max"]:
+                w.current(cur - row["min"])
+            w.bind("<<ComboboxSelected>>",
+                   lambda _e, _w=w: var.set(row["min"] + _w.current()))
+        else:
+            w = ttk.Spinbox(erow, from_=min(row["min"], row["default"]),
+                            to=max(row["max"], row["default"]),
+                            textvariable=var,
+                            width=max(8, len("%d" % row["max"]) + 1),
+                            increment=row.get("step") or 1)
+        w.pack(side=tk.LEFT, padx=(8, 0))
+        out = []
+
+        def _ok(_e=None):
+            try:
+                v = int(var.get())
+            except (tk.TclError, ValueError):
+                return
+            out.append(max(row["min"], min(row["max"], v))
+                       if v != row["default"] else v)
+            dlg.destroy()
+
+        def _card(_e=None):
+            out.append(row["default"])
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(0, 12))
+        ttk.Button(btns, text="OK", command=_ok,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy,
+                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="Back to card value", command=_card).pack(
+            side=tk.LEFT)
+        dlg.bind("<Return>", _ok)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        w.focus_set()
+        center_over(root, dlg)
+        dlg.grab_set()
+        root.wait_window(dlg)
+        return out[0] if out else None
+
+    # ---- Default Settings: showing hidden settings on the machine -------
+    # menu_visibility.widen_plan reads the operator menu's Feature Adjustments
+    # page; raising its last id is one instruction and exposes the debug tail
+    # above it.  Staged by NAME so a rebuild on another game version can't
+    # expose whatever that id happens to mean there.
+
+    def _settings_expose_label(self, name):
+        """The machine's caption for a staged expose-through name."""
+        for r in self._settings_all_rows:
+            if r["name"] == name:
+                return r["label"]
+        return name
+
+    def staged_menu_expose(self, assets_dir):
+        """The ``AD_`` name the machine's Adjustments menu is staged to be
+        opened up to, or ``""``.  Read by the app's Write flow after a
+        successful build."""
+        from ..core import staged_changes
+        val = staged_changes.load(assets_dir).get("menu_expose_through")
+        return str(val) if isinstance(val, str) and val else ""
+
+    def _settings_stage_menu_expose(self, name):
+        """Record (or clear, with ``name=""``) the menu widening."""
+        assets_dir = self._settings_staged_dir()
+        if not assets_dir:
+            self._settings_status.configure(
+                text="Set the project folder on the Extract tab first — "
+                     "changes stage with the project.")
+            return False
+        from ..core import staged_changes
+        data = staged_changes.load(assets_dir)
+        if name:
+            data["menu_expose_through"] = name
+        elif "menu_expose_through" in data:
+            del data["menu_expose_through"]
+        else:
+            return True
+        staged_changes.save(assets_dir, data)
+        if self._on_folder_state_written:
+            self._on_folder_state_written(assets_dir)
+        return True
+
+    def _settings_menu_dialog(self):
+        """Pick how far to open the machine's Adjustments menu."""
+        plan = self._settings_menu_plan
+        if not plan:
+            return
+        root = self._tk_root()
+        cands = plan["candidates"]
+        labels = {r["name"]: r["label"] for r in self._settings_all_rows}
+        dlg = tk.Toplevel(root)
+        dlg.title("Show hidden settings in the machine's menu")
+        dlg.transient(root)
+        self._theme_toplevel(dlg)
+        ttk.Label(dlg, text="Show hidden settings in the machine's menu",
+                  font=(_SANS_FONT, 10, "bold")).pack(
+            anchor=tk.W, padx=12, pady=(12, 4))
+        ttk.Label(
+            dlg,
+            text="The machine's Feature Adjustments page stops at setting "
+                 "0x%02X, which is the only reason the settings below can't be "
+                 "reached on the machine. Picking one moves that stopping "
+                 "point: everything down to and including your pick becomes "
+                 "visible in the Adjustments menu, and can be changed there "
+                 "like any other setting.\n\nThe page is a straight run, so "
+                 "settings above your pick come with it — you can't skip one."
+                 % plan["last"],
+            wraplength=520, justify=tk.LEFT).pack(anchor=tk.W, padx=12)
+        ttk.Label(
+            dlg,
+            text="This edits the game's code, not just a value. It has been "
+                 "verified against the firmware but not yet on a real "
+                 "machine — the settings it exposes include factory test and "
+                 "bookkeeping entries the game never expected an operator to "
+                 "change.",
+            wraplength=520, justify=tk.LEFT, foreground="#c07830",
+            font=(_SANS_FONT, 8)).pack(anchor=tk.W, padx=12, pady=(8, 4))
+        box = ttk.Frame(dlg)
+        box.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 4))
+        tree = ttk.Treeview(box, columns=("id",), height=min(10, len(cands)),
+                            selectmode="browse")
+        tree.heading("#0", text="Show through this setting", anchor=tk.W)
+        tree.heading("id", text="Id", anchor=tk.W)
+        tree.column("#0", width=380, minwidth=200)
+        tree.column("id", width=60, minwidth=50, stretch=False)
+        vs = ttk.Scrollbar(box, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vs.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vs.pack(side=tk.LEFT, fill=tk.Y)
+        items = {}
+        for c in cands:
+            items[tree.insert("", "end",
+                              text=labels.get(c["name"], c["name"]),
+                              values=("0x%02X" % c["id"],))] = c
+        count = ttk.Label(dlg, text="", foreground="#888888",
+                          font=(_SANS_FONT, 8))
+        count.pack(anchor=tk.W, padx=12)
+
+        def _sel(_e=None):
+            c = items.get(tree.focus())
+            if c is None:
+                count.configure(text="")
+                return
+            n = sum(1 for x in cands if x["id"] <= c["id"])
+            count.configure(
+                text="The machine will show %d setting(s) it normally "
+                     "hides, ending at \"%s\"."
+                     % (n, labels.get(c["name"], c["name"])))
+        tree.bind("<<TreeviewSelect>>", _sel)
+        staged = self.staged_menu_expose(self._settings_staged_dir())
+        pre = next((i for i, c in items.items() if c["name"] == staged), None)
+        if pre is None:
+            # Default to the last entry that isn't one of the game's internal
+            # "…_CHANGED" bookkeeping flags: those are state the game keeps for
+            # itself, and stopping before them is the useful default on the
+            # titles whose tail ends in a run of them.
+            useful = [i for i, c in items.items()
+                      if not c["name"].endswith("_CHANGED")]
+            pre = useful[-1] if useful else list(items)[-1]
+        tree.selection_set(pre)
+        tree.focus(pre)
+        tree.see(pre)
+        _sel()
+
+        def _apply(_e=None):
+            c = items.get(tree.focus())
+            if c is None:
+                return
+            if self._settings_stage_menu_expose(c["name"]):
+                n = sum(1 for x in cands if x["id"] <= c["id"])
+                self.append_log(
+                    "Defaults: the machine's Adjustments menu will show %d "
+                    "hidden setting(s), through \"%s\" — staged for the next "
+                    "Build." % (n, labels.get(c["name"], c["name"])), "info")
+                self._settings_status.configure(
+                    text="The machine's menu will be opened up to \"%s\" on "
+                         "the next Build." % labels.get(c["name"], c["name"]))
+            dlg.destroy()
+
+        def _clear(_e=None):
+            if self._settings_stage_menu_expose(""):
+                if staged:
+                    self.append_log(
+                        "Defaults: the machine's menu will be left as the "
+                        "game ships it.", "info")
+                self._settings_status.configure(
+                    text="The machine's menu will be left as the game ships "
+                         "it.")
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=12, pady=(4, 12))
+        ttk.Button(btns, text="Show them", command=_apply,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy,
+                   style="Danger.TButton").pack(side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(btns, text="Leave the menu alone", command=_clear).pack(
+            side=tk.LEFT)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        center_over(root, dlg)
+        dlg.grab_set()
+        root.wait_window(dlg)
 
     @staticmethod
     def _settings_fmt_num(v):
@@ -9751,10 +10134,20 @@ class MainWindow:
             self._settings_all_frame.pack(fill=tk.BOTH, expand=True,
                                           before=self._settings_arow)
             self._settings_fill_all_tree()
+        try:
+            self._settings_menu_btn.config(
+                state=tk.NORMAL if self._settings_menu_plan else tk.DISABLED)
+        except tk.TclError:
+            pass
         if not rows:
+            # Only the curated form is empty — the all-settings list below it
+            # still edits everything this firmware has, so this can't say
+            # "no editable settings" and stop.
             self._settings_empty.configure(
-                text="No editable settings were found in this firmware.")
+                text="None of the settings with friendly units and help are "
+                     "in this firmware — use the full list below.")
             self._settings_empty.grid()
+            self._settings_apply_staged_overlay()
             return
         self._settings_empty.grid_remove()
         form = self._settings_form
@@ -9903,13 +10296,20 @@ class MainWindow:
                 row=grow, column=base + 4, sticky="w", padx=6, pady=2)
             self._settings_rows.append(dict(r, var=var, widget=w))
         self._settings_build_hstd_block(by_adj, accent, extra_scores)
+        self._settings_apply_staged_overlay()
+
+    def _settings_apply_staged_overlay(self):
+        """Put the standing preset and the folder's staged edits into the
+        freshly built form, and say what's pending.
+
+        Overlaid in build-time order — the auto-apply preset first, then the
+        staged values on top (staged wins at Build too) — so the fields show
+        exactly what the next Build will bake in.  The loading flag keeps
+        these programmatic sets from re-staging."""
         self._settings_reset_btn.config(state=tk.NORMAL)
-        # Overlay in build-time order — the auto-apply preset first, then the
-        # folder's already-staged values on top (staged wins at Build too) —
-        # so the fields show exactly what the next Build will bake in.  The
-        # loading flag keeps these programmatic sets from re-staging.
         self._settings_refresh_presets()
         staged = self.staged_default_settings(self._settings_staged_dir())
+        expose = self.staged_menu_expose(self._settings_staged_dir())
         self._settings_loading = True
         try:
             active = self._presets_blob().get("active")
@@ -9919,17 +10319,35 @@ class MainWindow:
                 if r["name"] in staged:
                     self._settings_set_row(
                         r, int(staged[r["name"]]) // r.get("scale", 1))
+            # A staged setting the curated form doesn't draw was edited in the
+            # all-settings list — give it its row back so it keeps staging,
+            # logging and resetting like any other.
+            have = {r["name"] for r in self._settings_rows}
+            by_name = {a["name"]: a for a in self._settings_all_rows}
+            for name, val in staged.items():
+                if name in have or name not in by_name:
+                    continue
+                self._settings_set_row(
+                    self._settings_add_extra_row(by_name[name]), int(val))
         finally:
             self._settings_loading = False
+        self._settings_fill_all_tree()
         bits = []
         if staged:
             bits.append("%d setting(s) staged for the next Build"
                         % len(staged))
+        if expose:
+            bits.append("the machine's menu will be opened up to \"%s\""
+                        % self._settings_expose_label(expose))
         if active in self._presets_blob()["presets"]:
             bits.append("preset \"%s\" is baked into every card you Build"
                         % active)
         self._settings_status.configure(
             text=("; ".join(bits) + ".") if bits else "")
+        # This card's state is now the baseline the session log reports
+        # against: without adopting it here the first edit after a load was
+        # swallowed as "the first look at this card" and never narrated.
+        self._settings_logged = self._settings_log_state()
         # The form height changed — shrink the tab around it so the freed
         # space flows to the Log pane instead of sitting blank.
         try:
@@ -10132,24 +10550,34 @@ class MainWindow:
         finally:
             self._settings_loading = False
         n = 0
+        menu = False
         assets_dir = self._settings_staged_dir()
         if assets_dir:
             from ..core import staged_changes
             data = staged_changes.load(assets_dir)
             n = len(data.get("settings") or {}) + len(
                 data.get("high_scores") or {})
-            if "settings" in data or "high_scores" in data:
+            menu = bool(data.get("menu_expose_through"))
+            if ("settings" in data or "high_scores" in data
+                    or "menu_expose_through" in data):
                 data.pop("settings", None)
                 data.pop("high_scores", None)
+                data.pop("menu_expose_through", None)
                 staged_changes.save(assets_dir, data)
                 if self._on_folder_state_written:
                     self._on_folder_state_written(assets_dir)
+        self._settings_fill_all_tree()
+        cleared = []
+        if n:
+            cleared.append("%d staged setting(s)" % n)
+        if menu:
+            cleared.append("the menu widening")
         self._settings_status.configure(
             text="Fields reset to the image's current defaults%s."
-                 % (" — cleared %d staged setting(s)" % n if n else ""))
-        if n:
-            self.append_log("Defaults: cleared %d staged setting(s)." % n,
-                            "info")
+                 % (" — cleared " + " and ".join(cleared) if cleared else ""))
+        if cleared:
+            self.append_log("Defaults: cleared %s."
+                            % " and ".join(cleared), "info")
 
     # ---- Default Settings: staged-for-Build flow ---------------------
     # Changed defaults are recorded (auto-staged, debounced — batch 21) in
@@ -10318,6 +10746,9 @@ class MainWindow:
         self._settings_stage_job = None
         if self._settings_busy or self._settings_table is None:
             return
+        # The all-settings list shows the same pending values in its "New
+        # default" column, whichever editor set them.
+        self._settings_fill_all_tree()
         changes = self._settings_changes()
         hstd = self._settings_hstd_changes()
         assets_dir = self._settings_staged_dir()

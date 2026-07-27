@@ -330,3 +330,39 @@ def test_card_info_unopenable_image_degrades(tmp_path):
     rows = dict(sections["Firmware"])
     # No partitions/sidx, but the section still renders with an explanation.
     assert rows["System"] == "Stern Spike 2"
+
+
+def test_high_score_count_comes_from_the_board_the_defaults_tab_edits():
+    """The Image Info "High scores" row and the Defaults tab's High Scores
+    block must report the SAME number of places.
+
+    Counting adjustment names instead undercounts badly wherever a place has
+    no score adjustment of its own: TMNT keeps separate boards for co-op and
+    for 2- and 3-player team play, only 14 of its 57 places carry an
+    adjustment, and the name census reported 27 against the 57 the editor
+    lists.  This fixture is that shape in miniature — 6 board records, only 3
+    of which have a score adjustment.
+    """
+    from pinball_decryptor.plugins.stern.adjustments import (AdjustmentTable,
+                                                             high_score_names)
+    from pinball_decryptor.plugins.stern.high_scores import HighScoreDefaults
+    from pinball_decryptor.plugins.stern.info import _adjustment_rows
+    from tests.test_stern_high_scores import make_elf as hs_elf
+
+    elf, _off = hs_elf()
+    editable = len(HighScoreDefaults(elf, AdjustmentTable(elf)).rows)
+    census = len(high_score_names(AdjustmentTable(elf).names))
+    assert editable == 6 and census == 3, "fixture must exercise the divergence"
+
+    fw = dict(_adjustment_rows(elf))
+    assert fw["High scores"].startswith("%d — " % editable)
+
+
+def test_high_score_count_falls_back_when_there_is_no_board_table():
+    """A build whose board table can't be located still reports a count from
+    the adjustment names rather than dropping the row entirely."""
+    from pinball_decryptor.plugins.stern.info import _adjustment_rows
+    from tests.test_stern_adjustments import make_elf
+
+    fw = dict(_adjustment_rows(make_elf(_ADJ_SPECS)))
+    assert fw["High scores"].startswith("3 — ")

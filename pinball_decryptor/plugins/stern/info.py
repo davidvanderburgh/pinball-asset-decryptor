@@ -198,7 +198,19 @@ def _adjustment_rows(fw):
         return []
     # Id 0 is the AD_INVALID placeholder, never an operator-visible setting.
     total = table.count - (1 if table.names[:1] == ["AD_INVALID"] else 0)
-    slots = high_score_names(table.names)
+    # Count the PLACES off the game's own high-score board (the record table
+    # the Defaults tab edits), not the adjustment names that look like score
+    # slots.  Counting names undercounts badly wherever a place has no score
+    # adjustment of its own: TMNT keeps separate boards for co-op and for
+    # 2- and 3-player team play, and only 14 of its 57 places carry an
+    # adjustment, so the name census reported 27 against the 57 the Defaults
+    # tab lists.  Falling back to the census keeps a build whose board table
+    # can't be located reporting something rather than nothing.
+    try:
+        from .high_scores import HighScoreDefaults
+        slots = HighScoreDefaults(fw, table).rows
+    except Exception:
+        slots = high_score_names(table.names)
     rows = [("Adjustments",
              "%s — operator settings in the machine's menu; the Defaults tab "
              "edits the values a fresh machine starts from"

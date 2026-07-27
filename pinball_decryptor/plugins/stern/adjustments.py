@@ -86,7 +86,8 @@ class AdjustmentTable:
         if not self._loads:
             raise ValueError("not a little-endian 32-bit ELF")
         self.names = self._find_names()
-        self.table_va, self.count, self.elem, self.node = self._find_section()
+        (self.table_va, self.count, self.elem, self.node,
+         self.record_va) = self._find_section()
         self.by_name = {n: i for i, n in enumerate(self.names) if n}
 
     # --- address mapping ---
@@ -182,7 +183,11 @@ class AdjustmentTable:
                     node = struct.unpack_from("<I", self.data, i + 16)[0]
                     node_s = self._cstr(node, 16)
                     if self._off(table) is not None and node_s:
-                        return table, count, elem, node_s
+                        # The record's own VA matters too: the firmware passes
+                        # ``record + 4`` (table/count/elem) to the accessor the
+                        # operator menu walks, which is how
+                        # :mod:`.menu_visibility` finds the menu's pages.
+                        return table, count, elem, node_s, self._va(i)
                 i += 4
         raise ValueError("adjustment section record not found")
 
@@ -426,6 +431,100 @@ def _labels_for(name, e):
     if labels and e["max"] < len(labels):
         return {i: labels[i] for i in range(e["min"], e["max"] + 1)}
     return None
+
+
+def _is_caption(text):
+    """True for a string that could really be an operator-menu caption.
+
+    ``_cstr`` decodes latin-1 and ``str.isprintable`` happily accepts the
+    high-byte soup that reading a pointer as text produces (``'Ø'`` and friends
+    are printable), so a caption has to be plain ASCII with something
+    alphanumeric in it before it can be trusted.
+    """
+    t = (text or "").strip()
+    if len(t) < 2 or not all(32 <= ord(c) < 127 for c in t):
+        return False
+    return any(c.isalnum() for c in t)
+
+
+def _caption_at(table, idx):
+    """``(direct, indirect)`` caption candidates for one descriptor."""
+    off = table._off(table.table_va + idx * table.elem)
+    if off is None or OFF_MENU_LABEL + 4 > table.elem:
+        return None, None
+    va = struct.unpack_from("<I", table.data, off + OFF_MENU_LABEL)[0]
+    if not va:
+        return None, None
+    direct = table._cstr(va, 64)
+    indirect = None
+    inner = table._off(va)
+    if inner is not None and inner + 4 <= len(table.data):
+        first = struct.unpack_from("<I", table.data, inner)[0]
+        if first:
+            indirect = table._cstr(first, 64)
+    return direct, indirect
+
+
+def _caption_mode(table):
+    """Whether ``+0x18`` holds the caption or a pointer to a caption struct.
+
+    The 44-byte descriptor generation stores the caption pointer inline; the
+    32-byte one stores a pointer to a five-language caption struct whose first
+    entry is the English caption.  Deciding per entry is unsafe — the four
+    pointer bytes of the struct sometimes decode as a plausible little string
+    ("8VU") — so the whole table votes once and every row follows the winner.
+    """
+    mode = getattr(table, "_caption_mode_cache", None)
+    if mode:
+        return mode
+    direct = indirect = 0
+    step = max(1, table.count // 40)
+    for idx in range(1, table.count, step):
+        d, i = _caption_at(table, idx)
+        direct += _is_caption(d)
+        indirect += _is_caption(i)
+    mode = "indirect" if indirect > direct else "direct"
+    table._caption_mode_cache = mode
+    return mode
+
+
+def menu_label(table, idx):
+    """The caption the operator menu prints for adjustment *idx*.
+
+    Falls back to a label derived from the ``AD_`` name when the build stores
+    the caption somewhere this doesn't recognise."""
+    d, i = _caption_at(table, idx)
+    order = (i, d) if _caption_mode(table) == "indirect" else (d, i)
+    for cand in order:
+        if _is_caption(cand):
+            return cand.strip()
+    return _label_from_name(table.names[idx] or "")
+
+
+def all_rows(table, statuses=None):
+    """One display row per adjustment in the build, in the menu's own order.
+
+    Read-only companion to :func:`curated_rows` — every setting the firmware
+    carries, with the caption the machine itself would print and (when
+    :mod:`.menu_visibility` could read the menu) whether the machine can reach
+    it at all.  ``status`` is ``""`` for a normal Adjustments-menu setting,
+    ``"service"`` for one edited on another service screen, ``"debug"`` for one
+    no menu reaches, and ``None`` when the menu couldn't be read.
+    """
+    rows = []
+    for i in range(1, table.count):
+        name = table.names[i]
+        if not name or not name.startswith("AD_"):
+            continue
+        e = table.entry(i)
+        rows.append({
+            "id": i, "name": name, "label": menu_label(table, i),
+            "default": e["default"], "min": e["min"], "max": e["max"],
+            "step": e["step"] or 1,
+            "labels": _labels_for(name, e),
+            "status": statuses.get(i) if statuses else None,
+        })
+    return rows
 
 
 def curated_rows(table):

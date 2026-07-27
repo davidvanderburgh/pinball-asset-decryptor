@@ -8985,10 +8985,15 @@ class MainWindow:
                  lambda: self._current_theme)
         self._settings_hidden_only = tk.BooleanVar(value=False)
         self._settings_hidden_cb = ttk.Checkbutton(
-            hdr, text="Only settings the machine's menu never shows",
+            hdr, text="Only settings not in the Adjustments menu",
             variable=self._settings_hidden_only,
             command=self._settings_fill_all_tree)
         self._settings_hidden_cb.pack(side=tk.LEFT, padx=(16, 0))
+        _Tooltip(self._settings_hidden_cb,
+                 "Leaves the settings the machine's Adjustments menu can't "
+                 "reach: the ones it edits on another service screen, and the "
+                 "factory/debug ones it never shows at all.",
+                 lambda: self._current_theme)
         tbody = ttk.Frame(self._settings_all_frame)
         tbody.pack(fill=tk.BOTH, expand=True, padx=10)
         self._settings_all_tree = ttk.Treeview(
@@ -9276,15 +9281,15 @@ class MainWindow:
             st = r.get("status")
             if only_hidden and st in ("", None):
                 continue
-            if r.get("labels") and r["default"] in r["labels"]:
-                val = "%d - %s" % (r["default"], r["labels"][r["default"]])
-            else:
-                val = self._settings_fmt_num(r["default"])
             if r["min"] == 0 and r["max"] == 1:
-                rng = "off / on"
+                val, rng = ("On" if r["default"] else "Off"), "off / on"
             else:
                 rng = "%s - %s" % (self._settings_fmt_num(r["min"]),
                                    self._settings_fmt_num(r["max"]))
+                if r.get("labels") and r["default"] in r["labels"]:
+                    val = "%d - %s" % (r["default"], r["labels"][r["default"]])
+                else:
+                    val = self._settings_fmt_num(r["default"])
             tree.insert("", "end",
                         text="%s  (0x%02X)" % (r["label"], r["id"]),
                         values=(val, rng,

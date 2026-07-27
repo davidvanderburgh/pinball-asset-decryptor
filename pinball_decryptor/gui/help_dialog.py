@@ -448,6 +448,19 @@ HELP_CONTENT = {
          "initials are always 3. Same \"fresh cards only\" rule as every "
          "other default: a machine that already has scores stored keeps "
          "them."),
+        ("All settings on this image (and what \"Debug\" means)",
+         "Below the editable form is every adjustment the firmware carries, "
+         "read-only, with the caption the machine itself prints and its id. "
+         "The \"Menu\" column says where you can reach it on the machine. "
+         "\"Adjustments\" is the ordinary operator Adjustments menu. "
+         "\"Service menu\" is a real setting the machine edits on a different "
+         "screen — volume, speakers, software update, tournament, redemption. "
+         "\"Debug\" is one no menu shows at all: factory tuning values, "
+         "mech timings and developer leftovers that Stern left in the "
+         "firmware but never listed. This isn't guesswork — the app reads the "
+         "menu's own pages out of the game binary and works out what they "
+         "can't reach. A build whose menu can't be read says so and flags "
+         "nothing rather than guessing."),
         ("Presets (set once, reuse everywhere)",
          "Save a set of values as a named preset with \"Save As…\", then pick "
          "it from the dropdown any time to fill the form (the values stage "

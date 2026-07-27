@@ -21,6 +21,11 @@ def _capture(monkeypatch):
     # os.startfile is Windows-only; stub it so the test is uniform cross-platform.
     monkeypatch.setattr(os, "startfile",
                         lambda p: calls.append(p), raising=False)
+    # Linux goes through core.desktop (bundle-scrubbed env + real opener
+    # search) rather than a bare xdg-open, so stub that hop as well --
+    # otherwise the CI runner's actual file manager would be launched.
+    monkeypatch.setattr(mw.desktop, "open_path",
+                        lambda p, env=None: (calls.append(p), (True, ""))[1])
     return calls
 
 

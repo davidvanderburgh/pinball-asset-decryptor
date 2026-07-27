@@ -45,7 +45,10 @@ def _reveal(folder):
         elif sys.platform == "darwin":
             subprocess.Popen(["open", folder])
         else:
-            subprocess.Popen(["xdg-open", folder])
+            # core.desktop, not a bare xdg-open: a frozen/AppImage build
+            # has to hand the file manager a de-bundled environment.
+            from ..core import desktop
+            desktop.open_path(folder)
     except OSError:
         pass
 

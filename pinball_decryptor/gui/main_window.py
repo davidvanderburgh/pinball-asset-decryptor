@@ -16,13 +16,12 @@ import sys
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import webbrowser
 
 from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
 from ..core.extract_source import stale_source_message
 from ..core.staged_originals import ORIG_DIR
-from ..core import session_log
+from ..core import desktop, session_log
 from .theme import (THEMES, dark_titlebar, detect_system_theme,
                     platform_font)
 
@@ -5889,7 +5888,12 @@ class MainWindow:
                     ["open", "-R", path] if os.path.isfile(path)
                     else ["open", folder])
             else:
-                subprocess.Popen(["xdg-open", folder])
+                # Not a bare xdg-open: in a frozen/AppImage build the file
+                # manager has to be launched with the bundle scrubbed out
+                # of the environment or it dies on our bundled libs.
+                ok, err = desktop.open_path(folder)
+                if not ok:
+                    raise RuntimeError(err)
         except Exception as e:
             messagebox.showwarning(
                 "Couldn't open file manager",
@@ -14492,7 +14496,8 @@ class MainWindow:
             else:
                 menu.add_command(
                     label=f"● Download update v{version}…",
-                    command=lambda u=url: webbrowser.open(u))
+                    command=lambda u=url: self.open_link(
+                        u, what="the release page"))
             menu.add_separator()
 
         # Theme — a dynamic verb label (monkeybug: the bare ☀/☽ glyph wasn't
@@ -15527,7 +15532,9 @@ class MainWindow:
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", path])
             else:
-                subprocess.Popen(["xdg-open", path])
+                ok, err = desktop.open_path(path)
+                if not ok:
+                    raise RuntimeError(err)
         except Exception:
             # No default .log association / no opener — show the folder so
             # the user can still get at the file.
@@ -15594,7 +15601,7 @@ class MainWindow:
         self._log_text.tag_configure(
             tag, foreground=THEMES[self._current_theme]["link"], underline=True)
         self._log_text.tag_bind(tag, "<Button-1>",
-                                lambda e, u=url: webbrowser.open(u))
+                                lambda e, u=url: self.open_link(u))
         self._log_text.tag_bind(tag, "<Enter>",
                                 lambda e: self._log_text.configure(cursor="hand2"))
         self._log_text.tag_bind(tag, "<Leave>",
@@ -15945,10 +15952,48 @@ class MainWindow:
 
     def _open_update_url(self):
         """Open the release page in the user's default browser."""
-        if not self._update_banner_url:
+        self.open_link(self._update_banner_url,
+                       what="the release page")
+
+    def open_link(self, url, what="that link"):
+        """Open *url* in the browser, and say so when it doesn't work.
+
+        Off the main thread because the launch waits a beat to see
+        whether the opener actually survived (core.desktop), and Tk must
+        not freeze mid-click.  A failure isn't silent: on a Linux
+        AppImage the desktop's opener can be missing or refuse the
+        bundle's environment entirely (aly), so we put the URL on the
+        clipboard and show it, rather than leaving a dead button.
+        """
+        if not url:
             return
-        import webbrowser
-        webbrowser.open(self._update_banner_url)
+        import threading
+
+        def _work():
+            ok, err = desktop.open_url(url)
+            try:
+                self.root.after(0, lambda: self._link_opened(url, what,
+                                                             ok, err))
+            except Exception:
+                pass                       # window gone mid-flight
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _link_opened(self, url, what, ok, err):
+        if ok:
+            return
+        session_log.append("Could not open %s: %s (%s)" % (what, url, err),
+                           "warn")
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(url)
+            copied = "\n\nThe link has been copied to your clipboard."
+        except Exception:
+            copied = ""
+        messagebox.showwarning(
+            "Couldn't open your browser",
+            "Nothing here could open %s.\n\n%s%s\n\n(%s)"
+            % (what, url, copied, err or "no details"))
 
     def _install_update_clicked(self):
         """Banner / gear "Install update" — hand off to app.py's flow."""

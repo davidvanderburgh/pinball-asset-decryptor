@@ -464,6 +464,33 @@ def parse_glyph_tables(data, images):
     return out
 
 
+def table_size_px(table):
+    """The nominal pixel size a glyph table draws at: ascent + descent over its
+    bitmap glyphs — the same figure :func:`fontrender.load_fonts` labels a font
+    with, computed the same way so the two always agree.
+
+    An atlas is the font's MASTER art, and ONE atlas is routinely drawn at
+    several sizes: JAWS bakes ``GameFont_Primary`` at eight sizes over a single
+    512x512 atlas, and TMNT does the same with ``Stern_Impact_Outline`` (one
+    atlas, 8+ sizes across 152 tables).  So the atlas alone does not identify a
+    font — this is the missing half of that identity, and without it an extract
+    keeps whichever size it met first and draws every scene on the card at that
+    one size."""
+    gs = []
+    for g in table.get("glyphs") or ():
+        m = g.get("metrics")
+        # Tolerant of a glyph dict without metrics: the scene-layout parser
+        # calls this and must never raise on a malformed scene (a bad radium
+        # cannot be allowed to fail a whole extract).
+        if g.get("atlas") is not None and m and len(m) >= 4 and m[1] > 1:
+            gs.append(m)
+    if not gs:
+        return 0
+    asc = max(m[3] for m in gs)
+    desc = max(m[1] - m[3] for m in gs)
+    return int(round(asc)) + max(0, int(round(desc)))
+
+
 def glyph_px_rect(glyph):
     """A glyph's atlas rectangle in pixels: ``(x, y, w, h)``, or ``None`` for
     a glyph with no bitmap or an empty rectangle.  UVs are normalized by the

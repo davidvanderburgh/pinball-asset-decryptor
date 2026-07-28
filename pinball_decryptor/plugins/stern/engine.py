@@ -703,6 +703,11 @@ def _scene_layout_entry(lay, off2rel):
     entry = {"stage": list(lay["stage"]), "partial": lay["partial"],
              "unplaced": lay["unplaced"], "offstage": lay["offstage"],
              "alternates": lay["alternates"],
+             # alternative states are KEPT, tagged per element, so the preview
+             # can show one at a time instead of drawing the pile
+             "states": lay.get("states", 1),
+             # the scene's own named screens, in file order
+             "groups": list(lay.get("groups") or ()),
              # which corner the coordinates were measured from; kept so
              # a preview can admit when it had to reinterpret them
              "origin": lay["origin"], "scroll": lay.get("scroll", ""),
@@ -712,16 +717,22 @@ def _scene_layout_entry(lay, off2rel):
         entry["texts"].append({
             "name": t["name"], "x": t["x"], "y": t["y"],
             "text": t["text"], "rect": t["rect"], "rgba": t["rgba"],
-            "align": t["align"],
+            "align": t["align"], "slot": t.get("slot"),
+            "state": t.get("state", 0), "group": t.get("group"),
             # fontrender's whole-font key = the first atlas's stem
             "font": (os.path.splitext(os.path.basename(arel))[0]
                      if arel else ""),
+            # ...and the SIZE that font is drawn at here, because one atlas
+            # serves several sizes and the key alone can't say which.
+            "font_px": t.get("font_px", 0),
         })
     for s in lay["sprites"]:
         irel = off2rel.get(s["image_off"])
         if not irel:
             continue
-        sp = {"name": s["name"], "x": s["x"], "y": s["y"], "image": irel}
+        sp = {"name": s["name"], "x": s["x"], "y": s["y"], "image": irel,
+              "slot": s.get("slot"), "state": s.get("state", 0),
+              "group": s.get("group")}
         # An animated element carries its frames in play order, so the
         # preview can run them instead of stacking them.
         frames = [off2rel.get(o) for o in s.get("frames") or ()]
@@ -867,6 +878,16 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                         table_key = os.path.splitext(
                             os.path.basename(rel0))[0]
                         break
+            # ...but the atlas is only HALF the identity.  One atlas is
+            # routinely drawn at several sizes (JAWS bakes GameFont_Primary at
+            # eight sizes over one 512x512 atlas; TMNT does it with
+            # Stern_Impact_Outline), and every size is a distinct set of
+            # metrics over the SAME art.  Keying the dedupe on the atlas alone
+            # kept whichever size was met first and dropped the rest, so every
+            # scene on the card drew its text at that one size — JAWS' "MODE
+            # TITLE / LINE 0..8" screen wants 45px and was rendering at the
+            # 150px another scene had already claimed.
+            table_px = _radium.table_size_px(table)
             rgba_cache = {}
             for g in table["glyphs"]:
                 px = _radium.glyph_px_rect(g)
@@ -879,10 +900,10 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                 stem = os.path.splitext(os.path.basename(atlas_rel))[0]
                 g_rel = "scene_textures/%s/%s/%s" % (
                     _GLYPH_DIR, stem, _glyph_png_name(g["char"]))
-                if (table_key, g_rel) in glyph_rows:
+                if (table_key, table_px, g_rel) in glyph_rows:
                     continue        # the same table met again on another card
-                                    # path — one row per (font, glyph) is enough
-                glyph_rows.add((table_key, g_rel))
+                                    # path — one row per (font, size, glyph)
+                glyph_rows.add((table_key, table_px, g_rel))
                 # A page already sliced by an earlier table still belongs to
                 # THIS table: skip the decode and the PNG (identical content
                 # ⇒ identical slice at an identical path), but keep the
@@ -921,10 +942,10 @@ def extract_radium_images(reader, output_dir, log=None, progress=None,
                                 for c, v in sorted(g["kern"].items()))
                 glyph_manifest.append(
                     "%s\t%s\t0x%04X\t%d\t%d\t%d\t%d\t%s\t%d\t%g\t%g\t%g\t%g"
-                    "\t%g\t%s\t%s"
+                    "\t%g\t%s\t%s\t%d"
                     % (g_rel, atlas_rel, g["char"], x, y, w, hh,
                        table["name"], int(g["rot"]), gw, gh, bx, by, adv,
-                       table_key, kern))
+                       table_key, kern, table_px))
                 n_glyphs += 1
             # every glyph of a table shares its per-atlas dedupe fate; mark
             # the table's atlases done only after the whole table is sliced
@@ -2664,6 +2685,7 @@ def _changed_glyph_images(assets_dir, baseline):
     if not os.path.isfile(manifest):
         return {}
     out = {}
+    seen = set()
     with open(manifest, "r", encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\r\n")
@@ -2677,6 +2699,14 @@ def _changed_glyph_images(assets_dir, baseline):
                 x, y, w, h = (int(c) for c in cols[3:7])
             except ValueError:
                 continue
+            # One slice can appear on several rows: a typeface baked at more
+            # than one size shares both the atlas and its rectangles, so the
+            # sizes differ only in metrics.  Pasting it once per row is
+            # idempotent but re-hashes the file each time and would report
+            # "8 edited glyphs" for one edited character.
+            if (g_rel, x, y, w, h) in seen:
+                continue
+            seen.add((g_rel, x, y, w, h))
             staged = os.path.join(assets_dir, "images", *g_rel.split("/"))
             if not os.path.isfile(staged):
                 continue

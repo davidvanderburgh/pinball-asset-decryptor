@@ -45,11 +45,18 @@ class _Tooltip:
     """Minimal hover tooltip — shown below the widget while the mouse
     is over it.  Theme-aware via the ``theme_fn`` callable."""
 
-    def __init__(self, widget, text, theme_fn, bind=True):
+    def __init__(self, widget, text, theme_fn, bind=True, place="below"):
         self._widget = widget
         self.text = text
         self._theme_fn = theme_fn
         self._tip = None
+        # ``place="side"`` puts the tip beside the widget instead of under it.
+        # A tip UNDER a combobox lands exactly where its drop-down opens, so
+        # hovering to click covered the thing being clicked and the control was
+        # unusable (David).  Anything hover-explained that you also have to
+        # operate wants the side placement — or better, an info button next to
+        # it that carries the tip instead.
+        self._place = place
         # ``bind=False`` lets a caller drive show()/hide() itself — used by the
         # picker rows, which manage one shared tooltip across several child
         # widgets so the cursor can move between them without flicker.
@@ -94,13 +101,22 @@ class _Tooltip:
             wx, wy, self._widget.winfo_screenwidth(),
             self._widget.winfo_screenheight())
         m = 4
-        x = max(left + m, min(wx + ww // 2 - tw // 2, right - tw - m))
-        if wy + wh + m + th <= bottom - m:
-            y = wy + wh + m                       # below the widget
-        elif wy - th - m >= top + m:
-            y = wy - th - m                       # flip above
+        if self._place == "side":
+            # Beside the widget, top-aligned: to the right when it fits, else
+            # to the left, so the widget itself is never covered.
+            if wx + ww + m + tw <= right - m:
+                x = wx + ww + m
+            else:
+                x = max(left + m, wx - tw - m)
+            y = max(top + m, min(wy, bottom - th - m))
         else:
-            y = max(top + m, bottom - th - m)     # pin so the bottom fits
+            x = max(left + m, min(wx + ww // 2 - tw // 2, right - tw - m))
+            if wy + wh + m + th <= bottom - m:
+                y = wy + wh + m                   # below the widget
+            elif wy - th - m >= top + m:
+                y = wy - th - m                   # flip above
+            else:
+                y = max(top + m, bottom - th - m)  # pin so the bottom fits
         self._tip.wm_geometry(f"+{x}+{y}")
         self._tip.wm_overrideredirect(True)       # re-assert (deiconify can reset it)
         self._tip.deiconify()

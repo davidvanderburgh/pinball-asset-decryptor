@@ -1230,7 +1230,9 @@ class MainWindow:
         # App mirrors them into the encoder's env vars.  (The
         # match-to-callouts shaper and its fade/cap/roll-off knobs lived here
         # too until monkeybug batch 20 — retired: it never fixed the click it
-        # chased, and the blip-free firmware patch did.)
+        # chased.  The blip-free firmware patch did, but that is off by default
+        # from v0.93.0 (it borrowed memory the game owns — node board state on
+        # Elvira), so the click is back until the patch gets its own mapping.)
         self._audio_advanced = dict(initial_audio_advanced or {})
         self._on_audio_advanced_change = on_audio_advanced_change
         # Fired with a short caption ("Led Zeppelin v1.22 LE") when the
@@ -5041,8 +5043,12 @@ class MainWindow:
 
     def _draw_audio_icon(self, canvas, kind):
         """Draw a crisp, borderless transport icon (play triangle / pause two
-        bars / stop square) filled with the theme foreground — one visual
-        family, identical sizing."""
+        bars / stop square / prev-next triangles) filled with the theme
+        foreground — one visual family, identical sizing.
+
+        ``prev``/``next`` are the same family used to step the Scenes window's
+        screens: David asked for the audio-preview convention there rather than
+        glyphs boxed in square buttons."""
         canvas.delete("all")
         c = THEMES.get(self._current_theme, {})
         fg = c.get("fg", "#dddddd")
@@ -5051,8 +5057,11 @@ class MainWindow:
         except (tk.TclError, ValueError):
             s = 26
         m = s * 0.27  # margin so all three icons share the same bounding box
-        if kind == "play":
+        if kind in ("play", "next"):
             canvas.create_polygon(m, m, m, s - m, s - m, s / 2.0,
+                                  fill=fg, outline=fg)
+        elif kind == "prev":
+            canvas.create_polygon(s - m, m, s - m, s - m, m, s / 2.0,
                                   fill=fg, outline=fg)
         elif kind == "pause":
             bw, gap = s * 0.17, s * 0.11
@@ -10919,7 +10928,7 @@ class MainWindow:
         self._refresh_round_icon(cv)
 
     def _make_round_icon(self, parent, glyph, fill, hover, tooltip_text,
-                         command, size=24, font=None):
+                         command, size=24, font=None, tooltip_place="below"):
         """A round colorful icon button — colored circle, white glyph — the
         app's icon-button look (David: round colorful icons instead of
         square glyph buttons; drawn on a Canvas because Tk 8.6 renders no
@@ -10963,7 +10972,12 @@ class MainWindow:
                                        and _set_fill(cv.icon_hover)))
         cv.bind("<Leave>", lambda _e: (cv.icon_enabled
                                        and _set_fill(cv.icon_fill)))
-        _Tooltip(cv, tooltip_text, lambda: self._current_theme)
+        # ``tooltip_place="side"`` is for a badge sitting next to a control the
+        # user also has to operate — a tip under a combobox opens exactly where
+        # its drop-down does.  The tip is kept on the canvas so a caller can
+        # keep its text current (the Scenes window's caption badge does).
+        cv.icon_tip = _Tooltip(cv, tooltip_text, lambda: self._current_theme,
+                               place=tooltip_place)
         self._round_icons.append(cv)
         return cv
 

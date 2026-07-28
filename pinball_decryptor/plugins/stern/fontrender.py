@@ -104,6 +104,14 @@ def load_fonts(assets_dir):
                 adv = w + max(1.0, round(w * 0.15))
             stem = g_rel.replace("\\", "/").split("/")[-2]
             key = cols[14] if len(cols) >= 15 and cols[14] else stem
+            # One atlas is commonly drawn at several sizes over the SAME art,
+            # so rows are grouped by (font, size) — see radium.table_size_px.
+            # Column 17 is absent in a pre-size extract, where every row falls
+            # into one bucket and this behaves exactly as it always did.
+            try:
+                size_id = int(cols[16]) if len(cols) >= 17 else 0
+            except ValueError:
+                size_id = 0
             kern = {}
             if len(cols) >= 16 and cols[15]:
                 for pair in cols[15].split(";"):
@@ -112,11 +120,12 @@ def load_fonts(assets_dir):
                         kern[int(c, 16)] = float(v)
                     except ValueError:
                         continue
-            fo = fonts.get(key)
+            fo = fonts.get((key, size_id))
             if fo is None:
-                fo = fonts[key] = {
+                fo = fonts[(key, size_id)] = {
                     "key": key, "name": name, "atlas_rels": [],
                     "glyphs": {}, "has_metrics": has_metrics,
+                    "size_id": size_id,
                 }
             if atlas_rel not in fo["atlas_rels"]:
                 fo["atlas_rels"].append(atlas_rel)
@@ -129,16 +138,42 @@ def load_fonts(assets_dir):
                 "lw": lw, "lh": lh, "bx": bx, "by": by, "adv": adv,
                 "kern": kern,
             }
-    out = []
+    by_key = {}
     for fo in fonts.values():
         gs = [g for g in fo["glyphs"].values() if g["lh"] > 1]
         fo["ascent"] = int(round(max((g["by"] for g in gs), default=8)))
         fo["descent"] = max(0, int(round(
             max((g["lh"] - g["by"] for g in gs), default=0))))
         fo["px"] = fo["ascent"] + fo["descent"]
-        out.append(fo)
+        by_key.setdefault(fo["key"], []).append(fo)
+    # One entry per FONT, not per size: the sizes share one atlas and one set
+    # of glyph slices, so they are one thing to look at and one thing to
+    # import into — splitting them would show the Fonts window several rows
+    # whose edits all land on the same files.  The alternatives ride along in
+    # ``sizes`` for the scene preview, which does need the exact metrics of the
+    # size a given scene draws at.
+    out = []
+    for variants in by_key.values():
+        # A NAMED variant represents the font: the outline/companion tables
+        # that share an atlas are frequently anonymous, and letting one of
+        # those win left the Fonts window listing a blank name.
+        variants.sort(key=lambda f: (not f["name"], -len(f["glyphs"]),
+                                     -f["px"]))
+        rep = variants[0]
+        rep["sizes"] = {v["size_id"]: v for v in variants}
+        out.append(rep)
     out.sort(key=lambda fo: (fo["name"].lower(), -fo["px"]))
     return out
+
+
+def font_at_size(font, size_id):
+    """The variant of *font* whose metrics match *size_id*, or *font* itself.
+
+    Scenes name the size they draw at; a project extracted before sizes were
+    recorded has only the one, and every lookup falls back to it."""
+    if not font or not size_id:
+        return font
+    return (font.get("sizes") or {}).get(size_id) or font
 
 
 def _atlas_formats(assets_dir):
@@ -206,6 +241,28 @@ def _space_advance(font):
     return 0.6 * (sum(advs) / len(advs)) if advs else 8.0
 
 
+def _fit_to_metrics(img, glyph):
+    """Scale a glyph's atlas bitmap to the box its METRICS say it occupies.
+
+    The atlas cell is the font's master art and is not necessarily the size
+    this table draws it at.  JAWS bakes one typeface at two point sizes over a
+    SINGLE shared atlas: ``'0'`` is one 82x94 cell that one table draws at
+    28x31 (advance 30) and the other at 54x64 (advance 60).  So the metrics box
+    is the drawn size, and pasting the cell at its native resolution rendered
+    every JAWS text line about 3x too big — glyphs overlapped their neighbours
+    and lines ran off the stage, while the advances stayed correct.
+
+    On TMNT and Munsters the cell already equals the metrics box exactly (ratio
+    1.000 over all 113 glyphs of the clock screen's HelveticaNeueBlack), which
+    is why drawing at native size looked right for two years and this went
+    unnoticed.  There it is a no-op."""
+    tw, th = int(round(glyph["lw"])), int(round(glyph["lh"]))
+    if not (1 <= tw <= 4096 and 1 <= th <= 4096) or (tw, th) == img.size:
+        return img
+    Image = _pil()
+    return img.resize((tw, th), Image.LANCZOS)
+
+
 def render_text(font, text, slice_loader=None, tracking=0):
     """Composite *text* (``\\n`` = new line) with *font*'s current glyph
     bitmaps, laid out by the stored metrics: ink at ``pen + bearing_x``,
@@ -245,6 +302,7 @@ def render_text(font, text, slice_loader=None, tracking=0):
                 missing.add(ch)
                 pen += g["adv"] + kern + tracking
                 continue
+            img = _fit_to_metrics(img, g)
             x = pen + g["bx"]
             y = base_y - g["by"]
             placed.append((x, y, img))

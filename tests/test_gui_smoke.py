@@ -2979,7 +2979,12 @@ def test_scene_browser_preview_and_videos(app, tmp_path):
     sb._show_preview(sb._preview_token, [img],
                      layout["/g/scene1/scene.radium"])
     assert str(sb._save_btn.cget("state")) == "normal"
-    assert "Animation isn't shown" in sb._preview_lbl.cget("text")
+    # A still picture says so, and offers NO playback controls: a Speed box on
+    # something that cannot move implied there was animation being withheld.
+    assert "Still picture" in sb._preview_lbl.cget("text")
+    assert sb._fps_shown is False
+    # ...and no Screen control either: this scene is a single screen
+    assert sb._screen_shown is False
     assert sb._preview_full is img
 
     # a superseded render is discarded rather than painted over the new scene
@@ -2996,6 +3001,7 @@ def test_scene_browser_preview_and_videos(app, tmp_path):
     assert len(sb._frame_imgs) == 3
     assert sb._play_job is not None            # the loop is running
     assert "Animation: 3 frames" in sb._preview_lbl.cget("text")
+    assert sb._fps_shown is True               # ...so Speed appears now
     # the scene's own 60 fps rate is played, not an arbitrary cap (David: the
     # animation ran slow), and the Speed box can pin a fixed rate instead
     assert "60 fps" in sb._preview_lbl.cget("text")
@@ -3019,6 +3025,117 @@ def test_scene_browser_preview_and_videos(app, tmp_path):
     assert str(sb._save_btn.cget("state")) == "disabled"
 
     sb._close()
+    app.root.update()
+
+
+def test_scene_browser_caption_is_one_line_with_the_rest_on_its_button(app,
+                                                                      tmp_path):
+    """The caption admits whatever a scene couldn't decode, so it wrapped to
+    one, two or three lines depending on the scene and the pane jumped every
+    time you stepped to another screen — "the area gets resized between
+    different screens and it is jarring" (David).  One capped line stays on
+    screen; the whole text lives on the "?" beside it."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+
+    _make_extract(tmp_path)
+    app.window.write_assets_var.set(str(tmp_path))
+    app.window._open_scene_browser()
+    sb = app.window._scene_browser
+
+    long_note = ("Still picture: 2 images and 6 text lines on a 1360x768 "
+                 "stage. 43 more images in this scene can't be placed yet. "
+                 "1 element sits off the stage, so its position isn't fully "
+                 "decoded.")
+    sb._set_caption(long_note)
+    shown = sb._preview_lbl.cget("text")
+    assert shown == "Still picture: 2 images and 6 text lines on a 1360x768 stage."
+    assert "\n" not in shown and len(shown) <= sb_mod._CAPTION_CHARS
+    assert sb._caption_tip.text == long_note      # the rest is a hover away
+    # a caption longer than the cap is truncated rather than allowed to widen
+    sb._set_caption("x" * 400)
+    assert len(sb._preview_lbl.cget("text")) <= sb_mod._CAPTION_CHARS
+    assert sb._caption_tip.text == "x" * 400
+
+    sb._close()
+    app.root.update()
+
+
+def test_scene_browser_steps_through_screens(app, tmp_path):
+    """◀/▶ walk the Screen list without re-opening the drop-down (David), with
+    "All screens" as the entry before the first and wrap-around at both ends."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+
+    _make_extract(tmp_path)
+    app.window.write_assets_var.set(str(tmp_path))
+    app.window._open_scene_browser()
+    sb = app.window._scene_browser
+    # drive the stepper against a known screen list
+    sb._current_layout = lambda: {"groups": ["Intro_Instance", "Award1"]}
+    sb._render_preview = lambda *_a, **_k: None
+    sb._tree.selection_set()
+
+    assert sb._screen_var.get() == sb_mod._ALL_SCREENS
+    sb._step_screen(1)
+    assert sb._screen_var.get() == "Intro_Instance"
+    sb._step_screen(1)
+    assert sb._screen_var.get() == "Award1"
+    sb._step_screen(1)                       # wraps back to the composite
+    assert sb._screen_var.get() == sb_mod._ALL_SCREENS
+    sb._step_screen(-1)                      # and backwards off the front
+    assert sb._screen_var.get() == "Award1"
+
+    sb._close()
+    app.root.update()
+
+
+def test_side_tooltip_does_not_cover_its_row(app):
+    """A tooltip bound to a combobox opened exactly where the drop-down does,
+    so hovering to read it hid the control being clicked and the picker was
+    unusable (David).  The explanation moved onto its own "?" button, and the
+    tip is placed BESIDE it."""
+    import tkinter as tk
+    from tkinter import ttk
+    from pinball_decryptor.gui.widgets import _Tooltip
+
+    top = tk.Toplevel(app.root)
+    top.geometry("400x200+100+100")
+    row = ttk.Frame(top)
+    row.pack()
+    box = ttk.Combobox(row, values=["a"], width=12, state="readonly")
+    box.pack(side=tk.LEFT)
+    btn = ttk.Button(row, text="?", width=2)
+    btn.pack(side=tk.LEFT, padx=(6, 0))
+    tip = _Tooltip(btn, "an explanation long enough to wrap " * 4,
+                   lambda: "dark", place="side")
+    app.root.update_idletasks()
+    tip.show()
+    app.root.update_idletasks()
+
+    def rect(w):
+        return (w.winfo_rootx(), w.winfo_rooty(),
+                w.winfo_rootx() + w.winfo_width(),
+                w.winfo_rooty() + w.winfo_height())
+
+    t = tip._tip
+    tr = (t.winfo_rootx(), t.winfo_rooty(),
+          t.winfo_rootx() + t.winfo_width(),
+          t.winfo_rooty() + t.winfo_height())
+
+    def overlaps(a, b):
+        return not (a[2] <= b[0] or b[2] <= a[0]
+                    or a[3] <= b[1] or b[3] <= a[1])
+
+    assert not overlaps(tr, rect(box)), "the tip must not cover the picker"
+    assert not overlaps(tr, rect(btn))
+    assert tr[0] >= rect(btn)[2], "placed beside it, not under it"
+    tip.hide()
+    top.destroy()
     app.root.update()
 
 

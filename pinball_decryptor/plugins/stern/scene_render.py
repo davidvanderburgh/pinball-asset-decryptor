@@ -92,13 +92,17 @@ def text_tints(layouts):
     return out
 
 
-def describe(layout):
+def describe(layout, state=0, group=None):
     """One human line about what a preview will show, including what it can't
     (so a static frame is never mistaken for the whole truth)."""
     if not layout:
         return "No preview for this scene."
-    n_t = len(layout.get("texts") or ())
-    n_s = len(layout.get("sprites") or ())
+    n_states = state_count(layout)
+    names = group_names(layout)
+    texts = _pick(layout.get("texts") or (), state, group)
+    sprites = _pick(layout.get("sprites") or (), state, group)
+    n_t = len(texts)
+    n_s = len(sprites)
     bits = []
     if n_s:
         bits.append("%d image%s" % (n_s, "" if n_s == 1 else "s"))
@@ -107,13 +111,20 @@ def describe(layout):
     what = " and ".join(bits) or "nothing drawable"
     w, h, _fps = (list(layout.get("stage") or (0, 0, 0)) + [0, 0, 0])[:3]
     stage = " on a %dx%d stage" % (w, h) if w and h else ""
-    n_frames = frame_count(layout)
+    n_frames = frame_count(layout, state, group)
+    if group is not None and 0 <= group < len(names):
+        where = " Showing the screen \"%s\" on its own." % names[group]
+    else:
+        where = ""
     if n_frames > 1:
         msg = ("Animation: %d frames of %s%s at the scene's own %g fps, each "
-               "frame held for one tick (per-frame holds aren't decoded). "
-               % (n_frames, what, stage, frame_rate(layout)))
+               "frame held for one tick (per-frame holds aren't decoded).%s "
+               % (n_frames, what, stage, frame_rate(layout), where))
     else:
-        msg = "Still frame: %s%s. Animation isn't shown. " % (what, stage)
+        # Only claim animation is missing when the scene HAS any: saying
+        # "animation isn't shown" on a still picture implied there was
+        # something to play.
+        msg = "Still picture: %s%s.%s " % (what, stage, where)
     # Say WHAT is missing, not merely that something is: nearly every real
     # scene has an undecoded corner, so a bare "partial" told the user nothing.
     n_un = int(layout.get("unplaced") or 0)
@@ -136,7 +147,13 @@ def describe(layout):
                    else "%d elements sit" % n_off,
                    "its" if n_off == 1 else "their"))
     n_alt = int(layout.get("alternates") or 0)
-    if n_alt:
+    if group is None and len(names) > 1:
+        msg += ("This scene holds %d separate screens the machine shows one at "
+                "a time, drawn here together — pick one from Screen to see it "
+                "by itself. " % len(names))
+    elif group is None and n_alt:
+        # No named screens to offer (the node tree didn't decode for this one),
+        # so the repeats still have to be admitted rather than silently pruned.
         msg += ("%d repeat%s of this content sit on top of each other — "
                 "alternative states the machine shows one at a time — so only "
                 "one of each is drawn. " % (n_alt, "" if n_alt == 1 else "s"))
@@ -253,14 +270,75 @@ def _over_background(canvas, spec):
     return Image.fromarray(out.clip(0, 255).astype("uint8"), "RGB")
 
 
-def frame_count(layout):
-    """How many frames this scene animates over (1 = a still).  Elements with
-    different frame counts loop independently; the scene's cycle is the
-    longest."""
+def state_count(layout):
+    """How many alternative STATES this scene holds (1 = a single picture).
+
+    A slot is one place on the stage the machine redraws with different
+    content — a page carousel, a mode's instruction pages, a co-op variant of a
+    score panel.  Compositing them all is an unreadable pile, so the preview
+    shows one at a time."""
     if not layout:
         return 1
-    return max([1] + [len(sp.get("frames") or ())
-                      for sp in layout.get("sprites") or ()])
+    try:
+        return max(1, int(layout.get("states") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def group_names(layout):
+    """The scene's own named screens, or ``[]``.
+
+    A mode's radium holds every screen that mode can show and the machine picks
+    one; the node tree separates them exactly, so these are the scene's
+    structure rather than a guess about it."""
+    if not layout:
+        return []
+    got = layout.get("groups") or []
+    return list(got) if isinstance(got, (list, tuple)) else []
+
+
+def _in_group(elements, group):
+    """Every element of one named screen, pruning included — isolating a screen
+    should show all of it, not the subset that survived being composited with
+    the others."""
+    return [el for el in elements if el.get("group") == group]
+
+
+def _visible(elements, state):
+    """The elements of *elements* that belong to state *state*.
+
+    Anything with no slot is part of every state (the backdrop a carousel sits
+    on).  A slot shallower than *state* shows its LAST state rather than
+    vanishing, so stepping never blanks part of the picture."""
+    depth = {}
+    for el in elements:
+        sid = el.get("slot")
+        if sid is not None:
+            depth[sid] = max(depth.get(sid, 0), int(el.get("state", 0)) + 1)
+    out = []
+    for el in elements:
+        sid = el.get("slot")
+        if sid is None:
+            out.append(el)
+            continue
+        want = min(state, depth.get(sid, 1) - 1)
+        if int(el.get("state", 0)) == want:
+            out.append(el)
+    return out
+
+
+def frame_count(layout, state=0, group=None):
+    """How many frames this scene animates over (1 = a still).  Elements with
+    different frame counts loop independently; the scene's cycle is the
+    longest.
+
+    Counted over the elements VISIBLE in *state*, so a still state is reported
+    as still even when a different state of the same scene animates — the
+    window keys its playback controls off this."""
+    if not layout:
+        return 1
+    return max([1] + [len(sp.get("frames") or ()) for sp in
+                      _pick(layout.get("sprites") or (), state, group)])
 
 
 def frame_rate(layout, cap=60.0):
@@ -284,8 +362,15 @@ def frame_rate(layout, cap=60.0):
     return min(fps, cap)
 
 
+def _pick(elements, state, group):
+    """The elements to draw: one named screen, or the composited default."""
+    if group is None:
+        return _visible(elements, state)
+    return _in_group(elements, group)
+
+
 def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
-                  colors=None):
+                  colors=None, state=0, group=None):
     """Composite *layout* into an RGB ``PIL.Image``, or ``None`` if nothing
     could be drawn.  Pass *fonts* (``fontrender.load_fonts`` output) to render
     many scenes without re-reading the glyph manifest each time, and *frame* to
@@ -316,7 +401,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
 
     # Art first, then text over it (a scene's text is an overlay; true z-order
     # lives in the undecoded node tree).
-    for sp in layout.get("sprites") or ():
+    for sp in _pick(layout.get("sprites") or (), state, group):
         seq = sp.get("frames") or ()
         # An animated element draws ONE frame, never the whole stack.
         rel = seq[frame % len(seq)] if seq else sp.get("image")
@@ -330,7 +415,7 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
         _add(canvas, img, sp.get("x", 0), sp.get("y", 0))
         drew = True
 
-    texts = layout.get("texts") or ()
+    texts = _pick(layout.get("texts") or (), state, group)
     if texts:
         if fonts is None:
             try:
@@ -344,6 +429,10 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                 font = fonts[0]          # single-font scene, key drifted
             if font is None or not tx.get("text"):
                 continue
+            # The same atlas is drawn at several sizes; this scene named the
+            # one it uses.  Without this the preview drew every scene on the
+            # card at whichever size the extract happened to keep first.
+            font = fr.font_at_size(font, tx.get("font_px") or 0)
             try:
                 ink, _missing = fr.render_text(font, tx["text"])
             except Exception:
@@ -385,12 +474,12 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
 
 
 def render_scene(assets_dir, card_path, fonts=None, layouts=None,
-                 background=None, colors=None):
+                 background=None, colors=None, state=0):
     """Preview for one scene by its ``scene.radium`` card path, or ``None``."""
     if layouts is None:
         layouts = load_layouts(assets_dir)
     return render_layout(assets_dir, layouts.get(card_path), fonts=fonts,
-                         background=background, colors=colors)
+                         background=background, colors=colors, state=state)
 
 
 def layout_for_scene_dir(layouts, scene_dir):

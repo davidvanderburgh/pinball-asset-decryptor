@@ -39,15 +39,21 @@ def _s(text):
 
 
 def _keyframe(seq, text, rect=(0.0, 0.0, 1360.0, 120.0),
-              rgba=(1.0, 1.0, 1.0, 1.0), align=1):
+              rgba=(1.0, 1.0, 1.0, 1.0), align=1, font=""):
     """``[HANDLE][seq][u64 0][rect x4][rgba x4][u16 0][align][spacing][u32]
-    [STR][u8 2][24B pad]``."""
+    [STR][u8 2][24B pad]``.
+
+    *font* writes the line's FONT NAME string 12 bytes after the display
+    string's data, which is where the real file carries it — the ``[u8 2]``
+    plus the first 11 pad bytes."""
+    tail = (bytes([2]) + b"\x00" * 11 + _s(font) + b"\x00" * 13) if font \
+        else (bytes([2]) + b"\x00" * 24)
     return (struct.pack("<II", 0x80000001 | (seq << 8), seq)
             + struct.pack("<Q", 0)
             + struct.pack("<4f", *rect) + struct.pack("<4f", *rgba)
             + struct.pack("<H", 0) + struct.pack("<I", align)
             + struct.pack("<f", 0.0) + struct.pack("<I", 0)
-            + _s(text) + bytes([2]) + b"\x00" * 24)
+            + _s(text) + tail)
 
 
 def _track(x=0.0, y=0.0):
@@ -66,12 +72,15 @@ def _stage(w=1360, h=768, fps=60.0, root_kids=2):
             + struct.pack("<3I", 1, root_kids, 0))
 
 
-def _text_scene(lines, stage_wh=(1360, 768), rect=(0.0, 0.0, 1360.0, 120.0)):
+def _text_scene(lines, stage_wh=(1360, 768), rect=(0.0, 0.0, 1360.0, 120.0),
+                fonts=None):
     """A text scene: keyframes, then the stage, then one instance per line.
-    *lines* = ``[(name, x, baseline_y, string)]``."""
+    *lines* = ``[(name, x, baseline_y, string)]``; *fonts*, when given, is the
+    per-line font NAME each keyframe references."""
     out = bytearray()
     for i, (_n, _x, _y, s) in enumerate(lines):
-        out += _keyframe(i + 1, s, rect=rect)
+        out += _keyframe(i + 1, s, rect=rect,
+                         font=(fonts[i] if fonts else ""))
     out += _stage(*stage_wh)
     for i, (name, x, y, _s) in enumerate(lines):
         out += _s_instance(name, x, y, seq=i + 1)
@@ -181,18 +190,21 @@ def test_letters_in_a_row_are_not_alternative_states():
             dims[off] = (280, 336)
             sprites.append(_art(off, x, 207.0, off))
             parent_of[off] = 10 + i        # each letter is its own subtree
-    texts, kept, dropped = scene_layout._drop_overlapping_subtrees(
+    texts, kept, _alt_t, alt_s = scene_layout._drop_overlapping_subtrees(
         [], sprites, parent_of, dims)
-    assert texts == [] and dropped == 0
+    assert texts == [] and alt_s == []
     assert sorted({s["x"] for s in kept}) == xs
 
     # ...while art genuinely redrawn in the same place is still one state
     dup = [_art(1, 100.0, 100.0, 1), _art(2, 100.0, 100.0, 2),
            _art(3, 104.0, 102.0, 3), _art(4, 104.0, 102.0, 4)]
     dims2 = {n: (400, 300) for n in (1, 2, 3, 4)}
-    _t, kept2, dropped2 = scene_layout._drop_overlapping_subtrees(
+    _t, kept2, _at2, alt_s2 = scene_layout._drop_overlapping_subtrees(
         [], dup, {1: 20, 2: 20, 3: 21, 4: 21}, dims2)
-    assert dropped2 == 2 and len(kept2) == 2
+    assert len(alt_s2) == 2 and len(kept2) == 2
+    # the repeat is not discarded — it is state 1 of the slot state 0 holds
+    assert {s["state"] for s in kept2} == {0}
+    assert {s["state"] for s in alt_s2} == {1}
 
 
 def test_repeated_text_placeholders_still_collapse():
@@ -204,9 +216,9 @@ def test_repeated_text_placeholders_still_collapse():
              _line(2, 100.0, 205.0, "TOTAL"),
              _line(3, 250.0, 200.0, "INFORMATION"),
              _line(4, 260.0, 205.0, "TOTAL")]
-    texts, _s, dropped = scene_layout._drop_overlapping_subtrees(
+    texts, _s, alt_t, _as = scene_layout._drop_overlapping_subtrees(
         lines, [], {1: 30, 2: 30, 3: 31, 4: 31}, {})
-    assert dropped == 2 and len(texts) == 2
+    assert len(alt_t) == 2 and len(texts) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +231,12 @@ def test_parse_text_scene_positions_and_strings():
     lines = [("Line1", 2.0, 264.0, "CLOCK NOT SET"),
              ("Line2", 2.0, 386.0, "APR. 15, 2016")]
     data = _radium(_text_scene(lines))
-    imgs = [_fake_image(48)]
-    lay = scene_layout.parse_scene_layout(data, imgs, [])
+    # A text scene's image IS its font atlas, so it is declared as one — with
+    # no table it counts as art nothing draws, which is now (correctly) an
+    # unplaced image.
+    atlas = _fake_image(48)
+    lay = scene_layout.parse_scene_layout(data, [atlas],
+                                          [_font_table("F", atlas, 40)])
     assert lay is not None
     assert lay["stage"] == (1360, 768, 60.0)
     assert lay["partial"] is False
@@ -228,6 +244,121 @@ def test_parse_text_scene_positions_and_strings():
     assert got == [("Line1", 2.0, 264.0, "CLOCK NOT SET"),
                    ("Line2", 2.0, 386.0, "APR. 15, 2016")]
     assert lay["sprites"] == []
+
+
+def _font_table(name, atlas, px):
+    """A glyph table whose metrics make :func:`radium.table_size_px` read *px*
+    (ascent + descent, with descent 0)."""
+    return {"name": name, "table_off": 0, "table_end": 8,
+            "glyphs": [{"char": 65, "atlas": atlas,
+                        "metrics": (10.0, float(px), 0.0, float(px), 12.0)}]}
+
+
+def test_each_line_uses_the_font_its_keyframe_names():
+    """A keyframe names the font for THAT LINE, 12 bytes after its string.
+
+    Before this was decoded the parser picked one table for the whole scene,
+    which is wrong far more often than it looks — most scenes hold several
+    named fonts (57 of 60 sampled TMNT radiums).  JAWS' 30ec1fad named
+    Stern_SharpGrotesk (42px) on every line while the scene-wide guess took
+    Stern_AmityJack (81px), so its instructions rendered huge and overlapping."""
+    big, small = _fake_image(32), _fake_image(48)
+    tables = [_font_table("BigFace", big, 90), _font_table("SmallFace", small,
+                                                           30)]
+    lines = [("Line1", 2.0, 100.0, "TITLE"), ("Line2", 2.0, 300.0, "BODY")]
+    data = _radium(_text_scene(lines, fonts=["BigFace", "SmallFace"]))
+    lay = scene_layout.parse_scene_layout(data, [big, small], tables)
+    assert lay is not None
+    got = [(t["text"], t["font_atlas_off"], t["font_px"]) for t in lay["texts"]]
+    assert got == [("TITLE", 32, 90), ("BODY", 48, 30)]
+
+
+def test_line_with_no_named_font_falls_back_to_the_scene_pick():
+    """Only ~90% of display strings carry the reference (27% on Munsters, and
+    TMNT's CLOCK screen none at all), so the scene-wide pick has to remain."""
+    big, small = _fake_image(32), _fake_image(48)
+    tables = [_font_table("BigFace", big, 90), _font_table("SmallFace", small,
+                                                           30)]
+    lines = [("Line1", 2.0, 100.0, "TITLE")]
+    data = _radium(_text_scene(lines))          # no font names written
+    lay = scene_layout.parse_scene_layout(data, [big, small], tables)
+    assert lay is not None
+    assert [(t["font_atlas_off"], t["font_px"]) for t in lay["texts"]] \
+        == [(32, 90)]
+
+
+def test_outline_and_fill_collapse_even_in_different_fonts():
+    """A title is an outline instance under a fill instance at the SAME spot,
+    and they name DIFFERENT faces.
+
+    The duplicate rules keyed on the font, which was invisible while every line
+    in a scene shared one — decoding the per-line font split the pair apart and
+    every John Wick title drew twice, in two faces, on top of itself."""
+    body, outline = _fake_image(32), _fake_image(48)
+    tables = [_font_table("Body", body, 60), _font_table("Body_Outline",
+                                                         outline, 60)]
+    lines = [("Instance_T_Outline", 40.0, 100.0, "KIRILL BATTLE READY"),
+             ("Instance_T", 40.0, 100.0, "KIRILL BATTLE READY")]
+    data = _radium(_text_scene(lines, fonts=["Body_Outline", "Body"]))
+    lay = scene_layout.parse_scene_layout(data, [body, outline], tables)
+    assert lay is not None
+    # one line survives, and it is the LAST — the fill, drawn on top
+    assert [(t["text"], t["font_atlas_off"]) for t in lay["texts"]] \
+        == [("KIRILL BATTLE READY", 32)]
+
+
+def test_scene_names_its_screens_and_they_can_be_isolated():
+    """One scene file holds every screen a mode can put up, and the node tree
+    already separates them: JAWS' 30ec1fad has Intro_Instance, Award1_Instance,
+    Phase2_Start_Instance, Victory_Start_Instance and more, which the machine
+    shows one at a time under game control (there is no timeline in the file —
+    the only per-instance words that vary are a byte-misaligned sequential node
+    index).  Drawn together they are the pile David reported, so each is
+    offered by its own name.
+
+    Isolating a screen must show ALL of it, including elements the composite
+    pruned — a whole screen is often pruned as a repeat of an earlier one, and
+    filtering the isolated view by state would then draw nothing."""
+    page = lambda tag, dy: [                                    # noqa: E731
+        ("%s_Frame" % tag, 680.0, 300.0 + dy, 2, None, b""),
+        ("%s_Title" % tag, -260.0, -99.15, 0, "%s TITLE" % tag, b""),
+        ("%s_Name" % tag, -347.5, 5.4, 0, "%s NAME" % tag, b"")]
+    nodes = page("HS", 0.0) + page("COOP", 8.0)
+    data = _radium(_framed_scene(nodes, root_kids=2,
+                                 rect=(-322.5, -40.0, 322.5, 40.0)))
+    lay = scene_layout.parse_scene_layout(data, [_fake_image(48)], [])
+    assert lay is not None
+    assert lay["groups"] == ["HS_Frame", "COOP_Frame"]
+    # the composite still draws one of them, exactly as before
+    assert sorted(t["text"] for t in scene_render._visible(lay["texts"], 0)) \
+        == ["HS NAME", "HS TITLE"]
+    # ...and the pruned screen is fully reachable by name
+    assert sorted(t["text"] for t in scene_render._in_group(lay["texts"], 1)) \
+        == ["COOP NAME", "COOP TITLE"]
+    assert "COOP_Frame" in scene_render.describe(lay, 0, 1)
+
+
+def test_states_are_stepped_not_composited():
+    """Alternative states are kept and drawn ONE AT A TIME.
+
+    They used to be discarded and merely counted, so a scene that redraws the
+    same spot — a page carousel, a mode's instruction screens — had nothing to
+    step through and the caption just said some content wasn't drawn (David:
+    "how can i see the different states by themselves? there is no control for
+    that").  Anything with no slot belongs to every state."""
+    els = [{"name": "bg"},                                  # no slot: always
+           {"name": "p0", "slot": 0, "state": 0},
+           {"name": "p1", "slot": 0, "state": 1},
+           {"name": "p2", "slot": 0, "state": 2},
+           {"name": "q0", "slot": 1, "state": 0},           # shallower slot
+           {"name": "q1", "slot": 1, "state": 1}]
+    seen = [sorted(e["name"] for e in scene_render._visible(els, k))
+            for k in range(3)]
+    assert seen == [["bg", "p0", "q0"],
+                    ["bg", "p1", "q1"],
+                    # slot 1 has run out, so it holds its LAST state rather
+                    # than vanishing and blanking part of the picture
+                    ["bg", "p2", "q1"]]
 
 
 def test_parse_sprite_scene_needs_no_keyframe():
@@ -306,11 +437,35 @@ def test_parse_counts_what_is_missing_rather_than_just_flagging_it():
     "partial" was noise on 94% of them; the caption states the numbers."""
     lines = [("Line1", 2.0, 264.0, "ON STAGE"),
              ("Line2", 2.0, -400.0, "OFF STAGE")]
+    atlas = _fake_image(48)
     lay = scene_layout.parse_scene_layout(
-        _radium(_text_scene(lines)), [_fake_image(48)], [])
+        _radium(_text_scene(lines)), [atlas], [_font_table("F", atlas, 40)])
     assert lay is not None and lay["partial"] is True
     assert lay["offstage"] == 1 and lay["unplaced"] == 0
     assert "1 element sits off the stage" in scene_render.describe(lay)
+
+
+def test_unplaced_counts_images_and_cannot_exceed_the_art_present():
+    """"N more images can't be placed" has to MEAN images.
+
+    It used to count INSTANCES with no image triple, which reported 43 on
+    JAWS' 30ec1fad — a scene holding nine pieces of art. Those 43 were Text
+    nodes (the child a text instance hangs its string on) falling through to
+    the sprite branch, so the figure was not merely wrong, it was impossible.
+    Counting the scene's own art that nothing draws is bounded by the art it
+    has, and it went quiet: 41 of 50 sampled scenes on both JAWS and TMNT now
+    report zero."""
+    drawn, spare = _fake_image(60, 40, 20), _fake_image(120, 40, 20)
+    head = _image_head([(60, 2), (120, 4)], head_len=256)
+    tail = _sprite_scene([])
+    tail += _s_instance("Art", 10.0, 20.0, image_ref=_image_ref(40, 20, 2))
+    lay = scene_layout.parse_scene_layout(head + tail, [drawn, spare], [])
+    assert lay is not None
+    assert [s["image_off"] for s in lay["sprites"]] == [60]
+    # exactly one piece of art goes undrawn, and that is the number reported
+    assert lay["unplaced"] == 1
+    assert "1 more image in this scene can't be placed" \
+        in scene_render.describe(lay)
 
 
 def test_parse_resolves_which_image_each_instance_draws():
@@ -695,9 +850,11 @@ def test_parse_keeps_one_of_several_overlapping_animations():
                             image_ref=_image_ref(1360, 768, h))
     lay = scene_layout.parse_scene_layout(head + tail, imgs, [])
     assert lay is not None
-    assert len(lay["sprites"]) == 1, "one animation should survive"
-    assert lay["alternates"] == 1
-    assert "alternative states" in scene_render.describe(lay)
+    # one is DRAWN per state; the other is kept as the next state, not binned
+    assert len(scene_render._visible(lay["sprites"], 0)) == 1
+    assert len(scene_render._visible(lay["sprites"], 1)) == 1
+    assert lay["alternates"] == 1 and lay["states"] == 2
+    assert "one at a time" in scene_render.describe(lay)
 
 
 def test_parse_collapses_repeated_pages_but_keeps_distinct_rows():
@@ -712,7 +869,11 @@ def test_parse_collapses_repeated_pages_but_keeps_distinct_rows():
         tail += _s_instance("page%d" % i, x, y,
                             image_ref=_image_ref(944, 580, 2))
     lay = scene_layout.parse_scene_layout(head + tail, imgs, [])
-    assert len(lay["sprites"]) == 1 and lay["alternates"] == 2
+    assert len(scene_render._visible(lay["sprites"], 0)) == 1
+    assert lay["alternates"] == 2 and lay["states"] == 3
+    # each page is reachable, and they are the three distinct positions
+    assert sorted(round(scene_render._visible(lay["sprites"], k)[0]["y"], 1)
+                  for k in range(3)) == [522.0, 529.0, 538.3]
 
     # rows: same string, small boxes stacked 39px apart -> all kept
     rows = [("Row%d" % i, 136.0, 134.4 + 39 * i, "ABCDEFGHIJ") for i in range(3)]
@@ -720,6 +881,7 @@ def test_parse_collapses_repeated_pages_but_keeps_distinct_rows():
         _radium(_text_scene(rows, rect=(25.0, 15.6, 238.0, 61.0))),
         [_fake_image(48)], [])
     assert len(lay2["texts"]) == 3 and lay2["alternates"] == 0
+    assert lay2["states"] == 1               # nothing to step through
 
 
 def test_parse_refines_origin_per_element_for_mixed_scenes():
@@ -810,7 +972,10 @@ def test_describe_is_honest_about_animation():
     msg = scene_render.describe(lay)
     assert "1 image" in msg and "2 text lines" in msg
     assert "1360x768" in msg
-    assert "Animation isn't shown" in msg
+    # A still picture must not imply there is animation being withheld — the
+    # old wording said "Animation isn't shown" on every static scene, which
+    # read as a missing feature rather than a scene that simply doesn't move.
+    assert "Still picture" in msg and "nimation" not in msg
     assert scene_render.describe(None) == "No preview for this scene."
 
 
@@ -864,9 +1029,12 @@ def test_parse_drops_a_repeated_page_with_its_whole_subtree():
                                  rect=(-322.5, -40.0, 322.5, 40.0)))
     lay = scene_layout.parse_scene_layout(data, [_fake_image(48)], [])
     assert lay is not None
-    got = sorted(t["text"] for t in lay["texts"])
+    got = sorted(t["text"] for t in scene_render._visible(lay["texts"], 0))
     assert got == ["HS NAME", "HS TITLE"], "the repeat should go as one unit"
-    assert lay["alternates"] == 2
+    assert lay["alternates"] == 2 and lay["states"] == 2
+    # ...and the co-op page is the SECOND state, whole, not debris
+    assert sorted(t["text"] for t in scene_render._visible(lay["texts"], 1)) \
+        == ["COOP NAME", "COOP TITLE"]
 
 
 def test_parse_group_node_does_not_borrow_the_scenes_only_image():

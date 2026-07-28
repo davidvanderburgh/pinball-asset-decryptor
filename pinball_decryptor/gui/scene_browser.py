@@ -38,6 +38,15 @@ _MAX_PREVIEW_FRAMES = 60
 # looking closely at a fast animation (and because a frame's HOLD time is still
 # undecoded, so the file rate can run a sequence faster than the machine does).
 _FPS_FROM_FILE = "Scene rate"
+
+# The Screen picker's "don't isolate anything" entry: the scene as the layout
+# composites it, which is what the preview has always drawn.
+_ALL_SCREENS = "All screens"
+
+# Longest caption line kept on screen; the rest lives on its "?" button.  The
+# caption used to wrap to one, two or three lines depending on what a scene had
+# to admit, so the pane jumped every time you stepped to another screen.
+_CAPTION_CHARS = 96
 _FPS_CHOICES = (_FPS_FROM_FILE, "60 fps", "30 fps", "24 fps", "20 fps",
                 "15 fps", "12 fps", "8 fps", "4 fps", "2 fps")
 
@@ -162,9 +171,25 @@ def collect_scenes(assets_dir):
     except Exception:
         pass
 
+    # The size a scene draws a font at, straight from its layout.  One atlas is
+    # commonly baked at several sizes, so the manifest's card-wide maximum is
+    # the size of the BIGGEST scene using that typeface, not this one's — it
+    # labelled JAWS' "MODE TITLE / LINE 0..8" screen 140px when it draws at 45.
+    scene_font_px = {}
+    try:
+        from ..plugins.stern import scene_render as _sr
+        for card, lay in (_sr.load_layouts(assets_dir) or {}).items():
+            d = card.replace("\\", "/").rsplit("/", 1)[0]
+            for t in (lay or {}).get("texts") or ():
+                if t.get("font") and t.get("font_px"):
+                    scene_font_px[(d, t["font"])] = int(t["font_px"])
+    except Exception:
+        pass
+
     for d, sc in scenes.items():
         sc["images"].sort()
-        sc["fonts"] = {t: (n, int(font_px.get(t, 0)))
+        sc["fonts"] = {t: (n, int(scene_font_px.get((d, t),
+                                                    font_px.get(t, 0))))
                        for t, n in sc["fonts"].items()}
         base = d.rstrip("/").rsplit("/", 1)[-1][:8] or d
         sc["label"] = ("%s · %s" % (sc["hint"], base)) if sc["hint"] else base
@@ -319,8 +344,55 @@ class SceneBrowserWindow:
                                       foreground=th["gray"], wraplength=200,
                                       justify=tk.LEFT)
         self._rebuild_lbl.pack(anchor=tk.W, pady=(2, 0))
-        frow = ttk.Frame(pside)
-        frow.pack(anchor=tk.W, pady=(8, 0))
+        # A mode's radium holds every SCREEN that mode can show, and the
+        # machine displays one at a time under game control.  Drawn together
+        # they are an unreadable pile, and the scene names them itself, so
+        # this offers them by name.  David, on a scene holding nine: "seeing
+        # the preview like this is not useful. how can i see the different
+        # states by themselves? there is no control for that."
+        self._screen_row = ttk.Frame(pside)
+        self._screen_shown = False
+        self._fps_shown = False
+        ttk.Label(self._screen_row, text="Screen", font=(self._sans, 8),
+                  width=6).pack(side=tk.LEFT)
+        self._screen_var = tk.StringVar(value=_ALL_SCREENS)
+        # Narrow enough that the label, the box, ◀ ▶ and the "?" all fit the
+        # side column — at 20 chars the "?" was pushed off the pane entirely.
+        self._screen_box = ttk.Combobox(
+            self._screen_row, textvariable=self._screen_var, width=12,
+            state="readonly", values=[_ALL_SCREENS])
+        self._screen_box.pack(side=tk.LEFT, padx=(4, 0))
+        self._screen_box.bind("<<ComboboxSelected>>",
+                              lambda _e: self._on_screen_pick())
+        # Stepping beats re-opening a drop-down when you want to walk a scene's
+        # screens one by one (David).  Wraps at both ends, and "All screens"
+        # is the entry before the first, so ◀ from the first screen returns to
+        # the composite.
+        # Borderless canvas triangles, the audio preview's transport
+        # convention (David) — not glyphs boxed in square buttons.
+        _sb = dict(width=22, height=22, highlightthickness=0, bd=0,
+                   cursor="hand2", takefocus=0)
+        self._prev_btn = tk.Canvas(self._screen_row, **_sb)
+        self._prev_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._prev_btn.bind("<Button-1>", lambda _e: self._step_screen(-1))
+        self._next_btn = tk.Canvas(self._screen_row, **_sb)
+        self._next_btn.pack(side=tk.LEFT)
+        self._next_btn.bind("<Button-1>", lambda _e: self._step_screen(1))
+        self._draw_step_icons()
+        self._info(
+            self._screen_row,
+            "Which of the scene's screens to show.\n\n"
+            "One scene file holds every screen a mode can put up — its intro, "
+            "each award, the phase and victory screens — and the machine shows "
+            "one at a time as the game runs. Drawn together they overlap into "
+            "a pile, so pick one to see it by itself. The names are the "
+            "scene's own.\n\n"
+            "◀ and ▶ step through them without opening the list.")
+
+        # Playback only makes sense for a scene that actually moves; showing a
+        # Speed box on a still picture implied there was animation to play
+        # (David).  _set_preview_controls packs this row only when there is.
+        self._fps_row = frow = ttk.Frame(pside)
         ttk.Label(frow, text="Speed", font=(self._sans, 8), width=6).pack(
             side=tk.LEFT)
         self._fps_var = tk.StringVar(value=_FPS_FROM_FILE)
@@ -330,10 +402,19 @@ class SceneBrowserWindow:
         self._fps_box.pack(side=tk.LEFT, padx=(4, 0))
         self._fps_box.bind("<<ComboboxSelected>>",
                            lambda _e: self._restart_animation())
+        self._info(
+            frow,
+            "How fast an animated scene plays.\n\n"
+            "\"Scene rate\" is the frame rate written in the scene itself — "
+            "it really is per scene (12, 24, 30 and 60 all appear on one "
+            "card). Pick a fixed rate to slow a fast sequence down for a "
+            "closer look, or if a scene's own rate looks wrong: how long each "
+            "individual frame is held is still undecoded, so a sequence with "
+            "held frames plays faster here than on the machine.")
         # Peter: "would it be possible to do some different backgrounds? The
         # black does work most, but if you want to check the black border stuff
         # something different may help."
-        bgrow = ttk.Frame(pside)
+        self._bg_row = bgrow = ttk.Frame(pside)
         bgrow.pack(anchor=tk.W, pady=(4, 0))
         ttk.Label(bgrow, text="Behind", font=(self._sans, 8), width=6).pack(
             side=tk.LEFT)
@@ -344,25 +425,14 @@ class SceneBrowserWindow:
         self._bg_box.pack(side=tk.LEFT, padx=(4, 0))
         self._bg_box.bind("<<ComboboxSelected>>",
                           lambda _e: self._rerender())
-        _Tooltip(
-            self._bg_box,
+        self._info(
+            bgrow,
             "What the scene is laid over.\n\n"
             "The machine draws on BLACK, so that is the true picture — but a "
             "black outline on a black frame is as invisible here as it is "
             "there. Pick a light backdrop (or the checkerboard) to see the "
             "black borders and the edges of the art; nothing about the scene "
-            "itself changes, only what shows through behind it.",
-            lambda: getattr(self.app, "_current_theme", "light"))
-        _Tooltip(
-            self._fps_box,
-            "How fast an animated scene plays.\n\n"
-            "\"Scene rate\" is the frame rate written in the scene itself — "
-            "it really is per scene (12, 24, 30 and 60 all appear on one "
-            "card). Pick a fixed rate to slow a fast sequence down for a "
-            "closer look, or if a scene's own rate looks wrong: how long each "
-            "individual frame is held is still undecoded, so a sequence with "
-            "held frames plays faster here than on the machine.",
-            lambda: getattr(self.app, "_current_theme", "light"))
+            "itself changes, only what shows through behind it.")
         _Tooltip(
             self._rebuild_btn,
             "Re-read the scene layouts from the card image on the Extract "
@@ -373,10 +443,22 @@ class SceneBrowserWindow:
             lambda: getattr(self.app, "_current_theme", "light"))
         # Full width under the canvas: the caption says what is and isn't in
         # the frame, and it doesn't fit beside a 384px preview.
+        # ONE line, never wrapped, with the full caption behind the "?".  It
+        # used to wrap to one, two or three lines depending on how much a scene
+        # had to admit, so the whole pane jumped every time you stepped to
+        # another screen — "the area gets resized between different screens and
+        # it is jarring" (David).  A fixed-height row keeps the summary in
+        # sight without moving anything under it.
+        caprow = ttk.Frame(right)
+        caprow.pack(fill=tk.X, anchor=tk.W, pady=(3, 0))
         self._preview_lbl = ttk.Label(
-            right, text="", font=(self._sans, 8), foreground=th["gray"],
-            wraplength=610, justify=tk.LEFT)
-        self._preview_lbl.pack(anchor=tk.W, pady=(3, 0))
+            caprow, text="", font=(self._sans, 8), foreground=th["gray"],
+            justify=tk.LEFT, anchor=tk.W)
+        self._preview_lbl.pack(side=tk.LEFT)
+        # Directly after the text, not floated to the far right, or it reads
+        # as belonging to nothing.  _set_caption caps the visible line so this
+        # button cannot be pushed out of view.
+        self._caption_tip = self._info(caprow, "", side=tk.LEFT, padx=(6, 0))
         _Tooltip(self._preview,
                  "Composited from THIS project folder — replace an image or "
                  "import a font and the preview redraws with your version.\n\n"
@@ -533,7 +615,7 @@ class SceneBrowserWindow:
             self._preview_token += 1          # abandon any in-flight render
             self._preview.delete("all")
             self._preview_img = self._preview_full = None
-            self._preview_lbl.configure(text="")
+            self._set_caption("")
             self._save_btn.configure(state="disabled")
             return
         sc = self._scenes[sel[0]]
@@ -607,38 +689,48 @@ class SceneBrowserWindow:
         card, layout = scene_render.layout_for_scene_dir(
             self._layouts, scene_dir)
         if layout is None:
-            self._preview_lbl.configure(
-                text="No preview for this scene."
-                     + ("" if self._layouts else
-                        " This project was extracted before previews existed"
-                        " — re-extract with Images enabled to get them."))
+            self._set_caption(
+                "No preview for this scene."
+                + ("" if self._layouts else
+                   " This project was extracted before previews existed"
+                   " — re-extract with Images enabled to get them."))
             # An empty canvas is near-black and so is a rendered night scene:
             # say which this is ON the canvas, or "no preview" reads as "this
             # scene is black" (David).
             self._canvas_message("no preview for this scene")
             return
-        self._preview_lbl.configure(text="Drawing…")
+        self._set_caption("Drawing…")
         self._canvas_message("drawing…")
         # Read the Tk vars HERE: the render runs on a worker thread and Tk is
         # not safe to touch from one.
         bg = self._background_name()
         colors = self._pending_colors(card)
+        # A different scene starts at its first state; re-rendering the SAME
+        # one (a state pick, a backdrop change) keeps where the user is.
+        if scene_dir != getattr(self, "_preview_dir", None):
+            try:
+                self._screen_var.set(_ALL_SCREENS)
+            except tk.TclError:
+                pass
+        self._preview_dir = scene_dir
+        group = self._screen_index(layout)
 
         def work():
             try:
                 if self._fonts is None:
                     from ..plugins.stern import fontrender as fr
                     self._fonts = fr.load_fonts(self.assets_dir)
-                n = scene_render.frame_count(layout)
+                n = scene_render.frame_count(layout, 0, group)
                 frames = [scene_render.render_layout(
                     self.assets_dir, layout, fonts=self._fonts, frame=i,
-                    background=bg, colors=colors)
+                    background=bg, colors=colors, group=group)
                     for i in range(min(n, _MAX_PREVIEW_FRAMES))]
             except Exception:
                 frames = []
             try:
                 self.app._tk_root().after(
-                    0, lambda: self._show_preview(token, frames, layout))
+                    0, lambda: self._show_preview(token, frames, layout,
+                                                  group))
             except (tk.TclError, RuntimeError):
                 # The window (or the whole app) closed while this render was
                 # in flight — there is nothing left to draw on, and raising
@@ -748,7 +840,147 @@ class SceneBrowserWindow:
         except tk.TclError:
             pass
 
-    def _show_preview(self, token, frames, layout):
+    def _set_caption(self, text):
+        """Put the caption's FIRST SENTENCE on screen and the whole of it
+        behind the "?".
+
+        The caption admits whatever a scene couldn't decode, so it ran to one,
+        two or three wrapped lines depending on the scene — and the pane under
+        it jumped every time you stepped to another screen.  One unwrapped line
+        is a fixed height; the detail is a hover away."""
+        text = text or ""
+        self._caption_tip.text = text
+        head = text.split(". ")
+        short = head[0] + ("." if len(head) > 1 else "")
+        # Capped so the row can never grow wide enough to push the "?" out of
+        # the window (nor the pane wider) — the full text is on the button.
+        if len(short) > _CAPTION_CHARS:
+            short = short[:_CAPTION_CHARS - 1].rstrip() + "…"
+        try:
+            self._preview_lbl.configure(text=short)
+        except tk.TclError:
+            pass
+
+    def _info(self, parent, text, side=tk.LEFT, padx=(6, 0)):
+        """The app's round blue ⓘ badge, with its tooltip opening BESIDE it.
+
+        A tooltip bound to a combobox lands exactly where the drop-down opens,
+        so hovering to read it covered the control you were about to click and
+        the picker was unusable (David).  The explanation hangs off its own
+        badge instead — the same one the Extract tab uses, not a square glyph
+        button — and the tip is side-placed so it never covers the row.
+
+        Returns the :class:`_Tooltip` so a caller can keep its text current."""
+        mk = getattr(self.app, "_make_round_icon", None)
+        if mk is None:                     # not the main window (a bare test)
+            btn = ttk.Label(parent, text="i", width=2)
+            btn.pack(side=side, padx=padx)
+            tip = _Tooltip(btn, text,
+                           lambda: getattr(self.app, "_current_theme",
+                                           "light"), place="side")
+            return tip
+        badge = mk(parent, "i", self.app._INFO_BADGE_FILL,
+                   self.app._INFO_BADGE_HOVER, text,
+                   lambda: None, size=18,
+                   font=("Georgia", 10, "bold italic"),
+                   tooltip_place="side")
+        # Clicking shows it too: on a short hover (or a touch screen) the badge
+        # would otherwise do nothing at all, which reads as broken.
+        badge.bind("<Button-1>", lambda _e: badge.icon_tip.show(), add="+")
+        badge.pack(side=side, padx=padx)
+        return badge.icon_tip
+
+    def _screen_index(self, layout):
+        """Which named screen to draw, or ``None`` for the composite."""
+        names = scene_render.group_names(layout)
+        try:
+            want = self._screen_var.get()
+        except tk.TclError:
+            return None
+        if not want or want == _ALL_SCREENS or want not in names:
+            return None
+        return names.index(want)
+
+    def _set_preview_controls(self, layout, group, animated):
+        """Show only the controls this scene can actually use.
+
+        A Speed box on a still picture implied there was animation being
+        withheld, and a scene holding several screens had no way to show them
+        one at a time (David).  Both rows are packed on demand."""
+        names = scene_render.group_names(layout)
+        many = len(names) > 1
+        self._draw_step_icons()
+        # Tracked explicitly rather than via winfo_ismapped(): a widget in an
+        # unmapped window reports 0 forever, so that would re-pack every time.
+        try:
+            if many:
+                self._screen_box.configure(values=[_ALL_SCREENS] + list(names))
+                self._screen_var.set(_ALL_SCREENS if group is None
+                                     else names[group])
+            if many != self._screen_shown:
+                self._screen_shown = many
+                if many:
+                    # above the backdrop picker: which screen you are looking
+                    # at matters more than what is behind it
+                    self._screen_row.pack(anchor=tk.W, pady=(8, 0),
+                                          before=self._bg_row)
+                else:
+                    self._screen_row.pack_forget()
+            if bool(animated) != self._fps_shown:
+                self._fps_shown = bool(animated)
+                if self._fps_shown:
+                    self._fps_row.pack(anchor=tk.W, pady=(8, 0),
+                                       before=self._bg_row)
+                else:
+                    self._fps_row.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _draw_step_icons(self):
+        """Paint the ◀ ▶ triangles in the theme foreground.
+
+        Redrawn on every render so a theme switch while this window is open
+        repaints them; they are canvases, not themed ttk widgets."""
+        draw = getattr(self.app, "_draw_audio_icon", None)
+        if draw is None:
+            return
+        for canvas, kind in ((self._prev_btn, "prev"), (self._next_btn,
+                                                        "next")):
+            try:
+                canvas.configure(
+                    bg=THEMES[getattr(self.app, "_current_theme",
+                                      "light")]["bg"])
+                draw(canvas, kind)
+            except (tk.TclError, KeyError):
+                pass
+
+    def _step_screen(self, delta):
+        """Move to the next/previous screen and redraw.
+
+        Walking a nine-screen scene by re-opening the drop-down each time is
+        the slow way round (David), so ◀/▶ step the same list.  "All screens"
+        is entry 0, and the ends wrap, so you can keep pressing one button."""
+        layout = self._current_layout()
+        names = [_ALL_SCREENS] + list(scene_render.group_names(layout))
+        if len(names) < 2:
+            return
+        try:
+            cur = names.index(self._screen_var.get())
+        except (ValueError, tk.TclError):
+            cur = 0
+        try:
+            self._screen_var.set(names[(cur + delta) % len(names)])
+        except tk.TclError:
+            return
+        self._on_screen_pick()
+
+    def _on_screen_pick(self):
+        """A different screen was chosen — re-render, keeping the selection."""
+        sel = self._tree.selection()
+        if sel:
+            self._render_preview(sel[0])
+
+    def _show_preview(self, token, frames, layout, group=None):
         """Main thread: put a finished render on the canvas (ignoring one that
         a newer selection has already superseded).  Several frames = an
         animation, which then plays."""
@@ -760,11 +992,12 @@ class SceneBrowserWindow:
         except tk.TclError:
             return
         frames = [f for f in frames or () if f is not None]
-        note = scene_render.describe(layout)
+        note = scene_render.describe(layout, 0, group)
+        self._set_preview_controls(layout, group, len(frames) > 1)
         if not frames:
-            self._preview_lbl.configure(
-                text="This scene's layout is known but it could not be drawn "
-                     "(a missing image or font in this project folder).")
+            self._set_caption(
+                "This scene's layout is known but it could not be drawn "
+                "(a missing image or font in this project folder).")
             self._canvas_message("nothing could be drawn")
             return
         self._preview_full = frames[0]
@@ -779,7 +1012,7 @@ class SceneBrowserWindow:
                 shown.thumbnail((cw, chh), Image.LANCZOS)
                 self._frame_imgs.append(ImageTk.PhotoImage(shown))
         except Exception:
-            self._preview_lbl.configure(text=note)
+            self._set_caption(note)
             return
         self._preview_img = self._frame_imgs[0]
         self._preview.delete("all")
@@ -787,11 +1020,11 @@ class SceneBrowserWindow:
             cw // 2, chh // 2, image=self._preview_img)
         # describe() counts every frame the layout has; say so when the render
         # cap means fewer are actually on screen, or the caption over-promises.
-        n_all = scene_render.frame_count(layout)
+        n_all = scene_render.frame_count(layout, 0, group)
         if len(frames) > 1 and n_all > len(frames):
             note += (" Showing the first %d of them — the rest are rendered "
                      "only on Save preview…" % len(frames))
-        self._preview_lbl.configure(text=note)
+        self._set_caption(note)
         self._save_btn.configure(state="normal")
         if len(self._frame_imgs) > 1:
             self._play(token, 0, self._effective_fps(layout))
@@ -879,7 +1112,7 @@ class SceneBrowserWindow:
         except (OSError, ValueError) as e:
             messagebox.showerror("Save failed", str(e), parent=self.win)
             return
-        self._preview_lbl.configure(text="Saved %s" % os.path.basename(path))
+        self._set_caption("Saved %s" % os.path.basename(path))
 
     # -- rebuild previews -------------------------------------------------
 
@@ -1118,9 +1351,9 @@ class SceneBrowserWindow:
             self.app._start_change_scan("image")
         except Exception:
             pass
-        self._preview_lbl.configure(
-            text="Blanked %d letter(s) of \"%s\" — %s. Build on the Write tab "
-                 "to put it on the card." % (n, name, where))
+        self._set_caption(
+            "Blanked %d letter(s) of \"%s\" — %s. Build on the Write tab "
+            "to put it on the card." % (n, name, where))
 
     def _refresh_font_studio(self):
         """Keep an open Fonts window in step with a blank done from here."""

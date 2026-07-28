@@ -224,6 +224,80 @@ def test_render_text_rotated_slot_upright(tmp_path):
     assert arr[0].max() == 0
 
 
+def _supersampled_extract(tmp_path, sizes=((6, 4, 6, 6),)):
+    """A font whose ATLAS CELL is 12x18 while its metrics box is much smaller.
+
+    *sizes* is ``(size_id, lw, lh, adv)`` per table — several entries put one
+    atlas at several sizes, which is what JAWS does with ``GameFont_Primary``
+    (eight sizes over one 512x512 atlas) and TMNT with ``Stern_Impact_Outline``.
+    """
+    tex = tmp_path / "images" / "scene_textures"
+    cell = np.zeros((18, 12, 4), np.uint8)
+    cell[:] = RED
+    _png(str(tex / "glyphs" / "radimg_Big_16x16_0000000f" / "U+0041_A.png"),
+         cell)
+    _png(str(tex / "radimg_Big_16x16_0000000f.png"),
+         np.zeros((32, 32, 4), np.uint8))
+    (tex / "radium_images.txt").write_text(
+        "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
+        "scene_textures/radimg_Big_16x16_0000000f.png\t/g/s/scene.radium"
+        "\t100\t1024\t32\t32\t5\n", encoding="utf-8")
+    rows = []
+    for size_id, lw, lh, adv in sizes:
+        rows.append("\t".join((
+            "scene_textures/glyphs/radimg_Big_16x16_0000000f/U+0041_A.png",
+            "scene_textures/radimg_Big_16x16_0000000f.png", "0x0041",
+            "0", "0", "12", "18", "BigFont", "0", str(lw), str(lh), "0",
+            str(lh), str(adv), "tbl", "", str(size_id))))
+    (tex / "glyph_images.txt").write_text("\n".join(rows) + "\n",
+                                          encoding="utf-8")
+    return tmp_path
+
+
+def test_glyph_ink_is_scaled_to_its_metric_box(tmp_path):
+    """The atlas cell is the font's MASTER art, not the size it is drawn at.
+
+    JAWS bakes one typeface over a shared high-resolution atlas and each table
+    scales it: '0' is a single 82x94 cell drawn at 28x31 by one table and 54x64
+    by another.  Pasting the cell at its native size drew every JAWS text line
+    about 3x too big — glyphs overlapped their neighbours and lines ran off the
+    stage while the advances stayed right.  TMNT's cells already equal their
+    metrics box exactly, which is why this went unnoticed."""
+    _supersampled_extract(tmp_path)
+    fo = _font(tmp_path)
+    img, _ = fr.render_text(fo, "A")
+    # ink 4 wide at bearing 0, advance 6 -> canvas is the advance, not the
+    # 12px cell; height is ascent+descent, which the cell would overflow.
+    assert img.size == (6, 6)
+    arr = np.asarray(img)
+    assert arr[..., 3].max() == 255          # the glyph still drew
+    assert arr[0, 4:, 3].max() == 0          # and stayed inside its box
+
+
+def test_one_atlas_drawn_at_two_sizes_keeps_both(tmp_path):
+    """One atlas, two sizes: both sets of metrics have to survive the extract.
+
+    The manifest used to be deduped per (font, glyph), so the first table to
+    claim a typeface won and every other size of it was dropped — card-wide.
+    Every scene then drew its text at that one size: JAWS' "MODE TITLE /
+    LINE 0..8" screen wants 45px and rendered at the 150px a different scene
+    had already claimed."""
+    _supersampled_extract(tmp_path, sizes=((6, 4, 6, 6), (18, 12, 18, 14)))
+    fonts = fr.load_fonts(str(tmp_path))
+    # still ONE entry per font — the sizes share an atlas and its slices, so
+    # the Fonts window has one thing to show and one thing to import into
+    assert [f["key"] for f in fonts] == ["tbl"]
+    assert sorted(fonts[0]["sizes"]) == [6, 18]
+    small = fr.font_at_size(fonts[0], 6)
+    big = fr.font_at_size(fonts[0], 18)
+    assert (small["px"], big["px"]) == (6, 18)
+    assert fr.render_text(small, "A")[0].size == (6, 6)
+    assert fr.render_text(big, "A")[0].size == (14, 18)
+    # an unknown size (a project extracted before sizes were recorded) falls
+    # back to the representative rather than failing to draw
+    assert fr.font_at_size(fonts[0], 99) is fonts[0]
+
+
 # ---- fit_size ----------------------------------------------------------------
 
 def test_fit_size_core_chars_only():

@@ -44,6 +44,8 @@ Design rules learned the hard way (see the handoff's gotchas):
 import bisect
 import struct
 
+from . import radium as _radium
+
 # A property track's value quad is [f32 1.0][f32 0][f32 x][f32 y]; anchoring
 # on the byte-exact 1.0/0.0 pair is what makes the position readable without
 # knowing how many flag words precede it.
@@ -290,8 +292,13 @@ def _drop_exact_duplicates(texts, sprites):
         for i, el in enumerate(els):
             last[key(el)] = i
         return [el for i, el in enumerate(els) if last[key(el)] == i]
+    # The FONT is deliberately not part of the key: the outline instance and
+    # the fill instance name DIFFERENT fonts (an ``..._Outline`` companion and
+    # the body face), so including it stopped the pair collapsing the moment
+    # the per-line font was decoded, and every John Wick title drew twice in
+    # two faces on top of itself.  Same string at the same spot IS the pair.
     return (dedupe(texts, lambda t: (t["text"], round(t["x"], 1),
-                                     round(t["y"], 1), t.get("font_atlas_off"))),
+                                     round(t["y"], 1))),
             dedupe(sprites, lambda s: (tuple(s.get("frames") or
                                              (s.get("image_off"),)),
                                        round(s["x"], 1), round(s["y"], 1))))
@@ -332,7 +339,38 @@ def _iou(a, b):
     return inter / union if union > 0 else 0.0
 
 
-def _drop_overlapping_states(texts, sprites, dims, thresh=0.3):
+class _Slots:
+    """Hands out slot ids and tracks how deep each slot has grown.
+
+    A "slot" is one place on the stage that holds several alternative STATES
+    the machine shows one at a time.  They used to be discarded and merely
+    counted, which left the preview with no way to show them and no control to
+    step through them (David: "seeing the preview like this is not useful").
+    Tagging them instead keeps every state in the layout, so the Scenes window
+    can draw one at a time."""
+
+    def __init__(self):
+        self.depth = {}
+
+    def new(self):
+        sid = len(self.depth)
+        self.depth[sid] = 1
+        return sid
+
+    def add(self, sid):
+        """Index of the next state in *sid*."""
+        n = self.depth[sid]
+        self.depth[sid] = n + 1
+        return n
+
+
+def _tag(el, sid, state):
+    el["slot"] = sid
+    el["state"] = state
+    return el
+
+
+def _drop_overlapping_states(texts, sprites, dims, slots=None, thresh=0.3):
     """Where the SAME content is drawn several times on top of itself, keep one.
 
     Those repeats are alternative STATES the machine shows one at a time, not
@@ -347,7 +385,13 @@ def _drop_overlapping_states(texts, sprites, dims, thresh=0.3):
 
     Only *heavily overlapping* repeats collapse, so genuinely repeated layout
     survives: the two columns of player initials and the separate score rows
-    barely overlap and are all kept.  Returns ``(texts, sprites, dropped)``."""
+    barely overlap and are all kept.
+
+    Returns ``(texts, sprites, alt_texts, alt_sprites)``.  The alternatives are
+    NOT thrown away — each is tagged with the slot it belongs to and its index
+    within it, so the preview can step through them."""
+    slots = slots if slots is not None else _Slots()
+
     def prune(els, key, box_of):
         groups = {}
         for el in els:
@@ -356,32 +400,38 @@ def _drop_overlapping_states(texts, sprites, dims, thresh=0.3):
         for members in groups.values():
             if len(members) < 2:
                 continue
-            keep = []
+            keep = []                     # [(element, slot id)]
             for el in members:
                 box = box_of(el)
-                if any(_overlap_fraction(box, box_of(k)) >= thresh
-                       for k in keep):
-                    drop.add(id(el))
+                hit = next((k for k in keep
+                            if _overlap_fraction(box, box_of(k[0])) >= thresh),
+                           None)
+                if hit is None:
+                    keep.append((_tag(el, slots.new(), 0), el["slot"]))
                 else:
-                    keep.append(el)
-        return [el for el in els if id(el) not in drop], len(drop)
+                    _tag(el, hit[1], slots.add(hit[1]))
+                    drop.add(id(el))
+        return ([el for el in els if id(el) not in drop],
+                [el for el in els if id(el) in drop])
 
-    texts, n_t = prune(texts, lambda t: (t["text"], t.get("font_atlas_off")),
-                       _text_box)
+    # Same reason as _drop_exact_duplicates: an outline and its fill are the
+    # same string in two different faces, and grouping by font kept them apart.
+    texts, alt_t = prune(texts, lambda t: t["text"], _text_box)
     # Animations are compared to EACH OTHER regardless of content: Leonardo's
     # two takes are entirely different images, so grouping them by content would
     # never have caught them.  Static art still groups by content, since two
     # different pictures overlapping are usually a real composition.
     anims = [s for s in sprites if len(s.get("frames") or ()) > 1]
     statics = [s for s in sprites if len(s.get("frames") or ()) <= 1]
-    anims, n_a = prune(anims, lambda _s: "animation",
-                       lambda s: _sprite_box(s, dims))
-    statics, n_s = prune(
+    anims, alt_a = prune(anims, lambda _s: "animation",
+                         lambda s: _sprite_box(s, dims))
+    statics, alt_s = prune(
         statics, lambda s: tuple(s.get("frames") or (s.get("image_off"),)),
         lambda s: _sprite_box(s, dims))
     keep = {id(s) for s in anims} | {id(s) for s in statics}
-    sprites = [s for s in sprites if id(s) in keep]
-    return texts, sprites, n_t + n_a + n_s
+    alt = {id(s) for s in alt_a} | {id(s) for s in alt_s}
+    return (texts, [s for s in sprites if id(s) in keep], alt_t,
+            [s for s in sprites if id(s) in alt])
 
 
 def _subtree_roots(elements, parent_of):
@@ -404,8 +454,8 @@ def _subtree_roots(elements, parent_of):
     return out
 
 
-def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3,
-                               art_thresh=0.5):
+def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, slots=None,
+                               thresh=0.3, art_thresh=0.5):
     """Where two GROUPS sit on top of each other, keep one.
 
     The element-level rule in :func:`_drop_overlapping_states` only compares
@@ -430,7 +480,8 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3,
     so trespassing on it really does mean drawing over it, and that is what
     collapses the repeated "INFORMATION" placeholders of a template screen."""
     if not parent_of:
-        return texts, sprites, 0
+        return texts, sprites, [], []
+    slots = slots if slots is not None else _Slots()
     els = list(texts) + list(sprites)
     roots = _subtree_roots(els, parent_of)
     groups, order = {}, []
@@ -444,7 +495,7 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3,
     def box(el):
         return (_text_box(el) if "text" in el else _sprite_box(el, dims))
 
-    kept = []                         # (bounding box, holds text?)
+    kept = []                         # (bounding box, holds text?, slot id)
     drop = set()
     for r in order:
         members = groups[r]
@@ -454,18 +505,28 @@ def _drop_overlapping_subtrees(texts, sprites, parent_of, dims, thresh=0.3,
         bb = (min(b[0] for b in bs), min(b[1] for b in bs),
               max(b[2] for b in bs), max(b[3] for b in bs))
         texty = any("text" in el for el in members)
-        covered = any(
-            _overlap_fraction(bb, kb) >= thresh if (texty or ktexty)
-            else _iou(bb, kb) >= art_thresh
-            for kb, ktexty in kept)
-        if covered:
+        covers = next(
+            (sid for kb, ktexty, sid in kept
+             if (_overlap_fraction(bb, kb) >= thresh if (texty or ktexty)
+                 else _iou(bb, kb) >= art_thresh)), None)
+        if covers is not None:
+            # A whole page that repeats an earlier page: it is the next STATE
+            # of that page's slot, and every element in it goes together.
+            state = slots.add(covers)
+            for el in members:
+                _tag(el, covers, state)
             drop.update(id(el) for el in members)
         else:
-            kept.append((bb, texty))
+            sid = slots.new()
+            for el in members:
+                _tag(el, sid, 0)
+            kept.append((bb, texty, sid))
     if not drop:
-        return texts, sprites, 0
+        return texts, sprites, [], []
     return ([t for t in texts if id(t) not in drop],
-            [s for s in sprites if id(s) not in drop], len(drop))
+            [s for s in sprites if id(s) not in drop],
+            [t for t in texts if id(t) in drop],
+            [s for s in sprites if id(s) in drop])
 
 
 def _resolve_origin(texts, sprites, stage):
@@ -523,12 +584,72 @@ def _sprite_on_stage(x, y, stage):
     return -h < y < h and -w < x < 2 * w
 
 
+_FONT_REF_GAP = 12          # display string -> font name, see _font_name_after
+
+
+def _font_name_after(data, text_end):
+    """The FONT NAME a text keyframe draws with, or ``""``.
+
+    A second ``[u64 len][latin1]`` string sits ``_FONT_REF_GAP`` bytes after the
+    display string's data, and it names the font for THAT LINE.  This is the
+    per-line font reference; before it was decoded the parser picked one table
+    for the whole scene, which is wrong far more often than it looks — most
+    scenes hold several named fonts (57 of 60 sampled TMNT radiums, 42 of 60 on
+    JAWS).  JAWS' ``30ec1fad`` names ``Stern_SharpGrotesk_whiteWBlackOutline``
+    (42px) on every line while the scene-wide guess picked ``Stern_AmityJack``
+    (81px), which is why its instructions rendered huge and overlapping.
+
+    Present on roughly 90% of display strings (JAWS 90, TMNT 94, Godzilla 88,
+    Munsters 27), so the caller must keep the old scene-wide guess as the
+    fallback — TMNT's CLOCK screen carries no name here at all.
+
+    Note the keyframe's own ``[u8 2][24B pad]`` tail runs straight through this
+    string's length prefix, so it cannot be read by continuing that walk."""
+    j = text_end + _FONT_REF_GAP
+    try:
+        ln = struct.unpack_from("<Q", data, j)[0]
+    except struct.error:
+        return ""
+    if not (1 <= ln <= 64) or j + 8 + ln > len(data):
+        return ""
+    raw = data[j + 8:j + 8 + ln]
+    try:
+        name = raw.decode("latin-1")
+    except UnicodeDecodeError:
+        return ""
+    # Printable only: [u64 1][any byte] is common filler and matched constantly
+    # in a looser scan, which is what made this field look like it didn't
+    # generalize (a 1-char false positive hid the real name behind it).
+    return name if all(0x20 <= b < 0x7F for b in raw) else ""
+
+
+def _font_tables_by_name(tables):
+    """``{font name: (atlas offset, size)}`` for the scene's NAMED tables.
+
+    A name that covers more than one size in the same scene is dropped rather
+    than guessed, so the caller falls back — that is 0 of 386 named references
+    on JAWS and 2 of 128 on TMNT, i.e. a name resolves a size in practice."""
+    per = {}
+    for t in tables or ():
+        name = t.get("name")
+        if not name:
+            continue
+        offs = [g["atlas"]["data_off"] for g in t["glyphs"]
+                if g.get("atlas") is not None]
+        if offs:
+            per.setdefault(name, []).append((offs[0], _radium.table_size_px(t)))
+    return {n: v[0] for n, v in per.items()
+            if len({px for _o, px in v}) == 1}
+
+
 def _parse_keyframe(data, off):
     """One keyframe block -> ``(dict, end_offset)`` or ``None``.
 
     ``[HANDLE][u32 seq][u64 0][f32 rect x4][f32 rgba x4][u16 0][u32 align]
     [f32 spacing][u32][STR text][u8 2][24B pad]``  (validated byte-exactly on
     the CLOCK scene; the same block shape carries a sprite instance's link).
+    The display string is followed by the line's FONT NAME — see
+    :func:`_font_name_after`.
     """
     r = _R(data, off)
     try:
@@ -547,12 +668,14 @@ def _parse_keyframe(data, off):
         spacing = r.f32()
         r.u32()
         text = r.string(1024)
+        text_end = r.i
         r.u8()
         r.skip(24)
     except (ValueError, UnicodeDecodeError):
         return None
     return ({"seq": seq, "rect": list(rect), "rgba": list(rgba),
-             "align": align, "spacing": spacing, "text": text}, r.i)
+             "align": align, "spacing": spacing, "text": text,
+             "font_name": _font_name_after(data, text_end)}, r.i)
 
 
 def _find_stage(data, start):
@@ -931,19 +1054,28 @@ def _instance_image(data, seg, seg_end, refs):
     return None
 
 
-def _font_atlas_off(tables):
-    """The atlas offset identifying the scene's text font.
+def _font_table(tables):
+    """``(atlas offset, size)`` identifying the scene's text font.
 
     A text scene normally embeds exactly one font; when it holds several we
     take the one with the most drawable glyphs, which on every multi-font
-    scene checked is the body font rather than an outline companion."""
-    best, best_n = None, -1
+    scene checked is the body font rather than an outline companion.
+
+    The SIZE has to come back with it.  One atlas is drawn at several sizes
+    over the same art, so naming the atlas alone leaves the preview to pick a
+    size — and it picked whichever one the card-wide extract happened to keep.
+    Which of a scene's several typefaces each individual LINE uses is still not
+    decoded (the Text node's font reference is neither the keyframe's spare u32
+    nor an atlas handle in the instance segment — both were checked), so a
+    multi-typeface scene still draws every line in this one."""
+    best, best_n, best_px = None, -1, 0
     for t in tables or ():
         offs = [g["atlas"]["data_off"] for g in t["glyphs"]
                 if g.get("atlas") is not None]
         if len(offs) > best_n:
             best, best_n = offs[0] if offs else None, len(offs)
-    return best
+            best_px = _radium.table_size_px(t)
+    return best, best_px
 
 
 def _parse_scene_layout(data, images, tables):
@@ -986,7 +1118,10 @@ def _parse_scene_layout(data, images, tables):
     # bounds its instance, and widening that window would let an instance
     # adopt the next one's keyframe.
     bounds = [o for o, _n in names]
-    font_off = _font_atlas_off(tables)
+    font_off, font_px = _font_table(tables)
+    # Per-line font, when the keyframe names one; the scene-wide pick above is
+    # only the fallback now (about 1 line in 10, and most of Munsters).
+    font_by_name = _font_tables_by_name(tables)
     # Art = the images that are NOT font atlas pages.  Splitting them is what
     # makes a text-heavy scene (eleven atlases plus one piece of art) place its
     # art instead of reporting twelve images it couldn't figure out.
@@ -1041,11 +1176,14 @@ def _parse_scene_layout(data, images, tables):
         text = (linked or kf or {}).get("text", "")
         if text:
             produced.add(noff)
+            t_off, t_px = font_by_name.get(
+                (linked or kf).get("font_name") or "", (font_off, font_px))
             texts.append({"name": name, "x": x, "y": y, "text": text,
                           "rect": (linked or kf)["rect"],
                           "rgba": (linked or kf)["rgba"],
                           "align": (linked or kf)["align"],
-                          "font_atlas_off": font_off, "node": noff})
+                          "font_atlas_off": t_off, "font_px": t_px,
+                          "node": noff})
         elif has_track:
             # Sprite instance: it names its own image; failing that, a scene
             # with exactly one piece of art is unambiguous anyway.
@@ -1120,13 +1258,20 @@ def _parse_scene_layout(data, images, tables):
     # Pages first, then what is left inside them: pruning elements first can
     # strip a page down to a couple of lines, and those no longer cover enough
     # of the page they duplicate to be recognised as its repeat.
-    texts, sprites, pages = _drop_overlapping_subtrees(
-        texts, sprites, parent_of, dims)
-    texts, sprites, alternates = _drop_overlapping_states(texts, sprites, dims)
+    slots = _Slots()
+    texts, sprites, alt_t, alt_s = _drop_overlapping_subtrees(
+        texts, sprites, parent_of, dims, slots)
+    texts, sprites, alt_t2, alt_s2 = _drop_overlapping_states(
+        texts, sprites, dims, slots)
+    alt_t += alt_t2
+    alt_s += alt_s2
     # Whatever the pruning above dropped, its children go too — a state is a
     # subtree, and orphaning its contents is what left debris on the screen.
     texts, sprites, orphans = _drop_orphans(texts, sprites, parent_of, produced)
-    alternates += pages + orphans
+    alternates = len(alt_t) + len(alt_s) + orphans
+    # Counts below deliberately cover the BASE state only, so off-stage and
+    # scroll classification mean exactly what they did before states were
+    # kept — the alternatives are re-attached afterwards.
     on = off = 0
     for el, check in ([(t, _text_on_stage) for t in texts]
                       + [(s, _sprite_on_stage) for s in sprites]):
@@ -1136,11 +1281,51 @@ def _parse_scene_layout(data, images, tables):
             off += 1
     if on == 0:
         return None
+    # "N more images can't be placed" has to MEAN images.  It used to count
+    # instances with no image triple, which on JAWS' 30ec1fad reported 43 —
+    # in a scene holding nine pieces of art.  Those 43 were Text nodes (the
+    # child a text instance hangs its string on) falling through to the sprite
+    # branch, so the number was not only wrong, it was impossible.  Counting
+    # the scene's own art that nothing ends up drawing says the true thing and
+    # cannot exceed the art it has.
+    drawn = set()
+    for sp in sprites + alt_s:
+        drawn.add(sp.get("image_off"))
+        drawn.update(sp.get("frames") or ())
+    unplaced = len([im for im in art if im["data_off"] not in drawn])
+    scroll = _scroll_axis(texts, sprites, stage)
+    # The scene's own SCREENS, named.  A mode's radium holds every screen it
+    # can show — 30ec1fad has Intro_Instance, Award1..5_Instance,
+    # Phase2_Start_Instance, Victory_Start_Instance and more — and the machine
+    # shows one at a time, driven by game events (there is no timeline in the
+    # file: the only per-instance words that vary are a byte-misaligned
+    # sequential node index).  The node tree already separates them exactly, so
+    # the preview can offer them BY NAME instead of guessing from geometry
+    # which repeats alternate with which.
+    groups = []
+    if parent_of:
+        every = texts + alt_t + sprites + alt_s
+        name_of = dict(walk)
+        roots = _subtree_roots(every, parent_of)
+        index = {}
+        for el in every:
+            r = roots.get(id(el))
+            if r not in index:
+                index[r] = len(groups)
+                groups.append(name_of.get(r) or "unnamed")
+            el["group"] = index[r]
     return {"stage": stage, "origin": origin,
-            "texts": texts, "sprites": sprites,
+            "texts": texts + alt_t, "sprites": sprites + alt_s,
+            # How many alternative states the deepest slot holds: the Scenes
+            # window offers one step per state instead of drawing the pile.
+            "states": max([1] + list(slots.depth.values())),
+            # ...and the scene's named screens, which is the better handle:
+            # "Intro_Instance" says what you are looking at, "state 3 of 7"
+            # does not.
+            "groups": groups,
             # a long strip that moves THROUGH the screen (a credits roll), so
             # its off-stage elements are by design, not a decode failure
-            "scroll": _scroll_axis(texts, sprites, stage),
+            "scroll": scroll,
             # Counted, not just flagged: on a real card almost every scene has
             # SOMETHING undecoded, so a bare "partial" was noise on 94% of
             # scenes.  The numbers say what is actually missing.

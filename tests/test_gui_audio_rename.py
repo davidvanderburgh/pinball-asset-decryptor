@@ -161,14 +161,32 @@ def test_play_through_advances_to_the_next_visible_row(app, tmp_path):
     w.audio_play_through_var.set(True)
     w._audio_current_rel = REL
     played = []
-    w._audio_load_track = lambda rel, autoplay=None: played.append(
-        (rel, autoplay))
+
+    def _fake_load(rel, autoplay=None):
+        # Mirror the one side effect the debounce depends on: the real
+        # _audio_load_track records the row it loaded, and
+        # _audio_preview_selected skips a row that is already current.  A stub
+        # that leaves _audio_current_rel stale makes the late TreeviewSelect
+        # (it fires a turn late) fail that guard and reload the row with
+        # autoplay=None -- which is a bug in the stub, not in the app, but it
+        # failed this test on macOS CI where the event lands inside the wait.
+        w._audio_current_rel = rel
+        played.append((rel, autoplay))
+
+    w._audio_load_track = _fake_load
 
     w._audio_on_clip_finished(w._audio_pane_orig)
     # The step is deferred off the player's own callback, so let the pending
     # after() land rather than assuming it already has.
     deadline = time.monotonic() + 3
     while not played and time.monotonic() < deadline:
+        app.root.update()
+        time.sleep(0.02)
+    # Then keep pumping past the 250 ms select debounce, so a regression that
+    # DID let the selection clobber the play-through load still fails here
+    # instead of being raced past.
+    settle = time.monotonic() + 0.6
+    while time.monotonic() < settle:
         app.root.update()
         time.sleep(0.02)
     assert played == [(other, "orig")]

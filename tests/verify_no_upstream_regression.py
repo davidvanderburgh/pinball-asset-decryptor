@@ -148,6 +148,11 @@ PLAN = {
         ("jjp/jjp_decryptor/wsl.py", "identical"),
     "pinball_decryptor/plugins/jjp/crypto.py":
         ("jjp/jjp_decryptor/crypto.py", "identical"),
+    # Sonic-era asset crypto (scheme 3).  No upstream counterpart — it was
+    # reverse-engineered after the standalone decryptor was archived, and it
+    # lives in its own module precisely so crypto.py stays byte-identical.
+    "pinball_decryptor/plugins/jjp/crypto_v3.py":
+        (None, "new"),
     "pinball_decryptor/plugins/jjp/audio.py":
         ("jjp/jjp_decryptor/audio.py", "identical"),
     "pinball_decryptor/plugins/jjp/filelist.py":

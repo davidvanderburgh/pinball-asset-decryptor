@@ -1087,6 +1087,76 @@ def _stage_project_file(filename, cache_dir):
     return f"/tmp/{filename}"
 
 
+def _detect_write_scheme(entries, read_original, game_name, log=None):
+    """Work out which asset-crypto scheme this image uses.
+
+    Read off the bytes actually on the image rather than inferred from the
+    game name or the sidecar, because a stale or hand-made
+    ``fl_decrypted.dat`` must not be able to pick the wrong cipher and
+    corrupt a card.  Only a few entries are sampled — the scheme is a
+    property of the image, not of individual files.
+    """
+    from .crypto_v3 import detect_scheme, SCHEME_V3, SCHEME_LEGACY
+
+    checked = 0
+    for entry in entries:
+        if checked >= 3:
+            break
+        try:
+            data = read_original(entry)
+        except Exception:
+            continue          # unreadable sample proves nothing; try the next
+        if not data or len(data) < 8:
+            continue
+        checked += 1
+        scheme, _ = detect_scheme(data, entry.path, game_name)
+        if scheme == SCHEME_V3:
+            if log:
+                log(f"Asset crypto: scheme 3 (key '{game_name}') — "
+                    f"replacements must keep their original size.", "info")
+            return SCHEME_V3
+    if checked == 0 and log:
+        log("Could not sample the image to confirm its asset encryption; "
+            "assuming the standard scheme.", "info")
+    return SCHEME_LEGACY
+
+
+def _encrypt_one(scheme, entry, content, game_name, read_original):
+    """Encrypt one replacement asset.  Returns (bytes, note_for_log).
+
+    Scheme 3 rebuilds the file around the original's pads and forges the
+    CRC the loader checks; scheme 2 keeps the upstream CRC-forgery path
+    byte-for-byte.
+    """
+    from .crypto_v3 import SCHEME_V3, reencrypt_asset
+    from .crypto import encrypt_file
+
+    if scheme == SCHEME_V3:
+        original = read_original(entry)
+        if not original:
+            raise ValueError("could not read the original asset off the "
+                             "image to rebuild it")
+        out = reencrypt_asset(original, content, entry.path, game_name,
+                              filler_size=entry.filler_size)
+        from .crypto import crc32_buf
+        return out, (f"scheme 3, {len(out)} bytes, "
+                     f"crc {crc32_buf(out):#010x} (matches original)")
+    return encrypt_file(content, entry.filler_size, entry.path,
+                        entry.crc_encrypted, entry.crc_decrypted), None
+
+
+def _fl_text(path):
+    """Read a cached ``fl_decrypted.dat`` for :func:`filelist.parse_fl_dat`.
+
+    The pinned parser opens the file as latin-1, which raises on the asset
+    names Sonic ships (U+2019).  ``crypto_v3.read_filelist_text`` decodes
+    UTF-8 first and falls back to latin-1, and ``parse_fl_dat`` takes the
+    resulting text verbatim — so sidecars from either era load correctly.
+    """
+    from .crypto_v3 import read_filelist_text
+    return read_filelist_text(path)
+
+
 # Python script deployed to WSL for standalone decryption.
 # Placeholders are filled by StandaloneDecryptPipeline._phase_decrypt_standalone().
 #
@@ -1100,6 +1170,8 @@ import sys, os, struct, hashlib
 import multiprocessing as _mp
 sys.path.insert(0, "/tmp")
 from jjp_crypto import decrypt_file, detect_filler_size, crc32_buf, xor_keystream, PRNG
+from jjp_crypto_v3 import (detect_scheme, decrypt_file as decrypt_file_v3,
+                           SCHEME_V3, write_filelist, read_filelist_text)
 from jjp_filelist import parse_fl_dat, detect_edata_prefix, FileEntry, write_fl_dat
 
 HAS_FL_DAT = {has_fl_dat}
@@ -1113,6 +1185,12 @@ EXTRACT_SOUNDS = {extract_sounds}
 # Assigned in main() before the decrypt pool is created; forked workers
 # inherit it.
 PREFIX = ""
+
+# path -> asset-crypto scheme, filled by the dongle-free scan and read by the
+# decrypt workers.  Sonic-era images use scheme 3 (see crypto_v3.py); every
+# older title stays on scheme 2.  Titles that come in with a decryptable
+# fl.dat are scheme 2 by definition, so this stays empty for them.
+SCHEME_BY_PATH = {{}}
 
 try:
     N_WORKERS = max(1, len(os.sched_getaffinity(0)))
@@ -1136,10 +1214,16 @@ def _scan_one(task):
         return None
     if len(enc_data) < 8:
         return None
-    filler_size = detect_filler_size(enc_data, crypto_path)
+    # One unreadable name must not kill the pool: an exception raised in a
+    # worker propagates out of imap_unordered and aborts the whole scan (a
+    # single U+2019 in an asset filename used to end a 16k-file run).
+    try:
+        scheme, filler_size = detect_scheme(enc_data, crypto_path, GAME_NAME)
+    except Exception:
+        return None
     if filler_size < 0 or len(enc_data) <= filler_size:
         return None
-    return (crypto_path, filler_size, crc32_buf(enc_data))
+    return (crypto_path, filler_size, crc32_buf(enc_data), scheme)
 
 
 def _decrypt_one(task):
@@ -1158,7 +1242,11 @@ def _decrypt_one(task):
             enc_data = f.read()
         if len(enc_data) <= filler_size:
             return ("skip", crypto_path, 0, "")
-        content = decrypt_file(enc_data, filler_size, crypto_path)
+        if SCHEME_BY_PATH.get(crypto_path) == SCHEME_V3:
+            content = decrypt_file_v3(enc_data, filler_size, crypto_path,
+                                      GAME_NAME)
+        else:
+            content = decrypt_file(enc_data, filler_size, crypto_path)
         rel = (crypto_path[len(PREFIX):]
                if PREFIX and crypto_path.startswith(PREFIX) else crypto_path)
         out_path = OUT_DIR + "/" + rel
@@ -1172,10 +1260,10 @@ def _decrypt_one(task):
 
 
 def main():
-    global PREFIX
+    global PREFIX, SCHEME_BY_PATH
 
     if HAS_FL_DAT:
-        entries = parse_fl_dat("/tmp/fl_decrypted.dat")
+        entries = parse_fl_dat(read_filelist_text("/tmp/fl_decrypted.dat"))
         PREFIX = detect_edata_prefix(entries)
     else:
         # Scan filesystem to build file list (dongle-free)
@@ -1207,6 +1295,8 @@ def main():
                         path=res[0], filler_size=res[1],
                         crc_encrypted=res[2], crc_decrypted=0,
                     ))
+                    if res[3] == SCHEME_V3:
+                        SCHEME_BY_PATH[res[0]] = res[3]
                 if scanned % 500 == 0:
                     print("  Scanned {{}}/{{}}".format(scanned, total_scan),
                           flush=True)
@@ -1214,6 +1304,10 @@ def main():
         PREFIX = detect_edata_prefix(entries)
         print("Scan complete: {{}} files found".format(len(entries)),
               flush=True)
+        if SCHEME_BY_PATH:
+            print("Asset crypto: scheme 3 on {{}}/{{}} files "
+                  "(key '{{}}')".format(len(SCHEME_BY_PATH), len(entries),
+                                        GAME_NAME), flush=True)
 
     # Filter entries by selected categories
     if not EXTRACT_GRAPHICS or not EXTRACT_SOUNDS:
@@ -1290,7 +1384,7 @@ def main():
             for e in entries if e.path in crc_by_path
         ]
         fl_out = OUT_DIR + "/fl_decrypted.dat"
-        write_fl_dat(computed_entries, fl_out)
+        write_filelist(computed_entries, fl_out)
         print("Generated fl_decrypted.dat with {{}} entries".format(
             len(computed_entries)), flush=True)
 
@@ -4832,7 +4926,7 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             pkg = __package__ or "pinball_decryptor.plugins.jjp"
             this_dir = os.path.dirname(os.path.abspath(__file__))
             cache_dir = self.executor._cache_dir()
-            for module in ("crypto.py", "filelist.py"):
+            for module in ("crypto.py", "crypto_v3.py", "filelist.py"):
                 data = pkgutil.get_data(pkg, module)
                 if data is None:
                     # Fallback: read the .py sitting next to this file
@@ -4851,7 +4945,7 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
                     f.write(data)
         else:
             pkg_dir = os.path.dirname(os.path.abspath(__file__))
-            for module in ("crypto.py", "filelist.py"):
+            for module in ("crypto.py", "crypto_v3.py", "filelist.py"):
                 src = self.executor.to_exec_path(os.path.join(pkg_dir, module))
                 self.executor.run(f"cp '{src}' /tmp/jjp_{module}", timeout=10)
 
@@ -5999,7 +6093,25 @@ class StandaloneModPipeline(ModPipeline):
                 f"the file list, then try again.")
 
         self.log("Loading file list...", "info")
-        entries = parse_fl_dat(self.fl_dat_path)
+        entries = parse_fl_dat(_fl_text(self.fl_dat_path))
+        game_name = self.game_name or ""
+
+        def _read_original(entry):
+            tmp = os.path.join(tempfile.gettempdir(),
+                               f"jjp_orig_{uuid.uuid4().hex[:8]}.bin")
+            try:
+                self._debugfs_run(f'dump "{entry.path}" "{tmp}"', timeout=60)
+                with open(tmp, "rb") as f:
+                    return f.read()
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+
+        from .crypto_v3 import SCHEME_V3
+        scheme = _detect_write_scheme(entries, _read_original, game_name,
+                                      self.log)
         edata_prefix = detect_edata_prefix(entries)
 
         # Build lookup
@@ -6044,7 +6156,13 @@ class StandaloneModPipeline(ModPipeline):
                 m = _re.search(r'Size:\s*(\d+)', orig_stat)
                 if m:
                     orig_enc_size = int(m.group(1))
-                    orig_content_size = orig_enc_size - entry.filler_size - 4
+                    # Scheme 2 appends a 4-byte CRC suffix; scheme 3
+                    # has a trailing pad instead, so this estimate
+                    # only applies to scheme 2.  reencrypt_asset
+                    # reports the exact figure for scheme 3.
+                    orig_content_size = (
+                        0 if scheme == SCHEME_V3
+                        else orig_enc_size - entry.filler_size - 4)
                     if orig_content_size > 0 and len(content) != orig_content_size:
                         diff = len(content) - orig_content_size
                         direction = "larger" if diff > 0 else "smaller"
@@ -6062,26 +6180,40 @@ class StandaloneModPipeline(ModPipeline):
 
             # Encrypt with CRC forgery
             try:
-                encrypted = encrypt_file(
-                    content, entry.filler_size, entry.path,
-                    entry.crc_encrypted, entry.crc_decrypted)
+                encrypted, _note = _encrypt_one(
+                    scheme, entry, content, game_name, _read_original)
+                if _note:
+                    self.log(f"  {_note}", "info")
             except Exception as e:
                 self.log(f"[FAIL] {rel_path}: {e}", "error")
                 fail += 1
                 continue
 
-            # Verify CRCs
+            # Verify CRCs.  Scheme 3 keeps the file byte-length and
+            # hash of the original, which is the only thing the game
+            # checks; its decrypted content has no stored checksum.
             from .crypto import crc32_buf, decrypt_file as _df
+            from .crypto_v3 import SCHEME_V3 as _S3
             n2 = crc32_buf(encrypted)
-            re_dec = _df(encrypted, entry.filler_size, entry.path)
-            n3 = crc32_buf(re_dec)
-            n2_ok = n2 == entry.crc_encrypted
-            n3_ok = n3 == entry.crc_decrypted
+            if scheme == _S3:
+                _orig = _read_original(entry)
+                n2_ok = n2 == crc32_buf(_orig)
+                n3_ok = len(encrypted) == len(_orig)
+            else:
+                re_dec = _df(encrypted, entry.filler_size, entry.path)
+                n3 = crc32_buf(re_dec)
+                n2_ok = n2 == entry.crc_encrypted
+                n3_ok = n3 == entry.crc_decrypted
 
-            self.log(f"  n2 forge: want={entry.crc_encrypted} "
-                     f"got={n2} {'OK' if n2_ok else 'FAIL'}", "info")
-            self.log(f"  n3 forge: want={entry.crc_decrypted} "
-                     f"got={n3} {'OK' if n3_ok else 'FAIL'}", "info")
+            if scheme == _S3:
+                self.log(f"  crc: {n2:#010x} "
+                         f"{'matches original' if n2_ok else 'MISMATCH'}, "
+                         f"size {'kept' if n3_ok else 'CHANGED'}", "info")
+            else:
+                self.log(f"  n2 forge: want={entry.crc_encrypted} "
+                         f"got={n2} {'OK' if n2_ok else 'FAIL'}", "info")
+                self.log(f"  n3 forge: want={entry.crc_decrypted} "
+                         f"got={n3} {'OK' if n3_ok else 'FAIL'}", "info")
 
             if not (n2_ok and n3_ok):
                 self.log(f"[VERIFY FAIL] {rel_path}", "error")
@@ -6289,7 +6421,7 @@ class StandaloneModPipeline(ModPipeline):
             return
         rel_path, win_path = edata_changed[0]
         from .filelist import parse_fl_dat, detect_edata_prefix
-        entries = parse_fl_dat(self.fl_dat_path)
+        entries = parse_fl_dat(_fl_text(self.fl_dat_path))
         edata_prefix = detect_edata_prefix(entries)
         entry_map = {e.path: e for e in entries}
         full_path = f"{edata_prefix}{rel_path}"
@@ -6928,7 +7060,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         Uses debugfs to dump individual files from the raw SSD partition,
         decrypts them in-process, and writes output directly to the host.
         """
-        from .crypto import decrypt_file, detect_filler_size, crc32_buf
+        from .crypto import decrypt_file, crc32_buf
+        from .crypto_v3 import (detect_scheme, SCHEME_V3,
+                                decrypt_file as decrypt_file_v3,
+                                write_filelist, read_filelist_text)
         from .filelist import parse_fl_dat, detect_edata_prefix, \
             FileEntry, write_fl_dat
 
@@ -6945,7 +7080,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         has_fl_dat = self.fl_dat_path and os.path.isfile(self.fl_dat_path)
 
         if has_fl_dat:
-            entries = parse_fl_dat(self.fl_dat_path)
+            entries = parse_fl_dat(_fl_text(self.fl_dat_path))
             prefix = detect_edata_prefix(entries)
             # Copy fl_dat to output
             import shutil
@@ -7006,7 +7141,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         self.log(f"TOTAL_FILES={total}", "info")
         self.on_progress(0, total, "Decrypting...")
 
-        ok = fail = skip = 0
+        ok = fail = skip = n_v3 = 0
         computed_entries = []
         tmp_file = os.path.join(tempfile.gettempdir(),
                                 f"jjp_dump_{uuid.uuid4().hex[:8]}.bin")
@@ -7054,10 +7189,15 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                         skip += 1
                         continue
 
+                    # A cached fl.dat only exists for scheme-2 titles (the
+                    # Sonic-era dongle encrypts fl.dat with a routine we
+                    # can't reproduce), so a known filler implies scheme 2.
                     if known_filler is not None:
                         filler_size = known_filler
+                        scheme = None
                     else:
-                        filler_size = detect_filler_size(enc_data, path)
+                        scheme, filler_size = detect_scheme(
+                            enc_data, path, game_name)
                         if filler_size < 0:
                             skip += 1
                             continue
@@ -7066,7 +7206,12 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                         skip += 1
                         continue
 
-                    content = decrypt_file(enc_data, filler_size, path)
+                    if scheme == SCHEME_V3:
+                        content = decrypt_file_v3(enc_data, filler_size,
+                                                  path, game_name)
+                        n_v3 += 1
+                    else:
+                        content = decrypt_file(enc_data, filler_size, path)
                     rel = path[len(prefix):] if prefix and \
                         path.startswith(prefix) else path
                     out_path = os.path.join(out_dir, rel)
@@ -7111,9 +7256,13 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
 
         if not has_fl_dat and computed_entries:
             fl_out = os.path.join(out_dir, "fl_decrypted.dat")
-            write_fl_dat(computed_entries, fl_out)
+            write_filelist(computed_entries, fl_out)
             self.log(f"Generated fl_decrypted.dat with "
                      f"{len(computed_entries)} entries", "info")
+
+        if n_v3:
+            self.log(f"Asset crypto: scheme 3 on {n_v3} file(s) "
+                     f"(key '{game_name}')", "info")
 
         self.on_progress(total, total, "Complete")
         self.log(
@@ -8763,10 +8912,22 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                 f"the file list, then try again.")
 
         self.log("Loading file list...", "info")
-        entries = parse_fl_dat(self.fl_dat_path)
+        entries = parse_fl_dat(_fl_text(self.fl_dat_path))
         edata_prefix = detect_edata_prefix(entries)
         entry_map = {e.path: e for e in entries}
         self.log(f"Loaded {len(entries)} fl.dat entries.", "info")
+
+        from .crypto_v3 import SCHEME_V3
+        game_name = self.game_name or ""
+
+        def _read_original(entry):
+            import base64 as _b64r
+            out = self.executor.run(
+                f"base64 -w0 '{mp}{entry.path}'", timeout=180)
+            return _b64r.b64decode(out.strip())
+
+        scheme = _detect_write_scheme(entries, _read_original, game_name,
+                                      self.log)
 
         total = len(edata_files)
         ok = 0
@@ -8809,7 +8970,13 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                     orig_path = f"{mp}{entry.path}"
                     orig_enc_size = int(self.executor.run(
                         f"stat -c%s '{orig_path}'", timeout=5).strip())
-                    orig_content_size = orig_enc_size - entry.filler_size - 4
+                    # Scheme 2 appends a 4-byte CRC suffix; scheme 3
+                    # has a trailing pad instead, so this estimate
+                    # only applies to scheme 2.  reencrypt_asset
+                    # reports the exact figure for scheme 3.
+                    orig_content_size = (
+                        0 if scheme == SCHEME_V3
+                        else orig_enc_size - entry.filler_size - 4)
                     if orig_content_size > 0 and len(content) != orig_content_size:
                         diff = len(content) - orig_content_size
                         direction = "larger" if diff > 0 else "smaller"
@@ -8827,25 +8994,39 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
                 # Encrypt with CRC forgery
                 try:
-                    encrypted = encrypt_file(
-                        content, entry.filler_size, entry.path,
-                        entry.crc_encrypted, entry.crc_decrypted)
+                    encrypted, _note = _encrypt_one(
+                        scheme, entry, content, game_name, _read_original)
+                    if _note:
+                        self.log(f"  {_note}", "info")
                 except Exception as e:
                     self.log(f"[FAIL] {rel_path}: {e}", "error")
                     fail += 1
                     continue
 
-                # Verify CRCs
+                # Verify CRCs.  Scheme 3 keeps the file byte-length and hash
+                # of the original, which is the only thing the game checks;
+                # its decrypted content has no stored checksum.
+                from .crypto_v3 import SCHEME_V3 as _S3
                 n2 = crc32_buf(encrypted)
-                re_dec = _df(encrypted, entry.filler_size, entry.path)
-                n3 = crc32_buf(re_dec)
-                n2_ok = n2 == entry.crc_encrypted
-                n3_ok = n3 == entry.crc_decrypted
+                if scheme == _S3:
+                    _orig = _read_original(entry)
+                    n2_ok = n2 == crc32_buf(_orig)
+                    n3_ok = len(encrypted) == len(_orig)
+                else:
+                    re_dec = _df(encrypted, entry.filler_size, entry.path)
+                    n3 = crc32_buf(re_dec)
+                    n2_ok = n2 == entry.crc_encrypted
+                    n3_ok = n3 == entry.crc_decrypted
 
-                self.log(f"  n2 forge: want={entry.crc_encrypted} "
-                         f"got={n2} {'OK' if n2_ok else 'FAIL'}", "info")
-                self.log(f"  n3 forge: want={entry.crc_decrypted} "
-                         f"got={n3} {'OK' if n3_ok else 'FAIL'}", "info")
+                if scheme == _S3:
+                    self.log(f"  crc: {n2:#010x} "
+                             f"{'matches original' if n2_ok else 'MISMATCH'}, "
+                             f"size {'kept' if n3_ok else 'CHANGED'}", "info")
+                else:
+                    self.log(f"  n2 forge: want={entry.crc_encrypted} "
+                             f"got={n2} {'OK' if n2_ok else 'FAIL'}", "info")
+                    self.log(f"  n3 forge: want={entry.crc_decrypted} "
+                             f"got={n3} {'OK' if n3_ok else 'FAIL'}", "info")
 
                 if not (n2_ok and n3_ok):
                     self.log(f"[VERIFY FAIL] {rel_path}", "error")

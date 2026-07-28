@@ -49,7 +49,22 @@ from .emulator import DESC_BASE
 # offset-identity anchor; validated per-run by requiring magic-5 descriptors.
 IMG_BASE = DESC_BASE
 
-_SEFX = b"SE FX "
+# The table's last entry is a placeholder, never a sound.
+_NOT_A_SOUND = {"INVALID", ""}
+
+
+def _is_sound_entry(name):
+    return bool(name) and name.strip() not in _NOT_A_SOUND
+
+
+def _is_music_entry(name):
+    """Does the menu itself call this slot music?
+
+    Titles that name their music (Elvira's House of Horrors lists 53 tracks as
+    "MUSIC: <NAME>") must be allowed to name long records — the blanket
+    music-length guard below exists for the opposite case, where an *event*
+    name would otherwise land on a shared song master."""
+    return name.strip().upper().startswith(("MUSIC:", "SONG:"))
 
 # Ceiling for a node id (an index into the sound-id list block, so bounded by
 # the block's length) — guards the walk over the {group_ptr, node_id} array.
@@ -81,11 +96,30 @@ def _seg_maps(segs):
     return off2va, va2off
 
 
+def _group_sites(raw):
+    """File offsets where five identical non-zero dwords sit in a row.
+
+    A name-group is five copies of one ``char*`` (the five UI languages all
+    point at the same English string for a debug name), so this is a cheap
+    superset of every group head in the binary — a few tens of thousands of
+    sites on a 69 MB firmware, which the caller then filters."""
+    import numpy as np
+    n = len(raw) // 4
+    if n < 8:
+        return []
+    a = np.frombuffer(raw[: n * 4], dtype="<u4")
+    eq = a[:-4] == a[1:-3]
+    for k in range(2, 5):
+        eq &= a[:-4] == a[k: len(a) - 4 + k]
+    eq &= a[:-4] != 0
+    return (np.flatnonzero(eq) * 4).tolist()
+
+
 def _walk_menu_table(raw):
     """Mine the Sound/Speaker-Test menu structure, or ``None``.
 
     Returns ``{"names": [...], "node_ids": {position: node_id},
-    "lists": [[sid, ...], ...]}``.  ``names`` covers the WHOLE table (SE FX
+    "lists": [[sid, ...], ...]}``.  ``names`` covers the WHOLE table (the sound
     entries plus the trailing speaker-routing names and "INVALID") because the
     full length is what sets the displayed numbering."""
     try:
@@ -93,19 +127,6 @@ def _walk_menu_table(raw):
     except Exception:
         return None
     off2va, va2off = _seg_maps(segs)
-
-    # VAs of every pooled "SE FX " string (NUL-preceded == a pool entry start),
-    # used only to LOCATE the table (an SE FX group is an unambiguous anchor).
-    sefx_vas = set()
-    pos = raw.find(_SEFX)
-    while pos != -1:
-        if pos > 0 and raw[pos - 1] == 0:
-            va = off2va(pos)
-            if va is not None:
-                sefx_vas.add(va)
-        pos = raw.find(_SEFX, pos + 1)
-    if len(sefx_vas) < 8:                      # no menu (or too few to trust)
-        return None
 
     def name_at_group(goff):
         p = _u32(raw, goff)
@@ -122,8 +143,8 @@ def _walk_menu_table(raw):
 
     def is_group(goff):
         """A name-group: five identical pointers to a valid string.  Accepts
-        ANY entry (SE FX, speaker names, INVALID) so the whole table is walked
-        — the full length is what determines the displayed numbering."""
+        ANY entry (sound names, speaker names, INVALID) so the whole table is
+        walked — the full length is what determines the displayed numbering."""
         if goff < 0 or goff + 24 > len(raw):
             return False
         p0 = _u32(raw, goff)
@@ -131,40 +152,73 @@ def _walk_menu_table(raw):
             return False
         return name_at_group(goff) is not None
 
-    seed = None
-    for va in sorted(sefx_vas):
-        at = raw.find(struct.pack("<I", va) * 5)
-        if at != -1:
-            seed = at
-            break
-    if seed is None:
-        return None
-    start = seed
-    while is_group(start - 24):
-        start -= 24
-    names, goff = [], start
-    while is_group(goff):
-        names.append(name_at_group(goff))
-        goff += 24
-    n = len(names)
-    if n < 8:
+    # Find the menu table by SHAPE rather than by any name it contains.  Only
+    # the Sound/Speaker-Test table has a full {group_ptr, node_id} array
+    # pointing at it — of the ~140 name-group tables in a Stern binary, exactly
+    # one does.  Anchoring on the literal "SE FX " instead (as this did
+    # originally) only ever worked on the titles using that prefix: TMNT names
+    # its entries "SPEECH: ...", "SOUND: ...", "MUSIC: ...", and Elvira's House
+    # of Horrors uses "VO: ...", "FX: ...".
+    tables, seen = [], set()
+    for goff in _group_sites(raw):
+        if goff in seen or not is_group(goff):
+            continue
+        start = goff
+        while is_group(start - 24):
+            start -= 24
+        if start in seen:
+            continue
+        names, g = [], start
+        while is_group(g):
+            names.append(name_at_group(g))
+            seen.add(g)
+            g += 24
+        if len(names) >= 8:
+            tables.append((start, names))
+    if not tables:
         return None
 
-    # {group_ptr, node_id} pairs, immediately BEFORE the name table, one per
-    # group.  Walk back while each entry points into the table.
-    node_ids, k = {}, 0
-    while k < n:
-        o = start - (k + 1) * 8
-        if o < 0:
-            break
-        ptr, nid = struct.unpack_from("<2I", raw, o)
-        po = va2off(ptr)
-        if (po is None or po < start or (po - start) % 24
-                or (po - start) // 24 >= n or nid > _MAX_NODE_ID):
-            break
-        node_ids[(po - start) // 24] = nid
-        k += 1
-    pairs_start = start - k * 8
+    # Locate the array by finding where the table's groups are POINTED AT, not
+    # by assuming it sits immediately before them.  It usually does, but not
+    # always: Godzilla parks its array 14 KB ahead of a 1315-entry table, and
+    # requiring adjacency found nothing there at all.
+    group_va = {}
+    for ti, (start, names) in enumerate(tables):
+        for p in range(len(names)):
+            va = off2va(start + 24 * p)
+            if va is not None:
+                group_va[va] = (ti, p)
+    if not group_va:
+        return None
+    import numpy as np
+    words = np.frombuffer(raw[: len(raw) // 4 * 4], dtype="<u4")
+    keys = np.array(sorted(group_va), dtype="<u4")
+    hits = [int(h) for h in (np.flatnonzero(np.isin(words, keys)) * 4)
+            if _u32(raw, h + 4) <= _MAX_NODE_ID] if len(keys) else []
+
+    best = None                                # (count, table index, offset)
+    i = 0
+    while i < len(hits):
+        ti = group_va[_u32(raw, hits[i])][0]
+        j = i
+        while (j + 1 < len(hits) and hits[j + 1] - hits[j] == 8
+               and group_va[_u32(raw, hits[j + 1])][0] == ti):
+            j += 1
+        run = j - i + 1
+        if best is None or run > best[0]:
+            best = (run, ti, hits[i])
+        i = j + 1
+    if best is None:
+        return None
+    k, ti, pairs_start = best
+    start, names = tables[ti]
+    n = len(names)
+    if k < max(8, n // 2):                     # not a menu table after all
+        return None
+    node_ids = {}
+    for e in range(k):
+        ptr, nid = struct.unpack_from("<2I", raw, pairs_start + e * 8)
+        node_ids[group_va[ptr][1]] = nid
 
     # NUL-terminated u32 sound-id lists, immediately BEFORE the pairs array.
     # Walk back counting terminators until the block holds every id the menu
@@ -220,7 +274,7 @@ def locate_menu_names(raw):
     names = t["names"]
     n = len(names)
     return [((n - 1) - p, name) for p, name in enumerate(names)
-            if name and name.startswith("SE FX")]
+            if _is_sound_entry(name)]
 
 
 def locate_menu_sids(raw):
@@ -239,7 +293,7 @@ def locate_menu_sids(raw):
     nl = len(lists)
     out = []
     for p, name in enumerate(t["names"]):
-        if not name or not name.startswith("SE FX"):
+        if not _is_sound_entry(name):
             continue
         nid = t["node_ids"].get(p)
         if nid is None:
@@ -355,10 +409,11 @@ def _select_names(entries, seconds_by_idx):
 
     *entries* arrive in menu-table order, so where two entries resolve to one
     record the earlier menu name wins.  Records at or over the music threshold
-    are left bare regardless."""
+    are left bare unless the menu entry is itself a music name."""
     out = {}
     for _sid, name, idx in entries:
-        if seconds_by_idx.get(idx, 0.0) < _MUSIC_MIN_SECONDS:
+        if (_is_music_entry(name)
+                or seconds_by_idx.get(idx, 0.0) < _MUSIC_MIN_SECONDS):
             out.setdefault(idx, name)
     return out
 
@@ -374,6 +429,7 @@ _VALIDATE_TRIALS = 2000
 _VALIDATE_ALPHA = 0.01
 _MIN_LIT_PAIRS = 6
 _MIN_GROUPS = 3
+_MIN_MUSIC = 5
 
 
 def _lit_unlit_pairs(names):
@@ -388,11 +444,16 @@ def _name_groups(names):
     """Names bucketed by everything but their trailing token.
 
     "ROCK BANK TARGET K/C/O/R LIT" or "ELECTRIC MAGIC NOTE 1..36" are one
-    sound design per bank or series, so their durations cluster tightly."""
+    sound design per bank or series, so their durations cluster tightly.
+
+    The key must be at least two tokens, which keeps a bare category prefix
+    from posing as a series: Elvira's five "FX: SCREAM / THUNDER / ORGAN /
+    FANFARE / EXPLOSION" share the token "FX:" and nothing else, and their
+    durations have no reason to agree."""
     g = {}
     for n in names:
         parts = n.split()
-        if len(parts) >= 2:
+        if len(parts) >= 3:
             g.setdefault(" ".join(parts[:-1]), []).append(n)
     return {k: v for k, v in g.items() if len(v) >= 3}
 
@@ -411,21 +472,37 @@ def _mean_cv(durations_by_group):
     return (sum(cvs) / len(cvs)) if cvs else None
 
 
+def _mean_rank(values, subset):
+    """Mean rank (1 = shortest) of *subset* within *values*."""
+    order = {v: i for i, v in enumerate(sorted(values))}
+    return sum(order[v] for v in subset) / len(subset)
+
+
 def validate_name_map(name_map, seconds_by_idx, trials=_VALIDATE_TRIALS):
     """``(ok, report)`` — does this name map describe the audio it points at?
 
-    Runs whichever of the two tests the title supplies enough names for, each
-    against *trials* reshuffles of the same slot set, and fails the map if an
-    applicable test doesn't clear ``p <= 0.01``.  A title with too few paired
-    or grouped names to judge returns ``(True, ...)`` with an empty report and
-    the caller falls back to the note-tonality check."""
+    Runs whichever tests the title supplies enough names for, each against
+    *trials* reshuffles of the same slot set, and fails the map if an
+    applicable test doesn't clear ``p <= 0.01``.  A title with too little to
+    judge returns ``(True, "")`` and the caller falls back to the note-tonality
+    check.
+
+    The lit/unlit and series tests look only at effect names: a menu that names
+    music ("MUSIC: CRYPT #1..#3") names genuinely different recordings, so
+    their durations must not be expected to agree.  Those titles get the third
+    test instead."""
     named = {n: i for i, n in name_map.items()}
     durs = {n: seconds_by_idx.get(i) for n, i in named.items()}
     durs = {n: d for n, d in durs.items() if d}
-    pairs = [(a, b) for a, b in _lit_unlit_pairs(durs) if a in durs and b in durs]
-    groups = [v for v in _name_groups(durs).values() if len(v) >= 3]
+    fx = {n: d for n, d in durs.items() if not _is_music_entry(n)}
+    music = [n for n in durs if _is_music_entry(n)]
 
-    if len(pairs) < _MIN_LIT_PAIRS and len(groups) < _MIN_GROUPS:
+    pairs = [(a, b) for a, b in _lit_unlit_pairs(fx) if a in fx and b in fx]
+    groups = [v for v in _name_groups(fx).values() if len(v) >= 3]
+    do_music = len(music) >= _MIN_MUSIC and len(fx) >= _MIN_MUSIC
+
+    if (len(pairs) < _MIN_LIT_PAIRS and len(groups) < _MIN_GROUPS
+            and not do_music):
         return True, ""
 
     def wins(d):
@@ -434,11 +511,15 @@ def validate_name_map(name_map, seconds_by_idx, trials=_VALIDATE_TRIALS):
     def cv(d):
         return _mean_cv([[d[n] for n in g] for g in groups])
 
+    def music_rank(d):
+        return _mean_rank(list(d.values()), [d[n] for n in music])
+
     obs_w, obs_cv = wins(durs), cv(durs)
+    obs_mr = music_rank(durs) if do_music else None
     rng = random.Random(0x5EF7)
     names = list(durs)
     pool = list(durs.values())
-    ge_w = le_cv = 0
+    ge_w = le_cv = ge_mr = 0
     for _ in range(trials):
         rng.shuffle(pool)
         shuf = dict(zip(names, pool))
@@ -448,6 +529,8 @@ def validate_name_map(name_map, seconds_by_idx, trials=_VALIDATE_TRIALS):
             c = cv(shuf)
             if c is not None and obs_cv is not None and c <= obs_cv:
                 le_cv += 1
+        if do_music and music_rank(shuf) >= obs_mr:
+            ge_mr += 1
 
     bits, ok = [], True
     if len(pairs) >= _MIN_LIT_PAIRS:
@@ -457,6 +540,11 @@ def validate_name_map(name_map, seconds_by_idx, trials=_VALIDATE_TRIALS):
     if len(groups) >= _MIN_GROUPS and obs_cv is not None:
         p = (le_cv + 1) / (trials + 1)
         bits.append("group spread %.3f p=%.4f" % (obs_cv, p))
+        ok = ok and p <= _VALIDATE_ALPHA
+    if do_music:
+        p = (ge_mr + 1) / (trials + 1)
+        bits.append("music longer (rank %.0f of %d) p=%.4f"
+                    % (obs_mr, len(durs), p))
         ok = ok and p <= _VALIDATE_ALPHA
     return ok, ", ".join(bits)
 

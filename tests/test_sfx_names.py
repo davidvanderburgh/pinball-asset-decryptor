@@ -148,6 +148,18 @@ def test_select_names_rules():
         1: "SE FX BLIP", 40: "SE FX SLING LEFT"}
 
 
+def test_music_named_by_the_menu_keeps_its_name():
+    """The length guard must not fire on a menu that names music outright:
+    Elvira's House of Horrors lists 53 tracks as "MUSIC: <NAME>", and every one
+    of them is over the guard's threshold."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    secs = {10: 240.0, 11: 190.0, 12: 285.0}
+    entries = [(1, "MUSIC: CRYPT #1", 10), (2, "MUSIC: DRACULA", 11),
+               (3, "SE FX SEQ SOME EVENT", 12)]
+    assert sfx_names._select_names(entries, secs) == {
+        10: "MUSIC: CRYPT #1", 11: "MUSIC: DRACULA"}
+
+
 # ---- validate_name_map: the names have to describe the audio -----------------
 
 def _lz_like_map():
@@ -188,6 +200,56 @@ def test_validate_rejects_a_shifted_map():
     shifted = dict(zip(idxs, [name_map[i] for i in idxs[1:] + idxs[:1]]))
     ok, _ = sfx_names.validate_name_map(shifted, secs, trials=400)
     assert not ok
+
+
+def _elvira_like_map():
+    """A menu that names music: many tracks plus a handful of short effects.
+    The lit/unlit and series tests have nothing to work with here."""
+    name_map, secs, i = {}, {}, 0
+    for n, d in (("SCREAM", 2.1), ("THUNDER/LIGHTNING", 6.4), ("ORGAN", 3.3),
+                 ("FANFARE", 4.0), ("EXPLOSION", 1.7)):
+        i += 1
+        name_map[i] = "FX: %s" % n
+        secs[i] = d
+    for n, d in (("CRYPT #1", 121.0), ("CRYPT #2", 96.5), ("CRYPT #3", 143.2),
+                 ("DRACULA", 88.0), ("WEREWOLF #1", 154.9), ("MANOS", 77.4),
+                 ("HOUSE PARTY", 133.1), ("TEENAGERS", 102.6)):
+        i += 1
+        name_map[i] = "MUSIC: %s" % n
+        secs[i] = d
+    return name_map, secs
+
+
+def test_validate_accepts_a_menu_that_names_music():
+    """Music entries have to land on the long records.  The series test must
+    not fire here — "CRYPT #1..#3" are three different recordings, so their
+    durations have no reason to agree, and demanding it would reject a map
+    that is entirely correct."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    name_map, secs = _elvira_like_map()
+    ok, report = sfx_names.validate_name_map(name_map, secs, trials=400)
+    assert ok
+    assert "music longer" in report
+    assert "group spread" not in report
+
+
+def test_validate_rejects_music_names_on_short_slots():
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    name_map, secs = _elvira_like_map()
+    idxs = sorted(name_map)
+    swapped = dict(zip(idxs, [name_map[i] for i in reversed(idxs)]))
+    ok, _ = sfx_names.validate_name_map(swapped, secs, trials=400)
+    assert not ok
+
+
+def test_name_groups_ignores_a_bare_category_prefix():
+    """"FX: SCREAM / THUNDER / ORGAN" share only the token "FX:" and are
+    unrelated sounds; treating them as a series would fail a correct map."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    assert sfx_names._name_groups(
+        ["FX: SCREAM", "FX: THUNDER", "FX: ORGAN", "FX: FANFARE"]) == {}
+    assert "SE FX ELECTRIC MAGIC NOTE" in sfx_names._name_groups(
+        ["SE FX ELECTRIC MAGIC NOTE %d" % n for n in range(1, 6)])
 
 
 def test_validate_abstains_without_enough_evidence():
@@ -246,7 +308,7 @@ _VA = 0x50000
 _SEG_OFF = 0x1000
 
 
-def _fake_fw(names, node_ids, lists_by_id, pad_words=1):
+def _fake_fw(names, node_ids, lists_by_id, pad_words=1, gap_words=0):
     """A minimal ARM ELF carrying a Sound-Test menu.
 
     *lists_by_id* maps node id -> sid list.  Ids count from the END of the
@@ -277,6 +339,9 @@ def _fake_fw(names, node_ids, lists_by_id, pad_words=1):
 
     pairs_at = len(body)
     body += b"\x00" * (8 * len(names))
+    # Godzilla parks unrelated data between its node-id array and the table it
+    # points at, so the two are not required to be adjacent.
+    body += struct.pack("<I", 0xDEAD0000) * gap_words
     table_at = len(body)
     for n in names:
         body += struct.pack("<I", str_va[n]) * 5 + struct.pack("<I", 0)
@@ -297,11 +362,17 @@ def _fake_fw(names, node_ids, lists_by_id, pad_words=1):
     return bytes(raw + body)
 
 
-def _menu_fixture(pad_words=1, category_sid=False):
-    """10 SE FX entries whose node ids are deliberately NOT their positions."""
-    names = ["SE FX ALPHA", "SE FX BRAVO", "SE FX CHARLIE", "SE FX DELTA",
-             "SE FX ECHO", "SE FX FOXTROT", "SE FX GOLF", "SE FX HOTEL",
-             "SE FX INDIA", "SE FX JULIET", "INVALID"]
+def _menu_fixture(pad_words=1, category_sid=False, gap_words=0):
+    """10 entries whose node ids are deliberately NOT their positions.
+
+    None of the names say "SE FX": the table has to be found by its shape.
+    Anchoring on that literal is why TMNT ("SPEECH: ...", "SOUND: ...",
+    "MUSIC: ...") and Elvira's House of Horrors ("VO: ...", "FX: ...") named
+    nothing at all — only Led Zeppelin and Rush use the SE FX prefix.
+    """
+    names = ["SPEECH: ALPHA", "SOUND: BRAVO", "VO: CHARLIE", "FX: DELTA",
+             "MUSIC: ECHO", "SE FOXTROT", "GOLF SOUND", "HOTEL",
+             "SOUND: INDIA", "FX: JULIET", "INVALID"]
     node_ids = [17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 0]
     lists_by_id = {0: []}
     for k, nid in enumerate(node_ids[:-1]):
@@ -312,7 +383,7 @@ def _menu_fixture(pad_words=1, category_sid=False):
         # A low id (so it is met early walking back) holding a sound id from a
         # non-zero category: high half = category, low half = sub-id.
         lists_by_id[3] = [(1 << 16) | 3]
-    return names, _fake_fw(names, node_ids, lists_by_id, pad_words)
+    return names, _fake_fw(names, node_ids, lists_by_id, pad_words, gap_words)
 
 
 def test_locate_menu_sids_follows_the_indirection():
@@ -329,6 +400,28 @@ def test_list_block_padding_never_shifts_the_map(pad_words):
     map must not move with the padding."""
     from pinball_decryptor.plugins.stern.spike2 import sfx_names
     names, fw = _menu_fixture(pad_words)
+    assert sfx_names.locate_menu_sids(fw) == [
+        (700 + k, n) for k, n in enumerate(names[:-1])]
+
+
+def test_table_is_found_without_the_sefx_string():
+    """The menu table is identified by the {group_ptr, node_id} array packed
+    before it — the one table in a Stern binary that has one — not by any name
+    it happens to contain."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture()
+    assert b"SE FX " not in fw
+    got = sfx_names.locate_menu_sids(fw)
+    assert [n for _, n in got] == names[:-1]        # INVALID dropped, rest kept
+
+
+@pytest.mark.parametrize("gap_words", [0, 4, 3500])
+def test_node_id_array_need_not_touch_the_table(gap_words):
+    """Godzilla parks its node-id array 14 KB ahead of a 1315-entry table.
+    Requiring the two to be adjacent found no menu there at all, so the array
+    is located by where it POINTS rather than by where it sits."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture(gap_words=gap_words)
     assert sfx_names.locate_menu_sids(fw) == [
         (700 + k, n) for k, n in enumerate(names[:-1])]
 

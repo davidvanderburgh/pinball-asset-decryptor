@@ -1282,9 +1282,11 @@ def _sfx_names_cache_path(fp):
     The suffix is bumped whenever the menu->sound binding changes so stale
     caches can't re-apply names built by a superseded mapping: ``2`` retired
     the pre-v0.63.1 maps, ``3`` retires everything built before the menu's
-    ``{group_ptr, node_id}`` / sound-id-list indirection was read correctly."""
+    ``{group_ptr, node_id}`` / sound-id-list indirection was read correctly,
+    and ``4`` retires the maps built while the menu table was located by the
+    literal "SE FX " (which found it on two titles out of fourteen)."""
     return os.path.join(os.path.dirname(_cache_path(fp)),
-                        fp[:32] + ".sfxnames3.json")
+                        fp[:32] + ".sfxnames4.json")
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):

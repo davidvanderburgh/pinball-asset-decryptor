@@ -223,11 +223,11 @@ Why online for music: the song→`idx` (master-directory position) binding lives
 
 ### Sound-Test SFX naming (`spike2/sfx_names.py`)
 
-Newer titles (Led Zeppelin onward) carry a Sound/Speaker-Test menu naming every effect `SE FX <NAME>`. Extract mines it and lands each name on an extraction `idx`:
+Most Spike 2 titles carry a Sound/Speaker-Test menu naming their sounds. The prefix is per title and there is no universal one — `SE FX ...` (Led Zeppelin, Rush), `SPEECH: ... / SOUND: ... / MUSIC: ...` (TMNT), `VO: ... / FX: ... / MUSIC: ...` (Elvira's House of Horrors), `SE GZ VO ...` (Godzilla), or no prefix at all (James Bond's `80S - STERN S2 BACKGROUND`). Extract mines the menu and lands each name on an extraction `idx`:
 
 ```
 menu name      24B name-group table (5 identical char*, one per UI language)
-  -> node id   {group_ptr, node_id} array immediately BEFORE the table
+  -> node id   {group_ptr, node_id} array POINTING AT that table
   -> sid       NUL-terminated u32 sound-id lists immediately BEFORE that array,
                indexed FROM THE END: lists[(nlists - 1) - node_id], last elem
   -> descriptor  firmware get_asset_descriptor(sid) driven in the emulator
@@ -235,22 +235,29 @@ menu name      24B name-group table (5 identical char*, one per UI language)
                key; derive_params snapshots the same key per record as `key0`
 ```
 
-Three traps, each of which shipped wrong names before (v0.61.0, v0.61.2):
+**The table is found by shape, never by a name.** Of the ~140 name-group tables in a Stern binary, exactly one has a `{group_ptr, node_id}` array pointing at it, so `_group_sites` enumerates every candidate table and a single numpy pass finds the longest stride-8 run of references into one of them. Anchoring on the literal `SE FX ` (v0.91.0) only ever matched Led Zeppelin and Rush, and left TMNT, Elvira, Godzilla, Jaws, Deadpool, Iron Maiden, James Bond and Jurassic Park naming nothing.
 
-1. the 8-byte array is `{group_ptr, node_id}`, **not** `{node_id, group_ptr}` — reading it the other way shifts every id by one entry;
+Five traps, each of which produced wrong or absent names in a shipped build:
+
+1. the 8-byte array is `{group_ptr, node_id}`, **not** `{node_id, group_ptr}` — reading it the other way shifts every id by one entry (v0.61.0);
 2. the list block's final u32 closes list id 0, and trailing padding words split into further empty lists. Since ids count from the **end**, one stray empty renumbers everything (`_walk_menu_table` keeps exactly one);
-3. the block's extent is found by counting terminators, **not** by bounding sid values: on the multi-category titles a sid carries its category in the high half (`category = sid >> 16`), so Rush's ids run past `0x10000` and a value ceiling truncated the block to 86 of 550 lists, resolving nothing.
+3. the block's extent is found by counting terminators, **not** by bounding sid values: on the multi-category titles a sid carries its category in the high half (`category = sid >> 16`), so Rush's ids run past `0x10000` and a value ceiling truncated the block to 86 of 550 lists, resolving nothing (v0.91.0);
+4. the array is **not** necessarily adjacent to the table it indexes — Godzilla parks its array 14 KB ahead of a 1315-entry table, so requiring adjacency found no menu there at all (v0.91.0);
+5. the blanket "never name a record ≥ 20s" music guard must not apply to a menu entry that is *itself* a music name, or Elvira's 53 `MUSIC:` tracks are all discarded.
 
 The number the machine **displays** is a fourth thing again — a reversed position `(N-1) - p` over the whole table, OCR-verified against a real Sound Test. `locate_menu_names` returns that for the `sound_test_names.csv` sidecar; `locate_menu_sids` returns the resolver sid for naming. They are not interchangeable.
 
-**Every map is validated against the audio before use** (`validate_name_map`), because a shifted map still resolves and still names real files. Two properties of Stern's own naming, each tested against 2000 reshuffles of the same slot set and required to clear p ≤ 0.01:
+**Every map is validated against the audio before use** (`validate_name_map`), because a shifted map still resolves and still names real files. Three properties of Stern's own naming, each tested against 2000 reshuffles of the same slot set and required to clear p ≤ 0.01. Whichever have enough data run; a title with none falls back to `_notes_look_tonal`:
 
 - **lit/unlit**: a `<TARGET> LIT` recording is longer than its `<TARGET> UNLIT` twin (Led Zeppelin: 20 of 21 pairs, the 21st an exact tie; null mean 10.2, p < 1/20000).
 - **group spread**: names differing only in a trailing letter or number are one sound design, so their durations cluster — mean within-group CV 0.078 against a null of 0.670, p < 1/20000. All 16 `SPINNER A` are 0.70s, all 36 `NOTE` are 1.16s.
+- **music longer**: where the menu names music, those entries must land on the long records (mean-rank test). This is what covers Elvira, whose menu is mostly `MUSIC:` names.
 
-Both collapse under an off-by-one, which is the exact historical failure mode; a map that fails is discarded and the sounds keep their `idx` names. Titles with too few paired/grouped names to judge fall back to `_notes_look_tonal` (decodes the note stings and checks they are tonal). Durations come from the derived params, so neither test decodes anything. Records ≥ 20s are never event-named at all: Led Zeppelin has **no music banks**, so mode events play into shared full-song masters and no single event name is right for one (`_MUSIC_MIN_SECONDS`).
+The first two look only at **effect** names. `MUSIC: CRYPT #1..#3` are three different recordings, so demanding their durations agree would reject a perfectly correct map; `_name_groups` also requires a key of at least two tokens so a bare category prefix (`FX:` over SCREAM / THUNDER / ORGAN) cannot pose as a series. All three collapse under an off-by-one, which is the exact historical failure mode; a map that fails is discarded and the sounds keep their `idx` names. Durations come from the derived params, so no test decodes anything.
 
-Independent confirmation that the chain itself is right: three of the four speaker-routing prompts resolve to audio that transcribes as its own menu name ("Cabinet Speaker", "Left back box speaker", "Cabinet and Backbox speakers"). Spoken **callouts have no firmware name table** — all 206 name-group tables in the Led Zeppelin binary were enumerated and exactly one names sound assets — so callouts stay with Whisper permanently. Per-card cache is `.sfxnames3.json` (the suffix retires maps built by any superseded binding); `PINBALL_SFX_NAMES=0` turns naming off.
+Independent confirmation that the chain is right, on two unrelated titles: the speaker-routing prompts resolve to audio that transcribes as its own menu name (all four on TMNT — "Cabinet speaker", "Right back box speaker", "Left back box speaker", "Cabinet and Backblock speakers"; three of four on Led Zeppelin), and TMNT's `SPEECH: 'WHAT IS IT ...'` / `SPEECH: 'NOTHING CAN ...'` land on "What is it now, Krang? ..." and "Nothing can stop the almighty Krang!" — the menu name is the line's own opening words.
+
+**Callouts and music are named on some titles and not others.** Led Zeppelin's menu covers effects only, which is why callouts there stay with Whisper; TMNT and Elvira name speech and music outright (Elvira lists 53 tracks). Menus found on the firmware corpus: Jaws 1352, Godzilla 1314, James Bond 458, Deadpool 361, Jurassic Park 260, Rush 246, Led Zeppelin 244, Iron Maiden 217, Elvira 66, TMNT 10. Mandalorian, Star Wars, Uncanny X-Men and Venom have name tables but nothing points at them — no menu binding exists in those builds and they name nothing. Per-card cache is `.sfxnames4.json` (the suffix retires maps built by any superseded binding); `PINBALL_SFX_NAMES=0` turns naming off.
 
 Two GUI features ride these passes:
 

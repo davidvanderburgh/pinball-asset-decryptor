@@ -1677,6 +1677,44 @@ class DecryptionPipeline:
         else:
             self.log("Dongle bound successfully.", "success")
 
+    def _dongle_visible(self):
+        """True if the HASP dongle is visible to the kernel inside WSL.
+
+        Reads sysfs and only falls back to `lsusb`: lsusb ships in the
+        `usbutils` package, which a stock Ubuntu WSL does *not* install, so the
+        old lsusb-only probe reported "Dongle not visible" on a perfectly good
+        attach — a false alarm that sent users hunting a non-existent problem.
+        `/sys/bus/usb/devices` needs no package (it appears once usbipd's
+        vhci-hcd attach lands).
+
+        The id pairing is done here rather than in the shell because commands
+        handed to ``executor.run()`` go through an extra ``wsl.exe`` parse that
+        eats ``$var`` expansions — globs survive, variables do not.
+        """
+        vid, pid = config.HASP_VID_PID.split(":")
+        probe = ("{ grep -sH . /sys/bus/usb/devices/*/idVendor "
+                 "/sys/bus/usb/devices/*/idProduct; lsusb 2>/dev/null; } "
+                 "2>/dev/null; true")
+        try:
+            out = self.executor.run(probe, timeout=5)
+        except CommandError:
+            return False
+
+        # lsusb prints "... ID 0529:0001 ..." when it exists at all.
+        if config.HASP_VID_PID in out:
+            return True
+
+        # sysfs lines look like "/sys/bus/usb/devices/1-1/idVendor:0529"
+        ids = {}
+        for line in out.splitlines():
+            path, sep, value = line.partition(":")
+            if not sep or "/idVendor" not in path and "/idProduct" not in path:
+                continue
+            devdir, _, leaf = path.rpartition("/")
+            ids.setdefault(devdir, {})[leaf] = value.strip().lower()
+        return any(d.get("idVendor") == vid and d.get("idProduct") == pid
+                   for d in ids.values())
+
     def _phase_dongle(self):
         self.log("Checking for HASP dongle...", "info")
         usbipd = find_usbipd()
@@ -1755,22 +1793,20 @@ class DecryptionPipeline:
             self.on_progress(step, total_wait, "Waiting for USB device...")
             time.sleep(1)
             step += 1
-            try:
-                self.executor.run(
-                    f"lsusb 2>/dev/null | grep -q '{config.HASP_VID_PID}'",
-                    timeout=5,
-                )
+            if self._dongle_visible():
                 dongle_visible = True
                 self.log(f"Dongle visible in WSL (after {i + 1}s).", "success")
                 step = config.USB_SETTLE_TIMEOUT  # skip remaining USB wait
                 break
-            except CommandError:
-                if i < config.USB_SETTLE_TIMEOUT - 1:
-                    self.log(f"  Not visible yet ({i + 1}s)...", "info")
+            if i < config.USB_SETTLE_TIMEOUT - 1:
+                self.log(f"  Not visible yet ({i + 1}s)...", "info")
 
         if not dongle_visible:
-            self.log("Warning: Dongle not visible in lsusb after waiting. "
-                     "Will try starting daemon anyway...", "error")
+            # Not fatal: the probe can only see what the WSL kernel enumerated,
+            # and the real proof is the HASP daemon below finding the key.
+            self.log("Warning: could not confirm the dongle inside WSL. "
+                     "Continuing — the HASP daemon check below is the real "
+                     "test; if that passes, the extract is fine.", "error")
 
         # Extra wait for HASP USB interface to fully initialize
         self.log("Letting USB interface settle...", "info")
@@ -1813,17 +1849,12 @@ class DecryptionPipeline:
         # Wait for device to appear in WSL
         for i in range(config.USB_SETTLE_TIMEOUT):
             time.sleep(1)
-            try:
-                self.executor.run(
-                    f"lsusb 2>/dev/null | grep -q '{config.HASP_VID_PID}'",
-                    timeout=5,
-                )
+            if self._dongle_visible():
                 self.log(f"Dongle visible in WSL (after {i + 1}s).", "success")
                 break
-            except CommandError:
-                pass
         else:
-            self.log("Warning: Dongle not visible in lsusb after re-attach.", "error")
+            self.log("Warning: could not confirm the dongle inside WSL after "
+                     "re-attach. Continuing to the daemon check.", "error")
 
         # Extra settle time
         time.sleep(2)

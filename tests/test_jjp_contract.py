@@ -541,3 +541,72 @@ def test_jjp_dev_capture_noop_when_not_requested():
     pipe.log = lambda *a, **k: None
     pipe._phase_dev_capture()  # must return immediately
     assert not called
+
+
+# --- dongle visibility probe -------------------------------------------------
+
+def _dongle_probe_pipe(out):
+    """A DecryptionPipeline whose executor replays `out` for the probe."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+    pipe = object.__new__(P.DecryptionPipeline)
+    seen = []
+
+    def run(cmd, timeout=None):
+        seen.append(cmd)
+        return out
+
+    pipe.executor = type("E", (), {"run": staticmethod(run)})()
+    return pipe, seen
+
+
+_SYSFS = (
+    "/sys/bus/usb/devices/1-1/idVendor:{v}\n"
+    "/sys/bus/usb/devices/2-1/idVendor:0489\n"
+    "/sys/bus/usb/devices/1-1/idProduct:{p}\n"
+    "/sys/bus/usb/devices/2-1/idProduct:e10d\n"
+)
+
+
+def test_jjp_dongle_visible_from_sysfs_without_lsusb():
+    """The dongle must be detectable with NO lsusb output at all.
+
+    `lsusb` lives in the `usbutils` package, which a stock Ubuntu WSL does not
+    install — the old lsusb-only probe cried "Dongle not visible in lsusb"
+    on a perfectly good attach and sent users chasing a phantom.
+    """
+    pipe, _ = _dongle_probe_pipe(_SYSFS.format(v="0529", p="0001"))
+    assert pipe._dongle_visible() is True
+
+
+def test_jjp_dongle_not_visible_when_ids_belong_to_other_devices():
+    """Vendor and product must match on the SAME device, not just appear
+    somewhere in the dump."""
+    pipe, _ = _dongle_probe_pipe(
+        "/sys/bus/usb/devices/1-1/idVendor:0529\n"
+        "/sys/bus/usb/devices/1-1/idProduct:e10d\n"
+        "/sys/bus/usb/devices/2-1/idVendor:0489\n"
+        "/sys/bus/usb/devices/2-1/idProduct:0001\n"
+    )
+    assert pipe._dongle_visible() is False
+
+
+def test_jjp_dongle_visible_from_lsusb_fallback():
+    """Where usbutils *is* installed, the lsusb line still counts."""
+    pipe, _ = _dongle_probe_pipe(
+        "Bus 001 Device 004: ID 0529:0001 Aladdin Knowledge Systems HASP\n")
+    assert pipe._dongle_visible() is True
+
+
+def test_jjp_dongle_visible_empty_output_is_false():
+    pipe, _ = _dongle_probe_pipe("")
+    assert pipe._dongle_visible() is False
+
+
+def test_jjp_dongle_probe_uses_no_shell_variables():
+    """Commands handed to executor.run() cross an extra wsl.exe parse that
+    eats `$var` expansions (globs survive, variables do not) — a probe written
+    with a shell loop silently evaluates to empty and never matches."""
+    pipe, seen = _dongle_probe_pipe("")
+    pipe._dongle_visible()
+    assert seen, "probe never ran"
+    assert "$" not in seen[0], seen[0]

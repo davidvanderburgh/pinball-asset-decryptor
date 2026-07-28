@@ -3045,7 +3045,7 @@ def _merge_radium_overlays(dst, src):
 
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                          full_repl, radium_overlays, log,
-                         fw_node=None, fw_overlays=None):
+                         fw_node=None, fw_patched_path=None):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
@@ -3073,16 +3073,23 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                  min_size=1, max_depth=20)}
 
     modified = {}   # manifest path -> (hmac, md5) of the patched file
+    resized = {}    # manifest path -> new byte length (non-size-neutral writes)
     if audio_patches and img_node is not None:
         p = ipath.get(bytes(img_node["i_block"]))
         if p:
             modified[p] = _overlay_digests(reader, disk_f, img_node, audio_patches)
-    # Path A: the patched game_real (firmware cave) also needs its .sidx digest
-    # refreshed, or the card fails SD validation on the modified firmware.
-    if fw_overlays and fw_node is not None:
+    # Path A: the rebuilt game_real (blip-free cave + validator bypass) needs its
+    # .sidx record refreshed or the card fails SD validation on the modified
+    # firmware.  Unlike every other patched file it is LONGER than the original,
+    # so the record's stored size has to move too -- digests alone would leave
+    # the manifest describing a file that no longer exists.
+    if fw_patched_path and fw_node is not None:
         p = ipath.get(bytes(fw_node["i_block"]))
         if p:
-            modified[p] = _overlay_digests(reader, disk_f, fw_node, fw_overlays)
+            with open(_lp(fw_patched_path), "rb") as f:
+                blob = f.read()
+            modified[p] = sidx.digests(blob)
+            resized[p] = len(blob)
     if music_patches:
         banks = {}
         for sc_node, body_off, body in music_patches:
@@ -3110,7 +3117,8 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         if po is None:
             log("  .sidx has no record for %s — left stale." % path, "warning")
             continue
-        for foff, b in sidx.record_field_writes(po, hm, md, sidx_fmt):
+        for foff, b in sidx.record_field_writes(po, hm, md, sidx_fmt,
+                                                size=resized.get(path)):
             for d, n in reader.disk_ranges(sidx_node, foff, len(b)):
                 out.append((d, b[:n]))
                 b = b[n:]
@@ -3221,16 +3229,22 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if adv:
             log("Advanced audio overrides active for this build: %s."
                 % "; ".join(adv), "warning")
-        if _pathA_disabled():
-            log("Blip-free callouts DISABLED (PAD_STERN_SKIP_KEYPATCH=1): "
-                "re-encoded callouts keep the ~6 ms original scrap at the two "
-                "master-directory windows (standard build).", "warning")
+        if not _pathA_enabled():
+            log("Blip-free callouts OFF for this build: a re-encoded sound keeps "
+                "a ~6 ms scrap of the original at the two master-directory "
+                "windows, and no code is added to the game firmware (only the "
+                "long-standing 4-byte validator bypass).", "info")
         else:
             log("Blip-free callouts on: patching game_real so the boot-derive "
-                "reads stock master-directory windows -- re-encoded callouts play "
-                "your audio for their whole length (no ~6 ms original scrap). "
-                "Falls back to the standard build for any firmware the cave can't "
-                "handle.", "info")
+                "reads stock master-directory windows -- re-encoded callouts "
+                "play your audio for their whole length (no ~6 ms original "
+                "scrap). The patch gets a memory mapping of its own rather than "
+                "borrowing the game's, which is what broke node boards on some "
+                "titles before v0.94.0. Needs the Linux filesystem driver "
+                "because it grows the game binary; falls back to the standard "
+                "build for any firmware or host it can't safely handle. Turn it "
+                "off in Advanced Audio Options to leave the firmware alone.",
+                "info")
         if _slot_seed_dbfs() is not None:
             log("Anti-pop seed ON (%.0f dBFS): mixing an inaudible low tone into "
                 "replacements so a callout is never digitally silent -- aimed at "
@@ -3273,7 +3287,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
         img_node = None
         fw_node = None
-        fw_overlays = {}       # Path A: game_real changed bytes {file_off: bytes}
+        # Path A: the rebuilt game_real (cave + validator bypass).  It is LONGER
+        # than the stock file, so it can't be patched in place like everything
+        # else -- it goes on the card as a whole-file copy through the ext4
+        # driver, and its .sidx record carries the new size as well as digests.
+        patched_gr = None
         reader = None
         gr_path = img_path = None
         if audio_edits or music_edits:
@@ -3320,11 +3338,19 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # is a boot of the FINAL firmware+image that asserts stock codec
                     # params for every sound before shipping.
                     pathA_applied = False
-                    if audio_patches and not _pathA_disabled():
+                    if audio_patches and _pathA_enabled():
                         try:
-                            fw_overlays, patched_gr = _build_derive_redirect_cave(
+                            _pathA_preflight(dest_is_device)
+                            # The cave grows game_real, so the whole firmware is
+                            # copied onto the card in one piece -- the validator
+                            # bypass has to be baked into that same image or the
+                            # copy would undo it.
+                            from . import valpatch as _vp
+                            with open(_lp(gr_path), "rb") as _f:
+                                _vbypass = _vp.bypass_overlay(_f.read())
+                            patched_gr, _fw_size = _build_derive_redirect_cave(
                                 gr_path, img_path, audio_patches, np, log, work,
-                                progress)
+                                progress, extra_fw_writes=_vbypass)
                             # Safety net: boot the PATCHED firmware on the patched
                             # image (our whole bodies) and confirm every sound
                             # still derives stock codec params, else abort.
@@ -3336,12 +3362,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                                     log, work)
                             pathA_applied = True
                         except Exception as e:
-                            # Any failure (unsupported firmware, too many replaced
-                            # sounds for the cave, or a failed integrity assert)
-                            # degrades to the standard build -- a working card with
-                            # the brief original scrap -- never a hard build
-                            # failure.  The fallback path re-asserts integrity.
-                            fw_overlays = {}
+                            # Any failure (unsupported firmware, no free address
+                            # space, a host that can't grow ext4 files, or a
+                            # failed integrity assert) degrades to the standard
+                            # build -- a working card with the brief original
+                            # scrap -- never a hard build failure.  The fallback
+                            # path re-asserts integrity.
+                            patched_gr = None
                             log("Blip-free callouts not applied (%s); building the "
                                 "standard way instead (the brief original-callout "
                                 "scrap remains)." % e, "warning")
@@ -3498,14 +3525,6 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             for disk, n in reader.disk_ranges(node, 0, len(payload)):
                 writes.append((disk, payload[off:off + n]))
                 off += n
-        # Path A: the patched game_real (cave code + redirect table + stock window
-        # copies + the FN branch + the segment +X flag) written back over the
-        # firmware inode.  Sparse -- only the changed byte ranges.
-        if fw_overlays and fw_node is not None:
-            for file_off, b in sorted(fw_overlays.items()):
-                for disk, n in reader.disk_ranges(fw_node, file_off, len(b)):
-                    writes.append((disk, b[:n]))
-                    b = b[n:]
         # Regenerate the .sidx manifest records for the changed files so the
         # card passes Stern's SD validation (recompute HMAC-SHA1 + MD5 with the
         # manifest's global validation key).  Best-effort: a missing /
@@ -3516,7 +3535,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_patches, music_patches,
                 full_repl, radium_overlays, log,
-                fw_node=fw_node, fw_overlays=fw_overlays)
+                fw_node=fw_node, fw_patched_path=patched_gr)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
@@ -3526,17 +3545,31 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # game validates itself, so a single bx-lr at that routine's entry stops
         # the asset checks, the self-check and the tamper flags (see valpatch).
         # Best-effort: a title without the validator, or any failure, is a no-op.
-        try:
-            from . import valpatch
-            writes += valpatch.compute_writes(reader, log)
-        except Exception as e:
-            log("Validation bypass skipped (%s)." % e, "warning")
+        # Skipped when the blip-free cave rebuilt the firmware: the bypass is
+        # already baked into that image (and its .sidx record refreshed above),
+        # and an in-place write here would be undone by the whole-file copy.
+        if patched_gr is None:
+            try:
+                from . import valpatch
+                writes += valpatch.compute_writes(reader, log)
+            except Exception as e:
+                log("Validation bypass skipped (%s)." % e, "warning")
 
         # Grown videos aren't flat disk writes — they're copied in by the ext4
-        # driver after the in-place writes land.  Hand them back to the caller
-        # (with the data-partition offset) as a separate plan.
-        grow_plan = ({"offset": reader.base, "jobs": video_grow_jobs}
-                     if video_grow_jobs else None)
+        # driver after the in-place writes land.  The rebuilt firmware rides the
+        # same mechanism, because it too is longer than the file it replaces.
+        grow_jobs = list(video_grow_jobs)
+        if patched_gr is not None and fw_node is not None:
+            from .valpatch import _game_manifest_path
+            fw_rel = _game_manifest_path(reader, fw_node)
+            if fw_rel:
+                grow_jobs.append((fw_rel, patched_gr))
+            else:
+                log("Couldn't resolve the game firmware's path on the card; the "
+                    "blip-free firmware won't be written.", "error")
+        grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
+                      "n_video": len(video_grow_jobs)}
+                     if grow_jobs else None)
 
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
@@ -3625,20 +3658,35 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         _apply_writes(out, writes)
         out.flush()
         os.fsync(out.fileno())
-    # Grow any oversized video slots (kept full-quality, not crushed) by copying
-    # the replacements in through the ext4 driver — done AFTER the in-place
-    # writes so the filesystem it mounts is already consistent.
+    # Grow the files that outgrew their slots (oversized videos kept at full
+    # quality, and the rebuilt firmware when a blip-free build is on) by copying
+    # them in through the ext4 driver — done AFTER the in-place writes so the
+    # filesystem it mounts is already consistent.
     n_grown = _grow_video_slots(output_path, grow_plan, log)
     n_audio, n_video, n_image, n_text = counts
     n_planned = len(grow_plan["jobs"]) if grow_plan else 0
+    # The firmware job is queued last, so jobs fail from the end: anything short
+    # of the full count means the firmware didn't land, and only the remainder
+    # comes out of the video tally.
+    n_vid_jobs = grow_plan.get("n_video", n_planned) if grow_plan else 0
     if n_grown < n_planned:
-        # The summary must not claim videos that never landed: every grow job
-        # that failed left its slot with the STOCK content.
-        n_video -= (n_planned - n_grown)
-        counts = (n_audio, n_video, n_image, n_text)
-        log("%d of %d replaced video(s) could NOT be written — those slots "
-            "still hold the game's stock videos. Fix the issue above and run "
-            "the Write again." % (n_planned - n_grown, n_planned), "error")
+        if n_planned > n_vid_jobs:
+            # Serious: the .sidx record already describes the rebuilt firmware,
+            # so the card now claims a game binary it doesn't have.
+            log("The blip-free game firmware could NOT be written to the card. "
+                "Its SD-validation record was already updated to match, so this "
+                "card will fail validation — re-run the Write, or build with "
+                "PAD_STERN_SKIP_KEYPATCH=1 for a standard (firmware-untouched) "
+                "build.", "error")
+        n_vid_failed = max(0, n_vid_jobs - n_grown)
+        if n_vid_failed:
+            # The summary must not claim videos that never landed: every grow
+            # job that failed left its slot with the STOCK content.
+            n_video -= n_vid_failed
+            counts = (n_audio, n_video, n_image, n_text)
+            log("%d of %d replaced video(s) could NOT be written — those slots "
+                "still hold the game's stock videos. Fix the issue above and "
+                "run the Write again." % (n_vid_failed, n_vid_jobs), "error")
     log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
@@ -4869,7 +4917,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     seed = _slot_seed_for(p)
-    if (seed is None and not _pathA_disabled()
+    if (seed is None and _pathA_enabled()
             and int(np.abs(tgt).max()) < _pathA_seed_peak()):
         seed = _PATHA_SEED_DBFS   # blip-free: rescue a degenerate near-silent slot
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
@@ -4897,7 +4945,7 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
     _seed = _slot_seed_for(p)
-    if (_seed is None and not _pathA_disabled()
+    if (_seed is None and _pathA_enabled()
             and max(int(np.abs(L).max()), int(np.abs(R).max())) < _pathA_seed_peak()):
         _seed = _PATHA_SEED_DBFS   # blip-free: rescue a degenerate near-silent slot
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
@@ -5066,7 +5114,8 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 
 # --------------------------------------------------------------------------
 # Blip-free callouts — derive-read redirect firmware cave (the callout "blip"
-# COMPLETE fix), applied automatically to every Stern Spike 2 audio build.
+# COMPLETE fix).  ON by default; the GUI's Advanced Audio Options checkbox and
+# PAD_STERN_SKIP_KEYPATCH=1 both turn it off — see _pathA_enabled.
 #
 # The firmware's boot-derive reads two ~512 B "windows" out of each sound's body
 # to set up that sound's (and, via a forward chain, every later sound's) codec
@@ -5086,12 +5135,35 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # GENERIC across Spike 2 titles: the window-read function is the same compiled
 # routine on every firmware seen (LZ LE/non-LE, TMNT) -- only its address moves --
 # so it's located by its unique 3-instruction prologue signature and confirmed
-# dynamically (it must actually perform the image window read).  The cave lives in
-# the first reloc-free zero-run of the firmware's data segment (first-fit by VA,
-# which keeps LZ on its HW-validated run).  Anything the locator can't pin down,
-# a set too large for the spare space, or a firmware that fails the post-build
-# integrity assert falls back to the standard _restore_masterdir_consumed build.
-# PAD_STERN_SKIP_KEYPATCH=1 forces that fallback everywhere (kill switch).
+# dynamically (it must actually perform the image window read).
+#
+# WHERE the cave lives was the hard part, and got it badly wrong once.  Until
+# v0.94.0 it went in the first reloc-free zero run of the RW data segment, on the
+# reasoning that a zero run with no relocations pointing into it must be spare.
+# It isn't: a zero-initialised global lives in .data and needs no relocations
+# either, so live storage and dead padding are indistinguishable to that rule.
+# On Elvira's House of Horrors 1.13.0 the run it picked (0x7FEEC0) is element 0
+# of the NODE BUS board table -- 5 elements of stride 0x798, node ids 0/1/7/8/9,
+# registered by the init loop at 0x1f0de8 into the table at 0x88B2A0 -- so the
+# build wrote executable code into node board 0's state buffer.  Reported from
+# the field as a machine that boots very slowly, runs slowly, throws node board
+# errors and cannot start a game (Kris, 2026-07-28).  Section headers tile the RW
+# segment exactly on all 17 firmwares on hand, so there was never any genuinely
+# unclaimed space to find there; LZ only worked because the object it happened to
+# land on goes unused, and even that shifts with the number of replaced sounds.
+#
+# So the cave no longer looks for space -- it MAKES it.  _append_cave_segment
+# appends the cave to game_real and maps it with a PT_LOAD of its own, over
+# address space no segment claims.  Nothing can own those bytes because they did
+# not exist until we wrote them.  The cost is that game_real stops being
+# size-neutral: the write path has to grow the file through the ext4 driver and
+# refresh its .sidx size fields as well as its digests.
+#
+# Anything the locator can't pin down, a firmware with no free address space in
+# branch reach, a host that can't grow ext4 files, or a firmware that fails the
+# post-build integrity assert falls back to the standard
+# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts in;
+# PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5101,14 +5173,26 @@ _CAVE_SIG = (0xE92D4FF0, 0xE24DDF5B, 0xE2819040)
 _CAVE_SIG_BYTES = struct.pack("<III", *_CAVE_SIG)
 _PATHA_SEED_DBFS = -45.0    # anti-degenerate seed level for a near-silent replacement
 _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
+_PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
-def _pathA_disabled():
-    """True when the blip-free firmware cave is force-disabled via
-    ``PAD_STERN_SKIP_KEYPATCH=1`` (kill switch): every audio build then uses the
-    standard :func:`_restore_masterdir_consumed` path (the ~6 ms original scrap
-    returns)."""
-    return os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1"
+def _pathA_enabled():
+    """True when the blip-free firmware cave should be built for this write.
+
+    **On by default**, surfaced as the "Blip-free callouts" checkbox in the
+    GUI's Advanced Audio Options.  The cave now gets a segment of its own (see
+    :func:`_append_cave_segment`) instead of squatting on the game's data, which
+    is what made the pre-v0.94.0 placement unsafe.
+
+    ``PAD_STERN_BLIP_FREE=0`` turns it off (what the checkbox clears to);
+    ``PAD_STERN_SKIP_KEYPATCH=1`` also forces it off and wins, so anything that
+    already sets the historical kill switch keeps working.  Either way the build
+    falls back to :func:`_restore_masterdir_consumed`, which touches no game code
+    at all -- and so does any firmware or host the cave can't safely handle.
+    """
+    if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
+        return False
+    return os.environ.get("PAD_STERN_BLIP_FREE") != "0"
 
 
 def _cave_va2off(segs, va):
@@ -5145,31 +5229,6 @@ def _exec_seg(raw):
     raise ValueError("no executable PT_LOAD segment")
 
 
-def _rw_data_seg(raw):
-    """``(vaddr, offset, filesz)`` of the writable non-exec (RW-) PT_LOAD, where
-    the cave's data (and, after :func:`_set_seg_exec`, its code) live."""
-    for _ph, va, off, fz, _mz, fl in _iter_phdrs(raw):
-        if (fl & 2) and not (fl & 1):   # PF_W and not PF_X
-            return va, off, fz
-    raise ValueError("no writable non-exec PT_LOAD segment")
-
-
-def _set_seg_exec(raw, va):
-    """Add PF_X to the PT_LOAD segment whose ``[vaddr, vaddr+memsz)`` contains
-    *va* (mutating *raw* in place).  The cave code lives in the data segment,
-    which ships RW- (non-executable); on real HW a branch into it would fault.
-    This one-field ELF edit marks that segment executable.  The firmware already
-    ships a PT_GNU_STACK with RWX flags, so its loader demonstrably permits W+X
-    (HW-confirmed on LZ 1.22).  (The emulator maps everything RWX regardless, so
-    this is the HW-only correctness fix.)  Returns ``(ph_off, old, new)``."""
-    for ph, p_va, _off, _fz, p_mz, fl in _iter_phdrs(raw):
-        if p_va <= va < p_va + p_mz:
-            new = fl | 1
-            struct.pack_into("<I", raw, ph + 24, new)
-            return ph, fl, new
-    raise ValueError("no PT_LOAD segment contains VA 0x%x" % va)
-
-
 def _locate_window_read_fn(raw):
     """VA of the masterdir window-read function: the unique occurrence of the
     3-word prologue signature inside the executable segment.  Returns the VA, or
@@ -5182,114 +5241,6 @@ def _locate_window_read_fn(raw):
         hits.append(va + (i - off))
         i = raw.find(_CAVE_SIG_BYTES, i + 4, off + fz)
     return hits[0] if len(hits) == 1 else None
-
-
-def _find_cave_region(raw, relocs, needed):
-    """First reloc-free zero-run in the RW data segment big enough for *needed*
-    bytes of cave.  Returns ``(cave_va, run_end_va)`` with ``cave_va`` 16-aligned,
-    or ``None``.  First-fit by ascending VA keeps LZ on its HW-validated 0x884940
-    run (the first big zero-run there)."""
-    import bisect
-    va, off, fz = _rw_data_seg(raw)
-    reloc_vas = sorted(gv for gv, _ in relocs)
-    end = off + fz
-    i = off
-    while i < end:
-        if raw[i] != 0:
-            i += 1
-            continue
-        j = i
-        while j < end and raw[j] == 0:
-            j += 1
-        run_va = va + (i - off)
-        run_len = j - i
-        cave_va = (run_va + 0xf) & ~0xf
-        if cave_va + needed <= run_va + run_len:
-            lo = bisect.bisect_left(reloc_vas, run_va)
-            hi = bisect.bisect_left(reloc_vas, run_va + run_len)
-            if lo == hi:                    # no relocation inside the run
-                return cave_va, run_va + run_len
-        i = j
-    return None
-
-
-def _all_data_runs(raw, relocs, min_len=512):
-    """All reloc-free zero-runs (>= *min_len*) in the RW data segment, as
-    ``[(va, length), ...]`` sorted by ascending VA -- the gaps the cave can use."""
-    import bisect
-    va, off, fz = _rw_data_seg(raw)
-    reloc_vas = sorted(gv for gv, _ in relocs)
-    out = []
-    i = off
-    end = off + fz
-    while i < end:
-        if raw[i] != 0:
-            i += 1
-            continue
-        j = i
-        while j < end and raw[j] == 0:
-            j += 1
-        run_va = va + (i - off)
-        run_len = j - i
-        if run_len >= min_len:
-            lo = bisect.bisect_left(reloc_vas, run_va)
-            hi = bisect.bisect_left(reloc_vas, run_va + run_len)
-            if lo == hi:
-                out.append((run_va, run_len))
-        i = j
-    return out
-
-
-def _scatter_cave(raw, relocs, windows, stock_chunks, code_table_bytes):
-    """Place the cave when no single reloc-free run fits the whole thing: code +
-    redirect table in the first run big enough for them, then the per-window stock
-    copies packed across that run's leftover and the remaining reloc-free runs.
-    The redirect table addresses each stock copy by absolute VA, so the copies
-    need not be contiguous -- capacity becomes the SUM of the firmware's zero-gaps
-    rather than just its biggest.
-
-    Returns ``(cave_va, table_va, basevar_va, placements, stock_overlays,
-    cave_hi)`` -- ``placements[i]`` is window *i*'s stock-copy VA and
-    ``stock_overlays`` is ``{va: concatenated stock bytes}`` -- or ``None`` if the
-    total still doesn't fit."""
-    runs = _all_data_runs(raw, relocs)
-    prim = next((k for k, (_v, L) in enumerate(runs)
-                 if L >= code_table_bytes + 16), None)
-    if prim is None:
-        return None
-    cave_va = (runs[prim][0] + 0xf) & ~0xf
-    table_va = cave_va + 30 * 4
-    basevar_va = cave_va + 29 * 4
-    table_end = table_va + (len(windows) + 1) * 12
-    # Free byte-spans for the stock copies, VA-ordered: the primary run's leftover
-    # (after code+table) first, then every other reloc-free run.
-    spans = []
-    prim_end = runs[prim][0] + runs[prim][1]
-    if table_end < prim_end:
-        spans.append([table_end, prim_end])
-    for k, (v, L) in enumerate(runs):
-        if k != prim:
-            spans.append([v, v + L])
-    cur = [s for s, _e in spans]
-    blob = [bytearray() for _ in spans]
-    blob_start = [None] * len(spans)
-    placements = [None] * len(windows)
-    for wi, (a0, b0) in enumerate(windows):
-        need = b0 - a0
-        for si in range(len(spans)):
-            if cur[si] + need <= spans[si][1]:
-                if blob_start[si] is None:
-                    blob_start[si] = cur[si]
-                placements[wi] = cur[si]
-                blob[si].extend(stock_chunks[wi])
-                cur[si] += need
-                break
-        else:
-            return None                       # a copy fit nowhere
-    stock_overlays = {blob_start[si]: bytes(blob[si])
-                      for si in range(len(spans)) if blob[si]}
-    cave_hi = max(cur[si] for si in range(len(spans)) if blob[si])
-    return cave_va, table_va, basevar_va, placements, stock_overlays, cave_hi
 
 
 def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
@@ -5431,27 +5382,137 @@ def _replaced_consumed_offsets(gr_path, img_path, patches, np):
     return out
 
 
+def _pathA_preflight(dest_is_device):
+    """Raise (so the caller falls back to the standard build) when this host or
+    destination can't take a blip-free build.
+
+    The cave makes ``game_real`` longer, and a longer file can only get onto the
+    card through the Linux filesystem driver -- the same requirement full-size
+    video replacement already has.  Checked BEFORE the cave is built so a host
+    that can't do it spends no time on the emulator work, and, more importantly,
+    so the ``.sidx`` record never gets rewritten to describe a firmware the write
+    then fails to deliver.
+    """
+    if dest_is_device:
+        raise RuntimeError(
+            "a direct-SD write can't grow files on the card; build an image "
+            "file and flash it for a blip-free build")
+    from ...core import ext4_grow
+    ok, why = ext4_grow.available()
+    if not ok:
+        raise RuntimeError(
+            "this system can't grow files inside an ext4 image (%s), which the "
+            "blip-free firmware patch needs" % why)
+
+
+def _append_cave_segment(raw, need, fn):
+    """Append *need* bytes to the ELF *raw* and map them with a PT_LOAD of the
+    cave's own, at a virtual address no existing segment claims.
+
+    This is what makes the cave safe: rather than hunting the data segment for
+    zeros and hoping nothing owns them (which put the cave on Elvira's node bus
+    board table -- see the section comment), the bytes are created here, so
+    nothing can own them.
+
+    The header comes from ``PT_GNU_STACK``, which every Spike 2 firmware seen
+    ships as a pure advisory entry (offset / vaddr / sizes all zero) with
+    ``flags=7``.  There is no room to append a 9th program header -- ``.interp``
+    starts immediately after the table -- so the advisory entry is repurposed.
+    Dropping it is benign here: it already requested an executable stack, and
+    its absence leaves the loader on that same default.
+
+    Returns ``(cave_va, append_off, gap_bytes)``.  Raises ``RuntimeError`` (so
+    the caller falls back to the standard build) if there's no repurposable
+    header or no free address space within ARM branch reach of *fn*.
+    """
+    PAGE = 0x1000
+    loads = [(va, mz) for _ph, va, _o, _fz, mz, _fl in _iter_phdrs(raw)]
+    if not loads:
+        raise RuntimeError("no PT_LOAD segments in the firmware ELF.")
+    loads.sort()
+
+    # Address space no PT_LOAD covers: the gaps between consecutive segments,
+    # then everything above the highest one.
+    frees = []
+    for i, (va, mz) in enumerate(loads):
+        lo = (va + mz + PAGE - 1) & ~(PAGE - 1)
+        hi = (loads[i + 1][0] & ~(PAGE - 1)) if i + 1 < len(loads) else lo + (32 << 20)
+        if hi > lo:
+            frees.append((lo, hi))
+
+    # The fn <-> cave hops are single ARM branches (+/-32 MB), so the cave has
+    # to land within reach of the window-read function.
+    want = (need + PAGE - 1) & ~(PAGE - 1)
+    pick = None
+    for lo, hi in frees:
+        if hi - lo < want:      # the mapping covers the padded extent, not just need
+            continue
+        if abs(lo - (fn + 8)) >= _CAVE_MAX_BRANCH:
+            continue
+        pick = (lo, hi)
+        break
+    if pick is None:
+        raise RuntimeError(
+            "no unclaimed address space within branch reach of the window-read "
+            "function fits a %d-byte cave -- using the standard build." % need)
+    cave_va, gap_hi = pick
+    gap = gap_hi - cave_va
+
+    slot = None
+    e_phoff = struct.unpack_from("<I", raw, 0x1c)[0]
+    e_phentsize = struct.unpack_from("<H", raw, 0x2a)[0]
+    e_phnum = struct.unpack_from("<H", raw, 0x2c)[0]
+    for i in range(e_phnum):
+        o = e_phoff + i * e_phentsize
+        if struct.unpack_from("<I", raw, o)[0] == _PT_GNU_STACK:
+            slot = o
+            break
+    if slot is None:
+        raise RuntimeError(
+            "firmware has no PT_GNU_STACK header to repurpose for the cave.")
+
+    # Page-align the appended data so p_offset == p_vaddr (mod PAGE), which the
+    # loader requires, and pad the file out to the whole declared extent -- a
+    # p_filesz running past EOF makes the loader read off the end of the file.
+    append_off = (len(raw) + PAGE - 1) & ~(PAGE - 1)
+    raw.extend(b"\0" * (append_off + want - len(raw)))
+    struct.pack_into("<8I", raw, slot,
+                     1,              # p_type = PT_LOAD
+                     append_off,     # p_offset
+                     cave_va,        # p_vaddr
+                     cave_va,        # p_paddr
+                     want,           # p_filesz
+                     want,           # p_memsz
+                     7,              # p_flags = R|W|X (BASEVAR is written)
+                     PAGE)           # p_align
+    return cave_va, append_off, gap
+
+
 def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
-                                out_dir, progress=None):
+                                out_dir, progress=None, extra_fw_writes=None):
     """Build the blip-free firmware cave for the replaced sounds in *patches*
     (``{body_off: body}``), generically for any Stern Spike 2 firmware.
 
-    Locates the window-read function by signature, patches ``game_real`` so the
-    boot-derive reads STOCK window bytes for every replaced sound, writes the
-    patched firmware to *out_dir*, and returns ``(fw_overlays, patched_gr_path)``
-    where ``fw_overlays`` = ``{file_off: bytes}`` are exactly the changed firmware
-    bytes (cave code + redirect table + stock window copies + the FN branch + the
-    segment +X flag) -- for both the on-disk write and the ``.sidx`` digest
-    refresh.
+    Locates the window-read function by signature, then rebuilds ``game_real``
+    so the boot-derive reads STOCK window bytes for every replaced sound: cave
+    code + redirect table + stock window copies go into a segment of the cave's
+    own (:func:`_append_cave_segment`), and the function is branched into it.
+    Anything in *extra_fw_writes* (``{file_off: bytes}`` -- in practice the
+    validator bypass) is baked into the same image, because the whole file is
+    copied onto the card in one piece.
+
+    Returns ``(patched_gr_path, new_size)``.  The result is LONGER than the stock
+    firmware, so the caller must write it through the ext4 grow path and refresh
+    the file's ``.sidx`` size as well as its digests.
 
     Raises ``RuntimeError`` (caught by the caller, which then falls back to the
     standard restore build) if the window-read function can't be located, the
-    consumed-window map is missing, the replacement set is too big for the
-    firmware's spare space, or the located function turns out not to be the window
-    reader."""
+    consumed-window map is missing, there's no free address space in branch reach
+    for the cave, the firmware has no repurposable program header, or the located
+    function turns out not to be the window reader."""
     from .spike2.elf import parse_elf
     raw = bytearray(open(gr_path, "rb").read())
-    segs, relocs = parse_elf(bytes(raw))
+    segs, _relocs = parse_elf(bytes(raw))   # relocs no longer used: the cave has its own segment
 
     def va2off(va):
         return _cave_va2off(segs, va)
@@ -5488,48 +5549,13 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         raise RuntimeError("no master-directory windows found for the replaced "
                            "sound(s) -- nothing to redirect.")
 
-    # Layout: 30-word cave (code + 3 literals + BASEVAR), then the redirect table
-    # (12 bytes/window + a zero sentinel), then the stock window copies.
+    # Layout, all contiguous inside the cave's own segment: 30-word cave (code +
+    # 3 literals + BASEVAR), the redirect table (12 bytes/window + a zero
+    # sentinel), then the stock window copies.
     ncode = 30
     table_bytes = (len(windows) + 1) * 12
     total_stock = sum(b - a for a, b in windows)
-    code_table = ncode * 4 + table_bytes
-    needed = code_table + 0xf + total_stock
-
-    # Prefer a single reloc-free run that holds the whole cave (this keeps the
-    # HW-validated LZ layout byte-identical).  If no single run is big enough,
-    # scatter the stock copies across multiple runs so capacity is the SUM of the
-    # firmware's zero-gaps, not just its biggest one.
-    region = _find_cave_region(raw, relocs, needed)
-    if region is not None:
-        cave_va, run_end = region
-        table_va = cave_va + ncode * 4
-        basevar_va = cave_va + 29 * 4
-        stock_va = (table_va + table_bytes + 0xf) & ~0xf
-        cave_hi = stock_va + total_stock
-        assert cave_hi <= run_end
-        placements = []
-        c = stock_va
-        for (a0, b0) in windows:
-            placements.append(c)
-            c += (b0 - a0)
-        stock_overlays = {stock_va: b"".join(stock_chunks)}
-        nruns = 1
-    else:
-        packed = _scatter_cave(raw, relocs, windows, stock_chunks, code_table)
-        if packed is None:
-            raise RuntimeError(
-                "no firmware spare space fits %d replaced sound(s) (%d bytes "
-                "across the available gaps) -- reduce the number of replaced "
-                "callouts for a blip-free build." % (len(patches), needed))
-        (cave_va, table_va, basevar_va, placements, stock_overlays,
-         cave_hi) = packed
-        nruns = len(stock_overlays)
-
-    # The fn<->cave hops must fit a single ARM branch (+/-32 MB).
-    if (abs(cave_va - (fn + 8)) >= _CAVE_MAX_BRANCH
-            or abs(ret - (cave_va + 25 * 4 + 8)) >= _CAVE_MAX_BRANCH):
-        raise RuntimeError("firmware code/data too far apart for the cave branch.")
+    needed = ncode * 4 + table_bytes + total_stock
 
     if progress:
         progress(74, 100, "Verifying firmware audio path...")
@@ -5538,38 +5564,51 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         raise RuntimeError(
             "the located function did not perform an image window read -- "
             "unsupported firmware layout; using the standard build.")
+
+    # Give the cave a segment of its own rather than squatting on the game's
+    # data (see the section comment): appended bytes at a virtual address no
+    # PT_LOAD claims can't collide with anything the game owns.
+    cave_va, append_off, gap = _append_cave_segment(raw, needed, fn)
+    table_va = cave_va + ncode * 4
+    basevar_va = cave_va + 29 * 4
+    stock_va = table_va + table_bytes
+    placements = []
+    c = stock_va
+    for (a0, b0) in windows:
+        placements.append(c)
+        c += (b0 - a0)
+
     cave = _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
                                      first_off, basevar_va)
-
     table = b"".join(struct.pack("<III", a0, b0, sb)
                      for (a0, b0), sb in zip(windows, placements))
     table += struct.pack("<III", 0, 0, 0)     # zero sentinel
+    blob = bytes(cave) + table + b"".join(stock_chunks)
+    assert len(blob) == needed, (len(blob), needed)
+    raw[append_off:append_off + len(blob)] = blob
 
-    branch = struct.pack("<I", (0xE << 28) | (0xA << 24)
-                         | (((cave_va - (fn + 8)) >> 2) & 0xFFFFFF))
-    overlays = {
-        va2off(cave_va): bytes(cave),
-        va2off(table_va): table,
-        va2off(fn): branch,
-    }
-    for sbva, blob in stock_overlays.items():
-        overlays[va2off(sbva)] = blob
-    for fo, b in overlays.items():
+    # Branch the window-read function into the cave.
+    raw[va2off(fn):va2off(fn) + 4] = struct.pack(
+        "<I", (0xE << 28) | (0xA << 24)
+        | (((cave_va - (fn + 8)) >> 2) & 0xFFFFFF))
+
+    # Anything else this Write would have patched into the firmware has to go
+    # into the SAME image: the whole file is copied onto the card in one go, so
+    # a separate in-place write against the old inode would just be overwritten.
+    for fo, b in (extra_fw_writes or {}).items():
         raw[fo:fo + len(b)] = b
-    seg_ph, seg_old, seg_new = _set_seg_exec(raw, cave_va)
-    overlays[seg_ph + 24] = struct.pack("<I", seg_new)
 
     patched_gr = os.path.join(out_dir, "game_real_pathA")
     with open(patched_gr, "wb") as f:
         f.write(bytes(raw))
 
-    def _flg(fl):
-        return ("R" if fl & 4 else "-") + ("W" if fl & 2 else "-") + ("X" if fl & 1 else "-")
-    log("Blip-free cave built: %d window(s) across %d replaced sound(s) redirected "
-        "to stock; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in %d gap(s); seg %s->%s."
-        % (len(windows), len(patches), fn, first_off, cave_va, nruns,
-           _flg(seg_old), _flg(seg_new)), "success")
-    return overlays, patched_gr
+    log("Blip-free cave built: %d window(s) across %d replaced sound(s) "
+        "redirected to stock; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in its own "
+        "%d-byte segment (file+0x%x), placed in %d bytes of unclaimed address "
+        "space; game_real %d -> %d bytes."
+        % (len(windows), len(patches), fn, first_off, cave_va, len(blob),
+           append_off, gap, os.path.getsize(gr_path), len(raw)), "success")
+    return patched_gr, len(raw)
 
 
 def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,

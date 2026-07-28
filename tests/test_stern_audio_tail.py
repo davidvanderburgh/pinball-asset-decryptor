@@ -1071,12 +1071,13 @@ def test_apply_slot_seed_makes_silence_tonal_but_inaudible():
 
 def test_encoders_apply_slot_seed(monkeypatch):
     """_encode_mono/_stereo feed the explicit PAD_STERN_SLOT_SEED_DB seed into the
-    fitted target, honouring the per-slot experiment gate.  The always-on blip-
-    free seed is disabled here (kill switch) so this isolates the explicit path."""
+    fitted target, honouring the per-slot experiment gate.  The blip-free seed is
+    pinned off here so this isolates the explicit path."""
     import types
     import numpy as np
     from pinball_decryptor.plugins.stern import engine as E
     monkeypatch.setenv("PAD_STERN_SLOT_SEED_DB", "-65")
+    monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
     monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")   # isolate the explicit seed
     captured = {}
 
@@ -1105,15 +1106,19 @@ def test_encoders_apply_slot_seed(monkeypatch):
     assert int(np.abs(captured["tgt"]).max()) == 0     # gated out -> silent
 
 
-def test_encoders_seed_near_silence_by_default(monkeypatch):
-    """Blip-free callouts are on by default, so a near-silent replacement is
-    auto-seeded (pure silence is degenerate for the firmware cave -- it decodes
-    to loud garbage).  PAD_STERN_SKIP_KEYPATCH=1 (kill switch) turns it off."""
+def test_encoders_seed_near_silence_only_when_blip_free_opted_in(monkeypatch):
+    """The anti-degenerate seed rides with the blip-free cave, which is opt-in.
+
+    Only Path A skips the master-directory restore, so only Path A can leave a
+    silent body silent everywhere (which the codec can't round-trip -- it
+    decodes to loud garbage).  A standard build restores stock bytes, so a
+    silent replacement must stay untouched."""
     import numpy as np
     from pinball_decryptor.plugins.stern import engine as E
     monkeypatch.delenv("PAD_STERN_SLOT_SEED_DB", raising=False)
     monkeypatch.delenv("PAD_STERN_EXPERIMENT_IDXS", raising=False)
     monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
+    monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
     captured = {}
 
     class FakeGR:
@@ -1127,13 +1132,164 @@ def test_encoders_seed_near_silence_by_default(monkeypatch):
     monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
                    "x.wav", np)
-    assert int(np.abs(captured["tgt"]).max()) > 0      # auto-seeded (default on)
+    assert int(np.abs(captured["tgt"]).max()) > 0      # blip-free on -> seeded
 
-    monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "0")     # checkbox cleared
     captured.clear()
     E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
                    "x.wav", np)
-    assert int(np.abs(captured["tgt"]).max()) == 0     # disabled -> no seed
+    assert int(np.abs(captured["tgt"]).max()) == 0     # restore path -> no seed
+
+    monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
+    monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch wins
+    captured.clear()
+    E._encode_mono(None, FakeGR(), {"length": 4000, "chan": 1, "idx": 1},
+                   "x.wav", np)
+    assert int(np.abs(captured["tgt"]).max()) == 0
+
+
+def test_blip_free_gate_defaults_on_and_both_switches_disable_it(monkeypatch):
+    """Blip-free is the standard build; two independent switches turn it off.
+
+    The GUI checkbox clears to PAD_STERN_BLIP_FREE=0, and the historical
+    PAD_STERN_SKIP_KEYPATCH=1 kill switch still wins, so anything already
+    setting it keeps working."""
+    from pinball_decryptor.plugins.stern import engine as E
+    for var in ("PAD_STERN_BLIP_FREE", "PAD_STERN_SKIP_KEYPATCH"):
+        monkeypatch.delenv(var, raising=False)
+    assert E._pathA_enabled() is True
+
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "0")     # checkbox cleared
+    assert E._pathA_enabled() is False
+
+    monkeypatch.setenv("PAD_STERN_BLIP_FREE", "1")
+    assert E._pathA_enabled() is True
+
+    monkeypatch.setenv("PAD_STERN_SKIP_KEYPATCH", "1")  # kill switch wins
+    assert E._pathA_enabled() is False
+
+
+def test_gui_blip_free_option_round_trips_to_the_engine_var(monkeypatch):
+    """The Advanced Audio Options checkbox has to reach the encoder, and only
+    the OFF case may set a var -- an unset PAD_STERN_BLIP_FREE means on."""
+    import os
+    from pinball_decryptor.app import App
+    from pinball_decryptor.plugins.stern import engine as E
+
+    monkeypatch.delenv("PAD_STERN_SKIP_KEYPATCH", raising=False)
+    app = object.__new__(App)
+
+    monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
+    App._apply_audio_advanced_env(app, {})                 # defaults
+    assert "PAD_STERN_BLIP_FREE" not in os.environ
+    assert E._pathA_enabled() is True
+
+    App._apply_audio_advanced_env(app, {"blip_free": False})
+    assert os.environ["PAD_STERN_BLIP_FREE"] == "0"
+    assert E._pathA_enabled() is False
+
+    App._apply_audio_advanced_env(app, {"blip_free": True})
+    assert "PAD_STERN_BLIP_FREE" not in os.environ
+    assert E._pathA_enabled() is True
+
+
+def _fake_elf(gap=0x8000, with_gnu_stack=True, nload=2):
+    """Minimal 32-bit LE ARM ET_EXEC with two PT_LOADs separated by *gap* bytes
+    of unclaimed VA, plus the advisory PT_GNU_STACK the cave repurposes."""
+    PAGE = 0x1000
+    phnum = nload + (1 if with_gnu_stack else 0)
+    phoff, phent = 0x34, 32
+    body = phoff + phnum * phent
+    text_va, text_sz = 0x8000, 0x2000
+    data_va = text_va + text_sz + gap
+    raw = bytearray(b"\0" * (0x4000 + text_sz))
+    raw[0:4] = b"\x7fELF"
+    raw[4] = 1                                   # 32-bit
+    raw[5] = 1                                   # little-endian
+    struct.pack_into("<H", raw, 16, 2)           # ET_EXEC
+    struct.pack_into("<I", raw, 0x1c, phoff)
+    struct.pack_into("<H", raw, 0x2a, phent)
+    struct.pack_into("<H", raw, 0x2c, phnum)
+    entries = [(1, 0, text_va, text_sz, text_sz, 5),
+               (1, 0x3000, data_va, 0x400, 0x800, 6)][:nload]
+    if with_gnu_stack:
+        entries.append((0x6474E551, 0, 0, 0, 0, 7))
+    for i, (t, off, va, fz, mz, fl) in enumerate(entries):
+        struct.pack_into("<8I", raw, phoff + i * phent,
+                         t, off, va, va, fz, mz, fl, PAGE)
+    del body
+    return raw, text_va + text_sz, data_va
+
+
+def test_append_cave_segment_maps_unclaimed_space():
+    """The cave gets address space no PT_LOAD covers, backed by appended file
+    bytes, via the repurposed PT_GNU_STACK -- and never lands inside a segment
+    the game already owns (which is what put it on Elvira's node board table)."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern.spike2.elf import parse_elf
+
+    raw, text_end, data_va = _fake_elf()
+    before = len(raw)
+    cave_va, append_off, gap = E._append_cave_segment(raw, 1195, fn=0x9000)
+
+    # Lands in the hole between the two segments, page-aligned, and the file is
+    # padded out to the whole declared extent (a p_filesz past EOF makes the
+    # loader read off the end of the file).
+    assert text_end <= cave_va < data_va
+    assert cave_va % 0x1000 == 0
+    assert append_off % 0x1000 == 0
+    assert append_off % 0x1000 == cave_va % 0x1000      # loader congruence
+    assert len(raw) >= append_off + 0x1000
+    assert len(raw) > before
+
+    segs = parse_elf(bytes(raw))[0]
+    assert len(segs) == 3, segs                          # ours joined the map
+    ours = [s for s in segs if s[0] == cave_va]
+    assert len(ours) == 1
+    _va, off, fz, mz = ours[0]
+    assert off == append_off and fz == mz
+    assert append_off + fz <= len(raw)                   # extent really exists
+    # No overlap with anything the game owns.
+    for va, _o, _fz, mz2 in segs:
+        if va == cave_va:
+            continue
+        assert cave_va >= va + mz2 or cave_va + fz <= va
+
+
+def test_append_cave_segment_refuses_when_it_cannot_place_safely():
+    """Rather than fall back to borrowing the game's memory, placement failures
+    raise so the build degrades to the standard (firmware-untouched) path."""
+    from pinball_decryptor.plugins.stern import engine as E
+
+    # No advisory header to repurpose.
+    raw, _te, _dv = _fake_elf(with_gnu_stack=False)
+    with pytest.raises(RuntimeError, match="PT_GNU_STACK"):
+        E._append_cave_segment(raw, 1195, fn=0x9000)
+
+    # Out of ARM branch reach of the window-read function (+/-32 MB).
+    raw, _te, _dv = _fake_elf()
+    with pytest.raises(RuntimeError, match="branch reach"):
+        E._append_cave_segment(raw, 1195, fn=0x8000000)
+
+
+def test_sidx_record_writes_carry_the_new_size():
+    """A grown file needs BOTH stored copies of its size rewritten; a
+    size-neutral write must leave them alone."""
+    from pinball_decryptor.plugins.stern import sidx
+
+    for fmt, packfmt, offs in (("FI64", "<Q", (8, 24)), ("FINF", "<I", (4, 12))):
+        hm, md = b"h" * 20, b"m" * 16
+        plain = sidx.record_field_writes(100, hm, md, fmt)
+        assert len(plain) == 2                       # digests only
+
+        grown = sidx.record_field_writes(100, hm, md, fmt, size=0x1234)
+        got = {off: b for off, b in grown}
+        for o in offs:
+            assert got[100 + o] == struct.pack(packfmt, 0x1234)
+        assert len(grown) == 2 + len(offs)
+
+    with pytest.raises(ValueError, match="32-bit"):
+        sidx.record_field_writes(0, b"h" * 20, b"m" * 16, "FINF", size=1 << 33)
 
 
 def test_experiment_covers_idx_scope(monkeypatch):

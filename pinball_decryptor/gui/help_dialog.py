@@ -152,6 +152,21 @@ HELP_CONTENT = {
          "suggestions, so you can play a number on the machine's Sound Test "
          "menu and either confirm what the extract called that slot or pick "
          "the entry (type its number to find it) yourself."),
+        ("Blip-free callouts (Advanced Audio Options)",
+         "On by default. The machine reads two ~512-byte windows out of "
+         "every sound at boot to set up its decoder, and each result feeds "
+         "the next, so re-encoding one sound would desync the whole bank. "
+         "The plain fix puts the original bytes back in those two windows, "
+         "which are inside the audible part — so you hear a ~6 ms scrap of "
+         "the original twice in every replacement. Blip-free instead stashes "
+         "a copy of those bytes in the game binary and points the boot-time "
+         "read at the copy, so your audio plays for the whole sound. It "
+         "needs the Linux filesystem driver (the same one full-size video "
+         "replacement uses) because it makes the game binary slightly "
+         "longer, and it is skipped for a direct-SD write. Every build "
+         "re-checks all the sounds against the patched firmware and quietly "
+         "falls back to the plain fix if anything looks wrong, so the only "
+         "cost of unticking it is that brief scrap."),
     ],
     "Replace Video": [
         ("Scan and assign",

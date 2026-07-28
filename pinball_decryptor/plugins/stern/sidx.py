@@ -41,6 +41,15 @@ _FORMATS = {"FI64": (37, 57), "FINF": (21, 41)}
 _HMAC_LEN = 20
 _MD5_LEN = 16
 
+# Per-format file-SIZE fields: ``tag -> (struct_fmt, offset, offset, ...)``.
+# Every record stores its file's size TWICE, and both copies have to move
+# together or the manifest disagrees with itself.  Recovered by correlating
+# each record against the real on-card file size and keeping only the offsets
+# that matched every record: all 9704 on an Elvira 1.13.0 card (FI64) and all
+# 1349 on a TMNT Pro 1.58.0 card (FINF).  Only needed by a write that changes a
+# file's length -- everything else on a Spike 2 card is size-neutral.
+_SIZE_FIELDS = {"FI64": ("<Q", 8, 24), "FINF": ("<I", 4, 12)}
+
 
 def find_sidx(reader):
     """Locate the ``/spk/index/*.sidx`` manifest on *reader*'s partition.
@@ -93,10 +102,27 @@ def digests(data):
             hashlib.md5(data).digest())
 
 
-def record_field_writes(payload_off, hmac_digest, md5_digest, fmt="FI64"):
+def record_field_writes(payload_off, hmac_digest, md5_digest, fmt="FI64",
+                        size=None):
     """Sidx-file-relative ``[(offset, bytes), ...]`` to write one record's
     HMAC + MD5 for format *fmt* ("FI64"/"FINF").  The caller maps these through
-    the sidx inode to disk."""
+    the sidx inode to disk.
+
+    Pass *size* only when the write changes the file's LENGTH (the blip-free
+    firmware cave is the one case -- it appends a segment to ``game_real``);
+    both stored copies of the size are then rewritten alongside the digests.
+    Leaving it ``None`` keeps the record's existing size, which is correct for
+    every size-neutral write.
+    """
     hmac_off, md5_off = _FORMATS.get(fmt, _FORMATS["FI64"])
-    return [(payload_off + hmac_off, hmac_digest),
-            (payload_off + md5_off, md5_digest)]
+    out = [(payload_off + hmac_off, hmac_digest),
+           (payload_off + md5_off, md5_digest)]
+    if size is not None:
+        packfmt, *offs = _SIZE_FIELDS.get(fmt, _SIZE_FIELDS["FI64"])
+        if struct.calcsize(packfmt) == 4 and size > 0xFFFFFFFF:
+            raise ValueError(
+                "%s .sidx records store a 32-bit size; %d does not fit"
+                % (fmt, size))
+        for o in offs:
+            out.append((payload_off + o, struct.pack(packfmt, size)))
+    return out

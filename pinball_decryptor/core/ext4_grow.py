@@ -169,13 +169,13 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     ok, msg = ex.check_available()
     if not ok:
         raise Ext4GrowUnavailable(
-            "Can't grow the video slots on this system: %s. The affected "
+            "Can't grow files on this system: %s. The affected "
             "videos keep their stock content on the card." % msg)
 
     image_exec = ex.to_exec_path(image_path)
     jobs_exec = [(rel, ex.to_exec_path(src)) for rel, src in jobs]
 
-    log("Growing %d video slot(s) to full size via the Linux filesystem "
+    log("Growing %d file(s) to full size via the Linux filesystem "
         "driver..." % len(jobs), "info")
     script = _bash_script(part_offset, jobs_exec, image_exec)
     # Ship the script through a base64 temp FILE, not the command line:
@@ -203,7 +203,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
                 "the videos to full size. The affected videos keep their "
                 "stock content on the card.", grown=n_ok) from e
         raise Ext4GrowError(
-            "Couldn't grow the video slots:\n%s" % text, grown=n_ok) from e
+            "Couldn't grow files:\n%s" % text, grown=n_ok) from e
     finally:
         try:
             os.remove(tmp)
@@ -215,7 +215,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         if line.startswith("PAD_GROW_OK "):
             rel = line.split(" ", 2)[-1]
             log("  grew %s" % rel, "info")
-    log("Grew %d video slot(s) to full size (filesystem left valid)." % grown,
+    log("Grew %d file(s) to full size (filesystem left valid)." % grown,
         "success")
     return grown
 
@@ -269,7 +269,7 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
     tools = _find_e2fsprogs()
     if tools is None:
         raise Ext4GrowUnavailable(
-            "Can't grow the video slots on this system: e2fsprogs isn't "
+            "Can't grow files on this system: e2fsprogs isn't "
             "installed (brew install e2fsprogs). The affected videos keep "
             "their stock content on the card.")
     if "?" in image_path:
@@ -279,7 +279,7 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
             "open. Rename the file and try again." % image_path)
     dev = "%s?offset=%d" % (image_path, part_offset)
 
-    log("Growing %d video slot(s) to full size via debugfs..." % len(jobs),
+    log("Growing %d file(s) to full size via debugfs..." % len(jobs),
         "info")
 
     # Free-space guard: fail clearly up front instead of ENOSPC mid-write
@@ -338,6 +338,6 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
                 raise Ext4GrowError(
                     "e2fsck could not repair the card's data partition after "
                     "growth (exit %d):\n%s" % (rc, out.strip()[-2000:]))
-    log("Grew %d video slot(s) to full size (filesystem left valid)." % grown,
+    log("Grew %d file(s) to full size (filesystem left valid)." % grown,
         "success")
     return grown

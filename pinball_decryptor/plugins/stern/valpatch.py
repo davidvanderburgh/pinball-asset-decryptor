@@ -114,6 +114,19 @@ def _game_manifest_path(reader, fw_node):
     return None
 
 
+def bypass_overlay(elf_bytes):
+    """``{file_off: bytes}`` neutering ``validation_exec`` inside *elf_bytes*,
+    expressed against the game ELF's own file offsets rather than the card's.
+
+    Used when the whole firmware file is being rebuilt and copied onto the card
+    in one piece (the blip-free cave grows ``game_real``, so it can't be patched
+    in place): the bypass has to be baked into that image, because a separate
+    in-place write against the old inode would just be overwritten by the copy.
+    Returns ``{}`` when this title carries no recognised validator."""
+    eoff = find_validation_exec(elf_bytes)
+    return {} if eoff is None else {eoff: _BX_LR}
+
+
 def compute_writes(reader, log):
     """``[(disk_offset, bytes), ...]`` that neuter ``validation_exec`` on the card
     behind *reader* and refresh the game ELF's ``.sidx`` record.

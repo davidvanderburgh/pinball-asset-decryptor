@@ -3777,6 +3777,7 @@ class App:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
+        "blip_free": True,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -3815,6 +3816,12 @@ class App:
             setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
         else:
             setenv("PAD_STERN_SLOT_SEED_DB", None)
+        # Blip-free callouts: ON is the engine baseline, so only the OFF case
+        # sets a var (matching how every other knob here leaves the default
+        # unset).  The engine reads "0" as off; anything else, including unset,
+        # is on.
+        setenv("PAD_STERN_BLIP_FREE",
+               None if d.get("blip_free", True) else "0")
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

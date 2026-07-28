@@ -1230,9 +1230,10 @@ class MainWindow:
         # App mirrors them into the encoder's env vars.  (The
         # match-to-callouts shaper and its fade/cap/roll-off knobs lived here
         # too until monkeybug batch 20 — retired: it never fixed the click it
-        # chased.  The blip-free firmware patch did, but that is off by default
-        # from v0.93.0 (it borrowed memory the game owns — node board state on
-        # Elvira), so the click is back until the patch gets its own mapping.)
+        # chased; the blip-free firmware patch did, and that now has a checkbox
+        # of its own here — on by default, and as of v0.94.0 the patch lives in
+        # a memory mapping of its own instead of borrowing the game's, which is
+        # what had it landing on Elvira's node board table.)
         self._audio_advanced = dict(initial_audio_advanced or {})
         self._on_audio_advanced_change = on_audio_advanced_change
         # Fired with a short caption ("Led Zeppelin v1.22 LE") when the
@@ -8056,6 +8057,7 @@ class MainWindow:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
+        "blip_free": True,
     }
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
@@ -8165,6 +8167,50 @@ class MainWindow:
 
         _rule()
 
+        # Blip-free callouts (the master-directory scrap fix).  On by default:
+        # this is the standard build now, and the checkbox is here so a card can
+        # be built without any firmware change at all if one is ever suspected.
+        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free", True)))
+        ttk.Checkbutton(
+            dlg, variable=blip_var,
+            text="Blip-free callouts: patch the game firmware so a replaced "
+                 "sound plays your audio for its whole length (default on)"
+        ).pack(anchor=tk.W, padx=12)
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=wrap,
+            font=(_SANS_FONT, 8, "italic"),
+            text="What it does, technically. At boot the game reads two ~512-"
+                 "byte windows out of every sound's body to work out that "
+                 "sound's decoder settings, and each result feeds the next, so "
+                 "the whole sound bank is one forward chain. Re-encoding a "
+                 "sound changes those bytes and desyncs the chain, which makes "
+                 "the machine reboot the moment any audio plays. The safe "
+                 "fallback is to put the original bytes back in just those two "
+                 "windows — but they sit inside the audible part, so you hear a "
+                 "~6 ms scrap of the ORIGINAL sound twice inside every "
+                 "replacement (the \"blip\"). Instead of that, this stashes a "
+                 "copy of the original window bytes inside the firmware and "
+                 "adds a small piece of ARM code that points the boot-time read "
+                 "at the copy, for the replaced sounds only. The chain then "
+                 "sees exactly what it saw on a stock card while the card "
+                 "itself carries your audio end to end. The added code needs "
+                 "somewhere to live: it is appended to the game binary and "
+                 "given a memory mapping of its own, at an address no part of "
+                 "the game claims. (Before v0.94.0 it was tucked into a run of "
+                 "zero bytes inside the game's own data instead, which on some "
+                 "titles turned out to be memory the game was using — on "
+                 "Elvira, the node board table — and those cards booted slowly "
+                 "and threw node board errors.) Because the binary gets longer, "
+                 "this needs the Linux filesystem driver, the same as full-size "
+                 "video replacement, and it is skipped for a direct-SD write. "
+                 "Every build re-derives all the sounds' settings from the "
+                 "patched firmware first and falls back to the plain "
+                 "stock-byte restore if anything would drift, so turning this "
+                 "off costs you the brief scrap and nothing else.").pack(
+            anchor=tk.W, padx=12, pady=(2, 8))
+
+        _rule()
+
         prev_var = tk.BooleanVar(value=bool(cfg["previews"]))
         ttk.Checkbutton(
             dlg, variable=prev_var,
@@ -8199,6 +8245,7 @@ class MainWindow:
                 "experiment_idxs": idxs,
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
+                "blip_free": bool(blip_var.get()),
             }
 
         def _ok(_e=None):
@@ -8215,6 +8262,7 @@ class MainWindow:
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
+            blip_var.set(True)          # blip-free is the default build
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))

@@ -311,11 +311,43 @@ loop.
     - Plain text, no markdown headings.
     - Lead with what's new that *they* care about and what to try next.  Name the version.
     - If a fix addressed their specific report, say so by name.
+    - **Each paragraph is ONE unbroken line.**  Never hard-wrap inside a
+      paragraph.  Blank line between paragraphs, nothing else.
 
-    Present it in its own copy-pasteable fenced block, clearly labelled so the user knows it's the forward-to-tester message (distinct from the release-summary in "What to report back" below).  Example shape:
+10b. **Deliver it as a FILE, not just a fenced block.**  David sends these
+    from Gmail, and a fenced block alone has bitten us twice over:
+
+    - Copying out of a rendered code block can bake the *display* wrap
+      points in as real newlines, so what looks like one line in the
+      transcript pastes as five.
+    - Gmail's **Plain text mode** hard-wraps at ~70 columns *at send
+      time*.  The draft looks correct and the sent mail arrives chopped
+      mid-sentence, which is how it reached Kris on v0.94.0 (2026-07-28).
+      Nothing about the paste is wrong when this happens, so don't go
+      hunting the message formatting for a fault that is in the mail
+      client.
+
+    So do BOTH, every release:
+    1. Write the message to a `.txt` in the scratchpad (one unbroken line
+       per paragraph) and hand it over with `SendUserFile`
+       (`display: "attach"`).  That gives a copy source with no wrap
+       points in it at all.
+    2. Also print it inline in a fenced block for a quick read.
+
+    And say once, in the same turn, how to stop Gmail re-wrapping it:
+    compose window → three-dot menu (bottom right, by the trash icon) →
+    untick **Plain text mode**.  Gmail then sends HTML and the paragraphs
+    reflow to the reader's window.
+
+    Label it clearly as the forward-to-tester message, distinct from the
+    release-summary in "What to report back" below.  Example shape:
     ```
     Shipped v0.50.0. New Partition Explorer tab lets you browse a card image and pull files or folders out without mounting it. And your renamed image-group names now survive re-extracting the same card. Give the explorer a try and tell me if a folder ever opens empty.
     ```
+
+    If the user edits the message before sending (they often tighten a
+    claim, e.g. adding "(by emulation)"), carry their wording forward into
+    any later version of it rather than reinstating your own.
 
 ## Conventions to match the existing release history
 
@@ -357,7 +389,8 @@ after the push in step 7b (this is where the user walks away):
 
 **Final report** — printed in the background-notified turn where the
 WINDOWS asset lands (step 9b watcher 2), together with the
-forward-to-tester message from step 10.  Do not hold either for the
+forward-to-tester message from steps 10 / 10b (inline block AND the
+`.txt` handed over with SendUserFile).  Do not hold either for the
 macOS / Linux assets; those get a one-line backfill confirmation later
 when the installer-run watch finishes:
 

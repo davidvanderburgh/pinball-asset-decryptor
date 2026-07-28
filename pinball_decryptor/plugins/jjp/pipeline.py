@@ -16,6 +16,11 @@ from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
                        _CREATE_FLAGS as _exec_create_flags)
 
+# Where the decrypt shim writes what it learns about the running game (inside
+# the chroot).  Deliberately not the asset output dir: a successful run's
+# output stays clean, and rescue_diagnostics() tars this out on failure.
+_DIAG_DIR = "/tmp/jjp_diag"
+
 
 # ---------------------------------------------------------------------------
 # Developer crypto-capture shim (dongle extract only)
@@ -175,17 +180,549 @@ int ov_open_callbacks(void *a, void *b, const char *c, long d, void *e){
 # dongle session, decrypts, and exits).  al_install_system is an Allegro
 # program's FIRST call, so old titles exit before any of these fire and their
 # behaviour is unchanged; these only ever run for a non-Allegro title.
+#
+# Prefix: reroute the pinned source's dlsym
+# -----------------------------------------
+# On Sonic the hooks DO fire (HW-confirmed 2026-07-28: "engine hook fired via
+# XOpenDisplay", i.e. the dongle unlocked the LDK-10 envelope and the game's own
+# code ran) but every one of the four crypto lookups came back nil — the new
+# engine does not export them under their old mangled names.  Upstream's
+# al_install_system does those dlsym() calls itself and exits when they fail, and
+# resources.py is pinned byte-verbatim, so we prepend this instead: it renames
+# dlsym to our own resolver for the whole pinned translation unit.  jjp_dlsym
+# tries the real dlsym FIRST (old titles resolve on the first try and behave
+# exactly as before) and only then falls back to a census of every loaded
+# object's dynamic symbols — which either finds a renamed function or proves
+# there is nothing to find and writes the deep diagnostic.
+DECRYPT_PREFIX_C = r"""
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+void *jjp_dlsym(void *handle, const char *name);
+#define dlsym jjp_dlsym
+"""
+
 DECRYPT_ENGINE_HOOKS_C = r"""
+
+/* The prefix above rerouted every dlsym() in the pinned upstream source to
+ * jjp_dlsym; from here on we want the real thing again. */
+#undef dlsym
+extern void *dlsym(void *, const char *);
+
+#include <link.h>
+#include <elf.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <setjmp.h>
 
 extern int al_install_system(int, int (*)(void (*)(void)));
 
 static volatile int g_engine_hook_fired = 0;
 
-static void jjp_hook_diag(const char *via) {
-    const char *od = getenv("JJP_OUTPUT_DIR");
+/* --- diagnostics directory ------------------------------------------------
+ * Everything the shim learns goes here, NOT into the asset output dir: the
+ * pipeline tars this directory into the user's output folder even when the
+ * run fails, so a one-shot dongle session always yields intel. */
+static char g_diag_dir[4096];
+static int  g_diag_ready = 0;
+
+static void jjp_diag_init(void) {
+    if (g_diag_ready) return;
+    g_diag_ready = 1;
+    const char *d = getenv("JJP_DIAG_DIR");
+    if (!d || !d[0]) d = "/tmp/jjp_diag";
+    snprintf(g_diag_dir, sizeof g_diag_dir, "%s", d);
+    mkdir(g_diag_dir, 0755);
+}
+
+static FILE *jjp_diag_open(const char *name, const char *mode) {
+    jjp_diag_init();
     char p[4096];
-    snprintf(p, sizeof p, "%s/jjp_hook_diag.txt", (od && od[0]) ? od : "/tmp");
-    FILE *d = fopen(p, "a");
+    snprintf(p, sizeof p, "%s/%s", g_diag_dir, name);
+    return fopen(p, mode);
+}
+
+/* --- dynamic-symbol census ------------------------------------------------
+ * Sonic (LDK 10 envelope, engine rebuilt off Allegro) resolves NONE of the
+ * four crypto symbols by their upstream mangled names.  Before giving up we
+ * enumerate every dynamic symbol of every loaded object: that both (a) finds
+ * the functions if they were merely re-mangled/renamed, and (b) tells the
+ * developer exactly what the game does export when they are truly internal. */
+#define JJP_MAX_HITS 96
+struct jjp_hit { char name[256]; void *addr; };
+static struct jjp_hit g_hits[JJP_MAX_HITS];
+static int g_nhits = 0;
+static int g_syms_done = 0;
+static FILE *g_symf = NULL;
+static unsigned long g_symcount = 0;
+
+static const char *const JJP_TOKENS[] = {
+    "jcrypt", "rand64", "set_seeds", "dongle", "process_filelist",
+    "hash_string", "decrypt_buffer", "filelist", NULL
+};
+
+static int jjp_name_interesting(const char *n) {
+    int i;
+    for (i = 0; JJP_TOKENS[i]; i++) if (strstr(n, JJP_TOKENS[i])) return 1;
+    return 0;
+}
+
+static sigjmp_buf g_sym_jb;
+static volatile int g_sym_guard = 0;
+static void jjp_sym_fault(int s) {
+    (void)s;
+    if (g_sym_guard) siglongjmp(g_sym_jb, 1);
+    syscall(SYS_exit_group, 3);
+}
+
+/* The memory census below scans for a byte pattern this shim itself carries in
+ * its own code and .bss, so our own mappings have to be excluded or we would
+ * only ever find ourselves.  Take the whole PT_LOAD span of the object we live
+ * in — that covers the .bss tail, which the loader maps anonymously and
+ * /proc/self/maps therefore shows with no path. */
+static unsigned long g_self_lo = 0, g_self_hi = 0;
+
+static int jjp_self_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+    unsigned long want = *(unsigned long *)data;
+    unsigned long lo = (unsigned long)-1, hi = 0;
+    int i;
+    (void)size;
+    for (i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        unsigned long a, b;
+        if (ph->p_type != PT_LOAD) continue;
+        a = (unsigned long)(info->dlpi_addr + ph->p_vaddr);
+        b = a + (unsigned long)ph->p_memsz;
+        if (a < lo) lo = a;
+        if (b > hi) hi = b;
+    }
+    if (hi > lo && want >= lo && want < hi) {
+        g_self_lo = lo;
+        g_self_hi = hi;
+        return 1;
+    }
+    return 0;
+}
+
+/* DT_ entries hold either an absolute address or a link-time vaddr depending
+ * on the linker; both forms occur in the wild, so bias on the load base. */
+static const void *jjp_dyn_ptr(ElfW(Addr) base, ElfW(Addr) v) {
+    return (const void *)((v < base) ? (base + v) : v);
+}
+
+static int jjp_obj_cb(struct dl_phdr_info *info, size_t size, void *data) {
+    const ElfW(Dyn) *dyn = NULL, *d;
+    const char *strtab = NULL;
+    const ElfW(Sym) *symtab = NULL;
+    const uint32_t *hash = NULL, *ghash = NULL;
+    unsigned long n = 0, i;
+    int k;
+    const char *nm;
+
+    (void)size; (void)data;
+    for (k = 0; k < info->dlpi_phnum; k++)
+        if (info->dlpi_phdr[k].p_type == PT_DYNAMIC)
+            dyn = (const ElfW(Dyn) *)(info->dlpi_addr +
+                                      info->dlpi_phdr[k].p_vaddr);
+
+    nm = (info->dlpi_name && info->dlpi_name[0]) ? info->dlpi_name
+                                                 : "(main executable)";
+    if (g_symf)
+        fprintf(g_symf, "\n=== %s  base=0x%lx  phnum=%d%s ===\n",
+                nm, (unsigned long)info->dlpi_addr, info->dlpi_phnum,
+                dyn ? "" : "   [NO PT_DYNAMIC]");
+    if (!dyn) return 0;
+
+    for (d = dyn; d->d_tag != DT_NULL; d++) {
+        switch (d->d_tag) {
+        case DT_STRTAB:
+            strtab = (const char *)jjp_dyn_ptr(info->dlpi_addr, d->d_un.d_ptr);
+            break;
+        case DT_SYMTAB:
+            symtab = (const ElfW(Sym) *)jjp_dyn_ptr(info->dlpi_addr,
+                                                    d->d_un.d_ptr);
+            break;
+        case DT_HASH:
+            hash = (const uint32_t *)jjp_dyn_ptr(info->dlpi_addr, d->d_un.d_ptr);
+            break;
+        case DT_GNU_HASH:
+            ghash = (const uint32_t *)jjp_dyn_ptr(info->dlpi_addr,
+                                                  d->d_un.d_ptr);
+            break;
+        default: break;
+        }
+    }
+    if (!strtab || !symtab) {
+        if (g_symf) fprintf(g_symf, "   (no dynamic symbol table)\n");
+        return 0;
+    }
+
+    if (hash) {
+        n = hash[1];                      /* nchain == symbol count */
+    } else if (ghash) {
+        uint32_t nb = ghash[0], symoff = ghash[1], bloom = ghash[2];
+        const ElfW(Addr) *bl = (const ElfW(Addr) *)&ghash[4];
+        const uint32_t *buck = (const uint32_t *)&bl[bloom];
+        const uint32_t *chain = &buck[nb];
+        uint32_t last = 0, b;
+        for (b = 0; b < nb; b++) if (buck[b] > last) last = buck[b];
+        if (last < symoff) n = symoff;
+        else { while (!(chain[last - symoff] & 1)) last++; n = last + 1; }
+    }
+    if (!n || n > 2000000UL) {
+        if (g_symf) fprintf(g_symf, "   (symbol count unavailable)\n");
+        return 0;
+    }
+    if (g_symf) fprintf(g_symf, "   %lu dynamic symbols\n", n);
+
+    for (i = 0; i < n; i++) {
+        const ElfW(Sym) *s = &symtab[i];
+        const char *sn;
+        void *a;
+        int defined;
+        if (!s->st_name) continue;
+        sn = strtab + s->st_name;
+        if (!sn[0]) continue;
+        defined = (s->st_shndx != SHN_UNDEF);
+        a = defined ? (void *)(info->dlpi_addr + s->st_value) : NULL;
+        if (g_symf)
+            fprintf(g_symf, "   %s %p %s\n", defined ? "DEF" : "UND", a, sn);
+        g_symcount++;
+        if (defined && a && g_nhits < JJP_MAX_HITS && jjp_name_interesting(sn)) {
+            snprintf(g_hits[g_nhits].name, sizeof g_hits[0].name, "%s", sn);
+            g_hits[g_nhits].addr = a;
+            g_nhits++;
+        }
+    }
+    return 0;
+}
+
+static void jjp_syms_collect(void) {
+    struct sigaction sa, osegv, obus;
+    unsigned long selfaddr;
+    if (g_syms_done) return;
+    g_syms_done = 1;
+    jjp_diag_init();
+
+    /* Locate our own module FIRST.  A fault inside the walk below longjmps out
+     * of dl_iterate_phdr with the loader lock still held, so this has to happen
+     * while calling into the loader is still safe. */
+    selfaddr = (unsigned long)(uintptr_t)&jjp_syms_collect;
+    dl_iterate_phdr(jjp_self_cb, &selfaddr);
+
+    g_symf = jjp_diag_open("jjp_symbols.txt", "w");
+    if (g_symf)
+        fprintf(g_symf, "Dynamic symbols of every object loaded into the "
+                        "running game.\nDEF = defined here, UND = imported.\n");
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = jjp_sym_fault;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, &osegv);
+    sigaction(SIGBUS, &sa, &obus);
+    g_sym_guard = 1;
+    if (sigsetjmp(g_sym_jb, 1) == 0)
+        dl_iterate_phdr(jjp_obj_cb, NULL);
+    else if (g_symf)
+        fprintf(g_symf, "\n[faulted while walking symbol tables - partial]\n");
+    g_sym_guard = 0;
+    sigaction(SIGSEGV, &osegv, NULL);
+    sigaction(SIGBUS, &obus, NULL);
+    if (g_symf) {
+        fprintf(g_symf, "\ntotal symbols listed: %lu\ncrypto-ish names: %d\n",
+                g_symcount, g_nhits);
+        fclose(g_symf);
+        g_symf = NULL;
+    }
+}
+
+/* --- memory census: constants + a dump for offline RE ---------------------
+ * If the crypto symbols are internal to the envelope, the only way forward is
+ * to disassemble the DECRYPTED code, which exists only inside this process.
+ * Dump the game's own mappings (plus any anonymous executable region — an
+ * envelope that maps its payload manually leaves no link-map entry) and scan
+ * everything readable for the known jcrypt LCG multiplier: a hit says the
+ * asset cipher is still jcrypt and points straight at rand64. */
+#define JJP_DUMP_CAP (192UL * 1024 * 1024)
+#define JJP_CHUNK    (1UL * 1024 * 1024)
+#define JJP_MAX_HOT  64
+
+/* 0x19BAFFBED, little-endian — crypto.py LCG_MULT, the game's rand64. */
+static uint8_t g_needle[8];
+static void jjp_build_needle(void)
+{
+    uint64_t v = ((uint64_t)0x00000001u << 32) | (uint64_t)0x9BAFFBEDu;
+    int i;
+    for (i = 0; i < 8; i++) g_needle[i] = (uint8_t)((v >> (i * 8)) & 0xFF);
+}
+
+static unsigned long g_hot_lo[JJP_MAX_HOT], g_hot_hi[JJP_MAX_HOT];
+static int g_nhot = 0;
+
+static unsigned long jjp_hex(const char **pp)
+{
+    const char *p = *pp;
+    unsigned long v = 0;
+    int c, d;
+    while ((c = (unsigned char)*p) != 0) {
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else break;
+        v = (v << 4) | (unsigned long)d;
+        p++;
+    }
+    *pp = p;
+    return v;
+}
+
+/* Parse one /proc/self/maps line: "lo-hi perms offset dev inode  path".
+ * Hand-rolled rather than sscanf'd on purpose: the host gcc's stdio.h maps
+ * sscanf onto __isoc23_sscanf (glibc 2.38+), but the shim is linked against
+ * the CARD's older libc, where that symbol does not exist. */
+static int jjp_parse_map(const char *line, unsigned long *lo, unsigned long *hi,
+                         char *perms, size_t permsz, char *path, size_t pathsz)
+{
+    const char *p = line;
+    size_t k = 0;
+    int field;
+
+    perms[0] = '\0'; path[0] = '\0';
+    *lo = jjp_hex(&p);
+    if (p == line || *p != '-') return 0;
+    p++;
+    *hi = jjp_hex(&p);
+    while (*p == ' ') p++;
+    while (*p && *p != ' ' && k + 1 < permsz) perms[k++] = *p++;
+    perms[k] = '\0';
+    if (k < 4) return 0;
+    for (field = 0; field < 3; field++) {       /* offset, dev, inode */
+        while (*p == ' ') p++;
+        while (*p && *p != ' ') p++;
+    }
+    while (*p == ' ') p++;
+    k = 0;
+    while (*p && *p != '\n' && k + 1 < pathsz) path[k++] = *p++;
+    path[k] = '\0';
+    while (k > 0 && (path[k-1] == ' ' || path[k-1] == '\r')) path[--k] = '\0';
+    return 1;
+}
+
+static int jjp_want_dump(const char *path, const char *perms, const char *exe)
+{
+    if (path[0] == '[') return 0;
+    if (path[0] == '\0') return perms[2] == 'x';        /* anonymous code */
+    if (exe[0] && strcmp(path, exe) == 0) return 1;     /* the game binary */
+    return 0;
+}
+
+static void jjp_mem_census(FILE *rep)
+{
+    char exe[4096], subdir[4096], line[8192];
+    ssize_t en;
+    FILE *m;
+    int memfd, pass;
+    uint8_t *buf;
+    unsigned long dumped = 0, scanned = 0, hits = 0;
+
+    /* g_self_lo/hi were filled in by jjp_syms_collect, which always runs
+     * first — nothing here may call back into the dynamic loader. */
+    jjp_build_needle();
+    exe[0] = '\0';
+    en = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (en > 0) exe[en] = '\0';
+    fprintf(rep, "exe=%s\n", exe);
+
+    snprintf(subdir, sizeof subdir, "%s/mem", g_diag_dir);
+    mkdir(subdir, 0755);
+
+    buf = (uint8_t *)malloc(JJP_CHUNK);
+    if (!buf) { fprintf(rep, "out of memory for the census\n"); return; }
+    memfd = open("/proc/self/mem", O_RDONLY);
+    if (memfd < 0) {
+        fprintf(rep, "cannot open /proc/self/mem (errno %d)\n", errno);
+        free(buf);
+        return;
+    }
+
+    /* pass 0 = scan every readable page for the cipher constant
+     * pass 1 = dump the game's own + anonymous-executable + hot regions */
+    for (pass = 0; pass < 2; pass++) {
+        m = fopen("/proc/self/maps", "r");
+        if (!m) break;
+        if (pass == 0)
+            fprintf(rep, "\n--- jcrypt LCG constant 0x19BAFFBED ---\n");
+        else
+            fprintf(rep, "\n--- dumped regions (%s/mem) ---\n", g_diag_dir);
+
+        while (fgets(line, sizeof line, m)) {
+            unsigned long lo = 0, hi = 0, off;
+            char perms[16], path[4096];
+            int hot = 0, want, i;
+            FILE *of = NULL;
+
+            if (!jjp_parse_map(line, &lo, &hi, perms, sizeof perms,
+                               path, sizeof path)) continue;
+            if (perms[0] != 'r') continue;
+            if (!strcmp(path, "[vvar]") || !strcmp(path, "[vsyscall]")) continue;
+            if (hi <= lo) continue;
+            if (g_self_hi && lo < g_self_hi && hi > g_self_lo)
+                continue;                                      /* the shim */
+            if ((unsigned long)(uintptr_t)buf >= lo &&
+                (unsigned long)(uintptr_t)buf <  hi) continue; /* scan buffer */
+
+            for (i = 0; i < g_nhot; i++)
+                if (g_hot_lo[i] == lo && g_hot_hi[i] == hi) hot = 1;
+            want = jjp_want_dump(path, perms, exe) || hot;
+            if (pass == 1) {
+                char fp[4200];
+                if (!want) continue;
+                if (dumped >= JJP_DUMP_CAP) {
+                    fprintf(rep, "  [cap %lu MB reached - %lx-%lx skipped]\n",
+                            JJP_DUMP_CAP >> 20, lo, hi);
+                    continue;
+                }
+                snprintf(fp, sizeof fp, "%s/%012lx-%012lx_%s.bin",
+                         subdir, lo, hi, perms);
+                of = fopen(fp, "wb");
+                if (!of) continue;
+            }
+
+            for (off = lo; off < hi; ) {
+                size_t need = (hi - off > JJP_CHUNK) ? JJP_CHUNK
+                                                     : (size_t)(hi - off);
+                ssize_t got = pread(memfd, buf, need, (off_t)off);
+                if (got <= 0) break;
+                if (pass == 0) {
+                    ssize_t j;
+                    scanned += (unsigned long)got;
+                    for (j = 0; j + 8 <= got; j++) {
+                        if (buf[j] != g_needle[0]) continue;
+                        if (memcmp(buf + j, g_needle, 8)) continue;
+                        hits++;
+                        fprintf(rep, "  HIT @ %p   region %lx-%lx %s %s\n",
+                                (void *)(off + (unsigned long)j), lo, hi,
+                                perms, path[0] ? path : "(anonymous)");
+                        if (g_nhot < JJP_MAX_HOT &&
+                            (g_nhot == 0 || g_hot_lo[g_nhot-1] != lo)) {
+                            g_hot_lo[g_nhot] = lo;
+                            g_hot_hi[g_nhot] = hi;
+                            g_nhot++;
+                        }
+                    }
+                } else {
+                    fwrite(buf, 1, (size_t)got, of);
+                    dumped += (unsigned long)got;
+                    if (dumped >= JJP_DUMP_CAP) break;
+                }
+                off += (unsigned long)got;
+            }
+            if (of) {
+                fclose(of);
+                fprintf(rep, "  %012lx-%012lx %s %-8lu KB  %s\n", lo, hi, perms,
+                        (hi - lo) >> 10, path[0] ? path : "(anonymous)");
+            }
+        }
+        fclose(m);
+        if (pass == 0)
+            fprintf(rep, "  %lu hit(s) over %lu MB scanned%s\n", hits,
+                    scanned >> 20,
+                    hits ? "  => asset cipher is still jcrypt"
+                         : "  => cipher constant absent (new cipher, or code "
+                           "still encrypted)");
+    }
+    close(memfd);
+    free(buf);
+    fprintf(rep, "\ndumped %lu KB of decrypted game memory\n", dumped >> 10);
+}
+
+/* --- the deep report ------------------------------------------------------ */
+static int g_deep_done = 0;
+
+static void jjp_deep_diag(const char *why)
+{
+    FILE *rep;
+    int i;
+    if (g_deep_done) return;
+    g_deep_done = 1;
+    jjp_diag_init();
+
+    jjp_syms_collect();
+
+    rep = jjp_diag_open("jjp_report.txt", "w");
+    if (!rep) return;
+    fprintf(rep, "JJP decrypt shim - deep diagnostic\n");
+    fprintf(rep, "triggered by: %s could not be resolved\n\n", why);
+    fprintf(rep, "%d crypto-ish exported symbol(s):\n", g_nhits);
+    for (i = 0; i < g_nhits; i++)
+        fprintf(rep, "  %p %s\n", g_hits[i].addr, g_hits[i].name);
+    if (!g_nhits)
+        fprintf(rep, "  (none - the game exports no crypto symbols at all, so "
+                     "the routines are internal to the envelope and must be "
+                     "located by pattern in the memory dump)\n");
+    fprintf(rep, "\nfull symbol census: jjp_symbols.txt\n");
+
+    {   /* module layout, same content as the breadcrumb but self-contained */
+        FILE *o = jjp_diag_open("proc_self_maps.txt", "w");
+        FILE *mm = fopen("/proc/self/maps", "r");
+        if (o && mm) {
+            char b[2048]; size_t k;
+            while ((k = fread(b, 1, sizeof b, mm)) > 0) fwrite(b, 1, k, o);
+        }
+        if (mm) fclose(mm);
+        if (o) fclose(o);
+    }
+
+    jjp_mem_census(rep);
+    fclose(rep);
+    fprintf(stderr, "[decrypt] DEEP DIAGNOSTIC written to %s\n", g_diag_dir);
+}
+
+/* --- the resolver the pinned upstream source now calls -------------------- */
+static const struct { const char *mangled; const char *token; int critical; }
+JJP_ALIASES[] = {
+    { "_Z13jcrypt_rand64v",                 "rand64",                1 },
+    { "_Z27jcrypt_set_seeds_for_cryptoPKc", "set_seeds_for_crypto",  1 },
+    { "_Z21dongle_decrypt_bufferPvj",       "dongle_decrypt_buffer", 1 },
+    { "_Z19fm_process_filelistPKcS0_",      "process_filelist",      0 },
+    { NULL, NULL, 0 }
+};
+
+void *jjp_dlsym(void *h, const char *name)
+{
+    void *p;
+    const char *token = NULL;
+    int critical = 0, i;
+
+    if (!name) return NULL;
+    p = dlsym(h, name);
+    if (p) return p;                   /* old titles: unchanged, first try wins */
+
+    for (i = 0; JJP_ALIASES[i].mangled; i++)
+        if (!strcmp(name, JJP_ALIASES[i].mangled)) {
+            token = JJP_ALIASES[i].token;
+            critical = JJP_ALIASES[i].critical;
+            break;
+        }
+    if (!token) return NULL;           /* e.g. the dongle-init name guesses */
+
+    jjp_syms_collect();
+    for (i = 0; i < g_nhits; i++)
+        if (strstr(g_hits[i].name, token)) {
+            fprintf(stderr, "[decrypt] %s absent; using %s @ %p\n",
+                    name, g_hits[i].name, g_hits[i].addr);
+            return g_hits[i].addr;
+        }
+    if (critical) jjp_deep_diag(name);
+    return NULL;
+}
+
+static void jjp_hook_diag(const char *via) {
+    char p[4096];
+    FILE *d;
+    jjp_diag_init();
+    snprintf(p, sizeof p, "%s/jjp_hook_diag.txt", g_diag_dir);
+    d = fopen(p, "a");
     if (d) {
         fprintf(d, "=== decrypt hook fired via %s ===\n", via);
         char exe[4096];
@@ -231,6 +768,16 @@ int ov_open_callbacks(void *a, void *b, const char *c, long d, void *e){
     jjp_engine_fire("ov_open_callbacks"); return -1;
 }
 """
+
+
+def combined_decrypt_source():
+    """The exact C the decrypt shim is built from.
+
+    Prefix (dlsym reroute) + the pinned upstream shim + our engine-agnostic
+    hooks and resolver.  One function so _phase_compile and the tests can never
+    disagree about what actually gets compiled.
+    """
+    return DECRYPT_PREFIX_C + DECRYPT_C_SOURCE + DECRYPT_ENGINE_HOOKS_C
 
 
 def _kill_process_tree(proc):
@@ -1147,7 +1694,13 @@ class DecryptionPipeline:
             self._check_cancel()
 
             self.on_phase(5)  # Decrypt
-            self._phase_decrypt()
+            try:
+                self._phase_decrypt()
+            except PipelineError:
+                # Cleanup is about to unmount the chroot; save whatever the
+                # shim learned first (see rescue_diagnostics).
+                self.rescue_diagnostics()
+                raise
             self._check_cancel()
 
             # Optional developer crypto capture (dongle extract only) — never
@@ -2027,7 +2580,7 @@ class DecryptionPipeline:
                 # Upstream (pinned verbatim) shim + the unified-app
                 # engine-agnostic hooks that make it fire on non-Allegro
                 # titles (e.g. Sonic).  See DECRYPT_ENGINE_HOOKS_C.
-                tf.write(DECRYPT_C_SOURCE + DECRYPT_ENGINE_HOOKS_C)
+                tf.write(combined_decrypt_source())
                 tmp_win = tf.name
             wsl_tmp = self.executor.to_exec_path(tmp_win)
             self.executor.run(f"cp '{wsl_tmp}' {mp}/tmp/jjp_decrypt.c", timeout=15)
@@ -2139,12 +2692,22 @@ class DecryptionPipeline:
         game_bin = f"{config.GAME_BASE_PATH}/{self.game_name}/game"
         decrypt_dir = "/tmp/jjp_decrypted"
 
+        # The shim writes everything it learns to JJP_DIAG_DIR (kept out of the
+        # asset dir so a successful run's output stays clean).  Start empty so a
+        # rescued archive can never carry a previous attempt's dump.
+        try:
+            self.executor.run(
+                f"rm -rf {mp}{_DIAG_DIR}; mkdir -p {mp}{_DIAG_DIR}", timeout=30)
+        except CommandError:
+            pass
+
         # Only set LD_LIBRARY_PATH if we actually built stub libraries;
         # otherwise the stubs dir is empty and we don't want it on the path.
         ld_lib_path = f"LD_LIBRARY_PATH=/tmp/stubs " if getattr(self, '_stubs_built', 0) > 0 else ""
         cmd = (
             f"chroot {mp} /bin/bash -c '"
             f"export JJP_OUTPUT_DIR={decrypt_dir}; "
+            f"export JJP_DIAG_DIR={_DIAG_DIR}; "
             f"unset DISPLAY; "
             f"LD_PRELOAD=/tmp/jjp_decrypt.so "
             f"{ld_lib_path}"
@@ -2164,6 +2727,7 @@ class DecryptionPipeline:
             final_fail = 0
             final_total = 0
             sentinel_error = False
+            missing_syms = False
             output_lines = []
 
             total_re = re.compile(r'\[decrypt\] TOTAL_FILES=(\d+)')
@@ -2184,6 +2748,12 @@ class DecryptionPipeline:
                     if ("key not found" in line.lower() or "H0007" in line
                             or "Terminal services" in line or "H0027" in line):
                         sentinel_error = True
+
+                    # The game ran (so the dongle unlocked its envelope) but
+                    # does not export the crypto the shim drives — a different
+                    # failure from a missing key, and retrying cannot help.
+                    if "Missing critical crypto functions" in line:
+                        missing_syms = True
 
                     # Log every line
                     level = "info"
@@ -2223,10 +2793,15 @@ class DecryptionPipeline:
                     pass  # Completed successfully despite non-zero exit
                 elif sentinel_error:
                     pass  # Handle below in retry logic
+                elif missing_syms:
+                    raise PipelineError("Decrypt", self._missing_symbols_help())
                 else:
                     combined = "\n".join(output_lines[-5:]) if output_lines else ""
                     raise PipelineError("Decrypt",
                         f"Game process failed.\nLast output:\n{combined}")
+
+            if missing_syms and final_total == 0:
+                raise PipelineError("Decrypt", self._missing_symbols_help())
 
             # If sentinel error and we have retries left, re-attach dongle and retry
             if sentinel_error and attempt < max_retries - 1:
@@ -2259,6 +2834,75 @@ class DecryptionPipeline:
             f"out of {final_total} files.",
             "success" if final_fail == 0 else "info",
         )
+
+    # --- dongle-run diagnostics -------------------------------------------
+
+    def rescue_diagnostics(self):
+        """Tar the shim's diagnostic dump into the user's output folder.
+
+        The dump lives inside the chroot, which Cleanup unmounts and deletes,
+        so it has to be rescued before the run ends.  A dongle session is rare
+        and expensive to arrange: when a run fails on a title whose crypto we
+        can't drive yet, this archive (symbol census, module map, and the
+        decrypted game code pulled out of the live process) is the whole
+        return on it.  Best-effort — never raises, never fails a run.
+
+        Returns the archive name, or None when there was nothing to rescue.
+        """
+        if getattr(self, "_diag_rescued", None):
+            return self._diag_rescued
+        mp = getattr(self, "mount_point", None)
+        if not mp:
+            return None
+        try:
+            wsl_out = self.executor.to_exec_path(self.output_path)
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", self.game_name or "game")
+            arc = f"jjp_diagnostics_{safe}.tar.gz"
+            self.executor.run(f"mkdir -p '{wsl_out}'", timeout=15)
+            # No "$(ls -A ...)" emptiness test here: this executor crosses an
+            # extra wsl.exe parse that expands $-substitutions away to nothing,
+            # so that guard is always false and the tar would never run.  find |
+            # grep survives it (see executor.py's UNC-path note).
+            self.executor.run(
+                f"find {mp}{_DIAG_DIR} -mindepth 1 -maxdepth 1 -print -quit "
+                f"| grep -q .", timeout=30)
+            self.executor.run(
+                f"cd {mp}{_DIAG_DIR} && tar czf '{wsl_out}/{arc}' .",
+                timeout=900,
+            )
+            self.executor.run(f"test -s '{wsl_out}/{arc}'", timeout=15)
+        except (CommandError, OSError, AttributeError):
+            return None
+        size = ""
+        try:
+            out = self.executor.run(
+                f"du -h '{wsl_out}/{arc}' | cut -f1", timeout=15)
+            if out and out.strip():
+                size = f" ({out.strip()})"
+        except CommandError:
+            pass
+        self._diag_rescued = arc
+        self.log(
+            f"Diagnostics saved to your output folder: {arc}{size}", "success")
+        return arc
+
+    def _missing_symbols_help(self):
+        """Explain a run that got all the way in but found no crypto to drive."""
+        arc = self.rescue_diagnostics()
+        msg = (
+            "The game ran and the dongle unlocked it, but this build does not "
+            "export the crypto functions the decryptor drives, so no assets "
+            "could be decrypted.\n"
+            "This is a new protection generation, not a problem with your "
+            "dongle or your setup — retrying will not change it."
+        )
+        if arc:
+            msg += (
+                f"\n\nThe run collected everything needed to add support: "
+                f"{arc}, in your output folder. Sending that file to the "
+                f"developer is what unlocks this title."
+            )
+        return msg
 
     def _phase_dev_capture(self):
         """Dump the game's decrypted asset-crypto routines for the developer.
@@ -2320,12 +2964,18 @@ class DecryptionPipeline:
             wsl_out = self.executor.to_exec_path(self.output_path)
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", game)
             arc = f"crypto_capture_{safe}.tar.gz"
-            self.executor.run(
-                f"if [ -n \"$(ls -A {mp}{cap_dir} 2>/dev/null)\" ]; then "
-                f"cd {mp}{cap_dir} && tar czf '{wsl_out}/{arc}' .; fi",
-                timeout=30)
             # confirm it landed
             try:
+                # "$(ls -A ...)" is eaten by the extra wsl.exe parse this
+                # executor goes through (it expands to empty, so the test never
+                # passed and the capture never got tarred).  find | grep
+                # survives it.
+                self.executor.run(
+                    f"find {mp}{cap_dir} -mindepth 1 -maxdepth 1 -print -quit "
+                    f"| grep -q .", timeout=30)
+                self.executor.run(
+                    f"cd {mp}{cap_dir} && tar czf '{wsl_out}/{arc}' .",
+                    timeout=60)
                 self.executor.run(f"test -s '{wsl_out}/{arc}'", timeout=5)
                 self.log(
                     f"Developer crypto sample saved: {arc} (in the output "

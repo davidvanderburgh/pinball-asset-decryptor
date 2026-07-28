@@ -505,9 +505,9 @@ def test_jjp_decrypt_shim_hooks_every_engine():
     hooks Allegro); the engine-agnostic hooks are appended from pipeline.py's
     DECRYPT_ENGINE_HOOKS_C at compile time.  Verify the *combined* source that
     _phase_compile actually builds."""
-    from pinball_decryptor.plugins.jjp.resources import DECRYPT_C_SOURCE
-    from pinball_decryptor.plugins.jjp.pipeline import DECRYPT_ENGINE_HOOKS_C
-    combined = DECRYPT_C_SOURCE + DECRYPT_ENGINE_HOOKS_C
+    from pinball_decryptor.plugins.jjp.pipeline import (
+        DECRYPT_ENGINE_HOOKS_C, combined_decrypt_source)
+    combined = combined_decrypt_source()
     for hook in _ENGINE_AGNOSTIC_HOOKS:
         assert hook in combined, hook
     # the appended snippet must hand off to the upstream Allegro entry, so we
@@ -528,6 +528,164 @@ def test_jjp_dev_capture_shim_hooks_every_engine():
         assert hook in DEV_CAPTURE_C_SOURCE, hook
     assert "proc_self_maps.txt" in DEV_CAPTURE_C_SOURCE
     assert "__sync_lock_test_and_set" in DEV_CAPTURE_C_SOURCE
+
+
+# On Sonic the hooks fire (HW-confirmed: "engine hook fired via XOpenDisplay",
+# so the dongle unlocked the LDK-10 envelope) but all four crypto lookups came
+# back nil — the rebuilt engine does not export them under the old mangled
+# names.  The shim must therefore try harder than one dlsym, and when there is
+# genuinely nothing to find it must hand back everything a developer needs
+# rather than burning a rare dongle session on a bare error.
+
+def test_jjp_shim_resolver_wraps_the_pinned_dlsym():
+    """Upstream does its own dlsym and exits when it fails, and resources.py is
+    pinned byte-verbatim — so the prefix reroutes dlsym for that whole
+    translation unit instead of editing it."""
+    from pinball_decryptor.plugins.jjp.resources import DECRYPT_C_SOURCE
+    from pinball_decryptor.plugins.jjp.pipeline import (
+        DECRYPT_PREFIX_C, combined_decrypt_source)
+    assert "#define dlsym jjp_dlsym" in DECRYPT_PREFIX_C
+    # the pinned source itself stays clean; the reroute is purely additive
+    assert "jjp_dlsym" not in DECRYPT_C_SOURCE
+    combined = combined_decrypt_source()
+    assert combined.index("#define dlsym") < combined.index("dlsym(h,")
+    # ...and the resolver un-defines it so it can still reach the real dlsym
+    assert "#undef dlsym" in combined
+    # old titles must be unaffected: the real dlsym is tried first, and a hit
+    # returns immediately without any of the fallback machinery
+    assert "p = dlsym(h, name);" in combined
+    assert "if (p) return p;" in combined
+
+
+def test_jjp_shim_falls_back_to_a_symbol_census():
+    """A crypto function that was merely renamed must still be found: walk every
+    loaded object's dynamic symbols and match on the meaningful part of the
+    name."""
+    combined = _combined()
+    assert "dl_iterate_phdr" in combined
+    assert "jjp_symbols.txt" in combined
+    for tok in ("rand64", "set_seeds_for_crypto", "dongle_decrypt_buffer",
+                "process_filelist"):
+        assert tok in combined, tok
+    # both hash-table flavours, or the census silently finds nothing
+    assert "DT_GNU_HASH" in combined and "DT_HASH" in combined
+    # a corrupt/absent table must not kill the game process
+    assert "sigsetjmp" in combined and "SIGSEGV" in combined
+
+
+def test_jjp_shim_deep_diagnostic_captures_the_decrypted_game():
+    """When nothing resolves, the crypto is internal to the envelope and only
+    exists decrypted inside this process — so dump it for offline RE instead of
+    just exiting."""
+    combined = _combined()
+    assert "jjp_report.txt" in combined
+    assert "/proc/self/mem" in combined
+    assert "proc_self_maps.txt" in combined
+    # scans for the known jcrypt LCG multiplier (crypto.py LCG_MULT) so the
+    # report says outright whether the asset cipher changed
+    assert "0x9BAFFBEDu" in combined
+    from pinball_decryptor.plugins.jjp.crypto import LCG_MULT
+    assert LCG_MULT == 0x19BAFFBED  # the constant the shim looks for
+    # bounded, or a runaway dump fills the user's disk
+    assert "JJP_DUMP_CAP" in combined
+    # and it must not report its own copy of the needle as a find
+    assert "g_self_lo" in combined
+
+
+def test_jjp_shim_writes_diagnostics_outside_the_asset_dir():
+    """Diagnostics go to JJP_DIAG_DIR, not the asset output dir, so a normal
+    successful extract's output stays clean."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+    assert "JJP_DIAG_DIR" in _combined()
+    assert P._DIAG_DIR and P._DIAG_DIR != "/tmp/jjp_decrypted"
+
+
+def _combined():
+    from pinball_decryptor.plugins.jjp.pipeline import combined_decrypt_source
+    return combined_decrypt_source()
+
+
+def _rescue_pipe(tmp_out=r"C:\out", diag_present=True):
+    """A DecryptionPipeline wired to a recording fake executor."""
+    from pinball_decryptor.plugins.jjp import pipeline as P
+    pipe = object.__new__(P.DecryptionPipeline)
+    pipe.mount_point = "/mnt/jjp_x"
+    pipe.output_path = tmp_out
+    pipe.game_name = "Sonic"
+    pipe.logs = []
+    pipe.log = lambda msg, lvl="info": pipe.logs.append((msg, lvl))
+    cmds = []
+
+    def run(cmd, timeout=None):
+        cmds.append(cmd)
+        if cmd.startswith("test -s") and not diag_present:
+            raise P.CommandError(cmd, 1, "no archive")
+        return ""
+
+    pipe.executor = type("E", (), {
+        "run": staticmethod(run),
+        "to_exec_path": staticmethod(lambda p: "/mnt/c/out"),
+    })()
+    return pipe, cmds
+
+
+def test_jjp_rescue_diagnostics_tars_into_the_output_folder():
+    """Cleanup unmounts the chroot, so the dump has to be pulled out before the
+    run ends — a dongle session is too expensive to lose it."""
+    pipe, cmds = _rescue_pipe()
+    arc = pipe.rescue_diagnostics()
+    assert arc == "jjp_diagnostics_Sonic.tar.gz"
+    joined = " ".join(cmds)
+    assert "tar czf" in joined and "jjp_diagnostics_Sonic.tar.gz" in joined
+    assert "/mnt/jjp_x/tmp/jjp_diag" in joined
+    # the user is told where it landed
+    assert any("jjp_diagnostics_Sonic.tar.gz" in m for m, _ in pipe.logs)
+    # second call is a no-op (the archive is built once)
+    before = len(cmds)
+    assert pipe.rescue_diagnostics() == arc
+    assert len(cmds) == before
+
+
+def test_jjp_archive_guards_avoid_shell_substitution():
+    """WslExecutor commands cross an extra wsl.exe parse that expands $... away
+    to nothing, so an `if [ -n "$(ls -A dir)" ]` guard is ALWAYS false and the
+    archive never gets built — silently costing a dongle session its artifact.
+    Both archive paths must guard without a substitution."""
+    import inspect
+    from pinball_decryptor.plugins.jjp import pipeline as P
+    for fn in (P.DecryptionPipeline.rescue_diagnostics,
+               P.DecryptionPipeline._phase_dev_capture):
+        code = [ln for ln in inspect.getsource(fn).splitlines()
+                if not ln.lstrip().startswith("#")]
+        src = "\n".join(code)
+        assert "tar czf" in src
+        assert "$(" not in src, fn.__name__
+    pipe, cmds = _rescue_pipe()
+    pipe.rescue_diagnostics()
+    assert any("find " in c and "grep -q ." in c for c in cmds)
+
+
+def test_jjp_rescue_diagnostics_is_best_effort():
+    """It must never turn into the reason a run fails."""
+    pipe, _ = _rescue_pipe(diag_present=False)
+    assert pipe.rescue_diagnostics() is None
+    pipe2 = object.__new__(
+        __import__("pinball_decryptor.plugins.jjp.pipeline",
+                   fromlist=["x"]).DecryptionPipeline)
+    pipe2.mount_point = None
+    assert pipe2.rescue_diagnostics() is None
+
+
+def test_jjp_missing_symbols_message_blames_the_right_thing():
+    """'Check that the correct dongle is connected' is wrong and wastes the
+    user's time when the game plainly ran: the dongle worked, the build simply
+    doesn't export the crypto."""
+    pipe, _ = _rescue_pipe()
+    msg = pipe._missing_symbols_help()
+    assert "dongle unlocked it" in msg
+    assert "not a problem with your dongle" in msg
+    assert "retrying will not change it" in msg.lower()
+    assert "jjp_diagnostics_Sonic.tar.gz" in msg
 
 
 def test_jjp_dev_capture_noop_when_not_requested():

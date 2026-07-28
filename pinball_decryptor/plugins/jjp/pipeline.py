@@ -1120,6 +1120,12 @@ class DecryptionPipeline:
                 if not ok:
                     raise PipelineError("Extract", f"{label} path error:\n{msg}")
 
+            # Prove the C toolchain works before the extract, not five
+            # phases later: a missing header costs a one-line apt install,
+            # and there's no reason to spend the extract + dongle handshake
+            # first to find that out.
+            self._ensure_compiler()
+
             self.on_phase(0)  # Extract
             self._phase_extract()
             self._check_cancel()
@@ -1939,8 +1945,75 @@ class DecryptionPipeline:
 
     # --- Phase 4: Compile ---
 
+    # Probe source for _ensure_compiler.  It only has to prove the driver
+    # AND the system headers are there — the real shims include nothing
+    # more exotic than these.
+    _CC_PROBE_C = ("#include <stdio.h>\n"
+                   "#include <stdlib.h>\n"
+                   "#include <string.h>\n"
+                   "int main(void) { return 0; }\n")
+
+    def _ensure_compiler(self, phase="Compile"):
+        """Make sure the executor can actually compile C, installing the
+        toolchain once if it can't.
+
+        ``which gcc`` is not the test.  Ubuntu's ``gcc`` package only
+        *Recommends* ``libc6-dev``, so a WSL set up without recommended
+        packages has the driver but no system headers, and every compile
+        dies on ``fatal error: stdio.h: No such file or directory`` —
+        five phases in, after the ISO extract and the dongle handshake.
+        So compile a throwaway file for real, and self-heal the same
+        one-time way the partclone install does.
+        """
+        if getattr(self, "_compiler_ready", False):
+            return
+
+        probe_b64 = base64.b64encode(self._CC_PROBE_C.encode()).decode()
+        probe_cmd = (
+            f"echo '{probe_b64}' | base64 -d > /var/tmp/jjp_ccprobe.c && "
+            f"gcc -c -o /var/tmp/jjp_ccprobe.o /var/tmp/jjp_ccprobe.c 2>&1")
+
+        def can_compile():
+            try:
+                self.executor.run(probe_cmd, timeout=config.COMPILE_TIMEOUT)
+                return True
+            except CommandError:
+                return False
+
+        if can_compile():
+            self._compiler_ready = True
+            return
+
+        self.log("C compiler unusable here (missing gcc or its headers). "
+                 "Installing gcc + libc6-dev (one-time setup)...", "info")
+        for cmd in (
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y "
+                "gcc libc6-dev 2>&1",
+                "apt-get update 2>&1; DEBIAN_FRONTEND=noninteractive "
+                "apt-get install -y gcc libc6-dev 2>&1",
+                # Alpine — the macOS Docker image's package manager.
+                "apk add --no-cache gcc musl-dev 2>&1"):
+            try:
+                self.executor.run(cmd, timeout=600)
+            except CommandError:
+                continue
+            if can_compile():
+                self._compiler_ready = True
+                self.log("C toolchain installed.", "success")
+                return
+
+        prefix = "wsl -u root -- " if sys.platform == "win32" else "sudo "
+        raise PipelineError(phase,
+            "No usable C compiler.\n"
+            "gcc needs the system headers too, and 'apt install gcc' skips\n"
+            "them when recommended packages are turned off.\n"
+            "Run this once, then start the extract again:\n"
+            f"  {prefix}apt-get update\n"
+            f"  {prefix}apt-get install -y gcc libc6-dev")
+
     def _phase_compile(self):
         self.log("Compiling decryptor...", "info")
+        self._ensure_compiler()
         mp = self.mount_point
 
         # Write C source to a temp file and copy into chroot.
@@ -1982,7 +2055,9 @@ class DecryptionPipeline:
         except CommandError as e:
             raise PipelineError("Compile",
                 f"gcc compilation failed: {e.output}\n"
-                "Ensure gcc is installed in WSL: wsl -u root -- apt install gcc") from e
+                "Install the full toolchain (the compiler alone is not "
+                "enough — it needs the system headers):\n"
+                "  wsl -u root -- apt-get install -y gcc libc6-dev") from e
 
         self.log("Decryptor compiled.", "success")
 
@@ -3096,6 +3171,7 @@ class ModPipeline(DecryptionPipeline):
     def _phase_compile_encryptor(self):
         """Compile the encryptor hook (instead of decryptor)."""
         self.log("Compiling encryptor...", "info")
+        self._ensure_compiler()
         mp = self.mount_point
 
         import tempfile, os

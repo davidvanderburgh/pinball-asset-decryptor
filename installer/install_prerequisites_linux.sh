@@ -25,7 +25,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "  PB:     e2fsprogs"
     echo "  Spooky: gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard"
     echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
-    echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard"
+    echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     echo "  CGC:    e2fsprogs xxd"
     exit 1
 fi
@@ -51,7 +51,9 @@ declare -A MFR_PACKAGES=(
     [1]="e2fsprogs"
     [2]="gnupg ffmpeg partclone e2fsprogs zstd python3-zstandard"
     [3]="gnupg tar curl unzip xvfb webp"
-    [4]="partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard"
+    # gcc pulls libc6-dev only as a *recommended* package, so name the
+    # headers too — without them the dongle-extract hooks won't compile.
+    [4]="partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     [5]="e2fsprogs xxd"
 )
 

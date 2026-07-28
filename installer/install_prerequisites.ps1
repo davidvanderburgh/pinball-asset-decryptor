@@ -162,6 +162,11 @@ $ManufacturerPrereqs = [ordered]@{
             @{ probe="pigz";           pkg="pigz";               label="pigz";                   reason="Parallel gzip - speeds up large image work" }
             @{ probe="ffmpeg";         pkg="ffmpeg";             label="ffmpeg (in WSL)";        reason="Audio processing for Write pipeline" }
             @{ probe="python3";        pkg="python3-zstandard";  label="python3-zstandard";      reason="zstd-compressed images" }
+            # Probed by compiling, not by 'which gcc': the gcc package only
+            # *recommends* libc6-dev, so a WSL without recommended packages
+            # has the compiler but none of its headers.
+            @{ probe="gcc";            pkg="gcc libc6-dev";      label="gcc + libc6-dev";        reason="Builds the decrypt/encrypt hooks for dongle extraction";
+               probeCmd="gcc -include stdio.h -x c /dev/null -c -o /var/tmp/ccprobe.o" }
         )
         HostPackages = @()
     }
@@ -462,25 +467,33 @@ if ($wslPlan.Count -gt 0) {
         wsl -u root -- bash -c "apt-get update -qq" 2>&1 |
             ForEach-Object { Write-Host "    $_" }
 
+        # A package with a probeCmd is tested by running that command
+        # instead of a PATH lookup — some packages (gcc) are on PATH while
+        # still being unusable, so "is the binary there" is the wrong test.
+        function Test-WslPkg($p) {
+            try {
+                if ($p.probeCmd) {
+                    wsl -u root -- bash -c "$($p.probeCmd)" 2>&1 | Out-Null
+                } else {
+                    wsl -u root -- which $p.probe 2>&1 | Out-Null
+                }
+                return ($LASTEXITCODE -eq 0)
+            } catch {
+                return $false
+            }
+        }
+
         foreach ($p in $wslPlan) {
             Write-Step ("Checking {0} in WSL (for: {1})" -f $p.label, ($p.for -join ", "))
-            $found = $false
-            try {
-                wsl -u root -- which $p.probe 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) { $found = $true; Write-OK $p.label }
-            } catch {}
+            $found = Test-WslPkg $p
+            if ($found) { Write-OK $p.label }
 
             if (-not $found) {
                 Write-Host ("  Installing {0}..." -f $p.label) -ForegroundColor Cyan
                 $cmd = "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq " + $p.pkg
                 wsl -u root -- bash -c $cmd 2>&1 | ForEach-Object { Write-Host "    $_" }
-                try {
-                    wsl -u root -- which $p.probe 2>&1 | Out-Null
-                    if ($LASTEXITCODE -eq 0) { Write-Installed $p.label }
-                    else                     { Write-FAIL $p.label }
-                } catch {
-                    Write-FAIL $p.label
-                }
+                if (Test-WslPkg $p) { Write-Installed $p.label }
+                else                { Write-FAIL $p.label }
             }
         }
     } else {

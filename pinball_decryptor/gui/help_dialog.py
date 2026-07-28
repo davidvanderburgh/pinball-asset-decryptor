@@ -145,11 +145,13 @@ HELP_CONTENT = {
          "by the sound's content, so a future extract — same card or a "
          "newer firmware carrying the same sound — reapplies it before "
          "transcription runs, and the slot keeps its Type bucket. Blank "
-         "restores the stock name and forgets it. Where the extract wrote "
-         "sound_test_names.csv (Stern), the dialog offers the game's own "
-         "Sound Test menu names as suggestions — play a number on the "
-         "machine's Sound Test menu, then pick that entry (type its number "
-         "to find it) for the slot that played."),
+         "restores the stock name and forgets it. On Stern titles with a "
+         "Sound Test menu the extract already names the sound effects from "
+         "it (\"SE FX MATCH\" and the like), and writes the full menu "
+         "listing to sound_test_names.csv; the dialog offers those names as "
+         "suggestions, so you can play a number on the machine's Sound Test "
+         "menu and either confirm what the extract called that slot or pick "
+         "the entry (type its number to find it) yourself."),
     ],
     "Replace Video": [
         ("Scan and assign",

@@ -96,7 +96,7 @@ def test_find_wavs_skips_named_decode_files(tmp_path):
                    "music_cat05_0007.wav"}
 
 
-# ---- _descriptor_refs / _select_names: op11 binding rules --------------------
+# ---- _primary_idx / _select_names: op11 binding rules ------------------------
 
 def _desc(pairs, size=0x50):
     """Synthetic descriptor: 0x0b opcode bytes at given offsets, each followed
@@ -110,66 +110,102 @@ def _desc(pairs, size=0x50):
     return bytes(d)
 
 
-def test_descriptor_refs_kinds():
+def test_primary_idx_takes_first_marker_at_or_after_9():
+    """The descriptor's variable-length field moves the op11 marker between
+    builds, so the primary asset is the FIRST marker at/after offset 9 — not
+    whichever of the two fixed offsets 10/28 happens to hold one (v0.61.x
+    checked only those and lost a third of the coverage)."""
     from pinball_decryptor.plugins.stern.spike2 import sfx_names
     keymap = {0xAAAA: 7, 0xBBBB: 9}
-    # op11 anchored at 10 (payload at 14) — the entry's own primary asset,
-    # even with another matching key elsewhere in the stream.
-    assert sfx_names._descriptor_refs(
-        _desc([(10, 0xAAAA), (40, 0xBBBB)]), keymap) == ("anchored", 7)
-    # No anchor: every known-key match is returned as a reference set.
-    kind, ref = sfx_names._descriptor_refs(_desc([(20, 0xAAAA)]), keymap)
-    assert (kind, ref) == ("broad", frozenset({7}))
-    kind, ref = sfx_names._descriptor_refs(
-        _desc([(20, 0xAAAA), (40, 0xBBBB)]), keymap)
-    assert (kind, ref) == ("broad", frozenset({7, 9}))
-    # Nothing known -> (None, None).
-    assert sfx_names._descriptor_refs(
-        _desc([(20, 0xCCCC)]), keymap) == (None, None)
+    assert sfx_names._primary_idx(_desc([(10, 0xAAAA), (40, 0xBBBB)]),
+                                  keymap) == 7
+    # Marker at 12 (the variable-length case) is just as valid as one at 10.
+    assert sfx_names._primary_idx(_desc([(12, 0xAAAA), (40, 0xBBBB)]),
+                                  keymap) == 7
+    # First marker wins; later ones are references to other assets.
+    assert sfx_names._primary_idx(_desc([(20, 0xBBBB), (40, 0xAAAA)]),
+                                  keymap) == 9
+    # A 0x0b before offset 9 is header, not an opcode.
+    assert sfx_names._primary_idx(_desc([(4, 0xAAAA)]), keymap) is None
+    assert sfx_names._primary_idx(_desc([(20, 0xCCCC)]), keymap) is None
 
 
 def test_select_names_rules():
-    """The Led Zeppelin lesson: anchored names always stick; a broad binding
-    names only a short record it alone references."""
+    """Menu order breaks ties; music-length records are never event-named."""
     from pinball_decryptor.plugins.stern.spike2 import sfx_names
-    secs = {1: 0.2, 2: 0.5, 30: 285.0, 31: 3.0, 40: 1.0}
+    secs = {1: 0.2, 30: 285.0, 40: 1.0}
     entries = [
-        # Anchored blip -> named, even though the sequence below also
-        # references idx 1.
-        (100, "SE FX BLIP", "anchored", 1),
-        # Sequence referencing sting + shared music master -> names nothing.
-        (99, "SE FX SEQ ZEPPELIN AWARD", "broad", frozenset({1, 30})),
-        # Sole unique broad ref to a SHORT record -> named.
-        (98, "SE FX TARGET HIT", "broad", frozenset({2})),
-        # Unique broad ref to a LONG record (a song master) -> NOT named.
-        (97, "SE FX LEFT RAMP EXIT", "broad", frozenset({30})),
-        # Unique broad ref, but ANOTHER entry references the same record ->
-        # shared, NOT named (no canonical event name exists).
-        (96, "SE FX ADD A BALL", "broad", frozenset({31})),
-        (95, "SE FX SEQ BALL SAVED", "broad", frozenset({31})),
-        # Two anchored entries sharing one reused sample: first in table
-        # order wins, second is dropped silently (both names are true).
-        (94, "SE FX SLING LEFT", "anchored", 40),
-        (93, "SE FX SLING RIGHT", "anchored", 40),
+        (100, "SE FX BLIP", 1),
+        # Led Zeppelin plays mode events into shared full-song masters, so an
+        # event descriptor can own a 4:45 track.  No event name is right for
+        # one; leaving it bare lets the music-ID pass title the actual song.
+        (99, "SE FX SEQ ZEPPELIN AWARD", 30),
+        # Two entries sharing one reused sample: first in menu order wins.
+        (94, "SE FX SLING LEFT", 40),
+        (93, "SE FX SLING RIGHT", 40),
     ]
-    out = sfx_names._select_names(entries, secs)
-    assert out == {1: "SE FX BLIP", 2: "SE FX TARGET HIT",
-                   40: "SE FX SLING LEFT"}
+    assert sfx_names._select_names(entries, secs) == {
+        1: "SE FX BLIP", 40: "SE FX SLING LEFT"}
 
 
-# ---- extract-level naming is disabled pending the binding re-RE -------------
+# ---- validate_name_map: the names have to describe the audio -----------------
 
-def test_extract_naming_disabled_by_default(tmp_path, monkeypatch):
-    """v0.63.1: content validation proved the menu->sound binding wrong
-    (speaker prompts inside blip-named files, Kashmir as "COMBO TERMINATE"),
-    so the extract pass names nothing until re-verified.  PINBALL_SFX_NAMES=1
-    re-enables for RE work."""
-    monkeypatch.delenv("PINBALL_SFX_NAMES", raising=False)
-    logs = []
-    out = engine._load_or_build_sfx_names(
-        None, None, None, [], lambda m, lvl: logs.append(m))
-    assert out == {}
-    assert any("auto-naming is off" in m for m in logs)
+def _lz_like_map():
+    """A correct-shaped map: LIT variants longer than their UNLIT twins, and
+    each named bank/series sharing one sound design (so one duration)."""
+    name_map, secs, i = {}, {}, 0
+    for bank, lit, unlit in (("ROCK", 1.17, 0.78), ("CENTER", 1.66, 1.07),
+                             ("LED", 1.15, 1.03), ("LEFT", 2.36, 1.21)):
+        for letter in "KCOR":
+            for kind, d in (("LIT", lit), ("UNLIT", unlit)):
+                i += 1
+                name_map[i] = "SE FX %s BANK TARGET %s %s" % (bank, letter, kind)
+                secs[i] = d
+    for series, count, d in (("ELECTRIC MAGIC NOTE", 12, 1.16),
+                             ("BONUS GOLD", 8, 0.30),
+                             ("EM FRENZY SPINNER A", 10, 0.70)):
+        for n in range(1, count + 1):
+            i += 1
+            name_map[i] = "SE FX %s %d" % (series, n)
+            secs[i] = d
+    return name_map, secs
+
+
+def test_validate_accepts_a_coherent_map():
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    name_map, secs = _lz_like_map()
+    ok, report = sfx_names.validate_name_map(name_map, secs, trials=400)
+    assert ok
+    assert "lit/unlit" in report and "group spread" in report
+
+
+def test_validate_rejects_a_shifted_map():
+    """The exact failure mode that shipped twice: the names are real and the
+    slots are real, but every name sits one entry off."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    name_map, secs = _lz_like_map()
+    idxs = sorted(name_map)
+    shifted = dict(zip(idxs, [name_map[i] for i in idxs[1:] + idxs[:1]]))
+    ok, _ = sfx_names.validate_name_map(shifted, secs, trials=400)
+    assert not ok
+
+
+def test_validate_abstains_without_enough_evidence():
+    """Too few paired/grouped names to judge -> no verdict (empty report), and
+    the caller falls back to the note-tonality check rather than dropping a
+    real map."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    ok, report = sfx_names.validate_name_map(
+        {1: "SE FX A", 2: "SE FX B"}, {1: 1.0, 2: 2.0}, trials=100)
+    assert ok and report == ""
+
+
+# ---- extract-level naming is on, with a kill switch -------------------------
+
+def test_extract_naming_kill_switch(monkeypatch):
+    monkeypatch.setenv("PINBALL_SFX_NAMES", "0")
+    assert engine._load_or_build_sfx_names(
+        None, None, None, [], lambda m, lvl: None) == {}
 
 
 # ---- sound_test_names.csv sidecar (rename suggestions) -----------------------
@@ -198,6 +234,125 @@ def test_write_sound_test_names_sidecar(tmp_path, monkeypatch):
     # Menu-less titles: no file, no crash.
     monkeypatch.setattr(sfx_names, "locate_menu_names", lambda raw: [])
     assert engine._write_sound_test_names(str(gr), str(tmp_path / "x")) == 0
+
+
+# ---- the menu -> sound-id indirection, on a synthetic firmware ---------------
+#
+# This is where every wrong name so far came from, and both traps are silent:
+# a map built off a shifted index still resolves, still looks plausible, and
+# still names real files.  The fixture pins the two of them.
+
+_VA = 0x50000
+_SEG_OFF = 0x1000
+
+
+def _fake_fw(names, node_ids, lists_by_id, pad_words=1):
+    """A minimal ARM ELF carrying a Sound-Test menu.
+
+    *lists_by_id* maps node id -> sid list.  Ids count from the END of the
+    block, so id 0 is written last; *pad_words* extra zero words then sit
+    between the block and the pairs array, as they do on real firmware.
+    """
+    import struct
+    body = bytearray()
+
+    def va_of(off):
+        return _VA + off
+
+    # string pool
+    str_va = {}
+    for n in names:
+        str_va[n] = va_of(len(body))
+        body += n.encode() + b"\x00"
+    while len(body) % 4:
+        body += b"\x00"
+    body += struct.pack("<I", 0xFFFFFFFF)      # stops the block walk-back
+
+    # sound-id lists, highest id first (ids are counted from the end)
+    for i in sorted(lists_by_id, reverse=True):
+        for sid in lists_by_id[i]:
+            body += struct.pack("<I", sid)
+        body += struct.pack("<I", 0)           # NUL terminator
+    body += struct.pack("<I", 0) * pad_words
+
+    pairs_at = len(body)
+    body += b"\x00" * (8 * len(names))
+    table_at = len(body)
+    for n in names:
+        body += struct.pack("<I", str_va[n]) * 5 + struct.pack("<I", 0)
+    for p, n in enumerate(names):
+        struct.pack_into("<2I", body, pairs_at + p * 8,
+                         va_of(table_at + p * 24), node_ids[p])
+
+    ph = struct.pack("<8I", 1, _SEG_OFF, _VA, _VA, len(body), len(body), 5, 4)
+    sh = struct.pack("<10I", 0, 3, 0, 0, _SEG_OFF - 1, 1, 0, 0, 1, 0)
+    hdr = bytearray(b"\x00" * 0x34)
+    hdr[0:8] = b"\x7fELF\x01\x01\x01\x00"
+    struct.pack_into("<HHI", hdr, 0x10, 2, 40, 1)          # type, machine, ver
+    struct.pack_into("<I", hdr, 0x1C, 0x34)                # e_phoff
+    struct.pack_into("<I", hdr, 0x20, 0x34 + 32)           # e_shoff
+    struct.pack_into("<HHHHH", hdr, 0x2A, 32, 1, 40, 1, 0)
+    raw = bytearray(hdr + ph + sh)
+    raw += b"\x00" * (_SEG_OFF - len(raw) - 1) + b"\x00"
+    return bytes(raw + body)
+
+
+def _menu_fixture(pad_words=1, category_sid=False):
+    """10 SE FX entries whose node ids are deliberately NOT their positions."""
+    names = ["SE FX ALPHA", "SE FX BRAVO", "SE FX CHARLIE", "SE FX DELTA",
+             "SE FX ECHO", "SE FX FOXTROT", "SE FX GOLF", "SE FX HOTEL",
+             "SE FX INDIA", "SE FX JULIET", "INVALID"]
+    node_ids = [17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 0]
+    lists_by_id = {0: []}
+    for k, nid in enumerate(node_ids[:-1]):
+        lists_by_id[nid] = [700 + k]                       # sid = 700 + position
+    for gap in range(1, 8):                                # ids the menu skips
+        lists_by_id.setdefault(gap, [900 + gap])
+    if category_sid:
+        # A low id (so it is met early walking back) holding a sound id from a
+        # non-zero category: high half = category, low half = sub-id.
+        lists_by_id[3] = [(1 << 16) | 3]
+    return names, _fake_fw(names, node_ids, lists_by_id, pad_words)
+
+
+def test_locate_menu_sids_follows_the_indirection():
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture()
+    got = sfx_names.locate_menu_sids(fw)
+    assert got == [(700 + k, n) for k, n in enumerate(names[:-1])]
+
+
+@pytest.mark.parametrize("pad_words", [0, 1, 2, 3])
+def test_list_block_padding_never_shifts_the_map(pad_words):
+    """Trailing zero words after list id 0 split into further empty lists, and
+    because ids count from the END each stray one renumbers everything.  The
+    map must not move with the padding."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture(pad_words)
+    assert sfx_names.locate_menu_sids(fw) == [
+        (700 + k, n) for k, n in enumerate(names[:-1])]
+
+
+def test_multi_category_sound_ids_dont_truncate_the_block():
+    """The multi-category titles (Rush, Metallica, Deadpool, ...) carry the
+    category in a sound id's high half, so ids run past 0x10000.  Bounding the
+    block scan by VALUE stopped it at the first such id — Rush found its menu
+    and then resolved nothing at all — so the scan counts list terminators."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture(category_sid=True)
+    assert sfx_names.locate_menu_sids(fw) == [
+        (700 + k, n) for k, n in enumerate(names[:-1])]
+
+
+def test_displayed_number_is_a_reversed_position_not_the_sid():
+    """sound_test_names.csv must keep printing the number the MACHINE shows,
+    which is (N-1) - position over the whole table (OCR-verified) and has
+    nothing to do with the resolver sid the naming path uses."""
+    from pinball_decryptor.plugins.stern.spike2 import sfx_names
+    names, fw = _menu_fixture()
+    n = len(names)
+    assert sfx_names.locate_menu_names(fw) == [
+        ((n - 1) - p, nm) for p, nm in enumerate(names[:-1])]
 
 
 # ---- build_name_map graceful degradation ------------------------------------

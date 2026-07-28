@@ -1,30 +1,44 @@
 """Attach the game's own Sound/Speaker-Test menu names to extracted SFX.
 
 Newer Spike 2 titles (Led Zeppelin onward) carry a Sound Test menu that lists
-every sound effect as ``SE FX <NAME>`` with a per-sound number.  That number is
-the sound's *asset id* (the resolver ``sid``), and the firmware plays it through
-the same descriptor->container path the game uses in-play.  This module mines the
-menu name table statically, then drives the firmware's asset resolver in the
-emulator to map each menu name onto the extraction ``idx`` (master-directory
-record) so a decoded WAV can be titled with its official name.
+every sound effect as ``SE FX <NAME>`` with a per-sound number.  This module
+mines the menu statically, follows the firmware's own menu-entry -> sound-id
+indirection, then drives the asset resolver in the emulator to land each name
+on an extraction ``idx`` (master-directory record) so a decoded WAV can be
+titled with its official name.
 
-The linkage, end to end:
+The linkage, end to end::
 
-  menu name  --(id-array)-->  sid
-  sid        --(resolver get_asset_descriptor)-->  descriptor (op11 band value)
-  op11 key0  --(container find key)-->  master-dir record  ==  extraction idx
+  menu name    --(24B name-group table, position p)
+  node id      --({group_ptr, node_id} array immediately BEFORE the table)
+  sound-id list--(NUL-terminated u32 lists immediately BEFORE that array,
+                  indexed FROM THE END: list = lists[(nlists - 1) - node_id];
+                  the list's LAST element is the sid the entry plays)
+  sid          --(resolver get_asset_descriptor)-->  descriptor
+  op11 key     --(container find key)-->  master-dir record  ==  extraction idx
 
-The container key is snapshotted per record during
-:meth:`Spike2Emu.derive_params` (``row["key0"]``) at the skipped find; each
-descriptor embeds that same key at its op11 payload, so matching the two yields
-``sid -> idx``.  Everything derives from ``game_real`` + ``image.bin`` alone.
+Two traps live in that chain, both of which shipped wrong names before:
+
+* the 8-byte array is ``{group_ptr, node_id}``, **not** ``{node_id, group_ptr}``.
+  Reading it the other way shifts every id by one entry (the v0.61.0 bug).
+* the sound-id list block's final u32 is the terminator that closes list id 0,
+  so splitting on zeros yields a trailing empty list that **must be kept** —
+  dropping it as spurious renumbers every list and shifts the whole map by one.
+
+The number the machine *displays* in its menu is a third thing again: a plain
+reversed position, ``(N - 1) - p``, which is what :func:`locate_menu_names`
+reports for the ``sound_test_names.csv`` sidecar.  It is not the resolver sid.
 
 Everything here is best-effort and title-generic: any step that can't be located
 (older menu-less builds, an un-mappable resolver) returns an empty map and the
 extract simply keeps the plain ``idx`` names.  Only the validated codec is
-required for decode; naming never blocks it.
+required for decode; naming never blocks it.  The finished map is additionally
+put through :func:`validate_name_map`, a permutation test of the names against
+the audio, so a build whose layout differs enough to shift the mapping rejects
+its own names instead of shipping mislabels.
 """
 
+import random
 import struct
 
 from .elf import parse_elf
@@ -36,6 +50,12 @@ from .emulator import DESC_BASE
 IMG_BASE = DESC_BASE
 
 _SEFX = b"SE FX "
+
+# Ceiling for a node id (an index into the sound-id list block, so bounded by
+# the block's length) — guards the walk over the {group_ptr, node_id} array.
+_MAX_NODE_ID = 0x10000
+# How far back the sound-id list block may be searched for, in bytes.
+_MAX_LIST_BLOCK = 1 << 20
 
 
 def _u32(b, o=0):
@@ -61,31 +81,17 @@ def _seg_maps(segs):
     return off2va, va2off
 
 
-def locate_menu_names(raw):
-    """Mine the Sound/Speaker-Test menu -> ``[(sid, name), ...]`` for SE FX entries.
+def _walk_menu_table(raw):
+    """Mine the Sound/Speaker-Test menu structure, or ``None``.
 
-    The menu is a contiguous table of 24-byte name-groups (five identical
-    ``char*`` — the UI languages, all pointing at the same English string —
-    plus a trailing word).  The firmware assigns this category's sound ids to
-    the table in REVERSE order: the last group gets sound #0 and the first gets
-    the highest, so a group at position ``p`` in a table of ``N`` groups has
-
-        sid = (N - 1) - p
-
-    (verified against Led Zeppelin's on-machine Sound Test: "Note 22" is
-    position 43 of 245 groups -> sid 201, matching the "#201" it shows).  The
-    machine's displayed "SOUND #" is exactly this sid, and the resolver plays
-    it.  Returns ``[]`` for any build without this menu (older titles) or whose
-    layout doesn't match, so the caller degrades to plain ``idx`` names.
-
-    NOTE: the parallel ``{id, group_ptr}`` array's ``id`` (= a reversed *display*
-    index, NOT the sid) must NOT be used here — doing so shipped wrong names in
-    v0.61.0.  The whole table's length is what sets the sid base.
-    """
+    Returns ``{"names": [...], "node_ids": {position: node_id},
+    "lists": [[sid, ...], ...]}``.  ``names`` covers the WHOLE table (SE FX
+    entries plus the trailing speaker-routing names and "INVALID") because the
+    full length is what sets the displayed numbering."""
     try:
         segs, _ = parse_elf(raw)
     except Exception:
-        return []
+        return None
     off2va, va2off = _seg_maps(segs)
 
     # VAs of every pooled "SE FX " string (NUL-preceded == a pool entry start),
@@ -99,7 +105,7 @@ def locate_menu_names(raw):
                 sefx_vas.add(va)
         pos = raw.find(_SEFX, pos + 1)
     if len(sefx_vas) < 8:                      # no menu (or too few to trust)
-        return []
+        return None
 
     def name_at_group(goff):
         p = _u32(raw, goff)
@@ -117,7 +123,7 @@ def locate_menu_names(raw):
     def is_group(goff):
         """A name-group: five identical pointers to a valid string.  Accepts
         ANY entry (SE FX, speaker names, INVALID) so the whole table is walked
-        — the full length is what determines the sid base."""
+        — the full length is what determines the displayed numbering."""
         if goff < 0 or goff + 24 > len(raw):
             return False
         p0 = _u32(raw, goff)
@@ -125,8 +131,6 @@ def locate_menu_names(raw):
             return False
         return name_at_group(goff) is not None
 
-    # Locate the table via an SE FX group (five identical pointers to an SE FX
-    # name), then walk the WHOLE contiguous table both directions.
     seed = None
     for va in sorted(sefx_vas):
         at = raw.find(struct.pack("<I", va) * 5)
@@ -134,24 +138,118 @@ def locate_menu_names(raw):
             seed = at
             break
     if seed is None:
-        return []
+        return None
     start = seed
     while is_group(start - 24):
         start -= 24
-    groups = []                                    # position -> name (full table)
-    goff = start
+    names, goff = [], start
     while is_group(goff):
-        groups.append(name_at_group(goff))
+        names.append(name_at_group(goff))
         goff += 24
-    n = len(groups)
+    n = len(names)
     if n < 8:
-        return []
+        return None
 
-    # sid = (N-1) - position; emit only the SE FX entries.
+    # {group_ptr, node_id} pairs, immediately BEFORE the name table, one per
+    # group.  Walk back while each entry points into the table.
+    node_ids, k = {}, 0
+    while k < n:
+        o = start - (k + 1) * 8
+        if o < 0:
+            break
+        ptr, nid = struct.unpack_from("<2I", raw, o)
+        po = va2off(ptr)
+        if (po is None or po < start or (po - start) % 24
+                or (po - start) // 24 >= n or nid > _MAX_NODE_ID):
+            break
+        node_ids[(po - start) // 24] = nid
+        k += 1
+    pairs_start = start - k * 8
+
+    # NUL-terminated u32 sound-id lists, immediately BEFORE the pairs array.
+    # Walk back counting terminators until the block holds every id the menu
+    # asks for, rather than bounding the *values*: on the multi-category titles
+    # (Rush, Metallica, Deadpool, ...) a sound id carries its category in the
+    # high half, so any value ceiling low enough to be meaningful cuts the block
+    # short.  Over-shooting the start costs nothing — ids are counted from the
+    # END, so extra leading lists renumber nothing.
+    # The margin absorbs the terminator the walk stops on (which would otherwise
+    # split off a leading empty list and swallow the highest id's slot) plus any
+    # padding words trimmed below.
+    need = (max(node_ids.values()) + 1 + 4) if node_ids else 0
+    b = pairs_start
+    floor = max(0, pairs_start - _MAX_LIST_BLOCK)
+    zeros = 0
+    while b - 4 >= floor and zeros < need:
+        b -= 4
+        if _u32(raw, b) == 0:
+            zeros += 1
+    lists, cur, o = [], [], b
+    while o < pairs_start:
+        v = _u32(raw, o)
+        if v == 0:
+            lists.append(cur)
+            cur = []
+        else:
+            cur.append(v)
+        o += 4
+    if cur:
+        lists.append(cur)
+    # The block ends with the empty list id 0 followed by padding words, which
+    # split into further empty lists.  Since ids count from the END, each stray
+    # trailing empty renumbers every list — so keep exactly one.
+    while len(lists) >= 2 and not lists[-1] and not lists[-2]:
+        lists.pop()
+    return {"names": names, "node_ids": node_ids, "lists": lists}
+
+
+def locate_menu_names(raw):
+    """Mine the Sound-Test menu -> ``[(displayed_number, name)]`` for SE FX.
+
+    The number is the one the machine prints beside the entry, a reversed
+    position ``(N - 1) - p`` over the whole table (OCR-verified against Led
+    Zeppelin's on-machine Sound Test: "NOTE 22" is position 43 of 245 groups
+    and displays "#201").  This powers the ``sound_test_names.csv`` sidecar so
+    an operator can play a number on the machine and name that slot by hand.
+
+    It is emphatically NOT the resolver sid — see :func:`locate_menu_sids`.
+    Returns ``[]`` for any build without this menu."""
+    t = _walk_menu_table(raw)
+    if t is None:
+        return []
+    names = t["names"]
+    n = len(names)
+    return [((n - 1) - p, name) for p, name in enumerate(names)
+            if name and name.startswith("SE FX")]
+
+
+def locate_menu_sids(raw):
+    """Mine the Sound-Test menu -> ``[(sid, name)]`` in menu-table order.
+
+    Follows the menu's real indirection (node id -> sound-id list, counted from
+    the end of the list block) and takes the list's last element, which is the
+    sid the entry plays.  Multi-element lists are routing/prefix sequences: the
+    speaker-test prompts carry three, the first two selecting the output.
+
+    Returns ``[]`` when the menu or the indirection can't be read."""
+    t = _walk_menu_table(raw)
+    if t is None:
+        return []
+    lists = t["lists"]
+    nl = len(lists)
     out = []
-    for p, name in enumerate(groups):
-        if name and name.startswith("SE FX"):
-            out.append(((n - 1) - p, name))
+    for p, name in enumerate(t["names"]):
+        if not name or not name.startswith("SE FX"):
+            continue
+        nid = t["node_ids"].get(p)
+        if nid is None:
+            continue
+        li = (nl - 1) - nid
+        if not 0 <= li < nl:                   # never let a negative index wrap
+            continue
+        lst = lists[li]
+        if lst:
+            out.append((lst[-1], name))
     return out
 
 
@@ -226,97 +324,164 @@ def _try_resolve(emu, addr, out, sid):
     return desc if desc and desc[0] == 5 else None
 
 
-# Records at least this long are music beds/masters, not effects — never give
-# one an event name off the weak (broad-scan) evidence path.  Matches the
-# music threshold the transcribe / music-ID passes use.
+# Records at least this long are music beds/masters, not effects.  Led Zeppelin
+# has no music banks — its mode songs are cat-0 records that shot and mode
+# events play into — so an event descriptor can legitimately reference a full
+# song master.  No single event name is right for a shared master, and leaving
+# it bare lets the music-ID pass title the actual song.
 _MUSIC_MIN_SECONDS = 20.0
 
+_OP11 = b"\x0b\x00\x00\x00"
 
-def _descriptor_refs(desc, key0_to_idx):
-    """The extraction records a descriptor references.
 
-    Returns ``("anchored", idx)``, ``("broad", frozenset_of_idx)`` or
-    ``(None, None)``.  op11 (opcode 0x0b) carries the 8-byte band value whose
-    low word is the container key; the two fixed layouts anchor the opcode at
-    offset 10 or 28 (payload lo32 at 14 / 32) — a key found there is the
-    entry's own primary asset.  Without an anchor, every 0x0b byte is scanned
-    and ALL known-key matches are returned: event/sequence descriptors embed
-    references to several assets (their sting plus the music bed they play
-    into), so a lone scan hit is a reference, not necessarily ownership."""
-    if len(desc) >= 18 and desc[10] == 0x0B:
-        idx = key0_to_idx.get(_u32(desc, 14))
-        if idx is not None:
-            return "anchored", idx
-    if len(desc) >= 36 and desc[28] == 0x0B:
-        idx = key0_to_idx.get(_u32(desc, 32))
-        if idx is not None:
-            return "anchored", idx
-    hits = set()
-    for o in range(1, len(desc) - 7):
-        if desc[o] == 0x0B:
-            idx = key0_to_idx.get(_u32(desc, o + 4))
-            if idx is not None:
-                hits.add(idx)
-    return ("broad", frozenset(hits)) if hits else (None, None)
+def _primary_idx(desc, key0_to_idx):
+    """The extraction record a descriptor owns, or ``None``.
+
+    op11 (opcode 0x0b) carries the 8-byte band value whose low word is the
+    container key.  The descriptor has a variable-length field ahead of it, so
+    the marker's offset moves between builds and entries; the first marker at
+    or after offset 9 is the entry's own primary asset.  (Checking only the two
+    fixed offsets 10 and 28, as v0.61.x did, silently lost a third of the
+    coverage and pushed the rest onto a broad scan that matched references to
+    shared music masters.)"""
+    p = desc.find(_OP11, 9)
+    if p < 0 or p + 8 > len(desc):
+        return None
+    return key0_to_idx.get(_u32(desc, p + 4))
 
 
 def _select_names(entries, seconds_by_idx):
-    """``{idx: name}`` from resolved menu *entries*, naming only what is safe.
+    """``{idx: name}`` from resolved menu *entries* = ``[(sid, name, idx)]``.
 
-    *entries* = ``[(sid, name, kind, ref)]`` in menu-table order, where
-    ``ref`` is an idx for kind "anchored" or a frozenset for "broad".
-
-    Anchored bindings name unconditionally — the opcode-anchored op11 is the
-    firmware's own answer for that entry (verified coherent: every Led
-    Zeppelin blip lands right).  Broad-scan bindings are weak evidence, so
-    one names a record only when the record is (a) that descriptor's sole
-    reference, (b) referenced by NO other menu entry, and (c) shorter than
-    the music threshold.
-
-    (b) and (c) are what David's mislabel report exposed: LZ has no music
-    banks — shot and mode events all play into a handful of shared full-song
-    masters, so many entries reference the same long record ("LEFT RAMP
-    EXIT" and "ZEPPELIN AWARD" both reference the same 4:45 track).  No
-    single event name is correct for a shared music master; leaving it bare
-    lets the music-ID pass title the actual song.  The old
-    take-the-first-scan-hit logic is how v0.61.2 put "SE FX SEQ BALL SAVE
-    LIT" on an 8-minute track (and produced monkeybug's LE dual-labels)."""
-    census = {}
-    for _sid, _name, kind, ref in entries:
-        for i in ((ref,) if kind == "anchored" else ref):
-            census[i] = census.get(i, 0) + 1
+    *entries* arrive in menu-table order, so where two entries resolve to one
+    record the earlier menu name wins.  Records at or over the music threshold
+    are left bare regardless."""
     out = {}
-    for _sid, name, kind, ref in entries:
-        if kind == "anchored":
-            out.setdefault(ref, name)
-        elif len(ref) == 1:
-            idx = next(iter(ref))
-            if (census[idx] == 1
-                    and seconds_by_idx.get(idx, 0.0) < _MUSIC_MIN_SECONDS):
-                out.setdefault(idx, name)
+    for _sid, name, idx in entries:
+        if seconds_by_idx.get(idx, 0.0) < _MUSIC_MIN_SECONDS:
+            out.setdefault(idx, name)
     return out
 
 
-def build_name_map(emu, params):
+# --------------------------------------------------------------------------
+# Validation: do the NAMES predict the AUDIO?
+#
+# Two properties of Stern's own naming, tested against a null that shuffles
+# which named slot gets which name.  Both hold overwhelmingly on a correct map
+# (p < 1/20000 on Led Zeppelin) and collapse on a shifted one, and neither
+# needs a decode — durations come straight from the derived params.
+_VALIDATE_TRIALS = 2000
+_VALIDATE_ALPHA = 0.01
+_MIN_LIT_PAIRS = 6
+_MIN_GROUPS = 3
+
+
+def _lit_unlit_pairs(names):
+    """``[(lit_name, unlit_name)]`` for targets the menu names both ways."""
+    have = set(names)
+    return sorted((n, n[:-len(" LIT")] + " UNLIT") for n in have
+                  if n.endswith(" LIT")
+                  and n[:-len(" LIT")] + " UNLIT" in have)
+
+
+def _name_groups(names):
+    """Names bucketed by everything but their trailing token.
+
+    "ROCK BANK TARGET K/C/O/R LIT" or "ELECTRIC MAGIC NOTE 1..36" are one
+    sound design per bank or series, so their durations cluster tightly."""
+    g = {}
+    for n in names:
+        parts = n.split()
+        if len(parts) >= 2:
+            g.setdefault(" ".join(parts[:-1]), []).append(n)
+    return {k: v for k, v in g.items() if len(v) >= 3}
+
+
+def _mean_cv(durations_by_group):
+    """Mean coefficient of variation of duration within each group."""
+    cvs = []
+    for ds in durations_by_group:
+        if len(ds) < 3:
+            continue
+        m = sum(ds) / len(ds)
+        if m <= 0:
+            continue
+        var = sum((d - m) ** 2 for d in ds) / len(ds)
+        cvs.append((var ** 0.5) / m)
+    return (sum(cvs) / len(cvs)) if cvs else None
+
+
+def validate_name_map(name_map, seconds_by_idx, trials=_VALIDATE_TRIALS):
+    """``(ok, report)`` — does this name map describe the audio it points at?
+
+    Runs whichever of the two tests the title supplies enough names for, each
+    against *trials* reshuffles of the same slot set, and fails the map if an
+    applicable test doesn't clear ``p <= 0.01``.  A title with too few paired
+    or grouped names to judge returns ``(True, ...)`` with an empty report and
+    the caller falls back to the note-tonality check."""
+    named = {n: i for i, n in name_map.items()}
+    durs = {n: seconds_by_idx.get(i) for n, i in named.items()}
+    durs = {n: d for n, d in durs.items() if d}
+    pairs = [(a, b) for a, b in _lit_unlit_pairs(durs) if a in durs and b in durs]
+    groups = [v for v in _name_groups(durs).values() if len(v) >= 3]
+
+    if len(pairs) < _MIN_LIT_PAIRS and len(groups) < _MIN_GROUPS:
+        return True, ""
+
+    def wins(d):
+        return sum(1 for a, b in pairs if d[a] > d[b])
+
+    def cv(d):
+        return _mean_cv([[d[n] for n in g] for g in groups])
+
+    obs_w, obs_cv = wins(durs), cv(durs)
+    rng = random.Random(0x5EF7)
+    names = list(durs)
+    pool = list(durs.values())
+    ge_w = le_cv = 0
+    for _ in range(trials):
+        rng.shuffle(pool)
+        shuf = dict(zip(names, pool))
+        if pairs and wins(shuf) >= obs_w:
+            ge_w += 1
+        if groups:
+            c = cv(shuf)
+            if c is not None and obs_cv is not None and c <= obs_cv:
+                le_cv += 1
+
+    bits, ok = [], True
+    if len(pairs) >= _MIN_LIT_PAIRS:
+        p = (ge_w + 1) / (trials + 1)
+        bits.append("lit/unlit %d/%d p=%.4f" % (obs_w, len(pairs), p))
+        ok = ok and p <= _VALIDATE_ALPHA
+    if len(groups) >= _MIN_GROUPS and obs_cv is not None:
+        p = (le_cv + 1) / (trials + 1)
+        bits.append("group spread %.3f p=%.4f" % (obs_cv, p))
+        ok = ok and p <= _VALIDATE_ALPHA
+    return ok, ", ".join(bits)
+
+
+def build_name_map(emu, params, log=None):
     """Return ``{idx: "SE FX <NAME>"}`` for the SFX the Sound-Test menu names.
 
     *emu* is a **booted** :class:`Spike2Emu`; *params* is its
     :meth:`derive_params` output (rows must carry ``key0`` — the container key
     snapshot).  Best-effort: returns ``{}`` if the menu, the resolver, or the
-    keys can't be located.  Never raises."""
+    keys can't be located, or if the finished map fails validation.  Never
+    raises."""
     try:
-        return _build_name_map(emu, params)
+        return _build_name_map(emu, params, log)
     except Exception:
         return {}
 
 
-def _build_name_map(emu, params):
+def _build_name_map(emu, params, log=None):
     key0_to_idx = {p["key0"]: p["idx"]
                    for p in params if p.get("key0") is not None}
     if not key0_to_idx:
         return {}
     fw = emu_fw_bytes(emu)                          # 69 MB — read once, reuse
-    names = locate_menu_names(fw)
+    names = locate_menu_sids(fw)
     if not names:
         return {}
     resolver, out = _find_resolver(emu, fw)
@@ -330,23 +495,33 @@ def _build_name_map(emu, params):
         desc = _try_resolve(emu, resolver, out, sid)
         if desc is None:
             continue
-        kind, ref = _descriptor_refs(desc, key0_to_idx)
-        if kind is not None:
-            entries.append((sid, name, kind, ref))
+        idx = _primary_idx(desc, key0_to_idx)
+        if idx is not None:
+            entries.append((sid, name, idx))
     result = _select_names(entries, seconds_by_idx)
-    # Safety gate: the "... NOTE n" entries are musical note stings, so a correct
-    # mapping lands them on TONAL sounds.  A wrong sid base (the v0.61.0 bug)
-    # lands them on speech/other and they read as non-tonal.  If there are
-    # enough NOTE entries and they're clearly NOT tonal, the base is wrong for
-    # this build -> return nothing rather than ship mislabels.  (No decode, no
-    # judgement when a build has too few NOTE entries -> trust the derived sid.)
-    if not _notes_look_tonal(emu, params, result):
+    if not result:
         return {}
+
+    ok, report = validate_name_map(result, seconds_by_idx)
+    if not ok:
+        if log:
+            log("Sound Test names didn't match the audio on this build (%s) — "
+                "sounds keep their idx names." % report, "info")
+        return {}
+    if not report and not _notes_look_tonal(emu, params, result):
+        return {}
+    if log and report:
+        log("Sound Test name check passed (%s)." % report, "info")
     return result
 
 
 def _notes_look_tonal(emu, params, name_map):
-    """Cheap, Whisper-free validation of the sid mapping via the note stings."""
+    """Fallback validation for titles with too few paired/grouped names.
+
+    The "... NOTE n" entries are musical note stings, so a correct mapping
+    lands them on TONAL sounds; a shifted one lands them on speech and other
+    effects.  Costs a short decode per note, so it only runs when the
+    duration-based tests can't be applied."""
     import numpy as np
     note_idx = [idx for idx, nm in name_map.items() if " NOTE " in nm]
     if len(note_idx) < 12:

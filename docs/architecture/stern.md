@@ -221,7 +221,36 @@ Decoded sounds come out as `idxNNNN.wav` (the firmware stores cue ids, not human
 
 Why online for music: the song→`idx` (master-directory position) binding lives in compiled game **rule logic** the codec oracle never executes — it is **not recoverable** from `game_real`/`image.bin` offline (proven exhaustively). AcoustID is the answer for music titling; do not reopen the firmware→idx RE.
 
-**Sound-Test SFX naming is DISABLED as of v0.63.1** (`engine._load_or_build_sfx_names` returns `{}` unless `PINBALL_SFX_NAMES=1`): content validation on Led Zeppelin 1.22.0 proved the shipped menu→sound binding wrong at the foundation. Evidence, all reproducible from the scratchpad scripts: (1) Whisper found the four **speaker-test voice prompts** inside files named as target/pop blips; (2) the 36 "ELECTRIC MAGIC NOTE n" entries are **not pitch-monotonic** under either candidate mapping; (3) the ~21 shared full-song masters (LZ has **no music banks** — shot/mode events play into shared song tracks) wore arbitrary event names — "SE FX COMBO TERMINATE" on Kashmir (monkeybug's LE), "SEQ BALL SAVE LIT" on the same master (David's Pro); (4) David's known Insider Connect sound (idx0075, Pro) was named "LEFT BANK TARGET UPPER LIT". The OCR of monkeybug's menu video only ever validated *name↔displayed-number*; the broken hop is *number→resolver id*: the true ids for the speaker prompts are **30/32/36** where the displayed-number formula and the menu id-array predict 31/30/28 — no constant offset reconciles them, so the id space has unresolved structure (it appears to interleave related assets). Naming machinery (`sfx_names.py`, now with anchored-vs-broad `_descriptor_refs` + reference-census `_select_names`) is kept for the re-RE; the per-card cache moved to `.sfxnames2.json` so stale wrong-name caches never re-apply. Ground truth to collect: play specific menu numbers in a machine's Sound Test and note what sounds (monkeybug's pending hardware pass).
+### Sound-Test SFX naming (`spike2/sfx_names.py`)
+
+Newer titles (Led Zeppelin onward) carry a Sound/Speaker-Test menu naming every effect `SE FX <NAME>`. Extract mines it and lands each name on an extraction `idx`:
+
+```
+menu name      24B name-group table (5 identical char*, one per UI language)
+  -> node id   {group_ptr, node_id} array immediately BEFORE the table
+  -> sid       NUL-terminated u32 sound-id lists immediately BEFORE that array,
+               indexed FROM THE END: lists[(nlists - 1) - node_id], last elem
+  -> descriptor  firmware get_asset_descriptor(sid) driven in the emulator
+  -> idx       first op11 (0x0b) marker at offset >= 9 carries the container
+               key; derive_params snapshots the same key per record as `key0`
+```
+
+Three traps, each of which shipped wrong names before (v0.61.0, v0.61.2):
+
+1. the 8-byte array is `{group_ptr, node_id}`, **not** `{node_id, group_ptr}` — reading it the other way shifts every id by one entry;
+2. the list block's final u32 closes list id 0, and trailing padding words split into further empty lists. Since ids count from the **end**, one stray empty renumbers everything (`_walk_menu_table` keeps exactly one);
+3. the block's extent is found by counting terminators, **not** by bounding sid values: on the multi-category titles a sid carries its category in the high half (`category = sid >> 16`), so Rush's ids run past `0x10000` and a value ceiling truncated the block to 86 of 550 lists, resolving nothing.
+
+The number the machine **displays** is a fourth thing again — a reversed position `(N-1) - p` over the whole table, OCR-verified against a real Sound Test. `locate_menu_names` returns that for the `sound_test_names.csv` sidecar; `locate_menu_sids` returns the resolver sid for naming. They are not interchangeable.
+
+**Every map is validated against the audio before use** (`validate_name_map`), because a shifted map still resolves and still names real files. Two properties of Stern's own naming, each tested against 2000 reshuffles of the same slot set and required to clear p ≤ 0.01:
+
+- **lit/unlit**: a `<TARGET> LIT` recording is longer than its `<TARGET> UNLIT` twin (Led Zeppelin: 20 of 21 pairs, the 21st an exact tie; null mean 10.2, p < 1/20000).
+- **group spread**: names differing only in a trailing letter or number are one sound design, so their durations cluster — mean within-group CV 0.078 against a null of 0.670, p < 1/20000. All 16 `SPINNER A` are 0.70s, all 36 `NOTE` are 1.16s.
+
+Both collapse under an off-by-one, which is the exact historical failure mode; a map that fails is discarded and the sounds keep their `idx` names. Titles with too few paired/grouped names to judge fall back to `_notes_look_tonal` (decodes the note stings and checks they are tonal). Durations come from the derived params, so neither test decodes anything. Records ≥ 20s are never event-named at all: Led Zeppelin has **no music banks**, so mode events play into shared full-song masters and no single event name is right for one (`_MUSIC_MIN_SECONDS`).
+
+Independent confirmation that the chain itself is right: three of the four speaker-routing prompts resolve to audio that transcribes as its own menu name ("Cabinet Speaker", "Left back box speaker", "Cabinet and Backbox speakers"). Spoken **callouts have no firmware name table** — all 206 name-group tables in the Led Zeppelin binary were enumerated and exactly one names sound assets — so callouts stay with Whisper permanently. Per-card cache is `.sfxnames3.json` (the suffix retires maps built by any superseded binding); `PINBALL_SFX_NAMES=0` turns naming off.
 
 Two GUI features ride these passes:
 

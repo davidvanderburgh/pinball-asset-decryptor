@@ -1279,41 +1279,28 @@ def _remove_renamed_audio_twins(audio_dir, log=None, duration_names=False):
 def _sfx_names_cache_path(fp):
     """Sibling of the params cache holding the ``{idx: name}`` SFX-name map.
 
-    The ``2`` suffix retires the pre-v0.63.1 caches: maps built before the
-    reference-census fix (sfx_names._select_names) carry names that landed
-    on the wrong sounds (Led Zeppelin's shared song masters named after
-    single events), and re-reading one would re-apply them on the next
-    extract."""
+    The suffix is bumped whenever the menu->sound binding changes so stale
+    caches can't re-apply names built by a superseded mapping: ``2`` retired
+    the pre-v0.63.1 maps, ``3`` retires everything built before the menu's
+    ``{group_ptr, node_id}`` / sound-id-list indirection was read correctly."""
     return os.path.join(os.path.dirname(_cache_path(fp)),
-                        fp[:32] + ".sfxnames2.json")
+                        fp[:32] + ".sfxnames3.json")
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
     """``{idx: "SE FX <NAME>"}`` for the sounds the game's Sound Test menu names.
 
-    **Temporarily disabled** (returns ``{}``) pending a re-RE of the menu→
-    resolver-id binding.  Content validation on Led Zeppelin 1.22.0 (both
-    editions) proved the shipped mapping mislabels real audio: the speaker-
-    test voice prompts sit inside files named as target blips, the "NOTE n"
-    scale isn't pitch-monotonic, shared song masters wore arbitrary event
-    names ("SE FX COMBO TERMINATE" on Kashmir — monkeybug; "SEQ BALL SAVE
-    LIT" on the same master — David), and neither the displayed-number
-    formula nor the menu id-array matches the resolver's id space (the true
-    speaker-prompt ids are 30/32/36 where the candidates predict 31/30/28).
-    Wrong names are worse than bare ``idx`` names, so nothing is named until
-    the binding is verified against hardware Sound-Test ground truth.  Set
-    ``PINBALL_SFX_NAMES=1`` to re-enable for RE work.
-
-    Mines the menu name table from the firmware and drives its asset resolver to
-    map each name onto the extraction idx (see :mod:`.spike2.sfx_names`).  Cached
+    Mines the menu name table from the firmware, follows the menu's own
+    node-id -> sound-id indirection, and drives its asset resolver to map each
+    name onto the extraction idx (see :mod:`.spike2.sfx_names`).  The finished
+    map only ships if it passes that module's validation, which tests the names
+    against the audio they point at, so a build whose layout shifts the mapping
+    names nothing rather than mislabelling (the v0.61.x failure mode).  Cached
     per card next to the params.  Best-effort: ``{}`` for older menu-less titles
     or any build whose resolver can't be located — the extract keeps plain idx
-    names.  *emu* must be booted and *params* must carry ``key0``."""
-    if os.environ.get("PINBALL_SFX_NAMES") != "1":
-        log("Sound-effect auto-naming is off in this build: the firmware "
-            "menu-to-sound binding failed content verification and is being "
-            "reworked. Sounds keep their idx names; Auto-name call-outs and "
-            "Auto-name music still work.", "info")
+    names.  Set ``PINBALL_SFX_NAMES=0`` to turn naming off entirely.  *emu* must
+    be booted and *params* must carry ``key0``."""
+    if os.environ.get("PINBALL_SFX_NAMES") == "0":
         return {}
     import json
     fp = _fingerprint(game_real_path, image_path)
@@ -1325,7 +1312,7 @@ def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
             pass
     try:
         from .spike2 import sfx_names as _sfxn
-        name_map = _sfxn.build_name_map(emu, params)
+        name_map = _sfxn.build_name_map(emu, params, log)
     except Exception as e:
         log("Sound-effect auto-naming unavailable (%s)." % e, "info")
         name_map = {}
@@ -1347,13 +1334,13 @@ def _write_sound_test_names(game_real_path, output_dir, log=None):
     ``sound_test_names.csv`` (columns ``sound_number,name``) at the assets
     root.  Static ELF parse only — no emulator.
 
-    The list is trustworthy on its own: the name↔number pairing matches the
-    machine's menu (OCR-verified).  What is NOT shipped any more is the
-    automatic number→sound binding (see :func:`_load_or_build_sfx_names`),
-    so this sidecar is the reference for naming sounds yourself: play a
-    number in the machine's Sound Test, find the slot it played, right-click
-    → Rename (the Rename dialog offers these names as suggestions).
-    Best-effort; older menu-less titles simply get no file."""
+    The number is the one the machine prints beside each entry (OCR-verified
+    against a real Sound Test), which is a reversed menu position and not the
+    internal sound id that :func:`_load_or_build_sfx_names` resolves.  Naming
+    is automatic now, so this sidecar is a cross-reference: play a number on
+    the machine, and either confirm the name the extract already applied or
+    right-click → Rename to set it yourself (the Rename dialog offers these
+    names as suggestions).  Best-effort; menu-less titles get no file."""
     try:
         from .spike2.sfx_names import locate_menu_names
         with open(game_real_path, "rb") as f:

@@ -314,34 +314,35 @@ loop.
     - **Each paragraph is ONE unbroken line.**  Never hard-wrap inside a
       paragraph.  Blank line between paragraphs, nothing else.
 
-10b. **Print it as ordinary prose.  NOT in a fenced code block, and NOT
-    as a file.**  David copies it straight out of the reply and pastes it
-    into Gmail, so the printed form IS the deliverable.
+10b. **Print it in a fenced code block, labelled as the forward-to-tester
+    message.**  David asked for it this way (2026-07-28): a block gives
+    him one obvious thing to select and copy, and he clears the
+    formatting in Gmail before sending.  So the block is the deliverable
+    — no `.txt` alongside it (that was tried on v0.95.0 and rejected:
+    leaving the reply to go open a file is more work than the paste it
+    was meant to save), and no bare prose either.
 
-    A fenced block is the thing to avoid: the renderer wraps it to the
-    panel width and the copy takes those *display* wraps with it as real
-    newlines, so one unbroken paragraph arrives in the mail chopped into
-    five ~65-column lines.  That is what happened to Kris on v0.94.0 and
-    to Alex on v0.95.0 (both 2026-07-28).  Prose has no such wrap points:
-    it reflows on copy and pastes as one line per paragraph.
+    Inside the block, **each paragraph is still ONE unbroken line** with
+    a blank line between paragraphs.  Never insert your own hard wraps
+    to make it look tidy in the panel — the panel's soft wrap is
+    cosmetic, a hard wrap you type is permanent and travels into the
+    mail.
 
-    Do NOT write it to a `.txt` and hand the path over either — that was
-    tried on v0.95.0 and rejected: it means leaving the reply to go open
-    a file, which is more work than the paste it was meant to save.
-
-    So: label it as the forward-to-tester message, then just write the
-    paragraphs out as normal text, one unbroken line each, blank line
-    between them.  Nothing around them.
-
-    If a sent mail still arrives hard-wrapped after that, the remaining
-    cause is Gmail's own **Plain text mode** (compose window → three-dot
-    menu, bottom right → untick it), which no wording on our side can
-    override — but do not lead with that.  Fix the copy source first;
-    mention the setting only if wrapping survives it.
+    Earlier releases (Kris on v0.94.0, Alex on v0.95.0, both 2026-07-28)
+    arrived hard-wrapped at ~65 columns, which is why this step kept
+    changing.  Two causes are known and neither is fixed by how the
+    message is printed: copying out of a rendered block can bake the
+    *display* wraps in as real newlines, and Gmail's **Plain text mode**
+    re-wraps at ~70 columns at send time (compose window → three-dot
+    menu, bottom right → untick it).  Clearing formatting in Gmail is
+    David's own fix for the first.  If a sent mail still arrives chopped
+    up, that is the trail — do not respond by reformatting the block.
 
     Example shape:
 
+    ```
     Shipped v0.50.0. New Partition Explorer tab lets you browse a card image and pull files or folders out without mounting it. And your renamed image-group names now survive re-extracting the same card. Give the explorer a try and tell me if a folder ever opens empty.
+    ```
 
     If the user edits the message before sending (they often tighten a
     claim, e.g. adding "(by emulation)"), carry their wording forward into
@@ -387,10 +388,9 @@ after the push in step 7b (this is where the user walks away):
 
 **Final report** — printed in the background-notified turn where the
 WINDOWS asset lands (step 9b watcher 2), together with the
-forward-to-tester message from steps 10 / 10b (inline block AND the
-`.txt` handed over with SendUserFile).  Do not hold either for the
-macOS / Linux assets; those get a one-line backfill confirmation later
-when the installer-run watch finishes:
+forward-to-tester message from steps 10 / 10b (in its fenced block).
+Do not hold either for the macOS / Linux assets; those get a one-line
+backfill confirmation later when the installer-run watch finishes:
 
 - New version + previous version.
 - Number of commits since last tag.

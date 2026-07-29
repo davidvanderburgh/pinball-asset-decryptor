@@ -200,12 +200,15 @@ class Capabilities:
     # in .radium scene files).
     replace_text: bool = False
     # Flash-image path: surfaces a "Flash image to SD card" action (a button on
-    # the Write tab that opens a small dialog) for raw-copying a pre-built
-    # ``.img``/``.raw`` onto a physical card — a dd-style whole-image write,
-    # distinct from the asset-modifying Write/Direct-SD paths.  Set True only
-    # for plugins whose medium is a flashable removable card the app can write
-    # directly (Stern Spike 2's SD card via core.drives + RawDeviceFile).  When
-    # True, the GUI calls ``make_flash_pipeline``; needs Administrator/root.
+    # the Write tab that opens a small dialog) for putting a pre-built image
+    # onto a physical card/stick.  For Stern/CGC that is a dd-style raw
+    # whole-image write of a ``.img``/``.raw``; for JJP the same surface
+    # instead formats the USB stick FAT32/MBR and copies the installer ISO's
+    # files onto it (the machine mounts the stick's FAT volume itself — a
+    # raw-imaged stick is unreadable to it).  Distinct from the
+    # asset-modifying Write/Direct-SD paths.  When True, the GUI calls
+    # ``make_flash_pipeline`` and the ``flash_*`` wording attributes below
+    # label the button/dialog; raw device writes need Administrator/root.
     flash_image: bool = False
     # Mod-transfer path: surfaces a "Transfer Mods to New Version" section on the
     # (shared) Mod Pack tab that pulls a user's pending Replace edits from an OLD
@@ -357,6 +360,32 @@ class Manufacturer(ABC):
     # card image you flash yourself); leave "" when the game/installer looks
     # the file up by name (e.g. BOF's .fun updates).
     write_output_suffix: str = ""
+
+    # --- Flash-surface wording (capabilities.flash_image plugins) --------
+    # The consolidated "Build / flash" button + dialog were written for
+    # dd-style whole-image media (Stern SD card, CGC card/USB).  JJP reuses
+    # the same surface for a *different* operation — format the stick FAT32
+    # and copy the installer ISO's files onto it (a raw-imaged stick is
+    # unreadable to a JJP machine) — so every user-facing word is
+    # overridable.  ``None`` falls back to the dd-flavoured default (and,
+    # for the noun/kind, to the Direct-SD attributes), keeping Stern/CGC
+    # byte-identical.
+    flash_button_text = None      # Write-tab button ("Build / flash SD card…")
+    flash_button_tip = None       # its tooltip
+    flash_medium_noun = None      # dialog noun -> direct_medium_noun/"SD card"
+    flash_target_kind = None      # drive-pick bias -> direct_target_kind
+    flash_safety_text = None      # red banner -> direct_safety_text
+    flash_dialog_title = None     # -> "Build / flash <noun> image"
+    flash_header = None           # dialog heading -> "Build an image and/or
+                                  # write one onto a <noun>"
+    flash_section_label = None    # -> "Write an image onto the <noun>"
+    flash_action_word = None      # Start-button verb -> "flash" ("Flash image",
+                                  # "Build + flash")
+    flash_confirm_verb = None     # erase-confirm clause -> "write the image
+                                  # onto it"
+    # File-dialog filter for the "Image file:" Browse (flash-only mode).
+    flash_image_filetypes = (("SD-card image", "*.img *.raw *.bin"),
+                             ("All files", "*.*"))
 
     # Extension (lower-case, leading dot, e.g. ".raw") the built file MUST
     # carry.  "" means the plugin pins nothing — the File Name box is used

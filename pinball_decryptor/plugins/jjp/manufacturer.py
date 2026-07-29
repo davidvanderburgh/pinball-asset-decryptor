@@ -20,7 +20,7 @@ import shutil
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
-from . import config
+from . import config, usbstick
 from .games import GAME_DB, detect_iso_game
 from .pipeline import (DecryptionPipeline, DirectSSDDecryptPipeline,
                        DirectSSDModPipeline, StandaloneDecryptPipeline,
@@ -204,6 +204,15 @@ class JJPManufacturer(Manufacturer):
         # generic changed-file repack re-encrypts like any other asset, so a
         # swapped clip round-trips with no special handling.
         replace_video=True,
+        # "Flash" surface — for JJP this is NOT a dd write: the machine
+        # never boots the stick, it mounts the stick's FAT volume at
+        # power-on and runs the installer from it, so a raw-imaged
+        # (Etcher/dd) stick fails with "Failed to mount USB stick" (Alex's
+        # Sonic report).  make_flash_pipeline formats the stick FAT32/MBR
+        # and copies the ISO's files onto it — the working procedure,
+        # in-app.  The flash_* wording attrs below relabel the shared
+        # button/dialog accordingly.
+        flash_image=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",
@@ -220,6 +229,35 @@ class JJPManufacturer(Manufacturer):
     # gone since we're reading/writing the SSD directly.
     direct_ssd_extract_phases = tuple(config.DIRECT_SSD_PHASES)
     direct_ssd_write_phases = tuple(config.DIRECT_SSD_MOD_PHASES)
+    # USB-stick prep flow (the "flash" surface) — see usbstick.py.
+    flash_phases = usbstick.PHASES
+    # The shared Build / flash button + dialog read dd-flavoured by
+    # default (Stern/CGC); JJP's operation is a format-and-copy, so every
+    # user-facing word says so.
+    flash_button_text = "Build / make USB install stick…"
+    flash_button_tip = (
+        "Build a modified ISO and/or turn it into a USB install stick — "
+        "tick both in the dialog for one step. The stick is formatted "
+        "FAT32 and the ISO's files are copied onto it (a JJP machine "
+        "cannot read a raw Etcher/dd-imaged stick). Formatting erases "
+        "the stick and needs Administrator.")
+    flash_medium_noun = "USB stick"
+    # USB install sticks are small removable media — bias the picker away
+    # from big backup drives and the game SSD (same heuristic Stern uses
+    # for SD cards).
+    flash_target_kind = "sd_card"
+    flash_safety_text = (
+        "⚠ Making an install stick ERASES the USB stick completely. Pick "
+        "the right drive — never the game SSD or a backup disk.")
+    flash_dialog_title = "Build / make USB install stick"
+    flash_header = "Build an ISO and/or turn one into a USB install stick"
+    flash_section_label = ("Prepare the USB stick (format FAT32 + copy the "
+                           "installer files)")
+    flash_action_word = "make stick"
+    flash_confirm_verb = ("format it FAT32, then copy the installer's "
+                          "files onto it")
+    flash_image_filetypes = (("JJP install ISO", "*.iso"),
+                             ("All files", "*.*"))
     # Dongle-decrypt flow — the original dongle-bearing pipeline (Extract /
     # Mount / Chroot / Dongle / Compile / Decrypt / Copy / Cleanup).
     dongle_extract_phases = tuple(config.PHASES)
@@ -306,6 +344,20 @@ class JJPManufacturer(Manufacturer):
                              log_cb, phase_cb, progress_cb, done_cb,
                              keep_full_length_paths=keep_full_length_names)
 
+    def make_flash_pipeline(self, image_path, device_path,
+                            log_cb, phase_cb, progress_cb, done_cb):
+        # NOT a dd write: format the stick FAT32/MBR + copy the ISO's files
+        # (the only stick layout a JJP machine can read — see usbstick.py).
+        return usbstick.UsbStickPreparePipeline(
+            image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
+
+    def write_output_ext(self):
+        # A JJP build is always a Clonezilla-derived install ISO; pinning
+        # the extension keeps the File Name box (and the Build / make USB
+        # stick dialog's Build-to path) from producing an extensionless or
+        # mis-suffixed file.
+        return ".iso"
+
     def make_direct_ssd_extract_pipeline(
             self, device_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
@@ -353,10 +405,13 @@ class JJPManufacturer(Manufacturer):
                 "partclone, debugfs, xorriso.")
 
     def write_install_help(self):
-        return ("1. The modified ISO is written to the chosen Build Location.\n"
-                "2. Put it on a USB stick with Rufus in ISO Image mode "
-                "(Windows) or by copying the ISO's files onto a FAT32/MBR "
-                "stick (macOS/Linux). Do NOT raw-write it with balenaEtcher "
-                "or dd -- the machine cannot read a raw-imaged stick.\n"
+        return ("1. \"Build / make USB install stick…\" builds the modified "
+                "ISO and prepares the stick in one step: the stick is "
+                "formatted FAT32 and the ISO's files are copied onto it.\n"
+                "2. Preparing a stick by hand instead? Use Rufus in ISO "
+                "Image mode (Windows) or copy the ISO's files onto a "
+                "FAT32/MBR stick (macOS/Linux). Do NOT raw-write the ISO "
+                "with balenaEtcher or dd -- the machine cannot read a "
+                "raw-imaged stick and shows 'Failed to mount USB stick'.\n"
                 "3. Plug the stick into the cabinet's front USB port and "
                 "turn the game on; the installer runs by itself.")

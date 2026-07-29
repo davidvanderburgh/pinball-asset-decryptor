@@ -456,6 +456,17 @@ HELP_CONTENT = {
          "separate imaging tool. The whole card is erased and replaced; a "
          "size check refuses an image too big for the card. Requires "
          "Administrator. (Other machines keep a plain Build button.)"),
+        ("USB install stick (JJP)",
+         "On Jersey Jack machines the same button reads \"Build / make USB "
+         "install stick…\", and the stick section does something different: "
+         "instead of raw-writing the ISO it formats the stick FAT32 and "
+         "copies the ISO's files onto it — the only stick layout a JJP "
+         "machine can read. A stick written with balenaEtcher, dd or Rufus' "
+         "DD mode fails on the machine with 'Failed to mount USB stick'. "
+         "Put the finished stick in a front-cabinet USB slot (OK to unplug "
+         "the dongle) and power on: the installer runs by itself — the "
+         "Utilities USB-update menu is only for JJP's small delta updates "
+         "and ignores install sticks."),
     ],
     "Mod Pack": [
         ("What it's for",

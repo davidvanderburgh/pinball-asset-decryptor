@@ -47,6 +47,35 @@ def _fmt_size(n):
     return "%d bytes" % n
 
 
+def _flash_words(mfr):
+    """Resolve the manufacturer's flash-surface wording (see registry).
+
+    Returns a dict of every string the dialog renders, falling back to the
+    dd-flavoured defaults so Stern/CGC read exactly as before.  JJP overrides
+    them because its "flash" is a format-and-copy, not a raw image write.
+    """
+    noun = (getattr(mfr, "flash_medium_noun", None)
+            or getattr(mfr, "direct_medium_noun", "SD card"))
+    return {
+        "noun": noun,
+        "title": (getattr(mfr, "flash_dialog_title", None)
+                  or "Build / flash %s image" % noun),
+        "section": (getattr(mfr, "flash_section_label", None)
+                    or "Write an image onto the %s" % noun),
+        "action": getattr(mfr, "flash_action_word", None) or "flash",
+        "confirm_verb": (getattr(mfr, "flash_confirm_verb", None)
+                         or "write the image onto it"),
+        "safety": (getattr(mfr, "flash_safety_text", None)
+                   or getattr(mfr, "direct_safety_text", None)),
+        "target_kind": (getattr(mfr, "flash_target_kind", None)
+                        or getattr(mfr, "direct_target_kind", "sd_card")),
+        "filetypes": [tuple(ft) for ft in
+                      getattr(mfr, "flash_image_filetypes", None)
+                      or (("SD-card image", "*.img *.raw *.bin"),
+                          ("All files", "*.*"))],
+    }
+
+
 class FlashImageDialog:
     """Modal collecting (build?, image, target card) for build and/or flash."""
 
@@ -62,6 +91,7 @@ class FlashImageDialog:
         self._cannot_build_reason = cannot_build_reason
         self._has_pending_changes = has_pending_changes
         self._theme = THEMES.get(theme_name) or THEMES["light"]
+        self._words = _flash_words(manufacturer)
         self._sans, _ = platform_font()
         self._drives = []            # list[PhysicalDrive] from last enumeration
         self._selected = None        # the chosen PhysicalDrive
@@ -83,7 +113,7 @@ class FlashImageDialog:
     # ------------------------------------------------------------------
     def _build(self, build_target):
         th = self._theme
-        noun = getattr(self._mfr, "direct_medium_noun", "SD card")
+        noun = self._words["noun"]
         dlg = tk.Toplevel(self._parent)
         self._dlg = dlg
         # Stay hidden until fully built AND positioned, then map once with
@@ -92,7 +122,7 @@ class FlashImageDialog:
         # _center call update_idletasks, so the user sees an empty white
         # box jump into place as the modal renders (David).
         dlg.withdraw()
-        dlg.title("Build / flash %s image" % noun)
+        dlg.title(self._words["title"])
         dlg.configure(bg=th["bg"])
         dark_titlebar(dlg, th is THEMES["dark"])
         dlg.transient(self._parent)
@@ -102,14 +132,16 @@ class FlashImageDialog:
         body = ttk.Frame(dlg, padding=16)
         body.pack(fill="both", expand=True)
 
+        header = (getattr(self._mfr, "flash_header", None)
+                  or "Build an image and/or write one onto a %s" % noun)
         ttk.Label(
-            body, text="Build an image and/or write one onto a %s" % noun,
+            body, text=header,
             font=(self._sans, 12, "bold")).pack(anchor="w", pady=(0, 2))
         ttk.Label(
             body,
             text=("Tick both to test changes on the machine in one step: "
-                  "build a fresh image, then write it straight onto the "
-                  "card."),
+                  "build a fresh image, then put it straight onto the %s."
+                  % noun),
             font=(self._sans, 9), foreground=th["gray"],
             wraplength=560, justify="left").pack(anchor="w", pady=(0, 10))
 
@@ -154,7 +186,7 @@ class FlashImageDialog:
         # ---- Section 2: flash ----------------------------------------
         self._write_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            body, text="Write an image onto the %s" % noun,
+            body, text=self._words["section"],
             variable=self._write_var, command=self._sync_sections).pack(
             anchor="w")
 
@@ -195,8 +227,9 @@ class FlashImageDialog:
             justify="left")
         self._readout.pack(anchor="w", pady=(8, 2))
 
-        # Red safety banner (manufacturer-supplied; same wording as Direct-SD).
-        safety = getattr(self._mfr, "direct_safety_text", None)
+        # Red safety banner (manufacturer-supplied; flash-specific wording
+        # falls back to the Direct-SD text).
+        safety = self._words["safety"]
         if safety:
             tk.Label(
                 body, text=safety, bg=th["bg"], fg=th["error"],
@@ -303,12 +336,14 @@ class FlashImageDialog:
             except tk.TclError:
                 pass
 
+        action = self._words["action"]
         if building and writing:
-            label = "Build + flash"
+            label = "Build + %s" % action
         elif building:
             label = "Build image"
         elif writing:
-            label = "Flash image"
+            label = ("Flash image" if action == "flash"
+                     else action[0].upper() + action[1:])
         else:
             label = "Start"
         self._start_btn.configure(text=label)
@@ -329,8 +364,7 @@ class FlashImageDialog:
             parent=self._dlg, title="Build the image to…",
             initialdir=initial_dir,
             initialfile=os.path.basename(cur) if cur else None,
-            filetypes=[("SD-card image", "*.img *.raw *.bin"),
-                       ("All files", "*.*")])
+            filetypes=self._words["filetypes"])
         if path:
             self._build_path_var.set(os.path.normpath(path))
 
@@ -342,10 +376,10 @@ class FlashImageDialog:
             if parent and os.path.isdir(parent):
                 initial = parent
         path = filedialog.askopenfilename(
-            parent=self._dlg, title="Select an SD-card image to flash",
+            parent=self._dlg,
+            title="Select the %s" % self._words["filetypes"][0][0],
             initialdir=initial,
-            filetypes=[("SD-card image", "*.img *.raw *.bin"),
-                       ("All files", "*.*")])
+            filetypes=self._words["filetypes"])
         if path:
             self._image_var.set(path)
 
@@ -356,7 +390,7 @@ class FlashImageDialog:
         my_id = self._enum_id
         self._drive_combo["values"] = ["Detecting drives…"]
         self._drive_var.set("Detecting drives…")
-        prefer = getattr(self._mfr, "direct_target_kind", "sd_card")
+        prefer = self._words["target_kind"]
 
         def _worker():
             try:
@@ -377,7 +411,7 @@ class FlashImageDialog:
         if my_id != self._enum_id:
             return                       # a newer Refresh superseded this one
         from ..core.drives import visible_drives
-        prefer = getattr(self._mfr, "direct_target_kind", "sd_card")
+        prefer = self._words["target_kind"]
         best = pick[0] if pick else None
         # Small-SD-card media (Stern Spike 2): hide multi-TB backup disks so
         # the dropdown lists plausible cards only — monkeybug saw the Flash
@@ -432,33 +466,34 @@ class FlashImageDialog:
             # (monkeybug batch 8: the line was redundant).
             self._readout.configure(text="", foreground=th["gray"])
             return
+        noun = self._words["noun"]
         if card is None:
             self._readout.configure(
-                text="Image: %s  •  pick a target card."
-                     % _fmt_size(img_size), foreground=th["gray"])
+                text="Image: %s  •  pick a target %s."
+                     % (_fmt_size(img_size), noun), foreground=th["gray"])
             return
         if card_size and img_size > card_size:
             self._readout.configure(
-                text=("⚠ Image %s is larger than the card %s — it won't fit. "
-                      "Use a larger card." % (_fmt_size(img_size),
-                                              _fmt_size(card_size))),
+                text=("⚠ Image %s is larger than the %s %s — it won't fit. "
+                      "Use a larger %s." % (_fmt_size(img_size), noun,
+                                            _fmt_size(card_size), noun)),
                 foreground=th["error"])
         elif card_size:
             self._readout.configure(
-                text="Image %s  →  card %s   ✓ fits"
-                     % (_fmt_size(img_size), _fmt_size(card_size)),
+                text="Image %s  →  %s %s   ✓ fits"
+                     % (_fmt_size(img_size), noun, _fmt_size(card_size)),
                 foreground=th["success"])
         else:
             self._readout.configure(
-                text="Image %s  →  card size unknown (it will be checked "
-                     "before writing)" % _fmt_size(img_size),
+                text="Image %s  →  %s size unknown (it will be checked "
+                     "before writing)" % (_fmt_size(img_size), noun),
                 foreground=th["gray"])
 
     # ------------------------------------------------------------------
     def _do_start(self):
         building = self._build_var.get() and self._can_build
         writing = self._write_var.get()
-        noun = getattr(self._mfr, "direct_medium_noun", "SD card")
+        noun = self._words["noun"]
 
         build_path = self._build_path_var.get().strip() if building else None
         if building and not build_path:
@@ -485,15 +520,16 @@ class FlashImageDialog:
             if not building and (not img or not os.path.isfile(img)):
                 messagebox.showwarning(
                     "No image",
-                    "Pick an SD-card image (.img / .raw) to flash — or tick "
-                    "\"Build a fresh image\" to build one first.",
+                    "Pick a %s — or tick \"Build a fresh image\" to build "
+                    "one first." % self._words["filetypes"][0][0],
                     parent=self._dlg)
                 return
             if card is None:
                 messagebox.showwarning(
-                    "No card selected",
-                    "Pick a target card from the dropdown. If it's empty, "
-                    "connect the card and click Refresh.", parent=self._dlg)
+                    "No %s selected" % noun,
+                    "Pick a target %s from the dropdown. If it's empty, "
+                    "connect the %s and click Refresh." % (noun, noun),
+                    parent=self._dlg)
                 return
             # Flash-only with nothing modified this session: legitimate
             # (restoring a backup, re-flashing an earlier build), but worth a
@@ -518,24 +554,24 @@ class FlashImageDialog:
                     and os.path.getsize(img) > card.size_bytes):
                 messagebox.showerror(
                     "Image too big",
-                    "The image (%s) is larger than the card (%s). Use a "
-                    "larger card." % (_fmt_size(os.path.getsize(img)),
-                                      _fmt_size(card.size_bytes)),
+                    "The image (%s) is larger than the %s (%s). Use a "
+                    "larger %s." % (_fmt_size(os.path.getsize(img)), noun,
+                                    _fmt_size(card.size_bytes), noun),
                     parent=self._dlg)
                 return
 
             flash_what = (os.path.basename(build_path)
                           if building else os.path.basename(img))
+            verb = self._words["confirm_verb"]
             lead = ("After the build finishes, this will ERASE the entire "
-                    "%s and write the fresh image onto it." % noun
+                    "%s and %s." % (noun, verb)
                     if building else
-                    "This will ERASE the entire %s and write the image onto "
-                    "it." % noun)
+                    "This will ERASE the entire %s and %s." % (noun, verb))
             if not messagebox.askyesno(
-                "Erase the card and flash?",
-                "%s There is no undo.\n\n  Card:  %s\n  Image: %s\n\n"
-                "Make sure you have a backup of the card. Proceed?"
-                % (lead, card.display, flash_what),
+                "Erase the %s and continue?" % noun,
+                "%s There is no undo.\n\n  Target: %s\n  Image:  %s\n\n"
+                "Make sure you have a backup of anything on the %s. Proceed?"
+                % (lead, card.display, flash_what, noun),
                 icon="warning", parent=self._dlg,
             ):
                 return

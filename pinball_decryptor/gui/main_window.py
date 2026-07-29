@@ -2977,14 +2977,10 @@ class MainWindow:
         # While a flash runs the button doubles as its live Cancel — see
         # set_flash_running.
         self._flash_btn = ttk.Button(
-            preview_toolbar, text="Build / flash SD card…",
+            preview_toolbar, text=self._FLASH_BTN_TEXT,
             command=self._open_flash_dialog, style="Go.TButton")
         self._flash_btn_tip = _Tooltip(
-            self._flash_btn,
-            "Build a fresh image and/or write one onto an SD card — tick "
-            "both in the dialog to build and flash in one step. Flashing "
-            "erases and replaces the whole card, and needs Administrator "
-            "(approved when the write starts).",
+            self._flash_btn, self._FLASH_BTN_TIP,
             lambda: self._current_theme)
         # "Card diagnostics…" — only for manufacturers implementing
         # diagnose_card (CGC): reads the on-machine installer's log back off
@@ -13320,6 +13316,13 @@ class MainWindow:
             btn.pack_forget()
         if caps.flash_image:
             self._write_btn.pack_forget()
+            # Label + tooltip are manufacturer-flavoured: Stern/CGC keep the
+            # dd-style "Build / flash SD card…", JJP reads as USB-stick prep
+            # (format + copy the installer files, not a raw image write).
+            self._flash_btn.configure(text=self._flash_btn_text())
+            self._flash_btn_tip.text = (
+                getattr(mfr, "flash_button_tip", None)
+                or self._FLASH_BTN_TIP)
             self._flash_btn.pack(side=tk.RIGHT)
         elif not self._write_btn.winfo_manager():
             self._write_btn.pack(side=tk.RIGHT)
@@ -14747,6 +14750,18 @@ class MainWindow:
         self._sync_flash_button_for_write_run(running, active)
 
     _FLASH_BTN_TEXT = "Build / flash SD card…"
+    _FLASH_BTN_TIP = (
+        "Build a fresh image and/or write one onto an SD card — tick "
+        "both in the dialog to build and flash in one step. Flashing "
+        "erases and replaces the whole card, and needs Administrator "
+        "(approved when the write starts).")
+
+    def _flash_btn_text(self):
+        """Idle label for the consolidated flash button — manufacturer-
+        overridable (JJP's "flash" is a format-and-copy USB-stick prep, so
+        it says so instead of "flash SD card")."""
+        return (getattr(self._current_mfr, "flash_button_text", None)
+                or self._FLASH_BTN_TEXT)
 
     def _sync_flash_button_for_write_run(self, running, active):
         """For consolidated (flash_image) plugins the Build / flash button
@@ -14766,7 +14781,7 @@ class MainWindow:
                 btn.configure(text="Cancel", command=self._on_write_cancel,
                               state=tk.NORMAL, style="Danger.TButton")
             else:
-                btn.configure(text=self._FLASH_BTN_TEXT,
+                btn.configure(text=self._flash_btn_text(),
                               command=self._open_flash_dialog,
                               state=(tk.DISABLED if running else tk.NORMAL),
                               style="Go.TButton")
@@ -14793,7 +14808,7 @@ class MainWindow:
                 # so there's exactly one Cancel on screen (monkeybug batch 9).
                 self._set_write_button_running(True, active=False)
             else:
-                btn.configure(text=self._FLASH_BTN_TEXT,
+                btn.configure(text=self._flash_btn_text(),
                               command=self._open_flash_dialog,
                               state=tk.NORMAL, style="Go.TButton")
         except tk.TclError:

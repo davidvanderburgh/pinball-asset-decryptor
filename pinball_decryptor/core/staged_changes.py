@@ -106,3 +106,30 @@ def dropped_assignments(saved, slots_by_rel):
                             "its folder isn't reachable right now "
                             "(NAS/drive disconnected?)"))
     return out
+
+
+def same_stem_sibling(path):
+    """A file beside the missing *path* with the same name but another
+    extension (``clip.mp4`` recorded, only ``clip.mov`` on disk), or ``None``.
+
+    The usual story behind "the file is no longer in its folder": the clip
+    was re-exported in a new container and the old file deleted, so only the
+    extension differs — a difference invisible in a full NAS path (batch 25:
+    monkeybug saw ``26s_..._Promos2.mov`` sitting right there and read the
+    note about the recorded ``...Promos2.mp4`` as a false alarm).  Callers
+    surface it next to the missing path so the note explains itself."""
+    folder = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    stem = os.path.splitext(base)[0]
+    if not stem:
+        return None
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return None
+    for name in names:
+        if (name.lower() != base.lower()
+                and os.path.splitext(name)[0].lower() == stem.lower()
+                and os.path.isfile(os.path.join(folder, name))):
+            return name
+    return None

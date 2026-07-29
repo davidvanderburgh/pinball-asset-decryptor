@@ -1500,6 +1500,10 @@ class MainWindow:
         # radium image has several.  Search/grouping use it so a scene id
         # finds its images even when they're filed under another scene.
         self._image_groups_all = {}
+        # group_key(lower) -> the part of the key that DISTINGUISHES it from
+        # its siblings (common card-path prefix stripped) — what the search
+        # matches instead of the raw key.  See _compute_image_key_tails.
+        self._image_group_key_tails = {}
         # User-authored display names for scene groups (group_key -> name,
         # <=50 chars) — the vendor's own element names are mostly
         # "unnamed_instance_N" (monkeybug).  Persisted in the staged-changes
@@ -3427,9 +3431,11 @@ class MainWindow:
             self._audio_trim_cb, "", lambda: self._current_theme)
         # Audition the card hands-free (monkeybug batch 23: "select a file and
         # it starts playing the next file in the list ... to run through all
-        # the audio files without manual intervention").
+        # the audio files without manual intervention").  Batch 25 renamed
+        # both boxes to two-word labels ("Play through list" and "substitute
+        # replacements" read wordy — his suggestion).
         self._audio_playthrough_cb = ttk.Checkbutton(
-            self._audio_opts_row, text="Play through the list",
+            self._audio_opts_row, text="Play sequentially",
             variable=self.audio_play_through_var)
         self._audio_playthrough_cb.pack(side=tk.LEFT, padx=(18, 0))
         _Tooltip(self._audio_playthrough_cb,
@@ -3442,15 +3448,18 @@ class MainWindow:
         # replacement play the replacement, the rest play the original, so a
         # clip that still sounds stock is one he forgot to replace.
         self._audio_play_subst_cb = ttk.Checkbutton(
-            self._audio_opts_row, text="Substitute replacements",
-            variable=self.audio_play_subst_var)
+            self._audio_opts_row, text="Play replacements",
+            variable=self.audio_play_subst_var,
+            command=self._audio_on_play_subst_toggle)
         self._audio_play_subst_cb.pack(side=tk.LEFT, padx=(18, 0))
         _Tooltip(self._audio_play_subst_cb,
-                 "While playing through the list, a row that has a "
-                 "replacement (picked now, or already changed on disk) plays "
-                 "the replacement instead of the original — the whole list "
+                 "While playing sequentially, a row that has a replacement "
+                 "(picked now, or already changed on disk) plays the "
+                 "replacement instead of the original — the whole list "
                  "sounds the way the built card will.\n\nSo anything that "
-                 "still sounds stock is a clip you haven't replaced yet.",
+                 "still sounds stock is a clip you haven't replaced yet.\n\n"
+                 "Ticking this turns on \"Play sequentially\" too — it only "
+                 "acts while sequential play is stepping through the list.",
                  lambda: self._current_theme)
         # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
         # encode overrides + a stock characterization report.
@@ -3972,6 +3981,20 @@ class MainWindow:
             root.after(0, _spawn)
         except (tk.TclError, RuntimeError):
             pass
+
+    def _slot_changed_on_disk(self, kind, rel):
+        """Whether *kind* (audio/video/image) slot *rel* is already modified
+        on disk: flagged by the background change scan, or carrying a ``.orig``
+        snapshot — which is proof of a staged change all by itself and is
+        available IMMEDIATELY.  The change scan MD5s every slot (minutes over
+        a NAS share), and until it lands the previews treated a modified slot
+        as pristine: monkeybug clicked his attract slot inside that window
+        and the "Original" pane played his previous replacement (batch 25)."""
+        if rel in getattr(self, "_%s_changed_on_disk" % kind, ()):
+            return True
+        from ..core import staged_originals
+        return staged_originals.snapshot_path(
+            getattr(self, "_%s_scan_dir" % kind, None), rel) is not None
 
     # ---- Replace tabs: click-header sorting (shared) -----------------
 
@@ -4943,6 +4966,16 @@ class MainWindow:
             return None
         return rels[i + 1] if i + 1 < len(rels) else None
 
+    def _audio_on_play_subst_toggle(self):
+        """"Play replacements" only acts while sequential play is stepping
+        through the list — ticked alone it did nothing (batch 25: "Logically
+        this does nothing. Maybe auto select the first option"), so ticking
+        it switches "Play sequentially" on too.  Unticking either box leaves
+        the other alone."""
+        if (self.audio_play_subst_var.get()
+                and not self.audio_play_through_var.get()):
+            self.audio_play_through_var.set(True)
+
     def _audio_on_clip_finished(self, pane):
         """A preview finished on its own — step to the next row when "Play
         through the list" is on (monkeybug batch 23).
@@ -5004,7 +5037,8 @@ class MainWindow:
         # taken when the change was staged is the true original; fall back to
         # the on-disk file when no snapshot exists (pre-snapshot builds).
         snap_used = False
-        if rel in self._audio_changed_on_disk:
+        changed = self._slot_changed_on_disk("audio", rel)
+        if changed:
             snap = staged_originals.snapshot_path(self._audio_scan_dir, rel)
             if snap:
                 opath = snap
@@ -5013,8 +5047,7 @@ class MainWindow:
         # bytes ARE the replacement — don't call them "Original" (monkeybug
         # read his imported mod as a missing replacement).
         self._audio_pane_orig.base_title = (
-            "Current file (already modified)"
-            if rel in self._audio_changed_on_disk and not snap_used
+            "Current file (already modified)" if changed and not snap_used
             else "Original")
         if opath and os.path.isfile(opath):
             self._audio_pane_orig.load(
@@ -5034,8 +5067,7 @@ class MainWindow:
         rpath = self._audio_assignments.get(rel)
         if rpath and os.path.isfile(rpath):
             return True
-        if rel in self._audio_changed_on_disk and staged_originals \
-                .snapshot_path(self._audio_scan_dir, rel):
+        if staged_originals.snapshot_path(self._audio_scan_dir, rel):
             slot = self._audio_slots_by_rel.get(rel)
             return bool(slot and slot.abs_path
                         and os.path.isfile(slot.abs_path))
@@ -5057,8 +5089,9 @@ class MainWindow:
         # true original is on the left (its .orig snapshot): the on-disk file
         # IS the replacement that will build — show it here instead of
         # "no replacement assigned" (monkeybug read that as a lost mod).
-        if rel in self._audio_changed_on_disk and staged_originals \
-                .snapshot_path(self._audio_scan_dir, rel):
+        # The snapshot alone is the test — the change scan may still be
+        # hashing (see _slot_changed_on_disk).
+        if staged_originals.snapshot_path(self._audio_scan_dir, rel):
             slot = self._audio_slots_by_rel.get(rel)
             cur = slot.abs_path if slot else None
             if cur and os.path.isfile(cur):
@@ -5434,6 +5467,17 @@ class MainWindow:
         self._video_pane_rep.frame.grid(row=0, column=1, sticky="n",
                                         padx=(4, 0))
         self._video_pane_rep.clear("no replacement assigned")
+        # Big wrong-format callout under the panes.  The Format column's ⚠ and
+        # its log line were easy to scroll past, and the "✗ wrong format" text
+        # only exists on rows with a live pick — a slot whose CURRENT clip is
+        # unplayable showed just the tiny glyph (batch 25: "What about putting
+        # a bigger indicator under the video to make it really stand out?").
+        # Text + color are set per-selection by _video_update_preview_note;
+        # packed only while there is something to say.
+        self._video_preview_note = ttk.Label(
+            player, text="", justify=tk.LEFT, anchor=tk.W,
+            font=(_SANS_FONT, 10, "bold"))
+        self._register_responsive_wrap(self._video_preview_note)
 
         # The conversion options get a row of their own under the preview box,
         # like the audio tab's.  They used to sit in the box's left margin
@@ -5788,6 +5832,10 @@ class MainWindow:
         for key, mode in results:
             self._video_conv_cache[key] = mode
             rel = key[0]
+            if rel == self._video_current_rel:
+                # The loaded slot's pick just got its verdict — the callout
+                # under the preview may change wording (or appear).
+                self._video_update_preview_note(rel)
             if tree is None:
                 continue
             try:
@@ -6026,6 +6074,9 @@ class MainWindow:
         # A baked-in unplayable clip is worth a log line even when the row is
         # filtered out of view right now.
         self._warn_unplayable_slot(rel, slot)
+        if rel == self._video_current_rel:
+            # The loaded slot's playability just became answerable.
+            self._video_update_preview_note(rel)
         tree = getattr(self, "_video_tree", None)
         if tree is None or not tree.exists(rel):
             return
@@ -6123,6 +6174,9 @@ class MainWindow:
             tree, "video", ("#0", "len", "res", "fmt", "aud", "rep", "conv"))
         # Fill in any "…" Convert cells the rebuild just drew.
         self._video_probe_conv_async()
+        # Option toggles funnel through here and can flip a cached verdict
+        # instantly — keep the callout under the preview in step.
+        self._video_update_preview_note()
 
     def _video_export_csv(self):
         """Save the video table as a CSV — the audio tab's Export CSV, mirrored
@@ -6415,6 +6469,7 @@ class MainWindow:
         self._refresh_video_list()
         if rel == self._video_current_rel:
             self._video_load_rep_pane(rel)  # show the new pick right away
+            self._video_update_preview_note(rel)
         try:
             self._video_tree.selection_set(rel)
             self._video_tree.see(rel)
@@ -6624,6 +6679,7 @@ class MainWindow:
             self._refresh_video_list()
             if rel == self._video_current_rel:
                 self._video_load_rep_pane(rel)  # back to "no replacement"
+                self._video_update_preview_note(rel)
             try:
                 self._video_tree.selection_set(rel)
             except tk.TclError:
@@ -6660,7 +6716,8 @@ class MainWindow:
         # Already-changed slots hold replacement bytes; the .orig snapshot is
         # the true original (see _audio_load_track).
         snap_used = False
-        if rel in getattr(self, "_video_changed_on_disk", ()):
+        changed = self._slot_changed_on_disk("video", rel)
+        if changed:
             snap = staged_originals.snapshot_path(self._video_scan_dir, rel)
             if snap:
                 opath = snap
@@ -6668,14 +6725,14 @@ class MainWindow:
         # Honest title when there's no snapshot (see _audio_load_track).
         self._video_pane_orig.base_title = (
             "Current file (already modified)"
-            if (rel in getattr(self, "_video_changed_on_disk", ())
-                and not snap_used)
+            if changed and not snap_used
             else "Original")
         if opath and os.path.isfile(opath):
             self._video_pane_orig.load(opath, autoplay=(autoplay == "orig"))
         else:
             self._video_pane_orig.clear()
         self._video_load_rep_pane(rel, autoplay=(autoplay == "rep"))
+        self._video_update_preview_note(rel)
 
     def _video_load_rep_pane(self, rel, autoplay=False):
         """(Re)load the Replacement pane for *rel* — after a clip change or
@@ -6686,15 +6743,90 @@ class MainWindow:
             self._video_pane_rep.load(rpath, autoplay=autoplay)
             return
         # Already-changed slot with its true original on the left: the
-        # on-disk file is the effective replacement (see audio twin).
-        if (rel in getattr(self, "_video_changed_on_disk", ())
-                and staged_originals.snapshot_path(self._video_scan_dir, rel)):
+        # on-disk file is the effective replacement (see audio twin).  The
+        # snapshot alone is the test — the change scan may still be hashing
+        # (see _slot_changed_on_disk).
+        if staged_originals.snapshot_path(self._video_scan_dir, rel):
             slot = self._video_slots_by_rel.get(rel)
             cur = slot.abs_path if slot else None
             if cur and os.path.isfile(cur):
                 self._video_pane_rep.load(cur, autoplay=autoplay)
                 return
         self._video_pane_rep.clear("no replacement assigned")
+
+    # Convert answers that mean "the machine will get something it can play".
+    _VIDEO_CONV_GOOD = (_VIDEO_CONV_ASIS, _VIDEO_CONV_REENC,
+                        _VIDEO_CONV_REPACK, _VIDEO_CONV_ASIS_NOISY)
+
+    def _video_update_preview_note(self, rel=None):
+        """Show/hide the big callout under the preview panes for the loaded
+        slot (batch 25: the ⚠ glyph alone didn't stand out, and a slot whose
+        current clip is unplayable had no visible text at all).
+
+        Three states, cheapest-first — nothing here probes a file, so it can
+        run on every selection / list refresh:
+          * the slot's CURRENT clip is unplayable and a good replacement is
+            already picked → amber: the Format/Audio columns keep describing
+            the clip that is in the slot until the next build (batch 25: he
+            read the unchanged "prores" cell as the app mis-probing his fresh
+            H.264 pick);
+          * unplayable with no good pick yet → red, act before building;
+          * the pick itself would be rejected as-is → red.
+        """
+        lbl = getattr(self, "_video_preview_note", None)
+        if lbl is None:
+            return
+        if rel is None:
+            rel = self._video_current_rel
+        slot = self._video_slots_by_rel.get(rel) if rel else None
+        text = color_key = None
+        if slot is not None:
+            why = self._slot_unplayable(slot)
+            rep = self._video_assignments.get(rel)
+            mode = self._video_conv_cached(rel, rep) if rep else ""
+            if why:
+                if mode in self._VIDEO_CONV_GOOD:
+                    text = ("⚠  The clip in this slot right now %s — the "
+                            "Format and Audio columns describe that clip "
+                            "until you build. Your replacement goes on at "
+                            "the next build and fixes it." % why)
+                    color_key = "warning"
+                else:
+                    text = ("⚠  WRONG FORMAT — the clip in this slot %s. On "
+                            "the machine it will play its sound over a black "
+                            "picture. Assign a good replacement (or "
+                            "right-click → revert the slot) before building."
+                            % why)
+                    color_key = "error"
+            elif rep and mode in (self._VIDEO_CONV_REJECT,
+                                  self._VIDEO_CONV_ASIS_NOISY):
+                conflict = self._video_noconv_conflict(rel, rep, deep=False)
+                if mode == self._VIDEO_CONV_ASIS_NOISY:
+                    text = ("⚠  %s brings its own audio track and this "
+                            "slot's clip has none — the machine will play it "
+                            "over the game's sound."
+                            % os.path.basename(rep))
+                    color_key = "warning"
+                else:
+                    text = ("✗  WRONG FORMAT — %s. As-is it will play its "
+                            "sound over a black picture on the machine. "
+                            "Untick \"Use my files as-is\" to have it "
+                            "converted, or pick a game-ready file."
+                            % (conflict or ("%s can't play on the machine "
+                                            "as it is"
+                                            % os.path.basename(rep))))
+                    color_key = "error"
+        if not text:
+            lbl.pack_forget()
+            return
+        c = THEMES.get(self._current_theme, {})
+        try:
+            lbl.configure(text=text,
+                          foreground=c.get(color_key) or c.get("fg"))
+        except tk.TclError:
+            return
+        if not lbl.winfo_manager():
+            lbl.pack(fill=tk.X, padx=8, pady=(0, 6))
 
     def _video_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
@@ -6735,6 +6867,12 @@ class MainWindow:
             self._video_pane_orig.clear()
         if self._video_pane_rep is not None:
             self._video_pane_rep.clear("no replacement assigned")
+        note = getattr(self, "_video_preview_note", None)
+        if note is not None:
+            try:
+                note.pack_forget()
+            except tk.TclError:
+                pass
 
     # ---- Replace Video: pending assignments (applied at Write time) --
 
@@ -6994,6 +7132,7 @@ class MainWindow:
             self._image_groups = {}
             self._image_group_occ = {}
             self._image_groups_all = {}
+            self._image_group_key_tails = {}
             self._refresh_image_list()
             self._image_empty.configure(
                 text="Set the project folder on the Extract tab, then click Scan.")
@@ -7048,6 +7187,8 @@ class MainWindow:
         self._image_groups = groups or {}
         self._image_group_occ = group_occ or {}
         self._image_groups_all = group_all or {}
+        self._image_group_key_tails = self._compute_image_key_tails(
+            self._image_groups, self._image_groups_all)
         # Restore assignments persisted for a freshly-scanned folder; a re-scan
         # of the same folder keeps the live in-memory ones (see audio above).
         from ..core import staged_changes
@@ -7294,13 +7435,57 @@ class MainWindow:
         anything but a shared radium image."""
         return self._image_groups_all.get(rel) or [self._image_group_of(rel)]
 
+    @staticmethod
+    def _compute_image_key_tails(groups, groups_all):
+        """``{group_key(lower): distinguishing tail}`` — each key minus the
+        card-path prefix its whole namespace shares.
+
+        The search matches container card paths so a scene hash from a file
+        listing finds its images (Peter) — but on a real card every radium
+        container lives under the same mount root, and a word sitting in that
+        SHARED prefix matches every group at once while naming none of them.
+        Batch 25: monkeybug searched "stern" for the Stern loading screen and
+        got ~5000 radimg rows, matched through invisible on-card paths.  Only
+        the part that differs between sibling keys carries any information,
+        so that's all the search reads.  Prefixes are cut at a "/" so a
+        partial path component is never split; namespaces (``rad::`` /
+        ``scn::`` / ``dir::``) are handled separately since their prefixes
+        differ."""
+        keys = {g[0] for g in groups.values()}
+        for lst in groups_all.values():
+            keys.update(g[0] for g in lst)
+        by_ns = {}
+        for k in keys:
+            by_ns.setdefault(k.split("::", 1)[0], []).append(k.lower())
+        tails = {}
+        for ns, ks in by_ns.items():
+            if len(ks) < 2:
+                # A lone container has no siblings to differ from — keep its
+                # whole path (minus the namespace tag) searchable.
+                for k in ks:
+                    tails[k] = k.split("::", 1)[-1]
+                continue
+            prefix = os.path.commonprefix(ks)
+            cut = prefix.rfind("/") + 1
+            for k in ks:
+                tails[k] = k[cut:]
+        return tails
+
     def _image_group_matches(self, group, query):
         """True when *query* hits this container's display label, its user
-        rename, or its card path (so the full scene hash from a file listing
-        works, not just the 8-char shorthand)."""
+        rename, or the distinguishing part of its card path (so a scene hash
+        from a file listing works, not just the 8-char shorthand — while a
+        word in the mount prefix every container shares matches nothing; see
+        _compute_image_key_tails).  A query with a path separator is a
+        deliberate full-path search and still matches the whole key."""
         key, label, _order = group
-        return (query in label.lower() or query in key.lower()
-                or query in self._image_group_tags.get(key, "").lower())
+        if (query in label.lower()
+                or query in self._image_group_tags.get(key, "").lower()):
+            return True
+        k = key.lower()
+        if "/" in query or "\\" in query:
+            return query.replace("\\", "/") in k
+        return query in self._image_group_key_tails.get(k, k)
 
     def _refresh_image_list(self):
         """Apply the search filter + sort and repopulate the slot tree — flat
@@ -8009,7 +8194,7 @@ class MainWindow:
         slot = self._image_slots_by_rel.get(rel) if rel is not None else None
         rep = self._image_assignments.get(rel) if rel is not None else None
         opath = slot.abs_path if slot else None
-        changed = (rel in self._image_changed_on_disk
+        changed = (self._slot_changed_on_disk("image", rel)
                    if rel is not None else False)
         snap = None
         if changed:
@@ -8113,18 +8298,25 @@ class MainWindow:
             return
         any_pending = False
         for rel, path, why in dropped[:6]:
+            # Same name with another extension sitting right there = the clip
+            # was re-exported in a new container; say so under the path, or
+            # the note reads as a false alarm (batch 25).
+            alt = staged_changes.same_stem_sibling(path)
+            hint = ('\n        (a file named "%s" IS in that folder — same '
+                    "name, different extension. If that's this clip "
+                    "re-exported, re-pick it.)" % alt) if alt else ""
             if staged_originals.snapshot_path(scan_dir, rel):
                 self.append_log(
                     'Note: "%s" already holds its %s replacement (changed on '
                     'disk) — nothing is lost.  But the source file it was '
                     'made from wasn\'t found (%s), so it can\'t be '
-                    're-applied until it\'s re-picked:\n        %s'
-                    % (rel, kind, why, path), "info")
+                    're-applied until it\'s re-picked:\n        %s%s'
+                    % (rel, kind, why, path, hint), "info")
             else:
                 any_pending = True
                 self.append_log(
                     'Saved %s replacement for "%s" wasn\'t restored — %s:\n'
-                    '        %s' % (kind, rel, why, path), "error")
+                    '        %s%s' % (kind, rel, why, path, hint), "error")
         if len(dropped) > 6:
             self.append_log("…and %d more saved %s replacement(s) like this."
                             % (len(dropped) - 6, kind),
@@ -15149,6 +15341,8 @@ class MainWindow:
         return lbl
 
     _SCAN_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"     # braille frames for the scanning animation
+    _SCAN_LABELS = {"audio": "Audio", "video": "Video", "image": "Images",
+                    "text": "Text", "write_preview": "Write change"}
 
     def _set_tab_scanning(self, tab_key, active):
         """Toggle a Replace tab into / out of its scanning state.
@@ -15162,9 +15356,7 @@ class MainWindow:
         slow scans are traceable after the fact (monkeybug batch 14 — his
         Write scan crawled after a mod-pack transfer and nothing recorded
         when or how long)."""
-        names = {"audio": "Audio", "video": "Video", "image": "Images",
-                 "text": "Text", "write_preview": "Write change"}
-        label = names.get(tab_key, tab_key)
+        label = self._SCAN_LABELS.get(tab_key, tab_key)
         t0s = getattr(self, "_scan_t0", None)
         if t0s is None:
             t0s = self._scan_t0 = {}
@@ -15290,9 +15482,21 @@ class MainWindow:
     def _cancel_scan(self, tab_key):
         """Cancel-button handler: invalidate the running scan (its result is
         dropped by the scan-id guard when the worker returns) and reset the tab
-        to idle with a blank list."""
+        to idle with a blank list.
+
+        The scan's start-stamp is cleared AND the cancel is logged: leaving
+        the stamp made the next Scan click count as re-entrant — no "started"
+        line — and its "finished" line then reported the time since the
+        CANCELLED scan began (batch 25: monkeybug's 35 s Images scan logged
+        as 2173.4 s, with his cancel and restart invisible in between)."""
         attr = "_%s_scan_id" % tab_key
         setattr(self, attr, getattr(self, attr, 0) + 1)
+        t0 = (getattr(self, "_scan_t0", None) or {}).pop(tab_key, None)
+        if t0 is not None:
+            self.append_log(
+                "%s scan cancelled after %.1f s."
+                % (self._SCAN_LABELS.get(tab_key, tab_key),
+                   time.monotonic() - t0), "info")
         self._stop_scan_spinner(tab_key)
         tree = getattr(self, "_%s_tree" % tab_key, None)
         if tree is not None:

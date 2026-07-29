@@ -108,18 +108,20 @@ HELP_CONTENT = {
          "replacement on the right — each with its own controls, so you can "
          "compare them before you commit to a build. Starting one pauses "
          "the other."),
-        ("Play through the list",
+        ("Play sequentially",
          "Tick it and a finished clip selects and plays the next row on its "
          "own, following whatever sort, search and Type filter you have set — "
          "so you can listen through a whole card without clicking each row. "
          "It stops at the end of the list, and pressing ■ or clicking another "
          "row stops it. Anything you notice on the way is already selected, "
-         "so hit F2 or right-click it there and then.\n\nTick \"Substitute "
+         "so hit F2 or right-click it there and then.\n\nTick \"Play "
          "replacements\" as well and every row that has a replacement "
          "(picked now, or already changed on disk) plays the replacement "
          "instead of the original — the list sounds the way the built card "
          "will, so anything that still sounds stock is a clip you haven't "
-         "replaced yet."),
+         "replaced yet. It only acts while sequential play is stepping "
+         "through the list, so ticking it turns \"Play sequentially\" on "
+         "too."),
         ("Undo",
          "Right-click a slot: \"Remove replacement\" cancels an un-built "
          "assignment; \"Revert to original\" restores an already-changed "
@@ -251,6 +253,18 @@ HELP_CONTENT = {
          "instead. The answer is worked out in the background, so a row can "
          "read \"…\" for a moment, and it re-checks itself whenever you "
          "change either checkbox. Export CSV carries the column too."),
+        ("Slots already holding a wrong-format clip",
+         "A ⚠ next to the Format cell means the clip sitting in that slot "
+         "RIGHT NOW is one the machine can't decode (ProRes, HEVC, 10-bit) — "
+         "usually one that went on as-is before the app checked for it. "
+         "Select the row and a callout under the preview says so in words. "
+         "The Format and Audio columns always describe the clip currently in "
+         "the slot, so after you assign a good replacement they keep showing "
+         "the old clip's format until the next build applies it — the "
+         "callout turns amber and says the build will fix it. The "
+         "\"Original\" preview pane shows the untouched factory clip "
+         "whenever its backup exists, even for a slot you've already "
+         "replaced."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
@@ -290,7 +304,11 @@ HELP_CONTENT = {
          "animation (transparent), clear its pending replacements, or "
          "rename the group — most factory scene names are generic "
          "(\"unnamed_instance_14\"); your name is remembered for that "
-         "assets folder and is matched by Search."),
+         "assets folder and is matched by Search. Search finds an image by "
+         "its own file name or by any scene it appears in — the scene's "
+         "name, your rename, or its id/hash — so a hit doesn't always have "
+         "the words in its file name; \"Group by scene\" shows which scene "
+         "matched."),
         ("Font atlases",
          "Some scene textures are font/glyph maps — a grid of characters "
          "the game draws text from. You can re-style the whole grid, but "

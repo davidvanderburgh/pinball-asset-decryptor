@@ -153,16 +153,39 @@ def test_audio_options_row_aligned(app):
             > w._audio_adv_btn.winfo_rootx())
 
 
-def test_video_checkboxes_are_left_aligned(app):
+def test_video_checkboxes_share_a_row_below_the_preview(app):
+    """The conversion checkboxes sit in one row under the Preview box, both on
+    the same line — they used to be stacked in the box's left margin."""
     w = _stern(app)
     _show_tab(app, w, w._tab_video)
     assert w._video_no_conversion_cb.winfo_ismapped()
-    assert (w._video_no_conversion_cb.winfo_x()
-            == w._video_trim_cb.winfo_x())
-    gap = w._video_trim_cb.winfo_y() - (
-        w._video_no_conversion_cb.winfo_y()
-        + w._video_no_conversion_cb.winfo_height())
-    assert 0 <= gap <= 6, "checkboxes drifted apart again (gap=%d)" % gap
+    assert w._video_trim_cb.winfo_ismapped()
+    assert (w._video_no_conversion_cb.master
+            is w._video_trim_cb.master is w._video_opts_row)
+    assert (w._video_no_conversion_cb.winfo_y()
+            == w._video_trim_cb.winfo_y())
+    # Below the preview, not beside it.
+    box = w._video_pane_orig.frame.master.master
+    assert (w._video_opts_row.winfo_rooty()
+            >= box.winfo_rooty() + box.winfo_height())
+
+
+def test_video_preview_panes_fit_the_narrowest_window(app):
+    """Nothing may sit beside the two preview panes: they alone fill the
+    default 820px window, so a left-margin column (and the long label that
+    made it obvious) pushed the Replacement pane off the right edge — David
+    saw it clipped by the window frame."""
+    w = _stern(app)
+    _show_tab(app, w, w._tab_video)
+    box = w._video_pane_orig.frame.master.master
+    # minsize() is 720x700; padding either side leaves ~700 for the box.
+    assert box.winfo_reqwidth() <= 700, (
+        "the Preview box wants %dpx — it no longer fits the minimum window "
+        "width, so a pane will be clipped" % box.winfo_reqwidth())
+    # And as laid out, the Replacement pane ends inside the box.
+    rep = w._video_pane_rep.frame
+    assert (rep.winfo_rootx() + rep.winfo_width()
+            <= box.winfo_rootx() + box.winfo_width())
 
 
 # ---- video Export CSV (mirrors audio) ------------------------------------

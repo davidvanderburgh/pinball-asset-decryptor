@@ -601,9 +601,13 @@ class _VideoPreviewPane:
             highlightthickness=1, bd=0, background="#000000")
         self.canvas.pack(pady=(0, 2))
         self.canvas.bind("<Configure>", self._on_canvas_resize, add="+")
-        # Seek bar: click or drag to seek; the playhead tracks playback.
+        # Seek bar: click or drag to seek; the playhead tracks playback.  It
+        # asks for the frame canvas's width even though it stretches to fill —
+        # left to Tk's default a bare canvas requests 378px, which quietly made
+        # every pane 58px wider than the video in it.
         self.seek_canvas = tk.Canvas(
-            self.frame, height=16, highlightthickness=1, bd=0, cursor="hand2")
+            self.frame, width=self.MAX_W, height=16, highlightthickness=1,
+            bd=0, cursor="hand2")
         self.seek_canvas.pack(fill=tk.X, pady=(0, 2))
         self.seek_canvas.bind("<Button-1>", self._seek_click)
         self.seek_canvas.bind("<B1-Motion>", self._seek_click)
@@ -5357,14 +5361,8 @@ class MainWindow:
         # never overlap. ---
         player = ttk.LabelFrame(f, text=" Preview ")
         player.pack(fill=tk.X, padx=10, pady=(4, 2))
-        # The conversion options sit in the preview box's spare left margin
-        # (monkeybug batch 21) instead of full-width rows under it; labels are
-        # short because ttk.Checkbutton can't wrap — the tooltips carry the
-        # detail.
-        opts = ttk.Frame(player)
-        opts.pack(side=tk.LEFT, padx=(10, 0))
         panes = ttk.Frame(player)
-        panes.pack(side=tk.LEFT, expand=True, padx=6, pady=(2, 6))
+        panes.pack(padx=6, pady=(2, 6))
         self._video_pane_orig = _VideoPreviewPane(
             self, panes, "Original",
             on_activate=lambda: self._video_activate_pane("orig"))
@@ -5379,16 +5377,27 @@ class MainWindow:
                                         padx=(4, 0))
         self._video_pane_rep.clear("no replacement assigned")
 
-        # This applies to EVERY replacement, not to the slot on screen — it
-        # sits beside the preview, which read as per-clip, and monkeybug
-        # thought changing it meant re-picking all his files one by one
-        # (batch 23).  The label says so, and flipping it re-answers the
-        # Convert column for the whole list on the spot.
+        # The conversion options get a row of their own under the preview box,
+        # like the audio tab's.  They used to sit in the box's left margin
+        # (monkeybug batch 21), but there is no spare margin: two 320px panes
+        # already fill the default 820px window, so the column stole width from
+        # the panes and the Replacement pane hung off the right edge — which is
+        # exactly what a longer label made obvious (David).  Beneath the panes
+        # the labels can say what they mean without crowding the video.
+        self._video_opts_row = ttk.Frame(f)
+        self._video_opts_row.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(4, 4))
+
+        # This applies to EVERY replacement, not to the slot on screen — it sat
+        # beside the preview, which read as per-clip, and monkeybug thought
+        # changing it meant re-picking all his files one by one (batch 23).
+        # The label says so, and flipping it re-answers the Convert column for
+        # the whole list on the spot.
         self._video_no_conversion_cb = ttk.Checkbutton(
-            opts, text="Use my files as-is — never re-encode (all slots)",
+            self._video_opts_row,
+            text="Use my files as-is — never re-encode (all slots)",
             variable=self.video_no_conversion_var,
             command=self._video_on_no_conversion_toggle)
-        self._video_no_conversion_cb.pack(anchor=tk.W, pady=(0, 6))
+        self._video_no_conversion_cb.pack(side=tk.LEFT)
         _Tooltip(
             self._video_no_conversion_cb,
             "Applies to every replacement you have picked, not just the "
@@ -5406,10 +5415,11 @@ class MainWindow:
             lambda: self._current_theme)
 
         self._video_trim_cb = ttk.Checkbutton(
-            opts, text="Trim / pad to the original clip length",
+            self._video_opts_row,
+            text="Trim / pad to the original clip length",
             variable=self.video_trim_var,
             command=self._on_video_trim_toggle)
-        self._video_trim_cb.pack(anchor=tk.W)
+        self._video_trim_cb.pack(side=tk.LEFT, padx=(18, 0))
         # Hover tooltip — per-plugin guidance is appended in
         # apply_manufacturer.
         self._video_trim_tip = _Tooltip(

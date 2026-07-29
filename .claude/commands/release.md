@@ -314,36 +314,34 @@ loop.
     - **Each paragraph is ONE unbroken line.**  Never hard-wrap inside a
       paragraph.  Blank line between paragraphs, nothing else.
 
-10b. **Deliver it as a FILE, not just a fenced block.**  David sends these
-    from Gmail, and a fenced block alone has bitten us twice over:
+10b. **Print it as ordinary prose.  NOT in a fenced code block, and NOT
+    as a file.**  David copies it straight out of the reply and pastes it
+    into Gmail, so the printed form IS the deliverable.
 
-    - Copying out of a rendered code block can bake the *display* wrap
-      points in as real newlines, so what looks like one line in the
-      transcript pastes as five.
-    - Gmail's **Plain text mode** hard-wraps at ~70 columns *at send
-      time*.  The draft looks correct and the sent mail arrives chopped
-      mid-sentence, which is how it reached Kris on v0.94.0 (2026-07-28).
-      Nothing about the paste is wrong when this happens, so don't go
-      hunting the message formatting for a fault that is in the mail
-      client.
+    A fenced block is the thing to avoid: the renderer wraps it to the
+    panel width and the copy takes those *display* wraps with it as real
+    newlines, so one unbroken paragraph arrives in the mail chopped into
+    five ~65-column lines.  That is what happened to Kris on v0.94.0 and
+    to Alex on v0.95.0 (both 2026-07-28).  Prose has no such wrap points:
+    it reflows on copy and pastes as one line per paragraph.
 
-    So do BOTH, every release:
-    1. Write the message to a `.txt` in the scratchpad (one unbroken line
-       per paragraph) and hand it over with `SendUserFile`
-       (`display: "attach"`).  That gives a copy source with no wrap
-       points in it at all.
-    2. Also print it inline in a fenced block for a quick read.
+    Do NOT write it to a `.txt` and hand the path over either — that was
+    tried on v0.95.0 and rejected: it means leaving the reply to go open
+    a file, which is more work than the paste it was meant to save.
 
-    And say once, in the same turn, how to stop Gmail re-wrapping it:
-    compose window → three-dot menu (bottom right, by the trash icon) →
-    untick **Plain text mode**.  Gmail then sends HTML and the paragraphs
-    reflow to the reader's window.
+    So: label it as the forward-to-tester message, then just write the
+    paragraphs out as normal text, one unbroken line each, blank line
+    between them.  Nothing around them.
 
-    Label it clearly as the forward-to-tester message, distinct from the
-    release-summary in "What to report back" below.  Example shape:
-    ```
+    If a sent mail still arrives hard-wrapped after that, the remaining
+    cause is Gmail's own **Plain text mode** (compose window → three-dot
+    menu, bottom right → untick it), which no wording on our side can
+    override — but do not lead with that.  Fix the copy source first;
+    mention the setting only if wrapping survives it.
+
+    Example shape:
+
     Shipped v0.50.0. New Partition Explorer tab lets you browse a card image and pull files or folders out without mounting it. And your renamed image-group names now survive re-extracting the same card. Give the explorer a try and tell me if a folder ever opens empty.
-    ```
 
     If the user edits the message before sending (they often tighten a
     claim, e.g. adding "(by emulation)"), carry their wording forward into

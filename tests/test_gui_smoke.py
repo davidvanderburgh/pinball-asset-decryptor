@@ -1853,6 +1853,45 @@ def test_image_group_scan_parses_manifests(tmp_path):
     assert MainWindow._scan_image_groups(str(empty)) == ({}, {}, {})
 
 
+def test_image_group_label_skips_font_atlases(tmp_path):
+    """A scene whose first named member is a FONT atlas must not be labeled
+    after the font (Stern names fonts "Stern_...", so every hash-named member
+    matched a search for "stern" through the invisible label — monkeybug).
+    The hint comes from the first non-atlas named member, or falls back to
+    the hash shorthand when the font is the only named member."""
+    from pinball_decryptor.gui.main_window import MainWindow
+    st = tmp_path / "images" / "scene_textures"
+    st.mkdir(parents=True)
+    atlas = "radimg_Stern_FooFont_512x512_deadbeef.png"
+    named = "radimg_Char_Select_8x8_00000001.png"
+    plain = "radimg_8x8_00000002.png"
+    for fn in (atlas, named, plain):
+        (st / fn).write_bytes(b"\x89PNG-fake")
+    # What marks the atlas as a font: its extracted glyphs/<stem>/ dir.
+    (st / "glyphs" / atlas[:-4]).mkdir(parents=True)
+    card_a = "/game/scenes/aaaaaaaa1111/scene.radium"
+    card_b = "/game/scenes/bbbbbbbb2222/scene.radium"
+    with open(st / "radium_images.txt", "w", encoding="utf-8") as f:
+        f.write("# output\tradium card path\tdata offset\tlength"
+                "\tpad_w\tpad_h\tfmt\n")
+        # Scene A: font first (offset 100), real named element later.
+        f.write("scene_textures/%s\t%s\t100\t16\t8\t8\t5\n" % (atlas, card_a))
+        f.write("scene_textures/%s\t%s\t200\t16\t8\t8\t5\n" % (named, card_a))
+        # Scene B: the font is the ONLY named member.
+        f.write("scene_textures/%s\t%s\t100\t16\t8\t8\t5\n" % (atlas, card_b))
+        f.write("scene_textures/%s\t%s\t200\t16\t8\t8\t5\n" % (plain, card_b))
+    groups, _occ, where = MainWindow._scan_image_groups(str(tmp_path))
+    rel_named = "images/scene_textures/" + named
+    rel_plain = "images/scene_textures/" + plain
+    assert groups[rel_named][1] == "Char_Select · aaaaaaaa"
+    assert groups[rel_plain][1] == "bbbbbbbb"
+    # The atlas itself keeps its membership (home = scene A) — only the
+    # label derivation skips it.
+    rel_atlas = "images/scene_textures/" + atlas
+    assert [g[0] for g in where[rel_atlas]] == [
+        "rad::" + card_a, "rad::" + card_b]
+
+
 def _seed_shared_image_assets(tmp_path):
     """Two scenes that share one image: the extract dedupes it to a single
     PNG whose HOME group is the first scene, so the second scene owns no

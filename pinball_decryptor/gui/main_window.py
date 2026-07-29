@@ -7359,11 +7359,27 @@ class MainWindow:
         # so neither half alone is unique or searchable.
         name_re = _re.compile(
             r"^radimg_(.+)_\d+x\d+_[0-9a-f]{8}\.png$", _re.IGNORECASE)
+        # A font atlas carries an element-name hint too — the FONT family,
+        # which Stern prefixes with "Stern_..." — and a font is often the
+        # first named node in its radium, so a scene led by its font was
+        # labeled after the font, and every hash-named member then matched a
+        # search for the font's name through a label that isn't on screen
+        # (monkeybug searched "stern" on Jaws: 758 such rows).  Every
+        # extracted atlas has a glyphs/<atlas-stem>/ dir; those members
+        # never supply the label hint.
+        try:
+            atlases = set(os.listdir(os.path.join(
+                assets_path, "images", "scene_textures", "glyphs")))
+        except OSError:
+            atlases = set()
         labels = {}
         for card, members in per_card.items():
             label = ""
             for _off, mrel in sorted(members):
-                m = name_re.match(os.path.basename(mrel))
+                base = os.path.basename(mrel)
+                if os.path.splitext(base)[0] in atlases:
+                    continue
+                m = name_re.match(base)
                 if m:
                     label = m.group(1)
                     break

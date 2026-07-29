@@ -3784,9 +3784,11 @@ class ModPipeline(DecryptionPipeline):
                 "No .checksums.md5 found in the assets folder.\n"
                 "Run Decrypt first to generate baseline checksums.")
 
-        # Load saved checksums
+        # Load saved checksums.  The baseline is written UTF-8; without an
+        # explicit encoding Windows reads it as cp1252 and a non-ASCII
+        # filename inside the image kills the whole scan.
         saved = {}
-        with open(checksums_file, 'r') as f:
+        with open(checksums_file, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -10028,9 +10030,9 @@ def export_mod_pack(assets_folder, output_zip, log_cb=None, progress_cb=None):
             "No fl_decrypted.dat found in the assets folder.\n"
             "Run Decrypt first to generate the file list.")
 
-    # Load saved checksums
+    # Load saved checksums (UTF-8 like the writer, not the platform default)
     saved = {}
-    with open(checksums_file, 'r') as f:
+    with open(checksums_file, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
             line = line.strip()
             if not line:

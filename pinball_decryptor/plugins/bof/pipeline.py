@@ -343,7 +343,7 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         raise FileNotFoundError(f"No {CHECKSUMS_FILE} found in {assets_folder}")
 
     baseline = {}
-    with open(checksums_file, "r") as f:
+    with open(checksums_file, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if "\t" in line:

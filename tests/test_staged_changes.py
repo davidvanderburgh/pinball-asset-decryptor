@@ -99,11 +99,28 @@ def test_dropped_assignments_reports_both_reasons(tmp_path):
     dropped = staged_changes.dropped_assignments(saved, slots)
     by_rel = {rel: (path, why) for rel, path, why in dropped}
     assert set(by_rel) == {"b.wav", "audio/gone.wav"}
-    assert "missing" in by_rel["b.wav"][1]
+    assert "no longer in its folder" in by_rel["b.wav"][1]
     assert "slot" in by_rel["audio/gone.wav"][1]
     # live + dropped together cover every real (non-empty) saved entry
     live = staged_changes.live_assignments(saved, slots)
     assert set(live) | set(by_rel) == set(saved)
+
+
+def test_dropped_assignments_distinguishes_moved_from_disconnected(tmp_path):
+    """Batch 24: monkeybug read "NAS/drive disconnected?" as the app failing
+    to load a clip while his NAS was connected the whole time — the file had
+    simply been renamed.  A reachable parent folder proves the drive is fine,
+    so the two cases get different words."""
+    saved = {
+        "a.wav": str(tmp_path / "renamed_away.wav"),      # folder reachable
+        "b.wav": str(tmp_path / "no_such_dir" / "x.wav"),  # folder gone too
+    }
+    slots = {"a.wav": object(), "b.wav": object()}
+    by_rel = {rel: why for rel, _p, why in
+              staged_changes.dropped_assignments(saved, slots)}
+    assert "moved, renamed or deleted" in by_rel["a.wav"]
+    assert "disconnected" not in by_rel["a.wav"]
+    assert "NAS/drive disconnected" in by_rel["b.wav"]
 
 
 def test_dropped_assignments_skips_empty_entries(tmp_path):

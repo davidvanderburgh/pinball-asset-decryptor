@@ -51,7 +51,7 @@ def test_right_container_but_undecodable_codec_is_flagged(monkeypatch):
     _probe(monkeypatch, _rep(codec="prores"))
     got = MainWindow._video_conv_mode(_slot(".mov"), "/x/attract.mov",
                                       no_conversion=True, trim=False)
-    assert got == "✗ won't play"
+    assert got == "✗ wrong format"
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -63,7 +63,7 @@ def test_other_undecodable_shapes_are_flagged(monkeypatch, kwargs):
     _probe(monkeypatch, _rep(**kwargs))
     assert MainWindow._video_conv_mode(
         _slot(".mov"), "/x/attract.mov",
-        no_conversion=True, trim=False) == "✗ won't play"
+        no_conversion=True, trim=False) == "✗ wrong format"
 
 
 def test_a_real_drop_in_still_reads_as_as_is(monkeypatch):
@@ -131,7 +131,7 @@ def test_a_black_picture_outranks_the_audio_note(monkeypatch):
     rep.has_audio = True
     _probe(monkeypatch, rep)
     assert MainWindow._video_conv_mode(
-        slot, "/x/a.mov", no_conversion=True, trim=False) == "✗ won't play"
+        slot, "/x/a.mov", no_conversion=True, trim=False) == "✗ wrong format"
 
 
 # ---------------------------------------------------------------------------

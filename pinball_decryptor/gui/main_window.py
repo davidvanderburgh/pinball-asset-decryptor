@@ -1385,6 +1385,10 @@ class MainWindow:
         # row.  Session-only (not persisted) — it is a thing you switch on to
         # listen through a card, not a preference.
         self.audio_play_through_var = tk.BooleanVar(value=False)
+        # Play-through plays the replacement instead of the original wherever
+        # one exists (batch 24: monkeybug auditioning the whole card to catch
+        # the clips he still meant to replace).
+        self.audio_play_subst_var = tk.BooleanVar(value=False)
         self.audio_status_var = tk.StringVar(value="")
         self._audio_slots = []           # list[AudioSlot] from last scan
         self._audio_slots_by_rel = {}    # rel_path -> AudioSlot
@@ -1429,6 +1433,9 @@ class MainWindow:
         # ffprobe of the replacement, so it's resolved on a background pass
         # (_video_probe_conv_async) and cached until a pick or flag changes.
         self._video_conv_cache = {}
+        # (scan_dir, rel) pairs already given their "this slot holds an
+        # unplayable clip" log line, so re-scans don't repeat it all session.
+        self._video_unplayable_warned = set()
         self._video_conv_pass_id = 0
         # Preview players: Original + Replacement side-by-side panes
         # (_AudioPreviewPane), built with the tab; None for plugins without it.
@@ -3091,16 +3098,25 @@ class MainWindow:
                 self.transfer_dst_var, self._browse_transfer_dst,
                 self.transfer_dst_ver_var)
         _picker(2, "3. Stock extract of the OLD version (optional):",
-                self.transfer_oldstock_var, self._browse_transfer_oldstock)
+                self.transfer_oldstock_var, self._browse_transfer_oldstock,
+                tip="Not an alternative to field 1, and never in conflict "
+                    "with it: field 1 is where your mods come FROM; this is "
+                    "an unmodified twin of that same version, used only as "
+                    "the reference your old extract is compared against.")
         # Full-width hint (monkeybug batch 22: it was capped at 560px inside a
         # much wider tab) — the responsive wrap tracks the content width.
+        # Batch 24: he read fields 1 and 3 as two ways to provide the same
+        # thing and asked which wins — so the hint now leads with the ROLE
+        # (a clean reference copy), not with what happens when it's empty.
         _oldstock_hint = ttk.Label(
             tf,
-            text="Leave empty to compare your old extract straight "
-                 "against the new one (finds image + video mods). Provide a "
-                 "clean, unmodified extract of the SAME old version to also "
-                 "carry AUDIO and TEXT and to avoid mistaking the factory's "
-                 "own between-version changes for your mods.",
+            text="A clean, unmodified extract of the SAME old version as "
+                 "field 1 — used only as a reference to compare field 1 "
+                 "against, so the factory's own between-version changes "
+                 "aren't mistaken for your mods, and AUDIO and TEXT mods "
+                 "can be carried too. Leave empty to compare your old "
+                 "extract straight against the new one (finds image + "
+                 "video mods).",
             font=(_SANS_FONT, 8, "italic"), justify=tk.LEFT)
         _oldstock_hint.grid(row=3, column=1, columnspan=3,
                             sticky=tk.EW, padx=6, pady=(0, 4))
@@ -3398,7 +3414,9 @@ class MainWindow:
         # user should worry about); the buttons are Stern-only
         # (apply_manufacturer hides them elsewhere).
         self._audio_opts_row = ttk.Frame(f)
-        self._audio_opts_row.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(4, 4))
+        # padx 10, not 12: lines the checkboxes up with the preview frame and
+        # the Project Folder / Search rows above (batch 24).
+        self._audio_opts_row.pack(anchor=tk.W, fill=tk.X, padx=10, pady=(4, 4))
         self._audio_trim_cb = ttk.Checkbutton(
             self._audio_opts_row,
             text="Trim / pad replacements to the original slot length",
@@ -3420,6 +3438,20 @@ class MainWindow:
                  "showing.\n\nStops at the end of the list, and any ■ (or "
                  "clicking another row) stops it.",
                  lambda: self._current_theme)
+        # Batch 24: audition the card as it will be BUILT — rows with a
+        # replacement play the replacement, the rest play the original, so a
+        # clip that still sounds stock is one he forgot to replace.
+        self._audio_play_subst_cb = ttk.Checkbutton(
+            self._audio_opts_row, text="Substitute replacements",
+            variable=self.audio_play_subst_var)
+        self._audio_play_subst_cb.pack(side=tk.LEFT, padx=(18, 0))
+        _Tooltip(self._audio_play_subst_cb,
+                 "While playing through the list, a row that has a "
+                 "replacement (picked now, or already changed on disk) plays "
+                 "the replacement instead of the original — the whole list "
+                 "sounds the way the built card will.\n\nSo anything that "
+                 "still sounds stock is a clip you haven't replaced yet.",
+                 lambda: self._current_theme)
         # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
         # encode overrides + a stock characterization report.
         self._audio_adv_btn = ttk.Button(
@@ -3430,7 +3462,10 @@ class MainWindow:
                  "head/tail block handling and the anti-pop codec seed — plus "
                  "machine-render preview WAVs on Build.\n\nThese are levers "
                  "for chasing clicks heard on the real machine. Defaults "
-                 "match the standard behavior.",
+                 "match the standard behavior.\n\nA * on the button means at "
+                 "least one option is currently OFF its default (they persist "
+                 "between sessions) — open the dialog to see which, or to set "
+                 "everything back.",
                  lambda: self._current_theme)
         self._audio_profile_btn = ttk.Button(
             self._audio_opts_row, text="Profile vs stock", width=15,
@@ -3576,7 +3611,8 @@ class MainWindow:
             self._audio_assignments = staged_changes.live_assignments(
                 staged.get("audio"), self._audio_slots_by_rel)
             self._warn_dropped_assignments(
-                "audio", staged.get("audio"), self._audio_slots_by_rel)
+                "audio", staged.get("audio"), self._audio_slots_by_rel,
+                scan_dir)
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
@@ -4926,6 +4962,11 @@ class MainWindow:
                 "Replace Audio: played through to the end of the list.",
                 "info")
             return
+        # "Substitute replacements": per-row side — the replacement wherever
+        # one exists, the original elsewhere — instead of sticking to the
+        # side the user started on (batch 24).
+        if self.audio_play_subst_var.get():
+            side = "rep" if self._audio_rep_available(nxt) else "orig"
 
         def _advance():
             # Selecting the row drives the usual debounced preview load, so
@@ -4982,6 +5023,23 @@ class MainWindow:
         else:
             self._audio_pane_orig.clear()
         self._audio_load_rep_pane(rel, autoplay=(autoplay == "rep"))
+
+    def _audio_rep_available(self, rel):
+        """Whether the Replacement pane would have something to play for
+        *rel* — a live assignment, or a slot already changed on disk whose
+        on-disk file IS the replacement.  Mirrors _audio_load_rep_pane's
+        branches, so play-through's "Substitute replacements" never lands on
+        an empty pane (which would end the run early)."""
+        from ..core import staged_originals
+        rpath = self._audio_assignments.get(rel)
+        if rpath and os.path.isfile(rpath):
+            return True
+        if rel in self._audio_changed_on_disk and staged_originals \
+                .snapshot_path(self._audio_scan_dir, rel):
+            slot = self._audio_slots_by_rel.get(rel)
+            return bool(slot and slot.abs_path
+                        and os.path.isfile(slot.abs_path))
+        return False
 
     def _audio_load_rep_pane(self, rel, autoplay=False):
         """(Re)load the Replacement pane for *rel* — after a track change or
@@ -5385,7 +5443,8 @@ class MainWindow:
         # exactly what a longer label made obvious (David).  Beneath the panes
         # the labels can say what they mean without crowding the video.
         self._video_opts_row = ttk.Frame(f)
-        self._video_opts_row.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(4, 4))
+        # padx 10, not 12: same alignment fix as the audio tab (batch 24).
+        self._video_opts_row.pack(anchor=tk.W, fill=tk.X, padx=10, pady=(4, 4))
 
         # This applies to EVERY replacement, not to the slot on screen — it sat
         # beside the preview, which read as per-clip, and monkeybug thought
@@ -5407,7 +5466,7 @@ class MainWindow:
             "already be the clip's container, codec, resolution and frame "
             "rate. Lossless and fast, but the file has to be game-ready — a "
             "clip the machine can't decode plays its sound over a black "
-            "picture, and the Convert column says \"✗ won't play\" when it "
+            "picture, and the Convert column says \"✗ wrong format\" when it "
             "can see that coming.\n\nOff: anything that isn't already a match "
             "is converted to suit the slot, at full size — and a clip that is "
             "already this slot's video in the wrong container is repackaged "
@@ -5506,6 +5565,61 @@ class MainWindow:
                     % (name, info.profile, sinfo.profile))
         return None
 
+    def _slot_unplayable(self, slot):
+        """Whether the slot's CURRENT on-disk clip is a format the machine
+        can't decode — i.e. an earlier as-is build already baked in ProRes /
+        HEVC / 10-bit (the pick-time gate only arrived in v0.95).  Monkeybug
+        had exactly this: his ProRes attract went on as-is before the gate
+        existed, and afterwards nothing anywhere pointed at the slots he
+        needed to redo (batch 24: "there are other files labelled as MOV
+        Prores ... I will need to go back and adjust them").
+
+        Stern-only: the H.264 / 8-bit 4:2:0 ceiling is a Spike 2 VPU fact
+        (census: 2251 stock clips across five titles, H.264 every one), so a
+        stock folder can never trip it.  Other manufacturers' machines decode
+        more, so no claim is made for them."""
+        if getattr(self._current_mfr, "key", "") != "stern":
+            return None
+        info = getattr(slot, "info", None)
+        if info is None:
+            return None
+        from ..core import video as _video
+        if _video.backend_for(slot.abs_path) is not None:
+            return None
+        codec = (info.vcodec or "").lower()
+        if codec and codec != "h264":
+            return "is %s and the machine plays H.264" % codec.upper()
+        pix = info.pix_fmt or ""
+        if pix and pix not in _video.SAFE_PIX_FMTS:
+            return ("is %s and the machine's decoder handles only 8-bit "
+                    "4:2:0" % pix)
+        return None
+
+    def _video_fmt_cell(self, slot):
+        """The Format column's text for a slot: its format summary, plus a ⚠
+        when the clip sitting in the slot right now is one the machine can't
+        play (see _slot_unplayable).  The ⚠ is explained by a log line the
+        metadata probe emits when it lands."""
+        s = slot.format_summary()
+        return (s + "  ⚠") if self._slot_unplayable(slot) else s
+
+    def _warn_unplayable_slot(self, rel, slot):
+        """One red log line (per folder+slot per session) for a slot whose
+        current clip the machine can't decode, so the user can find every
+        slot that needs redoing instead of spotting ⚠ rows by scrolling."""
+        why = self._slot_unplayable(slot)
+        if not why:
+            return
+        key = (self._video_scan_dir, rel)
+        if key in self._video_unplayable_warned:
+            return
+        self._video_unplayable_warned.add(key)
+        self.append_log(
+            'Video slot "%s" currently holds a clip that %s — on the machine '
+            'it will play its sound over a black picture. Assign a good '
+            'replacement (or revert the slot) before building.' % (rel, why),
+            "error")
+
     @staticmethod
     def _video_extra_audio(slot, path):
         """Why *path*'s soundtrack is a problem for *slot*, or None.
@@ -5541,7 +5655,10 @@ class MainWindow:
     # the machine can't play it, or Write would refuse it outright.  The column
     # used to go BLANK for both, which is why 27 of monkeybug's 29 rows said
     # nothing at all and he asked why only one was "As-is" (batch 23).
-    _VIDEO_CONV_REJECT = "✗ won't play"
+    # Worded "wrong format", not "won't play": the file itself is perfectly
+    # playable on a PC, it is its FORMAT the machine's decoder can't take —
+    # "won't play" read as "the file is corrupt" (batch 24).
+    _VIDEO_CONV_REJECT = "✗ wrong format"
     _VIDEO_CONV_WRONG_TYPE = "✗ needs %s"
     # Goes on as-is and the picture is right, but it brings a soundtrack the
     # slot's own clip doesn't have and the machine will play it.
@@ -5599,9 +5716,20 @@ class MainWindow:
         return ""
 
     def _video_conv_key(self, rel, path):
-        """Cache key for a row's Convert answer — it changes with the pick and
-        with either option flag."""
-        return (rel, path, bool(self.video_no_conversion_var.get()),
+        """Cache key for a row's Convert answer — it changes with the pick,
+        with either option flag, and with the picked FILE's bytes (size +
+        mtime).  The last part is what lets a re-export under the same name
+        get a fresh verdict: monkeybug re-exported his ProRes pick as H.264
+        over the same .mov and the column kept serving the old file's
+        "✗ won't play" — through re-picks and re-scans — because nothing in
+        the key had changed (batch 24)."""
+        try:
+            st = os.stat(path)
+            ident = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            ident = (0, 0)
+        return (rel, path, ident,
+                bool(self.video_no_conversion_var.get()),
                 bool(self.video_trim_var.get()))
 
     def _video_conv_cached(self, rel, path):
@@ -5625,20 +5753,23 @@ class MainWindow:
         pass_id = self._video_conv_pass_id
         no_conv = bool(self.video_no_conversion_var.get())
         trim = bool(self.video_trim_var.get())
-        pending = [(rel, path) for rel, path
-                   in sorted(self._video_assignments.items())
-                   if self._video_conv_key(rel, path)
-                   not in self._video_conv_cache]
+        # Keys are built HERE (main thread) via _video_conv_key so they carry
+        # the picked file's size+mtime — the worker must store its answer
+        # under the same key the repaint will look up.
+        pending = [(self._video_conv_key(rel, path), rel, path)
+                   for rel, path in sorted(self._video_assignments.items())]
+        pending = [p for p in pending if p[0] not in self._video_conv_cache]
         if not pending:
             return
-        slots = {rel: self._video_slots_by_rel.get(rel) for rel, _p in pending}
+        slots = {rel: self._video_slots_by_rel.get(rel)
+                 for _k, rel, _p in pending}
 
         def _work():
             out = []
-            for rel, path in pending:
+            for key, rel, path in pending:
                 if self._video_conv_pass_id != pass_id:
                     return
-                out.append(((rel, path, no_conv, trim),
+                out.append((key,
                             self._video_conv_mode(slots.get(rel), path,
                                                   no_conv, trim)))
             try:
@@ -5841,7 +5972,8 @@ class MainWindow:
             self._video_assignments = staged_changes.live_assignments(
                 staged.get("video"), self._video_slots_by_rel)
             self._warn_dropped_assignments(
-                "video", staged.get("video"), self._video_slots_by_rel)
+                "video", staged.get("video"), self._video_slots_by_rel,
+                scan_dir)
             if "video_trim" in staged:
                 self.video_trim_var.set(bool(staged["video_trim"]))
             if "video_no_conversion" in staged:
@@ -5891,6 +6023,9 @@ class MainWindow:
             return
         slot.info = info
         slot.probed = True
+        # A baked-in unplayable clip is worth a log line even when the row is
+        # filtered out of view right now.
+        self._warn_unplayable_slot(rel, slot)
         tree = getattr(self, "_video_tree", None)
         if tree is None or not tree.exists(rel):
             return
@@ -5902,7 +6037,7 @@ class MainWindow:
         else:
             rep_disp = "Choose…"
         tree.item(rel, values=(slot.duration_str(), slot.resolution_str(),
-                               slot.format_summary(),
+                               self._video_fmt_cell(slot),
                                slot.info.audio_summary() if slot.info else "",
                                rep_disp, self._video_conv_cached(rel, rep)))
 
@@ -5966,7 +6101,7 @@ class MainWindow:
                 length, res = s.duration_str(), s.resolution_str()
                 aud = s.info.audio_summary() if s.info else ""
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
-                        values=(length, res, s.format_summary(), aud,
+                        values=(length, res, self._video_fmt_cell(s), aud,
                                 rep_disp,
                                 self._video_conv_cached(s.rel_path, rep)),
                         tags=(tag,) if tag else ())
@@ -6018,7 +6153,7 @@ class MainWindow:
                     rep = self._video_assignments.get(rel, "")
                     w.writerow([
                         rel, s.duration_str(), s.resolution_str(),
-                        s.format_summary(),
+                        self._video_fmt_cell(s),
                         s.info.audio_summary() if s.info else "",
                         rep,
                         self._video_conv_cache.get(
@@ -6921,7 +7056,8 @@ class MainWindow:
             self._image_assignments = staged_changes.live_assignments(
                 staged.get("image"), self._image_slots_by_rel)
             self._warn_dropped_assignments(
-                "image", staged.get("image"), self._image_slots_by_rel)
+                "image", staged.get("image"), self._image_slots_by_rel,
+                scan_dir)
             if "image_changed_only" in staged:
                 self.image_changed_only_var.set(
                     bool(staged["image_changed_only"]))
@@ -7957,24 +8093,42 @@ class MainWindow:
         from ..core import staged_changes
         return staged_changes.load(assets_dir)
 
-    def _warn_dropped_assignments(self, kind, saved, slots_by_rel):
+    def _warn_dropped_assignments(self, kind, saved, slots_by_rel, scan_dir):
         """Log the sidecar assignments a restore had to drop (slot gone, or
         replacement source file unreachable), so a disconnected NAS drive or a
         re-extract that renamed slots doesn't silently read as "nothing
         assigned" (monkeybug).  The sidecar keeps the entries until the user
         changes an assignment, so fixing the cause and re-scanning restores
-        them."""
-        from ..core import staged_changes
+        them.
+
+        A slot that was already changed on disk (it has a .orig snapshot) gets
+        a calm info line instead of red: the replacement IS in the project
+        folder — losing track of the source file it was made from only matters
+        for a re-apply (batch 24: monkeybug read the red line as a clip that
+        "cannot be loaded from my NAS", while it played fine, because the
+        change itself was long since applied)."""
+        from ..core import staged_changes, staged_originals
         dropped = staged_changes.dropped_assignments(saved, slots_by_rel)
         if not dropped:
             return
+        any_pending = False
         for rel, path, why in dropped[:6]:
-            self.append_log(
-                'Saved %s replacement for "%s" wasn\'t restored — %s:\n'
-                '        %s' % (kind, rel, why, path), "error")
+            if staged_originals.snapshot_path(scan_dir, rel):
+                self.append_log(
+                    'Note: "%s" already holds its %s replacement (changed on '
+                    'disk) — nothing is lost.  But the source file it was '
+                    'made from wasn\'t found (%s), so it can\'t be '
+                    're-applied until it\'s re-picked:\n        %s'
+                    % (rel, kind, why, path), "info")
+            else:
+                any_pending = True
+                self.append_log(
+                    'Saved %s replacement for "%s" wasn\'t restored — %s:\n'
+                    '        %s' % (kind, rel, why, path), "error")
         if len(dropped) > 6:
             self.append_log("…and %d more saved %s replacement(s) like this."
-                            % (len(dropped) - 6, kind), "error")
+                            % (len(dropped) - 6, kind),
+                            "error" if any_pending else "info")
 
     def _seed_group_tags_from_library(self, scan_dir):
         """Fill in group names the user gave a PREVIOUS extract of this same
@@ -8338,7 +8492,20 @@ class MainWindow:
                 == os.path.normcase(os.path.normpath(assets_dir)))
 
         data = staged_changes.load(assets_dir)
+        # Every pick/re-pick/clear (and build-shaping toggle flip) also lands
+        # in the folder's own append-only .history.log with the old and new
+        # source, so "changed on disk" months later still says what it was
+        # changed WITH (batch 24).  The diff is against the sidecar being
+        # replaced — the same data, so no extra I/O beyond one append.
+        from ..core import history_log
+        hist = []
         if _live(self._audio_scan_dir):
+            hist += history_log.diff_assignments(
+                "audio", data.get("audio"), self._audio_assignments)
+            hist.append(history_log.diff_scalar(
+                'audio  option "Trim / pad replacements to the original '
+                'slot length"',
+                data.get("audio_trim"), bool(self.audio_trim_var.get())))
             data["audio"] = dict(self._audio_assignments)
             data["audio_loop"] = dict(self._audio_loop_flags)
             data["audio_keep"] = dict(self._audio_keep_full_flags)
@@ -8346,6 +8513,15 @@ class MainWindow:
             data["audio_changed_only"] = bool(
                 self.audio_changed_only_var.get())
         if _live(self._video_scan_dir):
+            hist += history_log.diff_assignments(
+                "video", data.get("video"), self._video_assignments)
+            hist.append(history_log.diff_scalar(
+                'video  option "Trim / pad to the original clip length"',
+                data.get("video_trim"), bool(self.video_trim_var.get())))
+            hist.append(history_log.diff_scalar(
+                'video  option "Use my files as-is — never re-encode"',
+                data.get("video_no_conversion"),
+                bool(self.video_no_conversion_var.get())))
             data["video"] = dict(self._video_assignments)
             data["video_trim"] = bool(self.video_trim_var.get())
             data["video_no_conversion"] = bool(
@@ -8353,6 +8529,8 @@ class MainWindow:
             data["video_changed_only"] = bool(
                 self.video_changed_only_var.get())
         if _live(self._image_scan_dir):
+            hist += history_log.diff_assignments(
+                "image", data.get("image"), self._image_assignments)
             data["image"] = dict(self._image_assignments)
             data["image_changed_only"] = bool(
                 self.image_changed_only_var.get())
@@ -8373,6 +8551,7 @@ class MainWindow:
             except Exception:
                 pass
         staged_changes.save(assets_dir, data)
+        history_log.record(assets_dir, [h for h in hist if h])
         # Batch 19 anchor materialization: a staged change is the app
         # writing state into the folder, which is exactly when a folder
         # becomes a project (same rule as extract — never on read-only
@@ -10873,6 +11052,37 @@ class MainWindow:
         elif "high_scores" in data:
             del data["high_scores"]
         staged_changes.save(assets_dir, data)
+        # Project history (batch 24): staged default-settings edits, with the
+        # previous staged value where one existed.
+        from ..core import history_log
+        hist = []
+        for k in sorted(set(before) | set(new)):
+            o, n = before.get(k), new.get(k)
+            if o == n:
+                continue
+            if n is None:
+                hist.append("defaults  %s  un-staged (back to the card's "
+                            "default, was staged: %s)" % (k, o))
+            elif o is None:
+                hist.append("defaults  %s  staged: %s" % (k, n))
+            else:
+                hist.append("defaults  %s  staged: %s  (was staged: %s)"
+                            % (k, n, o))
+        def _hs(d):
+            return ", ".join("%s=%s" % kv for kv in sorted(
+                (d or {}).items()))
+        for k in sorted(set(before_hs) | set(hstd)):
+            o, n = before_hs.get(k), hstd.get(k)
+            if o == n:
+                continue
+            if n is None:
+                hist.append("defaults  high score %s  un-staged  (was: %s)"
+                            % (k, _hs(o)))
+            else:
+                hist.append("defaults  high score %s  staged: %s%s"
+                            % (k, _hs(n),
+                               ("  (was: %s)" % _hs(o)) if o else ""))
+        history_log.record(assets_dir, hist)
         # Staged settings are folder state too — see _save_staged_changes.
         if self._on_folder_state_written:
             self._on_folder_state_written(assets_dir)
@@ -11926,6 +12136,7 @@ class MainWindow:
                 % (new, self._text_byte_len(new), self._text_byte_len(orig)))
             return
         eff = "" if new == orig else new       # new == orig => unchanged
+        prev = r.get("replacement") or ""
         if self.text_apply_all_var.get():
             targets = [rr for rr in self._text_rows if rr["original"] == orig]
         else:
@@ -11933,6 +12144,18 @@ class MainWindow:
         for rr in targets:
             rr["replacement"] = eff
         self._save_text_manifest()
+        # Project history (batch 24): full strings, not ellipsized — the file
+        # is for grepping months later.
+        if eff != prev:
+            from ..core import history_log
+            copies = ("  (%d copies)" % len(targets)
+                      if len(targets) > 1 else "")
+            was = ('  (was: "%s")' % prev) if prev else ""
+            history_log.record(
+                self._text_scan_dir,
+                ('text  "%s"  changed to: "%s"%s%s' % (orig, eff, was, copies))
+                if eff else
+                ('text  "%s"  reverted to original%s%s' % (orig, was, copies)))
         if eff:
             self.append_log(
                 'Replace Text: "%s" → "%s"%s'
@@ -11958,6 +12181,7 @@ class MainWindow:
         except (ValueError, IndexError):
             return
         orig = r["original"]
+        prev = r.get("replacement") or ""
         if self.text_apply_all_var.get():
             targets = [rr for rr in self._text_rows if rr["original"] == orig]
         else:
@@ -11965,6 +12189,13 @@ class MainWindow:
         for rr in targets:
             rr["replacement"] = ""
         self._save_text_manifest()
+        if prev:
+            from ..core import history_log
+            history_log.record(
+                self._text_scan_dir,
+                'text  "%s"  reverted to original  (was: "%s")%s'
+                % (orig, prev,
+                   "  (%d copies)" % len(targets) if len(targets) > 1 else ""))
         self.append_log(
             'Replace Text: reverted "%s"%s'
             % (self._ellipsize(orig),
@@ -15611,7 +15842,40 @@ class MainWindow:
         menu.add_separator()
         _entry("Properties…", self._on_project_properties,
                enabled=have_project)
+        _entry("Change history…", self._open_change_history,
+               enabled=have_project)
         return menu
+
+    def _open_change_history(self):
+        """Project ▾ → Change history…: open the project folder's append-only
+        change record (core.history_log) in the OS's text viewer.  Every
+        replacement pick/re-pick/clear (with the previous source file), text
+        edit, staged default, build and revert lands there with a date+time —
+        so "changed on disk" months later still says what it was changed with
+        (batch 24)."""
+        from ..core import history_log
+        assets_dir = (self.write_assets_var.get() or "").strip()
+        if not assets_dir:
+            return
+        path = history_log.path_for(assets_dir)
+        if not os.path.isfile(path):
+            messagebox.showinfo(
+                "Change history",
+                "Nothing recorded for this folder yet.\n\nFrom now on, every "
+                "replacement pick (with what it replaced), text edit, staged "
+                "default, build and revert is appended with a timestamp "
+                "to:\n\n%s" % path)
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except OSError as e:
+            messagebox.showerror(
+                "Change history", "Couldn't open %s:\n%s" % (path, e))
 
     def _build_settings_menu(self):
         """Construct the ⚙ dropdown.

@@ -114,7 +114,12 @@ HELP_CONTENT = {
          "so you can listen through a whole card without clicking each row. "
          "It stops at the end of the list, and pressing ■ or clicking another "
          "row stops it. Anything you notice on the way is already selected, "
-         "so hit F2 or right-click it there and then."),
+         "so hit F2 or right-click it there and then.\n\nTick \"Substitute "
+         "replacements\" as well and every row that has a replacement "
+         "(picked now, or already changed on disk) plays the replacement "
+         "instead of the original — the list sounds the way the built card "
+         "will, so anything that still sounds stock is a clip you haven't "
+         "replaced yet."),
         ("Undo",
          "Right-click a slot: \"Remove replacement\" cancels an un-built "
          "assignment; \"Revert to original\" restores an already-changed "
@@ -240,7 +245,7 @@ HELP_CONTENT = {
          "the only one of the three that costs any quality. With \"Use my "
          "files as-is\" on you may "
          "also see \"✗ needs .mov\" (the build would refuse a different "
-         "container) or \"✗ won't play\" (it would be copied on untouched, "
+         "container) or \"✗ wrong format\" (it would be copied on untouched, "
          "but the machine can't decode it, so it would play its sound over a "
          "black picture) — untick the box for those and they get converted "
          "instead. The answer is worked out in the background, so a row can "
@@ -457,7 +462,14 @@ HELP_CONTENT = {
          "your Replace edits from an older firmware's extract onto a new "
          "version's extract. Audio is matched by content signature, so it "
          "survives renumbered slots and renamed files; anything that can't "
-         "be matched is reported instead of silently dropped."),
+         "be matched is reported instead of silently dropped.\n\nFields 1 "
+         "and 3 are never alternatives, and neither takes priority: field 1 "
+         "(your old extract) is where your mods come FROM and is always "
+         "required; field 3 is an optional clean, unmodified twin of that "
+         "same old version, used only as the reference your old extract is "
+         "compared against — with it, the factory's own between-version "
+         "changes aren't mistaken for your mods, and audio + text mods can "
+         "be carried too."),
     ],
     "Partition Explorer": [
         ("What it's for",
@@ -652,6 +664,13 @@ GENERAL_CONTENT = [
     ("Recent paths",
      "Every file/folder box keeps a per-manufacturer history — open its "
      "dropdown to reuse a recent path."),
+    ("Change history",
+     "Every replacement pick (with the file it replaced), text edit, staged "
+     "default, build and revert is appended with a date and time to a "
+     ".history.log file at the root of the project folder — so months later "
+     "a slot that says \"changed on disk\" still tells you what it was "
+     "changed with, and from where. Open it from Project ▾ → "
+     "\"Change history…\"; it's plain text, so it greps and diffs fine too."),
     ("The log",
      "The progress dots and log at the bottom mirror every operation; "
      "right-click the log to copy text for a bug report."),

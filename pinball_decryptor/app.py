@@ -2436,6 +2436,11 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            from .core import history_log
+            history_log.record(assets_dir,
+                               "audio  applied %d of %d replacement(s) to "
+                               "the project folder (build)"
+                               % (staged, len(assignments)))
             return (len(assignments), staged,
                     [(f"audio: {rel}", err) for rel, err in failures])
         except Exception as e:
@@ -2472,6 +2477,11 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            from .core import history_log
+            history_log.record(assets_dir,
+                               "video  applied %d of %d replacement(s) to "
+                               "the project folder (build)"
+                               % (staged, len(assignments)))
             return (len(assignments), staged,
                     [(f"video: {rel}", err) for rel, err in failures])
         except Exception as e:
@@ -2502,6 +2512,11 @@ class App:
                 + (f"  {len(failures)} could not be converted (see above)."
                    if failures else ""),
                 "success" if not failures else "error"))
+            from .core import history_log
+            history_log.record(assets_dir,
+                               "image  applied %d of %d replacement(s) to "
+                               "the project folder (build)"
+                               % (staged, len(assignments)))
             return (len(assignments), staged,
                     [(f"image: {rel}", err) for rel, err in failures])
         except Exception as e:
@@ -2563,6 +2578,11 @@ class App:
         self.window.begin_revert_view()
 
         # 1) Clear the in-memory + on-disk assignment state and text edits.
+        from .core import history_log
+        history_log.record(
+            assets_dir,
+            "revert  all staged replacements/edits cleared and every "
+            "modified file restored to the extract's original")
         self.window.clear_replace_assignments(assets_dir)
         try:
             text_manifest.revert_all(assets_dir)

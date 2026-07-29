@@ -82,6 +82,13 @@ def dropped_assignments(saved, slots_by_rel):
     A disconnected NAS share / mapped drive looks exactly like a missing
     source file, so callers must WARN with these instead of quietly building
     or exporting without a recorded replacement (monkeybug).
+
+    The two missing-file cases get different words (batch 24: monkeybug read
+    "NAS/drive disconnected?" as the app failing to load a clip that was fine):
+    when the file's own folder still answers, the drive is clearly connected —
+    the file itself was moved, renamed or deleted since it was picked.  Only
+    when the folder doesn't answer either is a disconnected share the likely
+    story.
     """
     out = []
     for rel, path in (saved or {}).items():
@@ -90,6 +97,12 @@ def dropped_assignments(saved, slots_by_rel):
         if rel not in slots_by_rel:
             out.append((rel, path, "its slot isn't in this folder"))
         elif not os.path.isfile(path):
-            out.append((rel, path, "the replacement file is missing "
-                                   "(NAS/drive disconnected?)"))
+            if os.path.isdir(os.path.dirname(path) or "."):
+                out.append((rel, path,
+                            "the file is no longer in its folder (moved, "
+                            "renamed or deleted since it was picked)"))
+            else:
+                out.append((rel, path,
+                            "its folder isn't reachable right now "
+                            "(NAS/drive disconnected?)"))
     return out

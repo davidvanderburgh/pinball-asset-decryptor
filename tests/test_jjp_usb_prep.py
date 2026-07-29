@@ -211,7 +211,7 @@ def test_flash_words_jjp_vs_default():
 
     jjp = _flash_words(JJPManufacturer())
     assert jjp["noun"] == "USB stick"
-    assert jjp["target_kind"] == "sd_card"
+    assert jjp["target_kind"] == "usb_stick"
     assert "*.iso" in jjp["filetypes"][0][1]
     assert "format" in jjp["confirm_verb"]
 
@@ -225,6 +225,71 @@ def test_flash_words_jjp_vs_default():
     assert dd["action"] == "flash"
     assert dd["confirm_verb"] == "write the image onto it"
     assert "*.img" in dd["filetypes"][0][1]
+
+
+# ---------------------------------------------------------------------------
+# Drive picking — the format target must never default to an SSD/HDD
+# ---------------------------------------------------------------------------
+
+def _drive(model, gb, bus="USB", path=None):
+    from pinball_decryptor.core.drives import PhysicalDrive
+    return PhysicalDrive(
+        device_path=path or r"\\.\PHYSICALDRIVE9",
+        model=model, size_bytes=int(gb * 1e9), bus_type=bus)
+
+
+def test_usb_stick_pick_prefers_stick_over_ssd():
+    from pinball_decryptor.core.drives import pick_best_game_ssd
+
+    stick = _drive("SanDisk Ultra USB Device", 32, path=r"\\.\PHYSICALDRIVE4")
+    ssd = _drive("Samsung SSD 870 EVO 500GB", 500, path=r"\\.\PHYSICALDRIVE5")
+    best, confidence, _reason = pick_best_game_ssd(
+        [ssd, stick], prefer="usb_stick")
+    assert best is stick
+    assert confidence == "high"
+
+
+def test_usb_stick_pick_refuses_obvious_disks():
+    """Only SSDs/HDDs connected -> nothing is auto-selected, ever."""
+    from pinball_decryptor.core.drives import pick_best_game_ssd
+
+    game_ssd = _drive("WDC WDS240G2G0A SSD", 240,
+                      path=r"\\.\PHYSICALDRIVE3")
+    backup = _drive("Seagate Solid State Drive", 2000,
+                    path=r"\\.\PHYSICALDRIVE6")
+    nvme = _drive("Fast Thing 990", 1000, bus="NVMe",
+                  path=r"\\.\PHYSICALDRIVE7")
+    best, _confidence, reason = pick_best_game_ssd(
+        [game_ssd, backup, nvme], prefer="usb_stick")
+    assert best is None
+    assert "nothing was auto-selected" in reason
+
+
+def test_usb_stick_pick_never_guesses_a_big_external():
+    """A big external with no SSD hint (backup HDD) is still not guessed —
+    stick candidates must be stick-SIZED."""
+    from pinball_decryptor.core.drives import pick_best_game_ssd
+
+    big = _drive("Seagate Backup Plus", 4000, path=r"\\.\PHYSICALDRIVE8")
+    best, _confidence, _reason = pick_best_game_ssd([big],
+                                                    prefer="usb_stick")
+    assert best is None
+
+
+def test_usb_stick_visible_drives_hides_disks_but_never_empties():
+    from pinball_decryptor.core.drives import visible_drives
+
+    stick = _drive("SanDisk Ultra USB Device", 32,
+                   path=r"\\.\PHYSICALDRIVE4")
+    ssd = _drive("Samsung SSD 870 EVO 500GB", 500,
+                 path=r"\\.\PHYSICALDRIVE5")
+    assert visible_drives([stick, ssd], prefer="usb_stick") == [stick]
+    # keep= wins over the filter (the auto-picked best must stay listed).
+    assert ssd in visible_drives([stick, ssd], prefer="usb_stick",
+                                 keep=[ssd])
+    # Filtering must never leave the dropdown empty — a manual pick of an
+    # unrecognised stick stays possible.
+    assert visible_drives([ssd], prefer="usb_stick") == [ssd]
 
 
 def test_linux_partition_node_naming():

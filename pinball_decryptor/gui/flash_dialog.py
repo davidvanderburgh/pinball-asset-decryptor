@@ -428,6 +428,17 @@ class FlashImageDialog:
             self._update_readout()
             return
         self._drive_combo["values"] = [d.display for d in drives]
+        if best is None and prefer == "usb_stick":
+            # The stick picker deliberately selects nothing when every
+            # candidate looks like an SSD/HDD — formatting must never
+            # default to the game SSD or a backup disk (David).  The list
+            # stays available for an explicit manual pick.
+            self._drive_var.set(
+                "(no USB stick detected — pick one, or connect it and "
+                "click Refresh)")
+            self._selected = None
+            self._update_readout()
+            return
         chosen = best if (best and best in drives) else drives[0]
         self._drive_var.set(chosen.display)
         self._selected = chosen

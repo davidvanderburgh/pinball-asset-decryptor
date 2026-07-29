@@ -242,10 +242,11 @@ class JJPManufacturer(Manufacturer):
         "cannot read a raw Etcher/dd-imaged stick). Formatting erases "
         "the stick and needs Administrator.")
     flash_medium_noun = "USB stick"
-    # USB install sticks are small removable media — bias the picker away
-    # from big backup drives and the game SSD (same heuristic Stern uses
-    # for SD cards).
-    flash_target_kind = "sd_card"
+    # USB install sticks are small removable media, and the pick is a
+    # FORMAT target: the strict usb_stick kind never auto-selects a drive
+    # that looks like an SSD/HDD (the game SSD / backup disks) and leaves
+    # the selection empty rather than guess (David).
+    flash_target_kind = "usb_stick"
     flash_safety_text = (
         "⚠ Making an install stick ERASES the USB stick completely. Pick "
         "the right drive — never the game SSD or a backup disk.")

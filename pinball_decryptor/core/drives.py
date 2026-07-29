@@ -327,6 +327,52 @@ def _looks_like_card_reader(d):
     return bool(_CARD_READER_RE.search(d.model or ""))
 
 
+# Model-string hints that a drive is a real disk (solid-state or spinning),
+# not a thumb stick.  On the JJP install-stick workflow the drives sitting
+# next to the stick are exactly the game SSD and backup disks, so anything
+# advertising itself as one must never be the auto-selected format target.
+_DISK_MODEL_RE = re.compile(
+    r'(\bSSD\b|\bNVME\b|SOLID[\s-]?STATE|\bHDD\b|HARD\s*DIS[KC])',
+    re.IGNORECASE)
+
+
+def _looks_like_disk(d):
+    """True if *d* is obviously an SSD/HDD rather than a stick/card."""
+    if d.bus_type.upper() == "NVME":
+        return True
+    return bool(_DISK_MODEL_RE.search(d.model or ""))
+
+
+def _pick_usb_stick(drives, externals):
+    """Auto-pick heuristic for a USB *install stick* (JJP's stick maker).
+
+    Strictest of the kinds, because the pick is a FORMAT target: only a
+    stick-sized external that does not look like an SSD/HDD is ever
+    auto-selected.  When nothing qualifies this returns ``(None, ...)``
+    even though drives exist — the dropdown still lists them for a manual
+    pick, but nothing is pre-selected (David: the stick maker must not
+    default to an obvious SSD).
+    """
+    sticks = [d for d in externals
+              if not _looks_like_disk(d)
+              and d.size_bytes and d.size_bytes <= _SD_CARD_MAX_BYTES]
+    if sticks:
+        best = min(sticks, key=lambda d: d.size_bytes)
+        if len(sticks) == 1:
+            return (best, "high",
+                    f"found one USB-stick-sized drive — using "
+                    f"{best.device_path}")
+        others = [d.device_path for d in sticks if d is not best]
+        return (best, "low",
+                f"several stick-sized drives connected — picked the "
+                f"smallest ({best.device_path}); also seen: "
+                f"{', '.join(others)}")
+    return (None, "low",
+            "no USB stick found — every connected drive is large or looks "
+            "like an SSD/HDD, so nothing was auto-selected. Connect the "
+            "stick and click Refresh, or pick manually.")
+
+
 def _pick_sd_card(drives, externals):
     """Auto-pick heuristic for plugins whose medium is a small SD card.
 
@@ -395,9 +441,19 @@ def visible_drives(drives, prefer="ssd", keep=()):
     only large disks are connected — the full list is returned so the
     user can still pick manually.
     """
+    keep_set = set(keep)
+    if prefer == "usb_stick":
+        # Install-stick targets: additionally hide obvious SSDs/HDDs (the
+        # game SSD / backup disks) — they're format targets here, not
+        # read targets.  Same "never leave the list empty" fallback.
+        sticks = [d for d in drives
+                  if d in keep_set
+                  or (not _looks_like_disk(d)
+                      and (not d.size_bytes
+                           or d.size_bytes <= _SD_CARD_MAX_BYTES))]
+        return sticks or list(drives)
     if prefer != "sd_card":
         return list(drives)
-    keep_set = set(keep)
     small = [d for d in drives
              if d in keep_set
              or not d.size_bytes
@@ -428,6 +484,8 @@ def pick_best_game_ssd(drives, prefer="ssd"):
     # Card readers can present as bus type SD/MMC, not just USB.
     externals = [d for d in drives
                  if d.bus_type.upper() in ("USB", "SD", "MMC")]
+    if prefer == "usb_stick":
+        return _pick_usb_stick(drives, externals)
     if prefer == "sd_card":
         return _pick_sd_card(drives, externals)
 

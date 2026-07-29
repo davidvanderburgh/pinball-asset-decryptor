@@ -16008,7 +16008,20 @@ class MainWindow:
                        else tk.DISABLED))
         menu.add_cascade(label=self._cascade_label(summary),
                          menu=prereq_menu)
+
+        # The first-launch disclaimer, re-readable on demand (David) —
+        # About-style reference material, so it sits last.
+        menu.add_separator()
+        menu.add_command(label="View disclaimer…",
+                         command=self._show_disclaimer)
         return menu
+
+    def _show_disclaimer(self):
+        """Gear "View disclaimer…" — re-open the first-launch terms in
+        review mode (one Close button; nothing to accept or decline)."""
+        from .disclaimer import show_disclaimer_dialog
+        show_disclaimer_dialog(self.root, theme_name=self._current_theme,
+                               review=True)
 
     def _cascade_label(self, label):
         """Cascade-entry label, with a dark-theme arrow glyph appended.

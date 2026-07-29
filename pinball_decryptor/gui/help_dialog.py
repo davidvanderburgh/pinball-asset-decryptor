@@ -654,7 +654,8 @@ GENERAL_CONTENT = [
     ("The ⚙ settings menu",
      "The gear in the top-right collects the app-wide controls: light/dark "
      "theme, update check, disk-space management, voice recognition "
-     "quality, and the prerequisite tools (status, re-check, install)."),
+     "quality, the prerequisite tools (status, re-check, install), and a "
+     "re-readable copy of the first-launch disclaimer (View disclaimer…)."),
     ("Prerequisites",
      "Each manufacturer needs a few tools installed. While anything is "
      "still being checked or missing, a strip under the title lists them: "

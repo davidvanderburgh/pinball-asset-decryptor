@@ -1642,6 +1642,8 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
             "Switch to light theme" in joined
         assert "Check for updates" in joined
         assert "Voice recognition quality" in joined
+        # The accepted disclaimer stays re-readable from the gear (David).
+        assert "View disclaimer…" in joined
         # Prerequisites are a cascade now (monkeybug): the cascade label IS
         # the status summary; the actions live in its submenu.
         assert "1 missing" in joined
@@ -1658,6 +1660,49 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         app._on_back_to_picker()
         app._on_manufacturer_change(manufacturers_by_key["spooky"])
         app.root.update()
+
+
+def test_disclaimer_review_mode(app):
+    """Gear "View disclaimer…" re-opens the accepted terms read-only: one
+    Close button (no I Agree / Quit pair), and closing — here via Esc —
+    returns True, so a re-read can never register as a decline."""
+    from pinball_decryptor.gui.disclaimer import (
+        DISCLAIMER_TITLE, show_disclaimer_dialog)
+
+    seen = {}
+
+    def _probe_and_close():
+        dlg = next((c for c in app.root.winfo_children()
+                    if isinstance(c, _tk_mod.Toplevel)
+                    and c.title() == DISCLAIMER_TITLE), None)
+        if dlg is None:                   # modal not mapped yet — re-arm
+            app.root.after(50, _probe_and_close)
+            return
+        labels, stack = [], [dlg]
+        while stack:
+            wgt = stack.pop()
+            stack.extend(wgt.winfo_children())
+            if isinstance(wgt, _tk_mod.Label):
+                labels.append(wgt.cget("text"))
+        seen["labels"] = labels
+        dlg.event_generate("<Escape>")
+
+        # Failsafe: a regressed Escape binding must fail the test, not
+        # hang the whole run inside wait_window().
+        def _failsafe():
+            if dlg.winfo_exists():
+                seen["hung"] = True
+                dlg.destroy()
+        app.root.after(2000, _failsafe)
+
+    app.root.after(100, _probe_and_close)
+    result = show_disclaimer_dialog(app.root, theme_name="light",
+                                    review=True)
+    assert result is True
+    assert not seen.get("hung"), "Esc did not close the review dialog"
+    assert "Close" in seen["labels"]
+    assert "I Agree" not in seen["labels"]
+    assert "Quit" not in seen["labels"]
 
 
 def test_help_window_singleton_and_tab_refresh(app, manufacturers_by_key):

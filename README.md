@@ -139,7 +139,9 @@ first time you launch it, including a request to **not contact the
 manufacturer's support team** about issues that may have been caused by
 modified code — revert to stock firmware before opening a ticket, and
 disclose any past modifications. The acceptance is stored in
-`settings.json` and survives app updates; you only see the dialog once.
+`settings.json` and survives app updates; you're only asked to accept
+once, and the full text stays re-readable any time via the ⚙ settings
+menu → **View disclaimer…**.
 
 ## Supported manufacturers
 

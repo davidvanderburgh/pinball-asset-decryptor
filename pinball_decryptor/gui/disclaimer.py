@@ -7,6 +7,11 @@ versioned, so reinstalls and version bumps do not re-prompt.
 
 The user must click "I Agree" to proceed; declining or closing the
 dialog returns False so the caller can exit cleanly.
+
+After acceptance the same text stays reachable from the settings gear
+("View disclaimer…"), which re-opens this dialog in ``review`` mode:
+one Close button, and every way out — Close, Esc, Enter, the X — just
+closes it.  Nothing is re-accepted or revoked.
 """
 
 import tkinter as tk
@@ -62,11 +67,16 @@ DISCLAIMER_BODY = (
 )
 
 
-def show_disclaimer_dialog(parent, theme_name="light"):
+def show_disclaimer_dialog(parent, theme_name="light", review=False):
     """Show a blocking modal disclaimer dialog.
 
     Returns True if the user clicked "I Agree".  Returns False if they
     clicked "Quit" or closed the window — caller should exit.
+
+    With ``review=True`` (settings gear → "View disclaimer…", after the
+    terms were already accepted) the accept/decline pair is replaced by
+    a single Close button and the return value is always True — closing
+    a re-read must never register as a decline.
     """
     theme = THEMES.get(theme_name) or THEMES["light"]
     sans_font, _ = platform_font()
@@ -136,27 +146,44 @@ def show_disclaimer_dialog(parent, theme_name="light"):
         lbl.bind("<Leave>", lambda _e: lbl.configure(bg=bg))
         return lbl
 
-    # Quit on the right, primary action ("I Agree") to its right so it's
-    # the rightmost button — matches the OK-on-right Windows/Linux convention.
-    _make_button(
-        "Quit", _decline,
-        bg=theme["button"], fg=theme["fg"], hover_bg=theme["border"],
-    ).pack(side="right", padx=(8, 0))
+    if review:
+        # Post-acceptance re-read: nothing to accept or decline, so one
+        # Close button, and every exit path (Enter, Esc, the X) is the
+        # same close.  _accept keeps the return value True so no caller
+        # can mistake closing a re-read for a decline.
+        focus_btn = _make_button(
+            "Close", _accept,
+            bg=theme["accent"], fg="#ffffff", hover_bg=theme["select_bg"],
+            bold=True,
+        )
+        focus_btn.pack(side="right")
+        dlg.bind("<Return>", lambda _e: _accept())
+        dlg.bind("<Escape>", lambda _e: _accept())
+        dlg.protocol("WM_DELETE_WINDOW", _accept)
+    else:
+        # Quit on the right, primary action ("I Agree") to its right so it's
+        # the rightmost button — matches the OK-on-right Windows/Linux
+        # convention.
+        _make_button(
+            "Quit", _decline,
+            bg=theme["button"], fg=theme["fg"], hover_bg=theme["border"],
+        ).pack(side="right", padx=(8, 0))
 
-    accept_btn = _make_button(
-        "I Agree", _accept,
-        bg=theme["accent"], fg="#ffffff", hover_bg=theme["select_bg"],
-        bold=True,
-    )
-    accept_btn.pack(side="right")
+        focus_btn = _make_button(
+            "I Agree", _accept,
+            bg=theme["accent"], fg="#ffffff", hover_bg=theme["select_bg"],
+            bold=True,
+        )
+        focus_btn.pack(side="right")
 
-    # Keyboard: Enter accepts, Esc declines.  tk.Label doesn't inherit the
-    # focused-button Return behavior tk.Button had, so bind it on the dialog.
-    dlg.bind("<Return>", lambda _e: _accept())
-    dlg.bind("<Escape>", lambda _e: _decline())
+        # Keyboard: Enter accepts, Esc declines.  tk.Label doesn't inherit
+        # the focused-button Return behavior tk.Button had, so bind it on
+        # the dialog.
+        dlg.bind("<Return>", lambda _e: _accept())
+        dlg.bind("<Escape>", lambda _e: _decline())
 
-    # Closing the X = decline.
-    dlg.protocol("WM_DELETE_WINDOW", _decline)
+        # Closing the X = decline.
+        dlg.protocol("WM_DELETE_WINDOW", _decline)
 
     # Center over the parent (or screen if parent isn't mapped yet).
     parent.update_idletasks()
@@ -191,7 +218,7 @@ def show_disclaimer_dialog(parent, theme_name="light"):
         # update + retry usually resolves it.
         dlg.update()
         dlg.grab_set()
-    accept_btn.focus_set()
+    focus_btn.focus_set()
     parent.wait_window(dlg)
 
     return accepted["value"]

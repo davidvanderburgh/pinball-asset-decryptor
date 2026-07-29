@@ -354,6 +354,9 @@ class JJPManufacturer(Manufacturer):
 
     def write_install_help(self):
         return ("1. The modified ISO is written to the chosen Build Location.\n"
-                "2. Burn it to a USB drive with Rufus / Etcher.\n"
-                "3. Boot the JJP machine from the USB to flash the new game "
-                "image.")
+                "2. Put it on a USB stick with Rufus in ISO Image mode "
+                "(Windows) or by copying the ISO's files onto a FAT32/MBR "
+                "stick (macOS/Linux). Do NOT raw-write it with balenaEtcher "
+                "or dd -- the machine cannot read a raw-imaged stick.\n"
+                "3. Plug the stick into the cabinet's front USB port and "
+                "turn the game on; the installer runs by itself.")

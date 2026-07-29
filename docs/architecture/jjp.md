@@ -211,7 +211,7 @@ In the **embedded-C** (dongle) Write path the changed files are staged into the 
 
 ### Output naming & install
 
-Upstream writes `<assets_folder>/<iso_basename>_modified.iso`. `_WriteWrapper._move_output` then `shutil.move`s it to the user's chosen Output Folder (cross-drive safe), preferring the stashed `_output_iso_path` — [manufacturer.py:112](../../pinball_decryptor/plugins/jjp/manufacturer.py#L112). Install help: write the ISO to USB with Rufus (**ISO mode, not DD**) / Etcher, boot the machine from USB, let Clonezilla restore — [manufacturer.py:287](../../pinball_decryptor/plugins/jjp/manufacturer.py#L287), with linked JJP PDF instructions — [pipeline.py:3695](../../pinball_decryptor/plugins/jjp/pipeline.py#L3695).
+Upstream writes `<assets_folder>/<iso_basename>_modified.iso`. `_WriteWrapper._move_output` then `shutil.move`s it to the user's chosen Output Folder (cross-drive safe), preferring the stashed `_output_iso_path` — [manufacturer.py:112](../../pinball_decryptor/plugins/jjp/manufacturer.py#L112). Install help: Rufus **ISO Image mode** on Windows, or format FAT32/MBR + copy the ISO's files on macOS/Linux — **never a raw Etcher/dd write**. The machine does not BIOS-boot the stick; its own boot sequence mounts the stick's FAT volume and runs the installer at power-on, so a raw-imaged (ISO9660) stick yields the on-machine error `Failed to mount USB stick` and the game just boots normally (JJP's PC and Mac PDFs both produce FAT-with-files sticks; the Mac one is plain Disk Utility + Finder copy, no boot sector at all). Help text — [manufacturer.py:287](../../pinball_decryptor/plugins/jjp/manufacturer.py#L287), with linked JJP PDF instructions — [pipeline.py:3695](../../pinball_decryptor/plugins/jjp/pipeline.py#L3695).
 
 ## Audio assets
 

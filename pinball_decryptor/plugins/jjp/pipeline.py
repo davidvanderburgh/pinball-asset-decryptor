@@ -3672,10 +3672,17 @@ class ModPipeline(DecryptionPipeline):
                 self.log("=== Next Steps ===", "info")
                 if sys.platform == "win32":
                     self.log(
-                        "1. Write this ISO to a USB drive using Rufus\n"
-                        "   Important: select ISO mode (NOT DD mode) when prompted\n"
-                        "2. Boot the pinball machine from USB\n"
-                        "3. Let Clonezilla restore the image to the machine",
+                        "1. Write this ISO to a USB stick with Rufus, default\n"
+                        "   settings; pick 'ISO Image mode' when it asks.\n"
+                        "   Do NOT use balenaEtcher or Rufus DD mode: the\n"
+                        "   machine cannot read a raw-imaged stick and shows\n"
+                        "   'Failed to mount USB stick'.\n"
+                        "2. Plug the stick into the USB port at the front of\n"
+                        "   the cabinet (Cabinet Board slot / USB extension\n"
+                        "   near the coin door; OK to unplug the dongle).\n"
+                        "3. Turn the machine on. The installer starts on its\n"
+                        "   own and offers an optional factory reset; the\n"
+                        "   Utilities USB-update menu is NOT part of this.",
                         "info",
                     )
                     self.log_link(
@@ -3685,9 +3692,18 @@ class ModPipeline(DecryptionPipeline):
                     )
                 else:
                     self.log(
-                        "1. Write this ISO to a USB drive using balenaEtcher or dd\n"
-                        "2. Boot the pinball machine from USB\n"
-                        "3. Let Clonezilla restore the image to the machine",
+                        "1. Format a USB stick as FAT32 with a Master Boot\n"
+                        "   Record scheme (Disk Utility: MS-DOS (FAT) + MBR).\n"
+                        "2. Mount/open this ISO and copy ALL of its files onto\n"
+                        "   the stick. Do NOT raw-write the ISO with\n"
+                        "   balenaEtcher or dd: the machine cannot read a\n"
+                        "   raw-imaged stick and shows 'Failed to mount USB\n"
+                        "   stick'.\n"
+                        "3. Plug the stick into the USB port at the front of\n"
+                        "   the cabinet (Cabinet Board slot / USB extension\n"
+                        "   near the coin door) and turn the machine on. The\n"
+                        "   installer starts on its own; the Utilities\n"
+                        "   USB-update menu is NOT part of this.",
                         "info",
                     )
                     if sys.platform == "darwin":
@@ -5355,10 +5371,17 @@ class StandaloneModPipeline(ModPipeline):
                 self.log("=== Next Steps ===", "info")
                 if sys.platform == "win32":
                     self.log(
-                        "1. Write this ISO to a USB drive using Rufus\n"
-                        "   Important: select ISO mode (NOT DD mode) when prompted\n"
-                        "2. Boot the pinball machine from USB\n"
-                        "3. Let Clonezilla restore the image to the machine",
+                        "1. Write this ISO to a USB stick with Rufus, default\n"
+                        "   settings; pick 'ISO Image mode' when it asks.\n"
+                        "   Do NOT use balenaEtcher or Rufus DD mode: the\n"
+                        "   machine cannot read a raw-imaged stick and shows\n"
+                        "   'Failed to mount USB stick'.\n"
+                        "2. Plug the stick into the USB port at the front of\n"
+                        "   the cabinet (Cabinet Board slot / USB extension\n"
+                        "   near the coin door; OK to unplug the dongle).\n"
+                        "3. Turn the machine on. The installer starts on its\n"
+                        "   own and offers an optional factory reset; the\n"
+                        "   Utilities USB-update menu is NOT part of this.",
                         "info",
                     )
                     self.log_link(
@@ -5368,9 +5391,18 @@ class StandaloneModPipeline(ModPipeline):
                     )
                 else:
                     self.log(
-                        "1. Write this ISO to a USB drive using balenaEtcher or dd\n"
-                        "2. Boot the pinball machine from USB\n"
-                        "3. Let Clonezilla restore the image to the machine",
+                        "1. Format a USB stick as FAT32 with a Master Boot\n"
+                        "   Record scheme (Disk Utility: MS-DOS (FAT) + MBR).\n"
+                        "2. Mount/open this ISO and copy ALL of its files onto\n"
+                        "   the stick. Do NOT raw-write the ISO with\n"
+                        "   balenaEtcher or dd: the machine cannot read a\n"
+                        "   raw-imaged stick and shows 'Failed to mount USB\n"
+                        "   stick'.\n"
+                        "3. Plug the stick into the USB port at the front of\n"
+                        "   the cabinet (Cabinet Board slot / USB extension\n"
+                        "   near the coin door) and turn the machine on. The\n"
+                        "   installer starts on its own; the Utilities\n"
+                        "   USB-update menu is NOT part of this.",
                         "info",
                     )
                     if sys.platform == "darwin":

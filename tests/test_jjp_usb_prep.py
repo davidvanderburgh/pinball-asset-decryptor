@@ -214,6 +214,9 @@ def test_flash_words_jjp_vs_default():
     assert jjp["target_kind"] == "usb_stick"
     assert "*.iso" in jjp["filetypes"][0][1]
     assert "format" in jjp["confirm_verb"]
+    # "Target USB stick:" clips in the dialog's 12-char label column.
+    assert jjp["target_label"] == "Target USB:"
+    assert len(jjp["target_label"]) <= 12
 
     class _DdPlugin:  # a Stern/CGC-shaped plugin: no flash_* overrides
         direct_medium_noun = "SD card"

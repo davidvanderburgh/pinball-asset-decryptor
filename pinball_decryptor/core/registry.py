@@ -374,6 +374,8 @@ class Manufacturer(ABC):
     flash_button_tip = None       # its tooltip
     flash_medium_noun = None      # dialog noun -> direct_medium_noun/"SD card"
     flash_target_kind = None      # drive-pick bias -> direct_target_kind
+    flash_target_label = None     # target-row label -> "Target <noun>:";
+                                  # the column is 12 chars, long nouns clip
     flash_safety_text = None      # red banner -> direct_safety_text
     flash_dialog_title = None     # -> "Build / flash <noun> image"
     flash_header = None           # dialog heading -> "Build an image and/or

@@ -247,6 +247,8 @@ class JJPManufacturer(Manufacturer):
     # that looks like an SSD/HDD (the game SSD / backup disks) and leaves
     # the selection empty rather than guess (David).
     flash_target_kind = "usb_stick"
+    # "Target USB stick:" clips in the dialog's 12-char label column (David).
+    flash_target_label = "Target USB:"
     flash_safety_text = (
         "⚠ Making an install stick ERASES the USB stick completely. Pick "
         "the right drive — never the game SSD or a backup disk.")

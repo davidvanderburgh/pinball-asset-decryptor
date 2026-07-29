@@ -69,6 +69,10 @@ def _flash_words(mfr):
                    or getattr(mfr, "direct_safety_text", None)),
         "target_kind": (getattr(mfr, "flash_target_kind", None)
                         or getattr(mfr, "direct_target_kind", "sd_card")),
+        # The target row's label sits in a fixed 12-char column, so a long
+        # noun ("USB stick") gets clipped — plugins supply a short form.
+        "target_label": (getattr(mfr, "flash_target_label", None)
+                         or "Target %s:" % noun),
         "filetypes": [tuple(ft) for ft in
                       getattr(mfr, "flash_image_filetypes", None)
                       or (("SD-card image", "*.img *.raw *.bin"),
@@ -209,7 +213,7 @@ class FlashImageDialog:
         # Target-card row.
         card_row = ttk.Frame(flash_body)
         card_row.pack(fill="x", pady=4)
-        ttk.Label(card_row, text="Target %s:" % noun, width=12,
+        ttk.Label(card_row, text=self._words["target_label"], width=12,
                   anchor="w").pack(side="left")
         self._drive_var = tk.StringVar()
         self._drive_combo = ttk.Combobox(

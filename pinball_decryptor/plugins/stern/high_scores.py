@@ -52,7 +52,14 @@ def _cstr(table, data, va, limit=64):
         s = data[off:end].decode("latin1")
     except Exception:
         return None
-    return s if s.isprintable() else None
+    if s.isprintable():
+        return s
+    # Some captions are two display lines in one string ("JAWS MULTIBALL 1
+    # \nCHAMPION", Jaws/Godzilla/King Kong) — a newline is the one control
+    # character that doesn't disqualify.
+    if "\n" in s and s.replace("\n", " ").isprintable():
+        return s
+    return None
 
 
 def _writable_len(table, data, va, limit=64):
@@ -95,7 +102,12 @@ class HighScoreDefaults:
         Most slots share the very string their adjustment points at, so the VA
         match is exact; the Grand Champion doesn't (its record says "GRAND
         CHAMPION" where the adjustment caption is "GRAND CHAMPION SCORE"), so
-        the caption text is kept as a fallback key."""
+        the caption text is kept as a fallback key.
+
+        Older builds interpose the same language bundle the records use (see
+        :meth:`_label_ptr`), so the caption is resolved through it and both
+        maps are keyed by the resolved ENGLISH string — the same thing
+        :meth:`_slot_label` hands back for a record."""
         from .adjustments import OFF_MENU_LABEL
         by_va, by_text = {}, {}
         t = self._t
@@ -104,7 +116,7 @@ class HighScoreDefaults:
             if off is None:
                 continue
             va = struct.unpack_from("<I", self.data, off + OFF_MENU_LABEL)[0]
-            cap = _cstr(t, self.data, va)
+            va, cap = self._label_ptr(va)
             if cap:
                 by_va[va] = t.names[i]
                 by_text.setdefault(self._norm_caption(cap), t.names[i])
@@ -141,13 +153,67 @@ class HighScoreDefaults:
             return None
         return by_text.get(cls._norm_caption(label))
 
+    def _label_ptr(self, va):
+        """``(string VA, text)`` for a label word, or ``(0, None)``.
+
+        Newer builds point straight at the caption; older ones point at a
+        NULL-terminated per-language bundle ``{char* EN, DE, FR, ES, IT, 0}``
+        (Foo Fighters 1.03, Batman, Munsters, …), so when the word isn't a
+        string itself, its first pointee is tried — the English caption.
+        """
+        t, data = self._t, self.data
+        s = _cstr(t, data, va, 64)
+        if s and len(s) >= 4:
+            return va, s
+        off = t._off(va)
+        if off is not None and off + 4 <= len(data):
+            first = struct.unpack_from("<I", data, off)[0]
+            if first:
+                s = _cstr(t, data, first, 64)
+                if s and len(s) >= 4:
+                    return first, s
+        return 0, None
+
+    def _slot_label(self, off, stride):
+        """``(label VA, label text)`` for the record at *off*, or ``(0, None)``.
+
+        The label normally sits at +0x10, but when that word doesn't resolve
+        the other tail words are tried — record layouts drift a little
+        between titles.
+        """
+        data = self.data
+        if stride > OFF_LABEL:
+            va, s = self._label_ptr(
+                struct.unpack_from("<I", data, off + OFF_LABEL)[0])
+            if s:
+                return va, s
+        for k in range(3, stride // 4):
+            if k == OFF_LABEL // 4:
+                continue
+            va, s = self._label_ptr(
+                struct.unpack_from("<I", data, off + k * 4)[0])
+            if s:
+                return va, s
+        return 0, None
+
     def _locate(self):
         """Find the record array by SHAPE — no per-title magic values.
 
         Every record starts {char* 1-3 printable chars, char* short string,
         <handler>} and every record in the array shares that third word, so:
-        collect candidates, group them by handler, and keep the longest
+        collect candidates, group them by handler, and take the best
         constant-stride run.
+
+        "Best" is NOT simply the longest run: a connector/pin wiring table
+        ("CN7", pin "2", …) is shaped exactly like {initials, name, shared
+        word} and on boards with more lamps than high-score slots (Venom: 87
+        vs 47) it out-runs the real board; a topper LED map can even carry
+        uppercase captions ("TOPPER 1-R", Bond: 314 of them).  What no
+        impostor has is records whose captions normalise onto the score
+        adjustments (GRAND CHAMPION -> AD_GRAND_CHAMPION_SCORE …), so runs
+        are ranked by mapped-adjustment count first, readable-caption count
+        second, and length only breaks the remaining ties — a title with no
+        captions at all still resolves like before.
         """
         t, data = self._t, self.data
         cands = []
@@ -174,7 +240,8 @@ class HighScoreDefaults:
         for off, handler in cands:
             by_handler[handler].append(off)
 
-        best = None
+        by_va, by_text = self._label_owners()
+        best = best_key = None
         for offs in by_handler.values():
             offs.sort()
             for stride in range(16, 129, 4):
@@ -188,13 +255,26 @@ class HighScoreDefaults:
                         cur = [o]
                 if len(cur) > len(run):
                     run = cur
-                if len(run) >= MIN_RECORDS and (best is None
-                                                or len(run) > len(best[1])):
-                    best = (stride, run)
+                if len(run) < MIN_RECORDS:
+                    continue
+                labels = mapped = 0
+                claimed = set()
+                for off in run:
+                    va, s = self._slot_label(off, stride)
+                    # ASCII-only for SCORING: a coil table's tail words can
+                    # decode as printable-latin1 mush; real captions never do.
+                    if s and s.isascii():
+                        labels += 1
+                    owner = self._owner_for(s, va, by_va, by_text)
+                    if owner and owner not in claimed:
+                        claimed.add(owner)
+                        mapped += 1
+                key = (mapped, labels, len(run))
+                if best_key is None or key > best_key:
+                    best_key, best = key, (stride, run)
         if best is None:
             raise ValueError("no default high-score table found")
         stride, run = best
-        by_va, by_text = self._label_owners()
         # One adjustment holds one score, so it can own at most one slot.  The
         # co-op / team boards repeat a caption at several menu indents and all
         # of them normalise onto the same adjustment; first (least-indented)
@@ -202,17 +282,8 @@ class HighScoreDefaults:
         claimed = set()
         rows = []
         for i, off in enumerate(run):
-            w = struct.unpack_from("<5I", data, off)
-            label_va = w[OFF_LABEL // 4] if stride > OFF_LABEL else 0
-            label = _cstr(t, data, label_va, 64)
-            if not label or len(label) < 4:
-                label_va, label = 0, None
-                for k in range(3, stride // 4):
-                    cand = struct.unpack_from("<I", data, off + k * 4)[0]
-                    s = _cstr(t, data, cand, 64)
-                    if s and len(s) >= 4:
-                        label_va, label = cand, s
-                        break
+            w = struct.unpack_from("<2I", data, off)
+            label_va, label = self._slot_label(off, stride)
             rows.append({
                 "index": i,
                 "offset": off,
@@ -222,7 +293,8 @@ class HighScoreDefaults:
                 # #3  "), and that padding is what keeps them distinct.
                 # `display` is the tidied version for the UI.
                 "label": label or "High score %d" % (i + 1),
-                "display": (label or "High score %d" % (i + 1)).strip(),
+                "display": " ".join((label or "High score %d" % (i + 1))
+                                    .split()),
                 "adjustment": None,     # filled in just below
                 "initials": _cstr(t, data, w[0], 8) or "",
                 "name": _cstr(t, data, w[1], 40) or "",

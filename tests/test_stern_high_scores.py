@@ -211,6 +211,75 @@ def test_one_adjustment_is_never_claimed_by_two_slots():
     assert owners.count("AD_HIGH_SCORE_1_SCORE") == 1
 
 
+def _append_str(buf, text):
+    """Append a NUL-terminated string, return its VA (PT_LOAD grown later)."""
+    while len(buf) % 4:
+        buf.append(0)
+    va = BASE + len(buf)
+    buf.extend(text.encode("latin1") + b"\x00")
+    return va
+
+
+def _grow_load(buf):
+    struct.pack_into("<II", buf, 52 + 16, len(buf), len(buf))
+
+
+def test_a_longer_unlabeled_run_does_not_win():
+    """A connector/pin wiring table ("CN7", pin "2", shared word) is shaped
+    exactly like the board and can be LONGER (Venom: 87 lamps vs 47 slots),
+    but none of its records has a caption — the board must still win."""
+    elf, hstd_off = make_elf()
+    buf = bytearray(elf)
+    ini = _append_str(buf, "CN7")
+    pin = _append_str(buf, "2")
+    shared = _append_str(buf, "1")
+    while len(buf) % 4:
+        buf.append(0)
+    for i in range(3 * len(HSTD)):
+        buf.extend(struct.pack("<IIIIII", ini, pin, shared,
+                               0x175010F + i, 0, 0))
+    _grow_load(buf)
+    hs = HighScoreDefaults(bytes(buf), AdjustmentTable(bytes(buf)))
+    assert hs.offset == hstd_off and hs.stride == STRIDE
+    assert len(hs.rows) == len(HSTD)
+
+
+def test_two_line_captions_decode():
+    """Jaws-era captions hold both display lines in one string ("JAWS
+    MULTIBALL 1\\nCHAMPION"); the raw label keeps the newline (it is the
+    stable key), the display copy collapses it."""
+    elf, hstd_off = make_elf()
+    buf = bytearray(elf)
+    ins = hstd_off + len(HSTD) * STRIDE
+    buf[ins:ins] = buf[hstd_off:hstd_off + STRIDE]
+    lbl = _append_str(buf, "ENCORE\nCHAMPION")
+    struct.pack_into("<I", buf, ins + 0x10, lbl)
+    _grow_load(buf)
+    hs = HighScoreDefaults(bytes(buf), AdjustmentTable(bytes(buf)))
+    assert len(hs.rows) == len(HSTD) + 1
+    row = hs.by_label()["ENCORE\nCHAMPION"]
+    assert row["display"] == "ENCORE CHAMPION"
+
+
+def test_language_bundle_labels_resolve():
+    """Older builds point +0x10 at a per-language bundle {char* EN, DE, …, 0}
+    instead of at the caption itself — the English entry is the label."""
+    elf, hstd_off = make_elf()
+    buf = bytearray(elf)
+    ins = hstd_off + len(HSTD) * STRIDE
+    buf[ins:ins] = buf[hstd_off:hstd_off + STRIDE]
+    en = _append_str(buf, "BUNDLE CHAMPION")
+    de = _append_str(buf, "BUENDEL CHAMPION")
+    while len(buf) % 4:
+        buf.append(0)
+    bundle = BASE + len(buf)
+    buf.extend(struct.pack("<III", en, de, 0))
+    struct.pack_into("<I", buf, ins + 0x10, bundle)
+    _grow_load(buf)
+    hs = HighScoreDefaults(bytes(buf), AdjustmentTable(bytes(buf)))
+    assert "BUNDLE CHAMPION" in hs.by_label()
+
+
 def test_caption_normalisation_bridges_sterns_spellings():
     n = HighScoreDefaults._norm_caption
     # Grand Champion: record vs adjustment.

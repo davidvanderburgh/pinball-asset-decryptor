@@ -1121,6 +1121,143 @@ def _detect_write_scheme(entries, read_original, game_name, log=None):
     return SCHEME_LEGACY
 
 
+_PNG_DROPPABLE = (b"tEXt", b"zTXt", b"iTXt", b"tIME")
+_PNG_PAD_KEYWORD = b"pad"          # 3 chars + NUL => 12 + 4 = 16 byte minimum
+
+
+def _png_chunks(data):
+    """[(type, whole_chunk_bytes)] for a PNG, or None if it doesn't walk."""
+    import struct as _st
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    out = []
+    pos = 8
+    while pos + 12 <= len(data):
+        size = _st.unpack_from(">I", data, pos)[0]
+        end = pos + 12 + size
+        if end > len(data):
+            return None
+        out.append((data[pos + 4:pos + 8], data[pos:end]))
+        if data[pos + 4:pos + 8] == b"IEND":
+            return out
+        pos = end
+    return None
+
+
+def fit_png_to_size(content, target, log=None):
+    """Make a PNG exactly *target* bytes without touching how it renders.
+
+    Sonic-era images pin every asset's byte length, which left image mods
+    needing to be padded to the byte by hand.  PNG has room for that in the
+    format itself: metadata chunks can be dropped and a ``tEXt`` chunk of any
+    length can be added, and neither changes a single pixel.  Only pure
+    metadata is dropped — anything that affects rendering (palette,
+    transparency, colour profile, gamma) is left alone.
+
+    Returns the resized PNG, or None if it cannot be hit exactly.
+    """
+    import struct as _st
+    import zlib as _zl
+
+    if len(content) == target:
+        return content
+    chunks = _png_chunks(content)
+    if not chunks:
+        return None
+
+    kept = [c for cid, c in chunks if cid not in _PNG_DROPPABLE]
+    base = b"\x89PNG\r\n\x1a\n" + b"".join(kept)
+    if log and len(base) != len(content):
+        log(f"  Dropped {len(content) - len(base)} bytes of image metadata "
+            f"(comments/timestamps) to make room", "info")
+
+    delta = target - len(base)
+    if delta == 0:
+        return base
+    if delta < 0:
+        return None                     # too big even stripped: cannot shrink
+    # A tEXt chunk costs 12 bytes of framing plus keyword + NUL + text.
+    body_len = delta - 12
+    if body_len < len(_PNG_PAD_KEYWORD) + 1:
+        return None                     # 1-15 bytes short: no legal chunk fits
+    # tEXt text is Latin-1 and must not contain NUL (that is the separator)
+    text = b" " * (body_len - len(_PNG_PAD_KEYWORD) - 1)
+    body = _PNG_PAD_KEYWORD + b"\x00" + text
+    chunk = (_st.pack(">I", len(body)) + b"tEXt" + body
+             + _st.pack(">I", _zl.crc32(b"tEXt" + body) & 0xFFFFFFFF))
+    # IEND has to stay last
+    out = base[:-12] + chunk + base[-12:]
+    return out if len(out) == target else None
+
+
+def _validate_replacement(content, path):
+    """Reject a replacement whose own header would walk a reader off its end.
+
+    These images pin every asset's byte length, so people hand-pad files to
+    hit it, and the classic result is a WAV whose ``data`` chunk still claims
+    the length it had before the trim.  The size check passes, the CRC is
+    forged over whatever we write, and the game is the first thing to find
+    out.  Only structurally *dangerous* files are refused here — a container
+    that declares more bytes than it holds.  Harmless slop (trailing junk
+    after the declared end) is left alone, because plenty of real files have
+    it and refusing those would break working mods.
+
+    Returns None when the file is safe to write, else a reason string.
+    """
+    import struct as _st
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext == ".wav":
+        if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
+            return "not a RIFF/WAVE file"
+        riff = _st.unpack_from("<I", content, 4)[0]
+        if 8 + riff > len(content):
+            return (f"the RIFF header claims {8 + riff} bytes but the file is "
+                    f"{len(content)}")
+        pos = 12
+        while pos + 8 <= len(content):
+            cid = content[pos:pos + 4]
+            size = _st.unpack_from("<I", content, pos + 4)[0]
+            if pos + 8 + size > len(content):
+                return (f"the '{cid.decode('latin-1', 'replace')}' chunk claims "
+                        f"{size} bytes but only {len(content) - pos - 8} remain")
+            pos += 8 + size + (size & 1)
+        return None
+
+    if ext == ".png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "not a PNG file"
+        pos = 8
+        saw_iend = False
+        while pos + 8 <= len(content):
+            size = _st.unpack_from(">I", content, pos)[0]
+            cid = content[pos + 4:pos + 8]
+            if pos + 12 + size > len(content):
+                return (f"the '{cid.decode('latin-1', 'replace')}' chunk claims "
+                        f"{size} bytes but the file ends first")
+            if cid == b"IEND":
+                saw_iend = True
+                break
+            pos += 12 + size
+        if not saw_iend:
+            return "the PNG has no IEND chunk (truncated?)"
+        return None
+
+    if ext in (".jpg", ".jpeg"):
+        if not content.startswith(b"\xff\xd8"):
+            return "not a JPEG file"
+        if b"\xff\xd9" not in content[-64:]:
+            return "the JPEG has no end-of-image marker (truncated?)"
+        return None
+
+    if ext == ".ogg":
+        if not content.startswith(b"OggS"):
+            return "not an Ogg file"
+        return None
+
+    return None
+
+
 def _encrypt_one(scheme, entry, content, game_name, read_original):
     """Encrypt one replacement asset.  Returns (bytes, note_for_log).
 
@@ -1128,7 +1265,7 @@ def _encrypt_one(scheme, entry, content, game_name, read_original):
     CRC the loader checks; scheme 2 keeps the upstream CRC-forgery path
     byte-for-byte.
     """
-    from .crypto_v3 import SCHEME_V3, reencrypt_asset
+    from .crypto_v3 import SCHEME_V3, reencrypt_asset, detect_filler_size
     from .crypto import encrypt_file
 
     if scheme == SCHEME_V3:
@@ -1136,11 +1273,40 @@ def _encrypt_one(scheme, entry, content, game_name, read_original):
         if not original:
             raise ValueError("could not read the original asset off the "
                              "image to rebuild it")
-        out = reencrypt_asset(original, content, entry.path, game_name,
-                              filler_size=entry.filler_size)
+        # Take the lead pad from the bytes we are actually rewriting rather
+        # than from fl_decrypted.dat.  Nothing ties that sidecar to the image
+        # it was extracted from, so a project folder left over from another
+        # release of the same game would hand us a pad from the wrong file
+        # and quietly move the content boundary.
+        f1 = detect_filler_size(original, entry.path, game_name)
+        note_pad = ""
+        if f1 < 0:
+            f1 = entry.filler_size
+        elif f1 != entry.filler_size:
+            note_pad = (f", pad %d from the image (the file list says %d — "
+                        f"it is probably from a different release)"
+                        % (f1, entry.filler_size))
+        from .crypto_v3 import SizeMismatch, decrypt_file as _d3
+        try:
+            out = reencrypt_asset(original, content, entry.path, game_name,
+                                  filler_size=f1)
+        except SizeMismatch:
+            # A PNG can be padded to any length without changing a pixel,
+            # so an image that is merely the wrong size is still usable.
+            fitted = None
+            if entry.path.lower().endswith(".png"):
+                target = len(_d3(original, f1, entry.path, game_name))
+                fitted = fit_png_to_size(content, target)
+            if fitted is None:
+                raise
+            out = reencrypt_asset(original, fitted, entry.path, game_name,
+                                  filler_size=f1)
+            note_pad += (f", image refitted from {len(content)} to "
+                         f"{len(fitted)} bytes to match the slot")
         from .crypto import crc32_buf
         return out, (f"scheme 3, {len(out)} bytes, "
-                     f"crc {crc32_buf(out):#010x} (matches original)")
+                     f"crc {crc32_buf(out):#010x} (matches original)"
+                     f"{note_pad}")
     return encrypt_file(content, entry.filler_size, entry.path,
                         entry.crc_encrypted, entry.crc_decrypted), None
 
@@ -3372,15 +3538,16 @@ class DecryptionPipeline:
             out = self._debugfs_run(f'stat "{path}"', timeout=15)
         except CommandError:
             return None
-        mode = re.search(r'Mode:\s*0?([0-7]{3,4})', out)
-        owner = re.search(r'User:\s*(\d+)\s+Group:\s*(\d+)', out)
-        if not mode or not owner:
-            return None
-        return (int(mode.group(1), 8),
-                int(owner.group(1)), int(owner.group(2)))
+        return self._parse_inode_meta(out)
 
-    def _debugfs_restore_inode_meta(self, path, meta):
+    def _debugfs_restore_inode_meta(self, path, meta, current=None):
         """Put the mode/uid/gid captured by :meth:`_debugfs_inode_meta` back.
+
+        ``current`` is the metadata the new file actually landed with, if the
+        caller already stat'ed it — every field that already matches is then
+        skipped.  That matters at volume: each ``sif`` is its own debugfs
+        invocation, so a mod touching hundreds of files paid three extra
+        round-trips per file to re-set values that were usually already right.
 
         Best effort: a failure here leaves the file readable but with the
         wrong permissions, which is worth a log line rather than failing
@@ -3390,9 +3557,11 @@ class DecryptionPipeline:
             return
         perms, uid, gid = meta
         # sif wants the full mode word, file-type bits included.
-        fields = (("mode", f"0{0o100000 | perms:o}"),
-                  ("uid", str(uid)), ("gid", str(gid)))
-        for field, value in fields:
+        fields = (("mode", f"0{0o100000 | perms:o}", 0),
+                  ("uid", str(uid), 1), ("gid", str(gid), 2))
+        for field, value, idx in fields:
+            if current is not None and current[idx] == meta[idx]:
+                continue
             try:
                 self._debugfs_run(f'sif "{path}" {field} {value}',
                                   writable=True, timeout=15)
@@ -3400,6 +3569,16 @@ class DecryptionPipeline:
                 self.log(f"  Warning: could not restore {field} on {path}: "
                          f"{e}", "info")
                 return
+
+    @staticmethod
+    def _parse_inode_meta(stat_out):
+        """(perms, uid, gid) out of a debugfs ``stat`` dump, or None."""
+        mode = re.search(r'Mode:\s*0?([0-7]{3,4})', stat_out or "")
+        owner = re.search(r'User:\s*(\d+)\s+Group:\s*(\d+)', stat_out or "")
+        if not mode or not owner:
+            return None
+        return (int(mode.group(1), 8),
+                int(owner.group(1)), int(owner.group(2)))
 
     def _run_shell_elevated(self, shell_cmd, timeout=120, label=None):
         """Run an arbitrary shell command as root with the cached
@@ -5897,11 +6076,25 @@ class StandaloneModPipeline(ModPipeline):
         Skipped when skip_duration_match is True, or when this slot is in
         keep_full_length_paths (a per-slot exemption the user ticked).
         """
-        if getattr(self, 'skip_duration_match', False):
+        # "Keep full length" cannot be honoured on an image that pins each
+        # asset's byte count: the write would just be refused on size, and
+        # nothing would connect that error back to the option.  Say so and
+        # fit anyway.
+        from .crypto_v3 import SCHEME_V3 as _S3
+        pinned = getattr(self, '_write_scheme', None) == _S3
+        wants_full = (getattr(self, 'skip_duration_match', False)
+                      or rel_path in getattr(self, 'keep_full_length_paths',
+                                             frozenset()))
+        if wants_full and pinned:
+            self.log(
+                f"  {rel_path}: this game stores every sound at a fixed "
+                f"size, so the full-length option cannot apply — fitting to "
+                f"the original slot instead.", "info")
+        elif getattr(self, 'skip_duration_match', False):
             self.log(f"  Duration matching skipped (keep original length)",
                      "info")
             return content
-        if rel_path in getattr(self, 'keep_full_length_paths', frozenset()):
+        elif rel_path in getattr(self, 'keep_full_length_paths', frozenset()):
             self.log(f"  {rel_path}: keeping full length (per-slot override) — "
                      "not trimming to the original slot length", "info")
             return content
@@ -6388,6 +6581,16 @@ class StandaloneModPipeline(ModPipeline):
                      f"orig_n2={entry.crc_encrypted} "
                      f"orig_n3={entry.crc_decrypted}", "info")
 
+            # Refuse a file whose own header would send a reader past its end
+            bad = _validate_replacement(content, entry.path)
+            if bad:
+                self.log(f"[FAIL] {rel_path}: {bad}. The game reads this "
+                         f"file's header to find its data, so writing it "
+                         f"would break playback rather than change it.",
+                         "error")
+                fail += 1
+                continue
+
             # Encrypt with CRC forgery
             try:
                 encrypted, _note = _encrypt_one(
@@ -6496,13 +6699,16 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{entry.path}"',
                     writable=True, timeout=120)
-                _step = f"debugfs sif {entry.path} (metadata)"
-                self._debugfs_restore_inode_meta(entry.path, meta)
 
-                # Verify file was written by checking size via debugfs stat
+                # One stat serves both jobs: confirm the size landed, and
+                # tell the metadata restore which fields actually need
+                # touching (usually none).
                 _step = f"debugfs stat {entry.path}"
                 stat_out = self._debugfs_run(
                     f'stat "{entry.path}"', timeout=15)
+                _step = f"debugfs sif {entry.path} (metadata)"
+                self._debugfs_restore_inode_meta(
+                    entry.path, meta, self._parse_inode_meta(stat_out))
                 m = _re.search(r'Size:\s*(\d+)', stat_out)
                 if m:
                     disk_size = int(m.group(1))
@@ -6798,7 +7004,11 @@ class StandaloneModPipeline(ModPipeline):
             for clean in (e.output or "").splitlines():
                 if clean.strip():
                     fsck_lines.append(clean.strip())
-        if fsck_rc & 4 or fsck_rc >= 8:
+        if fsck_rc & 32:
+            raise PipelineError("Convert", "e2fsck was cancelled, so the "
+                                "modified filesystem was left unchecked and "
+                                "no ISO was built.")
+        if fsck_rc & 4 or fsck_rc & 8 or fsck_rc & 16:
             tail = "\n".join(fsck_lines[-8:]) or "(no output captured)"
             raise PipelineError(
                 "Convert",
@@ -9205,6 +9415,11 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
         scheme = _detect_write_scheme(entries, _read_original, game_name,
                                       self.log)
+        # Same stash as the ISO path: everything that reads an original off
+        # the card (the audio format probes, the slot fit) picks its cipher
+        # from this.  Leaving it unset here silently reverted this path to
+        # the older cipher and switched those checks off again.
+        self._write_scheme = scheme
 
         total = len(edata_files)
         ok = 0
@@ -9268,6 +9483,17 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                 self.log(f"  filler={entry.filler_size} "
                          f"orig_n2={entry.crc_encrypted} "
                          f"orig_n3={entry.crc_decrypted}", "info")
+
+                # Refuse a file whose own header would send a reader past
+                # its end (see _validate_replacement)
+                bad = _validate_replacement(content, entry.path)
+                if bad:
+                    self.log(f"[FAIL] {rel_path}: {bad}. The game reads this "
+                             f"file's header to find its data, so writing it "
+                             f"would break playback rather than change it.",
+                             "error")
+                    fail += 1
+                    continue
 
                 # Encrypt with CRC forgery
                 try:

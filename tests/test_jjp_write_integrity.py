@@ -435,6 +435,104 @@ def test_legacy_resize_still_matches_frames_not_bytes(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# 2c.  Both write paths must know which cipher the image uses
+# --------------------------------------------------------------------------
+
+def test_both_encrypt_phases_stash_the_detected_scheme():
+    """The ISO path stashed it and the Direct-SSD path did not, so every
+    audio check silently reverted to the older cipher when writing straight
+    to a card."""
+    import inspect
+    src = inspect.getsource(P)
+    for fn in ("_phase_encrypt_standalone", "_phase_encrypt_ssd"):
+        body = src.split("def %s" % fn, 1)[1].split("\n    def ", 1)[0]
+        assert "_detect_write_scheme(" in body, fn
+        assert "self._write_scheme = scheme" in body, (
+            "%s detects the scheme but never stashes it" % fn)
+
+
+# --------------------------------------------------------------------------
+# 2d.  A replacement whose header lies must be refused, not written
+# --------------------------------------------------------------------------
+
+def test_a_wav_claiming_more_audio_than_it_holds_is_refused():
+    """The hand-padded file: trimmed to hit the pinned byte count, with the
+    data chunk still claiming its old length.  Length checks and the forged
+    CRC both pass, so the game was the first thing to notice."""
+    good = _logic_wav(2000)
+    assert P._validate_replacement(good, "/x/a.wav") is None
+    lying = bytearray(good)
+    d_start, d_len = P.StandaloneModPipeline._wav_data_chunk(good)
+    struct.pack_into("<I", lying, d_start - 4, d_len + 5000)
+    why = P._validate_replacement(bytes(lying), "/x/a.wav")
+    assert why and "claims" in why
+
+
+def test_a_wav_with_a_lying_riff_header_is_refused():
+    good = _logic_wav(2000)
+    lying = bytearray(good)
+    struct.pack_into("<I", lying, 4, len(good) * 2)
+    why = P._validate_replacement(bytes(lying), "/x/a.wav")
+    assert why and "RIFF" in why
+
+
+def test_harmless_trailing_slop_is_not_refused():
+    """Plenty of real files carry junk after the declared end; refusing
+    those would break working mods."""
+    assert P._validate_replacement(_logic_wav(500) + b"\x00" * 32,
+                                   "/x/a.wav") is None
+
+
+def test_truncated_png_and_jpeg_are_refused():
+    png = _png()
+    assert P._validate_replacement(png, "/x/a.png") is None
+    assert P._validate_replacement(png[:len(png) // 2], "/x/a.png")
+    jpg = b"\xff\xd8" + b"\x00" * 200 + b"\xff\xd9"
+    assert P._validate_replacement(jpg, "/x/a.jpg") is None
+    assert P._validate_replacement(jpg[:-2], "/x/a.jpg")
+
+
+def test_unknown_types_are_left_alone():
+    assert P._validate_replacement(b"anything at all", "/x/a.bin") is None
+
+
+# --------------------------------------------------------------------------
+# 2e.  PNG replacements get fitted to the pinned slot size
+# --------------------------------------------------------------------------
+
+def test_png_is_padded_to_the_slot_size_without_changing_pixels():
+    from PIL import Image
+    import io as _io
+    png = _png()
+    target = len(png) + 500
+    out = P.fit_png_to_size(png, target)
+    assert out is not None and len(out) == target
+    before = Image.open(_io.BytesIO(png)).convert("RGBA").tobytes()
+    after = Image.open(_io.BytesIO(out)).convert("RGBA").tobytes()
+    assert before == after, "padding must not touch a single pixel"
+
+
+def test_png_metadata_is_dropped_to_make_room():
+    png = _png()
+    bulky = (png[:-12]
+             + struct.pack(">I", 400) + b"tEXt" + b"c\x00" + b"x" * 398
+             + struct.pack(">I", zlib.crc32(b"tEXtc\x00" + b"x" * 398)
+                           & 0xFFFFFFFF)
+             + png[-12:])
+    # target smaller than the bulky file but reachable once the text goes
+    out = P.fit_png_to_size(bulky, len(png) + 20)
+    assert out is not None and len(out) == len(png) + 20
+
+
+def test_png_fit_gives_up_rather_than_guessing():
+    png = _png()
+    assert P.fit_png_to_size(png, len(png) - 100) is None   # cannot shrink
+    assert P.fit_png_to_size(png, len(png) + 5) is None     # no legal chunk
+    assert P.fit_png_to_size(b"not a png", 100) is None
+    assert P.fit_png_to_size(png, len(png)) == png          # already exact
+
+
+# --------------------------------------------------------------------------
 # 3.  e2fsck's verdict must not be thrown away
 # --------------------------------------------------------------------------
 
@@ -493,3 +591,40 @@ def test_clean_fsck_does_not_block_the_iso():
 
     with pytest.raises(RuntimeError, match="reached the tool check"):
         pipe._phase_convert_standalone()
+
+
+def test_cancelled_fsck_is_reported_as_cancelled():
+    """Exit 32 is 'the user stopped it', not 'the filesystem is broken'."""
+    pipe = _convert_pipe(32, "/var/tmp/jjp_raw.img: cancelled!")
+
+    with pytest.raises(P.PipelineError) as exc:
+        pipe._phase_convert_standalone()
+    assert "cancelled" in str(exc.value).lower()
+    assert "could not repair" not in str(exc.value)
+
+
+# --------------------------------------------------------------------------
+# 4.  Restoring permissions must not cost a round-trip it does not need
+# --------------------------------------------------------------------------
+
+def test_metadata_restore_skips_fields_that_already_match(tmp_path):
+    image = FakeImage({"/etc/x": (b"x", 0o644, 0, 0)})
+    pipe = _mod_pipe(tmp_path, image)
+    pipe._debugfs_restore_inode_meta("/etc/x", (0o644, 0, 0), (0o644, 0, 0))
+    assert image.commands == [], "nothing differed, so nothing to write"
+
+
+def test_metadata_restore_writes_only_the_field_that_differs(tmp_path):
+    image = FakeImage({"/etc/x": (b"x", 0o644, 0, 0)})
+    pipe = _mod_pipe(tmp_path, image)
+    pipe._debugfs_restore_inode_meta("/etc/x", (0o755, 0, 0), (0o644, 0, 0))
+    assert [c.split()[0] for c in image.commands] == ["sif"]
+    assert "mode" in image.commands[0]
+    assert image.files["/etc/x"][1] == 0o755
+
+
+def test_metadata_restore_still_works_without_a_current_reading(tmp_path):
+    image = FakeImage({"/etc/x": (b"x", 0o600, 0, 0)})
+    pipe = _mod_pipe(tmp_path, image)
+    pipe._debugfs_restore_inode_meta("/etc/x", (0o755, 1000, 44))
+    assert image.files["/etc/x"] == (b"x", 0o755, 1000, 44)

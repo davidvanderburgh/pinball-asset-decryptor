@@ -22,6 +22,12 @@ Per-OS mechanics:
     Partition then fails with "Not enough available capacity" even though
     the disk is empty (Alex's Sonic stick, 2026-07-29) — so the script
     re-syncs with Update-Disk and retries the partition/format steps.
+    That stale view can also wedge outright — the provider keeps serving
+    it no matter how often Update-Disk asks (the same stick, later that
+    day: all six retries failed identically) — so when the cmdlet script
+    fails the format is redone through diskpart, which talks to the disk
+    via the Virtual Disk Service and does not share the Storage-WMI
+    provider's cache.
     Windows refuses to *create* FAT32 volumes above 32 GiB, so the
     partition is capped there (plenty: the stick only ever holds this one
     installer) and an ISO whose contents won't fit is refused with a
@@ -197,6 +203,12 @@ def _win_format_script(n):
     and the partition and format steps retry across the window where the
     cache catches up.  $ErrorActionPreference Stop makes the first real
     failure THE error instead of the head of a null-parameter cascade.
+
+    The retries can still lose: the provider sometimes keeps serving the
+    stale view no matter how often Update-Disk asks, and every retry then
+    fails the same way (the same stick, later that day).
+    ``format_stick_windows`` treats any failure of this script as a cue to
+    redo the job with :func:`_win_diskpart_script`.
     """
     return (
         "$ErrorActionPreference = 'Stop'\n"
@@ -246,11 +258,85 @@ def _win_format_script(n):
         % {"n": n, "cap": _WIN_FAT32_MAX, "label": STICK_LABEL})
 
 
+# Two failures of the cmdlet script that diskpart can never fix — the
+# safety refusal must stay fatal, and a declined UAC prompt would only
+# prompt again.
+_BOOT_DISK_REFUSAL = "Refusing to format the boot/system disk."
+_UAC_DECLINED = "Administrator access was not granted."
+
+# diskpart sizes are in MiB; stay comfortably under format.com's 32 GiB
+# FAT32 ceiling while clearing the _WIN_FAT32_USABLE fit-check (~31.4 GiB).
+_DISKPART_CAP_MIB = 32700
+
+
+def _win_diskpart_script(n):
+    """Fallback: the same clean/MBR/FAT32 job through diskpart.
+
+    The Storage-WMI provider behind the cmdlets can keep serving a stale
+    view of the just-cleared disk no matter how often Update-Disk asks —
+    all six retries in :func:`_win_format_script` failed with "Not enough
+    available capacity" on Alex's Sonic stick (2026-07-29).
+    diskpart reaches the disk through the Virtual Disk Service instead and
+    does not share that cache, so this script leans on it for everything
+    the provider could lie about: the disk size comes from the old
+    Win32_DiskDrive provider and the free drive letter from
+    ``DriveInfo.GetDrives`` (plain filesystem view).  The letter is
+    assigned explicitly so the LETTER= handshake needs no post-format
+    query.  The boot/system-disk guard is re-checked here — a fallback
+    must never bypass the safety net.
+    """
+    return (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$disk = Get-Disk -Number %(n)d\n"
+        "if ($disk.IsBoot -or $disk.IsSystem) "
+        "{ throw '%(refusal)s' }\n"
+        "$size = [int64](Get-CimInstance Win32_DiskDrive "
+        "-Filter 'Index=%(n)d').Size\n"
+        "$used = [System.IO.DriveInfo]::GetDrives() | "
+        "ForEach-Object { $_.Name.Substring(0,1) }\n"
+        "$letter = $null\n"
+        "foreach ($c in 90..68) {\n"
+        "  if ($used -notcontains [string][char]$c) "
+        "{ $letter = [string][char]$c; break }\n"
+        "}\n"
+        "if (-not $letter) { throw 'No free drive letter available.' }\n"
+        "$create = 'create partition primary'\n"
+        "if ($size -gt %(cap)d) "
+        "{ $create = 'create partition primary size=%(capmb)d' }\n"
+        "$dp = \"select disk %(n)d`nclean`nconvert mbr noerr`n\" + "
+        "$create + \"`n\" + "
+        "\"format fs=fat32 quick label=%(label)s`n\" + "
+        "\"assign letter=$letter`n\"\n"
+        "$dpfile = Join-Path $env:TEMP 'pad_jjp_diskpart.txt'\n"
+        "Set-Content -Path $dpfile -Value $dp -Encoding ascii\n"
+        "$out = diskpart.exe /s $dpfile | Out-String\n"
+        "Remove-Item $dpfile -ErrorAction SilentlyContinue\n"
+        "if ($LASTEXITCODE -ne 0) "
+        "{ throw ('diskpart failed:' + \"`n\" + $out) }\n"
+        "'LETTER=' + $letter\n"
+        % {"n": n, "cap": _WIN_FAT32_MAX, "capmb": _DISKPART_CAP_MIB,
+           "label": STICK_LABEL, "refusal": _BOOT_DISK_REFUSAL})
+
+
+def _first_line(text):
+    for line in (text or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return "(no output)"
+
+
 def format_stick_windows(device_path, log):
     """Clean + MBR + one FAT32 partition; returns the mount root ('E:\\\\')."""
     n = _disk_number(device_path)
     rc, out = _ps_admin(_win_format_script(n), timeout=300, log=log)
     m = re.search(r"^LETTER=([A-Za-z])\s*$", out, re.M)
+    if (rc != 0 or not m) and _BOOT_DISK_REFUSAL not in (out or "") \
+            and _UAC_DECLINED not in (out or ""):
+        log("Windows' storage service refused the format (%s) — redoing it "
+            "with diskpart, which reaches the disk through a different "
+            "service..." % _first_line(out), "info")
+        rc, out = _ps_admin(_win_diskpart_script(n), timeout=300, log=log)
+        m = re.search(r"^LETTER=([A-Za-z])\s*$", out, re.M)
     if rc != 0 or not m:
         raise PipelineError(
             PHASES[1],

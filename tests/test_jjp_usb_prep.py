@@ -206,6 +206,80 @@ def test_windows_format_script_survives_stale_disk_view():
     assert "-DiskNumber 3" in script
 
 
+def test_windows_diskpart_fallback_script():
+    """When the storage cmdlets fail, the format is redone with diskpart —
+    a different service (VDS) that does not share the Storage-WMI cache
+    that kept saying "Not enough available capacity" through all six
+    retries on Alex's stick.  Everything the wedged provider could lie
+    about must come from elsewhere: size from Win32_DiskDrive, the drive
+    letter from DriveInfo, assigned explicitly."""
+    script = usbstick._win_diskpart_script(3)
+    assert script.splitlines()[0] == "$ErrorActionPreference = 'Stop'"
+    # The boot/system-disk safety net is re-checked, never bypassed.
+    assert "IsBoot" in script
+    assert usbstick._BOOT_DISK_REFUSAL in script
+    assert "diskpart.exe /s" in script
+    assert "select disk 3" in script
+    assert "clean" in script
+    assert "convert mbr noerr" in script
+    assert "format fs=fat32 quick label=JJPUSB" in script
+    assert "Win32_DiskDrive" in script
+    assert "Index=3" in script
+    assert "GetDrives" in script
+    assert "assign letter=" in script
+    assert "'LETTER=' + $letter" in script
+
+
+def test_format_stick_windows_falls_back_to_diskpart(monkeypatch):
+    """Cmdlet script fails -> the diskpart script runs and its LETTER=
+    handshake is honoured; the log names both the error and diskpart."""
+    calls = []
+
+    def fake_ps_admin(script, timeout=300, log=None):
+        calls.append(script)
+        if len(calls) == 1:
+            return 1, "New-Partition : Not enough available capacity"
+        return 0, "LETTER=Z"
+
+    monkeypatch.setattr(usbstick, "_ps_admin", fake_ps_admin)
+    real_isdir = os.path.isdir
+    monkeypatch.setattr(usbstick.os.path, "isdir",
+                        lambda p: True if p == "Z:\\" else real_isdir(p))
+
+    logs = []
+    root = usbstick.format_stick_windows(
+        r"\\.\PHYSICALDRIVE3", lambda text, level="info": logs.append(text))
+
+    assert root == "Z:\\"
+    assert len(calls) == 2
+    assert "diskpart.exe" in calls[1]
+    joined = "\n".join(logs)
+    assert "Not enough available capacity" in joined
+    assert "diskpart" in joined
+
+
+@pytest.mark.parametrize("fatal", [
+    "Refusing to format the boot/system disk.",
+    "Administrator access was not granted.",
+])
+def test_format_stick_windows_fatal_errors_skip_diskpart(monkeypatch, fatal):
+    """The safety refusal must stay fatal (a fallback must never bypass
+    it) and a declined UAC prompt must not immediately prompt again."""
+    calls = []
+
+    def fake_ps_admin(script, timeout=300, log=None):
+        calls.append(script)
+        return 1, fatal
+
+    monkeypatch.setattr(usbstick, "_ps_admin", fake_ps_admin)
+
+    with pytest.raises(Exception) as exc:
+        usbstick.format_stick_windows(r"\\.\PHYSICALDRIVE3", lambda *a: None)
+
+    assert len(calls) == 1
+    assert fatal in str(exc.value)
+
+
 # ---------------------------------------------------------------------------
 # Manufacturer + dialog wiring
 # ---------------------------------------------------------------------------

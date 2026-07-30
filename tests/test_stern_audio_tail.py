@@ -18,13 +18,21 @@ import tempfile
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IMG_DIR = os.path.join(REPO, "images", "Stern", "spike2")
+# PAD_SPIKE2_IMG_DIR lets a worktree / CI point at the card library when it
+# lives outside the checkout (the default is the main checkout's images dir).
+IMG_DIR = os.environ.get("PAD_SPIKE2_IMG_DIR",
+                         os.path.join(REPO, "images", "Stern", "spike2"))
 CARDS = {
     "turtles": "turtles_pro-1_58_0.Release.8G.sdcard.raw",      # validated build
     "led_zeppelin": "led_zeppelin_le-1_20_0.Release.8G.sdcard.raw",  # generic build
     # LE 1.22.0: a build whose PLT thunks unicorn mistranslates -- exercises the
     # _plt_branch entry-intercept (without it, derive_params can't map the codec).
     "led_zeppelin_122": "led_zeppelin_le-1_22_0.Release.8G.sdcard.raw",
+    # Pro 1.16.0: first observed build that clobbers r5 with the record-array
+    # malloc SIZE at the master-dir malloc-return PC, so the count must come
+    # from the served alloc size (_md_record_count) -- the build family behind
+    # a field report of "Deriving codec parameters" hanging indefinitely.
+    "deadpool_116": "deadpool_pro-1_16_0.Release.8G.sdcard.raw",
 }
 
 

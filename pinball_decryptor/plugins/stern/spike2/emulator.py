@@ -133,14 +133,34 @@ def emitted_length(length):
     return max(0, int(length) - BLOCK)
 
 
+def _md_record_count(eng, dst):
+    """Record count at the master-directory malloc-return PC (where the
+    MASTERDIR_MALLOC hook sits, ``dst`` = the returned buffer in r0).
+
+    Most builds still hold the raw count in r5 there (the ``*24`` size is built
+    in a scratch register).  Deadpool Pro 1.16 is the first observed build that
+    REUSES r5 for the aligned byte size it passes to malloc
+    (``add r5, r7, #0xf ; bic r5, r5, #0xf``), so r5 reads ~24x high — which
+    chained the derive through tens of thousands of garbage records (the
+    "Deriving codec parameters" hang a field report sat on for 24+ minutes).
+    The import stub SERVED that malloc, so its recorded ``(ptr, size)`` is
+    ground truth: when ``dst`` is that ptr, ``size // 24`` is the record count
+    regardless of which register the build kept it in (the 16-byte alignment
+    pad is < 24, so the floor division is exact).  r5 stays as the fallback for
+    an allocation the stub didn't serve."""
+    la = getattr(eng, "_last_alloc", None)
+    if la and la[0] == dst and la[1] >= 24:
+        return la[1] // 24
+    return eng.mu.reg_read(UC_ARM_REG_R5)
+
+
 def _accept_masterdir_malloc(cap, dst, n):
     """First-hit capture for the master-directory record-array malloc hook.
 
     Accepts ``(dst, n)`` into ``cap`` and returns True only when ``n`` is a
-    sane record count.  At the true malloc site r5 IS the record count on every
-    mapped build (the located pattern derives the malloc size from it), so a
-    wild value means the hook landed on the wrong PC — a firmware build newer
-    than the locator knows.  Accepting it anyway disarms the fail-fast watchdog
+    sane record count (``n`` from :func:`_md_record_count`).  A wild value
+    means the hook landed on the wrong PC — a firmware build newer than the
+    locator knows.  Accepting it anyway disarms the fail-fast watchdog
     and sends the derive into ``_ensure_range``/``mem_read`` over ``n * 24``
     bytes — gigabytes of page churn that a field report saw as "Deriving codec
     parameters" sitting for 24+ minutes with no error.  Rejecting keeps the
@@ -531,7 +551,9 @@ class Spike2Emu:
         if nm in ("malloc", "calloc", "_Znwj", "operator new(unsigned int)",
                   "operator new[](unsigned int)", "_Znaj"):
             n = r0 if nm != "calloc" else r0 * mu.reg_read(UC_ARM_REG_R1)
-            self._ret(self.alloc(max(16, n)))
+            p = self.alloc(max(16, n))
+            self._last_alloc = (p, n)   # ground truth for _md_record_count
+            self._ret(p)
             return
         if nm in ("free", "_ZdlPv", "operator delete(void*)", "_ZdaPv",
                   "operator delete[](void*)"):
@@ -648,7 +670,10 @@ class Spike2Emu:
         self._ret(len(s) - 1)
 
     def _opnew(self):
-        self._ret(self.alloc(max(16, self.mu.reg_read(UC_ARM_REG_R0))))
+        n = self.mu.reg_read(UC_ARM_REG_R0)
+        p = self.alloc(max(16, n))
+        self._last_alloc = (p, n)       # ground truth for _md_record_count
+        self._ret(p)
 
     def _rbinsert_regs(self):
         mu = self.mu
@@ -791,8 +816,8 @@ class Spike2Emu:
         cap = {"mddst": None, "nrec": None, "state": None, "badrec": None}
 
         def at_md(eng):
-            if _accept_masterdir_malloc(cap, eng.mu.reg_read(UC_ARM_REG_R0),
-                                        eng.mu.reg_read(UC_ARM_REG_R5)):
+            dst = eng.mu.reg_read(UC_ARM_REG_R0)
+            if _accept_masterdir_malloc(cap, dst, _md_record_count(eng, dst)):
                 eng._watchdog = None      # located OK -> stop the fail-fast count
 
         def at_bb(eng):

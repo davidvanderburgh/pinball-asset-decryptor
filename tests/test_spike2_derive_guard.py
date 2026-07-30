@@ -13,7 +13,19 @@ unmapped-build error, naming the bogus count.
 import pytest
 
 from pinball_decryptor.plugins.stern.spike2.emulator import (
-    MAX_RECORDS, _accept_masterdir_malloc)
+    MAX_RECORDS, _accept_masterdir_malloc, _md_record_count)
+
+
+class _FakeEng:
+    """Just enough emulator for _md_record_count: r5 + the last-served alloc."""
+
+    def __init__(self, r5, last_alloc=None):
+        self.r5 = r5
+        self._last_alloc = last_alloc
+        self.mu = self           # _md_record_count reads eng.mu.reg_read(R5)
+
+    def reg_read(self, _reg):
+        return self.r5
 
 
 def _fresh_cap():
@@ -69,6 +81,54 @@ def test_bad_hit_then_sane_hit_recovers():
     assert cap["mddst"] == 0x30002000
     assert cap["nrec"] == 2000
     assert cap["badrec"] == 0x30001234   # the anomaly stays visible for the log
+
+
+def _align16(n):
+    return (n + 15) & ~15
+
+
+def test_count_from_malloc_size_classic_shape():
+    """Deadpool 1.14-style build: r5 holds the raw count at the hook PC and the
+    record-array malloc was served by the import stub -- both agree on 2000."""
+    eng = _FakeEng(r5=2000, last_alloc=(0x30001000, _align16(2000 * 24)))
+    assert _md_record_count(eng, 0x30001000) == 2000
+
+
+def test_count_from_malloc_size_r5_clobbered():
+    """Deadpool 1.16 Pro: the build reuses r5 for the ALIGNED BYTE SIZE it
+    passes to malloc (add r5, r7, #0xf ; bic r5, r5, #0xf), so r5 reads ~24x
+    high at the hook PC.  The size the import stub served the matching buffer
+    for is ground truth: 48000 // 24 == 2000, not 48000."""
+    eng = _FakeEng(r5=48000, last_alloc=(0x30001000, 48000))
+    assert _md_record_count(eng, 0x30001000) == 2000
+
+
+def test_count_odd_alignment_pad_is_floored_away():
+    """An odd count's *24 size gets a 16-byte-alignment pad (< 24), so the
+    floor division still recovers the exact count."""
+    n = 2001
+    eng = _FakeEng(r5=0xdead, last_alloc=(0x30001000, _align16(n * 24)))
+    assert _md_record_count(eng, 0x30001000) == n
+
+
+def test_count_falls_back_to_r5_when_alloc_unmatched():
+    """A buffer the import stub didn't serve (or no alloc seen yet) keeps the
+    legacy r5 read -- the validated-build behavior."""
+    assert _md_record_count(_FakeEng(r5=2000), 0x30001000) == 2000
+    eng = _FakeEng(r5=2000, last_alloc=(0x40000000, 48000))   # different buffer
+    assert _md_record_count(eng, 0x30001000) == 2000
+    eng = _FakeEng(r5=2000, last_alloc=(0x30001000, 8))       # too small for 1 rec
+    assert _md_record_count(eng, 0x30001000) == 2000
+
+
+def test_dp116_shape_end_to_end_accepted():
+    """The 1.16 shape flows through capture: size-derived count 2000 is sane,
+    accepted, and the watchdog would be disarmed on the true values."""
+    eng = _FakeEng(r5=48000, last_alloc=(0x30001000, 48000))
+    cap = _fresh_cap()
+    n = _md_record_count(eng, 0x30001000)
+    assert _accept_masterdir_malloc(cap, 0x30001000, n) is True
+    assert cap["nrec"] == 2000
 
 
 def test_bound_matches_category_gate():

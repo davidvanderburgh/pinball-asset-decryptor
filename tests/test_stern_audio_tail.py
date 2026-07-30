@@ -477,6 +477,28 @@ def test_rbtree_increment_walks_in_order_and_terminates():
     assert RB.decrement(mu, n20) == n10
 
 
+@pytest.fixture(autouse=True)
+def _no_faulthandler():
+    """Disable pytest's faulthandler around these emulator tests.
+
+    unicorn services guest memory through the host's fault machinery, and on
+    Windows pytest's faulthandler plugin traps that first: it prints a
+    "Windows fatal exception: access violation" traceback and kills the
+    process, reproducibly inside ``Spike2Emu.__init__``'s segment ``mem_map``,
+    before a single assertion runs.  The same construction succeeds every time
+    outside pytest.  Turn it off for the duration and restore it after, so a
+    card-gated run doesn't die on an artefact of the test harness.
+    """
+    import faulthandler
+    was = faulthandler.is_enabled()
+    faulthandler.disable()
+    try:
+        yield
+    finally:
+        if was:
+            faulthandler.enable()
+
+
 def _card_path(title):
     return os.path.join(IMG_DIR, CARDS[title])
 
@@ -511,19 +533,18 @@ def _shortest(rows, chan, minlen=600):
 def _shortest_encodable(rows, chan, emu, gr, sr, np, minlen=600, tries=6):
     """Shortest sound of ``chan`` that the re-encoder can actually reproduce.
 
-    Not every sound is re-encodable, on ANY title.  Most read one body word per
-    output sample, but some read the body in OVERLAPPING blocks -- block b
-    takes words ``200*b + 2*i``, so consecutive blocks share words and 1300 of
-    a sound's 1408 read words feed TWO output samples under different
-    keystreams (measured exactly, Deadpool Pro 1.16 idx7146; the same shape
-    appears on long-shipped titles, e.g. Godzilla 1.13 and Star Wars 1.30).
-    One 16-bit word cannot satisfy two independent targets, so a per-sample
-    inversion can't round-trip those and the Write path deliberately skips them
-    (``engine._recovery_valid`` -> "re-encode isn't bit-exact for this sound's
-    codec"), leaving them unchanged rather than writing noise.
+    Some sounds decode to stationary NOISE rather than audio (Deadpool Pro
+    1.16: 0% below idx 4000, 100% above idx 5000; controls TMNT 1.58 0.7%,
+    Jaws 1.01 0.0%), and a sound that decoded wrong cannot round-trip -- the
+    re-encode failure tracks the decode bug, it is not a separate encoder
+    defect.  Write already skips them (``engine._recovery_valid`` -> "re-encode
+    isn't bit-exact for this sound's codec"), leaving them unchanged.
 
-    This guard is about the emitted length and the TAIL, so it runs on a sound
-    the encoder supports -- picked with the very same production gate.
+    This guard is about the emitted length and the TAIL, so it must run on a
+    sound that decodes correctly.  Picking it with the very same production
+    gate keeps the guard meaningful without hard-coding an idx: bare
+    ``_shortest`` picked Deadpool 1.16 idx7146, a noise-decoding sound, and the
+    resulting failure said nothing about tails.
     """
     from pinball_decryptor.plugins.stern.engine import _recovery_valid
 

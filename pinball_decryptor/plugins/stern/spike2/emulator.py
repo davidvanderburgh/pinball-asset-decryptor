@@ -122,10 +122,39 @@ RET_SENTINEL = 0xdeadbee0  # even ``call()`` return trap (interwork-safe; see ca
 # one-shot SFX but clicks at the loop point of looping music.
 BLOCK = 200
 
+# Sane master-directory record-count ceiling.  The largest shipped catalog is
+# D&D's ~10.5k sounds, so 65536 has ~6x headroom; the per-category count gate
+# uses the same bound.  Anything above it is a mis-read register, not a card.
+MAX_RECORDS = 1 << 16
+
 
 def emitted_length(length):
     """True decoded sample count for a sound of header ``length`` (see BLOCK)."""
     return max(0, int(length) - BLOCK)
+
+
+def _accept_masterdir_malloc(cap, dst, n):
+    """First-hit capture for the master-directory record-array malloc hook.
+
+    Accepts ``(dst, n)`` into ``cap`` and returns True only when ``n`` is a
+    sane record count.  At the true malloc site r5 IS the record count on every
+    mapped build (the located pattern derives the malloc size from it), so a
+    wild value means the hook landed on the wrong PC — a firmware build newer
+    than the locator knows.  Accepting it anyway disarms the fail-fast watchdog
+    and sends the derive into ``_ensure_range``/``mem_read`` over ``n * 24``
+    bytes — gigabytes of page churn that a field report saw as "Deriving codec
+    parameters" sitting for 24+ minutes with no error.  Rejecting keeps the
+    watchdog armed (a later sane hit can still win), so an unmapped build bails
+    within ~1-2 min with the clear unmapped-build error; the bogus count is
+    kept in ``cap["badrec"]`` so that error names it."""
+    if cap["mddst"] is not None:
+        return False
+    if not (1 <= n <= MAX_RECORDS):
+        cap["badrec"] = n
+        return False
+    cap["mddst"] = dst
+    cap["nrec"] = n
+    return True
 
 # Byte signatures (ARM function prologues) of the supported firmware build at a
 # few of the hardcoded addresses above.  The codec oracle is pinned to this
@@ -759,12 +788,11 @@ class Spike2Emu:
         chan, scale}``.  ~1 minute for ~2000 sounds.
         """
         mu = self.mu
-        cap = {"mddst": None, "nrec": None, "state": None}
+        cap = {"mddst": None, "nrec": None, "state": None, "badrec": None}
 
         def at_md(eng):
-            if cap["mddst"] is None:
-                cap["mddst"] = eng.mu.reg_read(UC_ARM_REG_R0)
-                cap["nrec"] = eng.mu.reg_read(UC_ARM_REG_R5)
+            if _accept_masterdir_malloc(cap, eng.mu.reg_read(UC_ARM_REG_R0),
+                                        eng.mu.reg_read(UC_ARM_REG_R5)):
                 eng._watchdog = None      # located OK -> stop the fail-fast count
 
         def at_bb(eng):
@@ -797,10 +825,12 @@ class Spike2Emu:
         # by at_md) sits at the very top of the decode on every mapped build, so
         # mddst is set within the first instructions regardless of catalog size.
         # If a newer/unrecognised build's addresses locate to the wrong PCs the
-        # hook never fires, and without this the emulation would burn the whole
-        # 600M-instruction cap (~19 min on real HW) before failing.  at_md clears
-        # the watchdog the moment it fires, so a good build pays ~nothing; a bad
-        # one bails after a wide margin (~1-2 min) with the error below.
+        # hook never fires — or fires somewhere r5 is NOT the record count (see
+        # _accept_masterdir_malloc) — and without this the emulation would burn
+        # the whole 600M-instruction cap (~19 min on real HW) before failing.
+        # at_md clears the watchdog the moment a sane capture lands, so a good
+        # build pays ~nothing; a bad one bails after a wide margin (~1-2 min)
+        # with the error below.
         wd = {"n": 0}
 
         def _wd():

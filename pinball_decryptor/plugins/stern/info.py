@@ -5,7 +5,7 @@ extracting anything: the vendor filename and the on-card ``.sidx`` name (both
 carry the firmware version), the MBR partition table, the ``.sidx`` validation
 manifest (game folder, indexed-file count, record format, ``image.bin`` size),
 the plaintext count words in the ``image.bin`` container header (sounds +
-sound requests), the game ELF's objective namespace (the title's three-letter
+sound fragments), the game ELF's objective namespace (the title's three-letter
 code, e.g. ``VEN``) and its adjustment table (how many operator settings and
 high-score places the game has), plus on-card asset counts (videos by the
 same 12-byte ``ftyp`` sniff the extract uses, images/scenes by name).  Apart
@@ -51,34 +51,40 @@ def version_from_filename(path):
 
 
 def container_counts(head):
-    """``(sound_requests, sounds)`` from the ``image.bin`` header, else
+    """``(sound_fragments, sounds)`` from the ``image.bin`` header, else
     ``(None, None)``.
 
     The container header is NOT obfuscated: it opens with its own size
     (0xb0 on most titles, 0x4d0 on the multi-category Metallica remaster)
     and carries two plaintext count words —
 
-      * ``u32 @ 0x5c`` — the requestable sound assets.  Probing the booted
-        firmware's ``get_asset_descriptor`` resolver on Led Zeppelin 1.22
-        accepts exactly sids ``0..w5c-1`` (578), so this is the game's sound
-        request space (several requests can share one recording).
+      * ``u32 @ 0x5c`` — the sound fragments: every audio piece the booted
+        firmware's ``get_asset_descriptor`` resolver can hand out.  On Led
+        Zeppelin 1.22 the resolver accepts exactly sids ``0..w5c-1`` (578),
+        each landing on a master-directory record, i.e. a physical recording
+        (see sfx_names for the chain).  This is NOT the game-code *sound
+        request* count — requests sit a level above and chain/share
+        fragments, so a tester comparing counts on Venom caught the old
+        "Sound requests" label as wrong.  The request tally itself is not a
+        header word; counting it would mean mining the request tables out of
+        the game ELF.
       * ``u32 @ 0x60`` — the packed cat-0 sounds.  Equals
         ``len(derive_params())`` (the Extract decode count) on every card
         with a cached derive (LZ 1.22 both editions = 549, Elvira 3 = 5597).
 
     Verified across all 33 vendor images on hand (word @ 0x58 is always 0,
-    requests >= sounds always holds); anything off-pattern returns
+    fragments >= sounds always holds); anything off-pattern returns
     ``(None, None)`` so the caller degrades to the honest "run Extract" row.
     """
     if len(head) < 0x68:
         return None, None
     hdr_size, = struct.unpack_from("<Q", head, 0)
-    zero, requests, sounds = struct.unpack_from("<III", head, 0x58)
+    zero, fragments, sounds = struct.unpack_from("<III", head, 0x58)
     if not (0x68 <= hdr_size <= 0x10000) or hdr_size % 8 or zero != 0:
         return None, None
-    if not (0 < sounds <= requests < 500_000):
+    if not (0 < sounds <= fragments < 500_000):
         return None, None
-    return requests, sounds
+    return fragments, sounds
 
 
 # The game firmware names its objectives/flags ``OB_<CODE>_*`` / ``FG_<CODE>_*``
@@ -274,15 +280,15 @@ def _data_partition_probe(card):
                         format(image_bin["size"], ","))))
 
     # Counted from the card itself, no Extract needed (David).  The sound and
-    # sound-request counts are the container header's own plaintext words
+    # sound-fragment counts are the container header's own plaintext words
     # (see container_counts) — a tester: the old row could only say "run
-    # Extract", and asked for the request count separately.
-    requests = sounds = None
+    # Extract", and asked for the second count separately.
+    fragments = sounds = None
     if image_bin is not None:
         try:
-            requests, sounds = container_counts(reader.peek(image_bin, 0x68))
+            fragments, sounds = container_counts(reader.peek(image_bin, 0x68))
         except Exception:
-            requests = sounds = None
+            fragments = sounds = None
     asset_rows = [
         ("Videos", format(found["videos"], ",")),
         ("Images", format(found["images"], ",")),
@@ -293,9 +299,10 @@ def _data_partition_probe(card):
             ("Sounds", "%s — packed in image.bin; Extract decodes them "
                        "to WAVs" % format(sounds, ",")))
         asset_rows.append(
-            ("Sound requests", "%s — sound events the game can trigger "
-                               "(several can share one recording)"
-             % format(requests, ",")))
+            ("Sound fragments", "%s — audio pieces the firmware can "
+                                "resolve and play (the game's sound "
+                                "requests chain and share them)"
+             % format(fragments, ",")))
     else:
         asset_rows.append(
             ("Sounds", "packed inside image.bin — run Extract to decode "

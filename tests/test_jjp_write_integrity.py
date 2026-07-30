@@ -319,6 +319,84 @@ def test_unreadable_original_slot_is_reported_not_silent(tmp_path):
                for lvl, msg in pipe.logged), pipe.logged
 
 
+def _logic_wav(nframes, rate=44100, nch=1, sw=2, fill=b"\x11\x22"):
+    """A WAV shaped like JJP's actual audio.
+
+    Every asset on the card is a Logic Pro export: a JUNK pad before fmt,
+    then data, then LGWV/ResU/cue /LIST/bext trailing it — 2-5 KB of
+    metadata, with the samples starting past offset 100 rather than at 44.
+    """
+    def chunk(cid, body):
+        out = cid + struct.pack("<I", len(body)) + body
+        return out + (b"\x00" if len(body) & 1 else b"")
+    data = (fill * (nframes * nch * sw))[:nframes * nch * sw]
+    body = (b"WAVE"
+            + chunk(b"JUNK", b"\x00" * 64)
+            + chunk(b"fmt ", struct.pack("<HHIIHH", 1, nch, rate,
+                                         rate * nch * sw, nch * sw, sw * 8))
+            + chunk(b"data", data)
+            + chunk(b"LGWV", b"\xaa" * 972)
+            + chunk(b"ResU", b"x\x9c" + b"\xbb" * 373)
+            + chunk(b"cue ", b"\x01\x00\x00\x00" + b"\x00" * 24)
+            + chunk(b"LIST", b"adtllabl" + b"Tempo: 120.0\x00" * 1)
+            + chunk(b"bext", b"\xcc" * 602))
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def test_replacement_is_spliced_into_the_originals_container(tmp_path):
+    """The fit has to keep the slot's byte length AND its chunks.
+
+    Rebuilding the file canonically would hit the length only by stuffing
+    the metadata budget with extra samples, and would throw away the cue
+    points and labels the originals carry.
+    """
+    orig = _logic_wav(4000)
+    enc = _encrypt_v3(orig, SONIC_WAV, "Sonic", lead=216, trail=96)
+    pipe, entry = _audio_pipe(tmp_path, enc, v3.SCHEME_V3)
+    fmt = pipe._get_original_wav_format(entry)
+    assert fmt is not None and fmt["_orig_bytes"] == orig
+
+    # a plain editor export: same format, same frames, no metadata chunks
+    plain = _wav(4000, nch=1, sw=2, rate=44100)
+    assert len(plain) != len(orig), "the fixture must differ in length"
+
+    out = pipe._resize_wav_to_duration(plain, fmt, "audio/x.wav")
+    assert len(out) == len(orig), "must land on the slot's exact size"
+    for tag in (b"JUNK", b"LGWV", b"ResU", b"cue ", b"LIST", b"bext"):
+        assert tag in out, f"{tag!r} chunk must survive the fit"
+    # the samples really are the replacement's
+    d_start, d_len = P.StandaloneModPipeline._wav_data_chunk(out)
+    s_start, s_len = P.StandaloneModPipeline._wav_data_chunk(plain)
+    assert out[d_start:d_start + s_len] == plain[s_start:s_start + s_len]
+    # and everything around them is untouched
+    assert out[:d_start] == orig[:d_start]
+    assert out[d_start + d_len:] == orig[d_start + d_len:]
+
+
+def test_splice_pads_a_short_replacement_and_trims_a_long_one(tmp_path):
+    orig = _logic_wav(4000)
+    enc = _encrypt_v3(orig, SONIC_WAV, "Sonic", lead=216, trail=96)
+    pipe, entry = _audio_pipe(tmp_path, enc, v3.SCHEME_V3)
+    fmt = pipe._get_original_wav_format(entry)
+    for frames in (1000, 9000):
+        out = pipe._resize_wav_to_duration(_wav(frames, rate=44100), fmt,
+                                           "audio/x.wav")
+        assert len(out) == len(orig)
+        assert P.StandaloneModPipeline._wav_data_chunk(out)[1] == 4000 * 2
+
+
+def test_data_chunk_walk_rejects_a_lying_header():
+    """A replacement whose data chunk claims more bytes than it has is
+    exactly the hand-padded file that would crash the game's parser."""
+    good = _logic_wav(100)
+    assert P.StandaloneModPipeline._wav_data_chunk(good) is not None
+    lying = bytearray(good)
+    d_start, d_len = P.StandaloneModPipeline._wav_data_chunk(good)
+    struct.pack_into("<I", lying, d_start - 4, d_len + 10_000)
+    assert P.StandaloneModPipeline._wav_data_chunk(bytes(lying)) is None
+    assert P.StandaloneModPipeline._wav_data_chunk(b"not a wav at all") is None
+
+
 def test_v3_resize_targets_the_slots_exact_byte_size(tmp_path):
     """On scheme 3 the byte count is what matters, not the frame count: the
     original may carry RIFF chunks the canonical header we write does not."""

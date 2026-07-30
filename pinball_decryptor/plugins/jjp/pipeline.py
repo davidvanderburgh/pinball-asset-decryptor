@@ -5720,6 +5720,7 @@ class StandaloneModPipeline(ModPipeline):
                     "error")
                 return None
             fmt["_orig_size"] = len(orig_dec)
+            fmt["_orig_bytes"] = orig_dec
             return fmt
         except Exception as e:
             self.log(f"  Warning: could not read the original slot "
@@ -5821,6 +5822,72 @@ class StandaloneModPipeline(ModPipeline):
                     except OSError:
                         pass
 
+    @staticmethod
+    def _wav_data_chunk(buf):
+        """(start, length) of the ``data`` chunk BODY, or None.
+
+        Walks the RIFF chunk list rather than assuming the 44-byte canonical
+        header: JJP's audio is exported from Logic and every file carries
+        JUNK/LGWV/ResU/cue /LIST/bext chunks, so the samples typically start
+        past offset 100 and there is 2-5 KB of metadata around them.
+        """
+        import struct as _st
+        if len(buf) < 12 or buf[:4] != b"RIFF" or buf[8:12] != b"WAVE":
+            return None
+        pos = 12
+        while pos + 8 <= len(buf):
+            cid = buf[pos:pos + 4]
+            size = _st.unpack_from("<I", buf, pos + 4)[0]
+            body = pos + 8
+            if cid == b"data":
+                if body + size > len(buf):
+                    return None          # declared longer than the file
+                return (body, size)
+            pos = body + size + (size & 1)
+        return None
+
+    def _splice_wav_into_slot(self, content, orig_bytes, rel_path):
+        """Put the replacement's samples inside the ORIGINAL's container.
+
+        These images pin every asset's byte length, and JJP's own WAVs are
+        Logic exports wrapped in kilobytes of chunks (cue points, labels,
+        bext, waveform overviews).  Rebuilding a replacement from scratch
+        would have to guess its way back onto that exact length and would
+        drop whatever the game reads out of those chunks.  Keeping the
+        original file and swapping only the contents of its ``data`` chunk
+        hits the length by construction and leaves everything else alone.
+
+        Returns the spliced bytes, or None if either file can't be walked.
+        """
+        dst = self._wav_data_chunk(orig_bytes)
+        src = self._wav_data_chunk(content)
+        if not dst or not src:
+            self.log(f"  {rel_path}: could not locate the audio data inside "
+                     f"the WAV container; falling back to a plain resize.",
+                     "info")
+            return None
+        d_start, d_len = dst
+        s_start, s_len = src
+        frames = content[s_start:s_start + s_len]
+        if len(frames) > d_len:
+            trimmed = len(frames) - d_len
+            frames = frames[:d_len]
+            note = f"trimmed {trimmed} bytes of audio"
+        elif len(frames) < d_len:
+            pad = d_len - len(frames)
+            frames = frames + b"\x00" * pad
+            note = f"padded {pad} bytes of silence"
+        else:
+            note = "exact fit"
+        out = orig_bytes[:d_start] + frames + orig_bytes[d_start + d_len:]
+        if len(out) != len(orig_bytes):
+            return None
+        self.log(f"  Fitted into the original slot ({note}, {len(out)} "
+                 f"bytes, container and cue points preserved)", "info")
+        if hasattr(self, '_file_tree_cb'):
+            self._file_tree_cb(rel_path, "Fitted to slot")
+        return out
+
     def _resize_wav_to_duration(self, content, orig_fmt, rel_path):
         """Trim or pad WAV to match the original's exact frame count.
 
@@ -5853,39 +5920,19 @@ class StandaloneModPipeline(ModPipeline):
         # Sonic-era images pin the file length: the game reads each asset's
         # padding out of fl.dat, which that generation encrypts with the
         # dongle, so the content has to come back the exact same number of
-        # bytes or the write is refused.  Aim at the slot's byte budget
-        # rather than its frame count — the original may carry chunks the
-        # canonical 44-byte header we write does not.
+        # bytes or the write is refused.  Rather than rebuild the file and
+        # hope it lands on the size, drop the replacement's samples into the
+        # original's own container — see _splice_wav_into_slot.
         from .crypto_v3 import SCHEME_V3
         nch = orig_fmt["nchannels"]
         sw = orig_fmt["sampwidth"]
-        orig_size = orig_fmt.get("_orig_size")
-        if (getattr(self, '_write_scheme', None) == SCHEME_V3
-                and orig_size and nch and sw):
-            budget = orig_size - 44          # canonical RIFF header we emit
-            fitted, remainder = divmod(budget, nch * sw)
-            if remainder or fitted <= 0:
-                self.log(
-                    f"  {rel_path}: this image pins the slot at {orig_size} "
-                    f"bytes, which is not a whole number of "
-                    f"{sw * 8}-bit/{nch}-channel frames — the replacement "
-                    f"cannot be fitted exactly and will be refused.",
-                    "error")
-            elif fitted != target_nframes:
-                self.log(
-                    f"  Fitting to the slot's exact size: {target_nframes} "
-                    f"-> {fitted} frames ({orig_size} bytes)", "info")
-                target_nframes = fitted
-            else:
-                target_nframes = fitted
-            # Right number of frames is not the same as the right number of
-            # bytes: a replacement carrying extra RIFF chunks still has to be
-            # rewritten canonically to land on the slot's size.
-            if repl_nframes == target_nframes and len(content) != orig_size:
-                self.log(
-                    f"  Rewriting the header to hit the slot's {orig_size} "
-                    f"bytes (replacement is {len(content)})", "info")
-                repl_nframes = -1
+        orig_bytes = orig_fmt.get("_orig_bytes")
+        if (getattr(self, '_write_scheme', None) == SCHEME_V3 and orig_bytes):
+            spliced = self._splice_wav_into_slot(content, orig_bytes, rel_path)
+            if spliced is not None:
+                return spliced
+            # fall through to the ordinary resize and let the size check
+            # downstream refuse it with an explanation
 
         if repl_nframes == target_nframes:
             return content

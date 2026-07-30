@@ -374,6 +374,13 @@ class _AudioPreviewPane:
             self.start_playback(self.pos)
 
     def stop_to_start(self):
+        """■ silences BOTH panes, not just this one — sequential play may
+        have moved the sound to the sibling, and stop on the pane in front
+        of you must not leave the other one playing ("tie the stop buttons
+        together (like slings!)" — a tester).  Only this pane rewinds; the
+        sibling keeps its playhead."""
+        if self.sibling is not None:
+            self.sibling.stop_playback()
         self.stop_playback()
         self.pos = 0.0
         self._draw_playhead()
@@ -851,6 +858,10 @@ class _VideoPreviewPane:
             self.start_playback(self.pos)
 
     def stop_to_start(self):
+        # ■ stops the sibling too — same tied-together rule as the audio
+        # panes (a tester); the sibling keeps its playhead.
+        if self.sibling is not None:
+            self.sibling.stop_playback()
         self.stop_playback()
         self.pos = 0.0
         self._draw_playhead()
@@ -7381,23 +7392,37 @@ class MainWindow:
         # search for the font's name through a label that isn't on screen
         # (a tester searched "stern" on Jaws: 758 such rows).  Every
         # extracted atlas has a glyphs/<atlas-stem>/ dir; those members
-        # never supply the label hint.
+        # never supply the label hint.  The slicer's manifest names each
+        # atlas too (second column), so a project whose glyphs folder was
+        # pruned still knows its fonts.
         try:
             atlases = set(os.listdir(os.path.join(
                 assets_path, "images", "scene_textures", "glyphs")))
+            sliced = True
         except OSError:
-            atlases = set()
+            atlases, sliced = set(), False
+        for cols in _rows("images", "scene_textures", "glyph_images.txt"):
+            if len(cols) >= 2:
+                atlases.add(os.path.splitext(os.path.basename(cols[1]))[0])
+                sliced = True
         labels = {}
         for card, members in per_card.items():
             label = ""
-            for _off, mrel in sorted(members):
-                base = os.path.basename(mrel)
-                if os.path.splitext(base)[0] in atlases:
-                    continue
-                m = name_re.match(base)
-                if m:
-                    label = m.group(1)
-                    break
+            # An extract that predates the glyph slicer has NO record of
+            # which members are fonts, so no member may supply a hint at
+            # all: on such a project the atlas-skip above was a no-op and
+            # "stern" still phantom-matched ~44% of a card's rows (a
+            # tester's older Led Zeppelin extract).  Hash-only labels are
+            # honest; re-extracting brings the names back.
+            if sliced:
+                for _off, mrel in sorted(members):
+                    base = os.path.basename(mrel)
+                    if os.path.splitext(base)[0] in atlases:
+                        continue
+                    m = name_re.match(base)
+                    if m:
+                        label = m.group(1)
+                        break
             id8 = os.path.basename(os.path.dirname(card))[:8] or card
             labels[card] = ("%s · %s" % (label, id8)) if label else id8
         for rel, (card, off) in primary.items():

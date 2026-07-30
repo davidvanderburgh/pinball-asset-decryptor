@@ -1796,6 +1796,9 @@ def _seed_image_assets(tmp_path):
     loose PNG, the extractor manifests describing them, and a baseline."""
     st = tmp_path / "images" / "scene_textures"
     st.mkdir(parents=True)
+    # The slicer's glyphs dir marks this as a modern extract — name hints
+    # are only trusted when the extractor recorded which members are fonts.
+    (st / "glyphs").mkdir()
     frames = ["radimg_Char_Select_8x8_00000001.png",
               "radimg_Char_Select_8x8_00000002.png",
               "radimg_8x8_00000003.png"]

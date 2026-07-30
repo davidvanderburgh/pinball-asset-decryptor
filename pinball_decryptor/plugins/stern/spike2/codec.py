@@ -179,6 +179,46 @@ def pick_shared_word(pred_ctx, self_ctx, tol=2):
     return w, int(ep[w]), int(gs[w])
 
 
+# Body-word offset probe (see GenRecover._calibrate / StereoRecover._calibrate).
+# TWO markers, far enough apart that their hit indices can't be confused, and
+# both inside the first captured block.
+DELTA_Q1, DELTA_Q2 = 10, 37
+# Physically plausible deltas: the body pointer is set at `base` (0) or a few
+# words below it (observed -1 across most builds, -2 on LZ 1.11 idx5103).  A
+# POSITIVE delta would mean a sample reading a body word ahead of itself, which
+# no build does -- seeing one means the probe matched noise.
+DELTA_MIN, DELTA_MAX = -4, 0
+
+
+def _delta_from_hits(hits, q1=DELTA_Q1, q2=DELTA_Q2):
+    """Body-word offset from the indices where a marker probe's sample differs
+    from the zero probe by exactly 0xFFFF.
+
+    The marker is rotate-invariant, so the sample it feeds satisfies
+    ``S ^ K == 0xFFFF`` exactly -- but so does any sample where two *unrelated*
+    keystream values happen to XOR to 0xFFFF (1/65536 per sample; across ~200
+    samples per probe that is ~0.3% per sound, i.e. ~25 sounds on a big catalog
+    like Deadpool's 8175).  Taking the FIRST hit therefore mis-calibrated the
+    rare sound whose noise collision landed before the real marker -- e.g.
+    Deadpool Pro 1.16 idx7146 hit at i=5 and derived delta=+5, shifting the
+    whole encode window by five words so its re-encode decoded to noise.
+
+    With markers at TWO positions the true delta produces hits at BOTH
+    ``q1 - delta`` and ``q2 - delta`` -- a pair exactly ``q2 - q1`` apart -- so
+    a lone collision is ignored.  Falls back to a single hit only when it is a
+    physically plausible delta, and finally to 0 (the historical default)."""
+    hs = {int(i) for i in hits}
+    step = q2 - q1
+    for i in sorted(hs):
+        if i + step in hs:
+            return q1 - i
+    for i in sorted(hs):
+        d = q1 - i
+        if DELTA_MIN <= d <= DELTA_MAX:
+            return d
+    return 0
+
+
 def _asr16_src_regs(ins):
     """Register operands this instruction arithmetic-shifts right by 16 -- the
     codec's ``>>16`` after the volume multiply.  Capstone tags the shifted
@@ -324,19 +364,20 @@ class GenRecover:
             emu.del_hook(a)
         dom_addr, sreg = max(comps, key=lambda ar: len(caps[ar[0]]))
         K = caps[dom_addr]
-        # decode #2 (one body word = 0xFFFF): the affected sample reveals delta
-        # (0xFFFF is rotate-invariant, so S^K == 0xFFFF exactly at that sample).
-        q = 10
-        marker = np.zeros(260, np.uint16); marker[q] = 0xFFFF
+        # decode #2 (body words = 0xFFFF at TWO positions): each marked sample
+        # satisfies S^K == 0xFFFF exactly (0xFFFF is rotate-invariant), and the
+        # pair q2-q1 apart identifies delta even when an unrelated sample
+        # collides on 0xFFFF by chance -- see _delta_from_hits.
+        marker = np.zeros(260, np.uint16)
+        marker[DELTA_Q1] = 0xFFFF
+        marker[DELTA_Q2] = 0xFFFF
         capm = []
         emu.add_hook(dom_addr, lambda eng: capm.append(eng.mu.reg_read(sreg) & 0xffff))
         self._drive_decode(p, 200, marker)
         emu.del_hook(dom_addr)
-        delta = 0
-        for i in range(min(len(capm), len(K))):
-            if (capm[i] ^ K[i]) & 0xffff == 0xffff:
-                delta = q - i
-                break
+        hits = [i for i in range(min(len(capm), len(K)))
+                if (capm[i] ^ K[i]) & 0xffff == 0xffff]
+        delta = _delta_from_hits(hits)
         self._calib[key] = (dom_addr, sreg, delta)
         return self._calib[key]
 
@@ -580,16 +621,19 @@ class StereoRecover:
         key = (p["scale"], p["chan"])
         if key in self._calib:
             return self._calib[key]
+        # nf must cover the second marker frame (see DELTA_Q2) with room for the
+        # delta shift; the markers go in u0 of frames DELTA_Q1 / DELTA_Q2.
         nf = 60
         L0, _R0 = self._drive(p, 200, self._frame_body(nf, 0, 0))   # KL
-        q = 10
-        a = np.zeros(2 * nf, dtype="<u2"); a[2 * q] = 0xFFFF        # marker in u0
+        a = np.zeros(2 * nf, dtype="<u2")
+        a[2 * DELTA_Q1] = 0xFFFF
+        a[2 * DELTA_Q2] = 0xFFFF
         Lm, _Rm = self._drive(p, 200, a.tobytes())
-        delta = 0
-        for i in range(min(len(L0), len(Lm))):
-            if (int(Lm[i]) ^ int(L0[i])) & 0xffff == 0xffff:
-                delta = q - i
-                break
+        # Same two-marker rule as the mono path: a lone 0xFFFF collision between
+        # unrelated keystream samples must not be read as the marker.
+        hits = [i for i in range(min(len(L0), len(Lm)))
+                if (int(Lm[i]) ^ int(L0[i])) & 0xffff == 0xffff]
+        delta = _delta_from_hits(hits)
         self._calib[key] = delta
         return delta
 

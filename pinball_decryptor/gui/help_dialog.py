@@ -107,7 +107,8 @@ HELP_CONTENT = {
          "Two players side by side — the original on the left, your "
          "replacement on the right — each with its own controls, so you can "
          "compare them before you commit to a build. Starting one pauses "
-         "the other."),
+         "the other, and ■ on either silences both — only the pane you "
+         "pressed rewinds."),
         ("Play sequentially",
          "Tick it and a finished clip selects and plays the next row on its "
          "own, following whatever sort, search and Type filter you have set — "

@@ -17,13 +17,18 @@ procedure in-app:
 
 Per-OS mechanics:
   * Windows — PowerShell storage cmdlets (Clear-Disk/New-Partition/
-    Format-Volume) for the format; ``Mount-DiskImage`` for the ISO.  Windows
-    refuses to *create* FAT32 volumes above 32 GiB, so the partition is
-    capped there (plenty: the stick only ever holds this one installer) and
-    an ISO whose contents won't fit is refused with a pointer at Rufus'
-    large-FAT32 mode.  Formatting needs Administrator; the shipped build
-    already runs elevated (launcher.vbs), and an unelevated source run gets
-    a one-shot UAC prompt (``Start-Process -Verb RunAs``).
+    Format-Volume) for the format; ``Mount-DiskImage`` for the ISO.  The
+    cmdlets see a stale view of the disk right after Clear-Disk — New-
+    Partition then fails with "Not enough available capacity" even though
+    the disk is empty (Alex's Sonic stick, 2026-07-29) — so the script
+    re-syncs with Update-Disk and retries the partition/format steps.
+    Windows refuses to *create* FAT32 volumes above 32 GiB, so the
+    partition is capped there (plenty: the stick only ever holds this one
+    installer) and an ISO whose contents won't fit is refused with a
+    pointer at Rufus' large-FAT32 mode.  Formatting needs Administrator;
+    the shipped build already runs elevated (launcher.vbs), and an
+    unelevated source run gets a one-shot UAC prompt
+    (``Start-Process -Verb RunAs``).
   * macOS   — ``diskutil eraseDisk MS-DOS JJPUSB MBR`` (no root needed for
     external media) and ``hdiutil attach`` for the ISO.
   * Linux   — ``pkexec`` runs parted + mkfs.vfat (root needed for block
@@ -182,31 +187,69 @@ def _tree_size(root):
 # plain paths so the pipeline core stays OS-agnostic and unit-testable.
 # ---------------------------------------------------------------------------
 
-def format_stick_windows(device_path, log):
-    """Clean + MBR + one FAT32 partition; returns the mount root ('E:\\\\')."""
-    n = _disk_number(device_path)
-    script = (
+def _win_format_script(n):
+    """The PowerShell that cleans disk *n* and leaves one FAT32 volume.
+
+    The storage cmdlets serve a cached view of the disk, and right after
+    Clear-Disk that view still shows the old partitions — New-Partition
+    then fails with "Not enough available capacity" on an empty stick
+    (Alex's Sonic stick, 2026-07-29).  Update-Disk re-reads the hardware,
+    and the partition and format steps retry across the window where the
+    cache catches up.  $ErrorActionPreference Stop makes the first real
+    failure THE error instead of the head of a null-parameter cascade.
+    """
+    return (
+        "$ErrorActionPreference = 'Stop'\n"
         "$disk = Get-Disk -Number %(n)d\n"
         "if ($disk.IsBoot -or $disk.IsSystem) "
         "{ throw 'Refusing to format the boot/system disk.' }\n"
         "Clear-Disk -Number %(n)d -RemoveData -RemoveOEM -Confirm:$false\n"
-        "Initialize-Disk -Number %(n)d -PartitionStyle MBR "
-        "-ErrorAction SilentlyContinue\n"
-        "$size = (Get-Disk -Number %(n)d).Size\n"
-        "if ($size -gt %(cap)d) {\n"
-        "  $part = New-Partition -DiskNumber %(n)d -Size %(cap)d "
+        "$part = $null\n"
+        "for ($try = 1; $try -le 6; $try++) {\n"
+        "  try {\n"
+        "    Update-Disk -Number %(n)d\n"
+        "    $disk = Get-Disk -Number %(n)d\n"
+        "    if ($disk.PartitionStyle -eq 'RAW') "
+        "{ Initialize-Disk -Number %(n)d -PartitionStyle MBR }\n"
+        "    $disk = Get-Disk -Number %(n)d\n"
+        "    if ($disk.Size -gt %(cap)d) {\n"
+        "      $part = New-Partition -DiskNumber %(n)d -Size %(cap)d "
         "-AssignDriveLetter\n"
-        "} else {\n"
-        "  $part = New-Partition -DiskNumber %(n)d -UseMaximumSize "
+        "    } else {\n"
+        "      $part = New-Partition -DiskNumber %(n)d -UseMaximumSize "
         "-AssignDriveLetter\n"
+        "    }\n"
+        "    break\n"
+        "  } catch {\n"
+        "    if ($try -ge 6) { throw }\n"
+        "    Start-Sleep -Seconds 2\n"
+        "  }\n"
         "}\n"
-        "$null = Format-Volume -Partition $part -FileSystem FAT32 "
+        "for ($try = 1; $try -le 3; $try++) {\n"
+        "  try {\n"
+        "    $null = Format-Volume -Partition $part -FileSystem FAT32 "
         "-NewFileSystemLabel %(label)s -Confirm:$false\n"
+        "    break\n"
+        "  } catch {\n"
+        "    if ($try -ge 3) { throw }\n"
+        "    Start-Sleep -Seconds 2\n"
+        "  }\n"
+        "}\n"
         "$part = Get-Partition -DiskNumber %(n)d "
         "-PartitionNumber $part.PartitionNumber\n"
+        "if (-not $part.DriveLetter) {\n"
+        "  $part | Add-PartitionAccessPath -AssignDriveLetter\n"
+        "  $part = Get-Partition -DiskNumber %(n)d "
+        "-PartitionNumber $part.PartitionNumber\n"
+        "}\n"
         "'LETTER=' + $part.DriveLetter\n"
         % {"n": n, "cap": _WIN_FAT32_MAX, "label": STICK_LABEL})
-    rc, out = _ps_admin(script, timeout=300, log=log)
+
+
+def format_stick_windows(device_path, log):
+    """Clean + MBR + one FAT32 partition; returns the mount root ('E:\\\\')."""
+    n = _disk_number(device_path)
+    rc, out = _ps_admin(_win_format_script(n), timeout=300, log=log)
     m = re.search(r"^LETTER=([A-Za-z])\s*$", out, re.M)
     if rc != 0 or not m:
         raise PipelineError(

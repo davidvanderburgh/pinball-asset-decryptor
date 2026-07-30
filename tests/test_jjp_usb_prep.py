@@ -187,6 +187,25 @@ def test_prepare_verify_catches_corrupt_copy(tmp_path):
     assert "size mismatch" in calls.done[1]
 
 
+def test_windows_format_script_survives_stale_disk_view():
+    """New-Partition right after Clear-Disk sees the cmdlets' stale cached
+    view of the disk and fails with "Not enough available capacity" (Alex's
+    Sonic stick) — the script must re-sync and retry, and must surface the
+    first real error alone instead of a null-parameter cascade."""
+    script = usbstick._win_format_script(3)
+    assert script.splitlines()[0] == "$ErrorActionPreference = 'Stop'"
+    assert "Update-Disk" in script
+    assert "Start-Sleep" in script
+    # Initialize-Disk failures must be visible, not silenced.
+    assert "SilentlyContinue" not in script
+    # The boot/system-disk guard and the drive-letter handshake stay.
+    assert "IsBoot" in script
+    assert "'LETTER=' + $part.DriveLetter" in script
+    # A partition that came up letterless still gets one assigned.
+    assert "Add-PartitionAccessPath -AssignDriveLetter" in script
+    assert "-DiskNumber 3" in script
+
+
 # ---------------------------------------------------------------------------
 # Manufacturer + dialog wiring
 # ---------------------------------------------------------------------------

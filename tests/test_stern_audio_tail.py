@@ -556,6 +556,44 @@ def _shortest_encodable(rows, chan, emu, gr, sr, np, minlen=600, tries=6):
     return None
 
 
+def _spread(rows, n):
+    """*n* sounds spread evenly across the catalog, longest-tail bias avoided.
+
+    The corruption this guards against is POSITIONAL -- clean up to some record
+    and dead from there on -- so sampling has to walk the whole index range, not
+    just the front where every other check in this test lives."""
+    cand = [r for r in rows if r["length"] > 4000]
+    if len(cand) <= n:
+        return cand
+    step = len(cand) / float(n)
+    return [cand[min(len(cand) - 1, int(i * step))] for i in range(n)]
+
+
+def _decodes_dead(emu, p, np):
+    """True if this sound decodes to STATIONARY NOISE rather than audio.
+
+    The wrong-codec signature documented in emulator.py: near-white spectrum
+    with no envelope.  Measured on Deadpool Pro 1.16's broken tail as spectral
+    flatness ~0.67 with an envelope ratio ~1.1 and no quiet frames, against
+    0.001-0.42 / 1.6-12 / 7-34% quiet for healthy sounds on the same card."""
+    out = emu.decode(p, max_secs=1.5)
+    if not out:
+        return True
+    x = np.asarray(out[0], float)
+    if len(x) < 4096 or np.std(x) < 1e-6:
+        return False              # silence isn't the failure this looks for
+    n = 1 << int(np.floor(np.log2(len(x))))
+    w = (x[:n] - x[:n].mean()) * np.hanning(n)
+    X = np.maximum(np.abs(np.fft.rfft(w))[1:], 1e-9)
+    flat = float(np.exp(np.mean(np.log(X))) / np.mean(X))
+    fr = max(1, int(0.005 * 44100))                      # 5 ms frames
+    env = np.array([np.sqrt(np.mean(x[i * fr:(i + 1) * fr] ** 2))
+                    for i in range(max(1, len(x) // fr))])
+    ratio = float(env.max()) / max(float(np.median(env)), 1e-9)
+    quiet = float(np.mean(env < 0.1 * np.median(env)))
+    return flat > 0.60 and ratio < 2.0 and quiet < 0.02
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("title", list(CARDS))
 def test_decode_length_and_tail_roundtrip(title):
@@ -635,7 +673,23 @@ def test_decode_length_and_tail_roundtrip(title):
                 "%s idx%d: stereo R round-trip not bit-exact" % (title, p["idx"]))
         checked += 1
 
+    # (3) The catalog must still be AUDIO all the way to its end.  The chain
+    # replay used to write 24 bytes at a pseudo-random address once per record
+    # (see spike2.emulator._record_write_addr), so the deeper a catalog went the
+    # likelier a record got hit -- and every record after the hit derived its
+    # predictor from corrupted state.  Deadpool Pro 1.16 broke at idx 4714 and
+    # 3461 of its 8175 sounds (42% of the extract) decoded to stationary noise
+    # while every check above still passed, because those all run on a
+    # short-and-encodable sound near the FRONT.  Sample the whole catalog.
+    dead = [p["idx"] for p in _spread(rows, 16)
+            if _decodes_dead(emu, p, np)]
     emu.close()
+    assert len(dead) <= 2, (
+        "%s: %d of 16 sounds sampled across the catalog decode to stationary "
+        "noise (idx %s) -- expected at most 2. Noise late in the catalog and "
+        "not early is the chain-replay corruption signature; check that the "
+        "record write-back stays inside the master-directory array."
+        % (title, len(dead), dead))
     assert checked >= 1, "%s: no codec-0 sound found to test" % title
 
 

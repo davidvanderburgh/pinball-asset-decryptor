@@ -70,8 +70,19 @@ _MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 # --------------------------------------------------------------------------
 # params cache (fingerprint of game_real + image.bin master-dir region)
 # --------------------------------------------------------------------------
+# Bump whenever a fix changes the params DERIVED from unchanged card bytes.  The
+# fingerprint covers the card only, so without this a cached pickle from the old
+# derive keeps being loaded and silently masks the fix.
+#   2: the chain replay no longer writes 24 bytes at a pseudo-random address
+#      once per record (spike2.emulator._record_write_addr).  Every catalog big
+#      enough to take a hit cached wrong codec params -- Deadpool Pro 1.16 had
+#      3461 of 8175 sounds decoding to noise.
+_DERIVE_REV = 2
+
+
 def _fingerprint(game_real_path, image_path):
     h = hashlib.sha256()
+    h.update(b"derive-rev-%d\0" % _DERIVE_REV)
     with open(_lp(game_real_path), "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)

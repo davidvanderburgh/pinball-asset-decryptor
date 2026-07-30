@@ -340,6 +340,10 @@ class CatEmu(Spike2Emu):
                 return None
             self._ensure_range(cap["mddst"], n * 24)
             md = bytes(mu.mem_read(cap["mddst"], n * 24))
+            # Bounds the per-record write-back in _drive_step; without it the
+            # replay scribbles 24 bytes at a pseudo-random address per record
+            # (see emulator._record_write_addr).
+            self._md_range = (cap["mddst"], cap["mddst"] + n * 24)
             return self._chain_records(md, n, cap["state"])
         finally:
             self.del_hook(snp)

@@ -176,6 +176,32 @@ def _accept_masterdir_malloc(cap, dst, n):
     cap["nrec"] = n
     return True
 
+
+def _record_write_addr(md_range, r9):
+    """Where the chain replay may write a master-directory record, or None.
+
+    :meth:`Spike2Emu._drive_step` hands each record back to the band build by
+    writing it at ``r9 - 8``.  That is right on the validated build, where r9 at
+    the loop head is the record cursor.  It is NOT right on newer builds: their
+    loop head opens ``and r1, sb, #1`` — r9 is a packed data word, so ``r9 - 8``
+    is a pseudo-random 32-bit address and the replay maps a page and scribbles
+    24 bytes of live guest memory once per record.  Deadpool Pro 1.16 throws
+    8175 such darts; one lands at record 4714, and from there every record's
+    predictor (obj+0x18) is built from corrupted state — 3461 of its 8175 sounds
+    decoded to stationary noise (spectral flatness ~0.67 / rms ~6400, the
+    wrong-codec signature).  Big catalogs get hit hardest because each record is
+    another dart: TMNT 1.58 (2067 sounds) lost only ~0.7%.
+
+    The record already sits in the record array, so writing it back inside the
+    array is a no-op and writing it anywhere else is corruption — allow the
+    write only when all 24 bytes land inside ``md_range`` (``(lo, hi)``, the
+    record array; ``(0, 0)`` when unknown, which allows nothing)."""
+    lo, hi = md_range
+    dst = (r9 - 8) & 0xffffffff
+    if hi > lo and lo <= dst and dst + 24 <= hi:
+        return dst
+    return None
+
 # Byte signatures (ARM function prologues) of the supported firmware build at a
 # few of the hardcoded addresses above.  The codec oracle is pinned to this
 # exact build; a card whose ``game`` ELF doesn't match is a *different* Spike 2
@@ -339,6 +365,9 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+        # (lo, hi) of the master-directory record array, set by the chain that
+        # is replaying it; bounds the record write-back (see _record_write_addr).
+        self._md_range = (0, 0)
 
     def _set_addrs(self, addrs):
         """Bind every firmware address as an instance attribute.  Defaults are
@@ -902,6 +931,7 @@ class Spike2Emu:
         nrec = cap["nrec"]
         self._ensure_range(cap["mddst"], nrec * 24)
         md = bytes(mu.mem_read(cap["mddst"], nrec * 24))
+        self._md_range = (cap["mddst"], cap["mddst"] + nrec * 24)
 
         # chain forward from states[0]: stub a few helpers and cap bulk copies
         # so each per-record band-build runs cheaply.
@@ -972,9 +1002,10 @@ class Spike2Emu:
             mu.reg_write(r, cur["regs"][i])
         mu.reg_write(UC_ARM_REG_SP, sp)
         mu.reg_write(UC_ARM_REG_LR, cur["regs"][14])
-        r9 = cur["regs"][9]
-        self._ensure_range(r9 - 8, 24)
-        mu.mem_write(r9 - 8, record_bytes)
+        rec_at = _record_write_addr(self._md_range, cur["regs"][9])
+        if rec_at is not None:
+            self._ensure_range(rec_at, 24)
+            mu.mem_write(rec_at, record_bytes)
         cap = {"obj": None, "next": None, "hits": 0}
 
         def at_bl(eng):

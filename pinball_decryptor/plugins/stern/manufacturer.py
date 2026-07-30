@@ -14,6 +14,7 @@ normal Write copies verbatim).
 """
 
 import re
+import sys
 
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
@@ -64,6 +65,53 @@ _WHITESTAR_PREREQS = (
                      "brew install ffmpeg          (macOS)\n"
                      "apt-get install ffmpeg       (Linux)")),
 )
+
+_EXT4_GROW_REASON = (
+    "Blip-free callouts (and full-size video replacement): grows files "
+    "inside the card's ext4 partition through the platform's Linux "
+    "filesystem path. Without it a build silently falls back to the "
+    "standard build, whose replaced sounds keep a brief scrap of the "
+    "original audio at two points (a quick double click on quiet "
+    "replacements).")
+
+
+def _ext4_grow_prereqs(platform):
+    """The platform dependency of :mod:`...core.ext4_grow` — what blip-free
+    callouts (v0.94.0+, on by default) and full-size video replacement ride
+    on.  It became load-bearing for AUDIO quality the moment the blip-free
+    cave started growing ``game_real``, but was never declared, so the strip
+    said "All prerequisites OK" on machines whose every build was quietly
+    falling back to the scrap-remains build — a tester burned two hardware
+    tests that way (Elvira spinner, 2026-07-30).  Missing is not fatal (the
+    build still degrades gracefully and the completion dialog now says so);
+    declaring it makes the gap visible BEFORE a card is built and tested.
+
+    Windows needs a WSL2 distro reachable as root (the probe mirrors
+    ``WslExecutor.check_available``); macOS needs e2fsprogs' ``debugfs``
+    (probed in the same keg-only locations ``ext4_grow._find_e2fsprogs``
+    searches); native Linux mounts ext4 itself — nothing to declare."""
+    if platform == "win32":
+        return (
+            Prerequisite(name="WSL2", where="wsl", probe="echo ok",
+                         reason=_EXT4_GROW_REASON,
+                         install_hint="wsl --install -d Ubuntu  "
+                                      "(admin PowerShell, then reboot)"),
+        )
+    if platform == "darwin":
+        return (
+            Prerequisite(
+                name="e2fsprogs", where="host",
+                probe="test -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs || "
+                      "test -x /usr/local/opt/e2fsprogs/sbin/debugfs || "
+                      "test -x /opt/local/sbin/debugfs || "
+                      "command -v debugfs",
+                reason=_EXT4_GROW_REASON,
+                install_hint="brew install e2fsprogs"),
+        )
+    return ()
+
+
+_EXT4_GROW_PREREQS = _ext4_grow_prereqs(sys.platform)
 
 
 class SternManufacturer(Manufacturer):
@@ -183,6 +231,10 @@ class SternManufacturer(Manufacturer):
                      reason="Locates the codec's companding point to recover "
                             "the keystream when re-encoding replaced audio.",
                      install_hint="pip install capstone"),
+        # Platform ext4-grow path (WSL2 / e2fsprogs) — needed by blip-free
+        # callouts and full-size video replacement; absent on native Linux
+        # (see _ext4_grow_prereqs).
+        *_EXT4_GROW_PREREQS,
         # Optional — only the Auto-transcribe action needs it; extract/write
         # work without it.
         Prerequisite(name="faster-whisper", where="host",

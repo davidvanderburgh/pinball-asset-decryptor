@@ -129,8 +129,10 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
 
     def fake_compute(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None, label=None, dest_is_device=False):
-        # (writes, counts, grow_plan) — no oversized videos, so grow_plan=None
-        return ({19: b"PATCHED!"}, (3, 0, 0, 0), None)   # 3 sounds, off 19
+        # (writes, counts, grow_plan, audio_mode) — no oversized videos, so
+        # grow_plan=None; the cave applied, so the mode is blip-free
+        return ({19: b"PATCHED!"}, (3, 0, 0, 0), None,   # 3 sounds, off 19
+                ("blip-free", ""))
     monkeypatch.setattr(engine, "_compute_patches", fake_compute)
 
     seen = {}
@@ -142,8 +144,9 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
             out_f.write(b)
     monkeypatch.setattr(engine, "_apply_writes", fake_apply)
 
-    n = engine.write_image(str(src), str(tmp_path), str(out), log=_log)
+    n, mode = engine.write_image(str(src), str(tmp_path), str(out), log=_log)
     assert n == (3, 0, 0, 0)          # per-type breakdown (audio, video, image, text)
+    assert mode == ("blip-free", "")  # the engine's mode passes through intact
     assert out.exists()
     assert seen["writes"] == {19: b"PATCHED!"}
     data = out.read_bytes()
@@ -156,10 +159,11 @@ def test_write_image_cancel_discards_output(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: (None, None, None))  # cancelled mid-compute
+                        lambda *a, **k: (None, None, None, None))  # cancelled mid-compute
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch on cancel"))
-    assert engine.write_image(str(src), str(tmp_path), str(out), log=_log) == (0, 0, 0, 0)
+    assert (engine.write_image(str(src), str(tmp_path), str(out), log=_log)
+            == ((0, 0, 0, 0), None))
     assert not out.exists()                                # pristine copy discarded
 
 
@@ -184,7 +188,7 @@ def test_write_image_copy_failure_surfaces(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), None))
+                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), None, None))
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch when copy failed"))
 
@@ -206,7 +210,8 @@ def test_write_image_waits_for_slow_copy_before_patching(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0), None))
+                        lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0),
+                                         None, None))
 
     real_copy = shutil.copyfile
 
@@ -248,3 +253,53 @@ def test_write_summary_joins_multiple_types_and_handles_empty():
     assert (_write_summary((1, 2, 3, 4))
             == "1 sound(s), 2 video(s), 3 image(s) and 4 display string(s)")
     assert _write_summary((0, 0, 0, 0)) == "no changes"  # cancelled / nothing edited
+
+
+# --- completion-dialog audio-mode note: say whether the card is blip-free ----
+# A build whose blip-free patch silently fell back (e.g. a Windows host without
+# WSL2) used to look identical to a blip-free build everywhere but a mid-build
+# log warning; a tester (Elvira, 2026-07-30) burned two hardware tests on a
+# fallback card he believed was blip-free, reporting its two window scraps as a
+# "two stage click" that survived the v0.94.0 fix.  The dialog must name the
+# build mode so a report can be tied to what the card actually carries.
+
+def test_audio_mode_note_names_the_fallback_and_its_symptom():
+    from pinball_decryptor.plugins.stern.pipeline import _audio_mode_note
+    note = _audio_mode_note(("standard", "this system can't grow files "
+                             "inside an ext4 image (WSL2 not available)"))
+    assert "NOT applied" in note
+    assert "WSL2 not available" in note        # the reason reaches the user
+    assert "scrap" in note                     # and so does what it sounds like
+    assert "double click" in note
+
+
+def test_audio_mode_note_confirms_blip_free_and_skips_non_audio():
+    from pinball_decryptor.plugins.stern.pipeline import _audio_mode_note
+    assert "applied" in _audio_mode_note(("blip-free", ""))
+    assert "NOT" not in _audio_mode_note(("blip-free", ""))
+    # A video/image-only write has no cat-0 audio: nothing to report.
+    assert _audio_mode_note(None) == ""
+
+
+def test_write_pipeline_summary_carries_the_mode(tmp_path, monkeypatch):
+    # End-to-end through SternWritePipeline._run: the dialog string handed to
+    # done_cb must carry the engine's mode, not just the counts.
+    from pinball_decryptor.plugins.stern import pipeline as pl
+    monkeypatch.setattr(pl, "detect_game", lambda p: "spike2")
+    monkeypatch.setattr(pl, "display_for_key", lambda k, p: "Test Game")
+    monkeypatch.setattr(pl, "_require_engine", lambda: None)
+    monkeypatch.setattr(
+        pl.engine, "write_image",
+        lambda *a, **k: ((2, 0, 0, 0), ("standard", "turned off for this "
+                                        "build")))
+    got = {}
+    p = pl.SternWritePipeline(
+        str(tmp_path / "in.img"), str(tmp_path), str(tmp_path / "out.img"),
+        log_cb=lambda *a, **k: None, phase_cb=lambda *a, **k: None,
+        progress_cb=None,
+        done_cb=lambda ok, summary: got.update(ok=ok, summary=summary))
+    p._run()
+    assert got["ok"]
+    assert "2 sound(s)" in got["summary"]
+    assert "Blip-free callouts: NOT applied" in got["summary"]
+    assert "turned off for this build" in got["summary"]

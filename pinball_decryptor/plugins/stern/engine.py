@@ -3150,8 +3150,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`write_device`), so the exact same patch set is produced whether the
     destination is an image copy or the card itself.
 
-    Returns ``(writes, counts)`` where ``counts`` is ``(n_audio, n_video,
-    n_image, n_text)``; returns ``(None, None)`` if cancelled.  Raises
+    Returns ``(writes, counts, grow_plan, audio_mode)`` where ``counts`` is
+    ``(n_audio, n_video, n_image, n_text)`` and ``audio_mode`` says how the
+    re-encoded cat-0 sounds were built: ``None`` (no cat-0 audio in this
+    write), ``("blip-free", "")`` (the firmware cave applied), or
+    ``("standard", why)`` (the fallback build -- the original-sound scrap
+    remains at the two master-directory windows).  Every element is ``None``
+    if cancelled.  Raises
     ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
     when nothing could be re-encoded / fit."""
     phase = phase or (lambda i: None)
@@ -3285,6 +3290,14 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
+        # How this write's cat-0 audio was built, surfaced all the way to the
+        # completion dialog.  A fallback build sounds different on the machine
+        # -- each replaced sound keeps a ~6 ms scrap of the original at the two
+        # master-directory windows, audible as a quick double click on quiet
+        # replacements -- but until now only a mid-build log warning said so,
+        # and a tester burned two hardware tests on a card he believed was
+        # blip-free (Elvira spinner, 2026-07-30).
+        audio_mode = None      # None | ("blip-free", "") | ("standard", why)
         img_node = None
         fw_node = None
         # Path A: the rebuilt game_real (cave + validator bypass).  It is LONGER
@@ -3299,7 +3312,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             gr_path, img_path, reader, fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
             if cancel():
-                return None, None, None
+                return None, None, None, None
             if not audio_decode_supported(gr_path):
                 # This title's audio codec can't be re-encoded.  If the user
                 # only edited video/images, carry on and write those; otherwise
@@ -3326,7 +3339,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         gr_path, img_path, params, audio_edits, np, log,
                         progress, cancel)
                     if audio_patches is None:
-                        return None, None, None
+                        return None, None, None, None
                     # Keep the firmware's master-directory forward-chain intact.
                     # Blip-free (default): patch game_real so the boot-derive reads
                     # STOCK window bytes for the replaced sounds -- fully-stock
@@ -3338,6 +3351,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # is a boot of the FINAL firmware+image that asserts stock codec
                     # params for every sound before shipping.
                     pathA_applied = False
+                    pathA_why = None
                     if audio_patches and _pathA_enabled():
                         try:
                             _pathA_preflight(dest_is_device)
@@ -3369,9 +3383,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             # scrap -- never a hard build failure.  The fallback
                             # path re-asserts integrity.
                             patched_gr = None
+                            pathA_why = str(e)
                             log("Blip-free callouts not applied (%s); building the "
                                 "standard way instead (the brief original-callout "
                                 "scrap remains)." % e, "warning")
+                    elif audio_patches:
+                        pathA_why = ("turned off for this build (Advanced "
+                                     "Audio Options / PAD_STERN_SKIP_KEYPATCH)")
                     if (audio_patches and not pathA_applied
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
@@ -3379,10 +3397,17 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             gr_path, img_path, audio_patches, log, progress,
                             cancel)
                         if audio_patches is None:
-                            return None, None, None
+                            return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
                                                 params, np, log, work)
                     if audio_patches:
+                        why = pathA_why or "see the build log"
+                        if os.environ.get(
+                                "PAD_STERN_SKIP_MASTERDIR_FIX") == "1":
+                            why += ("; master-directory restore skipped "
+                                    "(experimental)")
+                        audio_mode = (("blip-free", "") if pathA_applied
+                                      else ("standard", why))
                         _audit_audio_patches(params, audio_patches, log)
                         # Honest end-of-pipeline check: decode the FINAL card
                         # bytes (post master-directory restore) and report /
@@ -3410,7 +3435,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         reader, gr_path, img_path, music_edits, work, log,
                         progress, cancel, np)
                     if cancel():
-                        return None, None, None
+                        return None, None, None, None
 
         # A video / image / text-only write (or one whose audio turned out
         # unsupported) still needs a reader to resolve the loose-file inodes.
@@ -3432,7 +3457,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         # Recoloured display text -> the same kind of in-place radium patch,
         # on different bytes of the same scenes, so the two compose.
@@ -3445,7 +3470,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, assets_dir, log, cancel)
             _merge_radium_overlays(radium_overlays, _c_ov)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         # Edited radium-embedded DXT5 images -> also already-flat (disk_offset,
         # bytes) writes (patched in place inside the scene.radium inode).
@@ -3458,7 +3483,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, assets_dir, baseline, log, cancel)
             _merge_radium_overlays(radium_overlays, _i_ov)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         video_patches = []     # (inode, payload bytes == inode size)
         video_grow_jobs = []   # (card_rel, source_file) — grown via ext4 driver
@@ -3474,7 +3499,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                 originals=_saved.get("video") or {},
                 dest_is_device=dest_is_device)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         image_patches = []     # (inode, payload bytes == inode size)
         if image_edits:
@@ -3483,7 +3508,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             image_patches, _iskip = _prepare_image_patches(
                 reader, image_edits, work, log, cancel)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         texture_patches = []   # (inode, payload bytes == inode size)
         if texture_edits:
@@ -3492,7 +3517,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             texture_patches, _tskip = _prepare_texture_patches(
                 reader, texture_edits, log, cancel)
             if cancel():
-                return None, None, None
+                return None, None, None, None
 
         if (not audio_patches and not music_patches and not video_patches
                 and not video_grow_jobs and not image_patches
@@ -3580,7 +3605,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                   len(video_patches) + len(video_grow_jobs),
                   len(image_patches) + len(texture_patches) + n_radimg,
                   n_text + n_color)
-        return writes, counts, grow_plan
+        return writes, counts, grow_plan, audio_mode
     finally:
         _rmtree(work)
 
@@ -3636,7 +3661,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
     try:
-        writes, counts, grow_plan = _compute_patches(
+        writes, counts, grow_plan, audio_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label)
     except BaseException:
         copier.join()                       # let the copy finish before unlinking
@@ -3651,7 +3676,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         raise copy_err[0]
     if writes is None:                      # cancelled mid-compute
         _safe_remove(output_path)
-        return (0, 0, 0, 0)
+        return (0, 0, 0, 0), None
 
     # the copy is already on disk; patch the changed bytes in place
     with open(_lp(output_path), "r+b") as out:
@@ -3678,6 +3703,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 "card will fail validation — re-run the Write, or build with "
                 "PAD_STERN_SKIP_KEYPATCH=1 for a standard (firmware-untouched) "
                 "build.", "error")
+            # The completion dialog must not claim a blip-free card either.
+            audio_mode = ("standard", "the rebuilt blip-free firmware could "
+                          "not be copied onto the card (see the build log; "
+                          "this image will fail SD validation until rebuilt)")
         n_vid_failed = max(0, n_vid_jobs - n_grown)
         if n_vid_failed:
             # The summary must not claim videos that never landed: every grow
@@ -3691,8 +3720,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         "%d display string(s))."
         % (output_path, n_audio, n_video, n_image, n_text), "success")
     # Return the per-type breakdown (not just the total) so the completion
-    # dialog can name what actually changed instead of always saying "sound(s)".
-    return counts
+    # dialog can name what actually changed instead of always saying "sound(s)",
+    # plus the audio build mode so it can say whether the card is blip-free or
+    # keeps the original-sound scrap (a fallback was invisible outside the log).
+    return counts, audio_mode
 
 
 def _grow_video_slots(image_or_device, grow_plan, log):
@@ -3906,11 +3937,11 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     parts = device_partitions(device_path, partition_override, log=log)
 
     with RawDeviceFile(device_path, writable=False) as disk_f:
-        writes, counts, _grow_plan = _compute_patches(
+        writes, counts, _grow_plan, audio_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
             dest_is_device=True)
     if writes is None:                          # cancelled mid-compute
-        return (0, 0, 0, 0)
+        return (0, 0, 0, 0), None
 
     phase(2)  # Write to SD card
     log("Writing changes directly to the SD card (in place)...", "info")
@@ -3924,8 +3955,10 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
         "%d display string(s)."
         % (n_audio, n_video, n_image, n_text), "success")
     # Return the per-type breakdown (see write_image) so the completion dialog
-    # names what changed rather than a bare total.
-    return counts
+    # names what changed rather than a bare total, plus the audio build mode --
+    # Direct-SD can never grow game_real, so a card with re-encoded sounds is
+    # always a standard (scrap-remains) build and the dialog should say so.
+    return counts, audio_mode
 
 
 # --------------------------------------------------------------------------

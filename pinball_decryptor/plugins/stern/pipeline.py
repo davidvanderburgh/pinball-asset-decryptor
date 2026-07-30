@@ -92,6 +92,29 @@ def _write_summary(counts):
     return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
+def _audio_mode_note(mode):
+    """Completion-dialog sentence saying HOW the re-encoded sounds were built.
+
+    The engine returns ``None`` (no cat-0 audio in this write), ``("blip-free",
+    "")``, or ``("standard", why)``.  A standard build keeps a ~6 ms scrap of
+    the ORIGINAL sound at each of the two master-directory windows -- audible
+    as a quick double click on quiet replacements -- but used to be reported
+    only as a mid-build log warning, so a build that silently fell back (e.g.
+    a Windows host without WSL2) looked identical to a blip-free one in the
+    dialog.  A tester burned two hardware tests that way (Elvira spinner,
+    2026-07-30): the card must say which build it got."""
+    if not mode:
+        return ""
+    kind, why = mode
+    if kind == "blip-free":
+        return ("\n\nBlip-free callouts: applied — replaced sounds play your "
+                "audio for their whole length.")
+    return ("\n\nBlip-free callouts: NOT applied — %s. Each replaced sound "
+            "keeps a brief scrap of the original at two points in its slot, "
+            "which can be heard as a quick double click on quiet "
+            "replacements." % (why or "see the build log"))
+
+
 class SternExtractPipeline(BasePipeline):
     """Decode every packed sound in a Spike 2 card image to a per-sound WAV."""
 
@@ -177,13 +200,14 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(1)  # Stage
         _require_engine()
         self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
-        counts = engine.write_image(
+        counts, audio_mode = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             label=display_for_key(key, self.original_path))
         self._set_phase(3)  # Patch image
-        self._done(True, "Wrote %s to %s"
-                   % (_write_summary(counts), self.output_path))
+        self._done(True, "Wrote %s to %s%s"
+                   % (_write_summary(counts), self.output_path,
+                      _audio_mode_note(audio_mode)))
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
@@ -276,13 +300,13 @@ class SternDirectSsdWritePipeline(BasePipeline):
                 "not a file path (got %r). Pick the card from the Game SD "
                 "dropdown." % self.device_path)
         _require_engine()
-        counts = engine.write_device(
+        counts, audio_mode = engine.write_device(
             self.device_path, self.assets_dir,
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
-        self._done(True, "Wrote %s directly to the SD card."
-                   % _write_summary(counts))
+        self._done(True, "Wrote %s directly to the SD card.%s"
+                   % (_write_summary(counts), _audio_mode_note(audio_mode)))
 
 
 class SternRevertPipeline(BasePipeline):

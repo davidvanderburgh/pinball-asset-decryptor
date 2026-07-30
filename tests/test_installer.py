@@ -481,6 +481,68 @@ def test_windows_installer_offers_every_stern_pip_dep():
         f"{', '.join(missing)} -- Install Missing won't install them on Windows.")
 
 
+def test_stern_declares_ext4_grow_prereq_per_platform():
+    """Regression guard — the blip-free WSL2 dependency was undeclared.
+
+    v0.94.0's blip-free cave grows game_real through core/ext4_grow (WSL2 on
+    Windows, e2fsprogs on macOS), but the Stern plugin never declared that
+    dependency, so the GUI said "All prerequisites OK" on machines whose every
+    build silently fell back to the scrap-remains standard build -- a tester
+    burned two hardware tests on a fallback card (Elvira spinner, 2026-07-30).
+    The declaration is platform-built; check all three branches directly."""
+    from pinball_decryptor.plugins.stern.manufacturer import _ext4_grow_prereqs
+
+    (win,) = _ext4_grow_prereqs("win32")
+    assert win.name == "WSL2" and win.where == "wsl"
+    # Must mirror WslExecutor.check_available's probe (wsl -u root bash -c
+    # "echo ok") so the indicator can never disagree with what the write
+    # path's ext4_grow.available() actually tests.
+    assert win.probe == "echo ok"
+    assert "Blip-free" in win.reason
+    assert "wsl --install" in win.install_hint
+
+    (mac,) = _ext4_grow_prereqs("darwin")
+    assert mac.name == "e2fsprogs" and mac.where == "host"
+    # The probe must search every keg-only location _find_e2fsprogs does --
+    # e2fsprogs is keg-only in Homebrew, so a bare PATH check reports it
+    # missing on a machine where ext4_grow works fine.
+    from pinball_decryptor.core import ext4_grow  # noqa: F401  (location source)
+    for d in ("/opt/homebrew/opt/e2fsprogs/sbin",
+              "/usr/local/opt/e2fsprogs/sbin", "/opt/local/sbin"):
+        assert d in mac.probe, f"macOS probe must search {d}"
+    assert "brew install e2fsprogs" in mac.install_hint
+
+    # Native Linux mounts ext4 itself -- declaring a prereq there would show
+    # a permanently-unfixable indicator.
+    assert _ext4_grow_prereqs("linux") == ()
+
+    # And the live registry actually carries the current platform's entry in
+    # the Spike 2 (default-era) strip.
+    import sys as _sys
+    from pinball_decryptor.core.registry import get_manufacturer, load_plugins
+    load_plugins()
+    names = [p.name for p in get_manufacturer("stern").prerequisites]
+    if _sys.platform == "win32":
+        assert "WSL2" in names
+    elif _sys.platform == "darwin":
+        assert "e2fsprogs" in names
+
+
+def test_windows_installer_requires_wsl_for_stern():
+    """The installer's Stern entry must pull in the WSL2 + Ubuntu framework.
+
+    Companion to the plugin-side declaration above: WslPackages = @() meant a
+    Stern user who dutifully ran Install Prerequisites still had no WSL2, and
+    the framework step only runs when a selected manufacturer lists at least
+    one WSL package."""
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    stern = ps1.split('"Stern Pinball" = @{', 1)[1].split("PipPackages", 1)[0]
+    assert "losetup" in stern, (
+        "The Stern entry lists no WSL package, so the installer never offers "
+        "the WSL2 + Ubuntu framework to Stern users -- blip-free callouts "
+        "then silently fall back on every Windows machine without WSL2.")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

@@ -206,6 +206,7 @@ class App:
             on_detected_game_change=self._on_detected_game_change,
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
+            on_compare_run=self._on_compare_run,
             initial_default_presets=self._settings.get(
                 "default_settings_presets", {}),
             on_default_presets_change=self._on_default_presets_change,
@@ -553,6 +554,10 @@ class App:
         saved_out = section.get("write_output", "")
         if saved_out:
             self.window.write_output_var.set(_rmd(saved_out))
+        # The Compare tab's two pickers, so a compare pair survives a
+        # restart like every other path on this screen.
+        self.window.compare_a_var.set(_rmd(section.get("compare_a", "")))
+        self.window.compare_b_var.set(_rmd(section.get("compare_b", "")))
         # Extract-tab checkbox state (auto-name / categories / JJP filters) —
         # per manufacturer, so the ticks stick across sessions (a tester).
         # apply_manufacturer() re-applies this after it rebuilds the dynamic
@@ -595,6 +600,15 @@ class App:
         self._record_path_history(partition_image=path)
         self._save_settings()
 
+    def _on_compare_run(self, path_a, path_b):
+        """A starting Compare run: both images join their fields' recent-paths
+        dropdowns and the pair is persisted (same immediate-save reasoning as
+        the Partition Explorer above)."""
+        self._record_path_history(compare_a=path_a, compare_b=path_b)
+        if self._current_mfr is not None:
+            self._save_manufacturer_paths(self._current_mfr.key)
+        self._save_settings()
+
     def _save_manufacturer_paths(self, key):
         # Don't clobber a manufacturer's previously-saved input path with a
         # cross-manufacturer path that happens to be in the field right now
@@ -626,6 +640,12 @@ class App:
                 existing.get("write_original", "")),
             "write_assets": self.window.write_assets_var.get().strip(),
             "write_output": self.window.write_output_var.get().strip(),
+            "compare_a": _safe_input_path(
+                self.window.compare_a_var.get(),
+                existing.get("compare_a", "")),
+            "compare_b": _safe_input_path(
+                self.window.compare_b_var.get(),
+                existing.get("compare_b", "")),
             "extract_options": self.window.get_extract_options(),
         }
 

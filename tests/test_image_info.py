@@ -186,12 +186,12 @@ def test_card_info_probe(tmp_path, monkeypatch):
     assert dict(sections["Sound System"])["Sample rate"] == "44,100 Hz"
 
 
-def _container_header(requests, sounds):
+def _container_header(fragments, sounds):
     """A minimal valid image.bin header: size word 0xb0 + the two plaintext
-    count words the probe reads (sound requests @0x5c, sounds @0x60)."""
+    count words the probe reads (sound fragments @0x5c, sounds @0x60)."""
     b = bytearray(0xB0)
     struct.pack_into("<Q", b, 0, 0xB0)
-    struct.pack_into("<I", b, 0x5C, requests)
+    struct.pack_into("<I", b, 0x5C, fragments)
     struct.pack_into("<I", b, 0x60, sounds)
     return bytes(b)
 
@@ -202,7 +202,7 @@ def test_container_counts():
     big = bytearray(_container_header(5832, 2991))
     struct.pack_into("<Q", big, 0, 0x4D0)
     assert container_counts(bytes(big)) == (5832, 2991)
-    # Unaligned/absurd header-size word, non-zero pad word, requests <
+    # Unaligned/absurd header-size word, non-zero pad word, fragments <
     # sounds, short buffer: all refuse rather than report a junk number.
     bad = bytearray(_container_header(578, 549))
     struct.pack_into("<Q", bad, 0, 0xB1)
@@ -270,7 +270,7 @@ def test_card_info_counts_version_id_and_sidx_version(tmp_path, monkeypatch):
     assert fw["Version ID"] == "TUR158PRO"
     assets = dict(sections["Assets on Card"])
     assert assets["Sounds"].startswith("549 — ")
-    assert assets["Sound requests"].startswith("578 — ")
+    assert assets["Sound fragments"].startswith("578 — ")
     assert assets["Music banks"].startswith("1 ")
 
 

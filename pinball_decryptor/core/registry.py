@@ -233,6 +233,13 @@ class Capabilities:
     # a configured machine keeps its board-NVRAM values.  Stern Spike 2 only
     # (plugins.stern.explorer + plugins.stern.adjustments).
     settings_editor: bool = False
+    # Compare path: surfaces a "Compare" tab that takes two card images (two
+    # releases, or a mod against its stock base) and reports what changed —
+    # added / modified / deleted files per asset type by the cards' own
+    # validation digests, sound counts, adjustment defaults and high-score
+    # boards.  The plugin implements ``compare_images``.  Stern Spike 2 only
+    # (plugins.stern.compare).
+    compare: bool = False
 
 
 @dataclass(frozen=True)
@@ -468,6 +475,16 @@ class Manufacturer(ABC):
         File/Detection sections; whatever a plugin returns is appended.  Must
         stay read-only and cheap — a slow probe holds the whole tab on
         "Reading image…".  The default contributes nothing.
+        """
+        return []
+
+    def compare_images(self, path_a, path_b):
+        """What changed from image *path_a* to image *path_b*, in the same
+        section shape as :meth:`image_info`.
+
+        Called on a worker thread by the Compare tab; must stay read-only.
+        Only meaningful for plugins advertising ``capabilities.compare`` —
+        the default contributes nothing.
         """
         return []
 

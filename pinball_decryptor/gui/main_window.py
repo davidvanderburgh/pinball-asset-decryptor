@@ -1133,6 +1133,7 @@ class MainWindow:
                  on_detected_game_change=None,
                  on_audio_profile=None,
                  on_partition_image_opened=None,
+                 on_compare_run=None,
                  initial_default_presets=None,
                  on_default_presets_change=None,
                  on_build_flash=None,
@@ -1250,6 +1251,9 @@ class MainWindow:
         # opens a card — the App records it into the field's recent-paths
         # dropdown (a tester: same "last 5" memory as the Extract screen).
         self._on_partition_image_opened = on_partition_image_opened
+        # Fired with (path_a, path_b) when a Compare run starts — the App
+        # records both into recent-paths history and persists them.
+        self._on_compare_run = on_compare_run
         # Seed each log pane with the previous sessions' history (dimmed,
         # above a cut line)?  ⚙-menu checkbutton; OFF = a clean per-session
         # log for users who don't want the past in view.  Persisted in
@@ -1358,6 +1362,14 @@ class MainWindow:
         self._info_seq = 0           # bump-counter: drops stale worker results
         self._info_sections = []     # last rendered sections (Copy Report)
         self._info_shown_key = None  # (path, assets) the tree currently shows
+        # Compare tab state (capabilities.compare plugins): two card pickers
+        # and a worker-built what-changed report (a tester's wish list).
+        # The vars live here, not in the tab builder, so the App can restore
+        # saved paths regardless of build order.
+        self.compare_a_var = tk.StringVar()
+        self.compare_b_var = tk.StringVar()
+        self._compare_seq = 0        # bump-counter, same shape as _info_seq
+        self._compare_sections = []  # last rendered sections (Copy Report)
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -2010,6 +2022,7 @@ class MainWindow:
         self._tab_modpack = ttk.Frame(self._notebook)
         self._tab_partition = ttk.Frame(self._notebook)
         self._tab_settings = ttk.Frame(self._notebook)
+        self._tab_compare = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2026,6 +2039,7 @@ class MainWindow:
             (self._tab_write, "Write", "Write"),
             (self._tab_modpack, "Mod Pack", "Mod Pack"),
             (self._tab_partition, "Partitions", "Partition Explorer"),
+            (self._tab_compare, "Compare", "Compare"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2041,6 +2055,7 @@ class MainWindow:
         self._build_modpack_tab()
         self._build_partition_tab()
         self._build_settings_tab()
+        self._build_compare_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -11875,6 +11890,185 @@ class MainWindow:
         self.root.clipboard_append(_info_mod.as_text(self._info_sections))
         self._info_status.configure(text="Report copied to clipboard.")
 
+    def _build_compare_tab(self):
+        """Build the 'Compare' tab: pick two card images (two releases, or a
+        modded card against its stock base) and get a what-changed report —
+        added / modified / deleted files per asset type by the cards' own
+        validation digests, sound counts, adjustment defaults and high-score
+        boards (a tester's wish list).  Read-only, no Extract: the report is
+        the plugin's compare_images(), run on a worker thread like the Image
+        Info probe."""
+        f = self._tab_compare
+
+        intro = ttk.Label(
+            f, text="Compare two card images of the same game — two "
+                    "releases, or a modded card against its stock base. "
+                    "Everything is read straight off the cards (no Extract): "
+                    "files are diffed by the cards' own validation digests, "
+                    "and the adjustment / high-score defaults come from each "
+                    "card's game firmware.",
+            font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
+        intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
+        intro.bind("<Configure>", lambda e: intro.configure(
+            wraplength=max(300, e.width - 8)))
+
+        for label, var, field in (
+                ("Image A:", self.compare_a_var, "compare_a"),
+                ("Image B:", self.compare_b_var, "compare_b")):
+            row = ttk.Frame(f)
+            row.pack(fill=tk.X, padx=10, pady=4)
+            ttk.Label(row, text=label, width=12, anchor=tk.W).pack(
+                side=tk.LEFT)
+            ent = self._path_combo(row, var, field)
+            ent.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            ent.bind("<Return>", lambda _e: self._compare_run())
+            ttk.Button(row, text="Browse…",
+                       command=lambda v=var: self._compare_browse(v)).pack(
+                side=tk.LEFT, padx=(6, 0))
+
+        arow = ttk.Frame(f)
+        arow.pack(fill=tk.X, padx=10, pady=(2, 4))
+        self._compare_btn = ttk.Button(arow, text="Compare",
+                                       command=self._compare_run)
+        self._compare_btn.pack(side=tk.LEFT)
+        self._compare_copy_btn = ttk.Button(
+            arow, text="Copy Report", command=self._compare_copy_report,
+            state=tk.DISABLED)
+        self._compare_copy_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._compare_status = ttk.Label(arow, text="", font=(_SANS_FONT, 9))
+        self._compare_status.pack(side=tk.LEFT, padx=(10, 0))
+
+        body = ttk.Frame(f)
+        body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 6))
+        self._compare_tree = ttk.Treeview(body, columns=("value",),
+                                          height=22, selectmode="browse")
+        self._compare_tree.heading("#0", text="Change", anchor=tk.W)
+        self._compare_tree.heading("value", text="Details", anchor=tk.W)
+        self._compare_tree.column("#0", width=210, minwidth=140,
+                                  stretch=False)
+        self._compare_tree.column("value", width=640, minwidth=240)
+        self._compare_tree.tag_configure("section",
+                                         font=(_SANS_FONT, 9, "bold"))
+        vs = ttk.Scrollbar(body, orient="vertical",
+                           command=self._compare_tree.yview)
+        self._compare_tree.configure(yscrollcommand=vs.set)
+        self._compare_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vs.pack(side=tk.LEFT, fill=tk.Y)
+        # Same floating "working…" overlay the Image Info window uses — a
+        # two-card probe takes a little while and a blank tree looks hung.
+        self._compare_empty = ttk.Label(body, text="",
+                                        font=(_SANS_FONT, 18, "bold"),
+                                        foreground="#888888",
+                                        anchor=tk.CENTER, justify=tk.CENTER)
+
+    def _compare_browse(self, var):
+        path = filedialog.askopenfilename(
+            title="Select card image", filetypes=self._input_filetypes(),
+            initialdir=self._initialdir_for(var.get(),
+                                            self.extract_input_var.get()))
+        if path:
+            var.set(os.path.normpath(path))
+
+    def _compare_reset(self):
+        """Drop the Compare tab's report + any in-flight worker (manufacturer
+        switch — a previous manufacturer's diff must not survive)."""
+        self._compare_seq += 1
+        self._compare_sections = []
+        if hasattr(self, "_compare_tree"):
+            try:
+                self._compare_tree.delete(
+                    *self._compare_tree.get_children())
+                self._compare_empty.place_forget()
+                self._compare_btn.configure(state=tk.NORMAL)
+                self._compare_copy_btn.configure(state=tk.DISABLED)
+                self._compare_status.configure(text="")
+            except tk.TclError:
+                pass
+
+    def _compare_run(self):
+        """Diff the two picked card images on a worker thread and render the
+        report — the same thread + after()-poll + bump-counter shape as the
+        Image Info window (the probe never touches Tk off-thread)."""
+        import threading
+
+        a = (self.compare_a_var.get() or "").strip()
+        b = (self.compare_b_var.get() or "").strip()
+        if not a or not b:
+            messagebox.showinfo(
+                "Pick two images",
+                "Pick both card images to compare first.")
+            return
+        for side, p in (("A", a), ("B", b)):
+            if not os.path.isfile(p):
+                messagebox.showerror(
+                    "File not found", "Image %s:\n\n%s" % (side, p))
+                return
+        mfr = self._current_mfr
+        if mfr is None:
+            return
+        if self._on_compare_run:
+            self._on_compare_run(a, b)
+
+        self._compare_seq += 1
+        seq = self._compare_seq
+        holder = {}
+
+        def _worker():
+            try:
+                holder["sections"] = mfr.compare_images(a, b) or []
+            except Exception as e:  # never leave the tab on "Comparing…"
+                holder["sections"] = [
+                    ("Error", [("Could not compare", str(e))])]
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        tree = self._compare_tree
+        tree.delete(*tree.get_children())
+        self._compare_sections = []
+        self._compare_btn.configure(state=tk.DISABLED)
+        self._compare_copy_btn.configure(state=tk.DISABLED)
+        self._compare_status.configure(text="Comparing images…")
+        self._compare_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+        def _poll(i=0):
+            if seq != self._compare_seq:    # superseded / mfr switched
+                return
+            if t.is_alive():
+                try:
+                    self._compare_empty.configure(
+                        text="%s  Comparing images…"
+                        % self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)])
+                except tk.TclError:
+                    return
+                self.root.after(120, _poll, i + 1)
+                return
+            try:
+                self._compare_empty.place_forget()
+            except tk.TclError:
+                return
+            self._compare_sections = holder.get("sections") or []
+            tree.delete(*tree.get_children())
+            for title, rows in self._compare_sections:
+                parent = tree.insert("", tk.END, text=title, open=True,
+                                     tags=("section",))
+                for name, value in rows:
+                    tree.insert(parent, tk.END, text=name, values=(value,))
+            self._compare_btn.configure(state=tk.NORMAL)
+            self._compare_copy_btn.configure(
+                state=tk.NORMAL if self._compare_sections else tk.DISABLED)
+            self._compare_status.configure(text="")
+
+        self.root.after(120, _poll)
+
+    def _compare_copy_report(self):
+        from ..core import image_info as _info_mod
+        if not self._compare_sections:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(_info_mod.as_text(
+            self._compare_sections, title="Compare Report"))
+        self._compare_status.configure(text="Report copied to clipboard.")
+
     def _build_text_tab(self):
         """Build the 'Replace Text' tab: a searchable list of the editable
         on-screen strings from ``text/strings.tsv``, each with an in-place
@@ -12925,6 +13119,7 @@ class MainWindow:
                             getattr(caps, "partition_explorer", False))
         self._configure_tab("Default Settings",
                             getattr(caps, "settings_editor", False))
+        self._configure_tab("Compare", getattr(caps, "compare", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.
@@ -12937,6 +13132,9 @@ class MainWindow:
         # New mfr: close the Image Info window so a previous manufacturer's
         # report can't sit open under the new one's name.
         self._info_reset()
+        # New mfr: drop the Compare tab's report the same way (its tree
+        # would otherwise show a previous manufacturer's diff).
+        self._compare_reset()
         # New mfr: drop any text rows loaded for the previous one so a stale
         # manifest can't leak across a manufacturer switch.
         self._text_rows = []

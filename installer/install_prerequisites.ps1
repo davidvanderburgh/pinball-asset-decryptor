@@ -173,12 +173,22 @@ $ManufacturerPrereqs = [ordered]@{
 
     "Stern Pinball" = @{
         Description  = "Spike 2: Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden + more (SD-card images)"
-        WslPackages  = @()
+        # Blip-free callouts (v0.94.0+) and full-size video replacement grow
+        # files inside the card's ext4 partition through WSL2 — without it
+        # every Stern build silently falls back to the standard build with the
+        # brief original-sound scrap (a tester's two-stage spinner click).
+        # losetup/mount ship in Ubuntu's stock util-linux/mount packages, so
+        # this entry is normally a no-op install; its real job is pulling in
+        # the WSL2 + Ubuntu framework step for Stern users.
+        WslPackages  = @(
+            @{ probe="losetup"; pkg="util-linux mount"; label="util-linux (losetup/mount, in WSL)"; reason="Blip-free callouts + full-size video replacement: loop-mounts the card image to grow files in its ext4 partition" }
+        )
         HostPackages = @(
             @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }
         )
-        # The Spike 2 audio engine is pure-Python (no WSL) but needs these pip
-        # packages.  As of v0.15.x the installer bundles them into the app's
+        # The Spike 2 audio ENGINE is pure-Python and needs these pip
+        # packages (WSL above is only the ext4 file-growth path, not the
+        # codec).  As of v0.15.x the installer bundles them into the app's
         # Python already, so on a fresh install these usually report [OK]; this
         # entry is what lets an EXISTING install pick them up via Install
         # Missing (previously there was no Spike 2 option at all).

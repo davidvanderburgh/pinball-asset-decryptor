@@ -58,7 +58,7 @@ def _already_named(fn):
     """True when *fn* already has a real name and must not be fingerprinted.
 
     On a band pin, long SFX carry song riffs, so AcoustID happily "titles" a
-    Sound-Test-named effect too — monkeybug's Led Zeppelin extract grew names
+    Sound-Test-named effect too — a tester's Led Zeppelin extract grew names
     like "idx0384 - SE FX ZEPPELIN AWARD - Immigrant Song.wav" (the game's own
     name AND the song of the riff inside it, both true but read as a
     double-label bug).  It also stops a re-run from stacking a second title

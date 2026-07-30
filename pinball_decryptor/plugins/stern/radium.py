@@ -221,7 +221,7 @@ def display_texts(data):
 # [u64 pair count][count x (u16 right-char, f32 advance adjust)] — count is 0
 # on every TMNT 1.59 table (why the zeros assumption held there), but e.g.
 # Munsters 1.27 kerns ('-' vs A = -4.0), and the old strict-zeros check made
-# every kerned table vanish (Peter: scenes showed their font atlases but
+# every kerned table vanish (a tester: scenes showed their font atlases but
 # "Fonts (0)").  Pair chars must be members of the font's own char array —
 # that keeps the anchor validation as strict as the zeros check was.
 MAX_GLYPHS = 4096

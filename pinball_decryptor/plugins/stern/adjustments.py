@@ -36,7 +36,7 @@ OFF_MENU_LABEL, OFF_MENU_HELP = 0x18, 0x20
 
 # Values are shown in the firmware's own internal units.  We previously
 # assumed the master volume displayed as internal/4 (a 0-16 menu scale), but
-# monkeybug's hardware test (LZ LE 1.22, 2026-07-20) disproved it: his
+# a tester's hardware test (LZ LE 1.22, 2026-07-20) disproved it: his
 # machine's Guided Setup shows raw values (default 30 on a raw scale) that
 # don't come from this compiled default at all, so the display transform —
 # and whether the default even reaches the operator's volume on wizard
@@ -250,7 +250,7 @@ class AdjustmentTable:
 # (name, label, kind, help, scale, group) — scale is the internal-per-display
 # factor (internal = display * scale); 1 for everything except the master
 # volume.  ``group`` heads the block the row is drawn under, and the list is
-# kept in group order: monkeybug read one flat column and asked "is there any
+# kept in group order: a tester read one flat column and asked "is there any
 # particular logic to the order of the fields?", which there was, but nothing
 # on screen said so.
 GROUP_GAME = "Game"
@@ -279,7 +279,7 @@ CURATED = [
      "on real machines: titles with a first-boot setup wizard (Guided "
      "Setup) pick their own volume and may ignore this default.", 1,
      GROUP_SOUND),
-    # The two attenuation trims monkeybug asked for (batch 23).  They sit in
+    # The two attenuation trims a tester asked for (batch 23).  They sit in
     # the game's own adjustments rather than the standard/general ones, and
     # unlike most settings they are SIGNED — -60..+60 around 0, so a negative
     # value is the thing you actually want when call-outs are too loud.  There
@@ -295,7 +295,7 @@ CURATED = [
      "relative to music and effects, 0 leaves them alone.", 1, GROUP_SOUND),
     ("AD_KNOCKER_VOLUME", "Knocker Volume", "number",
      "How loud the knocker fires.", 1, GROUP_SOUND),
-    # Brightness family (monkeybug batch 21 — he wants the in-game backbox
+    # Brightness family (feedback batch 21 — he wants the in-game backbox
     # default).  All are plain 0/25-100 ranges, i.e. the percentage the
     # operator menu shows; display verification on hardware still pending,
     # same caveat class as the master volume.
@@ -314,7 +314,7 @@ CURATED = [
      "Playfield LED brightness, as a percentage.", 1, GROUP_LIGHTING),
     ("AD_FLASHER_BRIGHTNESS", "Flasher Brightness", "number",
      "Flasher brightness, as a percentage.", 1, GROUP_LIGHTING),
-    # Insider Connected (monkeybug batch 23).  Note there is NO master
+    # Insider Connected (feedback batch 23).  Note there is NO master
     # on/off adjustment: whether the machine talks to Insider Connected at
     # all is decided by its registration and its dongle, not by a setting the
     # card carries.  What IS card-settable is how it behaves once connected,
@@ -341,7 +341,7 @@ CURATED = [
     ("AD_CUSTOM_MESSAGE", "Custom Message", "toggle",
      "Show the game's custom attract message. The wording itself is an "
      "on-screen string — edit it on the Replace Text tab.", 1, GROUP_INSIDER),
-    # High-score defaults (monkeybug batch 22).  These are the scores the
+    # High-score defaults (feedback batch 22).  These are the scores the
     # machine seeds its high-score table with on a fresh flash / factory
     # reset.  The initials and player names that go with them live in their
     # own table in the same ELF and are edited in the High Scores block the
@@ -444,7 +444,7 @@ def is_score_adjustment(name):
     NAME rather than by "did we find its initials/player-name record?" is the
     point: Led Zeppelin's BLACK DOG CHAMPION has no such record, so it used to
     be the one champion left stranded up in the settings grid between Allow
-    High Scores and Reset High Scores After (monkeybug's red circle)."""
+    High Scores and Reset High Scores After (a tester's red circle)."""
     if name in _CURATED_SCORE_NAMES:
         return True
     if name in _NOT_SLOTS or name.endswith(("_AWARD", "_AWARDS")):
@@ -483,7 +483,7 @@ def high_score_names(names):
     """The adjustment names that are recorded high-score slots, in id order.
 
     Counting these answers "how many high scores does this game keep?" without
-    an Extract (peanuts).  Note this is deliberately broader than
+    an Extract (a tester).  Note this is deliberately broader than
     :func:`champion_rows`, which only offers the plain ``_CHAMPION`` scores for
     editing: here a co-op board or a timed-challenge board counts too.
     """

@@ -46,7 +46,7 @@ def dark_titlebar(win, is_dark):
 
     Tk paints a Toplevel's client area but never its title bar, so in dark
     mode every secondary window opened with a light bar while the main window
-    had a dark one (monkeybug batch 16: "dark mode isn't 100% on popups").
+    had a dark one (feedback batch 16: "dark mode isn't 100% on popups").
     No-op off Windows and on Windows 10 builds without the attribute."""
     if sys.platform != "win32":
         return

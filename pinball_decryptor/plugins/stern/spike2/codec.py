@@ -374,7 +374,7 @@ class GenRecover:
         (output sample ``i`` reads body word ``i + delta``, so sample 0's word
         sits one word BELOW ``body_off`` on delta=-1 builds), ``body_off``
         otherwise.  Writing that whole window kills two real-machine clicks
-        our emulated round-trips could never see (monkeybug, LZ cabinet
+        our emulated round-trips could never see (a tester, LZ cabinet
         recordings):
 
         * TAIL: the encode only covers the emitted range (length - BLOCK);
@@ -602,7 +602,7 @@ class StereoRecover:
         sample the machine plays FIRST) is actually written; see
         :meth:`GenRecover.encode_sound` for the head/tail click story (every
         delta=-1 sound observed on LZ 1.22.0 is stereo — scales 22/23/30 —
-        so this path is where monkeybug's start-of-callout tick lived; their
+        so this path is where a tester's start-of-callout tick lived; their
         stock word below body_off decodes at 4k-16.5k of ~21.5k full scale)."""
         length = p["length"]
         delta = self._calibrate(p)

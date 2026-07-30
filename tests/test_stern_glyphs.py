@@ -119,7 +119,7 @@ def test_parse_glyph_tables_inline_backref_and_none():
 
 
 def test_parse_glyph_tables_kerning(tmp_path):
-    """A record tail with kerning pairs (Munsters '-' vs A/B — Peter's
+    """A record tail with kerning pairs (Munsters '-' vs A/B — a tester's
     scenes-without-fonts) parses, and pair chars outside the font's char
     array reject the table (the strictness the old zeros check provided)."""
     raw, _rgba = _atlas_raw(16, 16)

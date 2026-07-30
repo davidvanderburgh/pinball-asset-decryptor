@@ -92,7 +92,7 @@ class App:
         # The Stern encoder always runs raw: the "Match audio replacements to
         # the game's callouts" shaper (v0.49) never fixed the hardware click it
         # chased — the real fixes were the blip-free firmware patch + anti-pop
-        # seed — so the option was retired from the Advanced dialog (monkeybug
+        # seed — so the option was retired from the Advanced dialog (a tester
         # batch 20).  Set before any Write can spawn encode workers (they
         # inherit this env var); the engine keeps the env semantics so tests /
         # manual experiments still work.
@@ -231,7 +231,7 @@ class App:
         self._pending_post_hydrate = None
 
         # Restore the user's last window size + position over MainWindow's
-        # default (monkeybug: the app "does not remember my preferred sizing
+        # default (a tester: the app "does not remember my preferred sizing
         # and position").  Clamped to the current screen so a geometry saved on
         # a since-disconnected monitor can't open off-screen.
         self._restore_window_geometry()
@@ -533,7 +533,7 @@ class App:
     def _load_manufacturer_paths(self, key):
         # Saved paths go through resolve_mapped_drive: a path saved as
         # "W:\…" in a normal session stops resolving when the app is later
-        # run elevated (drive mappings are per logon session — monkeybug),
+        # run elevated (drive mappings are per logon session — a tester),
         # so restore its UNC equivalent instead of a dead letter.
         from .core.admin import resolve_mapped_drive as _rmd
         section = self._manufacturers_section().get(key, {})
@@ -554,7 +554,7 @@ class App:
         if saved_out:
             self.window.write_output_var.set(_rmd(saved_out))
         # Extract-tab checkbox state (auto-name / categories / JJP filters) —
-        # per manufacturer, so the ticks stick across sessions (monkeybug).
+        # per manufacturer, so the ticks stick across sessions (a tester).
         # apply_manufacturer() re-applies this after it rebuilds the dynamic
         # category checkboxes; setting it here covers the rest of the vars.
         self.window.set_extract_options(section.get("extract_options", {}))
@@ -565,7 +565,7 @@ class App:
         self.window.set_path_history(
             self._settings.get("path_history", {}).get(key, {}))
 
-    # Dropdown history keeps this many recent paths per field (monkeybug
+    # Dropdown history keeps this many recent paths per field (a tester
     # suggested "maybe last 6 files").
     _PATH_HISTORY_MAX = 6
 
@@ -589,7 +589,7 @@ class App:
 
     def _on_partition_image_opened(self, path):
         """A card image the Partition Explorer actually opened joins the
-        field's recent-paths dropdown (monkeybug: the same "last 5" memory
+        field's recent-paths dropdown (a tester: the same "last 5" memory
         as the Extract screen).  Saved immediately — this isn't tied to a
         run, so there's no later _save_settings() to ride on."""
         self._record_path_history(partition_image=path)
@@ -704,7 +704,7 @@ class App:
 
         if not hydrating and self._extract_overwrite_risk(output_path):
             # icon: a question mark undersells "your edits get clobbered"
-            # (monkeybug) — this is a warning-grade confirm.
+            # (a tester) — this is a warning-grade confirm.
             if not messagebox.askyesno(
                 "Output Folder Not Empty",
                 "The output folder already contains files this extract "
@@ -871,7 +871,7 @@ class App:
         audio files.  Plugins with per-type Extract checkboxes (Stern's
         Audio / Video / Images / Text) skip the audio phase entirely when
         Audio is unchecked — the chained Auto-name call-outs / music steps
-        would then fail on an output with no WAVs (monkeybug: video-only
+        would then fail on an output with no WAVs (a tester: video-only
         extract still ran them and the log filled with errors).  The GUI
         greys those options out; this is the run-time gate that actually
         honours it.  Plugins without an Audio category always pass."""
@@ -1088,7 +1088,7 @@ class App:
         For plugins with per-type Extract checkboxes the category keys map
         1:1 onto the output subfolders (audio/ video/ images/ text/), so
         only the SELECTED categories' non-empty subfolders count —
-        monkeybug deleted audio/ to re-extract audio alone and still got
+        a tester deleted audio/ to re-extract audio alone and still got
         warned about the leftover video/ + images/.  Top-level sidecars
         (.checksums.md5, callouts.csv, ...) are app-regenerated metadata,
         not user edits, so they don't count.  Plugins without categories
@@ -1797,7 +1797,7 @@ class App:
                     f"Mod pack imported: {n} file(s).", "success"))
                 # Re-scan the Replace tabs so the imported changes show up
                 # immediately — without this the tabs keep the pre-import scan
-                # ("0 slots changed") until a manual re-scan (monkeybug).  Same
+                # ("0 slots changed") until a manual re-scan (a tester).  Same
                 # refresh the mod-transfer flow does.
                 self.root.after(0, self.window.reload_assets_tabs)
                 self.root.after(0, lambda: messagebox.showinfo(
@@ -2361,7 +2361,7 @@ class App:
         # Never silently drop a recorded replacement: a disconnected NAS or a
         # re-extract that renamed slots looks identical to "nothing assigned",
         # and the result is a build/export missing the user's changes with no
-        # trace in the log (monkeybug).
+        # trace in the log (a tester).
         dropped = staged_changes.dropped_assignments(saved.get(kind),
                                                      slots_by_rel)
         if dropped:
@@ -2572,7 +2572,7 @@ class App:
 
         # Say so in the log right away — the first worker line ("Checking for
         # edits made before snapshots existed…") read like scan noise, and
-        # monkeybug concluded the button did nothing (batch 10).
+        # a tester concluded the button did nothing (batch 10).
         self.msg_queue.put(LogMsg(
             "Reverting all changes in %s…" % assets_dir, "info"))
         self.window.begin_revert_view()
@@ -2792,7 +2792,7 @@ class App:
             # "Completed at 2:45 PM" beats a bare "Complete!" — the status
             # persists across tab switches, and a timestamp reads as a
             # finished past event instead of something maybe still running
-            # (monkeybug batch 14).  Park the bar at 100% too; it used to
+            # (feedback batch 14).  Park the bar at 100% too; it used to
             # freeze wherever the last progress callback left it.
             self.window.set_status(
                 time.strftime("Completed at %I:%M %p").replace(" 0", " "))
@@ -2801,7 +2801,7 @@ class App:
                 # No modal for extraction — the per-asset progress already
                 # scrolls by in the log, so a blocking popup just gets in the
                 # way of dismissing it.  Drop the summary into the log instead,
-                # closed out by an unambiguous "fully done" line (monkeybug).
+                # closed out by an unambiguous "fully done" line (a tester).
                 self.window.append_log(summary, "success")
                 if run_elapsed is not None:
                     h, rem = divmod(int(run_elapsed), 3600)
@@ -3115,7 +3115,7 @@ class App:
 
         The banner is filled in by ONE check, 1.5 s after launch, and then
         stands until the app is restarted — so a window left open across a
-        release offers whatever was latest when it opened.  monkeybug pressed
+        release offers whatever was latest when it opened.  A tester pressed
         Install on a laptop showing 0.81 and got 0.81, days after it stopped
         being the newest, and asked for exactly this: notice, and let him
         choose.
@@ -3469,7 +3469,7 @@ class App:
     def _load_project(self):
         """Project ▾ → Open…: pick a project FOLDER (the anchor file is
         hidden — the folder is the thing).  Routes legacy loose .pinproj
-        files (batch 18, David+monkeybug dev builds only) and offers to
+        files (batch 18, internal dev builds only) and offers to
         adopt a not-yet-project folder."""
         from .core import project_file
         if self.window._is_running():
@@ -3509,7 +3509,7 @@ class App:
 
     def _apply_project_file(self, path):
         """Load a LEGACY loose .pinproj (batch 18 — population: David +
-        monkeybug's dev builds) under the collapsed batch-19 field model,
+        internal dev builds) under the collapsed batch-19 field model,
         then offer to anchor it into its project folder so the folder
         auto-loads from now on.  Raises OSError/ValueError for the caller's
         error dialog."""
@@ -3568,7 +3568,7 @@ class App:
 
     def _on_detected_game_change(self, caption):
         """MainWindow detected a game on the Extract input (or lost it —
-        *caption* None): show it in the title bar.  Batch 20 (monkeybug): the
+        *caption* None): show it in the title bar.  Batch 20 (a tester): the
         tab's "Detected: …" badge repeated the game name, the platform pill,
         and "card image"; the title bar states it once, with the firmware
         version where the plugin can recover one."""
@@ -3634,7 +3634,7 @@ class App:
 
     def _on_column_widths_change(self, widths):
         """Persist the Replace-tree column widths the user dragged so the layout
-        survives a restart (monkeybug).  *widths* is ``{tree_key: {col: px}}``."""
+        survives a restart (a tester).  *widths* is ``{tree_key: {col: px}}``."""
         self._settings["column_widths"] = widths
         self._save_settings()
 
@@ -3743,7 +3743,7 @@ class App:
                             "(%s) — its initials/names were not applied." % e,
                             "warning")
                 # Widening the operator menu's Feature Adjustments page so the
-                # machine will show its hidden/debug settings (peanuts).  It is
+                # machine will show its hidden/debug settings (a tester).  It is
                 # staged by NAME, like the settings themselves, so a rebuild on
                 # a different game version can't silently expose whatever that
                 # id happens to mean there — an image that doesn't have the
@@ -3786,7 +3786,7 @@ class App:
 
     def _on_admin_warning_collapsed_change(self, collapsed):
         """Persist whether the admin-warning body is collapsed so a returning
-        user who's read it once keeps it minimised (monkeybug)."""
+        user who's read it once keeps it minimised (a tester)."""
         self._settings["admin_warning_collapsed"] = bool(collapsed)
         self._save_settings()
 
@@ -3814,7 +3814,7 @@ class App:
                 os.environ[name] = str(val)
 
         # Retired shaper knobs (fade / level cap / treble roll-off — removed
-        # with the match-to-callouts option, monkeybug batch 20): explicitly
+        # with the match-to-callouts option, feedback batch 20): explicitly
         # cleared so a stale persisted experiment from an old session can
         # never silently shape a card built today.
         setenv("PAD_STERN_FADE_MS", None)
@@ -3874,7 +3874,7 @@ class App:
 
         Drives the main progress bar per sound and logs an unmistakable
         completion line — a big extract over a NAS runs for a minute-plus and
-        used to look idle the whole time (monkeybug batch 20)."""
+        used to look idle the whole time (feedback batch 20)."""
         if not assets_dir or not os.path.isdir(assets_dir):
             self.msg_queue.put(LogMsg(
                 "Profile vs stock: scan an extract folder on the Audio tab "

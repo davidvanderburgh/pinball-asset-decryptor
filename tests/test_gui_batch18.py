@@ -1,4 +1,4 @@
-"""GUI guards for monkeybug batch 18.
+"""GUI guards for feedback batch 18.
 
 Covers: the Audio-category gate on the chained Auto-name steps (video-only
 extract must not run transcribe / music-ID against an output with no WAVs),
@@ -43,7 +43,7 @@ def _pick(app, key):
 # ---- Audio category off ⇒ no chained auto-name steps ----------------------
 
 def test_autoname_chain_skipped_when_audio_category_off(app):
-    """monkeybug: a video-only extract (Audio unchecked) still chained
+    """a tester: a video-only extract (Audio unchecked) still chained
     Auto-transcribe + Music-ID, which then errored on \"No .wav files\".
     The wrappers must return the done_cb untouched when the run won't
     produce audio."""

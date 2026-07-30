@@ -1,6 +1,6 @@
 """Cross-extract memory of the user's own audio names, keyed by content.
 
-Whisper mis-hears some callouts the same way on every extract (monkeybug:
+Whisper mis-hears some callouts the same way on every extract (a tester:
 "Whisper renames incorrectly over and over on the same file").  When the user
 renames an audio slot in Replace Audio, the chosen label is stored here keyed
 by the sound's FACTORY content hash — the extract baseline md5, which is
@@ -73,7 +73,7 @@ def sanitize_label(text):
 def _load_raw():
     """Raw store — values are either a bare label string (v0.63.0) or a
     ``{"label":..., "cat":...}`` dict (v0.63.1, so a rename keeps its Type
-    bucket — monkeybug renamed an SFX and watched it turn into a callout)."""
+    bucket — a tester renamed an SFX and watched it turn into a callout)."""
     try:
         with open(AUDIO_NAMES_FILE, encoding="utf-8") as f:
             data = json.load(f)

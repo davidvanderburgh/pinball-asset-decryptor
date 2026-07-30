@@ -226,7 +226,7 @@ HS_SPECS = SPECS + [
 
 
 def test_high_score_and_champion_rows_are_offered_for_editing():
-    """monkeybug batch 22 asked for the high scores on the Defaults tab.  The
+    """feedback batch 22 asked for the high scores on the Defaults tab.  The
     named places come from CURATED; the per-mode champions are matched
     generically across every naming shape Stern has used."""
     rows = {r["name"]: r for r in curated_rows(AdjustmentTable(
@@ -256,7 +256,7 @@ def test_curated_rows_never_list_a_setting_twice():
 
 def test_curated_rows_carry_the_adjustments_own_step():
     """High-score defaults step by a million, so the editor's spinbox has to
-    use the table's step rather than 1 (monkeybug batch 22)."""
+    use the table's step rather than 1 (feedback batch 22)."""
     elf = bytearray(make_elf(HS_SPECS))
     t = AdjustmentTable(bytes(elf))
     # step lives 12 bytes past the default field (OFF_STEP - OFF_DEFAULT).

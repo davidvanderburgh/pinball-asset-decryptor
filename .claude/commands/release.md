@@ -164,8 +164,10 @@ loop.
    vN.N.N - <one-line summary of what this release does>
 
    <2-5 sentence paragraph or bullet list of notable changes — focus
-   on WHAT the user sees, not WHAT files changed.  Mention any
-   feedback contributors by name (e.g. "joe_blasi feedback").>
+   on WHAT the user sees, not WHAT files changed.  Do NOT name feedback
+   contributors anywhere public — commits, tags, release notes, docs,
+   code comments.  Refer to reports generically ("tester feedback",
+   "a field report").  Who reported what lives in private memory only.>
 
    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
    ```
@@ -267,7 +269,7 @@ loop.
        done
        gh release edit vN.N.N --draft=false
        ```
-    2. A **Windows-asset watcher** — the tester (monkeybug) is on
+    2. A **Windows-asset watcher** — the primary tester is on
        Windows, so the moment `*_Windows.exe` attaches is the moment the
        final report + forward-to-tester message (step 10) go out.  Do
        NOT hold that message for the macOS builds (the Intel Mac build
@@ -304,7 +306,7 @@ loop.
 
 10. **Draft a message for the tester / user.**
 
-    As soon as the WINDOWS asset is attached (step 9b watcher 2 — never wait for the macOS/Linux builds), write a SHORT, plain-text message the user can forward to whoever tests or requested the changes (e.g. monkeybug).  This is separate from the GitHub release notes — it's a casual DM, not documentation.  If the release answers questions the tester asked in their feedback, fold the answers into this message — it's the reply they actually read.
+    As soon as the WINDOWS asset is attached (step 9b watcher 2 — never wait for the macOS/Linux builds), write a SHORT, plain-text message the user can forward to whoever tests or requested the changes.  This is separate from the GitHub release notes — it's a casual DM, not documentation.  If the release answers questions the tester asked in their feedback, fold the answers into this message — it's the reply they actually read.
 
     Rules (this is text the USER sends onward, see `feedback_no_emdash_short_messages.md`):
     - **No em dashes.**  Keep it to a few lines.
@@ -328,7 +330,7 @@ loop.
     cosmetic, a hard wrap you type is permanent and travels into the
     mail.
 
-    Earlier releases (Kris on v0.94.0, Alex on v0.95.0, both 2026-07-28)
+    Two earlier tester messages (v0.94.0 and v0.95.0, both 2026-07-28)
     arrived hard-wrapped at ~65 columns, which is why this step kept
     changing.  Two causes are known and neither is fixed by how the
     message is printed: copying out of a rendered block can bake the
@@ -352,6 +354,11 @@ loop.
 
 - **Title format:** `vX.Y.Z — <short title>` (em dash `—`, not hyphen).
 - **Tag prefix:** `v`, always.  `v0.3.0` not `0.3.0`.
+- **No contributor names anywhere public** (2026-07-29): commits, tags,
+  release notes, README, docs, and code comments never credit a tester
+  or feedback contributor by name or handle.  Say "tester feedback" /
+  "a field report" instead.  The private memory files keep the
+  who-reported-what map; public text stays anonymous.
 - **Release notes structure** (the body of `gh release create --notes`):
   ```
   ## Highlights

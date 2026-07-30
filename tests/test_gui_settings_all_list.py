@@ -1,11 +1,11 @@
-"""GUI guards for the Defaults tab's "All settings" list (peanuts).
+"""GUI guards for the Defaults tab's "All settings" list (a tester).
 
 Covers what the list promises: every setting is listed with the machine's own
 caption, the Menu column separates the three cases, the filter leaves only what
 the Adjustments menu can't reach, and a build whose menu couldn't be read says
 so instead of flagging anything.
 
-Then the two things peanuts asked for on top of it — setting the default of a
+Then the two things a tester asked for on top of it — setting the default of a
 setting the curated form doesn't draw (including the hidden ones), and staging
 the firmware patch that makes the machine's own menu show them.
 """
@@ -57,7 +57,7 @@ def test_lists_every_setting_with_caption_id_and_menu_column(app):
     got = _fill(w, ROWS)
     assert len(got) == len(ROWS)
     texts = [t for t, _v in got]
-    # The machine's own caption, plus the id peanuts cross-references against.
+    # The machine's own caption, plus the id a tester cross-references against.
     assert "ALLOW TOPPER CHEATS  (0xD4)" in texts
     by_label = {t.split("  (")[0]: v for t, v in got}
     assert by_label["FREE PLAY"][3] == "Adjustments"
@@ -111,7 +111,7 @@ def test_empty_list_leaves_no_stale_legend(app):
 
 
 # ---------------------------------------------------------------------------
-# Editing a setting the curated form doesn't draw (peanuts: "write ... these
+# Editing a setting the curated form doesn't draw (a tester: "write ... these
 # hidden/debug values").
 # ---------------------------------------------------------------------------
 

@@ -610,7 +610,7 @@ def dropin_spec(info, ext):
         out.append(("Length", "%.2f s" % info.duration))
     # Worth stating outright: most Spike 2 clips carry no audio track, and a
     # replacement that brings one adds sound the game never had, which the
-    # machine plays (monkeybug: "I forgot to drop the audio off some files").
+    # machine plays (a tester: "I forgot to drop the audio off some files").
     out.append(("Audio", "none" if not info.has_audio
                 else "%d Hz, %d ch" % (info.audio_rate, info.audio_channels)))
     return out
@@ -621,7 +621,7 @@ def dropin_ffmpeg_command(info, ext, src="input.mov", dst="output"):
     *info* describes, or ``None`` when it can't be built.
 
     For users who would rather encode their own files than let the app do it —
-    monkeybug tunes his own key-frame interval so long clips play smoothly on
+    a tester tunes his own key-frame interval so long clips play smoothly on
     the machine, and without knowing the target he was guessing.  Everything
     that isn't dictated by the slot (bitrate, key-frame interval, preset) is
     deliberately left out, so it can be tuned without fighting the parts that
@@ -748,7 +748,7 @@ def transcode_video_to(src_path, dst_path, original_info,
     track gets a replacement with none either.  Nearly every Spike 2 clip is
     silent and the game plays its own sound, so a replacement that keeps its
     source's audio adds a second soundtrack the machine really does play over
-    the top (monkeybug: "I forgot to drop the audio off some files").  The
+    the top (a tester: "I forgot to drop the audio off some files").  The
     test is per-SLOT, not a blanket rule: a census of 2251 clips across five
     titles found Led Zeppelin, Godzilla, Jaws and John Wick entirely silent
     but Deadpool carrying audio on 7 of its 99, so the clip being replaced is
@@ -848,7 +848,7 @@ def remux_video_to(src_path, dst_path, original_info, cancel_cb=None):
     """Repackage *src_path* into *dst_path*'s container without re-encoding it.
 
     For the replacement that already IS the clip the slot needs and is only
-    wrapped wrong: aly encoded his to the slot's codec, resolution and frame
+    wrapped wrong: a tester encoded his to the slot's codec, resolution and frame
     rate but wrote it as ``.mp4`` where the card's clip is QuickTime, and the
     build then refused it as a drop-in (right — the wrapper really is part of
     what the machine reads).  Re-encoding to fix a container costs a whole

@@ -1,6 +1,6 @@
 """Parallel-transcription worker sizing (pure arithmetic, no model, no RAM read).
 
-monkeybug ran medium.en over 549 clips on an 8-core box: the pool spun up 7
+A tester ran medium.en over 549 clips on an 8-core box: the pool spun up 7
 workers (cores-1), each loading its own ~2 GB medium.en model, and partway
 through the run every worker hit a multi-minute clip at once (files are
 duration-sorted) and inference started failing with "mkl_malloc: failed to

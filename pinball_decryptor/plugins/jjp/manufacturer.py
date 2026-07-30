@@ -207,7 +207,7 @@ class JJPManufacturer(Manufacturer):
         # "Flash" surface — for JJP this is NOT a dd write: the machine
         # never boots the stick, it mounts the stick's FAT volume at
         # power-on and runs the installer from it, so a raw-imaged
-        # (Etcher/dd) stick fails with "Failed to mount USB stick" (Alex's
+        # (Etcher/dd) stick fails with "Failed to mount USB stick" (a tester's
         # Sonic report).  make_flash_pipeline formats the stick FAT32/MBR
         # and copies the ISO's files onto it — the working procedure,
         # in-app.  The flash_* wording attrs below relabel the shared

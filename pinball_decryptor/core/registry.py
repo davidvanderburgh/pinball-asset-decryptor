@@ -85,7 +85,7 @@ class Capabilities:
     # audio filename with its play length ("01m22s235 - idx0001.wav") so a
     # name sort orders by duration — durations are stable across firmware
     # versions while slot indexes shift, so this is how a modder lines up the
-    # same sounds between two extracts (monkeybug).  app.py passes
+    # same sounds between two extracts (a tester).  app.py passes
     # ``duration_names`` (bool) to the extract factories.  Used by Stern
     # Spike 2, whose sounds are otherwise named only by index.
     audio_duration_names: bool = False
@@ -223,7 +223,7 @@ class Capabilities:
     # ext4 filesystem(s), previews small text files, and extracts files/folders
     # to disk.  For pulling radium/script files out of an old modded card, or
     # dumping folders to diff a modded card vs stock without a mount+map cycle
-    # (monkeybug).  Set True only for plugins whose medium is a partitioned card
+    # (a tester).  Set True only for plugins whose medium is a partitioned card
     # image the app can read (Stern Spike 2 via plugins.stern.explorer).
     partition_explorer: bool = False
     # Settings-editor path: surfaces a "Settings" tab that opens a card image,
@@ -355,7 +355,7 @@ class Manufacturer(ABC):
 
     # Inserted before the extension of the built file's default name (which
     # otherwise mirrors the original's), so a build is obviously not the
-    # stock file (monkeybug 5: "led_zeppelin…-modified.raw").  Only safe for
+    # stock file (a tester 5: "led_zeppelin…-modified.raw").  Only safe for
     # plugins whose output filename carries no meaning to the machine (a raw
     # card image you flash yourself); leave "" when the game/installer looks
     # the file up by name (e.g. BOF's .fun updates).
@@ -451,7 +451,7 @@ class Manufacturer(ABC):
         *path* — e.g. "Led Zeppelin v1.22 LE".
 
         The happy-path "Detected: …" badge moved into the window title
-        (monkeybug batch 20: repeating the game name, the platform, and "card
+        (feedback batch 20: repeating the game name, the platform, and "card
         image" on the tab was redundant), so this should be the leanest string
         that identifies the loaded game — no manufacturer/platform echo, plus
         a version when the plugin can recover one cheaply (filename-level;
@@ -739,7 +739,7 @@ class Manufacturer(ABC):
 
     # NOTE: the Write tab used to lead with per-manufacturer wording hooks
     # (write_intro / build_write_description / direct_write_description);
-    # all of that guidance moved into the "?" tips window (monkeybug batches
+    # all of that guidance moved into the "?" tips window (feedback batches
     # 4 + 8), so the hooks are gone.
 
 

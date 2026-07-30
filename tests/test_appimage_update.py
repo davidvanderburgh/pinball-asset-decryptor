@@ -1,6 +1,6 @@
 """Linux in-app update: the AppImage download and what happens after it.
 
-aly ran v0.85 through v0.88 and reported the same thing every time --
+A tester ran v0.85 through v0.88 and reported the same thing every time --
 the update banner's Download button did nothing, no error, nothing.  It
 went through the desktop's URL opener, which from inside an AppImage
 inherits a bundle environment it can't run in.  v0.86.1 made that

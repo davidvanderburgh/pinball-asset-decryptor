@@ -4,7 +4,7 @@ file), staged default-settings edits, builds and reverts, each stamped with
 date and time.
 
 The session log already says these things, but it is a rolling record of one
-session; this file is the project's own memory.  Monkeybug (batch 24): a slot
+session; this file is the project's own memory.  A tester (batch 24): a slot
 that says "changed on disk" months later doesn't say what it was changed
 WITH — he had to open the file and compare it by eye against the folder he
 thought it came from.  One grep-able file at the root of the assets folder

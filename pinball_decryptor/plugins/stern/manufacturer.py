@@ -102,7 +102,7 @@ class SternManufacturer(Manufacturer):
         # Flash a pre-built SD-card image (.img/.raw) straight onto a card from
         # the GUI — a dd-style whole-image write, so users no longer need a
         # separate imaging tool (and the built-in size guard refuses an image
-        # too big for the card, the failure monkeybug hit externally).
+        # too big for the card, the failure a tester hit externally).
         flash_image=True,
         # On-screen LCD text lives in the .radium scene files; Extract pulls the
         # editable display strings out to text/strings.tsv, the Replace Text tab
@@ -117,11 +117,11 @@ class SternManufacturer(Manufacturer):
         mod_transfer=True,
         # Partition Explorer: browse a raw card image's partitions + ext4 tree
         # read-only and extract files/folders — pull radium/.sh files out of an
-        # old modded card or dump folders to diff vs stock (monkeybug).
+        # old modded card or dump folders to diff vs stock (a tester).
         partition_explorer=True,
         # Settings editor: decode the game firmware's compiled operator-
         # adjustment defaults (free play, volume, pricing, …) and preset them
-        # for a fresh-flash / factory-reset machine (monkeybug).
+        # for a fresh-flash / factory-reset machine (a tester).
         settings_editor=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
@@ -134,7 +134,7 @@ class SternManufacturer(Manufacturer):
         music_id=True,
         # Length-prefix names: Spike 2 sounds are named only by master-dir
         # index, and indexes shift between firmware versions — a play-length
-        # prefix gives users a sort key that survives updates (monkeybug).
+        # prefix gives users a sort key that survives updates (a tester).
         audio_duration_names=True,
         # Per-type Extract checkboxes (default all on): audio decode is the slow
         # part (~minutes) and images now include hundreds of scene textures, so
@@ -229,7 +229,7 @@ class SternManufacturer(Manufacturer):
         "⚠ Power off the machine and remove the SD card before connecting "
         "it to this PC. Always keep a backup image of the original card.")
     # Built images get a distinct default name (…-modified.raw) so they can't
-    # be mistaken for the stock image in the same folder (monkeybug 5).  Safe
+    # be mistaken for the stock image in the same folder (a tester 5).  Safe
     # here: the flashed card doesn't care what the image file was called.
     write_output_suffix = "-modified"
 
@@ -305,7 +305,7 @@ class SternManufacturer(Manufacturer):
 
     def image_note(self):
         # No inline note — the auto-fit / per-store fitting rules live in the
-        # "?" help window (monkeybug: the tab read as cluttered; the earlier
+        # "?" help window (a tester: the tab read as cluttered; the earlier
         # one-line summary went too).
         return ""
 
@@ -332,7 +332,7 @@ class SternManufacturer(Manufacturer):
     def title_caption(self, path, game):
         # "Led Zeppelin v1.22 LE", not "Led Zeppelin (Spike 2) — Spike 2 card
         # image": the title bar identifies the game; the era pill already says
-        # Spike 2 (monkeybug batch 20).  Version + edition parse straight off
+        # Spike 2 (feedback batch 20).  Version + edition parse straight off
         # Stern's vendor filename — cheap enough for the Tk thread; a renamed
         # card just shows the bare title.
         disp = re.sub(r"\s*\((?:Spike 2|Whitestar[^)]*)\)$", "", game.display)

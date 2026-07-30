@@ -87,7 +87,7 @@ def test_encode_sound_preserves_stock_words_beyond_emitted_range():
     The encode only covers the emitted range (length - BLOCK); the lead-out
     block past it can't be re-encoded (keystream recovery captures nothing
     there), and shipping raw 0x0000 words in it made the real machine play a
-    deterministic noise burst right after every replaced callout (monkeybug's
+    deterministic noise burst right after every replaced callout (a tester's
     LZ end-click, diagnosed from his cabinet recording — stock bodies are
     encoded to the last word and never click)."""
     import types
@@ -163,7 +163,7 @@ def test_encode_sound_writes_first_word_on_shifted_builds():
     shifted one word down with enc[0] written at its head — the old
     fixed-at-body_off window clipped enc[0] and left the stock word there,
     which real hardware rendered as a one-sample stock-amplitude tick right
-    in front of the replacement's fade-in (monkeybug's start-of-callout
+    in front of the replacement's fade-in (a tester's start-of-callout
     click, lz_click2.mp4: the click followed the slot, never the content)."""
     import types
     import numpy as np
@@ -233,7 +233,7 @@ def test_fit_fades_audio_edges_to_zero():
     """_fit must land BOTH edges of the actual audio at zero via a short
     fade: audio that starts or ends non-zero (cut mid-waveform, DC offset)
     is a step the machine plays as a click at that edge of the callout
-    (monkeybug, real-HW — end clicks first, start clicks confirmed after
+    (a tester, real-HW — end clicks first, start clicks confirmed after
     the tail-only fix).  Both the truncation point and the last real
     sample before zero-padding are audio ends."""
     import numpy as np

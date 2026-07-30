@@ -893,7 +893,7 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
 
     Refuses (``FlashError``) when the image is larger than the target card — a
     too-big image would be truncated and produce an unbootable card (the failure
-    monkeybug hit with an external imaging tool).  When the card size can't be
+    a tester hit with an external imaging tool).  When the card size can't be
     probed it proceeds with a logged warning rather than blocking.  Reports
     progress and honours ``cancel`` (a True return raises :class:`FlashCancelled`
     mid-write).  Returns the number of bytes written.

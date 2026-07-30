@@ -2,7 +2,7 @@
 
 The Write tab's change scan and the mod-pack export both MD5 every baseline
 file to find the changed ones — minutes of re-hashing on big or networked
-folders even when almost nothing changed since the last walk (monkeybug
+folders even when almost nothing changed since the last walk (a tester
 batch 14).  This sidecar remembers each file's ``(size, mtime_ns, md5)``;
 a later walk re-hashes only files whose size or mtime moved, rsync-style.
 

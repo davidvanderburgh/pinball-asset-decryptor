@@ -66,7 +66,7 @@ def test_csv_classifications(tmp_path):
 
 
 def test_sound_test_name_beats_csvs(tmp_path):
-    """monkeybug's pre-fix Led Zeppelin extract: a Sound-Test-named SFX also
+    """a tester's pre-fix Led Zeppelin extract: a Sound-Test-named SFX also
     matched a song in music_titles.csv (the riff inside it) — the game's own
     name wins, so the slot files under Sound FX, not Music."""
     assets = str(tmp_path)
@@ -108,7 +108,7 @@ def test_matches_filter_duration_aware_music():
 
 
 def test_renamed_slot_keeps_remembered_category(tmp_path, monkeypatch):
-    """monkeybug: he renamed an SFX and the Type filter re-filed it as a
+    """a tester: he renamed an SFX and the Type filter re-filed it as a
     callout.  The rename memory now records the bucket; the classifier
     honors it while the on-disk label still matches."""
     from pinball_decryptor.core import name_memory as NM

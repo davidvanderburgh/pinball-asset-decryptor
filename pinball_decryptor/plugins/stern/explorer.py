@@ -2,7 +2,7 @@
 
 Backs the GUI's Partition Explorer: open a ``.raw``/``.img`` card, list its MBR
 partitions, walk the ext4 filesystem(s), preview small text files, and extract
-files or whole subtrees to disk.  monkeybug's use cases: pull radium files out
+files or whole subtrees to disk.  A tester's use cases: pull radium files out
 of an old modded card to transfer into a new stock version, read/copy the boot
 ``.sh`` scripts, and dump partitions/folders to diff a modded card vs stock.
 
@@ -10,7 +10,7 @@ Browsing composes the existing size-neutral machinery (:mod:`.formats` for the
 MBR + :class:`.ext4.Ext4Reader` for read-only ext4).  The one write the
 explorer offers is :meth:`CardImage.replace_file` — an EXACT-SIZE in-place
 replacement of a single file through the ext4 extent map, refreshing the
-file's Spike 2 ``.sidx`` validation record (monkeybug batch 14 wishlist:
+file's Spike 2 ``.sidx`` validation record (feedback batch 14 wishlist:
 swap a radium/script file straight into a card without a full Write cycle).
 Anything that would change the filesystem's shape (sizes, allocation,
 names) stays out of scope — that's the engine's Write path.

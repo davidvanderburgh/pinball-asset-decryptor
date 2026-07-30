@@ -1,4 +1,4 @@
-"""Scene Browser — what each Spike 2 scene is made of (Peter).
+"""Scene Browser — what each Spike 2 scene is made of (a tester).
 
 The extract manifests already record, per on-card ``scene.radium``, every
 embedded image (in play order), every font atlas and every editable display
@@ -315,7 +315,7 @@ class SceneBrowserWindow:
         self._detail.bind("<<TreeviewSelect>>", lambda _e: self._on_detail())
         self._detail.bind("<Double-1>", self._on_detail_double)
         # Right-click acts ON the scene — recolour a line of its text, blank a
-        # font out of it.  Peter, about an outline font he wanted gone: "Is
+        # font out of it.  A tester, about an outline font he wanted gone: "Is
         # there an easy way to blank it out from the scene menu? when i do
         # doubleclick on it, it will go the import windows, but it will not
         # blank it out there."
@@ -411,7 +411,7 @@ class SceneBrowserWindow:
             "closer look, or if a scene's own rate looks wrong: how long each "
             "individual frame is held is still undecoded, so a sequence with "
             "held frames plays faster here than on the machine.")
-        # Peter: "would it be possible to do some different backgrounds? The
+        # a tester: "would it be possible to do some different backgrounds? The
         # black does work most, but if you want to check the black border stuff
         # something different may help."
         self._bg_row = bgrow = ttk.Frame(pside)

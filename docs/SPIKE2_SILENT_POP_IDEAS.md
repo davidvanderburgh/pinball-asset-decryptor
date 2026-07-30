@@ -1,6 +1,6 @@
 # Spike 2 "silent replacement still pops" — 20 ideas, ranked
 
-Context: monkeybug (Led Zeppelin LE 1.22.0) put silence into two song-name
+Context: a tester (Led Zeppelin LE 1.22.0) put silence into two song-name
 callout slots (idx0231 Ramble On, idx0258 Kashmir) and still hears artifacts.
 David's challenge: if *silence* isn't silent, our encode/decode pipeline is
 suspect. This ranks 20 ways the app could be at fault (or could help prove it
@@ -171,7 +171,7 @@ the machine. Needs the video re-sent. No code.
 - The **START pop** is, on all current evidence, machine-side; the shipped
   stock-head mode (idea 2) is the cleanest way to prove that on hardware, and a
   firmware ELF patch (idea 12) is the only true fix if it is.
-- Everything in Tier 1–2 is committed and built to be tested on monkeybug's
+- Everything in Tier 1–2 is committed and built to be tested on a tester's
   actual machine, with per-slot A/B so one card settles multiple questions.
 
 ---

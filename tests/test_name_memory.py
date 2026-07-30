@@ -1,5 +1,5 @@
 """User rename memory (core/name_memory.py): content-hash keyed names that
-re-apply on the next extract before Whisper runs (monkeybug's wishlist)."""
+re-apply on the next extract before Whisper runs (a tester's wishlist)."""
 import os
 
 from pinball_decryptor.core import name_memory as NM

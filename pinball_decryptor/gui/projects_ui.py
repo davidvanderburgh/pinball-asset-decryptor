@@ -245,7 +245,7 @@ def new_project_dialog(app):
     """Project ▾ → New…: one small dialog, three questions — where the
     project folder goes, which manufacturer, which stock image.  OK resets
     the Extract options to that manufacturer's defaults, anchors the
-    folder, and leaves the user ready to Extract (monkeybug: "no easy way
+    folder, and leaves the user ready to Extract (a tester: "no easy way
     of wiping out most of the settings")."""
     if app.window._is_running():
         return

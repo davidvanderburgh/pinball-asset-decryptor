@@ -2,7 +2,7 @@
 
 A Spike 2 project keeps its glyph slices 120+ characters below the project
 folder, and the Build writes wherever the user pointed it, so both go past
-Windows' 260-character limit without looking unusual.  Peter's font import
+Windows' 260-character limit without looking unusual.  A tester's font import
 applied and then the build failed with an error that reads as a missing file;
 shortening the build path fixed it.
 

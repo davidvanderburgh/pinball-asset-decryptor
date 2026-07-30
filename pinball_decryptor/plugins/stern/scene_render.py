@@ -27,7 +27,7 @@ output:
 The machine draws on black, so black is the truthful backdrop and the default.
 A preview is also something you *inspect*, though, and black ink on a black
 frame is invisible in it exactly as it is on the machine — which is no help
-when the thing you are checking IS the black border round a letter (Peter).
+when the thing you are checking IS the black border round a letter (a tester).
 So the render tracks COVERAGE as it composites and lays the finished frame over
 a backdrop of the caller's choosing; over black the result is byte-identical to
 drawing straight onto black, and over anything else the black bits finally show.

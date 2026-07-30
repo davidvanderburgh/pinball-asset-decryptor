@@ -84,7 +84,7 @@ def test_live_assignments_handles_none():
 
 # --- dropped_assignments: the loud-warning side of live_assignments ---------
 # A disconnected NAS (missing replacement file) or a re-extract that renamed
-# slots must be REPORTED, not silently built without (monkeybug lost 190
+# slots must be REPORTED, not silently built without (a tester lost 190
 # audio changes to a silent drop looking exactly like "nothing assigned").
 
 def test_dropped_assignments_reports_both_reasons(tmp_path):
@@ -107,7 +107,7 @@ def test_dropped_assignments_reports_both_reasons(tmp_path):
 
 
 def test_dropped_assignments_distinguishes_moved_from_disconnected(tmp_path):
-    """Batch 24: monkeybug read "NAS/drive disconnected?" as the app failing
+    """Batch 24: a tester read "NAS/drive disconnected?" as the app failing
     to load a clip while his NAS was connected the whole time — the file had
     simply been renamed.  A reachable parent folder proves the drive is fine,
     so the two cases get different words."""

@@ -1,7 +1,7 @@
 """Prerequisite-probe robustness (no real binaries, no subprocess).
 
 The host probe must not cry "missing" when the tool is actually installed:
-monkeybug saw ffmpeg flagged missing DURING a big extract (disk + CPU churn),
+A tester saw ffmpeg flagged missing DURING a big extract (disk + CPU churn),
 then a re-check when idle said OK.  Root cause: `ffmpeg -version` was executed
 with an 8 s timeout, and under load the spawn/exec blew past it.  Fix: for a
 simple presence probe, resolve via shutil.which (a pure PATH scan, no

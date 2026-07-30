@@ -1,6 +1,6 @@
 """Tests for the Image Info collector (core.image_info) and the Stern Spike 2
 card probe behind it (plugins.stern.info) — the read-only "Image Info" tab
-(peanuts).  All fixtures are tiny synthetic files; the Spike 2 probe runs over
+(a tester).  All fixtures are tiny synthetic files; the Spike 2 probe runs over
 the same in-memory fake ext4 the Partition Explorer tests use."""
 
 import os
@@ -301,7 +301,7 @@ _ADJ_SPECS = [
 
 
 def test_card_info_adjustment_and_high_score_counts(tmp_path, monkeypatch):
-    """peanuts: how many settings does this machine's menu have, and how many
+    """a tester: how many settings does this machine's menu have, and how many
     high scores does it keep?  Both come off the game firmware, no Extract."""
     from tests._ext4_fake import install_fake_reader, write_fake_card
     from tests.test_stern_adjustments import make_elf

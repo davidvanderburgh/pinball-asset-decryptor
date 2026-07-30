@@ -235,7 +235,7 @@ def test_intact_copy_rejects_a_foreign_container(tmp_path, monkeypatch):
     msgs = []
     assert _decide(src, staged, "a.mov", msgs) == str(staged)
     # One line, and not an alarm: the converted copy going on IS the plan when
-    # the user left conversion on (aly read the old warning as a failure).
+    # the user left conversion on (a tester read the old warning as a failure).
     assert len(msgs) == 1 and msgs[0][1] == "info"
     assert "format-matched" in msgs[0][0]
 

@@ -1,5 +1,5 @@
 """Tests for plugins.stern.explorer — the read-only card-image browser behind
-the Partition Explorer tab (monkeybug wishlist #3).
+the Partition Explorer tab (a tester wishlist #3).
 
 The real ext4 read layer (Ext4Reader) is exercised elsewhere + on real cards; a
 tiny in-memory fake filesystem (tests/_ext4_fake.py) covers the explorer's
@@ -94,7 +94,7 @@ def test_extract_tree_whole_partition_skips_symlinks(card, tmp_path):
 def test_extract_tree_top_name_override(card, tmp_path):
     """A whole-partition extract can land under a caller-chosen folder
     ("Partition 1") instead of the generic "root" — two partitions extracted
-    into one destination used to mix together (monkeybug batch 10)."""
+    into one destination used to mix together (feedback batch 10)."""
     n_files, _ = card.extract_tree(1, "/", str(tmp_path / "all"),
                                    top_name="Partition 1")
     assert n_files == 5

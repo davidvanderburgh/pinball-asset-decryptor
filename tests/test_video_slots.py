@@ -344,7 +344,7 @@ def test_matching_extension_is_not_a_matching_container(tmp_path, monkeypatch):
 
 
 def test_stage_repackages_a_wrong_container_without_re_encoding(tmp_path):
-    # aly's case: an .mp4 encoded to the slot's codec/resolution/frame rate for
+    # A tester's case: an .mp4 encoded to the slot's codec/resolution/frame rate for
     # a QuickTime slot.  Only the wrapper is wrong, so the staged copy must be
     # a stream copy — the coded frames come out bit-for-bit identical.
     from pinball_decryptor.core.video import find_ffmpeg, find_ffprobe
@@ -514,7 +514,7 @@ def test_banner_parse_picks_up_the_profile():
 def test_transcode_strips_audio_for_a_silent_slot(monkeypatch, tmp_path):
     """Spike 2 clips are nearly all silent and the game plays its own sound,
     so a converted replacement must not smuggle its source's soundtrack onto
-    the card (monkeybug batch 23)."""
+    the card (feedback batch 23)."""
     from pinball_decryptor.core import video as _video
     seen = {}
 

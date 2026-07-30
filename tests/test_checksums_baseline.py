@@ -141,7 +141,7 @@ def test_rename_in_baseline_noops(tmp_path):
 
 
 def test_autoname_rename_then_baseline_repoint_is_clean(tmp_path):
-    """The bug monkeybug hit: Auto-name MOVES the WAV after the baseline was
+    """The bug a tester hit: Auto-name MOVES the WAV after the baseline was
     written, so without re-pointing the renamed file reads as "changed on disk".
     With rename_in_baseline applied, the renamed-but-unedited file is clean."""
     assets = str(tmp_path)

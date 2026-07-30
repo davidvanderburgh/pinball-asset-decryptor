@@ -1,7 +1,7 @@
 """Persistent rolling session log.
 
 The GUI's log pane is per-process — closing the app (or updating in place,
-which relaunches it) throws the text away, and monkeybug wanted to look back
+which relaunches it) throws the text away, and a tester wanted to look back
 at what an earlier session did.  Every line the pane shows is therefore also
 appended here, to a plain-text file that survives restarts and updates:
 

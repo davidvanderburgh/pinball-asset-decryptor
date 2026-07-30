@@ -1221,7 +1221,7 @@ class Spike2Emu:
         # Mirror the card bytes just BELOW the window too: on delta=-1 keys the
         # first sample of the first block reads one word/frame below the body,
         # and the real machine sees the actual card byte there (this is where
-        # monkeybug's start-of-callout click lived — the word is part of the
+        # a tester's start-of-callout click lived — the word is part of the
         # sound's true read window).  Keeps extraction + the re-encode
         # self-test hardware-faithful at the boundary.
         self.ensure_bb_margin()

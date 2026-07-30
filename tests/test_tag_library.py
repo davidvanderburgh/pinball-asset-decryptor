@@ -1,6 +1,6 @@
 """Tests for core.tag_library — the per-card library that lets a fresh
 re-extract of the same Stern card restore the user's renamed image-group names
-(monkeybug's "group tags lost on re-extract")."""
+(a tester's "group tags lost on re-extract")."""
 
 import json
 import os

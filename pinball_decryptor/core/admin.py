@@ -84,7 +84,7 @@ def resolve_mapped_drive(path):
     Mapped drive letters are per-logon-session: an elevated ("Run as
     administrator") process runs under a separate token whose session has
     no drive mappings, so a saved ``W:\\mods`` stops resolving under
-    elevation even though ``\\\\server\\share`` is reachable (monkeybug,
+    elevation even though ``\\\\server\\share`` is reachable (a tester,
     running PAD elevated for flash-image).  The persistent mapping lives
     per-USER in the registry (``HKCU\\Network\\<letter>\\RemotePath``),
     which both sessions share — translate through it.  Anything that

@@ -1015,7 +1015,7 @@ def test_save_preserves_other_tabs_sections(
 
 
 # ---------------------------------------------------------------------------
-# monkeybug UI batch: Scan/Browse busy state, column-width persistence,
+# a tester UI batch: Scan/Browse busy state, column-width persistence,
 # responsive intro-text wrapping
 # ---------------------------------------------------------------------------
 
@@ -1033,7 +1033,7 @@ def test_set_tab_scanning_toggles_button_state(app):
     w = app.window
     scan = w._scan_buttons["audio"]
 
-    # Scanning: the Scan button becomes an ENABLED Cancel (monkeybug) and a
+    # Scanning: the Scan button becomes an ENABLED Cancel (a tester) and a
     # spinner animation is scheduled.
     w._audio_empty.configure(text="Scanning for audio files…")
     w._set_tab_scanning("audio", True)
@@ -1112,7 +1112,7 @@ def test_flash_button_shown_for_stern_hidden_otherwise(
         app, manufacturers_by_key):
     # winfo_manager() == "pack" means the Flash-image button is laid out in
     # the Modified Files toolbar (winfo_ismapped() reads 0 unless the Write
-    # tab is raised).  monkeybug batch 8 moved it out of its own LabelFrame
+    # tab is raised).  feedback batch 8 moved it out of its own LabelFrame
     # onto the Build row.
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
@@ -1149,7 +1149,7 @@ def test_flash_button_shown_for_stern_hidden_otherwise(
 
 
 def test_write_preview_scan_uses_shared_scan_state(app, manufacturers_by_key):
-    """monkeybug batch 8: the Modified Files scan gets the same treatment as
+    """feedback batch 8: the Modified Files scan gets the same treatment as
     the Replace tabs — Refresh flips to a live (enabled) Cancel while a scan
     runs instead of the old disabled hourglass button, and cancelling
     invalidates the in-flight scan and restores a plain "Refresh"."""
@@ -1176,7 +1176,7 @@ def test_write_preview_scan_uses_shared_scan_state(app, manufacturers_by_key):
 
 def test_flash_button_folds_cancel_and_status_resets_on_run_start(
         app, manufacturers_by_key):
-    """monkeybug batch 8: (a) starting any run replaces the previous run's
+    """feedback batch 8: (a) starting any run replaces the previous run's
     terminal status ("Complete!") immediately instead of letting it linger
     until the first progress callback; (b) during a flash run the Flash
     button doubles as its live Cancel and is restored by set_running(False)
@@ -1198,7 +1198,7 @@ def test_flash_button_folds_cancel_and_status_resets_on_run_start(
 
 def test_write_build_button_folds_cancel_and_lives_in_toolbar(
         app, manufacturers_by_key):
-    """monkeybug Write-tab rework: Build/Revert moved into the Modified Files
+    """a tester Write-tab rework: Build/Revert moved into the Modified Files
     toolbar, the standalone Cancel widget is gone (Build doubles as a live
     Cancel), and the built file's name lives in an editable File Name box
     pre-filled with the original + the plugin's suffix; the hint line under it
@@ -1267,7 +1267,7 @@ def test_write_filename_box_editable_and_flags_collisions(
 
         # Create the colliding build; the hint states the fact (gray,
         # informational — the Build click now asks before overwriting,
-        # monkeybug batch 14).
+        # feedback batch 14).
         (out_dir / "game-1_0_0.sdcard-modified.raw").write_bytes(b"old")
         w._update_write_filename_hint()
         assert "already exists" in w._write_filename_lbl.cget("text")
@@ -1371,7 +1371,7 @@ def test_capture_help_line_removed_for_noncapture_plugin(
     """The capture-help line is fully unpacked (not just blanked) for a
     non-capture plugin, so it can't reserve an empty line between the
     Output-folder warning and the Extract row and skew the 3-step spacing
-    (monkeybug Extract #1).  winfo_manager() == "" means not managed."""
+    (a tester Extract #1).  winfo_manager() == "" means not managed."""
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     stern.set_era("spike2")
@@ -1469,7 +1469,7 @@ def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
 
 
 def test_path_history_records_dedupes_and_caps(app, manufacturers_by_key):
-    """Path boxes keep a per-manufacturer recent-paths history (monkeybug):
+    """Path boxes keep a per-manufacturer recent-paths history (a tester):
     recorded at run start, most recent first, deduped case-insensitively,
     capped, and pushed into the window for the comboboxes' dropdowns."""
     import copy
@@ -1528,7 +1528,7 @@ def test_path_boxes_are_history_comboboxes(app, manufacturers_by_key):
 
 
 def test_help_button_and_per_tab_content(app, manufacturers_by_key):
-    """The header "?" opens the per-tab tips modal (monkeybug): shown only
+    """The header "?" opens the per-tab tips modal (a tester): shown only
     in the working view, and every notebook tab caption has help content so
     no tab opens an empty modal."""
     from pinball_decryptor.gui.help_dialog import HELP_CONTENT, show_tab_help
@@ -1556,7 +1556,7 @@ def test_help_button_and_per_tab_content(app, manufacturers_by_key):
 
 
 def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
-    """The header ⚙ replaces the old button row (monkeybug: settings live in
+    """The header ⚙ replaces the old button row (a tester: settings live in
     a dropdown, not permanent top-bar clutter), and the Prerequisites strip
     stays hidden until a probe CONFIRMS something is missing (David: no
     flash-then-vanish "checking" strip on tab entry)."""
@@ -1620,7 +1620,7 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         assert "Install update v99.0.0" in upd_menu.entrycget(0, "label")
         # Linux gets the same one-click flow with an honest verb: an
         # AppImage download installs nothing, it just lands next to the
-        # one being run (aly -- the browser handoff it replaces was dead).
+        # one being run (a tester -- the browser handoff it replaces was dead).
         appimage_asset = {"name": "PAD_v99_Linux_x86_64.AppImage",
                           "url": "https://x/pad.AppImage",
                           "size": 1, "sha256": None, "kind": "appimage"}
@@ -1647,7 +1647,7 @@ def test_settings_gear_and_prereq_strip_autohide(app, manufacturers_by_key):
         assert "Voice recognition quality" in joined
         # The accepted disclaimer stays re-readable from the gear (David).
         assert "View disclaimer…" in joined
-        # Prerequisites are a cascade now (monkeybug): the cascade label IS
+        # Prerequisites are a cascade now (a tester): the cascade label IS
         # the status summary; the actions live in its submenu.
         assert "1 missing" in joined
         prereq_i = next(
@@ -1710,7 +1710,7 @@ def test_disclaimer_review_mode(app):
 
 def test_help_window_singleton_and_tab_refresh(app, manufacturers_by_key):
     """"?" re-uses one tips window instead of stacking new ones, and a
-    notebook tab switch re-renders the open window (monkeybug round 2)."""
+    notebook tab switch re-renders the open window (a tester round 2)."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
     app.root.update()
@@ -1738,7 +1738,7 @@ def test_help_window_singleton_and_tab_refresh(app, manufacturers_by_key):
 def test_extract_options_persist_per_manufacturer(app, manufacturers_by_key):
     """Auto-name + extract-category checkboxes stick across a leave-and-return
     (the same settings.json round trip a restart does) and stay per-mfr
-    (monkeybug: 'do not stick between sessions')."""
+    (a tester: 'do not stick between sessions')."""
     w = app.window
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
@@ -1848,7 +1848,7 @@ def test_image_group_scan_parses_manifests(tmp_path):
     assert groups[rel3] == (key, "Char_Select · a1b2c3d4", 300)
     assert occ[rel1] == 1
     # Group KEY keeps the manifest's leading slash (so saved tags match); the
-    # display LABEL drops it for consistency with the other tabs (monkeybug).
+    # display LABEL drops it for consistency with the other tabs (a tester).
     assert groups["images/loose/logo.png"] == (
         "dir::/game/assets/loose", "game/assets/loose", 0)
     empty = tmp_path / "no_manifests"
@@ -1859,7 +1859,7 @@ def test_image_group_scan_parses_manifests(tmp_path):
 def test_image_group_label_skips_font_atlases(tmp_path):
     """A scene whose first named member is a FONT atlas must not be labeled
     after the font (Stern names fonts "Stern_...", so every hash-named member
-    matched a search for "stern" through the invisible label — monkeybug).
+    matched a search for "stern" through the invisible label — a tester).
     The hint comes from the first non-atlas named member, or falls back to
     the hash shorthand when the font is the only named member."""
     from pinball_decryptor.gui.main_window import MainWindow
@@ -1898,7 +1898,7 @@ def test_image_group_label_skips_font_atlases(tmp_path):
 def _seed_shared_image_assets(tmp_path):
     """Two scenes that share one image: the extract dedupes it to a single
     PNG whose HOME group is the first scene, so the second scene owns no
-    first-occurrence row at all (Peter's training scene)."""
+    first-occurrence row at all (a tester's training scene)."""
     st = tmp_path / "images" / "scene_textures"
     st.mkdir(parents=True)
     shared = "radimg_Logo_8x8_000000aa.png"
@@ -1990,7 +1990,7 @@ def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
     grp = [t for t in tops if "Char_Select" in tree.item(t, "text")]
     assert len(grp) == 1
     assert "Char_Select · a1b2c3d4" in tree.item(grp[0], "text")
-    # The member count lives in its own sortable "Images" column (monkeybug),
+    # The member count lives in its own sortable "Images" column (a tester),
     # which only shows in grouped mode.
     assert tree.item(grp[0], "values")[0] == "3 images"
     assert tree["displaycolumns"][0] == "n"
@@ -2116,7 +2116,7 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
     """The Source dropdown narrows the list to one image store, and
     right-click Rename gives a scene group a persistent display name that
     renders, searches, and lands in the staged-changes sidecar; a blank
-    rename restores the manifest label (monkeybug)."""
+    rename restores the manifest label (a tester)."""
     from pinball_decryptor.core import staged_changes
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
@@ -2166,13 +2166,13 @@ def test_image_source_filter_and_group_rename(app, manufacturers_by_key,
 
 
 # ---------------------------------------------------------------------------
-# monkeybug batch 9: mode-aware Cancel buttons, "Cancel scan" labelling,
+# feedback batch 9: mode-aware Cancel buttons, "Cancel scan" labelling,
 # Write-toolbar grouping, live scan-activity text, Total-changes readout
 # ---------------------------------------------------------------------------
 
 def test_scan_cancel_button_says_cancel_scan(app):
     """The scan buttons' running label is "Cancel scan" — context so it can't
-    be confused with a run's "Cancel", and no ✕ glyph (monkeybug batch 9)."""
+    be confused with a run's "Cancel", and no ✕ glyph (feedback batch 9)."""
     w = app.window
     w._audio_empty.configure(text="Scanning for audio files…")
     w._set_tab_scanning("audio", True)
@@ -2187,7 +2187,7 @@ def test_scan_cancel_button_says_cancel_scan(app):
 def test_run_cancel_only_on_initiating_side_extract(app):
     """During an extract run only the Extract button becomes Cancel; the Write
     tab's Build button greys out with its idle label instead of becoming a
-    second Cancel that would kill the extract (monkeybug batch 9 — he clicked
+    second Cancel that would kill the extract (feedback batch 9 — he clicked
     it and cancelled his extract)."""
     w = app.window
     idle = w._write_btn.cget("text")
@@ -2222,7 +2222,7 @@ def test_run_cancel_only_on_initiating_side_write(app):
 def test_flash_run_has_exactly_one_cancel(app, manufacturers_by_key):
     """A flash run arms the Flash button as the live Cancel and parks the
     Build button (which set_running(mode="write") had armed) disabled on its
-    idle label — one Cancel on screen, not two (monkeybug batch 9)."""
+    idle label — one Cancel on screen, not two (feedback batch 9)."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
@@ -2258,7 +2258,7 @@ def test_set_cancelling_only_relabels_live_cancel(app):
 
 def test_write_toolbar_right_justifies_scan_and_actions(
         app, manufacturers_by_key):
-    """Modified Files toolbar (monkeybug batch 22): every button is
+    """Modified Files toolbar (feedback batch 22): every button is
     right-justified, with the scan control at the LEFT end of that group —
     i.e. last in the side=RIGHT packing order.  For a flash-capable plugin the
     plain Build button is hidden (David: the consolidated Build / flash button
@@ -2284,7 +2284,7 @@ def test_write_toolbar_right_justifies_scan_and_actions(
 def test_write_preview_scan_status_ticks_and_clears(app):
     """The Modified Files scan shows the SAME big animated overlay as every
     other tab, carrying a running "N found", and resets when the scan ends or
-    is cancelled (monkeybug batch 22 — the old small toolbar label is gone)."""
+    is cancelled (feedback batch 22 — the old small toolbar label is gone)."""
     w = app.window
     w._write_preview_empty.configure(text="Scanning for modified files…")
     w._set_tab_scanning("write_preview", True)
@@ -2304,7 +2304,7 @@ def test_write_preview_scan_status_ticks_and_clears(app):
 
 def test_write_preview_total_changes_readout(app):
     """"Total changes: N" tracks the preview tree's row count and goes blank
-    when the list empties (monkeybug batch 9)."""
+    when the list empties (feedback batch 9)."""
     w = app.window
     sid = w._write_preview_scan_id
     w._add_write_preview_row("audio/one.wav", "wav", "Modified", sid)
@@ -2319,7 +2319,7 @@ def test_write_preview_total_changes_readout(app):
 
 
 def test_run_preempts_preview_scan(app):
-    """One live Cancel at a time (monkeybug batch 10): starting a run kills an
+    """One live Cancel at a time (feedback batch 10): starting a run kills an
     in-flight Modified Files scan (no "Cancel scan" next to the run's
     "Cancel"), greys Refresh for the run, and re-fires the scan afterwards."""
     w = app.window
@@ -2341,7 +2341,7 @@ def test_run_preempts_preview_scan(app):
 
 def test_begin_revert_view_blanks_preview(app):
     """Revert blanks the Modified Files list immediately — its rows are about
-    to go stale — and says so in place (monkeybug batch 10)."""
+    to go stale — and says so in place (feedback batch 10)."""
     w = app.window
     sid = w._write_preview_scan_id
     w._add_write_preview_row("audio/one.wav", "wav", "Modified", sid)
@@ -2355,7 +2355,7 @@ def test_begin_revert_view_blanks_preview(app):
 def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
                                             tmp_path, monkeypatch):
     """A group name given one extract is restored when the SAME card is
-    re-extracted to a fresh folder (monkeybug: tags lost on re-extract).  The
+    re-extracted to a fresh folder (a tester: tags lost on re-extract).  The
     per-card library is keyed by the source card's file name, so only the
     same-version card seeds; the fresh folder's sidecar also gets the name so
     it rides Mod Transfer / reopen."""
@@ -2405,7 +2405,7 @@ def test_group_tags_reseed_across_reextract(app, manufacturers_by_key,
 def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
                                                tmp_path, monkeypatch):
     """Open a card image, list partitions, browse the ext4 tree (lazy expand),
-    preview a text file, and extract one file (monkeybug wishlist #3)."""
+    preview a text file, and extract one file (a tester wishlist #3)."""
     from pinball_decryptor.gui.main_window import _PEX_PLACEHOLDER
     from tests._ext4_fake import install_fake_reader, write_fake_card
 
@@ -2419,7 +2419,7 @@ def test_partition_explorer_browse_and_extract(app, manufacturers_by_key,
     w._pex_open_image()
 
     labels = list(w._pex_part_combo["values"])
-    # Device-style names: MBR slot N -> sda(N+1) (monkeybug batch 14).
+    # Device-style names: MBR slot N -> sda(N+1) (feedback batch 14).
     assert any("sda2" in l and "not browsable" not in l for l in labels)
     assert sum("not browsable" in l for l in labels) == 3   # FAT, bad ext, ext'd
 
@@ -2496,7 +2496,7 @@ def test_partition_explorer_threaded_extract_and_cancel(
         app, manufacturers_by_key, tmp_path, monkeypatch):
     """The real button path: _pex_run_extract runs on a worker thread, flips
     the launching button to a live Cancel + shows the spinner overlay, and
-    restores everything when it lands.  Regression for monkeybug's lockup —
+    restores everything when it lands.  Regression for a tester's lockup —
     a missing ``threading`` import killed the launch after the buttons were
     disabled, and the old synchronous-only test never went through here."""
     import os
@@ -2565,7 +2565,7 @@ def test_partition_explorer_defaults_and_history(
     """Entering the tab with a blank Card Image defaults to (and opens) the
     Extract tab's image, a successful open lands in the field's recent-paths
     history, and the Extract/Write phase strip hides on this tab
-    (monkeybug's Partition Explorer feedback batch)."""
+    (a tester's Partition Explorer feedback batch)."""
     import os
     from tests._ext4_fake import install_fake_reader, write_fake_card
 
@@ -2706,7 +2706,7 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
 
 def test_video_noconv_conflict_helper(app, manufacturers_by_key):
     """'No conversion' + a container the verbatim copy would reject is
-    flagged at pick/toggle time (monkeybug hit it only at build time)."""
+    flagged at pick/toggle time (a tester hit it only at build time)."""
     import types
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
@@ -2742,7 +2742,7 @@ def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
                                                  tmp_path, monkeypatch):
     """Clicking a sortable column header fast registers as <Double-1> too;
     the row-action double-click handlers must ignore anything outside the
-    data rows (monkeybug: sorting the image tab quickly popped the
+    data rows (a tester: sorting the image tab quickly popped the
     "No Slot Selected" box / opened the picker)."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
@@ -2784,7 +2784,7 @@ def test_header_double_click_is_not_a_row_action(app, manufacturers_by_key,
 
 def test_double_click_opens_picker_on_audio_and_video(
         app, manufacturers_by_key, tmp_path, monkeypatch):
-    """Double-click = choose-a-replacement on EVERY Replace tab (monkeybug
+    """Double-click = choose-a-replacement on EVERY Replace tab (a tester
     batch 11): audio/video used to PLAY the original on double-click while
     images opened the picker.  Playback stays on the right-click menu and
     the preview panes' transport buttons."""
@@ -2825,7 +2825,7 @@ def test_double_click_opens_picker_on_audio_and_video(
 def test_assign_and_clear_write_log_lines(app, manufacturers_by_key,
                                           tmp_path, monkeypatch):
     """Staging or clearing a replacement writes a log line so a session can
-    be double-checked afterwards (monkeybug batch 11: 'the log does not
+    be double-checked afterwards (feedback batch 11: 'the log does not
     record any replaced video or audio')."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
@@ -2864,7 +2864,7 @@ def test_write_tab_output_label_says_build_image(app, manufacturers_by_key):
 
 
 # ---------------------------------------------------------------------------
-# Image Info tab (peanuts)
+# Image Info tab (a tester)
 # ---------------------------------------------------------------------------
 
 def _pump_until(app, cond, timeout=5.0):
@@ -2885,7 +2885,7 @@ def test_image_info_window_populates(app, manufacturers_by_key, tmp_path,
     """The "Info" button beside the Extract picker opens the Image Info
     window; the worker probe fills the tree with File / Detection /
     Firmware / Assets on Card / Partitions sections and enables Copy
-    Report (peanuts; window-not-tab per David)."""
+    Report (a tester; window-not-tab per David)."""
     from tests._ext4_fake import install_fake_reader, write_fake_card
     from tests.test_image_info import SIDX_TREE
 
@@ -3314,7 +3314,7 @@ def _seed_scene_with_text(tmp_path, text="CLOCK NOT SET",
 
 def test_scene_browser_recolours_a_line_and_offers_backdrops(app, tmp_path,
                                                              monkeypatch):
-    """Peter: "as i understand the Font color is in the scene itself... maybe
+    """a tester: "as i understand the Font color is in the scene itself... maybe
     something to switch the color to turtle green" — and, separately, "would it
     be possible to do some different backgrounds?".
 
@@ -3377,7 +3377,7 @@ def test_scene_browser_recolours_a_line_and_offers_backdrops(app, tmp_path,
 
 def test_scene_browser_blanks_a_font_out_of_one_scene(app, tmp_path,
                                                       monkeypatch):
-    """Peter, about an outline/shadow font: "Is there an easy way to blank it
+    """a tester, about an outline/shadow font: "Is there an easy way to blank it
     out from the scene menu? when i do doubleclick on it, it will go the import
     windows, but it will not blank it out there."
 
@@ -3421,7 +3421,7 @@ def test_font_studio_blank_button_and_scene_tint_note(app, tmp_path,
                                                       monkeypatch):
     """The Fonts window can blank a font on its own (it used to happen only as
     a side effect of importing into the font an outline sits behind), and says
-    what the scenes multiply the ink by — which is why Peter's colour picks
+    what the scenes multiply the ink by — which is why a tester's colour picks
     "did not produce what i wanted"."""
     pytest = __import__("pytest")
     pytest.importorskip("numpy")
@@ -3544,7 +3544,7 @@ def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
     """The Fonts window names the outline font drawn behind a typeface, and
     can remove it with the import.
 
-    Peter restyled a whole game and kept getting "a strange inconsistent black
+    A tester restyled a whole game and kept getting "a strange inconsistent black
     border" he blamed on his own stroke colour: it was the ORIGINAL typeface's
     outline companion, a separate font he had no reason to open.  The window
     now says so on the font that has one, and Apply can blank it."""
@@ -3598,7 +3598,7 @@ def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
     # …and ONLY in the scenes this font is in.  Blanking is card-wide by
     # default (one atlas serves every scene that draws it), so an unscoped
     # removal strips the outline off screens the user never touched — on TMNT
-    # 446 scene occurrences against 6 that overlap the body font.  Peter did
+    # 446 scene occurrences against 6 that overlap the body font.  A tester did
     # exactly that by hand: "i did remove to much shadow, now on the normal
     # font some are missing too".
     scoped = fr.get_font_scope(str(tmp_path), comp)
@@ -3619,7 +3619,7 @@ def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
 def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
                                                          monkeypatch):
     """One typeface is baked at many sizes and each is its own font here —
-    TMNT lists Stern_CCZoinks 94 times.  Peter "replaced the font wherever i
+    TMNT lists Stern_CCZoinks 94 times.  A tester "replaced the font wherever i
     found it" and still saw stock letters, because nobody does 94 imports by
     hand.  Apply fits the same font file into every size."""
     pytest = __import__("pytest")
@@ -3735,7 +3735,7 @@ def test_font_studio_undo_steps_back_rather_than_to_stock(app, tmp_path,
 
 def test_font_studio_will_not_lose_an_unapplied_import(app, tmp_path,
                                                        monkeypatch):
-    """Peter: "on some i have forgotten to press the apply font :(".  A fitted
+    """a tester: "on some i have forgotten to press the apply font :(".  A fitted
     import that was never applied is invisible once the window closes, and he
     found out on the machine."""
     pytest = __import__("pytest")
@@ -3767,7 +3767,7 @@ def test_font_studio_will_not_lose_an_unapplied_import(app, tmp_path,
 
 def test_font_studio_warns_before_restyling_a_tiny_font(app, tmp_path,
                                                         monkeypatch):
-    """Peter: "smaller fonts do look more and more strange the smaller they
+    """a tester: "smaller fonts do look more and more strange the smaller they
     get… i guess they should be skipped".  The list marks them and Apply asks
     once — it does not refuse, because his call is the one that counts."""
     pytest = __import__("pytest")
@@ -3855,7 +3855,7 @@ def test_font_studio_scene_scope_control(app, tmp_path):
 
 
 def test_font_studio_and_scene_browser_smoke(app, tmp_path):
-    """The Fonts and Scenes tool windows (Peter) open on a synthetic Stern
+    """The Fonts and Scenes tool windows (a tester) open on a synthetic Stern
     extract, populate their lists from the manifests, render a preview, and
     close cleanly.  Layout/pixel correctness lives in test_stern_fontrender;
     this is construction + wiring only."""
@@ -3922,12 +3922,12 @@ def test_font_studio_and_scene_browser_smoke(app, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# monkeybug batch 22
+# feedback batch 22
 # ---------------------------------------------------------------------------
 
 def test_write_original_row_keeps_the_info_badge_beside_the_path(app):
     """The ⓘ badge sits right after the Original path, not shoved to the far
-    edge of the window by an expanding label (monkeybug batch 22)."""
+    edge of the window by an expanding label (feedback batch 22)."""
     w = app.window
     kids = w._write_upd_row.pack_slaves()
     path_lbl = kids[1]
@@ -3936,7 +3936,7 @@ def test_write_original_row_keeps_the_info_badge_beside_the_path(app):
 
 def test_text_scan_uses_the_shared_scanning_state(app, tmp_path):
     """Replace Text scans on a worker thread behind the same big animated
-    indicator + Cancel-scan button as the other Replace tabs (monkeybug batch
+    indicator + Cancel-scan button as the other Replace tabs (feedback batch
     22: it used to freeze the window with no sign of life)."""
     w = app.window
     w._set_tab_scanning("text", True)
@@ -3971,7 +3971,7 @@ def test_text_scan_uses_the_shared_scanning_state(app, tmp_path):
 def test_invalidating_scans_rescans_the_visible_tab(app, manufacturers_by_key):
     """Opening/forking a project clears the scan stamps, and the tab already on
     screen gets no <<NotebookTabChanged>> — so it is re-scanned directly
-    (monkeybug batch 22: after a fork the Video tab kept the old project's
+    (feedback batch 22: after a fork the Video tab kept the old project's
     slots until he left and came back)."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["stern"])
@@ -3989,7 +3989,7 @@ def test_invalidating_scans_rescans_the_visible_tab(app, manufacturers_by_key):
 
 def test_video_convert_column_reports_as_is_vs_reencode(app, tmp_path):
     """The video list says what Write will DO with each assigned clip, instead
-    of leaving it in the log at pick time (monkeybug batch 22)."""
+    of leaving it in the log at pick time (feedback batch 22)."""
     from pinball_decryptor.core.video_slots import VideoSlot
     w = app.window
     slot = VideoSlot(rel_path="video/a.mov",
@@ -4002,7 +4002,7 @@ def test_video_convert_column_reports_as_is_vs_reencode(app, tmp_path):
     assert w._video_conv_mode(slot, str(rep), True, False) == \
         w._VIDEO_CONV_ASIS
     # ...and a container the copy-through would reject NAMES what it needs.
-    # This used to report nothing at all, which is why 27 of monkeybug's 29
+    # This used to report nothing at all, which is why 27 of a tester's 29
     # rows sat blank and he asked why only one said "As-is" (batch 23); see
     # test_gui_video_convert_column.py for the rest of that behaviour.
     other = tmp_path / "rep.mp4"
@@ -4081,7 +4081,7 @@ def test_video_poster_explains_a_frame_it_cannot_show(app):
 
 
 # ---------------------------------------------------------------------------
-# Peter round 6 — jumping between the scene, the text and the tabs
+# a tester round 6 — jumping between the scene, the text and the tabs
 # ---------------------------------------------------------------------------
 
 def _stern_text_extract(tmp_path):
@@ -4105,7 +4105,7 @@ def _load_text_rows(w, assets):
 
 
 def test_a_jump_steps_the_tool_windows_out_of_the_way(app, tmp_path):
-    """Peter: "when you have the font / scene folder open and jump to it with
+    """a tester: "when you have the font / scene folder open and jump to it with
     a double click, it will visit the page in the background, it was hard for
     me to find out that it did jump there."
 
@@ -4155,7 +4155,7 @@ def test_a_jump_steps_the_tool_windows_out_of_the_way(app, tmp_path):
 
 
 def test_text_tab_jumps_into_the_scene(app, tmp_path):
-    """Peter: "Could you jump from the text tab into the scene?"  Show in
+    """a tester: "Could you jump from the text tab into the scene?"  Show in
     Scenes… opens the Scenes window on the scene that draws the selected
     string, with the line itself picked out."""
     pytest = __import__("pytest")

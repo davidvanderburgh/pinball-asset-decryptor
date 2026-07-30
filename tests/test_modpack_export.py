@@ -1,6 +1,6 @@
 """Export Mod Pack must include the user's Replace-tab edits.
 
-monkeybug assigned ~50 audio replacements on the Replace Audio tab and hit
+A tester assigned ~50 audio replacements on the Replace Audio tab and hit
 "Export mod pack" straight away — it failed with "No modified files found"
 even though the Write preview listed every one as Pending.  The Replace tabs
 record assignments in memory (+ a sidecar) and only *stage them onto disk* at
@@ -83,7 +83,7 @@ def test_export_missing_baseline_raises(tmp_path):
 def test_export_skips_pipeline_scratch_files(tmp_path):
     """A rebuilt fl_decrypted.dat / .img is baselined and "modified", but it
     is pipeline scratch, not a card asset — packing it turned an audio-only
-    mod pack into hundreds of MB (monkeybug batch 16)."""
+    mod pack into hundreds of MB (feedback batch 16)."""
     files = {"a.wav": b"orig", "fl_decrypted.dat": b"orig",
              "build/card.img": b"orig"}
     os.makedirs(tmp_path / "build", exist_ok=True)

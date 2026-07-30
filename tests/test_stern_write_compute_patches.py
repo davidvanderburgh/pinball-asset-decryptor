@@ -78,7 +78,7 @@ def test_audio_edit_logs_shaping_mode(tmp_path, monkeypatch, raw, expect_line):
     # was retired — batch 20), so the standard build logs nothing about
     # shaping; only the unusual hand-cleared-env case leaves a warning
     # fingerprint (a card built during an experiment must be identifiable
-    # after the fact — monkeybug's 2026-07 click A/B).
+    # after the fact — a tester's 2026-07 click A/B).
     (tmp_path / "idx0001.wav").write_bytes(b"\x00\x01\x02\x03")
     if raw:
         monkeypatch.setenv("PAD_STERN_AUDIO_RAW", "1")

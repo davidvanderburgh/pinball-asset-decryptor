@@ -1,5 +1,5 @@
 """Font Preview & Import window — see a Spike 2 game font rendered live, and
-fit a desktop font (TTF/OTF) into it (Peter).
+fit a desktop font (TTF/OTF) into it (a tester).
 
 The Images tab already extracts every radium font into per-character glyph
 slice PNGs; editing those files IS the mod path (Write splices the changed
@@ -133,7 +133,7 @@ class FontStudioWindow:
         ttk.Label(left, text="Used in scenes:", font=(self._sans, 9)).pack(
             anchor=tk.W, pady=(6, 0))
         # Scenes embed their own copy of the font, so an edit can go to all of
-        # them (restyle the game) or just the ones picked here (Peter: restyle
+        # them (restyle the game) or just the ones picked here (a tester: restyle
         # only the training scene).  All = the long-standing behaviour.
         self._scope_var = tk.StringVar(value="all")
         srow2 = ttk.Frame(left)
@@ -196,7 +196,7 @@ class FontStudioWindow:
                               lambda _e: self._schedule_render())
         # A black outline on a black preview is as invisible here as it is on
         # the machine, which is no use when the outline is what you are looking
-        # at (Peter).
+        # at (a tester).
         ttk.Label(prow, text="Behind:").pack(side=tk.LEFT)
         self._bg_var = tk.StringVar(value=_SCENE_BG_NAMES[0])
         bgc = ttk.Combobox(prow, textvariable=self._bg_var, width=12,
@@ -274,7 +274,7 @@ class FontStudioWindow:
         self._stroke_btn.pack(side=tk.LEFT, padx=(2, 2))
         self._stroke_btn.bind("<Button-1>", lambda _e: self._pick_stroke())
         self._stroke_color = (0, 0, 0)
-        # Peter looked for a "transparent" entry in the colour picker; the
+        # a tester looked for a "transparent" entry in the colour picker; the
         # answer is a width of 0, which the picker can't express.
         ttk.Label(orow, text="px (0 = none)", font=(self._sans, 8),
                   foreground=th["gray"]).pack(side=tk.LEFT, padx=(0, 12))
@@ -285,7 +285,7 @@ class FontStudioWindow:
                      "\"transparent\" colour to pick, the width is the "
                      "switch.",
                      lambda: getattr(self.app, "_current_theme", "light"))
-        # What the SCENES do to this font's ink.  Peter, after painting an
+        # What the SCENES do to this font's ink.  A tester, after painting an
         # atlas: "as i understand the Font color is in the scene itself... maybe
         # something to switch the color to turtle green... does the color thing
         # on your font menu work[?] i played around with it, but it did not
@@ -312,7 +312,7 @@ class FontStudioWindow:
                  lambda: getattr(self.app, "_current_theme", "light"))
         # The game lays text out with the CARD's advances, which an import must
         # not change, so a letter that fills its slot sits hard against its
-        # neighbour (Peter: "some of the letters are very near together").
+        # neighbour (a tester: "some of the letters are very near together").
         ttk.Label(srow3, text="Letter width:").pack(side=tk.LEFT)
         self._width_var = tk.IntVar(value=100)
         wsp = ttk.Spinbox(srow3, from_=60, to=100, increment=5, width=4,
@@ -332,7 +332,7 @@ class FontStudioWindow:
         # A Stern title is an outline instance with a fill instance on top, and
         # the outline comes from its OWN font.  Restyling only the fill leaves
         # the old typeface's black silhouette showing round the new letters —
-        # which is unfindable from here unless the window says so (Peter spent
+        # which is unfindable from here unless the window says so (a tester spent
         # three rounds on it, blaming his stroke colour).
         self._comp_row = ttk.Frame(imp)
         self._comp_lbl = ttk.Label(self._comp_row, text="",
@@ -357,7 +357,7 @@ class FontStudioWindow:
         # ---- apply to every size of the typeface --------------------------
         # The same typeface is baked at many sizes and each is its own font
         # here: TMNT lists Stern_CCZoinks 94 times and Stern_Impact 94 times.
-        # Peter "replaced the font wherever i found it" and still saw stock
+        # A tester "replaced the font wherever i found it" and still saw stock
         # letters in places — nobody is doing 94 imports by hand.
         arow = self._arow = ttk.Frame(imp)
         arow.pack(fill=tk.X, padx=8, pady=(2, 0))
@@ -395,7 +395,7 @@ class FontStudioWindow:
                  lambda: getattr(self.app, "_current_theme", "light"))
         # Blanking used to happen only as a side effect of importing into the
         # font an outline sits behind, which is no help when the font you want
-        # gone is the one you are looking at (Peter: "Not sure what i want to do
+        # gone is the one you are looking at (a tester: "Not sure what i want to do
         # with Outline/shadow fonts. Is there an easy way to blank it out?").
         self._blank_btn = ttk.Button(brow, text="Blank font",
                                      command=self._blank)
@@ -420,7 +420,7 @@ class FontStudioWindow:
         self._revert_all_btn.pack(side=tk.LEFT, padx=(8, 0))
         _Tooltip(self._revert_all_btn,
                  "Puts EVERY font in this project back to stock — the way to "
-                 "start a restyle over without re-extracting the card (Peter: "
+                 "start a restyle over without re-extracting the card (a tester: "
                  "\"i think i have to start from scratch\").",
                  lambda: getattr(self.app, "_current_theme", "light"))
         ttk.Button(brow, text="Close", command=self._close).pack(side=tk.RIGHT)
@@ -432,7 +432,7 @@ class FontStudioWindow:
 
     def _close(self):
         # An import that was fitted but never applied is invisible once the
-        # window is gone, and the user finds out on the machine (Peter: "on
+        # window is gone, and the user finds out on the machine (a tester: "on
         # some i have forgotten to press the apply font").
         if self._pending:
             names = ", ".join(
@@ -521,7 +521,7 @@ class FontStudioWindow:
             # be both, so neither marker hides the other.
             marks = []
             if fo["key"] in self._pending:
-                # Peter: "on some i have forgotten to press the apply font :("
+                # A tester: "on some i have forgotten to press the apply font :("
                 marks.append("NOT APPLIED")
             if fo["px"] < fr.MIN_RESTYLE_PX:
                 marks.append("tiny")
@@ -1136,7 +1136,7 @@ class FontStudioWindow:
                 except tk.TclError:
                     pass
             self._pending[fo["key"]] = pend
-        # Restyling a font too small to carry a typeface is Peter's "smaller
+        # Restyling a font too small to carry a typeface is a tester's "smaller
         # fonts do look more and more strange the smaller they get"; say so
         # once, with the number, rather than refusing.  A recolour is exempt:
         # it keeps every letter's shape, so size has nothing to do with it.
@@ -1244,7 +1244,7 @@ class FontStudioWindow:
         Blanking is otherwise CARD-WIDE: one atlas is shared by every scene
         that draws it, and on TMNT a paired outline font turns up 440 times in
         scenes where its body font ISN'T — so a plain blank strips outlines off
-        screens the user never touched.  Peter did exactly this by hand and
+        screens the user never touched.  A tester did exactly this by hand and
         reported "i did remove to much shadow, now on the normal font some are
         missing too".  Scoping it to the overlap keeps the rest stock."""
         from ..plugins.stern import fontrender as fr
@@ -1294,7 +1294,7 @@ class FontStudioWindow:
         letters, this leaves the font in place with empty ones.  It is how an
         outline or shadow font is removed, and it honours the scene scope
         chosen on the left — blanking is card-wide otherwise, which is how
-        Peter lost borders on screens he had never opened."""
+        a tester lost borders on screens he had never opened."""
         fo = self._current_font()
         if fo is None:
             return
@@ -1366,7 +1366,7 @@ class FontStudioWindow:
     def _revert_all(self):
         """Put every font in the project back to stock.
 
-        Peter, mid-restyle: "i think i have to start from scratch, so much
+        A tester, mid-restyle: "i think i have to start from scratch, so much
         changes."  Reverting 300-odd fonts one at a time is not a route, and
         re-extracting is worse — it rewrites every image in the project and
         would take his other work with it."""

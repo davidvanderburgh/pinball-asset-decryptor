@@ -296,7 +296,7 @@ class TestPickBestGameSsd:
 class TestPickBestSdCard:
     """Stern Spike ships on a small SD card, so prefer="sd_card" must
     never default to a big backup drive just because it's the largest
-    external — the bug monkeybug hit (a 4 TB Sabrent auto-selected as
+    external — the bug a tester hit (a 4 TB Sabrent auto-selected as
     the write target over the 7.7 GB card reader).
     """
 
@@ -398,7 +398,7 @@ class TestPickBestSdCard:
 class TestVisibleDrives:
     """The dropdown hides obvious backup disks for SD-card media so the
     user isn't scrolling past multi-TB Sabrents to find the card
-    (monkeybug: "large sized drives still being listed").
+    (a tester: "large sized drives still being listed").
     """
 
     def _usb(self, num, size, model="Some USB"):

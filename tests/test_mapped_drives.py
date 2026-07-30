@@ -2,7 +2,7 @@
 
 Mapped network drives are per logon session on Windows, so a path saved as
 ``W:\\mods`` in a normal session stops resolving when PAD is run elevated
-(monkeybug, running as admin for flash-image).  The helper translates such
+(a tester, running as admin for flash-image).  The helper translates such
 paths through the user's persistent mapping (HKCU\\Network\\<letter>);
 these tests drive the pure decision logic with the session/registry lookups
 monkeypatched so they run identically on every platform and CI.

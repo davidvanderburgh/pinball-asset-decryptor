@@ -1,4 +1,4 @@
-"""core.session_log — the rolling on-disk log history (monkeybug batch 18).
+"""core.session_log — the rolling on-disk log history (feedback batch 18).
 
 Pure-filesystem tests: no Tk needed.
 """

@@ -94,7 +94,7 @@ def _pil_tk_hint():
     right for a source checkout and useless inside an AppImage or .app,
     where there is no site-packages to install into and the missing
     piece is something the BUILD dropped (--collect-all PIL, see
-    installer/build_linux.sh).  aly got the apt advice from an AppImage
+    installer/build_linux.sh).  A tester got the apt advice from an AppImage
     and it could not have helped him.
     """
     if getattr(sys, "frozen", False):
@@ -201,7 +201,7 @@ class _AudioPreviewPane:
 
         self.frame = ttk.Frame(parent)
         # Title carries the loaded file's name ("Original — idx0258.wav") so
-        # the user always knows exactly what the player is holding (monkeybug
+        # the user always knows exactly what the player is holding (a tester
         # batch 14).
         self.base_title = title
         self.title_var = tk.StringVar(value=title)
@@ -444,7 +444,7 @@ class _AudioPreviewPane:
             # wall clock starts at spawn, but audio doesn't come out until
             # ffplay has started and opened the device (~0.2-0.4 s) — killing
             # on `pos >= stop_at` therefore cut the tail off every clip, which
-            # on a short callout ("Jackpot!", 0.7 s) is most of it (monkeybug
+            # on a short callout ("Jackpot!", 0.7 s) is most of it (a tester
             # batch 22).  _SELF_CAP_GRACE is only a runaway guard for a player
             # that never exits.
             ended = proc is None or proc.poll() is not None or (
@@ -590,7 +590,7 @@ class _VideoPreviewPane:
 
         self.frame = ttk.Frame(parent)
         # Title carries the loaded file's name ("Original — idx0258.wav") so
-        # the user always knows exactly what the player is holding (monkeybug
+        # the user always knows exactly what the player is holding (a tester
         # batch 14).
         self.base_title = title
         self.title_var = tk.StringVar(value=title)
@@ -1196,7 +1196,7 @@ class MainWindow:
         self._saved_column_widths = dict(initial_column_widths or {})
         self._on_column_widths_change = on_column_widths_change
         # Recent paths per field (``{field_key: [paths, most recent first]}``)
-        # backing the path boxes' dropdown history (monkeybug: "any text box
+        # backing the path boxes' dropdown history (a tester: "any text box
         # showing a file path should have a history").  Owned + persisted by
         # the App per manufacturer; set via set_path_history() on mfr switch.
         self._path_history = {}
@@ -1221,7 +1221,7 @@ class MainWindow:
         self._admin_warning_frames = []
         # Voice-recognition (auto-name call-outs) quality — the faster-whisper
         # model size, picked in the ⚙ settings menu and persisted in
-        # settings.json via ``on_voice_quality_change`` (monkeybug: "dial in
+        # settings.json via ``on_voice_quality_change`` (a tester: "dial in
         # better voice recognition at the expense of processing time").
         vq = initial_voice_quality
         if vq not in {v for v, _ in VOICE_QUALITY_CHOICES}:
@@ -1233,7 +1233,7 @@ class MainWindow:
         # trigger-pop hunt.  Persisted via ``on_audio_advanced_change``; the
         # App mirrors them into the encoder's env vars.  (The
         # match-to-callouts shaper and its fade/cap/roll-off knobs lived here
-        # too until monkeybug batch 20 — retired: it never fixed the click it
+        # too until feedback batch 20 — retired: it never fixed the click it
         # chased; the blip-free firmware patch did, and that now has a checkbox
         # of its own here — on by default, and as of v0.94.0 the patch lives in
         # a memory mapping of its own instead of borrowing the game's, which is
@@ -1248,7 +1248,7 @@ class MainWindow:
         self._on_audio_profile = on_audio_profile
         # Fired with the image path when the Partition Explorer successfully
         # opens a card — the App records it into the field's recent-paths
-        # dropdown (monkeybug: same "last 5" memory as the Extract screen).
+        # dropdown (a tester: same "last 5" memory as the Extract screen).
         self._on_partition_image_opened = on_partition_image_opened
         # Seed each log pane with the previous sessions' history (dimmed,
         # above a cut line)?  ⚙-menu checkbutton; OFF = a clean per-session
@@ -1364,11 +1364,11 @@ class MainWindow:
         # converted replacements over the originals so Write repacks them.
         self.audio_search_var = tk.StringVar()
         # "Type" filter (All types / Music / Sound FX / Callouts / Other) —
-        # monkeybug: "I am working on callouts so I want to hide everything
+        # a tester: "I am working on callouts so I want to hide everything
         # else".  Categories are derived per scan (core.audio_categories);
         # the dropdown hides itself for folders where nothing classifies.
         self.audio_type_var = tk.StringVar(value="All types")
-        # "Changed only" — the same toggle the Images tab has had; monkeybug
+        # "Changed only" — the same toggle the Images tab has had; a tester
         # asked for it on audio + video too ("show only modified files").
         # Persisted per assets folder with the other Replace toggles.
         self.audio_changed_only_var = tk.BooleanVar(value=False)
@@ -1386,7 +1386,7 @@ class MainWindow:
         # listen through a card, not a preference.
         self.audio_play_through_var = tk.BooleanVar(value=False)
         # Play-through plays the replacement instead of the original wherever
-        # one exists (batch 24: monkeybug auditioning the whole card to catch
+        # one exists (batch 24: a tester auditioning the whole card to catch
         # the clips he still meant to replace).
         self.audio_play_subst_var = tk.BooleanVar(value=False)
         self.audio_status_var = tk.StringVar(value="")
@@ -1402,7 +1402,7 @@ class MainWindow:
         # across invalidate_asset_scans() (which clears the scan stamps but
         # not the assignments).  Lets the Build/Export folder-mismatch check
         # name the real folder instead of "(unknown)" — and recognise a
-        # same-folder re-extract as a match (monkeybug).
+        # same-folder re-extract as a match (a tester).
         self._scan_dir_prev = {"audio": "", "video": "", "image": ""}
         # "Group duplicates" (CGC banks): cluster slots that carry
         # byte-identical factory audio under one parent row.  The grouping
@@ -1452,7 +1452,7 @@ class MainWindow:
         # decode thread streams raw frames from ffmpeg to a canvas while
         # ffplay carries the sound, both seeked together.
         self.video_search_var = tk.StringVar()
-        # "Changed only" — mirrors the audio + image toggle (monkeybug).
+        # "Changed only" — mirrors the audio + image toggle (a tester).
         self.video_changed_only_var = tk.BooleanVar(value=False)
         self._video_sort = ("#0", False)  # (column_id, descending)
         self.video_trim_var = tk.BooleanVar(value=False)
@@ -1506,7 +1506,7 @@ class MainWindow:
         self._image_group_key_tails = {}
         # User-authored display names for scene groups (group_key -> name,
         # <=50 chars) — the vendor's own element names are mostly
-        # "unnamed_instance_N" (monkeybug).  Persisted in the staged-changes
+        # "unnamed_instance_N" (a tester).  Persisted in the staged-changes
         # sidecar per assets folder.
         self._image_group_tags = {}
         # "Source" column filter: All sources / File / Scene texture / Radium
@@ -1576,7 +1576,7 @@ class MainWindow:
         # Length-prefixed extract names (capabilities.audio_duration_names):
         # when ON, extracted audio is named "01m22s235 - idx0001.wav" so a
         # name sort orders by play length — the stable key for lining sounds
-        # up across firmware versions, where slot indexes shift (monkeybug).
+        # up across firmware versions, where slot indexes shift (a tester).
         self.duration_names_var = tk.BooleanVar(value=False)
         # Whether the currently-selected extract input is a game whose
         # audio we can export (drives the Auto-transcribe controls +
@@ -1626,7 +1626,7 @@ class MainWindow:
         # the extract factory.  key -> BooleanVar.
         self._extract_category_vars = {}
         # Persisted Extract-tab options for the current manufacturer
-        # (monkeybug: the auto-name checkboxes "do not stick between
+        # (a tester: the auto-name checkboxes "do not stick between
         # sessions").  Set via set_extract_options() on mfr switch; also
         # re-applied inside apply_manufacturer() because the category
         # checkboxes are rebuilt (default-on) on every apply/era switch.
@@ -1707,7 +1707,7 @@ class MainWindow:
         self.write_assets_var.trace_add(
             "write", lambda *_: self._derive_build_output())
         # Default the Write Output Folder off the original image's location
-        # the first time an original is picked (monkeybug: the box starting
+        # the first time an original is picked (a tester: the box starting
         # blank forced an extra Browse; the -modified suffix already prevents
         # name clashes with the source).
         self.write_upd_var.trace_add(
@@ -1759,7 +1759,7 @@ class MainWindow:
         top.pack(fill=tk.X, padx=10, pady=(8, 0))
         # Back-to-picker button — hidden until the user has picked a
         # manufacturer.  A house glyph rather than "< Back" so it matches the
-        # header's ?/⚙ icon set (monkeybug): Segoe MDL2 "Home" on Windows
+        # header's ?/⚙ icon set (a tester): Segoe MDL2 "Home" on Windows
         # (same font/style as the gear — see the glyph comment below), text
         # "⌂" elsewhere.  The tooltip carries the words the icon dropped.
         home_glyph = "" if sys.platform == "win32" else "⌂"
@@ -1777,7 +1777,7 @@ class MainWindow:
         # is packed by show_mfr_view() and hidden in the picker.
         self._era_badges_frame = ttk.Frame(top)
         self._era_badge_widgets = {}   # era_key -> tk.Label pill
-        # "⚙" settings menu — the one always-visible header control (monkeybug:
+        # "⚙" settings menu — the one always-visible header control (a tester:
         # the old Check-for-updates / Manage-disk-space / theme button row was
         # permanent top-bar clutter for things you touch once in a while).
         # Everything app-wide lives in its dropdown: theme, update check, disk
@@ -1802,7 +1802,7 @@ class MainWindow:
         # home there — it's navigation/context, not a settings-side
         # control).  Projects moved OUT of the gear: the gear's charter is
         # app-wide once-in-a-while settings, a project is the all-day
-        # working context (monkeybug point 1 — and he named "an icon" as
+        # working context (a tester point 1 — and he named "an icon" as
         # the expected shape).  Always visible, INCLUDING the picker screen
         # (where home hides): Open/Recent + auto-load jump straight into a
         # project without picking a manufacturer first.
@@ -1840,14 +1840,14 @@ class MainWindow:
         # ● notification on the gear and a Download entry at the top of its
         # menu (persists even after the banner is dismissed).
         self._update_available = None
-        # "?" tips button — per-tab help window (monkeybug: collect the
+        # "?" tips button — per-tab help window (a tester: collect the
         # scattered inline tips somewhere a user can pull up on demand).
         # Created here, but packed only in show_mfr_view(): the picker has
         # no tabs so the button would have nothing to explain there.
         self._help_btn = self._make_round_icon(
             top, self._help_glyph, "#27ae60", "#44bd7c",
             "Tips for this tab", self._open_tab_help)
-        # The single per-app tips window (monkeybug round 2: "?" used to
+        # The single per-app tips window (a tester round 2: "?" used to
         # stack a new window per click).  Created lazily on first "?" click.
         self._help_window = None
         if sys.platform == "win32":
@@ -1924,7 +1924,7 @@ class MainWindow:
                 height=max(e.height, inner_h))
             # Reflow the registered intro/description labels to the new width so
             # the per-tab help text uses the full window instead of leaving a
-            # dead band on the right when widened (monkeybug).
+            # dead band on the right when widened (a tester).
             for lbl, margin, minimum in self._responsive_wrap_labels:
                 try:
                     lbl.configure(wraplength=max(minimum, e.width - margin))
@@ -1985,7 +1985,7 @@ class MainWindow:
             prereq_btns = ttk.Frame(self._prereqs_frame)
             prereq_btns.pack(side=tk.RIGHT, padx=4, pady=4)
             # Side by side (not stacked) so the Prerequisites frame is one row
-            # shorter — that height goes to the log below (monkeybug's ask).
+            # shorter — that height goes to the log below (a tester's ask).
             ttk.Button(
                 prereq_btns, text="Re-check",
                 command=lambda: (self._on_recheck_prereqs()
@@ -2232,7 +2232,7 @@ class MainWindow:
         # NOTE: a red "Output folder is not empty — files may be overwritten."
         # label used to live here, but the Extract click already raises a
         # confirm dialog for that case, so the always-on inline warning was
-        # redundant noise eating a row of vertical space (monkeybug).
+        # redundant noise eating a row of vertical space (a tester).
 
         # BOF-only callout — explains the custom-format conversion the
         # Extract pipeline does behind the scenes.  Built but not packed;
@@ -2334,7 +2334,7 @@ class MainWindow:
         self._extract_options_row = ttk.Frame(self._extract_action_row)
 
         # Second, separate "Options:" row for the auto-name / length-prefix
-        # cluster (monkeybug: sharing one row with the category checkboxes
+        # cluster (a tester: sharing one row with the category checkboxes
         # AND the Extract button cut the labels off at narrow widths).
         # Packed on demand by _update_extract_options_row_visibility — most
         # non-Stern plugins show none of the three options, and an empty
@@ -2583,14 +2583,14 @@ class MainWindow:
         # NOTE: a static per-manufacturer intro label (mfr.write_intro()) and
         # then a mode-aware description below the source toggle used to lead
         # this tab; both are gone — all of that guidance lives in the "?" tips
-        # window now (monkeybug, batches 4 + 8: reduce the tab's footprint).
+        # window now (a tester, batches 4 + 8: reduce the tab's footprint).
 
         # Write-destination toggle (hidden for plugins without
         # direct_ssd).  Action-oriented language here — writes have
         # a destination, not a source, so "Build USB ISO" /
         # "Write to SSD" reads more naturally than "From ISO" /
         # "From SSD".  Mirrors the standalone JJP decryptor.
-        # monkeybug batch 22 read this pair as a duplicate of the
+        # feedback batch 22 read this pair as a duplicate of the
         # "Build / flash SD card…" dialog's two checkboxes.  It isn't: the
         # dialog builds a whole image and dd-writes the ENTIRE card, while this
         # mode patches only the changed files onto a connected card in place.
@@ -2619,7 +2619,7 @@ class MainWindow:
         # The Write tab's field-label column.  Everything created with
         # width=16 below registers here so apply_manufacturer can widen the
         # whole column in lockstep when a manufacturer noun overflows it
-        # (Stern's "Original Card image:" truncated at 16 — monkeybug 5).
+        # (Stern's "Original Card image:" truncated at 16 — a tester 5).
         self._write_col_labels = []
 
         # ISO original file row.
@@ -2636,7 +2636,7 @@ class MainWindow:
                                  textvariable=self.write_upd_var, anchor=tk.W)
         # NOT fill/expand: the ⓘ badge belongs right after the path text, and
         # an expanding label shoved it to the far edge of the window — on a
-        # short path that left a huge gap between the two (monkeybug batch 22).
+        # short path that left a huge gap between the two (feedback batch 22).
         _orig_mirror.pack(side=tk.LEFT)
         _Tooltip(_orig_mirror,
                  "The master card image — it is set on the Extract tab.",
@@ -2687,7 +2687,7 @@ class MainWindow:
         # built unpacked, _sync_badge_row packs it while it has text) —
         # indented with a width-16 spacer so it lines up with the entry
         # fields (which follow width-16 labels), matching the Extract tab
-        # (monkeybug 4.8) instead of the old fixed padx.
+        # (a tester 4.8) instead of the old fixed padx.
         self._write_badge_row = ttk.Frame(f)
         _badge_spacer = ttk.Label(self._write_badge_row, text="", width=16)
         _badge_spacer.pack(side=tk.LEFT)
@@ -2813,7 +2813,7 @@ class MainWindow:
         self._refresh_build_path_display()
 
         # Flush-left with the "File Name:" / "Output Folder:" row labels (padx
-        # matches the rows' `pad`), not indented under the entry -- monkeybug
+        # matches the rows' `pad`), not indented under the entry -- a tester
         # found the old 26px indent read as off-centre / non-standard.
         self._write_filename_lbl = ttk.Label(f, text="",
                                              font=(_SANS_FONT, 9, "italic"))
@@ -2834,7 +2834,7 @@ class MainWindow:
         # Toolbar across the top of the preview frame.  Batch 9 put the SCAN
         # control on the LEFT and the "act on these changes" actions —
         # Flash ▸ Revert ▸ Build — on the RIGHT, so the scan Cancel couldn't
-        # be mistaken for a run Cancel.  Batch 22: monkeybug asked for the
+        # be mistaken for a run Cancel.  Batch 22: a tester asked for the
         # scan button right-justified like every other tab's, so it joins the
         # right-hand group as its LEFTMOST member with a wide gap before the
         # action buttons — same reading order, still visibly a separate group
@@ -2848,13 +2848,13 @@ class MainWindow:
         self._write_preview_refresh_btn.pack(side=tk.RIGHT, padx=(0, 24))
         # Register with the shared scan-state machinery so the preview scan
         # gets the same treatment as the Replace tabs — list blanked, big
-        # animated spinner, Refresh flips to a live Cancel (monkeybug batch 8:
+        # animated spinner, Refresh flips to a live Cancel (feedback batch 8:
         # the old disabled "⏳ Scanning…" button looked like nothing else).
         self._scan_buttons["write_preview"] = self._write_preview_refresh_btn
         self._scan_cmds["write_preview"] = self._rescan_write_preview_clicked
         self._scan_idle_labels["write_preview"] = "Refresh"
         # The single Build button doubles as a live Cancel while a build runs
-        # (monkeybug 4.4 — no separate Cancel widget any more); its label and
+        # (a tester 4.4 — no separate Cancel widget any more); its label and
         # command are driven by _set_write_button_running.
         self._write_btn = ttk.Button(
             preview_toolbar, text="Build update",
@@ -2910,7 +2910,7 @@ class MainWindow:
         self._write_preview_empty.place(
             relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # Status strip under the tree (monkeybug batch 9).  Left: the legend
+        # Status strip under the tree (feedback batch 9).  Left: the legend
         # for the two Status words.  Right: "Total changes: N" — a running
         # tally of every Modified + Pending row so the user doesn't have to
         # count/scroll the list (blank when empty; the placeholder already
@@ -2920,7 +2920,7 @@ class MainWindow:
         # trickling into the tree hid the big spinner overlay for most of a
         # long MD5 walk.  Batch 22 holds the rows back until the scan
         # finishes, so the overlay (with its running "N found") is visible the
-        # whole time and this second, smaller indicator is gone — monkeybug
+        # whole time and this second, smaller indicator is gone — a tester
         # read the two as inconsistent with every other tab.
         preview_status_row = ttk.Frame(self._write_preview_frame)
         preview_status_row.pack(fill=tk.X, padx=4, pady=(2, 0))
@@ -2970,9 +2970,9 @@ class MainWindow:
         # assets; this replaces the entire card.  Opens a small modal that
         # collects the image + target card and confirms before the write runs
         # through the normal status area.  Joins the right-hand action group
-        # of the preview toolbar, left of Revert/Build (monkeybug batch 9) —
+        # of the preview toolbar, left of Revert/Build (feedback batch 9) —
         # its old LabelFrame + description paragraph moved to the "?" tips
-        # window (monkeybug batch 8: tighter footprint, actions group
+        # window (feedback batch 8: tighter footprint, actions group
         # logically).
         # While a flash runs the button doubles as its live Cancel — see
         # set_flash_running.
@@ -2995,11 +2995,11 @@ class MainWindow:
         # Batch 22: the tab's intro paragraph and the "(the project folder —
         # every Replace tab…)" gloss under the path both moved into the "?"
         # tips window — the tab is two actions and one transfer form, and the
-        # prose was costing rows monkeybug wanted for the form.
+        # prose was costing rows a tester wanted for the form.
 
         # Same label as the Replace tabs — it's the SAME folder (one shared
         # path variable), and two names for one thing read as two things
-        # (monkeybug batch 14).
+        # (feedback batch 14).
         row = ttk.Frame(f); row.pack(fill=tk.X, padx=10, pady=(8, 4))
         ttk.Label(row, text="Project Folder:", width=14, anchor=tk.W).pack(
             side=tk.LEFT)
@@ -3067,7 +3067,7 @@ class MainWindow:
         tf.pack(fill=tk.X, padx=8, pady=(2, 2))
         tf.columnconfigure(1, weight=1)
 
-        # Version hints live in the row's own trailing column.  monkeybug batch
+        # Version hints live in the row's own trailing column.  feedback batch
         # 22 asked whether they were worth showing: they are — every one is
         # parsed from a source filename and they are the only on-screen check
         # that field 2 and field 4 are the SAME new version — so they stay, but
@@ -3103,7 +3103,7 @@ class MainWindow:
                     "with it: field 1 is where your mods come FROM; this is "
                     "an unmodified twin of that same version, used only as "
                     "the reference your old extract is compared against.")
-        # Full-width hint (monkeybug batch 22: it was capped at 560px inside a
+        # Full-width hint (feedback batch 22: it was capped at 560px inside a
         # much wider tab) — the responsive wrap tracks the content width.
         # Batch 24: he read fields 1 and 3 as two ways to provide the same
         # thing and asked which wins — so the hint now leads with the ROLE
@@ -3121,7 +3121,7 @@ class MainWindow:
         _oldstock_hint.grid(row=3, column=1, columnspan=3,
                             sticky=tk.EW, padx=6, pady=(0, 4))
         self._register_responsive_wrap(_oldstock_hint, margin=330)
-        # Field 4 is NOT an alternative to field 2 — monkeybug batch 22 read
+        # Field 4 is NOT an alternative to field 2 — feedback batch 22 read
         # the folder and the .raw as two ways to say the same thing and asked
         # which won.  Both are required and they do different jobs, so the
         # label says which one it is derived from.
@@ -3143,7 +3143,7 @@ class MainWindow:
 
         # Action row: button right-aligned like every other tab, with the
         # output-name preview on its left.  That preview answers "what am I
-        # about to end up with" (monkeybug batch 22 asked if it was still
+        # about to end up with" (feedback batch 22 asked if it was still
         # relevant — it is the only place the built file's NAME appears before
         # the build), so it stays, beside the button that causes it.
         arow = ttk.Frame(self._modpack_transfer_frame)
@@ -3184,7 +3184,7 @@ class MainWindow:
         pad = {"padx": 10, "pady": 4}
 
         # One-line intro; the full behaviour notes live in the "?" tips window
-        # (monkeybug: the multi-line paragraphs crowded every tab).
+        # (a tester: the multi-line paragraphs crowded every tab).
         _audio_desc = ttk.Label(
             f,
             text="Assign a replacement track to any slot — almost any audio "
@@ -3260,7 +3260,7 @@ class MainWindow:
             "assign a replacement to one copy, then right-click it and "
             "choose \"Apply to all copies\".",
             lambda: self._current_theme)
-        # "Changed only" — same toggle as the Images tab (monkeybug batch 16).
+        # "Changed only" — same toggle as the Images tab (feedback batch 16).
         # It is always visible, so it doubles as the stable `before=` anchor
         # for the optional Type / Group-duplicates widgets packed later.
         self._audio_changed_only_cb = ttk.Checkbutton(
@@ -3274,7 +3274,7 @@ class MainWindow:
             "changed on disk by a previous build.",
             lambda: self._current_theme)
         # Button rightmost (flush with the list edge), counter to its left
-        # (monkeybug batch 21).
+        # (feedback batch 21).
         self._audio_csv_btn = ttk.Button(
             tools, text="Export CSV", command=self._audio_export_csv)
         self._audio_csv_btn.pack(side=tk.RIGHT)
@@ -3359,12 +3359,12 @@ class MainWindow:
         # Selecting a row loads its original into the seek-bar strip (no
         # autoplay), debounced so arrowing through the list doesn't thrash.
         self._audio_tree.bind("<<TreeviewSelect>>", self._audio_on_tree_select)
-        # Spacebar = play/pause, audio-editor style (monkeybug batch 14):
+        # Spacebar = play/pause, audio-editor style (feedback batch 14):
         # click a row, tap space to listen, arrow on.  "break" stops the
         # Treeview's own space handling from re-toggling the selection.
         self._audio_tree.bind("<space>", self._audio_space_toggle)
         # F2 = Properties (rename / Type), the Explorer-standard rename key —
-        # monkeybug batch 22 kept reaching for it while renaming a batch of
+        # feedback batch 22 kept reaching for it while renaming a batch of
         # callouts.  Same gate as the context-menu entry: decode-shaped names
         # only (see _audio_on_tree_right).
         self._audio_tree.bind("<F2>", self._audio_properties_shortcut)
@@ -3425,7 +3425,7 @@ class MainWindow:
         # Hover tooltip — its text is set per-manufacturer in apply_manufacturer.
         self._audio_trim_tip = _Tooltip(
             self._audio_trim_cb, "", lambda: self._current_theme)
-        # Audition the card hands-free (monkeybug batch 23: "select a file and
+        # Audition the card hands-free (feedback batch 23: "select a file and
         # it starts playing the next file in the list ... to run through all
         # the audio files without manual intervention").  Batch 25 renamed
         # both boxes to two-word labels ("Play through list" and "substitute
@@ -3674,7 +3674,7 @@ class MainWindow:
             self._ensure_audio_dup_groups(quiet=True)
         self._refresh_audio_list()
         # Default to the first slot so a fresh scan shows a preview, matching
-        # the Video / Images tabs (monkeybug batch 21).
+        # the Video / Images tabs (feedback batch 21).
         self._select_first_tree_row(self._audio_tree, self._audio_on_tree_select)
         self._start_change_scan("audio")
         # Now fill in duration / format on a background thread so the list is
@@ -3984,7 +3984,7 @@ class MainWindow:
         snapshot — which is proof of a staged change all by itself and is
         available IMMEDIATELY.  The change scan MD5s every slot (minutes over
         a NAS share), and until it lands the previews treated a modified slot
-        as pristine: monkeybug clicked his attract slot inside that window
+        as pristine: a tester clicked his attract slot inside that window
         and the "Original" pane played his previous replacement (batch 25)."""
         if rel in getattr(self, "_%s_changed_on_disk" % kind, ()):
             return True
@@ -4001,7 +4001,7 @@ class MainWindow:
         Clicking a sortable column header fast enough registers as a
         double-click too; without this guard it falls through to the row
         action — the image tab popped "No Slot Selected" mid-sort
-        (monkeybug).  A None event (programmatic call) is allowed through."""
+        (a tester).  A None event (programmatic call) is allowed through."""
         if event is None:
             return True
         return tree.identify_region(event.x, event.y) in ("tree", "cell")
@@ -4295,7 +4295,7 @@ class MainWindow:
         self._audio_assignments[rel] = path
         self._save_staged_changes()
         # Staged replacements get a log line so the run can be double-checked
-        # afterwards (monkeybug batch 11).
+        # afterwards (feedback batch 11).
         self.append_log("Replace Audio: %s ← %s"
                         % (rel, os.path.basename(path)), "info")
         self._refresh_audio_list()
@@ -4330,7 +4330,7 @@ class MainWindow:
         if rel is None or rel == self._audio_current_rel:
             return
         # Selecting a different row while something plays stops it and loads
-        # the new row right away (monkeybug batch 14: needing a second click
+        # the new row right away (feedback batch 14: needing a second click
         # left the OLD sample in the player, and near the end of a play it
         # wasn't obvious the new row hadn't loaded).  Resume playing on the
         # same pane so click-through listening keeps flowing.
@@ -4344,7 +4344,7 @@ class MainWindow:
     def _audio_on_tree_double(self, _event=None):
         # Double-click = choose a replacement, same as the Images tab (playback
         # lives on the right-click menu + the preview panes' transport buttons;
-        # single click still previews).  Monkeybug batch 11: double-click did
+        # single click still previews).  Feedback batch 11: double-click did
         # replace-dialog on images/text but PLAYED on audio/video.  The first
         # click of the double already selected the row.
         if not self._double_click_on_rows(self._audio_tree, _event):
@@ -4506,7 +4506,7 @@ class MainWindow:
         # music_cat##_####) — the index prefix is preserved so Write still
         # maps the slot; every other plugin keys audio by its full path,
         # which a rename would break.  Was "Rename…", but the dialog also
-        # recategorizes, which that label hid (monkeybug).
+        # recategorizes, which that label hid (a tester).
         from ..core import name_memory as _nmem
         if _nmem.split_decode_name(os.path.basename(row)):
             menu.add_command(label="Properties…  (name / type)",
@@ -4606,7 +4606,7 @@ class MainWindow:
         """Modal rename prompt: an editable combo seeded with the game's
         Sound-Test menu names (pick one or type your own) plus a Type picker
         so a mis-bucketed slot can be recategorized in the same step
-        (monkeybug batch 14: an SFX classed as a callout).  Returns
+        (feedback batch 14: an SFX classed as a callout).  Returns
         ``(text, category_key)``, or None on cancel."""
         root = self._tk_root()
         dlg = tk.Toplevel(root)
@@ -4673,7 +4673,7 @@ class MainWindow:
         The label is also remembered against the sound's FACTORY content hash
         (the extract baseline md5), so the next extract of this sound —
         same card or a newer firmware that carries the bytes over — reapplies
-        it before Whisper ever listens (monkeybug: Whisper mis-names the same
+        it before Whisper ever listens (a tester: Whisper mis-names the same
         file on every extract).  Blank restores the stock decode name and
         forgets the remembered one."""
         from ..core import name_memory
@@ -4741,7 +4741,7 @@ class MainWindow:
         # baseline opens it for writing, which on a NAS share can fail; when it
         # threw, the exception took the list refresh with it and the slot both
         # kept its old row and came back from the next scan marked "changed on
-        # disk" — the two halves of monkeybug's batch-23 report.  Say what
+        # disk" — the two halves of a tester's batch-23 report.  Say what
         # happened and carry on.
         try:
             rename_in_baseline(self._audio_scan_dir, {rel: new_rel})
@@ -4754,7 +4754,7 @@ class MainWindow:
         if md5:
             # Record the bucket picked in the dialog with the name, so the
             # renamed file keeps (or moves to) its Type on future extracts
-            # (an SFX he renames stays under Sound FX — monkeybug's report of
+            # (an SFX he renames stays under Sound FX — a tester's report of
             # a rename turning into a "callout").
             try:
                 name_memory.remember(md5, new_label,   # blank forgets
@@ -4767,7 +4767,7 @@ class MainWindow:
         # the slot IN PLACE and re-sort the visible list.  No folder rescan:
         # only this one file changed, and the full re-walk both took minutes
         # on big cards and briefly showed the renamed row at the wrong sort
-        # position until the metadata probe caught up (monkeybug batch 14).
+        # position until the metadata probe caught up (feedback batch 14).
         for d in (self._audio_assignments, self._audio_loop_flags,
                   self._audio_keep_full_flags, self._audio_categories):
             if rel in d:
@@ -4793,7 +4793,7 @@ class MainWindow:
         # raised (the assets folder is routinely a NAS share) left the tree
         # holding the pre-rename rows — old name, old Type, and an iid no
         # longer in _audio_slots_by_rel, so clicking the row loaded nothing
-        # and only a rescan fixed it (monkeybug batch 23).
+        # and only a rescan fixed it (feedback batch 23).
         self._refresh_audio_type_filter()
         self._refresh_audio_list()             # re-applies the active sort
         try:                                   # keep the renamed row in view
@@ -4829,7 +4829,7 @@ class MainWindow:
         """Save the audio table as a CSV — every slot with its metadata,
         type bucket, replacement assignment and changed-on-disk status, so a
         big replacement project can be tracked in a spreadsheet instead of
-        scrolling the list (monkeybug batch 14)."""
+        scrolling the list (feedback batch 14)."""
         import csv
         if not self._audio_slots:
             messagebox.showinfo("Export CSV",
@@ -4974,7 +4974,7 @@ class MainWindow:
 
     def _audio_on_clip_finished(self, pane):
         """A preview finished on its own — step to the next row when "Play
-        through the list" is on (monkeybug batch 23).
+        through the list" is on (feedback batch 23).
 
         Only the pane that was actually playing drives this, and only while
         the Audio tab still owns the slot it just played, so a finished clip
@@ -5029,7 +5029,7 @@ class MainWindow:
         opath = slot.abs_path if slot else None
         # A slot already changed on disk (built or staged in an earlier
         # session) holds the REPLACEMENT bytes — playing that as "Original"
-        # made both panes identical (monkeybug batch 14).  The .orig snapshot
+        # made both panes identical (feedback batch 14).  The .orig snapshot
         # taken when the change was staged is the true original; fall back to
         # the on-disk file when no snapshot exists (pre-snapshot builds).
         snap_used = False
@@ -5040,7 +5040,7 @@ class MainWindow:
                 opath = snap
                 snap_used = True
         # Honest title: with no snapshot, an already-changed slot's on-disk
-        # bytes ARE the replacement — don't call them "Original" (monkeybug
+        # bytes ARE the replacement — don't call them "Original" (a tester
         # read his imported mod as a missing replacement).
         self._audio_pane_orig.base_title = (
             "Current file (already modified)" if changed and not snap_used
@@ -5084,7 +5084,7 @@ class MainWindow:
         # No new assignment, but the slot is already changed on disk and the
         # true original is on the left (its .orig snapshot): the on-disk file
         # IS the replacement that will build — show it here instead of
-        # "no replacement assigned" (monkeybug read that as a lost mod).
+        # "no replacement assigned" (a tester read that as a lost mod).
         # The snapshot alone is the test — the change scan may still be
         # hashing (see _slot_changed_on_disk).
         if staged_originals.snapshot_path(self._audio_scan_dir, rel):
@@ -5371,7 +5371,7 @@ class MainWindow:
             "changed on disk by a previous build.",
             lambda: self._current_theme)
         # Button rightmost (flush with the list edge), counter to its left
-        # (monkeybug batch 21).
+        # (feedback batch 21).
         self._video_csv_btn = ttk.Button(
             tools, text="Export CSV", command=self._video_export_csv)
         self._video_csv_btn.pack(side=tk.RIGHT)
@@ -5402,7 +5402,7 @@ class MainWindow:
         # What Write will DO with the assigned clip.  It was only ever
         # visible as a log line at pick time, so re-doing a batch of videos
         # meant scrolling the log to find which ones went in untouched
-        # (monkeybug batch 22).
+        # (feedback batch 22).
         self._video_tree.heading("conv", text="Convert", anchor=tk.W)
         self._video_tree.column("#0", width=300, minwidth=160)
         self._video_tree.column("len", width=56, minwidth=46, anchor=tk.W)
@@ -5477,7 +5477,7 @@ class MainWindow:
 
         # The conversion options get a row of their own under the preview box,
         # like the audio tab's.  They used to sit in the box's left margin
-        # (monkeybug batch 21), but there is no spare margin: two 320px panes
+        # (feedback batch 21), but there is no spare margin: two 320px panes
         # already fill the default 820px window, so the column stole width from
         # the panes and the Replacement pane hung off the right edge — which is
         # exactly what a longer label made obvious (David).  Beneath the panes
@@ -5487,7 +5487,7 @@ class MainWindow:
         self._video_opts_row.pack(anchor=tk.W, fill=tk.X, padx=10, pady=(4, 4))
 
         # This applies to EVERY replacement, not to the slot on screen — it sat
-        # beside the preview, which read as per-clip, and monkeybug thought
+        # beside the preview, which read as per-clip, and a tester thought
         # changing it meant re-picking all his files one by one (batch 23).
         # The label says so, and flipping it re-answers the Convert column for
         # the whole list on the spot.
@@ -5533,13 +5533,13 @@ class MainWindow:
         """Why *path* can't be copied through as-is for slot *rel* under
         'No conversion', or None if it's fine.  Used to warn at pick/toggle
         time instead of letting the mismatch surface only as a build-time
-        failure (monkeybug).
+        failure (a tester).
 
         This checks what the MACHINE needs, not just what Write will accept.
         Write only refuses the wrong container; everything else it copies
         through byte-for-byte because the user vouched for it — and an i.MX6
         VPU handed ProRes, HEVC, 10-bit, or the wrong geometry finds the sound
-        and shows a black picture, which is what monkeybug's attract video did
+        and shows a black picture, which is what a tester's attract video did
         (batch 23).  Same rules as the build's own drop-in gate
         (plugins.stern.engine._intact_copy_source), applied where he can still
         do something about it.
@@ -5608,7 +5608,7 @@ class MainWindow:
     def _slot_unplayable(self, slot):
         """Whether the slot's CURRENT on-disk clip is a format the machine
         can't decode — i.e. an earlier as-is build already baked in ProRes /
-        HEVC / 10-bit (the pick-time gate only arrived in v0.95).  Monkeybug
+        HEVC / 10-bit (the pick-time gate only arrived in v0.95).  A tester
         had exactly this: his ProRes attract went on as-is before the gate
         existed, and afterwards nothing anywhere pointed at the slots he
         needed to redo (batch 24: "there are other files labelled as MOV
@@ -5670,7 +5670,7 @@ class MainWindow:
         game is doing.  Judged against THIS slot's clip rather than a blanket
         rule: most Spike 2 clips are silent, but not all of them are (Deadpool
         1.14 LE has audio on 7 of its 99), so only a silent slot getting a
-        noisy replacement is worth mentioning (monkeybug: "I forgot to drop
+        noisy replacement is worth mentioning (a tester: "I forgot to drop
         the audio off some files")."""
         from ..core import video as _video
         sinfo = getattr(slot, "info", None)
@@ -5688,12 +5688,12 @@ class MainWindow:
     _VIDEO_CONV_REENC = "Re-encode"
     # The clip IS this slot's video, just wrapped in the wrong container — a
     # stream copy fixes the wrapper and every frame survives untouched, so
-    # it belongs with "As-is", not with the re-encodes (aly's 1360x768 H.264
+    # it belongs with "As-is", not with the re-encodes (a tester's 1360x768 H.264
     # .mp4 for a QuickTime slot).
     _VIDEO_CONV_REPACK = "Repackage"
     # "No conversion" is on and this pick would go on the card untouched but
     # the machine can't play it, or Write would refuse it outright.  The column
-    # used to go BLANK for both, which is why 27 of monkeybug's 29 rows said
+    # used to go BLANK for both, which is why 27 of a tester's 29 rows said
     # nothing at all and he asked why only one was "As-is" (batch 23).
     # Worded "wrong format", not "won't play": the file itself is perfectly
     # playable on a PC, it is its FORMAT the machine's decoder can't take —
@@ -5759,7 +5759,7 @@ class MainWindow:
         """Cache key for a row's Convert answer — it changes with the pick,
         with either option flag, and with the picked FILE's bytes (size +
         mtime).  The last part is what lets a re-export under the same name
-        get a fresh verdict: monkeybug re-exported his ProRes pick as H.264
+        get a fresh verdict: a tester re-exported his ProRes pick as H.264
         over the same .mov and the column kept serving the old file's
         "✗ won't play" — through re-picks and re-scans — because nothing in
         the key had changed (batch 24)."""
@@ -5848,7 +5848,7 @@ class MainWindow:
         """Short note on what Write will DO to *path* for slot *rel*: copy it
         through untouched, or re-encode it.
 
-        monkeybug batch 16: "I imported video I think was already in the right
+        feedback batch 16: "I imported video I think was already in the right
         format but I can't tell if PAD converted it."  The staging detail only
         appears at build time, so mirror stage_replacement's branch order here
         and say so at pick time.  Returns "" when it can't be determined
@@ -6176,7 +6176,7 @@ class MainWindow:
 
     def _video_export_csv(self):
         """Save the video table as a CSV — the audio tab's Export CSV, mirrored
-        for video (monkeybug batch 16)."""
+        for video (feedback batch 16)."""
         import csv
         if not self._video_slots:
             messagebox.showinfo("Export CSV",
@@ -6255,7 +6255,7 @@ class MainWindow:
         # A cleared stamp only makes the NEXT tab visit re-scan — and the tab
         # you are already looking at never gets a <<NotebookTabChanged>>, so
         # after a Save As / Open project it kept showing the old project's
-        # slots until you left the tab and came back (monkeybug batch 22, on a
+        # slots until you left the tab and came back (feedback batch 22, on a
         # fork).  Re-scan the visible tab here so what's on screen always
         # belongs to the project that's loaded.
         if rescan_visible:
@@ -6297,7 +6297,7 @@ class MainWindow:
 
         The Write preview tree (Modified + Pending rows) is the change-count
         signal: an empty tree means nothing to revert, so the button greys out
-        (monkeybug's request — it tells the user it isn't relevant).  When the
+        (a tester's request — it tells the user it isn't relevant).  When the
         preview tree isn't shown for this plugin, leave the button enabled (we
         have no count to gate on).  Never overrides the running-state disable."""
         btn = getattr(self, "_revert_all_btn", None)
@@ -6438,7 +6438,7 @@ class MainWindow:
             return
         self.remember_browse_dir("video_replacement", path)
         # "No conversion" + a file the copy-through would reject used to fail
-        # silently until build time ("✗ … needs a .mov") — monkeybug hit it.
+        # silently until build time ("✗ … needs a .mov") — a tester hit it.
         # Surface the mismatch here, while the user can still act on it.
         if self.video_no_conversion_var.get():
             why = self._video_noconv_conflict(rel, path)
@@ -6493,7 +6493,7 @@ class MainWindow:
         if rel is None or rel == self._video_current_rel:
             return
         # Selecting a different row while a clip plays stops it and loads the
-        # new row right away, resuming on the same pane (monkeybug batch 14 —
+        # new row right away, resuming on the same pane (feedback batch 14 —
         # same flow as the audio tab).
         resume = None
         if self._video_pane_orig and self._video_pane_orig.playing:
@@ -6579,7 +6579,7 @@ class MainWindow:
         """"What this slot needs…": the exact shape of a drop-in for *rel*,
         plus an ffmpeg command that produces one.
 
-        monkeybug encodes his own clips on purpose — he tunes the key-frame
+        A tester encodes his own clips on purpose — he tunes the key-frame
         interval so long videos play smoothly on the machine — and avoids the
         app's conversion for that reason.  He was doing it blind: his attract
         clip was ProRes in a .mov, which the i.MX6's decoder cannot touch, so
@@ -6949,7 +6949,7 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.image_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        # Source filter (monkeybug): narrow the list to one of the image
+        # Source filter (a tester): narrow the list to one of the image
         # stores; the values mirror the Source column's labels.
         self._image_source_combo = ttk.Combobox(
             tools, textvariable=self.image_source_filter_var,
@@ -6986,7 +6986,7 @@ class MainWindow:
             "(in play order), so a whole animation can be reviewed — or "
             "bulk-replaced via right-click — as one unit.",
             lambda: self._current_theme)
-        # Fonts / Scenes tool windows (Peter): preview + import whole game
+        # Fonts / Scenes tool windows (a tester): preview + import whole game
         # fonts, and browse what each scene is made of.
         fonts_btn = ttk.Button(tools, text="Fonts…", width=7,
                                command=self._open_font_studio)
@@ -7014,11 +7014,11 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
-        # "src" tells the three image stores apart (monkeybug: file-system
+        # "src" tells the three image stores apart (a tester: file-system
         # PNGs, scene textures and radium-embedded images were indistinguishable
         # beyond their paths) — see _image_source_label.
         # "n" (Images) is grouped-mode only: the per-group member count as its
-        # own sortable column (monkeybug: the count baked into the header text
+        # own sortable column (a tester: the count baked into the header text
         # couldn't be sorted on) — _refresh_image_list toggles displaycolumns.
         self._image_tree = ttk.Treeview(
             list_frame, columns=("n", "res", "fmt", "src", "rep"),
@@ -7073,7 +7073,7 @@ class MainWindow:
         panes = ttk.Frame(preview)
         panes.pack(padx=6, pady=(2, 6))
         # Kept as attributes so the preview loader can retitle the left pane
-        # honestly for a slot that's already changed on disk (monkeybug).
+        # honestly for a slot that's already changed on disk (a tester).
         self._image_hdr_orig = ttk.Label(panes, text="Original",
                                          font=(_SANS_FONT, 9))
         self._image_hdr_orig.grid(row=0, column=0, pady=(2, 1))
@@ -7281,7 +7281,7 @@ class MainWindow:
 
     @staticmethod
     def _image_source_label(rel_path):
-        """Which of the image stores *rel_path* came from (monkeybug: make
+        """Which of the image stores *rel_path* came from (a tester: make
         them tell-apart-able + sortable).  Derived purely from the extract
         layout: the Stern engine lands decoded scene textures under
         ``scene_textures/`` (radium-embedded ones named ``radimg_*``,
@@ -7317,7 +7317,7 @@ class MainWindow:
         The third mapping exists because a home group alone makes a shared
         image findable under ONE scene only — a scene whose every image is
         first seen elsewhere then has no row anywhere and searching its id
-        finds nothing (Peter's training scene).  Search and grouping use it to
+        finds nothing (a tester's training scene).  Search and grouping use it to
         show an image under whichever of its scenes you asked for."""
         import re as _re
 
@@ -7364,7 +7364,7 @@ class MainWindow:
         # first named node in its radium, so a scene led by its font was
         # labeled after the font, and every hash-named member then matched a
         # search for the font's name through a label that isn't on screen
-        # (monkeybug searched "stern" on Jaws: 758 such rows).  Every
+        # (a tester searched "stern" on Jaws: 758 such rows).  Every
         # extracted atlas has a glyphs/<atlas-stem>/ dir; those members
         # never supply the label hint.
         try:
@@ -7423,7 +7423,7 @@ class MainWindow:
                 continue
             card_dir = cols[1].rsplit("/", 1)[0] if "/" in cols[1] else ""
             folder = card_dir or "(root)"
-            # Display without the manifest's leading "/" (monkeybug: the other
+            # Display without the manifest's leading "/" (a tester: the other
             # tabs show no leading slash) — the group KEY keeps the slash so
             # names saved under the old key still match.
             label = folder.lstrip("/") or "(root)"
@@ -7453,10 +7453,10 @@ class MainWindow:
         card-path prefix its whole namespace shares.
 
         The search matches container card paths so a scene hash from a file
-        listing finds its images (Peter) — but on a real card every radium
+        listing finds its images (a tester) — but on a real card every radium
         container lives under the same mount root, and a word sitting in that
         SHARED prefix matches every group at once while naming none of them.
-        Batch 25: monkeybug searched "stern" for the Stern loading screen and
+        Batch 25: a tester searched "stern" for the Stern loading screen and
         got ~5000 radimg rows, matched through invisible on-card paths.  Only
         the part that differs between sibling keys carries any information,
         so that's all the search reads.  Prefixes are cut at a "/" so a
@@ -7522,7 +7522,7 @@ class MainWindow:
         query = (self.image_search_var.get() or "").strip().lower()
         grouped = bool(self.image_group_by_scene_var.get())
         # The per-group "Images" count column only exists in grouped mode
-        # (monkeybug: a sortable count column beats a count baked into the
+        # (a tester: a sortable count column beats a count baked into the
         # header text); flat mode hides it rather than show an empty column.
         tree["displaycolumns"] = (("n", "res", "fmt", "src", "rep") if grouped
                                   else ("res", "fmt", "src", "rep"))
@@ -7542,7 +7542,7 @@ class MainWindow:
         # animation whose member files are just hashes.  It matches ANY scene
         # an image appears in, not only its home group: a shared image belongs
         # to one group but lives in many scenes, and searching for one of the
-        # others used to come up empty (Peter).
+        # others used to come up empty (a tester).
         def _matched_group(s):
             for g in self._image_groups_of(s.rel_path):
                 if self._image_group_matches(g, query):
@@ -7589,7 +7589,7 @@ class MainWindow:
             else:
                 res = s.resolution_str()
             # In grouped mode the parent row already names the folder, so show
-            # just the filename (monkeybug); flat mode keeps the full path.
+            # just the filename (a tester); flat mode keeps the full path.
             disp = os.path.basename(s.rel_path) if parent else s.rel_path
             tree.insert(parent, tk.END, iid=s.rel_path, text=disp,
                         values=("", res, s.format_summary(),
@@ -7828,7 +7828,7 @@ class MainWindow:
         finally:
             menu.grab_release()
 
-    # ---- Fonts / Scenes tool windows (Peter) --------------------------
+    # ---- Fonts / Scenes tool windows (a tester) --------------------------
 
     def _image_assets_dir_or_warn(self, noun):
         """The Images-tab assets folder, or None with a friendly nudge."""
@@ -7924,7 +7924,7 @@ class MainWindow:
     def _step_aside_for_jump(self):
         """Move any open tool window out from in front of the main window.
 
-        Peter: "when you have the font / scene folder open and jump to it with
+        A tester: "when you have the font / scene folder open and jump to it with
         a double click, it will visit the page in the background, it was hard
         for me to find out that it did jump there."  The Fonts and Scenes
         windows are ``transient`` children of the main window, and Windows
@@ -7939,7 +7939,7 @@ class MainWindow:
         1. ``focus_force()`` the main window.  A double-click arrives while
            the TOOL window is the active one, and Windows will not push the
            foreground window below its own owner — lowering it alone is
-           silently ignored, which is exactly what Peter saw.
+           silently ignored, which is exactly what a tester saw.
         2. only then lower each tool window below the root.
 
         Do NOT ``lift()`` the root instead: that re-applies the owner rule and
@@ -8027,7 +8027,7 @@ class MainWindow:
         """Right-click → Rename group…: give a scene/animation group a
         custom display name.  The vendor's own scene-element names are
         mostly generic ("unnamed_instance_14"), so there's nothing better
-        to extract automatically (monkeybug).  Stored per assets folder in
+        to extract automatically (a tester).  Stored per assets folder in
         the staged-changes sidecar; a blank (or unchanged-generic) entry
         restores the manifest name.  The rename also becomes the group's
         sort key and a Search match."""
@@ -8201,7 +8201,7 @@ class MainWindow:
         holds the REPLACEMENT bytes: prefer its ``.orig`` snapshot as the true
         original and show the on-disk file on the replacement side — and when
         no snapshot exists, retitle the left pane instead of calling modified
-        bytes "Original" (monkeybug read his imported logo as a lost mod)."""
+        bytes "Original" (a tester read his imported logo as a lost mod)."""
         from ..core import staged_originals
         slot = self._image_slots_by_rel.get(rel) if rel is not None else None
         rep = self._image_assignments.get(rel) if rel is not None else None
@@ -8215,7 +8215,7 @@ class MainWindow:
                 opath = snap
         # Identical copies across scenes extract to ONE PNG, so a replacement
         # lands in every scene that carries it — say so where the user is
-        # about to replace it, not only in the Scenes window (Peter read the
+        # about to replace it, not only in the Scenes window (a tester read the
         # dedup as the app mixing unrelated scenes together).
         hdr = ("Current file (already modified)" if changed and not snap
                else "Original")
@@ -8294,14 +8294,14 @@ class MainWindow:
         """Log the sidecar assignments a restore had to drop (slot gone, or
         replacement source file unreachable), so a disconnected NAS drive or a
         re-extract that renamed slots doesn't silently read as "nothing
-        assigned" (monkeybug).  The sidecar keeps the entries until the user
+        assigned" (a tester).  The sidecar keeps the entries until the user
         changes an assignment, so fixing the cause and re-scanning restores
         them.
 
         A slot that was already changed on disk (it has a .orig snapshot) gets
         a calm info line instead of red: the replacement IS in the project
         folder — losing track of the source file it was made from only matters
-        for a re-apply (batch 24: monkeybug read the red line as a clip that
+        for a re-apply (batch 24: a tester read the red line as a clip that
         "cannot be loaded from my NAS", while it played fine, because the
         change itself was long since applied)."""
         from ..core import staged_changes, staged_originals
@@ -8376,7 +8376,7 @@ class MainWindow:
         """Force Trim/pad on — and HIDE its checkbox — when this plugin's
         Write always length-matches, else show it as a free toggle.
 
-        Batch 20 (monkeybug): for formats where length-matching is structural
+        Batch 20 (a tester): for formats where length-matching is structural
         (Spike 2's size-neutral slots, JJP, CGC's Pulp Fiction banks) it's
         standard behavior, not a choice — a forced-on disabled checkbox still
         read as a setting to worry about, so it's not shown at all.  The
@@ -8438,7 +8438,7 @@ class MainWindow:
 
     # Description labels wrap at the dialog's natural width (set by the
     # head/tail rows) instead of a narrower column, so no dead space is left
-    # to their right (monkeybug batch 20 item 4).
+    # to their right (feedback batch 20 item 4).
     _AUDIO_ADV_WRAP = 640
 
     def _open_audio_advanced(self):
@@ -8465,7 +8465,7 @@ class MainWindow:
                  "machine.").pack(anchor=tk.W, padx=12, pady=(12, 8))
 
         # Horizontal rules between the option groups break up the wall of
-        # text-and-knobs (monkeybug batch 20 item 5).
+        # text-and-knobs (feedback batch 20 item 5).
         def _rule():
             ttk.Separator(dlg, orient=tk.HORIZONTAL).pack(
                 fill=tk.X, padx=12, pady=(2, 8))
@@ -8635,7 +8635,7 @@ class MainWindow:
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))
         # Plain grey OK / Cancel — the green/red pair read as a different
-        # convention from every other dialog (monkeybug batch 20 item 8).
+        # convention from every other dialog (feedback batch 20 item 8).
         ttk.Button(btns, text="OK", command=_ok).pack(side=tk.RIGHT)
         ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(
             side=tk.RIGHT, padx=(0, 6))
@@ -8776,7 +8776,7 @@ class MainWindow:
     # partitions + ext4 filesystem(s), with file/folder extract to disk.
     # For pulling radium/.sh files out of an old modded card, or dumping
     # folders to diff a modded card vs stock, without a mount+map cycle
-    # (monkeybug).  Composes plugins.stern.explorer.CardImage; nothing on
+    # (a tester).  Composes plugins.stern.explorer.CardImage; nothing on
     # the card is written.
     # ==================================================================
 
@@ -8805,7 +8805,7 @@ class MainWindow:
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         # Rewrap to the actual window width instead of a fixed 720px
-        # (monkeybug: "the text should flow into that area").
+        # (a tester: "the text should flow into that area").
         intro.bind("<Configure>", lambda e: intro.configure(
             wraplength=max(300, e.width - 8)))
 
@@ -8818,7 +8818,7 @@ class MainWindow:
         ent.bind("<Return>", lambda _e: self._pex_open_image())
         # Picking a recent path opens it right away (typed paths go through
         # Return), and Browse… opens whatever it picks — a separate Open
-        # button read as "what does this do?" (monkeybug batch 10).
+        # button read as "what does this do?" (feedback batch 10).
         ent.bind("<<ComboboxSelected>>",
                  lambda _e: self._pex_open_image(), add="+")
         ttk.Button(row, text="Browse…", command=self._pex_browse_image).pack(
@@ -8836,7 +8836,7 @@ class MainWindow:
         # (No partition-count label here — the dropdown already shows every
         # partition; extract results land next to the extract buttons below.)
         # Find-in-partition: substring over full paths, Enter / "Find Next"
-        # cycles matches and reveals each in the lazy tree (monkeybug
+        # cycles matches and reveals each in the lazy tree (a tester
         # batch 10 wishlist: PE search).
         self.partition_search_var = tk.StringVar()
         self._pex_find_btn = ttk.Button(prow, text="Find Next",
@@ -8873,12 +8873,12 @@ class MainWindow:
         self._pex_tree.bind("<<TreeviewOpen>>", self._pex_on_tree_open)
         self._pex_tree.bind("<<TreeviewSelect>>", self._pex_on_tree_select)
         # Right-click → Properties (full on-card path for mount workflows,
-        # size, partition) + quick Extract (monkeybug batch 14).
+        # size, partition) + quick Extract (feedback batch 14).
         for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
             self._pex_tree.bind(seq, self._pex_on_tree_right)
         # Big animated "Extracting…" overlay, placed over the tree while an
         # extract runs — the same large spinner the Replace tabs' scans use
-        # (monkeybug: "the same large swirly font as the other screens").
+        # (a tester: "the same large swirly font as the other screens").
         self._pex_busy_lbl = ttk.Label(left, font=(_SANS_FONT, 18, "bold"))
 
         right = ttk.Frame(body); right.pack(side=tk.LEFT, fill=tk.BOTH,
@@ -8901,7 +8901,7 @@ class MainWindow:
 
         arow = ttk.Frame(f); arow.pack(fill=tk.X, padx=10, pady=(0, 8))
         # No trailing "…" on the extract buttons — it read as truncated text
-        # rather than the opens-a-dialog convention (monkeybug batch 14).
+        # rather than the opens-a-dialog convention (feedback batch 14).
         self._pex_extract_btn = ttk.Button(
             arow, text="Extract Selected", command=self._pex_extract_selected,
             state=tk.DISABLED, style="Go.TButton")
@@ -8918,7 +8918,7 @@ class MainWindow:
         self._pex_extract_all_btn.pack(side=tk.LEFT, padx=(6, 0))
         # Extract results show right next to the buttons that made them
         # (they used to land top-right by the partition combo, where they
-        # read as unrelated — monkeybug batch 10).
+        # read as unrelated — feedback batch 10).
         self._pex_action_status = ttk.Label(arow, text="",
                                             font=(_SANS_FONT, 9))
         self._pex_action_status.pack(side=tk.LEFT, padx=(10, 0))
@@ -8927,7 +8927,7 @@ class MainWindow:
 
     def _pex_default_from_extract(self):
         """A blank Card Image box defaults to the Extract tab's input image
-        and opens it right away (monkeybug: "defaults to the raw image
+        and opens it right away (a tester: "defaults to the raw image
         selected on the Extract screen").  Never overrides a path the user
         already put here."""
         if self._pex_busy or (self.partition_image_var.get() or "").strip():
@@ -8987,7 +8987,7 @@ class MainWindow:
         labels = []
         for p in parts:
             # Linux-style device names (sda1 = MBR slot 0) — the naming users
-            # already know from mounting these cards by hand (monkeybug
+            # already know from mounting these cards by hand (a tester
             # batch 14).
             label = "sda%d — %s (%s)%s" % (
                 p.index + 1, p.label, self._pex_human(p.size),
@@ -9103,7 +9103,7 @@ class MainWindow:
         Opens the Partition Explorer on the extract's own source image,
         selects the partition holding the file and expands the tree down to
         it.  Sounds and radium-embedded images aren't standalone files on the
-        card, so those reveal their CONTAINER and say so (monkeybug batch 16).
+        card, so those reveal their CONTAINER and say so (feedback batch 16).
         """
         from ..core import card_paths
         assets_dir = ""
@@ -9332,7 +9332,7 @@ class MainWindow:
             title="Choose a folder to extract the whole partition into")
         if out_dir:
             # Land under "<dest>\sdaN", not a generic "root" — two partitions
-            # extracted into one folder used to mix together there (monkeybug
+            # extracted into one folder used to mix together there (a tester
             # batch 10); the folder name matches the combo's device-style
             # partition label (batch 14).
             self._pex_run_extract(
@@ -9342,7 +9342,7 @@ class MainWindow:
     def _pex_extract_all(self):
         """Extract every browsable partition into its own ``sdaN`` subfolder
         of one chosen destination — the one-click dump-the-whole-card flow
-        (monkeybug batch 14)."""
+        (feedback batch 14)."""
         if self._pex_busy or self._pex_card is None:
             return
         parts = [p for p in self._pex_part_labels.values() if p.browsable]
@@ -9445,7 +9445,7 @@ class MainWindow:
     def _pex_replace_selected(self, iid):
         """Right-click → Replace with…: exact-size in-place write of one file
         into the card image, with the Spike 2 .sidx record refreshed (the
-        monkeybug wishlist item this whole tab started from)."""
+        a tester wishlist item this whole tab started from)."""
         if self._pex_busy or self._pex_card is None or iid in self._pex_dirs:
             return
         try:
@@ -9606,7 +9606,7 @@ class MainWindow:
 
         # The launching button flips to a live Cancel; the others wait.
         # Plain "Cancel" — the ✕ glyph read as inconsistent with every other
-        # button (monkeybug batch 10, same call as the scan buttons got).
+        # button (feedback batch 10, same call as the scan buttons got).
         for b in (self._pex_extract_btn, self._pex_extract_part_btn,
                   self._pex_extract_all_btn):
             if b is not btn:
@@ -9616,7 +9616,7 @@ class MainWindow:
         self._pex_action_status.configure(text="")
         # normpath: Tk's pickers hand back forward-slash paths that turned
         # into mixed-slash log lines on Windows, which couldn't be pasted
-        # into Explorer (monkeybug batch 14).
+        # into Explorer (feedback batch 14).
         what = ("all %d partitions" % len(path) if kind == "all"
                 else top_name if top_name
                 else "%s from partition %s" % (path, part))
@@ -9716,7 +9716,7 @@ class MainWindow:
     # apply on a fresh flash / factory reset; a configured machine keeps its
     # board-NVRAM values (settings aren't on the card).  Composes
     # plugins.stern.explorer (find/read/patch game_real + sidx refresh) and
-    # plugins.stern.adjustments (decode the table).  monkeybug wishlist #2.
+    # plugins.stern.adjustments (decode the table).  A tester wishlist #2.
     # ==================================================================
 
     def _build_settings_tab(self):
@@ -9777,7 +9777,7 @@ class MainWindow:
         # The checkbox marks WHICH saved preset is the standing default —
         # it's an attribute of the selected preset, not a parallel feature,
         # so its label says so and it stays greyed until a preset exists
-        # (monkeybug saw the two as overlapping).
+        # (a tester saw the two as overlapping).
         self._settings_auto_cb = ttk.Checkbutton(
             prow, text="Apply this preset automatically to every card I build",
             variable=self.settings_autoapply_var,
@@ -9793,7 +9793,7 @@ class MainWindow:
 
         # Scrollable form of one row per exposed setting.  The canvas hugs the
         # form's height (capped) instead of expanding into a sea of blank
-        # space below the rows (monkeybug batch 21) — the freed height flows
+        # space below the rows (feedback batch 21) — the freed height flows
         # to the Log pane via _resize_notebook_to_current_tab.
         body = ttk.Frame(f); body.pack(fill=tk.X, padx=10, pady=(4, 4))
         self._settings_canvas = tk.Canvas(
@@ -9822,9 +9822,9 @@ class MainWindow:
         self._settings_empty.grid(row=0, column=0, padx=6, pady=20, sticky="w")
 
         # Every setting the firmware carries, flagged with whether the
-        # machine's own menu can reach it (peanuts).  The form above is the
+        # machine's own menu can reach it (a tester).  The form above is the
         # curated set with friendly units and help; this is everything else,
-        # editable by double-click since peanuts asked to set the hidden and
+        # editable by double-click since a tester asked to set the hidden and
         # debug ones too.  It lives outside the scrolling canvas so it scrolls
         # itself instead of nesting two scroll regions.
         self._settings_all_frame = ttk.Frame(f)
@@ -10033,7 +10033,7 @@ class MainWindow:
         self._settings_clear_form()
         # Same big animated indicator the Replace tabs' scans use, so the
         # (possibly slow, NAS-bound) firmware read never looks idle
-        # (monkeybug asked for the swirl here).
+        # (a tester asked for the swirl here).
         self._settings_empty.grid()
         try:
             self._scan_empty_font.setdefault(
@@ -10268,7 +10268,7 @@ class MainWindow:
                     n_svc, n_dbg))
 
     # ---- Default Settings: editing anything in the all-settings list ----
-    # peanuts asked to set the values the machine hides as well as read them.
+    # a tester asked to set the values the machine hides as well as read them.
     # The curated form stays the friendly path (display units, help text,
     # presets); this is the long tail, edited one at a time through a dialog
     # rather than 500 live widgets.  An edited row joins _settings_rows like
@@ -10577,7 +10577,7 @@ class MainWindow:
     @staticmethod
     def _settings_fmt_num(v):
         """Group thousands once a value is big enough to be hard to read at a
-        glance — high-score defaults run to ten digits (monkeybug batch 22)."""
+        glance — high-score defaults run to ten digits (feedback batch 22)."""
         return "{:,}".format(v) if abs(v) >= 100000 else str(v)
 
     @classmethod
@@ -10645,7 +10645,7 @@ class MainWindow:
         # EVERY board score goes to the High Scores block, not just the ones
         # whose initials/player-name record we found.  Matching only on the
         # record left Led Zeppelin's BLACK DOG CHAMPION sitting alone up in
-        # the settings grid (monkeybug: "these items seem outside the score
+        # the settings grid (a tester: "these items seem outside the score
         # area") — it has no record, but it is still a champion score and
         # belongs with the rest.
         grid_rows = [r for r in rows
@@ -10687,7 +10687,7 @@ class MainWindow:
         group = None
         for r in rows:
             # A heading whenever the block changes, so the running order has
-            # a visible reason (monkeybug asked what the logic was).
+            # a visible reason (a tester asked what the logic was).
             if r.get("group") and r["group"] != group:
                 group = r["group"]
                 grow += 1
@@ -10703,7 +10703,7 @@ class MainWindow:
             # menu.  It is still worth setting from the card (the firmware
             # reads the same default either way), but "I changed it and the
             # operator menu doesn't agree" has a real answer — the master
-            # volume is the one monkeybug hit.
+            # volume is the one a tester hit.
             if r.get("status") == "service":
                 help_text = (help_text + "\n\n" if help_text else "") + (
                     "This machine edits this on a different service screen, "
@@ -10744,7 +10744,7 @@ class MainWindow:
                 # Step + width come from the adjustment itself: high-score
                 # defaults run to 1,000,000,000 and step by a million, so a
                 # width-8 box with increment=1 was unusable for them
-                # (monkeybug batch 22).
+                # (feedback batch 22).
                 # The spinner's own travel stretches to take in a shipped
                 # default that sits outside the declared range, so the arrows
                 # can always get back to the value the card actually has.
@@ -10842,7 +10842,7 @@ class MainWindow:
         high-score board — initials, player name and (where the firmware
         exposes it as an adjustment) the default score.
 
-        monkeybug batch 22 asked to edit "the name or score".  The scores are
+        feedback batch 22 asked to edit "the name or score".  The scores are
         ordinary adjustments; the initials and names are their own string
         table in the same ELF (see plugins.stern.high_scores) and are patched
         in place, so each field is capped at the room its slot actually has.
@@ -10879,7 +10879,7 @@ class MainWindow:
         # first, then the field you edit.  It used to trail the row as bare
         # grey "on card 75,000,000" text with no header, which read as a
         # duplicate of the box beside it rather than as the card's own value
-        # (monkeybug: "is this useful information?").
+        # (a tester: "is this useful information?").
         for col, txt, tip in (
                 (0, "Slot", None),
                 (1, "Initials", None),
@@ -11066,7 +11066,7 @@ class MainWindow:
     # the shared assets folder's .staged_changes.json (key "settings",
     # internal units) and the Write flow bakes them into the OUTPUT image
     # after a successful build — the same staged model as every Replace tab,
-    # so the master image on disk is never modified (monkeybug).
+    # so the master image on disk is never modified (a tester).
 
     def _settings_staged_dir(self):
         """The shared assets folder staged settings ride with ('' if unset)."""
@@ -11109,7 +11109,7 @@ class MainWindow:
     # The log used to fire off the debounced stage itself and name only the
     # raw AD_ ids of the whole staged SET, so a half-typed player name emitted
     # "2 setting(s) staged (AD_ELECTRIC_MAGIC_FRENZY_CHAMPION, …)" — settings
-    # monkeybug had never opened, no values, and again on the next keystroke.
+    # a tester had never opened, no values, and again on the next keystroke.
     # Logging is its own step now: one line per field that actually moved,
     # with the caption and the old and new value, and only once the field is
     # done being edited (focus left it, Return/Tab, or it went quiet).
@@ -11174,7 +11174,7 @@ class MainWindow:
 
         Bound to the fields' <FocusOut>/<Return> as well as the idle timer:
         leaving a field is the moment the user is done with it, which is what
-        monkeybug asked for ("doesn't fire off until you exit the text box").
+        a tester asked for ("doesn't fire off until you exit the text box").
 
         A stage write still waiting on its own debounce is brought forward
         first, so leaving a field records it AND reports it in one step and
@@ -11312,7 +11312,7 @@ class MainWindow:
         1.22's ELECTRIC MAGIC FRENZY / MULTIBALL champions default to
         2,000,000 with a minimum of 5,000,000), so the clamp moved the value
         off its own default and every one of those rows staged itself the
-        moment the tab loaded, with no ● lit and nothing touched — monkeybug
+        moment the tab loaded, with no ● lit and nothing touched — a tester
         saw two settings he never opened staged while typing a player name."""
         out = {}
         for r in self._settings_rows:
@@ -11560,7 +11560,7 @@ class MainWindow:
         return rows
 
     def _open_project_info(self):
-        """Stats popup for the project folder (monkeybug batch 20: "fun
+        """Stats popup for the project folder (feedback batch 20: "fun
         stats" behind a ⓘ like the Card image row's): what's in the project
         (audio/video/images counts + sizes), its size on disk, how much of it
         is changed, and when it started.  One singleton Toplevel; collection
@@ -11654,7 +11654,7 @@ class MainWindow:
         *var* — everything the app knows about it in one place: file facts,
         what was detected, the plugin's firmware/partition details, and
         (after an Extract) asset counts, with a copy-pasteable report for
-        comparing releases and filing bug reports (peanuts).
+        comparing releases and filing bug reports (a tester).
 
         A window, not a tab: the notebook was getting wide (David).  One
         singleton Toplevel, launched from the small "Info" button next to
@@ -11684,7 +11684,7 @@ class MainWindow:
         win.transient(self.root)
         # Starts tall enough for a typical report; _info_fit_height then
         # grows the window to the collected content (screen-capped) so a
-        # full Spike 2 report needs no vertical scrolling (peanuts).
+        # full Spike 2 report needs no vertical scrolling (a tester).
         # Opens centered over the app like every dialog (David).
         center_over(self.root, win, 780, 560)
         win.minsize(520, 300)
@@ -11838,7 +11838,7 @@ class MainWindow:
 
     def _info_fit_height(self):
         """Grow the Image Info window so the whole report is visible without
-        vertical scrolling (peanuts), capped to the screen.  Only ever grows —
+        vertical scrolling (a tester), capped to the screen.  Only ever grows —
         a user who shrank the window keeps their size for shorter reports."""
         win, tree = self._info_win, self._info_tree
         if win is None or not win.winfo_exists():
@@ -11912,7 +11912,7 @@ class MainWindow:
             side=tk.LEFT, padx=(4, 12))
         ttk.Button(tools, text="Clear all edits",
                    command=self._text_clear_all).pack(side=tk.LEFT)
-        # Peter: "Could you jump from the text tab into the scene?"  The
+        # a tester: "Could you jump from the text tab into the scene?"  The
         # Scenes window already jumps here; this is the way back, and it is
         # how you get from a line of text to a picture of where it appears.
         self._text_scene_btn = ttk.Button(
@@ -12062,7 +12062,7 @@ class MainWindow:
         Runs the read on a worker thread behind the same big animated
         indicator + Cancel-scan button as the other Replace tabs — it used to
         be synchronous, so a manifest on a slow share froze the window with no
-        sign anything was happening (monkeybug batch 22)."""
+        sign anything was happening (feedback batch 22)."""
         import threading
         from ..core import text_manifest
         assets_path = (self.write_assets_var.get() or "").strip()
@@ -12250,7 +12250,7 @@ class MainWindow:
             menu.grab_release()
 
     def _text_show_in_scene(self, iid=None):
-        """Peter: "Could you jump from the text tab into the scene?"
+        """a tester: "Could you jump from the text tab into the scene?"
 
         Open the Scenes window on the scene that draws the selected string,
         with the line itself picked out in the contents list — the scene is
@@ -12546,7 +12546,7 @@ class MainWindow:
             self._maybe_rescan_text()
         elif text == "Partition Explorer":
             # Read-only browse — the Extract/Write phase strip doesn't apply
-            # here (monkeybug asked what it was for on this tab: nothing).
+            # here (a tester asked what it was for on this tab: nothing).
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
@@ -12577,7 +12577,7 @@ class MainWindow:
                                   "Replace Images", "Replace Text"))
 
         # Keep an open tips window in step with the tab now showing
-        # (monkeybug: "the older help text remains").
+        # (a tester: "the older help text remains").
         self._refresh_tab_help(text)
 
         # Size the notebook to the tab now showing so a short tab (e.g.
@@ -12603,7 +12603,7 @@ class MainWindow:
             # but the canvas <Configure> that shows the scrollbar only fires on a
             # manual window resize — so without this the Write tab's lower
             # controls stay clipped with no scrollbar until the user drags the
-            # window. Re-apply the scroll geometry now (matches monkeybug's
+            # window. Re-apply the scroll geometry now (matches a tester's
             # "controls off the bottom until I resize again").
             self.root.after_idle(self._refresh_mfr_scrollregion)
 
@@ -12750,7 +12750,7 @@ class MainWindow:
             # Seed the fresh pane with the previous sessions' log tail
             # (dimmed, above a cut line) — the log "keeps" across restarts
             # and in-place updates right where the user already looks
-            # (monkeybug batch 18).  Before the pending-line flush below, so
+            # (feedback batch 18).  Before the pending-line flush below, so
             # this session's buffered lines land under the cut.
             self._seed_log_history(text)
             bundle = {"text": text, "scroll": scroll}
@@ -12908,7 +12908,7 @@ class MainWindow:
 
         # Widen the Write tab's whole label column when the noun overflows the
         # default 16 chars (Stern's "Original Card image:" was clipping to
-        # "Original Card imag" — monkeybug 5).  All the column's labels move
+        # "Original Card imag" — a tester 5).  All the column's labels move
         # together so the entry fields stay aligned.
         col_w = max(16, len(str(self._write_original_lbl.cget("text"))) + 1)
         for _lbl in getattr(self, "_write_col_labels", []):
@@ -13016,7 +13016,7 @@ class MainWindow:
         if hasattr(self, "_video_trim_tip"):
             # Per-plugin length guidance lives in the Trim checkbox's hover
             # tooltip (the old visible note label wrapped awkwardly and
-            # squeezed the log — monkeybug batches 14 and 16).
+            # squeezed the log — feedback batches 14 and 16).
             note = (mfr.video_length_note() or "").strip()
             self._video_trim_tip.text = (
                 "When on, a replacement longer or shorter than the original "
@@ -13034,7 +13034,7 @@ class MainWindow:
             note = mfr.image_note() or ""
             self._image_note_lbl.configure(text=note)
             # Hide the row entirely when there's no note, so the tab doesn't
-            # carry an empty gap (monkeybug: the fitting-rules line moved to
+            # carry an empty gap (a tester: the fitting-rules line moved to
             # Help).  Plugins that DO return a note still show it.
             if note:
                 self._image_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
@@ -13096,7 +13096,7 @@ class MainWindow:
                 text=getattr(mfr, "write_iso_label", "Build USB ISO"))
             self._write_ssd_radio.configure(
                 text=getattr(mfr, "write_ssd_label", "Write to SSD"))
-            # Say what each destination actually DOES — batch 22 (monkeybug
+            # Say what each destination actually DOES — batch 22 (a tester
             # thought these repeated the Build / flash dialog's checkboxes).
             _noun = getattr(mfr, "direct_medium_noun", "SSD")
             self._write_iso_tip.text = (
@@ -13282,7 +13282,7 @@ class MainWindow:
             # Fully remove the capture-help line (not just blank its text) so it
             # doesn't reserve an empty line between the Output-folder warning and
             # the Extract row — that stray gap pushed Extract down and made the
-            # 3-step spacing look uneven (monkeybug Extract #1).
+            # 3-step spacing look uneven (a tester Extract #1).
             self._capture_help.pack_forget()
             self._capture_help.configure(text="")
             self.capture_mode_var.set(False)
@@ -13402,7 +13402,7 @@ class MainWindow:
                 except tk.TclError:
                     pass
 
-    # ---- Persisted Extract options (monkeybug: checkboxes don't stick) ----
+    # ---- Persisted Extract options (a tester: checkboxes don't stick) ----
 
     def set_extract_options(self, opts):
         """Restore this manufacturer's saved Extract-tab options.
@@ -13600,7 +13600,7 @@ class MainWindow:
             return
         # First of the "Options:" row's cluster.  Trailing padx matches the
         # category checkboxes' (0, 12) so every checkbox sits the same
-        # distance apart (monkeybug: the gaps were visibly unequal).
+        # distance apart (a tester: the gaps were visibly unequal).
         self._transcribe_frame.pack(side=tk.LEFT, padx=(0, 12))
         self._update_extract_options_row_visibility()
 
@@ -13965,7 +13965,7 @@ class MainWindow:
         Points the OS file/folder picker at the path already in the field
         (or, for a file field, the folder containing it) so re-browsing
         lands where the user last was instead of a stale Windows MRU
-        folder — monkeybug's "default to the folder that is listed".  Walks
+        folder — a tester's "default to the folder that is listed".  Walks
         *values* in priority order and returns the first that resolves to
         an existing directory; ``None`` (the picker's own default) when
         none do.
@@ -13984,7 +13984,7 @@ class MainWindow:
     # Per-type "where was I last" for the replacement/mod-pack pickers: audio
     # picks live in one folder, video in another, mod packs a third — each
     # picker type reopens on its own last folder instead of the OS MRU
-    # (monkeybug batch 14).  Persisted in settings.json by the app.
+    # (feedback batch 14).  Persisted in settings.json by the app.
     def last_browse_dir(self, key):
         d = getattr(self, "_last_browse_dirs", None) or {}
         v = d.get(key)
@@ -14047,7 +14047,7 @@ class MainWindow:
         if path:
             # Tk's file dialogs return forward slashes even on Windows;
             # normalize so path fields don't mix //server/share with
-            # \\server\share styles (monkeybug 5.5).
+            # \\server\share styles (a tester 5.5).
             self.extract_input_var.set(os.path.normpath(path))
 
     def _browse_extract_deltas(self):
@@ -14215,7 +14215,7 @@ class MainWindow:
                         before=self._write_filename_lbl)
                 # When we ARE elevated (the state writing to a card requires),
                 # warn that mapped network-drive letters won't be visible —
-                # this is what silently emptied monkeybug's preview after a
+                # this is what silently emptied a tester's preview after a
                 # relaunch-as-admin.
                 if sys.platform == "win32" and is_admin():
                     self._write_admin_unc_hint.pack(
@@ -14345,7 +14345,7 @@ class MainWindow:
         ttk children are styled by _apply_theme, but the Toplevel itself is a
         raw Tk widget: without this its system-default (light) background
         bleeds through every padx/pady margin and flashes on open/resize
-        (monkeybug batch 16: "dark mode isn't 100% on popups").  Windows also
+        (feedback batch 16: "dark mode isn't 100% on popups").  Windows also
         needs the DWM call to darken the title bar."""
         try:
             win.configure(bg=THEMES[self._current_theme]["bg"])
@@ -14357,7 +14357,7 @@ class MainWindow:
         """Themed replacement for tkinter.simpledialog.askstring.
 
         simpledialog builds plain tk widgets with no styling hooks, so in dark
-        mode it opens as a white box with black text (monkeybug batch 16).
+        mode it opens as a white box with black text (feedback batch 16).
         Same contract: returns the string, or None if cancelled."""
         root = self._tk_root()
         dlg = tk.Toplevel(root)
@@ -14700,7 +14700,7 @@ class MainWindow:
         "Extract", enabled only when the inputs are ready (see
         _refresh_extract_enabled).  *active* says whether the running job is
         the Extract one: only the tab that STARTED the run gets the Cancel —
-        monkeybug hit "Cancel" on the Write tab during an extract and killed
+        a tester hit "Cancel" on the Write tab during an extract and killed
         the extract (batch 9), so the other tab's button now just greys out
         with its idle label.
         """
@@ -14742,12 +14742,12 @@ class MainWindow:
         """Drive the single Build/Cancel button.
 
         Mirrors _set_extract_button_running: while a build/write runs the
-        Build button doubles as a live Cancel (monkeybug 4.4 — there's no
+        Build button doubles as a live Cancel (a tester 4.4 — there's no
         separate Cancel widget any more); otherwise it shows the mode's build
         label and re-arms the write action.  *active* is False when the
         running job belongs to the Extract tab — the Build button then keeps
         its idle label but greys out, instead of becoming a second "Cancel"
-        that kills someone else's run (monkeybug batch 9).
+        that kills someone else's run (feedback batch 9).
         """
         if running and active:
             self._write_btn.configure(
@@ -14807,7 +14807,7 @@ class MainWindow:
     def set_flash_running(self, running):
         """While a flash run is in flight, the "Build / flash SD card…"
         button doubles as its live Cancel, same as the Build and Extract
-        buttons (monkeybug batch 8).  The app flips this on when it starts a
+        buttons (feedback batch 8).  The app flips this on when it starts a
         flash pipeline; ``set_running(False)`` restores the opener
         unconditionally, so an aborted run can't leave a stuck Cancel."""
         self._flash_running = running
@@ -14821,7 +14821,7 @@ class MainWindow:
                 # A flash starts via set_running(mode="write"), which armed
                 # the Build button as the run's Cancel — but the Flash button
                 # owns that role now.  Park Build disabled on its idle label
-                # so there's exactly one Cancel on screen (monkeybug batch 9).
+                # so there's exactly one Cancel on screen (feedback batch 9).
                 self._set_write_button_running(True, active=False)
             else:
                 btn.configure(text=self._flash_btn_text(),
@@ -14946,7 +14946,7 @@ class MainWindow:
 
         # One live Cancel at a time: while a run (build / flash / revert /
         # extract) is in flight, its button is the Cancel — starting a scan
-        # would put a second "Cancel scan" next to it (monkeybug batch 10).
+        # would put a second "Cancel scan" next to it (feedback batch 10).
         # Defer to when the run finishes (set_running(False) re-fires this).
         if self._is_running():
             self._rescan_preview_after_run = True
@@ -14960,7 +14960,7 @@ class MainWindow:
         scan_id = self._write_preview_scan_id
 
         # Enter the shared scanning state (same treatment as the Replace tabs
-        # — monkeybug batch 8): blanks the tree, overlays the big animated
+        # — feedback batch 8): blanks the tree, overlays the big animated
         # spinner, and flips Refresh into a live Cancel.  Batch 22: rows are
         # now held back until the walk finishes (see _finish_write_preview_scan)
         # so the big indicator stays up for the WHOLE scan, exactly like every
@@ -15059,7 +15059,7 @@ class MainWindow:
 
             # Size+mtime MD5 cache: unchanged files skip the re-hash, so a
             # re-scan of a mostly-unchanged folder takes seconds, not the
-            # minutes of the full hash walk (monkeybug batch 14).
+            # minutes of the full hash walk (feedback batch 14).
             from ..core import hashcache
             hcache = hashcache.load(assets_path)
 
@@ -15232,7 +15232,7 @@ class MainWindow:
 
     def _update_write_preview_count(self):
         """Keep the "Total changes: N" readout in step with the preview tree
-        (monkeybug batch 9).  Blank when the tree is empty — the placeholder
+        (feedback batch 9).  Blank when the tree is empty — the placeholder
         text already covers that state."""
         lbl = getattr(self, "_write_preview_count_lbl", None)
         if lbl is None:
@@ -15245,7 +15245,7 @@ class MainWindow:
 
     def _persist_tree_columns(self, tree, tree_key, col_ids):
         """Restore *tree*'s saved column widths and keep them saved as the user
-        drags them — so a layout the user tuned survives a restart (monkeybug:
+        drags them — so a layout the user tuned survives a restart (a tester:
         "persist column resizes").  *col_ids* lists the column ids including
         ``"#0"``.  Idempotent + tolerant of a tree that's since been destroyed.
         """
@@ -15285,7 +15285,7 @@ class MainWindow:
 
     def _autosize_tree_columns(self, tree, tree_key, col_ids):
         """Fit each column in *col_ids* to its widest cell, capped at
-        ``_AUTOSIZE_MAX_PX`` (monkeybug 4.2: long names sat ellipsized while
+        ``_AUTOSIZE_MAX_PX`` (a tester 4.2: long names sat ellipsized while
         fixed-width columns wasted the space).  Called after a list refresh.
         A column the user has dragged themselves (persisted by
         :meth:`_persist_tree_columns`) keeps the user's width; each column's
@@ -15337,7 +15337,7 @@ class MainWindow:
     def _register_responsive_wrap(self, label, margin=44, minimum=420):
         """Track *label* so :meth:`_resize_mfr_view` keeps its ``wraplength`` in
         step with the content width — a fixed wraplength left a dead band to the
-        right of the per-tab intro text when the window was widened (monkeybug).
+        right of the per-tab intro text when the window was widened (a tester).
         Applies the current width immediately (best-effort)."""
         self._responsive_wrap_labels.append((label, margin, minimum))
         try:
@@ -15354,7 +15354,7 @@ class MainWindow:
         Browse (the folder IS the project folder, set once on the Extract
         tab); batch 20 removed its "Set on Extract tab" replacement too — the
         row is a plain read-only mirror now, and anyone who reaches a Replace
-        tab already knows where the folder is set (monkeybug)."""
+        tab already knows where the folder is set (a tester)."""
         scan = ttk.Button(row, text="Scan", command=scan_cmd)
         scan.pack(side=tk.LEFT, padx=(8, 0))
         self._scan_buttons[tab_key] = scan
@@ -15379,12 +15379,12 @@ class MainWindow:
         """Toggle a Replace tab into / out of its scanning state.
 
         While a scan runs the list is blanked, a big animated indicator shows
-        over it, and the Scan button turns into Cancel (monkeybug) — so a slow
+        over it, and the Scan button turns into Cancel (a tester) — so a slow
         scan over a network share can't look idle and can be aborted.  Tolerant
         of tabs/layouts where a widget doesn't exist.
 
         Every scan's start and finish (with its duration) is also logged, so
-        slow scans are traceable after the fact (monkeybug batch 14 — his
+        slow scans are traceable after the fact (feedback batch 14 — his
         Write scan crawled after a mod-pack transfer and nothing recorded
         when or how long)."""
         label = self._SCAN_LABELS.get(tab_key, tab_key)
@@ -15394,7 +15394,7 @@ class MainWindow:
         if active:
             if tab_key not in t0s:      # re-entrant starts: keep first t0
                 t0s[tab_key] = time.monotonic()
-                # Say WHY, when the caller set a reason.  monkeybug batch 22
+                # Say WHY, when the caller set a reason.  feedback batch 22
                 # saw a 40-second Write change scan start on its own right
                 # after saving a project and read it as the save doing needless
                 # work; the save triggers nothing, but a bare "scan started"
@@ -15451,7 +15451,7 @@ class MainWindow:
                 if scanning:
                     # "Cancel scan", not a bare "Cancel": the run buttons
                     # (Extract / Build / Flash) also read "Cancel" mid-run,
-                    # and monkeybug hit both at once with no way to tell
+                    # and a tester hit both at once with no way to tell
                     # which cancelled what (batch 9; the ✕ glyph also read
                     # as inconsistent with every other button).
                     scan.configure(
@@ -15484,7 +15484,7 @@ class MainWindow:
                 # Tabs with a toolbar scan-status label (write_preview) get
                 # the same animated text there — rows landing in the tree
                 # hide the big overlay, and without this the rest of a long
-                # scan has no visible activity at all (monkeybug batch 9).
+                # scan has no visible activity at all (feedback batch 9).
                 status = getattr(self, "_%s_scan_status" % tab_key, None)
                 if status is not None:
                     status.configure(text=text)
@@ -15518,7 +15518,7 @@ class MainWindow:
         The scan's start-stamp is cleared AND the cancel is logged: leaving
         the stamp made the next Scan click count as re-entrant — no "started"
         line — and its "finished" line then reported the time since the
-        CANCELLED scan began (batch 25: monkeybug's 35 s Images scan logged
+        CANCELLED scan began (batch 25: a tester's 35 s Images scan logged
         as 2173.4 s, with his cancel and restart invisible in between)."""
         attr = "_%s_scan_id" % tab_key
         setattr(self, attr, getattr(self, attr, 0) + 1)
@@ -15552,7 +15552,7 @@ class MainWindow:
     def begin_revert_view(self):
         """Blank the Modified Files list the moment a revert starts — its
         rows are about to become stale one by one, and leaving them up read
-        as "nothing happened" (monkeybug batch 10).  The end-of-revert
+        as "nothing happened" (feedback batch 10).  The end-of-revert
         rescan repopulates whatever genuinely remains."""
         if not hasattr(self, "_write_preview_tree"):
             return
@@ -15657,7 +15657,7 @@ class MainWindow:
         if self._current_tab_key() != "Write":
             return
         # Skip the re-hash when nothing that feeds the preview has changed
-        # since the last completed scan (monkeybug batch 14: switching tabs
+        # since the last completed scan (feedback batch 14: switching tabs
         # re-ground through a minutes-long MD5 walk every single time).  The
         # fingerprint covers staged assignments, text edits, per-tab on-disk
         # change sets, and every finished run; the Refresh button still
@@ -15734,7 +15734,7 @@ class MainWindow:
         self.extract_output_var.set(path)
         # Batch 19 auto-load: a picked folder that already IS a project
         # (has the hidden anchor) restores that whole project — the 1:1
-        # folder↔project rule (monkeybug).  The app decides whether to
+        # folder↔project rule (a tester).  The app decides whether to
         # apply silently (same manufacturer) or ask first (it switches).
         if self._on_project_folder_picked:
             self._on_project_folder_picked(path)
@@ -15961,9 +15961,9 @@ class MainWindow:
     def _on_write_clicked(self):
         """Build-button click.  Warn (but allow) when the preview shows no
         changes — building an unmodified card just makes a copy of the
-        original, which monkeybug flagged as easy to do by accident — and
+        original, which a tester flagged as easy to do by accident — and
         confirm an overwrite of an existing output file at the moment it
-        matters instead of only a passive red label (monkeybug batch 14),
+        matters instead of only a passive red label (feedback batch 14),
         then defer to the app's write callback."""
         if (not self._is_running()
                 and not self._has_pending_write_changes()):
@@ -16027,7 +16027,7 @@ class MainWindow:
         """Construct the Project ▾ dropdown (batch 19): New / Open / Save /
         Save As / Recent ▸ / Projects… / Properties….  Built fresh per click
         like the gear menu.  In their own menu, Save/Load ARE at the top —
-        monkeybug's point 5 about ordering, solved by the move itself."""
+        a tester's point 5 about ordering, solved by the move itself."""
         kw = self._header_menu_kw()
         menu = tk.Menu(self.root, **kw)
         running = self._is_running()
@@ -16122,7 +16122,7 @@ class MainWindow:
         c = THEMES[self._current_theme]
         # No explicit font — Tk's TkMenuFont is the platform's native menu
         # font/metrics; forcing our own renders visibly "off" next to real
-        # context menus (monkeybug/David).
+        # context menus (a tester/David).
         # selectcolor draws the ✓ / radio indicators — Tk's default is
         # near-black, which vanishes on the dark theme's menu background
         # (David: "can't see the check marks"); the theme fg is visible on
@@ -16149,7 +16149,7 @@ class MainWindow:
                         u, what="the release page"))
             menu.add_separator()
 
-        # Theme — a dynamic verb label (monkeybug: the bare ☀/☽ glyph wasn't
+        # Theme — a dynamic verb label (a tester: the bare ☀/☽ glyph wasn't
         # self-explanatory).  Re-theming re-styles the whole widget tree
         # synchronously on the UI thread, so it's locked out mid-run to stop
         # users hammering it while a pipeline floods the main loop.
@@ -16204,7 +16204,7 @@ class MainWindow:
                 label=label, value=value,
                 variable=self.voice_quality_var,
                 command=self._on_voice_quality_pick)
-        # Escape hatch for a damaged model download (monkeybug): clears the
+        # Escape hatch for a damaged model download (a tester): clears the
         # huggingface cache dirs so the next run re-downloads clean.  Locked
         # out mid-run — a transcribe in flight holds its model files open.
         vq_menu.add_separator()
@@ -16218,7 +16218,7 @@ class MainWindow:
         menu.add_separator()
 
         # Prerequisites — one cascade, like the voice-quality submenu above
-        # (monkeybug: three loose prerequisite lines read as clutter).  The
+        # (a tester: three loose prerequisite lines read as clutter).  The
         # cascade LABEL is the status summary, so the state is visible without
         # opening it; the submenu holds the Re-check / Install actions.  The
         # strip under the title tucks itself away once everything is green,
@@ -16338,7 +16338,7 @@ class MainWindow:
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
         pre-filled from Output Folder + File Name); section 2 flashes an
-        image onto a card; both = build-then-flash in one click (monkeybug:
+        image onto a card; both = build-then-flash in one click (a tester:
         testing on the machine was always a two-step).  The dialog hands the
         choice to the app's ``on_build_flash`` / ``on_flash_image``
         callbacks, which run the pipelines through the normal status area.
@@ -16370,7 +16370,7 @@ class MainWindow:
                               and getattr(caps, "write", False)))
         # Pre-fill the flash box with the image the Output Folder + File Name
         # boxes point at, when it's already been built — flashing what you
-        # just built is the overwhelmingly common case (monkeybug batch 8).
+        # just built is the overwhelmingly common case (feedback batch 8).
         initial = target if (target and os.path.isfile(target)) else None
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
@@ -16643,7 +16643,7 @@ class MainWindow:
             # Happy path: the detected game now lives in the TITLE BAR (via
             # the App), not in a tab badge — "Detected: Led Zeppelin (Spike 2)
             # — Spike 2 card image" repeated the header pills and burned a row
-            # (monkeybug batch 20).  The badge keeps only genuine warnings.
+            # (feedback batch 20).  The badge keeps only genuine warnings.
             try:
                 caption = mfr.title_caption(path, game)
             except Exception:
@@ -17065,7 +17065,7 @@ class MainWindow:
         """Amber warning under the File Name box when the chosen name would
         overwrite an existing file (or the original itself); blank otherwise —
         the Output Folder + File Name boxes already say where the build lands,
-        so a redundant "Output: …" line was noise (monkeybug 4.6).  The label
+        so a redundant "Output: …" line was noise (a tester 4.6).  The label
         stays put as the layout anchor other rows pack ``before=``."""
         lbl = getattr(self, "_write_filename_lbl", None)
         if lbl is None:
@@ -17082,7 +17082,7 @@ class MainWindow:
                 foreground="#d04040")
         elif os.path.exists(target):
             # Informational, not alarming: Build now asks before overwriting
-            # (monkeybug batch 14), so the standing label just states the
+            # (feedback batch 14), so the standing label just states the
             # fact.
             lbl.configure(
                 text=f"{os.path.basename(target)} already exists here — "
@@ -17208,7 +17208,7 @@ class MainWindow:
         # widget once one is selected.  For now, silently drop them.
         ts = time.strftime("%H:%M:%S")
         # Every pane line is also mirrored into the rolling on-disk history
-        # (survives restarts and in-place updates — monkeybug), including
+        # (survives restarts and in-place updates — a tester), including
         # buffered lines: the file wants the real event time, not the flush.
         session_log.append(text, level)
         if self._log_text is None:
@@ -17254,7 +17254,7 @@ class MainWindow:
         Tk's default handler prints the traceback to stderr, which a windowed
         build has nowhere to show — so a button or an edit that half-completed
         looked to the user like a dead control with no error anywhere.  That is
-        how monkeybug's F2 rename read: the file was renamed but the exception
+        how a tester's F2 rename read: the file was renamed but the exception
         skipped the list refresh, leaving a row with the old name that clicked
         into nothing (batch 23).  One line in the log, and the traceback in the
         session log for a bug report.
@@ -17410,12 +17410,12 @@ class MainWindow:
             # Replace the previous run's terminal status ("Complete!" /
             # "Failed") right away — it used to linger well into the new run
             # until the first progress callback, which read as "already done"
-            # (monkeybug batch 8).
+            # (feedback batch 8).
             self.set_status("Starting…")
             # (Re-theming is a heavy synchronous re-style; the ⚙ menu greys
             # out its theme entry while running so clicks can't queue up.)
             # Only the initiating side's button becomes the live Cancel; the
-            # other greys out with its idle label (monkeybug batch 9 — two
+            # other greys out with its idle label (feedback batch 9 — two
             # simultaneous "Cancel"s, and the Write one killed his extract).
             self._set_extract_button_running(True, active=(mode == "extract"))
             self._set_write_button_running(True, active=(mode == "write"))
@@ -17423,7 +17423,7 @@ class MainWindow:
                 self._revert_all_btn.configure(state=tk.DISABLED)
             # One live Cancel at a time: kill any in-flight Modified Files
             # scan (its "Cancel scan" would sit next to the run's "Cancel" —
-            # monkeybug batch 10) and grey Refresh for the run's duration.
+            # feedback batch 10) and grey Refresh for the run's duration.
             # The scan re-fires when the run ends.
             if "write_preview" in self._scan_spinner_after:
                 self._cancel_scan("write_preview")
@@ -17561,7 +17561,7 @@ class MainWindow:
         # protected your PC" pass on every release) and runs it silently;
         # Linux downloads the AppImage and offers to start it, because
         # from inside an AppImage a browser handoff is unreliable enough
-        # that the Download button did nothing at all (aly).  Built here
+        # that the Download button did nothing at all (a tester).  Built here
         # but packed only by show_update_banner when the release carries
         # this platform's asset and app.py wired the flow (jim-beam).
         # Its verb is set there too — Linux installs nothing.
@@ -17663,7 +17663,7 @@ class MainWindow:
         whether the opener actually survived (core.desktop), and Tk must
         not freeze mid-click.  A failure isn't silent: on a Linux
         AppImage the desktop's opener can be missing or refuse the
-        bundle's environment entirely (aly), so we put the URL on the
+        bundle's environment entirely (a tester), so we put the URL on the
         clipboard and show it, rather than leaving a dead button.
         """
         if not url:

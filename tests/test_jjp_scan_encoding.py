@@ -1,6 +1,6 @@
 """JJP Write scan died on non-ASCII asset names in the baseline.
 
-Alex's Sonic build failed at "Scanning for modified files..." with
+A tester's Sonic build failed at "Scanning for modified files..." with
 "'charmap' codec can't decode byte 0x81".  The baseline ``.checksums.md5``
 is written UTF-8, but the JJP scan and mod-pack readers opened it with the
 platform default encoding — cp1252 on Windows — so any non-ASCII filename

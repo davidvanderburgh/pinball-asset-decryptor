@@ -2,7 +2,7 @@
 
 A JJP machine can't read a raw-imaged (Etcher/dd) stick: it mounts the
 stick's FAT volume at power-on and runs the installer from the files it
-finds there (Alex's Sonic report — "Failed to mount USB stick").  These
+finds there (a tester's Sonic report — "Failed to mount USB stick").  These
 tests drive ``UsbStickPreparePipeline``'s Check/Copy/Verify core on plain
 folders (a directory device_path/iso_path short-circuits the privileged
 format/mount steps by design) plus the manufacturer/dialog wiring.  No
@@ -189,7 +189,7 @@ def test_prepare_verify_catches_corrupt_copy(tmp_path):
 
 def test_windows_format_script_survives_stale_disk_view():
     """New-Partition right after Clear-Disk sees the cmdlets' stale cached
-    view of the disk and fails with "Not enough available capacity" (Alex's
+    view of the disk and fails with "Not enough available capacity" (a tester's
     Sonic stick) — the script must re-sync and retry, and must surface the
     first real error alone instead of a null-parameter cascade."""
     script = usbstick._win_format_script(3)
@@ -210,7 +210,7 @@ def test_windows_diskpart_fallback_script():
     """When the storage cmdlets fail, the format is redone with diskpart —
     a different service (VDS) that does not share the Storage-WMI cache
     that kept saying "Not enough available capacity" through all six
-    retries on Alex's stick.  Everything the wedged provider could lie
+    retries on a tester's stick.  Everything the wedged provider could lie
     about must come from elsewhere: size from Win32_DiskDrive, the drive
     letter from DriveInfo, assigned explicitly."""
     script = usbstick._win_diskpart_script(3)

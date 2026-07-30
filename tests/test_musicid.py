@@ -67,7 +67,7 @@ def test_resolve_client_key_precedence(monkeypatch):
 def test_already_named_gate():
     """Files a naming pass already titled are never fingerprint-candidates —
     on a band pin a long Sound-Test SFX carries a song riff, so AcoustID
-    happily double-labels it (monkeybug's "SE FX ZEPPELIN AWARD - Immigrant
+    happily double-labels it (a tester's "SE FX ZEPPELIN AWARD - Immigrant
     Song"); a re-run must also not stack a second title."""
     assert M._already_named("idx0384 - SE FX ZEPPELIN AWARD.wav")
     assert M._already_named("idx0100 - Welcome to the machine.wav")

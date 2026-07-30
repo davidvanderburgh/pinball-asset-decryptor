@@ -81,9 +81,9 @@ def dropped_assignments(saved, slots_by_rel):
 
     A disconnected NAS share / mapped drive looks exactly like a missing
     source file, so callers must WARN with these instead of quietly building
-    or exporting without a recorded replacement (monkeybug).
+    or exporting without a recorded replacement (a tester).
 
-    The two missing-file cases get different words (batch 24: monkeybug read
+    The two missing-file cases get different words (batch 24: a tester read
     "NAS/drive disconnected?" as the app failing to load a clip that was fine):
     when the file's own folder still answers, the drive is clearly connected —
     the file itself was moved, renamed or deleted since it was picked.  Only
@@ -115,7 +115,7 @@ def same_stem_sibling(path):
     The usual story behind "the file is no longer in its folder": the clip
     was re-exported in a new container and the old file deleted, so only the
     extension differs — a difference invisible in a full NAS path (batch 25:
-    monkeybug saw ``26s_..._Promos2.mov`` sitting right there and read the
+    A tester saw ``26s_..._Promos2.mov`` sitting right there and read the
     note about the recorded ``...Promos2.mp4`` as a false alarm).  Callers
     surface it next to the missing path so the note explains itself."""
     folder = os.path.dirname(path) or "."

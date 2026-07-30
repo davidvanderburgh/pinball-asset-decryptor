@@ -1,4 +1,4 @@
-"""GUI guards for monkeybug batch 16.
+"""GUI guards for feedback batch 16.
 
 Covers the pieces that are easy to break silently by editing layout code:
 the "Changed only" filters, the removed sort-hint labels + their former
@@ -59,7 +59,7 @@ def _show_tab(app, w, frame):
     app.root.update(); app.root.update_idletasks()
 
 
-# ---- "Changed only" filter (monkeybug: show only modified files) ----------
+# ---- "Changed only" filter (a tester: show only modified files) ----------
 
 def test_audio_changed_only_filters_the_list(app):
     w = _stern(app)
@@ -109,7 +109,7 @@ def test_changed_only_does_not_hide_the_total_count(app):
 # ---- the removed sort hints + their former pack anchors -------------------
 
 def test_sort_hint_labels_are_gone(app):
-    """They were pure clutter after first read (monkeybug)."""
+    """They were pure clutter after first read (a tester)."""
     w = _stern(app)
     assert not hasattr(w, "_audio_sort_hint_lbl")
     for tab in (w._tab_audio, w._tab_video, w._tab_image):

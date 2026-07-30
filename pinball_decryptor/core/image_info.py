@@ -8,7 +8,7 @@ partitions, validation manifest, on-card asset counts, …).
 
 Users work with multiple firmware versions and report bugs by forum post, so
 the point is one place that answers "exactly what image is this?" —
-:func:`as_text` renders the same sections as a copy-pasteable report (peanuts).
+:func:`as_text` renders the same sections as a copy-pasteable report (a tester).
 
 GUI-free on purpose (the collector runs on a worker thread and is unit-tested
 without Tk); the Image Info window only renders what this returns.

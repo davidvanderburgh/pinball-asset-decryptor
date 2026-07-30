@@ -150,12 +150,12 @@ def test_capacity_is_the_strings_own_allocation():
 def test_patch_is_size_neutral_and_reads_back():
     elf, hs, _o = load()
     out = hs.patched_bytes({"GRAND CHAMPION": {"initials": "PAD",
-                                               "name": "MONKEYBUG"},
+                                               "name": "NEWCHAMP"},
                             "HIGH SCORE #1": {"initials": "DAV"}})
     assert len(out) == len(elf)
     again = HighScoreDefaults(out, AdjustmentTable(out)).by_label()
     assert again["GRAND CHAMPION"]["initials"] == "PAD"
-    assert again["GRAND CHAMPION"]["name"] == "MONKEYBUG"
+    assert again["GRAND CHAMPION"]["name"] == "NEWCHAMP"
     assert again["HIGH SCORE #1"]["initials"] == "DAV"
     # Untouched slots are untouched.
     assert again["HIGH SCORE #2"]["initials"] == "JMR"

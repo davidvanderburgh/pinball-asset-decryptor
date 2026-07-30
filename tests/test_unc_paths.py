@@ -2,7 +2,7 @@
 
 WSL never automounts network shares, so ``\\\\plexnas\\Work\\...`` used to be
 naively rewritten to ``//plexnas/Work/...`` — a path that doesn't exist inside
-WSL, killing loop mount AND the xorriso fallback (monkeybug's GNR extract).
+WSL, killing loop mount AND the xorriso fallback (a tester's GNR extract).
 Every WSL executor now translates UNC paths onto an on-demand
 ``mount -t drvfs`` mount under /mnt/unc/.  These tests drive the translation
 and mount bookkeeping with executor.run() recorded, so they run on every

@@ -1,7 +1,7 @@
 """Unit tests for core.transcribe's cache helpers (no model, no network).
 
 clear_whisper_cache backs the ⚙ menu's "Clear downloaded voice models"
-(monkeybug: a damaged download kept failing with "Unable to open file
+(a tester: a damaged download kept failing with "Unable to open file
 'model.bin'" and manual cache surgery was the only way out).  The critical
 property: it must remove ONLY the faster-whisper model dirs — the same
 huggingface hub cache holds users' unrelated models (stable-diffusion etc.).

@@ -1,11 +1,11 @@
-"""Per-tab tips window — the header "?" button (monkeybug feedback).
+"""Per-tab tips window — the header "?" button (tester feedback).
 
 Every working-view tab carries a pile of behaviour that used to live only in
 inline grey prose or hover tooltips.  This window collects those tips per tab
 so a user can pull up "everything worth knowing about this page" on demand
 instead of hunting for hidden hovers.
 
-One window per app (monkeybug round 2): clicking "?" re-uses the open window
+One window per app (a tester round 2): clicking "?" re-uses the open window
 instead of stacking a new Toplevel per click, and switching notebook tabs
 re-renders the open window for the new tab so the text never goes stale.
 

@@ -4,7 +4,7 @@ Image-group tags (the "Rename group…" names in Replace Images) are stored per
 extract folder in that folder's ``.staged_changes.json`` sidecar, keyed by the
 group's container identity (``rad::`` / ``scn::`` / ``dir::``).  A brand-new
 extract folder has no sidecar, so re-extracting the *same* card loses every name
-the user typed — monkeybug's report (they DO ride mod packs + version transfer,
+the user typed — a tester's report (they DO ride mod packs + version transfer,
 but a plain re-extract starts blank).
 
 This module mirrors those names into one small JSON file next to

@@ -7,7 +7,7 @@ folder holds glyph slices at
     <project>/images/scene_textures/glyphs/<atlas stem>/U+0041_A.png
 
 which is 120+ characters of suffix on its own, and the Build's output sits
-under whatever folder the user picked.  Peter hit exactly this — his font
+under whatever folder the user picked.  A tester hit exactly this — his font
 import applied, then the build failed, and shortening the build path fixed it
 with no error saying why.
 
@@ -70,7 +70,7 @@ def hint(path):
     """A sentence naming the length problem, or ``""`` when there isn't one.
 
     Worth saying out loud: a too-long path fails with a bare "cannot find the
-    file" that reads as a missing file, which is what sent Peter looking in the
+    file" that reads as a missing file, which is what sent a tester looking in the
     wrong place."""
     if not is_long(path):
         return ""

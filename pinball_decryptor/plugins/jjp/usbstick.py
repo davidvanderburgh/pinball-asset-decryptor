@@ -3,7 +3,7 @@
 A JJP machine never boots the install stick.  At power-on the game's own boot
 sequence mounts the stick's FAT volume and runs the installer it finds there,
 so a raw-imaged (Etcher/dd) stick is unreadable to it — the machine shows
-"Failed to mount USB stick" and boots the old game (Alex's Sonic report,
+"Failed to mount USB stick" and boots the old game (a tester's Sonic report,
 2026-07-29).  JJP's own procedure is Rufus in ISO Image mode on Windows, or
 "format MS-DOS(FAT) + copy the ISO's files" on macOS.  This pipeline is that
 procedure in-app:
@@ -20,7 +20,7 @@ Per-OS mechanics:
     Format-Volume) for the format; ``Mount-DiskImage`` for the ISO.  The
     cmdlets see a stale view of the disk right after Clear-Disk — New-
     Partition then fails with "Not enough available capacity" even though
-    the disk is empty (Alex's Sonic stick, 2026-07-29) — so the script
+    the disk is empty (a tester's Sonic stick, 2026-07-29) — so the script
     re-syncs with Update-Disk and retries the partition/format steps.
     That stale view can also wedge outright — the provider keeps serving
     it no matter how often Update-Disk asks (the same stick, later that
@@ -199,7 +199,7 @@ def _win_format_script(n):
     The storage cmdlets serve a cached view of the disk, and right after
     Clear-Disk that view still shows the old partitions — New-Partition
     then fails with "Not enough available capacity" on an empty stick
-    (Alex's Sonic stick, 2026-07-29).  Update-Disk re-reads the hardware,
+    (a tester's Sonic stick, 2026-07-29).  Update-Disk re-reads the hardware,
     and the partition and format steps retry across the window where the
     cache catches up.  $ErrorActionPreference Stop makes the first real
     failure THE error instead of the head of a null-parameter cascade.
@@ -275,7 +275,7 @@ def _win_diskpart_script(n):
     The Storage-WMI provider behind the cmdlets can keep serving a stale
     view of the just-cleared disk no matter how often Update-Disk asks —
     all six retries in :func:`_win_format_script` failed with "Not enough
-    available capacity" on Alex's Sonic stick (2026-07-29).
+    available capacity" on a tester's Sonic stick (2026-07-29).
     diskpart reaches the disk through the Virtual Disk Service instead and
     does not share that cache, so this script leans on it for everything
     the provider could lie about: the disk size comes from the old

@@ -7,7 +7,7 @@ glyph_h, bearing_x, bearing_y, advance — appended by the same release that
 added this module) carry the radium glyph-record layout floats.  See
 ``radium.py``'s format comment for how those were derived.
 
-Two jobs, both feeding the GUI's Font Preview / Import window (Peter):
+Two jobs, both feeding the GUI's Font Preview / Import window (a tester):
 
 * :func:`render_text` — composite a string exactly the way the game lays it
   out (pen + bearing X, baseline − bearing Y, advance), reading the CURRENT
@@ -17,7 +17,7 @@ Two jobs, both feeding the GUI's Font Preview / Import window (Peter):
 
 * :func:`rasterize_ttf` — fit a TTF/OTF font into an existing glyph table:
   one uniform pixel size chosen so every character's ink fits its atlas slot
-  (the hard part of font swaps done by hand — Peter's turtle font), each glyph
+  (the hard part of font swaps done by hand — a tester's turtle font), each glyph
   baseline-aligned into its slot and returned at as-stored orientation, ready
   to save over the slice PNGs (Write then splices only the changed BC blocks).
 
@@ -36,7 +36,7 @@ GLYPH_MANIFEST = os.path.join("images", "scene_textures", "glyph_images.txt")
 LINE_GAP = 2          # extra px between lines (display nicety, not from card)
 
 #: Below this the letters are too few pixels tall for a desktop font to survive
-#: the fit — Peter, who restyled a whole game: "smaller fonts do look more and
+#: the fit — a tester, who restyled a whole game: "smaller fonts do look more and
 #: more strange the smaller they get… i guess they should be skipped and left
 #: alone (about smaller 30 pixel)".  Advisory: the Fonts window says so and
 #: asks, it never refuses.
@@ -388,7 +388,7 @@ def fit_size(measure, slots, lo=2, hi=512, squeeze=1.0):
 
     *squeeze* < 1 relaxes the WIDTH constraint: ink may be up to
     ``lw / squeeze`` wide because the rasterizer will compress it
-    horizontally into the slot (Peter: a wide typeface otherwise lets its
+    horizontally into the slot (a tester: a wide typeface otherwise lets its
     'W' crush the whole font to a fraction of the slot height — height
     should govern the size, width gets a bounded squeeze)."""
     core = _core_chars(slots)
@@ -446,13 +446,13 @@ def rasterize_ttf(font, ttf_path, color=None, stroke=0, stroke_color=(0, 0, 0),
     compressed horizontally at raster time, down to *squeeze* (0.6 = ink may
     be squeezed to 60% of its natural width before the whole font shrinks
     instead).  Without this, one wide 'W' crushes a wide typeface to a
-    fraction of the slot height (Peter's turtle font).  ``squeeze=1.0``
+    fraction of the slot height (a tester's turtle font).  ``squeeze=1.0``
     restores strict keep-aspect fitting.
 
     *width_scale* (< 1) draws each letter narrower than its slot, leaving a
     side bearing inside the SAME atlas rect.  The game lays text out with the
     card's own advances, which an import must not change, so a letter that
-    fills its slot edge to edge sits hard against its neighbour — Peter, after
+    fills its slot edge to edge sits hard against its neighbour — a tester, after
     restyling a card: "some of the letters are very near together".  Shrinking
     the whole font (*size_scale*) opens the gaps but throws away height too;
     this buys the gap for width alone.
@@ -655,7 +655,7 @@ def blank_slices(font):
 def clear_font(font):
     """Blank every glyph of *font* on disk.  Returns the file count.
 
-    This is Peter's "removing the shadow font in total": a title is drawn as an
+    This is a tester's "removing the shadow font in total": a title is drawn as an
     outline instance UNDER a fill instance, so restyling only the fill leaves
     the ORIGINAL typeface's black silhouette behind the new letters — the
     "strange inconsistent black border" he could not place.  Blanking the
@@ -704,7 +704,7 @@ def revert_slices(assets_dir, font):
 # carry one.
 #
 # So restyling the body font alone leaves the OLD typeface's silhouette drawn
-# behind the new letters.  That is Peter's "strange inconsistent black border",
+# behind the new letters.  That is a tester's "strange inconsistent black border",
 # his "everything else from white as black", and his "i do still see font
 # glyphs on some places" — one cause, three symptoms, and no way to find it
 # from the Fonts window because the companion is listed as an unrelated font.
@@ -905,7 +905,7 @@ def scenes_for_font(assets_dir, font):
 # Scenes embed their own copy of every atlas, but identical copies extract to
 # ONE PNG (see ``extract_radium_images``), so by default editing a font
 # rewrites it in every scene that uses it — usually what you want ("restyle
-# the game"), sometimes not ("restyle only the training scene", Peter).
+# the game"), sometimes not ("restyle only the training scene", a tester).
 #
 # The scope file is that opt-out: rows of ``atlas_rel <TAB> radium card path``
 # naming the ONLY scenes an atlas's edits may be written to.  An atlas with no

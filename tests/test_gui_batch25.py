@@ -1,4 +1,4 @@
-"""Monkeybug batch 25 — logic-level tests for the Video/Audio/Images fixes.
+"""Feedback batch 25 — logic-level tests for the Video/Audio/Images fixes.
 
 No Tk window is built: the methods under test only touch plain attributes,
 so duck-typed ``self`` stubs exercise them the way the real window does.
@@ -109,7 +109,7 @@ def test_pristine_slot_is_not_changed(tmp_path):
 # Images search: a word sitting in the card-path prefix EVERY container
 # shares ("stern" in the mount root) matched ~5000 rows while naming none of
 # them.  Only the distinguishing tail of a group key is searched now; scene
-# hashes (Peter) and explicit path fragments still work.
+# hashes (a tester) and explicit path fragments still work.
 # ---------------------------------------------------------------------------
 
 _RAD_A = "rad::/sternpinball/game/scenes/a1b2c3d4e5f6/scene.radium"

@@ -1,4 +1,4 @@
-"""Tests for recolouring a scene's display text (Peter's "turtle green").
+"""Tests for recolouring a scene's display text (a tester's "turtle green").
 
 The colour a line of text is drawn in is a property of the SCENE, not of the
 font: the glyph atlas is white ink so the scene can multiply it by an RGBA it

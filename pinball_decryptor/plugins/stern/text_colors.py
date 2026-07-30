@@ -1,4 +1,4 @@
-"""The scene text-colour manifest: ``<assets>/text/colors.tsv`` (Peter).
+"""The scene text-colour manifest: ``<assets>/text/colors.tsv`` (a tester).
 
 A Spike 2 font atlas is white ink on black (or a black silhouette on
 transparent) — deliberately, because the COLOUR is applied by the scene, which

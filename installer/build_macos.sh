@@ -59,7 +59,7 @@ pip3 install -r "$ROOT_DIR/requirements.txt" pyinstaller UnityPy fsb5 pyogg fast
 # PIL.ImageTk, whose Tk glue pulls in PIL._tkinter_finder and the
 # _imagingtk extension module, and neither is reachable by static
 # analysis.  The Linux AppImage shipped without them and every video
-# frame preview came up "No module named 'PIL._tkinter_finder'" (aly,
+# frame preview came up "No module named 'PIL._tkinter_finder'" (a tester,
 # v0.86 through v0.88).  --collect-all takes the submodules, the data
 # AND the native .so/.dylib files, so the whole of Pillow is there.
 pyinstaller \

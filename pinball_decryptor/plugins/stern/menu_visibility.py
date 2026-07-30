@@ -1,6 +1,6 @@
 """Which Spike 2 adjustments the machine's operator menu can actually show.
 
-peanuts asked why settings that read fine in the firmware never appear in the
+A tester asked why settings that read fine in the firmware never appear in the
 game menu on a real machine (Mandalorian's ``ALLOW TOPPER CHEATS`` and
 ``THIS IS THE WAY DEBUG``).  The RE answer, written up in
 ``plans/spike2_hidden_adjustments_re.md``, is that **nothing marks the
@@ -36,7 +36,7 @@ otherwise.
 Reading the pages is also what makes it possible to CHANGE them.  The debug
 tail always sits immediately above the feature page's last id, so raising that
 one id exposes it — see :func:`widen_plan` and :func:`widened_bytes`, which
-rewrite the single immediate the caller uses to set it (peanuts: "it would be
+rewrite the single immediate the caller uses to set it (a tester: "it would be
 cool to be able to write and activate these").
 """
 import collections

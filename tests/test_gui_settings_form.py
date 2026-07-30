@@ -1,4 +1,4 @@
-"""GUI guards for the Defaults tab's editable settings form (monkeybug b23).
+"""GUI guards for the Defaults tab's editable settings form (a tester b23).
 
 The batch-23 report: two settings he had never opened were staged for the next
 Build while he typed a player name, and the log said so again on every
@@ -116,7 +116,7 @@ def _form_texts(w):
 
 def test_score_rows_leave_the_settings_grid_for_high_scores(app):
     """Every champion belongs with the board, including the ones the ELF has
-    no initials/player-name record for (monkeybug's red circle)."""
+    no initials/player-name record for (a tester's red circle)."""
     w = _build(app)
     texts = _form_texts(w)
     assert "High Scores" in texts          # the block's own heading
@@ -133,7 +133,7 @@ def test_group_headings_are_drawn(app):
 
 
 def test_log_names_the_setting_and_both_values(app):
-    """monkeybug: "the log might be more useful if it states the previous
+    """a tester: "the log might be more useful if it states the previous
     value and the new value"."""
     w = _build(app)
     w._settings_logged = w._settings_log_state()      # adopt the loaded state

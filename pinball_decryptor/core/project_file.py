@@ -1,6 +1,6 @@
 """Project files — one JSON snapshot of every path + option for a game.
 
-monkeybug bounces between several Led Zeppelin / Beatles versions at once and
+A tester bounces between several Led Zeppelin / Beatles versions at once and
 had to re-check every path and checkbox each time he switched.  A project
 file captures the whole working setup — manufacturer, the Extract/Write
 paths, and the Extract options — so loading one file puts the app exactly

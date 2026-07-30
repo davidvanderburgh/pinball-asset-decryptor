@@ -1,6 +1,6 @@
 """The update banner's Download button must never be a dead button.
 
-aly, Ubuntu AppImage: clicking Download did nothing -- the browser
+A tester, Ubuntu AppImage: clicking Download did nothing -- the browser
 handoff failed inside the bundle's environment and the GUI had no way to
 know.  ``MainWindow.open_link`` now goes through core.desktop (which
 reports failure honestly) and surfaces the URL when it can't be opened.

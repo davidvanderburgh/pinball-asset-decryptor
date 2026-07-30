@@ -1,6 +1,6 @@
 """Best-effort audio-slot categories for the Replace Audio "Type" filter.
 
-Four buckets cover what the naming pipelines can tell apart (monkeybug's
+Four buckets cover what the naming pipelines can tell apart (a tester's
 "working on callouts, hide everything else"):
 
 * ``music``    — jukebox/bank tracks: ``music_cat``-stem decodes, files the
@@ -103,9 +103,9 @@ def classify(assets_dir, rel_paths):
     """``{rel: category}`` for every path in *rel_paths*.
 
     Precedence: the user's own remembered category (a right-click rename
-    records the slot's bucket, so a renamed SFX stays an SFX — monkeybug),
+    records the slot's bucket, so a renamed SFX stays an SFX — a tester),
     then bank/menu identity from the filename (music_cat stem, "SE FX"
-    label) which beats the CSVs — monkeybug's pre-fix Led Zeppelin extract
+    label) which beats the CSVs — a tester's pre-fix Led Zeppelin extract
     has SFX rows inside music_titles.csv, and a later user rename orphans a
     CSV row — then CSV classifications, then the label heuristics."""
     callouts = _load_callouts(assets_dir)

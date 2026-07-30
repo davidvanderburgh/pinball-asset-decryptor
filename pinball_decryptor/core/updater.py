@@ -16,7 +16,7 @@ Linux
     Downloads the ``.AppImage`` and offers to start it.  Here the reason
     is simpler: from inside an AppImage, handing a URL to the desktop's
     browser opener is unreliable enough that the Download button did
-    nothing at all, with no error, for aly across four releases.  We
+    nothing at all, with no error, for a tester across four releases.  We
     can always fetch a file; we cannot always open a browser.
 """
 
@@ -106,7 +106,7 @@ def _pick_installer_asset(assets, platform=None, machine=None):
         is here at all because the browser-download flow it used to have
         was not a flow: inside an AppImage the desktop's URL opener
         inherits a bundle environment it can't run in, and the banner's
-        Download button did nothing at all, silently, for aly across
+        Download button did nothing at all, silently, for a tester across
         v0.85 through v0.88.  Fetching the file ourselves needs no
         browser, so there is nothing left to fail.
 

@@ -133,7 +133,7 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
     # PATH scan (no subprocess), so an installed tool resolves instantly even
     # while a big extract + disk churn hammer the machine.  Actually executing
     # `ffmpeg -version` under that load can blow past PROBE_TIMEOUT or fail to
-    # spawn, wrongly flipping a green prereq to red mid-extract — monkeybug saw
+    # spawn, wrongly flipping a green prereq to red mid-extract — a tester saw
     # ffmpeg flagged missing during a Led Zeppelin extract, then a re-check when
     # idle said OK.  Only fall through to running the command when the tool
     # ISN'T on PATH (a genuine "not installed") or the probe is compound.

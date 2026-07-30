@@ -208,7 +208,7 @@ def test_statuses_split_visible_service_and_debug():
     # Unreachable, but the operator still edits these elsewhere.
     assert by_name["AD_SOUND_MASTER_VOLUME_SETTING"] == SERVICE
     assert by_name["AD_TOURNAMENT_TYPE"] == SERVICE
-    # peanuts' two confirmed-hidden Mandalorian settings, in miniature.
+    # a tester' two confirmed-hidden Mandalorian settings, in miniature.
     assert by_name["AD_TEST_THIS_IS_THE_WAY"] == DEBUG
     assert by_name["AD_TOPPER_CHEATS"] == DEBUG
 
@@ -246,7 +246,7 @@ def test_caption_falls_back_to_the_name():
 
 
 # ---------------------------------------------------------------------------
-# Widening the feature page so the machine SHOWS the hidden tail (peanuts).
+# Widening the feature page so the machine SHOWS the hidden tail (a tester).
 # ---------------------------------------------------------------------------
 
 HIDDEN = ["AD_TEST_THIS_IS_THE_WAY", "AD_TOPPER_CHEATS"]

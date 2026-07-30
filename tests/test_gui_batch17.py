@@ -1,4 +1,4 @@
-"""GUI guards for monkeybug batch 17 (the lost-audio post-mortem batch).
+"""GUI guards for feedback batch 17 (the lost-audio post-mortem batch).
 
 Covers: the folder-mismatch warning keeping a real folder name across
 invalidate_asset_scans (no more "(unknown)"), the Defaults tab's staged
@@ -48,7 +48,7 @@ def test_mismatch_warning_names_folder_after_invalidate(app, tmp_path):
     """invalidate_asset_scans (after an Extract) clears the scan stamps but
     not the in-memory assignments — the Build/Export mismatch check must
     still name the folder they were made against, not "(unknown)"
-    (monkeybug's export warning), and must treat the SAME folder as a
+    (a tester's export warning), and must treat the SAME folder as a
     match."""
     w = _stern(app)
     old = str(tmp_path / "old_extract"); os.makedirs(old)
@@ -171,7 +171,7 @@ def test_staged_default_settings_ignores_garbage(app, tmp_path):
 
 def test_image_preview_header_honest_without_snapshot(app, tmp_path):
     """A changed-on-disk slot with no .orig snapshot holds replacement bytes:
-    the left pane must not call them "Original" (monkeybug read his imported
+    the left pane must not call them "Original" (a tester read his imported
     logo as a lost mod).  With a snapshot the true original is shown and the
     header stays "Original"."""
     w = _stern(app)

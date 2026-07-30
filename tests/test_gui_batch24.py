@@ -1,4 +1,4 @@
-"""Monkeybug batch 24 — logic-level tests for the Video/Audio tab fixes.
+"""Feedback batch 24 — logic-level tests for the Video/Audio tab fixes.
 
 No Tk window is built: the methods under test only touch plain attributes,
 so a duck-typed ``self`` exercises them the way the async workers do.

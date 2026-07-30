@@ -106,7 +106,7 @@ DEFAULT_MUSIC_MIN_SECONDS = 20.0
 # encoder activations for a long (multi-minute) clip are what dominate.
 # Deliberately generous: under-counting is exactly what let 7 medium.en workers
 # exhaust memory partway through a run and spew "mkl_malloc: failed to allocate
-# memory", silently demoting long music/speech clips to non-speech (monkeybug,
+# memory", silently demoting long music/speech clips to non-speech (a tester,
 # Led Zeppelin extract — the failures bunched at the end because files are
 # duration-sorted, so every worker hit a multi-minute clip at once).
 _MODEL_WORKER_GB = {
@@ -220,7 +220,7 @@ class TranscribePipeline(BasePipeline):
         # The user's own remembered names go on FIRST (matched by factory
         # content hash), so a manual correction beats Whisper mis-hearing the
         # same clip on every extract — the renamed files are then skipped
-        # below as already-named (monkeybug).
+        # below as already-named (a tester).
         if self.rename_after:
             from . import name_memory
             name_memory.apply_saved_names(self.assets_dir, self._log)
@@ -313,7 +313,7 @@ class TranscribePipeline(BasePipeline):
         out_path = os.path.join(self.assets_dir, CALLOUTS_CSV)
         self._log(f"Writing {CALLOUTS_CSV}...", "info")
         # folder + file split into their own columns and a numeric seconds
-        # column (both plain sort keys in Excel — monkeybug: the combined
+        # column (both plain sort keys in Excel — a tester: the combined
         # path drowned the filename, and the play length was only findable
         # inside the Length-prefix filename).
         with open(out_path, "w", encoding="utf-8", newline="") as f:
@@ -356,7 +356,7 @@ class TranscribePipeline(BasePipeline):
         Hugging Face HTTP errors (the anonymous per-IP 429 rate limit,
         dropped connections) and silently falls back to whatever partial
         snapshot is cached, so EVERY failure surfaces as "Unable to open
-        file 'model.bin'" — monkeybug hit that wall repeatedly, with the
+        file 'model.bin'" — a tester hit that wall repeatedly, with the
         cache self-heal powerless because each "re-download" 429'd the same
         silent way.  Doing the snapshot_download here makes the real error
         visible: 429s wait the server's suggested delay and retry, a dead
@@ -570,14 +570,14 @@ class TranscribePipeline(BasePipeline):
         # spawning workers and hand them the local PATH: on a cold cache
         # every worker would otherwise download it at once, and ~8
         # simultaneous anonymous downloads is exactly what trips Hugging
-        # Face's per-IP rate limit (monkeybug's 429).  A partial cache dir
+        # Face's per-IP rate limit (a tester's 429).  A partial cache dir
         # counts as cold — _resolve_model_dir verifies model.bin exists.
         model_ref = self._resolve_model_dir()
         ncpu = os.cpu_count() or 2
         # Workers are bounded by CPUs (cap 8: each loads its own model, so more
         # is start-up tax for diminishing return) AND by a RAM budget, so a
         # heavy model can't over-subscribe memory and start failing mid-run
-        # ("mkl_malloc: failed to allocate memory" — monkeybug's 7 medium.en
+        # ("mkl_malloc: failed to allocate memory" — a tester's 7 medium.en
         # workers).  See _plan_workers.
         cpu_cap = max(1, min(ncpu - 1, len(wavs), 8))
         nworkers = _plan_workers(self.model_size, ncpu, len(wavs))
@@ -740,7 +740,7 @@ def clear_whisper_cache():
     """Delete every cached faster-whisper model — all sizes, plus any
     ``.corrupt`` dirs the self-heal set aside.  Returns ``(n_dirs,
     bytes_freed)``; the next Auto-name call-outs run re-downloads its model.
-    Backs the ⚙ menu's "Clear downloaded voice models" (monkeybug's ask:
+    Backs the ⚙ menu's "Clear downloaded voice models" (a tester's ask:
     a user-friendly way out of a cache no automatic heal could recover)."""
     try:
         from huggingface_hub.constants import HF_HUB_CACHE

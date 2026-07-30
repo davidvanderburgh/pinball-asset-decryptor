@@ -721,7 +721,7 @@ def test_background_black_is_the_render_that_has_always_been_drawn():
 
 
 def test_black_ink_is_invisible_on_black_and_shows_on_a_light_backdrop():
-    """Peter asked for other backgrounds to "check the black border stuff".
+    """a tester asked for other backgrounds to "check the black border stuff".
     Black ink adds nothing to a black frame — on the machine as here — so it
     can only be looked at over something else."""
     import tempfile

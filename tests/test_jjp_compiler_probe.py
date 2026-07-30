@@ -1,6 +1,6 @@
 """The JJP dongle flow's C-toolchain guard (_ensure_compiler).
 
-Alex Glaser's Sonic dongle extract died five phases in — after the ISO
+A tester's Sonic dongle extract died five phases in — after the ISO
 extract, the mount, the chroot and the dongle handshake — on
 
     fatal error: stdio.h: No such file or directory

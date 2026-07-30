@@ -189,7 +189,7 @@ def _adjustment_rows(fw):
     settings and the scores actually on the board live in the machine's i2c
     NVRAM, which a card reader never sees.  What the card carries is the table
     the game seeds a fresh machine from, and that table is also the definitive
-    list of what the menu offers (peanuts asked for both counts).
+    list of what the menu offers (a tester asked for both counts).
     """
     try:
         from .adjustments import AdjustmentTable, high_score_names
@@ -275,7 +275,7 @@ def _data_partition_probe(card):
 
     # Counted from the card itself, no Extract needed (David).  The sound and
     # sound-request counts are the container header's own plaintext words
-    # (see container_counts) — peanuts: the old row could only say "run
+    # (see container_counts) — a tester: the old row could only say "run
     # Extract", and asked for the request count separately.
     requests = sounds = None
     if image_bin is not None:

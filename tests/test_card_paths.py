@@ -1,6 +1,6 @@
 """Mapping an extracted asset back to its file on the card.
 
-Behind the Replace tabs' "Find in Partition Explorer" (monkeybug batch 16:
+Behind the Replace tabs' "Find in Partition Explorer" (feedback batch 16:
 "it would be great if there was an option to find in partition ... to see
 which radium file they live in").  The Stern extractor records the mapping in
 per-kind TSV manifests; these guard the parsing and the three image stores.

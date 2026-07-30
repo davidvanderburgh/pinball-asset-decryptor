@@ -313,7 +313,7 @@ def test_fit_size_core_chars_only():
 
 
 def test_fit_size_squeeze_lets_height_govern():
-    """Peter round 2: a wide typeface must not be crushed by its widest
+    """a tester round 2: a wide typeface must not be crushed by its widest
     letter — with squeeze, width may overflow (raster compresses it) and
     HEIGHT picks the size."""
     slots = {ord("A"): {"lw": 10, "lh": 20}}
@@ -475,7 +475,7 @@ def test_collect_scenes_groups_manifests(tmp_path):
 #
 # A Stern title draws an outline instance with a fill instance on top, from two
 # DIFFERENT fonts.  Restyling only the fill leaves the original typeface's black
-# silhouette around the new letters — Peter reported that three times over
+# silhouette around the new letters — a tester reported that three times over
 # ("strange inconsistent black border", "everything else from white as black",
 # "i do still see font glyphs on some places") without being able to find it,
 # because the companion is listed here as an unrelated font.
@@ -593,7 +593,7 @@ def test_recolor_slices_round_trips_through_save_and_revert(tmp_path):
 
 
 def test_clear_font_blanks_by_atlas_format(tmp_path):
-    """Removing the companion is Peter's own fix ("removing the shadow font in
+    """Removing the companion is a tester's own fix ("removing the shadow font in
     total").  A BC3 slot goes transparent; a BC1 slot has no usable alpha, so
     it goes opaque BLACK — the machine ADDS BC1 art, and black adds nothing."""
     _make_extract(tmp_path)
@@ -649,7 +649,7 @@ def test_glyph_io_goes_through_the_long_path_form(tmp_path, monkeypatch):
 def test_width_scale_leaves_side_bearings_without_losing_height(tmp_path):
     """The card's own advances lay text out and an import must not change
     them, so a letter that fills its slot sits hard against its neighbour
-    (Peter: "some of the letters are very near together").  Narrowing the INK
+    (a tester: "some of the letters are very near together").  Narrowing the INK
     inside the same slot buys the gap; shrinking the font would buy it by
     giving up height, which is what Size already does."""
     _make_outline_extract(tmp_path)
@@ -705,7 +705,7 @@ def test_outline_companion_appears_beyond_its_body_font(tmp_path):
     """Blanking a companion is CARD-WIDE — one atlas serves every scene that
     draws it.  On TMNT a paired outline font turns up in 446 scene
     occurrences but overlaps its body font in only 6, so a plain blank strips
-    outlines off 440 screens the user never touched.  That is what Peter did
+    outlines off 440 screens the user never touched.  That is what a tester did
     by hand: "i did remove to much shadow, now on the normal font some are
     missing too"."""
     _make_outline_extract(tmp_path)

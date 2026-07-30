@@ -9,7 +9,7 @@ browser launched with that inherited env loads the wrong libraries and
 dies before it ever draws a window, and because ``webbrowser.open``
 reports success the moment ``Popen`` returns, the GUI happily believes
 the link opened.  That is exactly what the update banner's Download
-button looked like on Ubuntu (aly): click, nothing, no error.
+button looked like on Ubuntu (a tester): click, nothing, no error.
 
 So: scrub the bundle out of the child env (PyInstaller stashes the real
 values in ``<VAR>_ORIG``), try the openers in turn, and — the part that

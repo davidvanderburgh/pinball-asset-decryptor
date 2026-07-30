@@ -1,4 +1,4 @@
-"""The Video tab's Convert column under "use my files as-is" — monkeybug b23.
+"""The Video tab's Convert column under "use my files as-is" — a tester b23.
 
 He replaced 29 clips with the as-is box ticked, and the column answered for
 exactly one of them.  Two separate reasons both rendered as an empty cell: a
@@ -101,7 +101,7 @@ def test_playability_check_needs_the_slot_to_be_probed(monkeypatch):
 
 def test_audio_on_a_silent_slot_is_flagged_but_still_plays(monkeypatch):
     """The picture is fine; the machine just also plays the soundtrack the
-    file brought with it (monkeybug: "I forgot to drop the audio off")."""
+    file brought with it (a tester: "I forgot to drop the audio off")."""
     slot = _slot(".mov")                       # VideoInfo default: no audio
     rep = _rep()
     rep.has_audio = True
@@ -177,7 +177,7 @@ def test_recipe_needs_a_probed_slot():
 
 
 # ---------------------------------------------------------------------------
-# Conversion left ON.  aly encoded his replacement to the slot's codec, size
+# Conversion left ON.  A tester encoded his replacement to the slot's codec, size
 # and frame rate but wrote it as .mp4 for a QuickTime slot: only the wrapper is
 # wrong, so it's repackaged (lossless), not re-encoded.
 # ---------------------------------------------------------------------------

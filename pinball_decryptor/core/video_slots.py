@@ -83,7 +83,7 @@ class VideoSlot:
             return "—"
         # Floor, don't round: the preview player's readout floors, and the
         # two disagreeing on the same clip (25.5 s showing 0:26 in the list
-        # but 0:25 in the player) read as a bug (monkeybug batch 14).
+        # but 0:25 in the player) read as a bug (feedback batch 14).
         m, s = divmod(int(d), 60)
         return f"{m}:{s:02d}"
 
@@ -322,7 +322,7 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
             shutil.copy2(replacement_path, tmp)
             detail = "copied through (already matches — no re-encode)"
         elif find_ffmpeg():
-            # The clip may be the slot's own video in the wrong wrapper (aly's
+            # The clip may be the slot's own video in the wrong wrapper (a tester's
             # .mp4 for a QuickTime slot).  Repackaging keeps every coded frame
             # bit-for-bit; only a real mismatch is worth a re-encode.
             repacked = False

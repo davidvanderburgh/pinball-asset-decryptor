@@ -390,7 +390,7 @@ def test_pyinstaller_collects_all_of_pillow(script):
     enough to draw one: ImageTk's Tk glue reaches PIL._tkinter_finder and
     the _imagingtk extension by paths PyInstaller's tracer never walks.
     The v0.86-v0.88 AppImages shipped exactly that way and every video
-    frame preview came up "No module named 'PIL._tkinter_finder'" (aly) --
+    frame preview came up "No module named 'PIL._tkinter_finder'" (a tester) --
     a frozen bundle the user cannot pip-fix.  --collect-all takes the
     submodules, the data and the native libraries together.
     """
@@ -412,7 +412,7 @@ def test_pyinstaller_collects_all_of_pillow(script):
 
 
 def test_windows_build_installs_runtime_deps():
-    """Regression guard — Windows fresh-install missing Stern deps (monkeybug).
+    """Regression guard — Windows fresh-install missing Stern deps (a tester).
 
     The Windows app ships an isolated embeddable Python under {app}\\python;
     its bundled site-packages is the ONLY interpreter the app uses (the ._pth
@@ -435,7 +435,7 @@ def test_windows_build_installs_runtime_deps():
 
 def test_windows_build_bundles_ffmpeg():
     """Regression guard — "ffmpeg not found" on a fresh Windows install
-    (monkeybug).
+    (a tester).
 
     The Replace Audio/Video tabs convert non-native formats + resample via
     ffmpeg.  On Windows the app's isolated embeddable Python can't fall back to
@@ -455,7 +455,7 @@ def test_windows_build_bundles_ffmpeg():
 
 
 def test_windows_installer_offers_every_stern_pip_dep():
-    """Regression guard — Stern absent from Install Missing (monkeybug).
+    """Regression guard — Stern absent from Install Missing (a tester).
 
     install_prerequisites.ps1 (what the GUI's "Install Missing" runs) had no
     Stern Pinball entry, so its manufacturer picker showed no Spike 2 option
@@ -620,7 +620,7 @@ def test_dockerfile_has_no_hijacking_entrypoint(dockerfile):
 
 
 def test_gdre_prereq_probe_matches_install_location():
-    """Regression guard — GDRE prereq false-negative (Joe_Blasi report).
+    """Regression guard — GDRE prereq false-negative (tester report).
 
     The BOF gdre_tools prerequisite probe must check the canonical path
     install_gdre.sh writes to (/opt/gdre_tools), NOT `which gdre_tools`

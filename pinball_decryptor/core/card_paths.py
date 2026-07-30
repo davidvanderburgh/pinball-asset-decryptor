@@ -5,7 +5,7 @@ The Replace tabs work in terms of ``rel_path`` inside the extract folder
 SD card that content actually lives.  The Stern extractor already records the
 mapping in per-kind sidecar manifests, so this module just reads them back —
 it is the lookup behind the Replace tabs' "Find in Partition Explorer"
-(monkeybug batch 16: "it would be great if there was an option to find in
+(feedback batch 16: "it would be great if there was an option to find in
 partition … to see which radium file they live in").
 
 Every resolver returns ``(card_path, note)`` — *card_path* is absolute on the

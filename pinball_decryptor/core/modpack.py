@@ -26,7 +26,7 @@ def _is_packable(rel):
     at extract time — so they ARE in the baseline — and get rewritten by later
     steps, which made them read as "modified" and land in the pack.  They are
     hundreds of MB and useless to the recipient, and they are exactly why an
-    audio-only mod pack could weigh 350 MB (monkeybug batch 16).  The Write
+    audio-only mod pack could weigh 350 MB (feedback batch 16).  The Write
     tab's Modified-Files preview already hides them for the same reason.
     """
     name = os.path.basename(rel)

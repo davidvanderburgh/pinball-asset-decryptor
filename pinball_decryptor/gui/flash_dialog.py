@@ -2,7 +2,7 @@
 
 A small modal (opened from the Write tab's "Build / flash SD card…" button for
 plugins with ``capabilities.flash_image``) with two independently tickable
-sections (monkeybug: "when someone builds an image, they are most likely
+sections (a tester: "when someone builds an image, they are most likely
 writing it out after" — testing a change on the machine used to be a
 mandatory two-step):
 
@@ -104,7 +104,7 @@ class FlashImageDialog:
         self._build(build_target or "")
         # Pre-fill the flash box with the image the Write tab would build
         # (Output Folder + File Name) when it exists on disk — flashing the
-        # image just built is the 90% case (monkeybug batch 8); Browse still
+        # image just built is the 90% case (feedback batch 8); Browse still
         # overrides.  Only relevant with the build section unticked; ticked,
         # the box tracks the build output instead.
         if (not self._build_var.get() and initial_image
@@ -243,7 +243,7 @@ class FlashImageDialog:
         # Windows + already elevated: mapped network-drive letters (W:) are
         # invisible to an elevated process, so a build reading its assets or
         # writing its output through one silently sees nothing there.  The
-        # Write tab carries this warning for Direct-SD mode; monkeybug batch 22
+        # Write tab carries this warning for Direct-SD mode; feedback batch 22
         # asked for it here too, since this dialog is where a build is actually
         # started.  Only shown when it can bite (Windows, elevated, building).
         self._unc_note = None
@@ -418,7 +418,7 @@ class FlashImageDialog:
         prefer = self._words["target_kind"]
         best = pick[0] if pick else None
         # Small-SD-card media (Stern Spike 2): hide multi-TB backup disks so
-        # the dropdown lists plausible cards only — monkeybug saw the Flash
+        # the dropdown lists plausible cards only — a tester saw the Flash
         # dialog still offering large drives because it skipped this filter
         # the Direct-SD picker already uses.  The auto-picked best is force-
         # kept visible so the selection always exists in the list.
@@ -478,7 +478,7 @@ class FlashImageDialog:
         if img_size is None:
             # No instructive text — the empty Image-file box + Browse button
             # say it already, and the Start-click validation still nags
-            # (monkeybug batch 8: the line was redundant).
+            # (feedback batch 8: the line was redundant).
             self._readout.configure(text="", foreground=th["gray"])
             return
         noun = self._words["noun"]
@@ -548,7 +548,7 @@ class FlashImageDialog:
                 return
             # Flash-only with nothing modified this session: legitimate
             # (restoring a backup, re-flashing an earlier build), but worth a
-            # heads-up so an accidental no-change flash is caught (monkeybug).
+            # heads-up so an accidental no-change flash is caught (a tester).
             if not building and not self._has_pending_changes:
                 if not messagebox.askyesno(
                     "Nothing modified",

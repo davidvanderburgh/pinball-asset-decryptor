@@ -1,4 +1,4 @@
-"""GUI guards for Replace Audio's Properties (F2) rename — monkeybug b23.
+"""GUI guards for Replace Audio's Properties (F2) rename — a tester b23.
 
 His report: "I hit F2. Changed a name and a type. Hit enter. Came back and the
 list had the old values and when I clicked on it, nothing loaded. The whole
@@ -150,7 +150,7 @@ def test_tk_callback_errors_reach_the_log(app):
 
 
 # ---------------------------------------------------------------------------
-# "Play through the list" (monkeybug batch 23 wish-list): select a file and it
+# "Play through the list" (feedback batch 23 wish-list): select a file and it
 # keeps going, so a whole card can be auditioned without clicking each row.
 # ---------------------------------------------------------------------------
 

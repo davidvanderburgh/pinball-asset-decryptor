@@ -30,7 +30,7 @@ import wave
 
 # Glyph slices sit 120+ characters below the project folder and the build
 # output goes wherever the user pointed it, so both routinely pass Windows'
-# 260-character limit — with an error that reads as "file not found" (Peter's
+# 260-character limit — with an error that reads as "file not found" (a tester's
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
 
@@ -555,7 +555,7 @@ def extract_scene_textures(reader, output_dir, log=None, progress=None,
         # ref + W×H.  The dims match the radium-embedded-image convention below
         # so a scene's large "main" texture and its smaller child glyphs are
         # distinguishable at a glance and matchable by resolution in a file
-        # browser — the manual workflow monkeybug was forced into.
+        # browser — the manual workflow a tester was forced into.
         scene8 = path.rsplit("/scene.assets/", 1)[0].rsplit("/", 1)[1][:8]
         base = "%s_%s_%dx%d" % (scene8, os.path.splitext(ref)[0], w, h)
         k = used.get(base, 0)
@@ -1251,13 +1251,13 @@ def _wav_basename(p, duration_names):
     Extract tab's "Length-prefix names" option) the play length leads —
     ``01m22s235 - idx0001.wav`` — zero-padded so a plain name sort orders by
     duration: the stable key for lining the same sounds up across firmware
-    versions, where the idx shifts (monkeybug).  ``:`` is not legal in
+    versions, where the idx shifts (a tester).  ``:`` is not legal in
     Windows filenames, hence the m/s spelling.
 
     The prefix is the TRUE decoded play length (header length minus the
     200-sample cursor lead-in, see emitted_length) — the raw header length
     read ~4.5 ms long, so a replacement trimmed to the advertised time got
-    its tail cut at encode (monkeybug's Replace-tab mismatch)."""
+    its tail cut at encode (a tester's Replace-tab mismatch)."""
     if not duration_names:
         return "idx%04d.wav" % p["idx"]
     from .spike2.emulator import emitted_length
@@ -2063,7 +2063,7 @@ def _intact_copy_source(src, staged, fname, slot_size, log):
         # format-matched copy to fall back TO — the rejected clip goes on the
         # card either way.  Saying "writing the format-matched copy instead"
         # there was simply untrue, and it was the only thing standing between
-        # monkeybug and an attract video that played black on the machine with
+        # a tester and an attract video that played black on the machine with
         # nothing in the log to explain it (batch 23).  Same bytes = say so,
         # as an error, and name what decides it.
         if _same_bytes(src, staged):
@@ -2078,7 +2078,7 @@ def _intact_copy_source(src, staged, fname, slot_size, log):
         # copy is exactly what they asked for and it goes on at full size.
         # This used to log a black-picture WARNING plus a second line saying
         # the same thing, which read like something had gone wrong when the
-        # build was doing the right thing (aly).
+        # build was doing the right thing (a tester).
         log("Video %s: %s, so the app's format-matched %d B copy goes on the "
             "card instead of your file (slot was %d B) — full size, no "
             "byte-budget crush." % (fname, why, _size(staged), slot_size),
@@ -3206,11 +3206,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("No .checksums.md5 baseline found; re-encoding all %d sound(s): "
                 "%s." % (len(audio_edits), listing), "warning")
         # Raw encode (replacements written as provided) is THE behavior now —
-        # the GUI retired the match-to-callouts shaper (monkeybug batch 20) and
+        # the GUI retired the match-to-callouts shaper (feedback batch 20) and
         # pins PAD_STERN_AUDIO_RAW=1 at startup.  Only the unusual case gets a
         # log line: shaping still fingerprints a card built with the env var
         # cleared by hand (a phone recording of the machine can't settle which
-        # mode built a card after the fact — monkeybug's 2026-07 click A/B).
+        # mode built a card after the fact — a tester's 2026-07 click A/B).
         if os.environ.get("PAD_STERN_AUDIO_RAW") != "1":
             log("Audio shaping ON (PAD_STERN_AUDIO_RAW unset): replacements "
                 "get the stock-callout edge fade, level cap, and 5 kHz "
@@ -3955,7 +3955,7 @@ def _fit(a, length, np, fade_ms=5.0):
     Every caller feeds user replacement audio, and audio whose edge is
     non-zero — cut mid-waveform, or carrying DC offset — is a step the
     machine renders as an audible click at that edge of the callout
-    (monkeybug, real-HW, both ends; stock sounds start and end at silence so
+    (a tester, real-HW, both ends; stock sounds start and end at silence so
     stock never clicked).  The symmetric fade also lands looping music at
     zero on both sides of the loop point.  Landing the edge at zero isn't
     enough on real HW — a 5 ms slam from zero to a hot sample still pops,
@@ -3991,7 +3991,7 @@ _STEREO_RANGE = 21452
 # "Auto-fade + cap audio replacements" (Write/Audio tab toggle, on by default).
 # A user replacement cut mid-waveform slams from silence to a hot sample in a
 # few ms; stock callouts ease in over 40-77 ms, so ours pop at that edge on real
-# hardware (monkeybug, Led Zeppelin LE: clicks at BOTH edges, click volume
+# hardware (a tester, Led Zeppelin LE: clicks at BOTH edges, click volume
 # tracks the cabinet's master knob, and a deliberately silent clip never clicks
 # -- i.e. the step is in the signal we ship, not a Stern anti-tamper "watermark"
 # that couldn't be removed).  ON lands a stock-length raised-cosine fade on both
@@ -4005,14 +4005,14 @@ _DECLICK_FADE_MS = 40.0
 _DECLICK_HEADROOM = 0.80
 
 # Band-limit to the stock callout's bandwidth (2026-07-09 firmware RE + spectral
-# measurement).  The edge-fade + cap shipped in v0.49 did NOT fix monkeybug's HW
+# measurement).  The edge-fade + cap shipped in v0.49 did NOT fix a tester's HW
 # clicks -- and reverse-engineering the firmware's symboled audio path (cabal's
 # Ghidra DBs) plus measuring the audio explained why.  The callouts are mixed by
 # Stern's own FIQ sound-script engine (sys_dac_c_handler_pdi: sums the cat-0
 # tracks, *saturates* the sum, runs a DSP filter, then amp_write -- NOT the
 # SoLoud path that carries music, which ramps/fades every gain).  Stock callouts
 # are band-limited SPEECH (spectral centroid ~620 Hz, essentially nothing above
-# 4 kHz); monkeybug's music-excerpt replacements measured ~2000 Hz centroid with
+# 4 kHz); a tester's music-excerpt replacements measured ~2000 Hz centroid with
 # 10x the energy above 8 kHz (Immigrant Song: 6400 Hz centroid, 28% in 8-12 kHz).
 # That HF content -- cymbals / sibilance a speech-tuned cabinet speaker never
 # reproduces, driven into the saturating FIQ mix -- is the click, and a fade + a
@@ -4071,7 +4071,7 @@ def _declick_lowpass_hz():
 # Anti-pop "keep the output engaged" seed (2026-07-23 LZ RE).
 # WHAT IT ADDRESSES: on real hardware a SILENT (or near-silent) callout
 # replacement clicks/pops at its start, while stock callouts and audible
-# replacements do not (monkeybug, Led Zeppelin 1.22).  We proved the whole
+# replacements do not (a tester, Led Zeppelin 1.22).  We proved the whole
 # codec + encode pipeline is clean -- our silent body decodes to true silence
 # with the same codec the machine uses (clickdiag/encode_slot_match.py) -- so
 # the pop is added by the machine's audio OUTPUT/mixer stage and is
@@ -4621,7 +4621,7 @@ def _extended_params(p, extra=400):
 # render (+2925, -6274) under the sound's own keystream — a naked one-frame
 # impulse Stern accepted, and real hardware provably does not click on it.  A
 # 4 ms ramp seeded from a residual that size carries ~60x the impulse's energy
-# spread across fully audible samples (the thump the wool still heard after
+# spread across fully audible samples (the thump the tester still heard after
 # v0.64.2), so past this threshold we keep the stock geometry instead: sample 0
 # lands where it lands, samples 1+ are the caller's untouched (faded) content.
 _RAMP_MAX_EXCESS = 512
@@ -4809,7 +4809,7 @@ def _resolve_shared_boundary(emu, p, pred, start, body, tgtL, tgtR, np,
         return body
 
 
-# Experimental head mode for the 2026-07 monkeybug trigger-pop hunt
+# Experimental head mode for the 2026-07 a tester trigger-pop hunt
 # (``PAD_STERN_HEAD_MODE=stock``, GUI: Advanced audio options).  Theory under
 # test: real playback seeds per-sound codec state at voice start in a way the
 # emulated decode path doesn't model, so ANY re-encoded head block can burp a
@@ -5130,7 +5130,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # the replaced sounds only) to a STOCK copy stashed inside the firmware.  The
 # derive then builds fully-stock params from a card whose bodies are ENTIRELY our
 # audio -> our audio plays for the whole callout; no blip, no hole.  HW-confirmed
-# on Led Zeppelin LE 1.22 (monkeybug, 2026-07-25).
+# on Led Zeppelin LE 1.22 (a tester, 2026-07-25).
 #
 # GENERIC across Spike 2 titles: the window-read function is the same compiled
 # routine on every firmware seen (LZ LE/non-LE, TMNT) -- only its address moves --
@@ -5147,7 +5147,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # registered by the init loop at 0x1f0de8 into the table at 0x88B2A0 -- so the
 # build wrote executable code into node board 0's state buffer.  Reported from
 # the field as a machine that boots very slowly, runs slowly, throws node board
-# errors and cannot start a game (Kris, 2026-07-28).  Section headers tile the RW
+# errors and cannot start a game (a tester, 2026-07-28).  Section headers tile the RW
 # segment exactly on all 17 firmwares on hand, so there was never any genuinely
 # unclaimed space to find there; LZ only worked because the object it happened to
 # land on goes unused, and even that shifts with the number of replaced sounds.

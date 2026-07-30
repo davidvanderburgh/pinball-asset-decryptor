@@ -71,7 +71,7 @@ def test_pick_installer_asset_linux_gets_the_appimage():
     unreliable one: from inside an AppImage the desktop URL opener
     inherits a bundle environment it can't run in, so the banner's
     Download button did nothing at all, silently, for four releases
-    (aly, v0.85-v0.88).  Fetching the file ourselves needs no browser."""
+    (a tester, v0.85-v0.88).  Fetching the file ourselves needs no browser."""
     got = updater._pick_installer_asset(ASSETS, platform="linux",
                                         machine="x86_64")
     assert got == {
@@ -348,7 +348,7 @@ def test_iss_prereq_task_name_matches_mergetasks_switch():
 
 
 # ---------------------------------------------------------------------------
-# Re-check before installing (monkeybug batch 23)
+# Re-check before installing (feedback batch 23)
 #
 # The banner is filled in by one check 1.5 s after launch and then stands until
 # the app restarts, so a window left open across a release keeps offering the

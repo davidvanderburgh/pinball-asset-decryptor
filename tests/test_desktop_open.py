@@ -1,6 +1,6 @@
 """Guards for core.desktop -- handing URLs/paths to the desktop.
 
-The bug these exist for: aly's Ubuntu AppImage, where the update
+The bug these exist for: a tester's Ubuntu AppImage, where the update
 banner's Download button did nothing at all.  A frozen bundle points
 LD_LIBRARY_PATH/PATH/PYTHONHOME at itself, any browser started with that
 environment dies loading our bundled libs, and ``webbrowser.open``

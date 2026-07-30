@@ -131,6 +131,92 @@ def test_dp116_shape_end_to_end_accepted():
     assert cap["nrec"] == 2000
 
 
+def _asm(words):
+    """Assemble a tiny ARM blob from raw u32 words (little-endian)."""
+    import struct
+    return b"".join(struct.pack("<I", w) for w in words)
+
+
+def test_locator_reads_count_register_from_mul3():
+    """locate._find_internal_pcs must report WHERE the count is live
+    (MASTERDIR_COUNT) and WHICH register holds it (COUNTREG), read off the *24
+    computation's `add rD, rN, rN, lsl #1`.  This is what makes the capture
+    independent of whether the build later reuses rN for the malloc size."""
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+
+    # add lr, r5, r5, lsl #1 ; lsl r7, lr, #3 ; add r5, r7, #0xf ;
+    # bic r5, r5, #0xf ; mov r4, r0 ; mov r0, r5 ; bl <malloc> ; subs r3, r0, #0
+    # (the Deadpool 1.16 / TMNT 1.59 shape: r5 REUSED for the size)
+    words = [0xe085e085, 0xe1a0718e, 0xe287500f, 0xe3c5500f,
+             0xe1a04000, 0xe1a00005, 0xeb000000, 0xe2503000]
+    ins = list(L._cs.disasm(_asm(words), 0x1000))
+    assert [i.mnemonic for i in ins][:4] == ["add", "lsl", "add", "bic"], (
+        "fixture did not assemble to the expected shape: %s"
+        % [(i.mnemonic, i.op_str) for i in ins])
+    # the *3 add carries the count register in operands 1 and 2
+    p = [q.strip() for q in ins[0].op_str.split(",")]
+    assert p[1] == p[2] == "r5"
+    assert L._reg_index(p[1]) == 5
+
+
+@pytest.mark.parametrize("name,idx", [
+    ("r0", 0), ("r5", 5), ("r12", 12), ("sb", 9), ("sl", 10), ("fp", 11),
+    ("ip", 12), (" r7 ", 7),
+])
+def test_reg_index_names(name, idx):
+    """Capstone spells r9-r12 as sb/sl/fp/ip; the count register must resolve
+    through either spelling (a build keeping the count in r9 would otherwise
+    silently fall back to the r5 read)."""
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+    assert L._reg_index(name) == idx
+
+
+def test_reg_index_rejects_non_gp():
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+    assert L._reg_index("sp") is None
+    assert L._reg_index("lr") is None
+    assert L._reg_index("r13") is None
+
+
+def test_count_addrs_are_optional_not_required():
+    """MASTERDIR_COUNT/COUNTREG must stay OUT of _REQUIRED: a build whose *24
+    computation doesn't parse should still locate (and fall back to the
+    malloc-return capture), not lose audio entirely."""
+    from pinball_decryptor.plugins.stern.spike2 import locate as L
+    assert "MASTERDIR_COUNT" not in L._REQUIRED
+    assert "COUNTREG" not in L._REQUIRED
+
+
+def test_emulator_defaults_count_addrs_to_none():
+    """The validated (TMNT 1.58) hardcoded path has no located count site -- it
+    doesn't need one (that build's size math uses a spare register, so r5 still
+    holds the count at the malloc return).  The attributes must exist and be
+    None so derive_params takes the fallback cleanly."""
+    from pinball_decryptor.plugins.stern.spike2.emulator import Spike2Emu
+
+    emu = Spike2Emu.__new__(Spike2Emu)
+    Spike2Emu._set_addrs(emu, None)
+    assert emu.MASTERDIR_COUNT is None
+    assert emu.COUNTREG is None
+
+
+def test_located_count_addrs_are_bound():
+    """When the locator supplies them, _set_addrs must bind both (a missed
+    binding silently reverts every generic build to the buggy r5 read)."""
+    from pinball_decryptor.plugins.stern.spike2 import emulator as EM
+
+    addrs = {k: 0x1000 for k in (
+        "BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV", "DISPATCH",
+        "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR", "RBTREE_ACC",
+        "MASTERDIR_DECODE", "MASTERDIR_MALLOC", "BANDLOOP", "BANDOBJ",
+        "FIND_BL")}
+    addrs.update(OBJREG=7, MASTERDIR_COUNT=0x2dad48, COUNTREG=5)
+    emu = EM.Spike2Emu.__new__(EM.Spike2Emu)
+    EM.Spike2Emu._set_addrs(emu, addrs)
+    assert emu.MASTERDIR_COUNT == 0x2dad48
+    assert emu.COUNTREG == 5
+
+
 def test_bound_matches_category_gate():
     """The cat-0 capture and the per-category count gate share one definition of
     a sane record count (the category path always had this gate; the cat-0

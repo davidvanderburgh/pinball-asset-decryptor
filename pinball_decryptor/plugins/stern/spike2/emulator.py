@@ -358,12 +358,20 @@ class Spike2Emu:
         self.CHAIN_STUBS = CHAIN_STUBS; self.LENGTH_XOR = LENGTH_XOR
         self.OBJREG = 7
         self.FIND_BL = None
+        # Where the record count is provably live (see locate._find_internal_pcs).
+        # None on the validated TMNT 1.58 build, whose size computation uses a
+        # SPARE register (`add r6,r8,#0xf`) and so leaves r5 = the count at the
+        # malloc-return PC — the capture there is correct for it.
+        self.MASTERDIR_COUNT = None
+        self.COUNTREG = None
         if addrs:
             for k in ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV",
                       "DISPATCH", "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR",
                       "RBTREE_ACC", "MASTERDIR_DECODE", "MASTERDIR_MALLOC",
                       "BANDLOOP", "BANDOBJ", "FIND_BL"):
                 setattr(self, k, addrs[k])
+            self.MASTERDIR_COUNT = addrs.get("MASTERDIR_COUNT")
+            self.COUNTREG = addrs.get("COUNTREG")
             self.OBJREG = addrs["OBJREG"]
             # generic derive skips the template lookup (find-skip) instead of
             # stubbing the chain helpers, and takes the length from the raw obj.
@@ -813,11 +821,22 @@ class Spike2Emu:
         chan, scale}``.  ~1 minute for ~2000 sounds.
         """
         mu = self.mu
-        cap = {"mddst": None, "nrec": None, "state": None, "badrec": None}
+        cap = {"mddst": None, "nrec": None, "state": None, "badrec": None,
+               "count_at_src": None}
+
+        def at_count(eng):
+            # The *24 size computation's `add rD,rN,rN,lsl#1`: rN holds the
+            # record count HERE, on every build shape, whether or not the build
+            # goes on to reuse rN for the malloc size (see MASTERDIR_COUNT).
+            if cap["count_at_src"] is None:
+                cap["count_at_src"] = eng.mu.reg_read(_R[eng.COUNTREG])
 
         def at_md(eng):
             dst = eng.mu.reg_read(UC_ARM_REG_R0)
-            if _accept_masterdir_malloc(cap, dst, _md_record_count(eng, dst)):
+            n = cap["count_at_src"]
+            if n is None:
+                n = _md_record_count(eng, dst)
+            if _accept_masterdir_malloc(cap, dst, n):
                 eng._watchdog = None      # located OK -> stop the fail-fast count
 
         def at_bb(eng):
@@ -839,6 +858,8 @@ class Spike2Emu:
             except UcError:
                 pass
 
+        if self.MASTERDIR_COUNT is not None and self.COUNTREG is not None:
+            self.extra[self.MASTERDIR_COUNT] = at_count
         self.extra[self.MASTERDIR_MALLOC] = at_md
         self.extra[self.BANDLOOP] = at_bb
         # Generous cap: at_bb emu_stops the instant BANDLOOP is reached, so this
@@ -867,6 +888,8 @@ class Spike2Emu:
             self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
         finally:
             self._watchdog = None
+            if self.MASTERDIR_COUNT is not None:
+                self.extra.pop(self.MASTERDIR_COUNT, None)
             self.extra.pop(self.MASTERDIR_MALLOC, None)
             self.extra.pop(self.BANDLOOP, None)
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:

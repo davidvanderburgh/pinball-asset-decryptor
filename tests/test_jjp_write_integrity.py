@@ -10,6 +10,7 @@ tests pin the three things that were wrong.
 """
 
 import hashlib
+import io
 import os
 import struct
 import zlib
@@ -23,6 +24,7 @@ from pinball_decryptor.plugins.jjp.executor import CommandError
 
 
 SONIC_PATH = "/jjpe/gen1/Sonic/edata/graphics/UI/panel.png"
+SONIC_WAV = "/jjpe/gen1/Sonic/edata/audio/callouts/eggman_01.wav"
 
 
 # --------------------------------------------------------------------------
@@ -255,6 +257,103 @@ def test_spot_check_catches_encrypted_bytes_that_did_not_land(tmp_path):
 
     with pytest.raises(P.PipelineError):
         pipe._verify_raw_image("/var/tmp/whatever.img")
+
+
+# --------------------------------------------------------------------------
+# 2b.  Reading the ORIGINAL slot has to use the image's own cipher, or every
+#      audio safety net silently switches off
+# --------------------------------------------------------------------------
+
+def _wav(nframes, nch=1, sw=2, rate=22050, fill=b"\x11\x22"):
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(nch)
+        w.setsampwidth(sw)
+        w.setframerate(rate)
+        w.writeframes((fill * (nframes * nch * sw))[:nframes * nch * sw])
+    return buf.getvalue()
+
+
+def _audio_pipe(tmp_path, orig_encrypted, scheme, entry_path=SONIC_WAV,
+                filler=216):
+    from pinball_decryptor.plugins.jjp.filelist import FileEntry
+    pipe = object.__new__(P.StandaloneModPipeline)
+    logged = []
+    pipe.log = lambda msg, lvl="info": logged.append((lvl, msg))
+    pipe.logged = logged
+    pipe.on_progress = lambda *a, **k: None
+    pipe.game_name = "Sonic"
+    pipe._write_scheme = scheme
+    pipe._wsl_img = "/var/tmp/jjp_raw.img"
+    pipe._debugfs_dump_file = lambda path, timeout=None: orig_encrypted
+    pipe.skip_duration_match = False
+    pipe.keep_full_length_paths = frozenset()
+    entry = FileEntry(path=entry_path, filler_size=filler,
+                      crc_encrypted=0, crc_decrypted=0)
+    return pipe, entry
+
+
+def test_original_wav_format_is_read_with_the_v3_cipher(tmp_path):
+    """Regression: this used the legacy cipher on every image, so on a
+    Sonic-era one it decrypted noise, the probe returned None, and
+    _maybe_convert_audio quietly passed the replacement through with NO
+    format check, NO conversion and NO trim to the slot length."""
+    orig = _wav(4000, nch=1, sw=2, rate=22050)
+    enc = _encrypt_v3(orig, SONIC_WAV, "Sonic", lead=216, trail=96)
+    pipe, entry = _audio_pipe(tmp_path, enc, v3.SCHEME_V3)
+
+    fmt = pipe._get_original_wav_format(entry)
+    assert fmt is not None, "the original slot must be readable"
+    assert (fmt["nchannels"], fmt["sampwidth"], fmt["framerate"]) == (1, 2, 22050)
+    assert fmt["nframes"] == 4000
+    assert fmt["_orig_size"] == len(orig)
+
+
+def test_unreadable_original_slot_is_reported_not_silent(tmp_path):
+    """If the slot still can't be read, say so — the old code returned None
+    with no message and the run looked clean."""
+    pipe, entry = _audio_pipe(tmp_path, os.urandom(4096), v3.SCHEME_LEGACY)
+    assert pipe._get_original_wav_format(entry) is None
+    assert any(lvl == "error" and "format-checked" in msg
+               for lvl, msg in pipe.logged), pipe.logged
+
+
+def test_v3_resize_targets_the_slots_exact_byte_size(tmp_path):
+    """On scheme 3 the byte count is what matters, not the frame count: the
+    original may carry RIFF chunks the canonical header we write does not."""
+    # A WAV whose header carries a LIST chunk inside the RIFF, so the file is
+    # 12 bytes longer than the canonical layout we write for the same frames.
+    data = (b"\x11\x22" * 4000)
+    fmt_chunk = (b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 22050,
+                                       22050 * 2, 2, 16))
+    list_chunk = b"LIST" + struct.pack("<I", 4) + b"abcd"
+    body = b"WAVE" + fmt_chunk + list_chunk + b"data" + struct.pack(
+        "<I", len(data)) + data
+    orig_padded = b"RIFF" + struct.pack("<I", len(body)) + body
+    assert len(orig_padded) == len(_wav(4000)) + 12
+    enc = _encrypt_v3(orig_padded, SONIC_WAV, "Sonic", lead=216, trail=96)
+    pipe, entry = _audio_pipe(tmp_path, enc, v3.SCHEME_V3)
+    fmt = pipe._get_original_wav_format(entry)
+    assert fmt is not None and fmt["_orig_size"] == len(orig_padded)
+
+    # A replacement with the same frame count but the plain header: it must
+    # still be rewritten so the file lands on the slot's exact size.
+    out = pipe._resize_wav_to_duration(_wav(4000), fmt, "audio/x.wav")
+    assert len(out) == len(orig_padded), (
+        "the fitted WAV has to be exactly the slot's size")
+
+
+def test_legacy_resize_still_matches_frames_not_bytes(tmp_path):
+    """Legacy titles keep the proven behaviour — frame matching, no byte
+    budget (their content runs to EOF, so length is free)."""
+    orig = _wav(4000)
+    pipe, entry = _audio_pipe(tmp_path, b"", v3.SCHEME_LEGACY)
+    from pinball_decryptor.plugins.jjp.audio import detect_wav_format
+    fmt = detect_wav_format(orig)
+    fmt["_orig_size"] = len(orig) + 12      # would force a rewrite on v3
+    out = pipe._resize_wav_to_duration(_wav(4000), fmt, "audio/x.wav")
+    assert len(out) == len(orig), "legacy must not chase the byte budget"
 
 
 # --------------------------------------------------------------------------

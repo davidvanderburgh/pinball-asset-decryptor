@@ -5604,13 +5604,12 @@ class StandaloneModPipeline(ModPipeline):
         they differ.  Also matches duration to the original.
         Returns (possibly converted) content bytes.
         """
-        import os
-        import base64 as _b64
         from .audio import (detect_wav_format, wav_formats_match,
                             format_description, format_diff,
                             needs_ffmpeg, convert_wav_python,
                             is_compressed_wav)
-        from .crypto import decrypt_file as _df
+        # No cipher import here on purpose: reading the original slot goes
+        # through _decrypt_original, which follows the image's own scheme.
 
         repl_fmt = detect_wav_format(content)
         if repl_fmt is None:
@@ -5674,29 +5673,57 @@ class StandaloneModPipeline(ModPipeline):
                  "Game may reject this file.", "error")
         return content
 
+    def _read_original_encrypted(self, entry, mp=None):
+        """The asset's bytes as they sit on the image, still encrypted."""
+        if hasattr(self, '_wsl_img') and self._wsl_img:
+            # debugfs path — read directly from unmounted image
+            return self._debugfs_dump_file(entry.path, timeout=120)
+        # mounted path fallback
+        import base64 as _b64
+        orig_path = f"{mp}{entry.path}"
+        enc_b64 = self.executor.run(
+            f"base64 '{orig_path}'", timeout=120).strip()
+        return _b64.b64decode(enc_b64)
+
+    def _decrypt_original(self, orig_enc, entry):
+        """Decrypt an original asset with the cipher THIS image uses.
+
+        Reading it with the wrong scheme returns noise, which the format
+        probes then reject — and a probe that returns None quietly switches
+        off format checking, format conversion AND the trim-to-slot-length
+        for that file, so a replacement gets written exactly as supplied.
+        That is why this has to follow the detected scheme rather than
+        assume the older cipher.
+        """
+        from .crypto_v3 import SCHEME_V3
+        if getattr(self, '_write_scheme', None) == SCHEME_V3:
+            from .crypto_v3 import decrypt_file as _df3
+            return _df3(orig_enc, entry.filler_size, entry.path,
+                        self.game_name or "")
+        from .crypto import decrypt_file as _df
+        return _df(orig_enc, entry.filler_size, entry.path)
+
     def _get_original_wav_format(self, entry, mp=None):
         """Read the original encrypted file from the image, decrypt it,
         and return its WAV format dict (or None)."""
         from .audio import detect_wav_format
-        from .crypto import decrypt_file as _df
 
         try:
-            if hasattr(self, '_wsl_img') and self._wsl_img:
-                # debugfs path — read directly from unmounted image
-                orig_enc = self._debugfs_dump_file(entry.path, timeout=120)
-            else:
-                # mounted path fallback
-                import base64 as _b64
-                orig_path = f"{mp}{entry.path}"
-                enc_b64 = self.executor.run(
-                    f"base64 '{orig_path}'", timeout=120).strip()
-                orig_enc = _b64.b64decode(enc_b64)
-            orig_dec = _df(orig_enc, entry.filler_size, entry.path)
+            orig_enc = self._read_original_encrypted(entry, mp)
+            orig_dec = self._decrypt_original(orig_enc, entry)
             fmt = detect_wav_format(orig_dec)
-            if fmt is not None:
-                fmt["_orig_size"] = len(orig_dec)
+            if fmt is None:
+                self.log(
+                    f"  Warning: could not read the original slot's audio "
+                    f"format for {entry.path} — the replacement will NOT be "
+                    f"format-checked, converted or trimmed to length.",
+                    "error")
+                return None
+            fmt["_orig_size"] = len(orig_dec)
             return fmt
-        except Exception:
+        except Exception as e:
+            self.log(f"  Warning: could not read the original slot "
+                     f"({e}) — no format check for this file.", "error")
             return None
 
     def _ensure_ffmpeg(self):
@@ -5822,6 +5849,44 @@ class StandaloneModPipeline(ModPipeline):
 
         target_nframes = orig_fmt["nframes"]
         repl_nframes = repl_fmt["nframes"]
+
+        # Sonic-era images pin the file length: the game reads each asset's
+        # padding out of fl.dat, which that generation encrypts with the
+        # dongle, so the content has to come back the exact same number of
+        # bytes or the write is refused.  Aim at the slot's byte budget
+        # rather than its frame count — the original may carry chunks the
+        # canonical 44-byte header we write does not.
+        from .crypto_v3 import SCHEME_V3
+        nch = orig_fmt["nchannels"]
+        sw = orig_fmt["sampwidth"]
+        orig_size = orig_fmt.get("_orig_size")
+        if (getattr(self, '_write_scheme', None) == SCHEME_V3
+                and orig_size and nch and sw):
+            budget = orig_size - 44          # canonical RIFF header we emit
+            fitted, remainder = divmod(budget, nch * sw)
+            if remainder or fitted <= 0:
+                self.log(
+                    f"  {rel_path}: this image pins the slot at {orig_size} "
+                    f"bytes, which is not a whole number of "
+                    f"{sw * 8}-bit/{nch}-channel frames — the replacement "
+                    f"cannot be fitted exactly and will be refused.",
+                    "error")
+            elif fitted != target_nframes:
+                self.log(
+                    f"  Fitting to the slot's exact size: {target_nframes} "
+                    f"-> {fitted} frames ({orig_size} bytes)", "info")
+                target_nframes = fitted
+            else:
+                target_nframes = fitted
+            # Right number of frames is not the same as the right number of
+            # bytes: a replacement carrying extra RIFF chunks still has to be
+            # rewritten canonically to land on the slot's size.
+            if repl_nframes == target_nframes and len(content) != orig_size:
+                self.log(
+                    f"  Rewriting the header to hit the slot's {orig_size} "
+                    f"bytes (replacement is {len(content)})", "info")
+                repl_nframes = -1
+
         if repl_nframes == target_nframes:
             return content
 
@@ -5829,8 +5894,6 @@ class StandaloneModPipeline(ModPipeline):
             with wave.open(_io.BytesIO(content), "rb") as w:
                 raw_frames = w.readframes(w.getnframes())
 
-            nch = orig_fmt["nchannels"]
-            sw = orig_fmt["sampwidth"]
             target_bytes = target_nframes * nch * sw
 
             if len(raw_frames) > target_bytes:
@@ -5930,24 +5993,24 @@ class StandaloneModPipeline(ModPipeline):
         """Read the original encrypted OGG from the image, decrypt it,
         and return its Vorbis format dict (or None)."""
         from .audio import detect_ogg_format
-        from .crypto import decrypt_file as _df
 
         try:
-            if hasattr(self, '_wsl_img') and self._wsl_img:
-                orig_enc = self._debugfs_dump_file(entry.path, timeout=120)
-            else:
-                import base64 as _b64
-                orig_path = f"{mp}{entry.path}"
-                enc_b64 = self.executor.run(
-                    f"base64 '{orig_path}'", timeout=120).strip()
-                orig_enc = _b64.b64decode(enc_b64)
-            orig_dec = _df(orig_enc, entry.filler_size, entry.path)
+            orig_enc = self._read_original_encrypted(entry, mp)
+            orig_dec = self._decrypt_original(orig_enc, entry)
             fmt = detect_ogg_format(orig_dec)
-            if fmt is not None:
-                fmt["_orig_size"] = len(orig_dec)
-                fmt["_orig_bytes"] = orig_dec
+            if fmt is None:
+                self.log(
+                    f"  Warning: could not read the original slot's OGG "
+                    f"format for {entry.path} — the replacement will NOT be "
+                    f"format-checked, converted or trimmed to length.",
+                    "error")
+                return None
+            fmt["_orig_size"] = len(orig_dec)
+            fmt["_orig_bytes"] = orig_dec
             return fmt
-        except Exception:
+        except Exception as e:
+            self.log(f"  Warning: could not read the original slot "
+                     f"({e}) — no format check for this file.", "error")
             return None
 
     def _convert_ogg_ffmpeg(self, src_bytes, tgt_fmt, rel_path):

@@ -123,6 +123,10 @@ class SternManufacturer(Manufacturer):
         # adjustment defaults (free play, volume, pricing, …) and preset them
         # for a fresh-flash / factory-reset machine (a tester).
         settings_editor=True,
+        # Compare: diff two card images — releases, or mod vs stock — by the
+        # cards' own validation digests + firmware tables, no Extract needed
+        # (a tester's wish list).
+        compare=True,
         # Auto-transcribe: TMNT is full of spoken callouts; faster-whisper
         # (+VAD, which skips the music/SFX beds) renames voice WAVs by their
         # spoken text, keeping the idx prefix so Write still round-trips.
@@ -355,6 +359,15 @@ class SternManufacturer(Manufacturer):
             return []
         from .info import card_info
         return card_info(path)
+
+    def compare_images(self, path_a, path_b):
+        # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
+        # to diff, so refuse with a plain explanation instead of a stack.
+        if path_a.lower().endswith(".zip") or path_b.lower().endswith(".zip"):
+            return [("Error", [("Compare", "Whitestar ROM zips can't be "
+                                "compared — pick two Spike 2 card images.")])]
+        from .compare import compare_cards
+        return compare_cards(path_a, path_b)
 
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,

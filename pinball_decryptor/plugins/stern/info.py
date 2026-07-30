@@ -142,7 +142,7 @@ def _walk_partition(reader):
     as extensionless ``.asset`` files); nothing larger is ever read."""
     found = {"sidx_path": "", "sidx_node": None, "image_bin": None,
              "image_bin_path": "", "videos": 0, "images": 0, "scenes": 0,
-             "music_banks": 0, "game_elves": {}}
+             "music_banks": 0, "game_elves": {}, "video_paths": []}
     for fpath, _ino, node in reader.iter_regular_files(min_size=1,
                                                        max_depth=20):
         base = fpath.rsplit("/", 1)[-1]
@@ -165,6 +165,9 @@ def _walk_partition(reader):
                 b = b""
             if len(b) >= 12 and b[4:8] == b"ftyp":
                 found["videos"] += 1
+                # The paths too, not just the count — the Compare tab
+                # classifies changed files by them.
+                found["video_paths"].append(fpath)
     return found
 
 

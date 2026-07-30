@@ -636,6 +636,33 @@ HELP_CONTENT = {
          "machines need different defaults; tick it when one preset fits "
          "everything you build."),
     ],
+    "Compare": [
+        ("What it does",
+         "Pick two card images of the same game — two releases, or a modded "
+         "card against its stock base — and Compare reports what changed "
+         "from A to B: added, modified and deleted files per asset type "
+         "(videos, images, scenes, music banks), the sound counts, "
+         "adjustment defaults and the high-score board. Copy Report puts "
+         "the whole diff on the clipboard as plain text."),
+        ("How files are diffed",
+         "Straight off the cards, no Extract needed: every moddable file on "
+         "a Spike 2 card is indexed in the card's own validation manifest "
+         "with its size and a digest, so \"modified\" means Stern's own "
+         "stored digest changed — comparing two multi-GB cards takes "
+         "seconds, not a full read. A scene counts as modified when any "
+         "file in its folder changed. Sounds are packed inside image.bin "
+         "and can't be listed one by one here: the report shows the sound "
+         "and fragment counts and whether the audio container changed at "
+         "all — for a sound-by-sound diff, extract both cards and compare "
+         "the WAVs (the length-prefix naming option helps line them up)."),
+        ("Adjustments and high scores",
+         "Both game firmwares are decoded with the same parsers the "
+         "Defaults tab uses, then diffed: settings added or removed, "
+         "defaults that changed, and high-score places whose default "
+         "initials, player name or score moved. As always these are the "
+         "cards' compiled defaults — a machine's live settings and scores "
+         "are in its own memory, not on the card."),
+    ],
 }
 
 # The Image Info WINDOW (the "Info" button beside the Extract / Write image

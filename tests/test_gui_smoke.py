@@ -2704,6 +2704,31 @@ def test_settings_tab_gated_and_form(app, manufacturers_by_key, monkeypatch):
     assert "disabled" in w._settings_auto_cb.state()
 
 
+def test_compare_tab_gated_by_capability(app, manufacturers_by_key):
+    """The Compare tab shows only for plugins advertising capabilities.compare
+    (Stern), and a manufacturer switch drops any rendered report so a stale
+    diff can't survive under the new manufacturer's name."""
+    w = app.window
+
+    def _state(label):
+        for tid in w._notebook.tabs():
+            if w._tab_key(tid) == label:
+                return str(w._notebook.tab(tid, "state"))
+        return None
+
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update(); app.root.update()
+    assert _state("Compare") == "normal"
+    # A rendered report + a manufacturer switch: the tree and sections clear.
+    w._compare_sections = [("Compared", [("Image A", "x.raw")])]
+    w._compare_tree.insert("", "end", text="Compared", tags=("section",))
+    app._on_manufacturer_change(manufacturers_by_key["spooky"])
+    app.root.update(); app.root.update()
+    assert _state("Compare") == "hidden"
+    assert w._compare_sections == []
+    assert not w._compare_tree.get_children("")
+
+
 def test_video_noconv_conflict_helper(app, manufacturers_by_key):
     """'No conversion' + a container the verbatim copy would reject is
     flagged at pick/toggle time (a tester hit it only at build time)."""

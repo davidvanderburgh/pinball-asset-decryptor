@@ -102,6 +102,33 @@ def digests(data):
             hashlib.md5(data).digest())
 
 
+def manifest_files(data):
+    """``{path: (size, md5_hex)}`` for every record in a ``.sidx``, else ``{}``.
+
+    The manifest already stores each indexed file's size and MD5 (the fields
+    :func:`record_field_writes` refreshes after a Write), so two cards can be
+    diffed file-by-file from their manifests alone — no hashing of the cards
+    themselves.  Used by the Compare tab.  A record whose payload is truncated
+    is skipped rather than reported with junk digests.
+    """
+    recs, _crc, fmt = parse_records(data)
+    if not recs:
+        return {}
+    _hmac_off, md5_off = _FORMATS[fmt]
+    size_fmt, size_off = _SIZE_FIELDS[fmt][0], _SIZE_FIELDS[fmt][1]
+    out = {}
+    for path, po in recs.items():
+        md5 = data[po + md5_off:po + md5_off + _MD5_LEN]
+        if len(md5) < _MD5_LEN:
+            continue
+        try:
+            size = struct.unpack_from(size_fmt, data, po + size_off)[0]
+        except struct.error:
+            continue
+        out[path] = (size, md5.hex())
+    return out
+
+
 def record_field_writes(payload_off, hmac_digest, md5_digest, fmt="FI64",
                         size=None):
     """Sidx-file-relative ``[(offset, bytes), ...]`` to write one record's

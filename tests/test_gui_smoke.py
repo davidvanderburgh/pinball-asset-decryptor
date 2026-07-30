@@ -23,10 +23,13 @@ pytestmark = [
 import re as _re_mod
 import tkinter as _tk_mod
 
-# The two shapes Tcl reports when its runtime scripts can't be loaded: the
-# direct read failure, and the follow-on symptom once a half-built interpreter
-# is left behind.  Deliberately narrow — see the `app` fixture.
-_TCL_RUNTIME_UNAVAILABLE = _re_mod.compile(r"init\.tcl|tcl_findLibrary")
+# The shapes Tcl reports when its runtime scripts can't be loaded: the direct
+# read failures (Tcl's init.tcl, Tk's tk.tcl — "Can't find a usable tk.tcl"
+# broke the v0.100.3 release CI run) and the follow-on symptom once a
+# half-built interpreter is left behind.  Deliberately narrow — see the `app`
+# fixture.
+_TCL_RUNTIME_UNAVAILABLE = _re_mod.compile(
+    r"init\.tcl|tk\.tcl|tcl_findLibrary")
 
 
 def _make_invisible(win):

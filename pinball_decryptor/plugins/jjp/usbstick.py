@@ -660,7 +660,9 @@ class UsbStickPreparePipeline(BasePipeline):
         self._done(True,
                    "USB install stick ready (%d files, %.1f GB).\n\n"
                    "Put it in the USB slot at the front of the machine's "
-                   "cabinet (either Cabinet Board slot; OK to unplug the "
-                   "dongle), then turn the machine on — the installer "
-                   "starts by itself and offers an optional factory "
-                   "reset." % (len(files), total / 1e9))
+                   "cabinet (either Cabinet Board slot), leave the purple "
+                   "security key plugged in, then turn the machine on — the "
+                   "installer starts by itself and offers an optional "
+                   "factory reset.\n\n"
+                   "Without the security key the installer stops on "
+                   "\"Security key not found\"." % (len(files), total / 1e9))

@@ -438,10 +438,30 @@ def reencrypt_asset(original_encrypted, new_content, path, game_name,
     pad, the trail pad and the file length all stay exactly as they were, and
     four bytes of the lead pad are forged so the whole file still hashes to
     the value ``fl.dat`` records.  That is the only integrity check the loader
-    performs (``fm_load_file_into_ram`` @0x6A9D19, standard CRC-32 over the
-    *encrypted* bytes) — there is no decrypted-content checksum in that path,
+    performs, and it was read straight out of the game's own decrypted code
+    (``fm_load_file_into_ram``, ``../JJPECore/file_manager.cpp``)::
+
+        006a9ce7  xor   edi, edi              ; seed 0
+        006a9ced  mov   rdx, r12              ; r12 = the full size read
+        006a9cf0  mov   rsi, r11              ; r11 = start of the buffer
+        006a9d19  call  0x849700              ; crc32(0, buf, size)
+        006a9d1e  cmp   dword ptr [rbx+0x18], eax   ; vs the fl.dat record
+
+    So the scope is the **whole file**, trailing pad included — nothing
+    subtracts the pads — the seed is 0, and 0x849700 is a plain table-driven
+    CRC-32 whose table (0xC669A0) is the standard one, bit-identical to
+    ``zlib.crc32``.  It is the only crc32 call site in the file manager (50
+    exist binary-wide).  There is no decrypted-content checksum in that path,
     which is why nothing has to be appended to the content and the length can
-    stay exact.
+    stay exact.  Because the stock file passes on a stock machine, the stored
+    value is by definition the CRC of the bytes already on the card, so the
+    target needs no ``fl.dat`` lookup.
+
+    A mismatch is not fatal, for what it's worth: the loader logs
+    ``FILE CHECK ERROR: <path>`` to ``/jjpe/temp/game.log``, sets the flag
+    behind the operator message "Missing or corrupted file(s) - reinstall
+    game", and jumps straight back into the decrypt path, so the asset still
+    loads.  A wrong forge shows up as that message, not as a dead machine.
 
     Because ``fl.dat`` is dongle-encrypted we can neither read nor rewrite the
     pad sizes, so the replacement has to be the same length as the original

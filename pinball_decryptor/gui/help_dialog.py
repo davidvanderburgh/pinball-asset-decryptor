@@ -463,10 +463,12 @@ HELP_CONTENT = {
          "copies the ISO's files onto it — the only stick layout a JJP "
          "machine can read. A stick written with balenaEtcher, dd or Rufus' "
          "DD mode fails on the machine with 'Failed to mount USB stick'. "
-         "Put the finished stick in a front-cabinet USB slot (OK to unplug "
-         "the dongle) and power on: the installer runs by itself — the "
-         "Utilities USB-update menu is only for JJP's small delta updates "
-         "and ignores install sticks."),
+         "Put the finished stick in a front-cabinet USB slot, leave the "
+         "purple security key plugged in, and power on: the installer runs "
+         "by itself — the Utilities USB-update menu is only for JJP's small "
+         "delta updates and ignores install sticks. The installer checks for "
+         "the security key first and stops on \"Security key not found\" if "
+         "it is missing."),
     ],
     "Mod Pack": [
         ("What it's for",

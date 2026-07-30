@@ -367,6 +367,60 @@ def test_reencrypt_identity_is_a_noop_for_content():
                            trim=False)[:len(png)] == png
 
 
+def test_forged_bytes_land_in_the_lead_pad_only():
+    """Read out of the game's own code (dump of the decrypted .text):
+
+        006a9ce7  xor   edi, edi                  ; seed 0
+        006a9ced  mov   rdx, r12                  ; r12 = full file size
+        006a9cf0  mov   rsi, r11                  ; r11 = buffer start
+        006a9d19  call  0x849700                  ; crc32(0, buf, size)
+        006a9d1e  cmp   dword ptr [rbx + 0x18], eax
+        006a9d76  mov   edx, dword ptr [rbx + 0x20]   ; f1
+        006a9d80  lea   rsi, [r15 + rdx]              ; shuffle starts AT
+        006a9d86  ...   pshufb                        ; the content
+
+    So the check covers the whole file, and the 128-byte shuffle begins at
+    the content.  The forge therefore has to stay strictly inside the lead
+    pad: a byte at or after f1 would be shuffled and would land in the
+    content the game keeps.
+    """
+    lead, trail = 216, 96
+    png = _big_png()
+    orig = _scheme3_asset(png, lead=lead, trail=trail)
+    edited = bytearray(png)
+    edited[40:44] = bytes((0xDE, 0xAD, 0xBE, 0xEF))
+    out = v3.reencrypt_asset(orig, bytes(edited), SAMPLE_PATH, "Sonic")
+
+    differing = [i for i in range(len(orig)) if orig[i] != out[i]]
+    in_lead = [i for i in differing if i < lead]
+    in_trail = [i for i in differing if i >= lead + len(png)]
+    assert in_lead, "the CRC forge has to rewrite part of the lead pad"
+    assert min(in_lead) >= lead - 4 and max(in_lead) < lead, (
+        "the forge must use the last 4 bytes of the lead pad and nothing "
+        "else: a byte at or after f1 would be shuffled into the content")
+    assert not in_trail, "the trailing pad must come through untouched"
+
+    # Same content in, byte-identical file out — no gratuitous rewrite.
+    assert v3.reencrypt_asset(orig, png, SAMPLE_PATH, "Sonic") == orig
+
+
+def test_crc_scope_is_the_whole_file_including_the_trailing_pad():
+    """The trailing pad is new in scheme 3, and the loader's crc32 length is
+    the full size read off disk (r12), not size-minus-pads — so a rewrite
+    has to keep the whole-file CRC, which is what reencrypt_asset targets.
+    Guards against someone "fixing" this to hash only the content."""
+    from pinball_decryptor.plugins.jjp.crypto import crc32_buf
+    trail = 96
+    png = _big_png()
+    orig = _scheme3_asset(png, trail=trail)
+    out = v3.reencrypt_asset(orig, png, SAMPLE_PATH, "Sonic")
+    assert crc32_buf(out) == crc32_buf(orig)
+    # The trailing pad is inside that scope: its bytes are unchanged, and
+    # dropping it changes the hash, so it cannot be excluded by accident.
+    assert out[-trail:] == orig[-trail:]
+    assert crc32_buf(out[:-trail]) != crc32_buf(out)
+
+
 def test_reencrypt_rejects_a_different_size():
     png = _big_png()
     orig = _scheme3_asset(png)

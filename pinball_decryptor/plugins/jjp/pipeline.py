@@ -3354,6 +3354,53 @@ class DecryptionPipeline:
             timeout=timeout,
         )
 
+    def _debugfs_inode_meta(self, path):
+        """Read (permission bits, uid, gid) for a file inside the image.
+
+        ``debugfs write`` builds a brand new inode and copies the mode and
+        ownership off the *staging* file, so a replaced file silently loses
+        its original permissions — an executable becomes non-executable.
+        On a JJP card that is not cosmetic: ``runonce.sh`` reboots the
+        machine when it finds ``jjpe-mount-generator`` non-executable, and
+        the installer carries the same workaround.  Capture the metadata
+        before the write so :meth:`_debugfs_restore_inode_meta` can put it
+        back.
+
+        Returns None when the file cannot be stat'ed (a new file, say).
+        """
+        try:
+            out = self._debugfs_run(f'stat "{path}"', timeout=15)
+        except CommandError:
+            return None
+        mode = re.search(r'Mode:\s*0?([0-7]{3,4})', out)
+        owner = re.search(r'User:\s*(\d+)\s+Group:\s*(\d+)', out)
+        if not mode or not owner:
+            return None
+        return (int(mode.group(1), 8),
+                int(owner.group(1)), int(owner.group(2)))
+
+    def _debugfs_restore_inode_meta(self, path, meta):
+        """Put the mode/uid/gid captured by :meth:`_debugfs_inode_meta` back.
+
+        Best effort: a failure here leaves the file readable but with the
+        wrong permissions, which is worth a log line rather than failing
+        the whole write.
+        """
+        if not meta:
+            return
+        perms, uid, gid = meta
+        # sif wants the full mode word, file-type bits included.
+        fields = (("mode", f"0{0o100000 | perms:o}"),
+                  ("uid", str(uid)), ("gid", str(gid)))
+        for field, value in fields:
+            try:
+                self._debugfs_run(f'sif "{path}" {field} {value}',
+                                  writable=True, timeout=15)
+            except CommandError as e:
+                self.log(f"  Warning: could not restore {field} on {path}: "
+                         f"{e}", "info")
+                return
+
     def _run_shell_elevated(self, shell_cmd, timeout=120, label=None):
         """Run an arbitrary shell command as root with the cached
         admin password (single-prompt UX).
@@ -3682,7 +3729,9 @@ class ModPipeline(DecryptionPipeline):
                         "   stick'.\n"
                         "2. Plug the stick into the USB port at the front of\n"
                         "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door; OK to unplug the dongle).\n"
+                        "   near the coin door). Leave the purple security\n"
+                        "   key plugged in: the installer checks for it and\n"
+                        "   stops with \"Security key not found\" without it.\n"
                         "3. Turn the machine on. The installer starts on its\n"
                         "   own and offers an optional factory reset; the\n"
                         "   Utilities USB-update menu is NOT part of this.",
@@ -5387,7 +5436,9 @@ class StandaloneModPipeline(ModPipeline):
                         "   stick'.\n"
                         "2. Plug the stick into the USB port at the front of\n"
                         "   the cabinet (Cabinet Board slot / USB extension\n"
-                        "   near the coin door; OK to unplug the dongle).\n"
+                        "   near the coin door). Leave the purple security\n"
+                        "   key plugged in: the installer checks for it and\n"
+                        "   stops with \"Security key not found\" without it.\n"
                         "3. Turn the machine on. The installer starts on its\n"
                         "   own and offers an optional factory reset; the\n"
                         "   Utilities USB-update menu is NOT part of this.",
@@ -6158,6 +6209,9 @@ class StandaloneModPipeline(ModPipeline):
         from .crypto_v3 import SCHEME_V3
         scheme = _detect_write_scheme(entries, _read_original, game_name,
                                       self.log)
+        # Remembered for the post-write spot-check, which has to decrypt
+        # with the same cipher the write used.
+        self._write_scheme = scheme
         edata_prefix = detect_edata_prefix(entries)
 
         # Build lookup
@@ -6320,7 +6374,11 @@ class StandaloneModPipeline(ModPipeline):
                     fail += 1
                     continue
 
-                # Remove old file from image, write new one via debugfs
+                # Remove old file from image, write new one via debugfs.
+                # debugfs builds a fresh inode from the staging file, so
+                # grab the original's mode/ownership first and put it back.
+                _step = f"debugfs stat {entry.path} (metadata)"
+                meta = self._debugfs_inode_meta(entry.path)
                 _step = f"debugfs rm {entry.path}"
                 self._debugfs_run(
                     f'rm "{entry.path}"', writable=True, timeout=30)
@@ -6328,6 +6386,8 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{entry.path}"',
                     writable=True, timeout=120)
+                _step = f"debugfs sif {entry.path} (metadata)"
+                self._debugfs_restore_inode_meta(entry.path, meta)
 
                 # Verify file was written by checking size via debugfs stat
                 _step = f"debugfs stat {entry.path}"
@@ -6354,6 +6414,7 @@ class StandaloneModPipeline(ModPipeline):
                         'md5': _hl.md5(encrypted).hexdigest(),
                         'size': len(encrypted),
                         'content_md5': _hl.md5(content).hexdigest(),
+                        'content_len': len(content),
                     }
             except (CommandError, OSError) as e:
                 self.log(f"[FAIL] {rel_path} (write failed at step "
@@ -6370,6 +6431,13 @@ class StandaloneModPipeline(ModPipeline):
         else:
             summary += " successfully"
             self.log(summary, "success")
+
+        if ok == 0 and fail > 0:
+            raise PipelineError("Encrypt",
+                f"None of the {fail} replacement file(s) could be written, so "
+                f"nothing was changed.\n\nCarrying on would only produce a "
+                f"copy of the original assets. See the [FAIL] lines above for "
+                f"the reason on each file.")
 
         if edata_files:
             self.log("CRC32 forgery: encrypted files match original fl.dat checksums.",
@@ -6429,12 +6497,26 @@ class StandaloneModPipeline(ModPipeline):
                             f"echo '{enc_b64}' | base64 -d > '{staging}'",
                             timeout=30)
 
-                # Write into image via debugfs
+                # Write into image via debugfs, keeping the original mode
+                # and ownership: these files are part of the OS, and one
+                # that comes back non-executable can stop the machine
+                # booting (see _debugfs_inode_meta).
+                meta = self._debugfs_inode_meta(fs_path)
                 self._debugfs_run(
                     f'rm "{fs_path}"', writable=True, timeout=30)
                 self._debugfs_run(
                     f'write "{staging}" "{fs_path}"',
                     writable=True, timeout=120)
+                self._debugfs_restore_inode_meta(fs_path, meta)
+                if meta:
+                    perms, uid, gid = meta
+                    self.log(f"    kept mode {perms:04o} owner {uid}:{gid}",
+                             "info")
+                else:
+                    self.log(
+                        "    Warning: could not read the original file's "
+                        "permissions; it will be written 0644 root:root.",
+                        "info")
 
                 self.log(f"  [OK] {fs_path}", "success")
                 ok += 1
@@ -6510,21 +6592,39 @@ class StandaloneModPipeline(ModPipeline):
             # than re-reading win_path, because the encrypt phase may have
             # trimmed/padded audio to match original duration.
             if entry and not verification_failed:
-                from .crypto import decrypt_file as _df
-                disk_decrypted = _df(
-                    disk_encrypted, entry.filler_size, entry.path)
-                # Strip the 4-byte CRC forgery suffix to get original content
-                disk_content = (disk_decrypted[:-4]
-                                if len(disk_decrypted) > 4
-                                else disk_decrypted)
-                disk_content_md5 = _hl.md5(disk_content).hexdigest()
-
+                from .crypto_v3 import SCHEME_V3 as _S3
                 if expected and 'content_md5' in expected:
                     expected_content_md5 = expected['content_md5']
+                    expected_content_len = expected.get('content_len')
                 else:
                     # Fallback: read the file from disk (pre-audio-resize)
                     with open(win_path, 'rb') as fh:
-                        expected_content_md5 = _hl.md5(fh.read()).hexdigest()
+                        _replacement = fh.read()
+                    expected_content_md5 = _hl.md5(_replacement).hexdigest()
+                    expected_content_len = len(_replacement)
+
+                if getattr(self, '_write_scheme', None) == _S3:
+                    # Scheme 3 appends no CRC suffix and keeps the original's
+                    # trailing pad, so compare the content prefix instead of
+                    # trimming.  Decrypting this with the legacy cipher (what
+                    # this check used to do for every image) yields noise and
+                    # reports a write failure that never happened.
+                    from .crypto_v3 import decrypt_file as _df3
+                    disk_content = _df3(
+                        disk_encrypted, entry.filler_size, entry.path,
+                        self.game_name or "", trim=False)
+                    if expected_content_len:
+                        disk_content = disk_content[:expected_content_len]
+                else:
+                    from .crypto import decrypt_file as _df
+                    disk_decrypted = _df(
+                        disk_encrypted, entry.filler_size, entry.path)
+                    # Strip the 4-byte CRC forgery suffix to get original
+                    # content
+                    disk_content = (disk_decrypted[:-4]
+                                    if len(disk_decrypted) > 4
+                                    else disk_decrypted)
+                disk_content_md5 = _hl.md5(disk_content).hexdigest()
 
                 if disk_content_md5 == expected_content_md5:
                     self.log(
@@ -6568,15 +6668,36 @@ class StandaloneModPipeline(ModPipeline):
             self._verify_raw_image(wsl_img)
 
         self.log("Running e2fsck...", "info")
+        # e2fsck exits 1/2 when it repaired something (expected after
+        # debugfs -w) but 4 when errors are LEFT UNCORRECTED, and 8 when it
+        # could not run at all.  Shipping either of those inside an install
+        # ISO hands the machine a filesystem its own e2fsck will then
+        # "repair" by deleting things, so say so instead of ignoring it.
+        fsck_lines = []
+        fsck_rc = 0
         try:
             for line in self.executor.stream(
                 f"e2fsck -fy '{wsl_img}' 2>&1", timeout=300
             ):
                 clean = line.strip()
                 if clean:
+                    fsck_lines.append(clean)
                     self.log(f"  {clean}", "info")
-        except CommandError:
-            pass
+        except CommandError as e:
+            fsck_rc = e.returncode or 0
+            for clean in (e.output or "").splitlines():
+                if clean.strip():
+                    fsck_lines.append(clean.strip())
+        if fsck_rc & 4 or fsck_rc >= 8:
+            tail = "\n".join(fsck_lines[-8:]) or "(no output captured)"
+            raise PipelineError(
+                "Convert",
+                f"e2fsck could not repair the modified filesystem "
+                f"(exit {fsck_rc}).  The ISO was NOT built, because the "
+                f"machine would restore a damaged root filesystem and fail "
+                f"to boot.\n\nLast output:\n{tail}\n\n"
+                f"Re-run Apply Modifications to start from a fresh copy of "
+                f"the original image.")
 
         self._ensure_iso_tools()
 
@@ -9174,6 +9295,13 @@ class DirectSSDModPipeline(StandaloneModPipeline):
         else:
             summary += " successfully"
             self.log(summary, "success")
+
+        if ok == 0 and fail > 0:
+            raise PipelineError("Encrypt",
+                f"None of the {fail} replacement file(s) could be written, so "
+                f"nothing was changed.\n\nCarrying on would only produce a "
+                f"copy of the original assets. See the [FAIL] lines above for "
+                f"the reason on each file.")
 
         if edata_files:
             self.log("CRC32 forgery: encrypted files match original fl.dat checksums.",

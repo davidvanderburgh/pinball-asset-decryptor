@@ -115,6 +115,29 @@ def _audio_mode_note(mode):
             "replacements." % (why or "see the build log"))
 
 
+def _valpatch_note(mode):
+    """Completion-dialog sentence for a card Stern's validator will reject.
+
+    The engine returns ``None``, ``("bypassed", "")``, ``("absent", "")`` or
+    ``("unlocated", why)`` (see :func:`.valpatch.bypass_status`).  Only the last
+    one gets a sentence: the firmware carries the validator but the Write could
+    not reach it, so the game still checksums its own assets and the machine
+    puts up GAME VALIDATION ERROR / UPDATE SD CARD on a build that otherwise
+    looks perfectly successful.  Saying nothing in the ordinary cases keeps the
+    dialog quiet when there's nothing to warn about -- the same reasoning as
+    :func:`_audio_mode_note`, which a tester's wasted hardware tests earned."""
+    if not mode:
+        return ""
+    kind, why = mode
+    if kind != "unlocated":
+        return ""
+    return ("\n\n⚠ SD-card validation: NOT bypassed — %s. The game binary on "
+            "this card still checks its own assets, so the machine is likely "
+            "to show GAME VALIDATION ERROR / UPDATE SD CARD and may reboot "
+            "instead of starting a game. Please report the title and firmware "
+            "version." % why)
+
+
 class SternExtractPipeline(BasePipeline):
     """Decode every packed sound in a Spike 2 card image to a per-sound WAV."""
 
@@ -200,14 +223,15 @@ class SternWritePipeline(BasePipeline):
         self._set_phase(1)  # Stage
         _require_engine()
         self._set_phase(2)  # Re-encode audio (+ patch, inside the engine)
-        counts, audio_mode = engine.write_image(
+        counts, audio_mode, valpatch_mode = engine.write_image(
             self.original_path, self.assets_dir, self.output_path,
             log=self._log, progress=self._progress, cancel=lambda: self._cancelled,
             label=display_for_key(key, self.original_path))
         self._set_phase(3)  # Patch image
-        self._done(True, "Wrote %s to %s%s"
+        self._done(True, "Wrote %s to %s%s%s"
                    % (_write_summary(counts), self.output_path,
-                      _audio_mode_note(audio_mode)))
+                      _audio_mode_note(audio_mode),
+                      _valpatch_note(valpatch_mode)))
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
@@ -300,13 +324,14 @@ class SternDirectSsdWritePipeline(BasePipeline):
                 "not a file path (got %r). Pick the card from the Game SD "
                 "dropdown." % self.device_path)
         _require_engine()
-        counts, audio_mode = engine.write_device(
+        counts, audio_mode, valpatch_mode = engine.write_device(
             self.device_path, self.assets_dir,
             log=self._log, progress=self._progress,
             cancel=lambda: self._cancelled, phase=self._set_phase,
             partition_override=self.partition_override)
-        self._done(True, "Wrote %s directly to the SD card.%s"
-                   % (_write_summary(counts), _audio_mode_note(audio_mode)))
+        self._done(True, "Wrote %s directly to the SD card.%s%s"
+                   % (_write_summary(counts), _audio_mode_note(audio_mode),
+                      _valpatch_note(valpatch_mode)))
 
 
 class SternRevertPipeline(BasePipeline):

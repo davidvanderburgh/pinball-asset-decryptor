@@ -132,7 +132,7 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
         # (writes, counts, grow_plan, audio_mode) — no oversized videos, so
         # grow_plan=None; the cave applied, so the mode is blip-free
         return ({19: b"PATCHED!"}, (3, 0, 0, 0), None,   # 3 sounds, off 19
-                ("blip-free", ""))
+                ("blip-free", ""), ("bypassed", ""))
     monkeypatch.setattr(engine, "_compute_patches", fake_compute)
 
     seen = {}
@@ -144,9 +144,11 @@ def test_write_image_copies_then_applies_patches(tmp_path, monkeypatch):
             out_f.write(b)
     monkeypatch.setattr(engine, "_apply_writes", fake_apply)
 
-    n, mode = engine.write_image(str(src), str(tmp_path), str(out), log=_log)
+    n, mode, vmode = engine.write_image(str(src), str(tmp_path), str(out),
+                                        log=_log)
     assert n == (3, 0, 0, 0)          # per-type breakdown (audio, video, image, text)
     assert mode == ("blip-free", "")  # the engine's mode passes through intact
+    assert vmode == ("bypassed", "")  # and so does the validator status
     assert out.exists()
     assert seen["writes"] == {19: b"PATCHED!"}
     data = out.read_bytes()
@@ -159,11 +161,12 @@ def test_write_image_cancel_discards_output(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: (None, None, None, None))  # cancelled mid-compute
+                        lambda *a, **k: (None, None, None, None,
+                                         None))  # cancelled mid-compute
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch on cancel"))
     assert (engine.write_image(str(src), str(tmp_path), str(out), log=_log)
-            == ((0, 0, 0, 0), None))
+            == ((0, 0, 0, 0), None, None))
     assert not out.exists()                                # pristine copy discarded
 
 
@@ -188,7 +191,8 @@ def test_write_image_copy_failure_surfaces(tmp_path, monkeypatch):
     out = tmp_path / "out.raw"
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
-                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), None, None))
+                        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), None, None,
+                                         None))
     monkeypatch.setattr(engine, "_apply_writes",
                         lambda *a, **k: pytest.fail("must not patch when copy failed"))
 
@@ -211,7 +215,7 @@ def test_write_image_waits_for_slow_copy_before_patching(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
     monkeypatch.setattr(engine, "_compute_patches",
                         lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0),
-                                         None, None))
+                                         None, None, None))
 
     real_copy = shutil.copyfile
 
@@ -291,7 +295,7 @@ def test_write_pipeline_summary_carries_the_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(
         pl.engine, "write_image",
         lambda *a, **k: ((2, 0, 0, 0), ("standard", "turned off for this "
-                                        "build")))
+                                        "build"), ("bypassed", "")))
     got = {}
     p = pl.SternWritePipeline(
         str(tmp_path / "in.img"), str(tmp_path), str(tmp_path / "out.img"),
@@ -303,3 +307,55 @@ def test_write_pipeline_summary_carries_the_mode(tmp_path, monkeypatch):
     assert "2 sound(s)" in got["summary"]
     assert "Blip-free callouts: NOT applied" in got["summary"]
     assert "turned off for this build" in got["summary"]
+
+
+# --- completion-dialog validator note: say when the card will be rejected ----
+# The bypass finds Stern's validator by code signature (a function carrying
+# several inlined CRC32 loops).  That is a property of how the firmware was
+# COMPILED, so a build that factors its CRC32 out of line matches nothing --
+# Jaws LE 1.01.0 is a shipped title exactly like that.  The miss used to be
+# reported as a mild "nothing to bypass" info line, indistinguishable from a
+# title that genuinely has no validator, so the Write shipped a card whose
+# validator is fully armed and the machine answered with GAME VALIDATION ERROR
+# (flippermeister, James Bond + one replaced sound, 2026-07-31).
+
+def test_valpatch_note_warns_when_the_validator_was_not_reached():
+    from pinball_decryptor.plugins.stern.pipeline import _valpatch_note
+    note = _valpatch_note(("unlocated", "this firmware's validator doesn't "
+                           "match the routine signature the bypass looks for"))
+    assert "NOT bypassed" in note
+    assert "GAME VALIDATION ERROR" in note      # the on-LCD message, verbatim
+    assert "routine signature" in note          # the reason reaches the user
+    assert "report the title" in note           # and it asks for a bug report
+
+
+def test_valpatch_note_stays_quiet_when_there_is_nothing_to_warn_about():
+    from pinball_decryptor.plugins.stern.pipeline import _valpatch_note
+    assert _valpatch_note(("bypassed", "")) == ""   # normal, patched card
+    assert _valpatch_note(("absent", "")) == ""     # title carries no validator
+    assert _valpatch_note(None) == ""               # firmware unreadable
+
+
+def test_write_pipeline_summary_carries_the_validator_warning(tmp_path,
+                                                              monkeypatch):
+    # End-to-end through SternWritePipeline._run: an un-bypassed validator has
+    # to reach the completion dialog, not just the build log.
+    from pinball_decryptor.plugins.stern import pipeline as pl
+    monkeypatch.setattr(pl, "detect_game", lambda p: "spike2")
+    monkeypatch.setattr(pl, "display_for_key", lambda k, p: "Test Game")
+    monkeypatch.setattr(pl, "_require_engine", lambda: None)
+    monkeypatch.setattr(
+        pl.engine, "write_image",
+        lambda *a, **k: ((1, 0, 2, 0), ("blip-free", ""),
+                         ("unlocated", "no signature match")))
+    got = {}
+    p = pl.SternWritePipeline(
+        str(tmp_path / "in.img"), str(tmp_path), str(tmp_path / "out.img"),
+        log_cb=lambda *a, **k: None, phase_cb=lambda *a, **k: None,
+        progress_cb=None,
+        done_cb=lambda ok, summary: got.update(ok=ok, summary=summary))
+    p._run()
+    assert got["ok"]
+    assert "1 sound(s) and 2 image(s)" in got["summary"]
+    assert "NOT bypassed" in got["summary"]
+    assert "no signature match" in got["summary"]

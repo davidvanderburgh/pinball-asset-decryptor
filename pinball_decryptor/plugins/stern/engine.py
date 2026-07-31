@@ -3150,12 +3150,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`write_device`), so the exact same patch set is produced whether the
     destination is an image copy or the card itself.
 
-    Returns ``(writes, counts, grow_plan, audio_mode)`` where ``counts`` is
+    Returns ``(writes, counts, grow_plan, audio_mode, valpatch_mode)`` where
+    ``counts`` is
     ``(n_audio, n_video, n_image, n_text)`` and ``audio_mode`` says how the
     re-encoded cat-0 sounds were built: ``None`` (no cat-0 audio in this
     write), ``("blip-free", "")`` (the firmware cave applied), or
     ``("standard", why)`` (the fallback build -- the original-sound scrap
-    remains at the two master-directory windows).  Every element is ``None``
+    remains at the two master-directory windows).  ``valpatch_mode`` says
+    whether Stern's SD-card validator was actually neutralised on this card
+    (see :func:`.valpatch.bypass_status`).  Every element is ``None``
     if cancelled.  Raises
     ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
     when nothing could be re-encoded / fit."""
@@ -3298,6 +3301,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # and a tester burned two hardware tests on a card he believed was
         # blip-free (Elvira spinner, 2026-07-30).
         audio_mode = None      # None | ("blip-free", "") | ("standard", why)
+        # Whether Stern's SD-card validator actually got neutralised on this
+        # card (see valpatch.bypass_status).  Carried out to the completion
+        # dialog because a firmware whose validator we can't reach still builds
+        # a perfectly normal-looking card -- one the machine then refuses with
+        # GAME VALIDATION ERROR.
+        valpatch_mode = None   # None | ("bypassed"|"absent"|"unlocated", why)
         img_node = None
         fw_node = None
         # Path A: the rebuilt game_real (cave + validator bypass).  It is LONGER
@@ -3361,7 +3370,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             # copy would undo it.
                             from . import valpatch as _vp
                             with open(_lp(gr_path), "rb") as _f:
-                                _vbypass = _vp.bypass_overlay(_f.read())
+                                _vbypass, _vmode = _vp.bypass_overlay(_f.read())
                             patched_gr, _fw_size = _build_derive_redirect_cave(
                                 gr_path, img_path, audio_patches, np, log, work,
                                 progress, extra_fw_writes=_vbypass)
@@ -3375,6 +3384,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                                     audio_patches, params, np,
                                                     log, work)
                             pathA_applied = True
+                            # The bypass rode along inside the rebuilt firmware,
+                            # so this build's validator status is that overlay's.
+                            valpatch_mode = _vmode
+                            _vp.log_status(log, _vmode)
                         except Exception as e:
                             # Any failure (unsupported firmware, no free address
                             # space, a host that can't grow ext4 files, or a
@@ -3576,7 +3589,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if patched_gr is None:
             try:
                 from . import valpatch
-                writes += valpatch.compute_writes(reader, log)
+                _vwrites, valpatch_mode = valpatch.compute_writes(reader, log)
+                writes += _vwrites
             except Exception as e:
                 log("Validation bypass skipped (%s)." % e, "warning")
 
@@ -3605,7 +3619,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                   len(video_patches) + len(video_grow_jobs),
                   len(image_patches) + len(texture_patches) + n_radimg,
                   n_text + n_color)
-        return writes, counts, grow_plan, audio_mode
+        return writes, counts, grow_plan, audio_mode, valpatch_mode
     finally:
         _rmtree(work)
 
@@ -3661,7 +3675,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
     try:
-        writes, counts, grow_plan, audio_mode = _compute_patches(
+        writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label)
     except BaseException:
         copier.join()                       # let the copy finish before unlinking
@@ -3676,7 +3690,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         raise copy_err[0]
     if writes is None:                      # cancelled mid-compute
         _safe_remove(output_path)
-        return (0, 0, 0, 0), None
+        return (0, 0, 0, 0), None, None
 
     # the copy is already on disk; patch the changed bytes in place
     with open(_lp(output_path), "r+b") as out:
@@ -3722,8 +3736,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # Return the per-type breakdown (not just the total) so the completion
     # dialog can name what actually changed instead of always saying "sound(s)",
     # plus the audio build mode so it can say whether the card is blip-free or
-    # keeps the original-sound scrap (a fallback was invisible outside the log).
-    return counts, audio_mode
+    # keeps the original-sound scrap (a fallback was invisible outside the log),
+    # and the validator status so it can say when the card will fail Stern's
+    # SD-card validation on the machine.
+    return counts, audio_mode, valpatch_mode
 
 
 def _grow_video_slots(image_or_device, grow_plan, log):
@@ -3937,11 +3953,11 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     parts = device_partitions(device_path, partition_override, log=log)
 
     with RawDeviceFile(device_path, writable=False) as disk_f:
-        writes, counts, _grow_plan, audio_mode = _compute_patches(
+        writes, counts, _grow_plan, audio_mode, valpatch_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
             dest_is_device=True)
     if writes is None:                          # cancelled mid-compute
-        return (0, 0, 0, 0), None
+        return (0, 0, 0, 0), None, None
 
     phase(2)  # Write to SD card
     log("Writing changes directly to the SD card (in place)...", "info")
@@ -3957,8 +3973,9 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     # Return the per-type breakdown (see write_image) so the completion dialog
     # names what changed rather than a bare total, plus the audio build mode --
     # Direct-SD can never grow game_real, so a card with re-encoded sounds is
-    # always a standard (scrap-remains) build and the dialog should say so.
-    return counts, audio_mode
+    # always a standard (scrap-remains) build and the dialog should say so --
+    # and the validator status, which applies to a card write just the same.
+    return counts, audio_mode, valpatch_mode
 
 
 # --------------------------------------------------------------------------

@@ -16,8 +16,20 @@ layer still validates it.
 
 ``validation_exec`` is found by **signature** (the only function carrying several
 inlined CRC32-``0xEDB88320`` loops), not a hardcoded address, so this works across
-titles / editions / versions; if a game doesn't carry the validator the patch is
-a silent no-op.
+titles / editions / versions.
+
+That signature is a property of how the firmware was *compiled*, not of what it
+does, so it can miss: a build that factors its CRC32 out of line instead of
+inlining it carries no ``0xEDB88320`` immediate in ``.text`` at all.  Jaws LE
+1.01.0 is a shipped title exactly like that (33 of the 34 cards in the vendor
+library match the signature; Jaws matches nothing).  A miss used to be
+indistinguishable from a title that simply carries no validator, and both were
+reported as a mild "nothing to bypass" note -- so the Write quietly shipped a
+card whose validator is fully live, and the machine put up GAME VALIDATION ERROR
+/ UPDATE SD CARD on a mod the user was told had built fine.
+:func:`carries_validator` answers "is the validator in here at all?" from the
+validator's own on-LCD strings, independently of the code shape, so the two
+cases can be told apart and a miss is reported as the problem it is.
 
 NOTE: the tamper *state* is stored on the machine's board i2c/nvram, NOT on the
 SD card, so a machine that already booted an **unpatched** modded card can keep a
@@ -27,10 +39,17 @@ tamper detection; it can't un-set a flag another card already wrote.
 
 import hashlib
 import hmac
+import re
 import struct
 
 _CRC32_POLY = 0xEDB88320
 _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
+
+# The six numbered messages the validator puts on the LCD.  Stern ships them
+# byte-identical in every Spike 2 firmware checked (34/34 cards in the vendor
+# library, Jaws included), which makes them a code-shape-free answer to "does
+# this title carry the validator?" -- see the module docstring.
+_ERR_MSG_RE = re.compile(rb"#[1-6](?: %d:%d(?::%d)?)? UPDATE SD CARD\x00")
 
 
 def _text_section(elf):
@@ -105,6 +124,56 @@ def find_validation_exec(elf):
     return eoff
 
 
+def carries_validator(elf):
+    """True when *elf* carries Stern's self/asset validator at all.
+
+    Keyed on the validator's own ``#N ... UPDATE SD CARD`` messages rather than
+    on any code shape, so it stays true for a firmware
+    :func:`find_validation_exec` can't match.  That distinction is the whole
+    point: without it, "this title has no validator" (harmless) and "this
+    title's validator is still armed and we couldn't reach it" (ships a card
+    that errors on the machine) look identical to the Write."""
+    return len(_ERR_MSG_RE.findall(elf)) >= 4
+
+
+def bypass_status(elf, eoff):
+    """``(kind, why)`` describing what the bypass achieved on *elf*, where
+    *eoff* is :func:`find_validation_exec`'s answer.
+
+    ``("bypassed", "")`` the validator was found and neutered; ``("absent", "")``
+    this firmware carries no validator, so there was nothing to do; and
+    ``("unlocated", why)`` the firmware *does* carry one but its routine didn't
+    match the signature -- the case a card must never ship on silently."""
+    if eoff is not None:
+        return ("bypassed", "")
+    if carries_validator(elf):
+        return ("unlocated",
+                "this firmware's validator doesn't match the routine signature "
+                "the bypass looks for")
+    return ("absent", "")
+
+
+def log_status(log, mode):
+    """Report *mode* on the build log at a level that matches how bad it is."""
+    kind, why = mode
+    if kind == "bypassed":
+        log("Applied Stern validation bypass: patched the game firmware so this "
+            "modified card boots without the \"GAME VALIDATION ERROR / UPDATE SD "
+            "CARD\" message or technician tamper alerts. (Disabled the game's "
+            "self/asset validator and refreshed its SD-validation record to "
+            "match.)", "success")
+    elif kind == "absent":
+        log("This game firmware carries no SD-card validator; nothing to "
+            "bypass.", "info")
+    else:
+        log("COULD NOT disable this game's SD-card validator (%s). The card "
+            "will still be built, but the game checks its own assets on boot, "
+            "so the machine is likely to show \"GAME VALIDATION ERROR / UPDATE "
+            "SD CARD\" and may reboot instead of starting a game. Please report "
+            "the title and firmware version so the bypass can be taught this "
+            "build." % why, "error")
+
+
 def _game_manifest_path(reader, fw_node):
     """The ``.sidx`` manifest path for the game ELF (match by extent block)."""
     want = bytes(fw_node["i_block"])
@@ -115,38 +184,44 @@ def _game_manifest_path(reader, fw_node):
 
 
 def bypass_overlay(elf_bytes):
-    """``{file_off: bytes}`` neutering ``validation_exec`` inside *elf_bytes*,
-    expressed against the game ELF's own file offsets rather than the card's.
+    """``({file_off: bytes}, status)`` neutering ``validation_exec`` inside
+    *elf_bytes*, expressed against the game ELF's own file offsets rather than
+    the card's.
 
     Used when the whole firmware file is being rebuilt and copied onto the card
     in one piece (the blip-free cave grows ``game_real``, so it can't be patched
     in place): the bypass has to be baked into that image, because a separate
     in-place write against the old inode would just be overwritten by the copy.
-    Returns ``{}`` when this title carries no recognised validator."""
+    The overlay is empty when no validator routine was matched; *status* (see
+    :func:`bypass_status`) says whether that means there is none to match."""
     eoff = find_validation_exec(elf_bytes)
-    return {} if eoff is None else {eoff: _BX_LR}
+    overlay = {} if eoff is None else {eoff: _BX_LR}
+    return overlay, bypass_status(elf_bytes, eoff)
 
 
 def compute_writes(reader, log):
-    """``[(disk_offset, bytes), ...]`` that neuter ``validation_exec`` on the card
-    behind *reader* and refresh the game ELF's ``.sidx`` record.
+    """``([(disk_offset, bytes), ...], status)`` that neuter ``validation_exec``
+    on the card behind *reader* and refresh the game ELF's ``.sidx`` record.
 
-    Best-effort and non-fatal: returns ``[]`` (and logs) if the game ELF or the
-    validator can't be found, so it never breaks a Write for a title that doesn't
-    carry the validator.  Offsets are absolute (relative to the start of the card
-    image / device), matching the rest of the Write's flat write list."""
+    Best-effort and non-fatal: returns no writes (and logs) if the game ELF or
+    the validator can't be found, so it never breaks a Write for a title that
+    doesn't carry the validator.  *status* (see :func:`bypass_status`) is what
+    tells that harmless case apart from a firmware whose validator is still
+    armed; ``None`` when the firmware itself couldn't be read.  Offsets are
+    absolute (relative to the start of the card image / device), matching the
+    rest of the Write's flat write list."""
     from . import sidx as _sidx
     try:
         _img_ino, fw_ino = reader.find_spike_assets()
         if not fw_ino:
-            return []
+            return [], None
         fw_node = reader.read_inode(fw_ino)
         elf = bytearray(reader.read_file_bytes(fw_node))
         eoff = find_validation_exec(bytes(elf))
+        status = bypass_status(bytes(elf), eoff)
         if eoff is None:
-            log("No Stern game validation routine recognised; nothing to bypass.",
-                "info")
-            return []
+            log_status(log, status)
+            return [], status
 
         writes = []
         elf[eoff:eoff + 4] = _BX_LR            # patched bytes -> new sidx digest
@@ -172,12 +247,8 @@ def compute_writes(reader, log):
                 log("Game ELF has no .sidx record; validation bypass applied but "
                     "the card may report an invalid-SD banner.", "warning")
 
-        log("Applied Stern validation bypass: patched the game firmware so this "
-            "modified card boots without the \"GAME VALIDATION ERROR / UPDATE SD "
-            "CARD\" message or technician tamper alerts. (Disabled the game's "
-            "self/asset validator and refreshed its SD-validation record to match.)",
-            "success")
-        return writes
+        log_status(log, status)
+        return writes, status
     except Exception as e:                     # never fail a Write over this
         log("Validation bypass skipped (%s)." % e, "warning")
-        return []
+        return [], None

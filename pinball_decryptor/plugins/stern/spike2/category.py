@@ -47,7 +47,7 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
 
 from . import locate as L
 from .elf import parse_elf
-from .emulator import DESC_BASE, PAGE, Spike2Emu, _R, _u32
+from .emulator import DESC_BASE, MAX_RECORDS, PAGE, Spike2Emu, _R, _u32
 
 DESC2 = 0xb0000000          # 2nd offset-identity window (clear of the image.bin one)
 
@@ -315,7 +315,7 @@ class CatEmu(Spike2Emu):
             # before we let MASTERDIR_DECODE run.  count_fn = MD's 1st bl.
             cnt = self.call(self._count_fn, (cat, 4), limit=20_000_000)
             n = cnt[1] if cnt[0] == "ok" else 0
-            if not (1 <= n <= 1 << 16):
+            if not (1 <= n <= MAX_RECORDS):
                 return None
 
             cap = {"mddst": None, "state": None}
@@ -340,6 +340,10 @@ class CatEmu(Spike2Emu):
                 return None
             self._ensure_range(cap["mddst"], n * 24)
             md = bytes(mu.mem_read(cap["mddst"], n * 24))
+            # Bounds the per-record write-back in _drive_step; without it the
+            # replay scribbles 24 bytes at a pseudo-random address per record
+            # (see emulator._record_write_addr).
+            self._md_range = (cap["mddst"], cap["mddst"] + n * 24)
             return self._chain_records(md, n, cap["state"])
         finally:
             self.del_hook(snp)

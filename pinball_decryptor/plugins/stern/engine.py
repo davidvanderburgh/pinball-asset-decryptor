@@ -70,6 +70,29 @@ _MUSIC_WAV_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 # --------------------------------------------------------------------------
 # params cache (fingerprint of game_real + image.bin master-dir region)
 # --------------------------------------------------------------------------
+# Bump whenever a fix changes the params DERIVED from unchanged card bytes.  The
+# fingerprint covers the card only, so without this a cached pickle from the old
+# derive keeps being loaded and silently masks the fix.  It lives in the FILE
+# NAME rather than in the fingerprint hash so a superseded cache is identifiable
+# and can be deleted (see :func:`clear_stale_params_caches`) instead of just
+# ignored -- a poisoned pickle nobody reads still costs the user real disk
+# (Deadpool Pro 1.16 alone caches ~66 MB).
+#   2: the chain replay no longer writes 24 bytes at a pseudo-random address
+#      once per record (spike2.emulator._record_write_addr).  Every catalog big
+#      enough to take a hit cached wrong codec params -- Deadpool Pro 1.16 had
+#      3461 of 8175 sounds decoding to noise.  rev-1 caches are the unsuffixed
+#      files written before this scheme existed.
+_DERIVE_REV = 2
+_REV_TAG = ".r%d" % _DERIVE_REV
+# Everything this module keeps in the cache directory, as (current-rev suffix,
+# regex matching that file kind at ANY revision including the unsuffixed rev-1).
+_CACHE_KINDS = (
+    (_REV_TAG + ".pkl",             re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.pkl$")),
+    (_REV_TAG + ".consumed.npy",    re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.consumed\.npy$")),
+    (_REV_TAG + ".sfxnames4.json",  re.compile(r"^[0-9a-f]{32}(\.r\d+)?\.sfxnames\d+\.json$")),
+)
+
+
 def _fingerprint(game_real_path, image_path):
     h = hashlib.sha256()
     with open(_lp(game_real_path), "rb") as f:
@@ -80,10 +103,14 @@ def _fingerprint(game_real_path, image_path):
     return h.hexdigest()
 
 
-def _cache_path(fp):
+def _params_cache_dir():
     d = os.path.join(tempfile.gettempdir(), "pinball_spike2_params")
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, fp[:32] + ".pkl")
+    return d
+
+
+def _cache_path(fp):
+    return os.path.join(_params_cache_dir(), fp[:32] + _REV_TAG + ".pkl")
 
 
 def _consumed_cache_path(fp):
@@ -92,7 +119,66 @@ def _consumed_cache_path(fp):
     sound's codec params).  These are deterministic for a card, so capturing them
     once at Extract lets a later Write's :func:`_restore_masterdir_consumed` skip
     its own full ~2 min re-derive (the integrity assert still runs)."""
-    return os.path.join(os.path.dirname(_cache_path(fp)), fp[:32] + ".consumed.npy")
+    return os.path.join(_params_cache_dir(),
+                        fp[:32] + _REV_TAG + ".consumed.npy")
+
+
+def _is_stale_cache_file(name):
+    """True if *name* is one of our cache files from a SUPERSEDED derive.
+
+    Matches only the file kinds this module writes, so anything else that ends
+    up in the directory is left alone."""
+    for cur, pat in _CACHE_KINDS:
+        if pat.match(name):
+            return not name.endswith(cur)
+    return False
+
+
+def clear_stale_params_caches():
+    """Delete codec-params caches left by a superseded derive.  Returns
+    ``(n_files, bytes_freed)``.
+
+    Runs once per process before the cache is first consulted.  Bumping
+    ``_DERIVE_REV`` stops a stale cache being *used*, but on its own it strands
+    the old files forever: every user who ever extracted a big Spike 2 card
+    would keep carrying tens of MB of pickles holding codec params we now know
+    are wrong.  Deleting by revision tag is safe under the extract/write process
+    fan-out because no live process ever opens a non-current revision."""
+    try:
+        d = _params_cache_dir()
+        names = os.listdir(d)
+    except OSError:
+        return 0, 0
+    n = freed = 0
+    for name in names:
+        if not _is_stale_cache_file(name):
+            continue
+        p = os.path.join(d, name)
+        try:
+            size = os.path.getsize(p)
+            os.remove(p)
+        except OSError:
+            continue
+        n += 1
+        freed += size
+    return n, freed
+
+
+_stale_caches_cleared = False
+
+
+def _clear_stale_params_caches_once(log=None):
+    global _stale_caches_cleared
+    if _stale_caches_cleared:
+        return
+    _stale_caches_cleared = True
+    try:
+        n, freed = clear_stale_params_caches()
+    except Exception:
+        return
+    if n and log:
+        log("Removed %d superseded codec-parameter cache file(s) (%.0f MB) "
+            "left by an earlier version." % (n, freed / 1e6), "info")
 
 
 def _install_consumed_hook(emu):
@@ -142,6 +228,7 @@ def _load_consumed(game_real_path, image_path):
 
 
 def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
+    _clear_stale_params_caches_once(log)
     fp = _fingerprint(game_real_path, image_path)
     cache = _cache_path(fp)
     if os.path.exists(cache):
@@ -155,8 +242,15 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
                 return params
         except Exception:
             pass
-    log("Deriving codec parameters from the firmware (one-time per card, "
-        "~2-5 min)...", "info")
+    # No fixed time estimate: the derive is a strictly sequential walk of the
+    # card's sound catalog, so it scales with catalog size -- seconds for a
+    # small title, ~19 min for Deadpool Pro 1.16's 8175 sounds.  The old
+    # "~2-5 min" promise was the shape of the field report that opened PAD-2:
+    # a user watched an unmoving progress bar past the stated time and
+    # reasonably concluded it had hung.  derive_params reports per-record
+    # progress below as soon as it knows the count.
+    log("Deriving codec parameters from the firmware (one-time per card; "
+        "large sound catalogs take several minutes)...", "info")
     if progress:
         progress(0, 0, "Deriving codec parameters...")
     # Capture the master-directory consumed body offsets in the SAME derive
@@ -167,7 +261,7 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
         reads, hh = _install_consumed_hook(emu)
     except Exception:
         reads = hh = None
-    params = emu.derive_params()
+    params = emu.derive_params(progress=progress)
     if hh is not None:
         try:
             emu.mu.hook_del(hh)
@@ -1305,9 +1399,13 @@ def _sfx_names_cache_path(fp):
     the pre-v0.63.1 maps, ``3`` retires everything built before the menu's
     ``{group_ptr, node_id}`` / sound-id-list indirection was read correctly,
     and ``4`` retires the maps built while the menu table was located by the
-    literal "SE FX " (which found it on two titles out of fourteen)."""
-    return os.path.join(os.path.dirname(_cache_path(fp)),
-                        fp[:32] + ".sfxnames4.json")
+    literal "SE FX " (which found it on two titles out of fourteen).
+
+    Also carries the derive revision, because a name map is validated against
+    the audio the params point at -- params from a superseded derive can only
+    have produced a superseded map."""
+    return os.path.join(_params_cache_dir(),
+                        fp[:32] + _REV_TAG + ".sfxnames4.json")
 
 
 def _load_or_build_sfx_names(emu, game_real_path, image_path, params, log):
@@ -5010,6 +5108,7 @@ def _params_for(gr_path, img_path, log, progress):
     throwaway emulator if the cache is cold (rare for Write, which follows an
     Extract that already cached them).  Avoids booting an emulator on the common
     cache-hit path (the workers boot their own)."""
+    _clear_stale_params_caches_once(log)   # a Write-only session never Extracts
     fp = _fingerprint(gr_path, img_path)
     cache = _cache_path(fp)
     if os.path.exists(cache):

@@ -23,7 +23,7 @@ import struct
 
 from unicorn import (UC_ARCH_ARM, UC_HOOK_CODE, UC_HOOK_MEM_FETCH_UNMAPPED,
                      UC_HOOK_MEM_READ_UNMAPPED, UC_HOOK_MEM_WRITE_UNMAPPED,
-                     UC_MODE_ARM, Uc, UcError)
+                     UC_MODE_ARM, UC_PROT_ALL, Uc, UcError)
 from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
                                UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0,
                                UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
@@ -122,10 +122,103 @@ RET_SENTINEL = 0xdeadbee0  # even ``call()`` return trap (interwork-safe; see ca
 # one-shot SFX but clicks at the loop point of looping music.
 BLOCK = 200
 
+# Sane master-directory record-count ceiling.  The largest shipped catalog is
+# D&D's ~10.5k sounds, so 65536 has ~6x headroom; the per-category count gate
+# uses the same bound.  Anything above it is a mis-read register, not a card.
+MAX_RECORDS = 1 << 16
+
 
 def emitted_length(length):
     """True decoded sample count for a sound of header ``length`` (see BLOCK)."""
     return max(0, int(length) - BLOCK)
+
+
+def _md_record_count(eng, dst):
+    """Record count at the master-directory malloc-return PC (where the
+    MASTERDIR_MALLOC hook sits, ``dst`` = the returned buffer in r0).
+
+    Most builds still hold the raw count in r5 there (the ``*24`` size is built
+    in a scratch register).  Deadpool Pro 1.16 is the first observed build that
+    REUSES r5 for the aligned byte size it passes to malloc
+    (``add r5, r7, #0xf ; bic r5, r5, #0xf``), so r5 reads ~24x high — which
+    chained the derive through tens of thousands of garbage records (the
+    "Deriving codec parameters" hang a field report sat on for 24+ minutes).
+    The import stub SERVED that malloc, so its recorded ``(ptr, size)`` is
+    ground truth: when ``dst`` is that ptr, ``size // 24`` is the record count
+    regardless of which register the build kept it in (the 16-byte alignment
+    pad is < 24, so the floor division is exact).  r5 stays as the fallback for
+    an allocation the stub didn't serve."""
+    la = getattr(eng, "_last_alloc", None)
+    if la and la[0] == dst and la[1] >= 24:
+        return la[1] // 24
+    return eng.mu.reg_read(UC_ARM_REG_R5)
+
+
+def _accept_masterdir_malloc(cap, dst, n):
+    """First-hit capture for the master-directory record-array malloc hook.
+
+    Accepts ``(dst, n)`` into ``cap`` and returns True only when ``n`` is a
+    sane record count (``n`` from :func:`_md_record_count`).  A wild value
+    means the hook landed on the wrong PC — a firmware build newer than the
+    locator knows.  Accepting it anyway disarms the fail-fast watchdog
+    and sends the derive into ``_ensure_range``/``mem_read`` over ``n * 24``
+    bytes — gigabytes of page churn that a field report saw as "Deriving codec
+    parameters" sitting for 24+ minutes with no error.  Rejecting keeps the
+    watchdog armed (a later sane hit can still win), so an unmapped build bails
+    within ~1-2 min with the clear unmapped-build error; the bogus count is
+    kept in ``cap["badrec"]`` so that error names it."""
+    if cap["mddst"] is not None:
+        return False
+    if not (1 <= n <= MAX_RECORDS):
+        cap["badrec"] = n
+        return False
+    cap["mddst"] = dst
+    cap["nrec"] = n
+    return True
+
+
+PROGRESS_UPDATES = 200
+
+
+def _progress_step(nrec):
+    """Report every Nth record so a catalog of any size gets about
+    :data:`PROGRESS_UPDATES` updates.
+
+    The chain calls back from inside its hot loop, so this bounds how often a
+    slow consumer (a GUI marshalling to its main thread) is entered: without it
+    Deadpool Pro 1.16 would fire 8175 times.  Never 0 -- a 0 step would mean
+    ``idx % step`` raises and the derive dies for a small catalog.
+
+    Rounds the step UP: floor division leaves a step fractionally too small and
+    overshoots the budget (8175 // 200 = 40 gives 205 updates, not 200)."""
+    n = int(nrec)
+    return max(1, -(-n // PROGRESS_UPDATES))
+
+
+def _record_write_addr(md_range, r9):
+    """Where the chain replay may write a master-directory record, or None.
+
+    :meth:`Spike2Emu._drive_step` hands each record back to the band build by
+    writing it at ``r9 - 8``.  That is right on the validated build, where r9 at
+    the loop head is the record cursor.  It is NOT right on newer builds: their
+    loop head opens ``and r1, sb, #1`` — r9 is a packed data word, so ``r9 - 8``
+    is a pseudo-random 32-bit address and the replay maps a page and scribbles
+    24 bytes of live guest memory once per record.  Deadpool Pro 1.16 throws
+    8175 such darts; one lands at record 4714, and from there every record's
+    predictor (obj+0x18) is built from corrupted state — 3461 of its 8175 sounds
+    decoded to stationary noise (spectral flatness ~0.67 / rms ~6400, the
+    wrong-codec signature).  Big catalogs get hit hardest because each record is
+    another dart: TMNT 1.58 (2067 sounds) lost only ~0.7%.
+
+    The record already sits in the record array, so writing it back inside the
+    array is a no-op and writing it anywhere else is corruption — allow the
+    write only when all 24 bytes land inside ``md_range`` (``(lo, hi)``, the
+    record array; ``(0, 0)`` when unknown, which allows nothing)."""
+    lo, hi = md_range
+    dst = (r9 - 8) & 0xffffffff
+    if hi > lo and lo <= dst and dst + 24 <= hi:
+        return dst
+    return None
 
 # Byte signatures (ARM function prologues) of the supported firmware build at a
 # few of the hardcoded addresses above.  The codec oracle is pinned to this
@@ -259,6 +352,10 @@ class Spike2Emu:
         self.mm = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_READ)
         self.imgsize = self.mm.size()
         self.mapped_pages = set()
+        self._cardf = None          # private COW view backing the guest window
+        self._cardbuf = None        # ctypes handle on it (must outlive the map)
+        self._card_lo = self._card_hi = 0
+        # (mapped below, once self.log exists for its best-effort diagnostic)
 
         # GOT import stubs: point each slot at a per-name sentinel address.
         self.name2sent = {}; self.imports = {}
@@ -277,6 +374,9 @@ class Spike2Emu:
         self.fds = {}; self.nextfd = 10
         self.faults = []; self.ondemand = 0
         self.extra = {}; self.log = []
+        # Before _hooks(): its unmapped-memory handler calls _ensure_page, which
+        # must already know the card window is backed in one piece.
+        self._map_card_window()
         # Optional per-instruction watchdog (set only during params derivation).
         # The global code hook calls it each instruction so a mis-located build
         # can bail early instead of burning the whole instruction cap.
@@ -290,6 +390,9 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+        # (lo, hi) of the master-directory record array, set by the chain that
+        # is replaying it; bounds the record write-back (see _record_write_addr).
+        self._md_range = (0, 0)
 
     def _set_addrs(self, addrs):
         """Bind every firmware address as an instance attribute.  Defaults are
@@ -309,17 +412,65 @@ class Spike2Emu:
         self.CHAIN_STUBS = CHAIN_STUBS; self.LENGTH_XOR = LENGTH_XOR
         self.OBJREG = 7
         self.FIND_BL = None
+        # Where the record count is provably live (see locate._find_internal_pcs).
+        # None on the validated TMNT 1.58 build, whose size computation uses a
+        # SPARE register (`add r6,r8,#0xf`) and so leaves r5 = the count at the
+        # malloc-return PC — the capture there is correct for it.
+        self.MASTERDIR_COUNT = None
+        self.COUNTREG = None
         if addrs:
             for k in ("BOOT_LO", "BOOT_HI", "VF2_VA", "REG_BASE", "PROV",
                       "DISPATCH", "QMUL_TABLE", "CAT0_REGISTER", "RBTREE_HDR",
                       "RBTREE_ACC", "MASTERDIR_DECODE", "MASTERDIR_MALLOC",
                       "BANDLOOP", "BANDOBJ", "FIND_BL"):
                 setattr(self, k, addrs[k])
+            self.MASTERDIR_COUNT = addrs.get("MASTERDIR_COUNT")
+            self.COUNTREG = addrs.get("COUNTREG")
             self.OBJREG = addrs["OBJREG"]
             # generic derive skips the template lookup (find-skip) instead of
             # stubbing the chain helpers, and takes the length from the raw obj.
             self.CHAIN_STUBS = ()
             self.LENGTH_XOR = 0
+
+    # ---- card window --------------------------------------------------------
+    def _map_card_window(self):
+        """Back the whole offset-identity card window with ONE zero-copy region.
+
+        The fallback below pages the card in 4 KiB at a time, which makes every
+        later guest memory access search an ever-growing pile of tiny unicorn
+        regions: per-record derive cost is linear in the number of mapped pages,
+        so the derive is QUADRATIC in catalog size.  Measured on Deadpool Pro
+        1.16 (8175 sounds, 1.5 GiB image): 11.2 ms/record at record 100 rising
+        to 54.5 ms by record 3000, and 18.8 min for the full derive -- against a
+        flat 11.0 ms/record and ~1.5 min mapping the window in one piece.
+
+        ``ACCESS_COPY`` makes it a private copy-on-write view, so a guest write
+        to the card lands in a private page and never reaches image.bin -- the
+        same isolation the copying path gave, without the copy.  Pages only
+        materialise when touched (peak RSS 81 MB on the Deadpool derive).
+
+        Best effort: any build/platform where this doesn't take keeps the paging
+        path, which is still correct, just slower on big catalogs."""
+        span = self.imgsize & ~(PAGE - 1)     # whole pages; tail keeps paging
+        if span <= 0 or DESC_BASE + span > 0x1_0000_0000:
+            return                            # would leave the 32-bit guest space
+        try:
+            import ctypes
+            self._cardf = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_COPY)
+            self._cardbuf = (ctypes.c_char * span).from_buffer(self._cardf)
+            self.mu.mem_map_ptr(DESC_BASE, span, UC_PROT_ALL,
+                                ctypes.addressof(self._cardbuf))
+        except Exception as e:
+            self.log.append(("card_map_ptr", str(e)))
+            self._cardbuf = None
+            if self._cardf is not None:
+                try:
+                    self._cardf.close()
+                except Exception:
+                    pass
+                self._cardf = None
+            return
+        self._card_lo, self._card_hi = DESC_BASE, DESC_BASE + span
 
     # ---- on-demand paging ---------------------------------------------------
     def _backing_byte_offset(self, addr):
@@ -329,6 +480,8 @@ class Spike2Emu:
 
     def _ensure_page(self, addr):
         base = addr & ~(PAGE - 1)
+        if self._card_lo <= base < self._card_hi:
+            return True            # already backed by the one-piece card region
         if base in self.mapped_pages:
             return True
         try:
@@ -502,7 +655,9 @@ class Spike2Emu:
         if nm in ("malloc", "calloc", "_Znwj", "operator new(unsigned int)",
                   "operator new[](unsigned int)", "_Znaj"):
             n = r0 if nm != "calloc" else r0 * mu.reg_read(UC_ARM_REG_R1)
-            self._ret(self.alloc(max(16, n)))
+            p = self.alloc(max(16, n))
+            self._last_alloc = (p, n)   # ground truth for _md_record_count
+            self._ret(p)
             return
         if nm in ("free", "_ZdlPv", "operator delete(void*)", "_ZdaPv",
                   "operator delete[](void*)"):
@@ -619,7 +774,10 @@ class Spike2Emu:
         self._ret(len(s) - 1)
 
     def _opnew(self):
-        self._ret(self.alloc(max(16, self.mu.reg_read(UC_ARM_REG_R0))))
+        n = self.mu.reg_read(UC_ARM_REG_R0)
+        p = self.alloc(max(16, n))
+        self._last_alloc = (p, n)       # ground truth for _md_record_count
+        self._ret(p)
 
     def _rbinsert_regs(self):
         mu = self.mu
@@ -752,19 +910,38 @@ class Spike2Emu:
         return _u16(bytes(self.mu.mem_read(self.QMUL_TABLE + 2 * v, 2)))
 
     # ---- params derivation (chain) -----------------------------------------
-    def derive_params(self):
+    def derive_params(self, progress=None):
         """Cold-derive the decode-params table for every cat-0 sound, straight
         from ``game_real`` + ``image.bin``.  Returns a list of dicts:
         ``{idx, body_off, length, pred16, seed_a, band0_keyoff_rel, stride,
-        chan, scale}``.  ~1 minute for ~2000 sounds.
+        chan, scale}``.
+
+        ``progress(done, total, message)`` is called as the record chain runs
+        (throttled to ~200 updates).  Cost scales with the catalog: measured
+        ~19 s of chain for TMNT 1.58's 2067 records against ~19 min for Deadpool
+        Pro 1.16's 8175.  The chain is strictly sequential and cannot be split
+        across processes -- each record's band build starts from the emulator
+        state the previous record left, so record N is not reachable without
+        having run 0..N-1 (replaying a late record from the initial state
+        produces no object at all).
         """
         mu = self.mu
-        cap = {"mddst": None, "nrec": None, "state": None}
+        cap = {"mddst": None, "nrec": None, "state": None, "badrec": None,
+               "count_at_src": None}
+
+        def at_count(eng):
+            # The *24 size computation's `add rD,rN,rN,lsl#1`: rN holds the
+            # record count HERE, on every build shape, whether or not the build
+            # goes on to reuse rN for the malloc size (see MASTERDIR_COUNT).
+            if cap["count_at_src"] is None:
+                cap["count_at_src"] = eng.mu.reg_read(_R[eng.COUNTREG])
 
         def at_md(eng):
-            if cap["mddst"] is None:
-                cap["mddst"] = eng.mu.reg_read(UC_ARM_REG_R0)
-                cap["nrec"] = eng.mu.reg_read(UC_ARM_REG_R5)
+            dst = eng.mu.reg_read(UC_ARM_REG_R0)
+            n = cap["count_at_src"]
+            if n is None:
+                n = _md_record_count(eng, dst)
+            if _accept_masterdir_malloc(cap, dst, n):
                 eng._watchdog = None      # located OK -> stop the fail-fast count
 
         def at_bb(eng):
@@ -786,6 +963,8 @@ class Spike2Emu:
             except UcError:
                 pass
 
+        if self.MASTERDIR_COUNT is not None and self.COUNTREG is not None:
+            self.extra[self.MASTERDIR_COUNT] = at_count
         self.extra[self.MASTERDIR_MALLOC] = at_md
         self.extra[self.BANDLOOP] = at_bb
         # Generous cap: at_bb emu_stops the instant BANDLOOP is reached, so this
@@ -797,10 +976,12 @@ class Spike2Emu:
         # by at_md) sits at the very top of the decode on every mapped build, so
         # mddst is set within the first instructions regardless of catalog size.
         # If a newer/unrecognised build's addresses locate to the wrong PCs the
-        # hook never fires, and without this the emulation would burn the whole
-        # 600M-instruction cap (~19 min on real HW) before failing.  at_md clears
-        # the watchdog the moment it fires, so a good build pays ~nothing; a bad
-        # one bails after a wide margin (~1-2 min) with the error below.
+        # hook never fires — or fires somewhere r5 is NOT the record count (see
+        # _accept_masterdir_malloc) — and without this the emulation would burn
+        # the whole 600M-instruction cap (~19 min on real HW) before failing.
+        # at_md clears the watchdog the moment a sane capture lands, so a good
+        # build pays ~nothing; a bad one bails after a wide margin (~1-2 min)
+        # with the error below.
         wd = {"n": 0}
 
         def _wd():
@@ -812,6 +993,8 @@ class Spike2Emu:
             self.call(self.MASTERDIR_DECODE, (0,), limit=600_000_000)
         finally:
             self._watchdog = None
+            if self.MASTERDIR_COUNT is not None:
+                self.extra.pop(self.MASTERDIR_COUNT, None)
             self.extra.pop(self.MASTERDIR_MALLOC, None)
             self.extra.pop(self.BANDLOOP, None)
         if cap["state"] is None or cap["mddst"] is None or not cap["nrec"]:
@@ -824,6 +1007,7 @@ class Spike2Emu:
         nrec = cap["nrec"]
         self._ensure_range(cap["mddst"], nrec * 24)
         md = bytes(mu.mem_read(cap["mddst"], nrec * 24))
+        self._md_range = (cap["mddst"], cap["mddst"] + nrec * 24)
 
         # chain forward from states[0]: stub a few helpers and cap bulk copies
         # so each per-record band-build runs cheaply.
@@ -846,8 +1030,20 @@ class Spike2Emu:
         rows = []
         cur = dict(regs=list(cap["state"]["regs"]), sp=cap["state"]["sp"],
                    frame=cap["state"]["frame"])
+        # The record count is known here (the malloc hook caught it in the first
+        # instructions), so the chain can report real progress instead of
+        # leaving one indeterminate "Deriving codec parameters..." on screen for
+        # the whole run.  A big catalog takes many minutes -- Deadpool Pro 1.16
+        # is 8175 records and ~19 min -- and a silent progress bar for that long
+        # is what a field report read as an indefinite hang.  Throttled so a
+        # slow GUI callback can't dominate the loop.
+        step = _progress_step(nrec)
         try:
             for idx in range(nrec):
+                if progress is not None and (idx % step == 0 or idx == nrec - 1):
+                    progress(idx + 1, nrec,
+                             "Deriving codec parameters (sound %d of %d)..."
+                             % (idx + 1, nrec))
                 rec = md[idx * 24: idx * 24 + 24]
                 dw0 = _u32(rec, 0)
                 length = (self.LENGTH_XOR ^ _u32(rec, 16)) & 0xffffffff
@@ -894,9 +1090,10 @@ class Spike2Emu:
             mu.reg_write(r, cur["regs"][i])
         mu.reg_write(UC_ARM_REG_SP, sp)
         mu.reg_write(UC_ARM_REG_LR, cur["regs"][14])
-        r9 = cur["regs"][9]
-        self._ensure_range(r9 - 8, 24)
-        mu.mem_write(r9 - 8, record_bytes)
+        rec_at = _record_write_addr(self._md_range, cur["regs"][9])
+        if rec_at is not None:
+            self._ensure_range(rec_at, 24)
+            mu.mem_write(rec_at, record_bytes)
         cap = {"obj": None, "next": None, "hits": 0}
 
         def at_bl(eng):
@@ -1267,6 +1464,22 @@ class Spike2Emu:
         return L[:n], R[:n], stereo
 
     def close(self):
+        # Tear the card window down first and in order: unicorn is pointing
+        # straight at the COW view, and the ctypes buffer holds an exported
+        # pointer that makes mmap.close() raise until it is dropped.
+        if self._card_hi > self._card_lo:
+            try:
+                self.mu.mem_unmap(self._card_lo, self._card_hi - self._card_lo)
+            except Exception:
+                pass
+            self._card_lo = self._card_hi = 0
+        self._cardbuf = None
+        if self._cardf is not None:
+            try:
+                self._cardf.close()
+            except Exception:
+                pass
+            self._cardf = None
         try:
             self.mm.close()
         except Exception:

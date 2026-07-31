@@ -18,13 +18,21 @@ import tempfile
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IMG_DIR = os.path.join(REPO, "images", "Stern", "spike2")
+# PAD_SPIKE2_IMG_DIR lets a worktree / CI point at the card library when it
+# lives outside the checkout (the default is the main checkout's images dir).
+IMG_DIR = os.environ.get("PAD_SPIKE2_IMG_DIR",
+                         os.path.join(REPO, "images", "Stern", "spike2"))
 CARDS = {
     "turtles": "turtles_pro-1_58_0.Release.8G.sdcard.raw",      # validated build
     "led_zeppelin": "led_zeppelin_le-1_20_0.Release.8G.sdcard.raw",  # generic build
     # LE 1.22.0: a build whose PLT thunks unicorn mistranslates -- exercises the
     # _plt_branch entry-intercept (without it, derive_params can't map the codec).
     "led_zeppelin_122": "led_zeppelin_le-1_22_0.Release.8G.sdcard.raw",
+    # Pro 1.16.0: first observed build that clobbers r5 with the record-array
+    # malloc SIZE at the master-dir malloc-return PC, so the count must come
+    # from the served alloc size (_md_record_count) -- the build family behind
+    # a field report of "Deriving codec parameters" hanging indefinitely.
+    "deadpool_116": "deadpool_pro-1_16_0.Release.8G.sdcard.raw",
 }
 
 
@@ -469,6 +477,28 @@ def test_rbtree_increment_walks_in_order_and_terminates():
     assert RB.decrement(mu, n20) == n10
 
 
+@pytest.fixture(autouse=True)
+def _no_faulthandler():
+    """Disable pytest's faulthandler around these emulator tests.
+
+    unicorn services guest memory through the host's fault machinery, and on
+    Windows pytest's faulthandler plugin traps that first: it prints a
+    "Windows fatal exception: access violation" traceback and kills the
+    process, reproducibly inside ``Spike2Emu.__init__``'s segment ``mem_map``,
+    before a single assertion runs.  The same construction succeeds every time
+    outside pytest.  Turn it off for the duration and restore it after, so a
+    card-gated run doesn't die on an artefact of the test harness.
+    """
+    import faulthandler
+    was = faulthandler.is_enabled()
+    faulthandler.disable()
+    try:
+        yield
+    finally:
+        if was:
+            faulthandler.enable()
+
+
 def _card_path(title):
     return os.path.join(IMG_DIR, CARDS[title])
 
@@ -500,6 +530,70 @@ def _shortest(rows, chan, minlen=600):
     return min(cand, key=lambda r: r["length"]) if cand else None
 
 
+def _shortest_encodable(rows, chan, emu, gr, sr, np, minlen=600, tries=6):
+    """Shortest sound of ``chan`` that the re-encoder can actually reproduce.
+
+    Some sounds decode to stationary NOISE rather than audio (Deadpool Pro
+    1.16: 0% below idx 4000, 100% above idx 5000; controls TMNT 1.58 0.7%,
+    Jaws 1.01 0.0%), and a sound that decoded wrong cannot round-trip -- the
+    re-encode failure tracks the decode bug, it is not a separate encoder
+    defect.  Write already skips them (``engine._recovery_valid`` -> "re-encode
+    isn't bit-exact for this sound's codec"), leaving them unchanged.
+
+    This guard is about the emitted length and the TAIL, so it must run on a
+    sound that decodes correctly.  Picking it with the very same production
+    gate keeps the guard meaningful without hard-coding an idx: bare
+    ``_shortest`` picked Deadpool 1.16 idx7146, a noise-decoding sound, and the
+    resulting failure said nothing about tails.
+    """
+    from pinball_decryptor.plugins.stern.engine import _recovery_valid
+
+    cand = sorted((r for r in rows if r["chan"] == chan and r["length"] > minlen),
+                  key=lambda r: r["length"])
+    for p in cand[:tries]:
+        if _recovery_valid(emu, gr, sr, p, np):
+            return p
+    return None
+
+
+def _spread(rows, n):
+    """*n* sounds spread evenly across the catalog, longest-tail bias avoided.
+
+    The corruption this guards against is POSITIONAL -- clean up to some record
+    and dead from there on -- so sampling has to walk the whole index range, not
+    just the front where every other check in this test lives."""
+    cand = [r for r in rows if r["length"] > 4000]
+    if len(cand) <= n:
+        return cand
+    step = len(cand) / float(n)
+    return [cand[min(len(cand) - 1, int(i * step))] for i in range(n)]
+
+
+def _decodes_dead(emu, p, np):
+    """True if this sound decodes to STATIONARY NOISE rather than audio.
+
+    The wrong-codec signature documented in emulator.py: near-white spectrum
+    with no envelope.  Measured on Deadpool Pro 1.16's broken tail as spectral
+    flatness ~0.67 with an envelope ratio ~1.1 and no quiet frames, against
+    0.001-0.42 / 1.6-12 / 7-34% quiet for healthy sounds on the same card."""
+    out = emu.decode(p, max_secs=1.5)
+    if not out:
+        return True
+    x = np.asarray(out[0], float)
+    if len(x) < 4096 or np.std(x) < 1e-6:
+        return False              # silence isn't the failure this looks for
+    n = 1 << int(np.floor(np.log2(len(x))))
+    w = (x[:n] - x[:n].mean()) * np.hanning(n)
+    X = np.maximum(np.abs(np.fft.rfft(w))[1:], 1e-9)
+    flat = float(np.exp(np.mean(np.log(X))) / np.mean(X))
+    fr = max(1, int(0.005 * 44100))                      # 5 ms frames
+    env = np.array([np.sqrt(np.mean(x[i * fr:(i + 1) * fr] ** 2))
+                    for i in range(max(1, len(x) // fr))])
+    ratio = float(env.max()) / max(float(np.median(env)), 1e-9)
+    quiet = float(np.mean(env < 0.1 * np.median(env)))
+    return flat > 0.60 and ratio < 2.0 and quiet < 0.02
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("title", list(CARDS))
 def test_decode_length_and_tail_roundtrip(title):
@@ -524,7 +618,7 @@ def test_decode_length_and_tail_roundtrip(title):
 
     checked = 0
     for chan in (1, 2):
-        p = _shortest(rows, chan)
+        p = _shortest_encodable(rows, chan, emu, gr, sr, np)
         if p is None:
             continue
         length = p["length"]
@@ -579,7 +673,23 @@ def test_decode_length_and_tail_roundtrip(title):
                 "%s idx%d: stereo R round-trip not bit-exact" % (title, p["idx"]))
         checked += 1
 
+    # (3) The catalog must still be AUDIO all the way to its end.  The chain
+    # replay used to write 24 bytes at a pseudo-random address once per record
+    # (see spike2.emulator._record_write_addr), so the deeper a catalog went the
+    # likelier a record got hit -- and every record after the hit derived its
+    # predictor from corrupted state.  Deadpool Pro 1.16 broke at idx 4714 and
+    # 3461 of its 8175 sounds (42% of the extract) decoded to stationary noise
+    # while every check above still passed, because those all run on a
+    # short-and-encodable sound near the FRONT.  Sample the whole catalog.
+    dead = [p["idx"] for p in _spread(rows, 16)
+            if _decodes_dead(emu, p, np)]
     emu.close()
+    assert len(dead) <= 2, (
+        "%s: %d of 16 sounds sampled across the catalog decode to stationary "
+        "noise (idx %s) -- expected at most 2. Noise late in the catalog and "
+        "not early is the chain-replay corruption signature; check that the "
+        "record write-back stays inside the master-directory array."
+        % (title, len(dead), dead))
     assert checked >= 1, "%s: no codec-0 sound found to test" % title
 
 

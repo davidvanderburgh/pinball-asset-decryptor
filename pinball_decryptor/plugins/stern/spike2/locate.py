@@ -286,21 +286,55 @@ def _boot_md_hi(fw, boot_lo):
     return md, bh
 
 
+_REG_ALIAS = {"sb": 9, "sl": 10, "fp": 11, "ip": 12}
+
+
+def _reg_index(name):
+    """r0..r12 index for a capstone ARM register name (incl. sb/sl/fp/ip)."""
+    name = name.strip()
+    if name in _REG_ALIAS:
+        return _REG_ALIAS[name]
+    if name.startswith("r") and name[1:].isdigit():
+        i = int(name[1:])
+        return i if i <= 12 else None
+    return None
+
+
 def _find_internal_pcs(fw, md_start):
-    """MASTERDIR_MALLOC / BANDOBJ / BANDLOOP inside the master-dir decoder."""
+    """MASTERDIR_MALLOC / MASTERDIR_COUNT / BANDOBJ / BANDLOOP inside the
+    master-dir decoder."""
     end = _func_end(fw, md_start)
     ins = list(_disasm(fw, md_start, end))
     out = {"_end": end}
-    # MALLOC: bl preceded by `lsl _,_,#3` (*8) and `add _,r5,r5,lsl#1` (*3) = *24.
+    # MALLOC: bl preceded by `lsl _,_,#3` (*8) and `add _,rN,rN,lsl#1` (*3) = *24.
     # Window is 8 (not 6): some builds (e.g. Jurassic Park) put the *3 add 7
     # instructions ahead of the malloc bl, just outside a tighter window.
+    #
+    # COUNT: that `add _,rN,rN,lsl#1` is the ONLY place the record count is
+    # provably live in a known register — rN holds it, and the instruction is
+    # the first half of the *24 size computation.  Capturing the count there
+    # (MASTERDIR_COUNT = its PC, COUNTREG = N) instead of at the malloc return
+    # is build-shape-independent: some builds (Deadpool Pro 1.16) go on to
+    # REUSE that same register for the aligned byte size they pass to malloc
+    # (`add r5,r7,#0xf ; bic r5,r5,#0xf`), so by the malloc-return PC it reads
+    # ~24x high and the derive chains through garbage records — the
+    # "Deriving codec parameters" hang behind a field report.
     for i, x in enumerate(ins):
         if x.mnemonic == "bl":
             win = ins[max(0, i - 8):i]
+            mul3 = [w for w in win
+                    if w.mnemonic == "add" and "lsl #1" in w.op_str]
             if (any(w.mnemonic == "lsl" and w.op_str.endswith("#3") for w in win)
-                    and any(w.mnemonic == "add" and "lsl #1" in w.op_str for w in win)
-                    and i + 1 < len(ins)):
+                    and mul3 and i + 1 < len(ins)):
                 out["MASTERDIR_MALLOC"] = ins[i + 1].address
+                # rD, rN, rN, lsl #1  ->  rN is the count (operands 1 and 2 are
+                # the same register; the shifted operand is what makes it *3).
+                p = [q.strip() for q in mul3[-1].op_str.split(",")]
+                if len(p) >= 3 and p[1] == p[2]:
+                    n = _reg_index(p[1])
+                    if n is not None:
+                        out["MASTERDIR_COUNT"] = mul3[-1].address
+                        out["COUNTREG"] = n
                 break
     # BANDOBJ: strb _,[rX,#0x1d] ; strb _,[rX,#0x1c] ; ... b <loop top>.
     for i in range(len(ins) - 2):
@@ -460,7 +494,12 @@ def locate_all(game_real_path=None, raw=None):
             MASTERDIR_DECODE=md, MASTERDIR_MALLOC=ipc.get("MASTERDIR_MALLOC"),
             BANDLOOP=ipc.get("BANDLOOP"), BANDOBJ=ipc.get("BANDOBJ"),
             FIND_BL=find_bl, OBJREG=objreg, DISPATCH=disp, PROV=prov,
-            QMUL_TABLE=qmul)
+            QMUL_TABLE=qmul,
+            # Optional (not in _REQUIRED): where the record count is provably
+            # live.  A build whose *24 computation doesn't parse simply falls
+            # back to the malloc-return capture.
+            MASTERDIR_COUNT=ipc.get("MASTERDIR_COUNT"),
+            COUNTREG=ipc.get("COUNTREG"))
     except Exception:
         return None
     if any(res.get(k) is None for k in _REQUIRED) or objreg is None:

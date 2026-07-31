@@ -3248,12 +3248,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`write_device`), so the exact same patch set is produced whether the
     destination is an image copy or the card itself.
 
-    Returns ``(writes, counts, grow_plan, audio_mode)`` where ``counts`` is
+    Returns ``(writes, counts, grow_plan, audio_mode, valpatch_mode)`` where
+    ``counts`` is
     ``(n_audio, n_video, n_image, n_text)`` and ``audio_mode`` says how the
     re-encoded cat-0 sounds were built: ``None`` (no cat-0 audio in this
     write), ``("blip-free", "")`` (the firmware cave applied), or
     ``("standard", why)`` (the fallback build -- the original-sound scrap
-    remains at the two master-directory windows).  Every element is ``None``
+    remains at the two master-directory windows).  ``valpatch_mode`` says
+    whether Stern's SD-card validator was actually neutralised on this card
+    (see :func:`.valpatch.bypass_status`).  Every element is ``None``
     if cancelled.  Raises
     ``FileNotFoundError`` when there's nothing to write and ``RuntimeError``
     when nothing could be re-encoded / fit."""
@@ -3385,6 +3388,20 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             progress(int(c * 10 / max(t, 1)), 100, "Reading image.bin")
 
     work = _work_dir(label)
+    # The rebuilt blip-free firmware can NOT live in `work`: `work` is deleted
+    # by this function's own `finally`, but the firmware is copied onto the card
+    # by the CALLER, after we return (it grows the file, so it goes through the
+    # ext4 driver rather than the flat write list).  Putting it in `work` left
+    # the grow job pointing at a file that no longer existed -- and a job whose
+    # source is missing was silently dropped, so the card shipped with its .sidx
+    # record already rewritten to describe a firmware that never landed AND
+    # without the validator bypass (which the blip-free path skips because the
+    # bypass is supposed to ride inside that firmware).  That is a card the
+    # machine rejects with GAME VALIDATION ERROR (a tester, James Bond,
+    # 2026-07-31).  So it gets its own directory, handed to the caller in the
+    # grow plan and removed by the caller once the copy has happened.
+    grow_work = None
+    grow_work_handed_off = False
     try:
         audio_patches = {}     # body_off -> bytes (inside image.bin)
         music_patches = []     # (sc_node, body_off, bytes) inside image-scNN.bin
@@ -3396,6 +3413,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # and a tester burned two hardware tests on a card he believed was
         # blip-free (Elvira spinner, 2026-07-30).
         audio_mode = None      # None | ("blip-free", "") | ("standard", why)
+        # Whether Stern's SD-card validator actually got neutralised on this
+        # card (see valpatch.bypass_status).  Carried out to the completion
+        # dialog because a firmware whose validator we can't reach still builds
+        # a perfectly normal-looking card -- one the machine then refuses with
+        # GAME VALIDATION ERROR.
+        valpatch_mode = None   # None | ("bypassed"|"absent"|"unlocated", why)
         img_node = None
         fw_node = None
         # Path A: the rebuilt game_real (cave + validator bypass).  It is LONGER
@@ -3459,10 +3482,12 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             # copy would undo it.
                             from . import valpatch as _vp
                             with open(_lp(gr_path), "rb") as _f:
-                                _vbypass = _vp.bypass_overlay(_f.read())
+                                _vbypass, _vmode = _vp.bypass_overlay(_f.read())
+                            grow_work = grow_work or _work_dir(
+                                label, base="spike2_grow_")
                             patched_gr, _fw_size = _build_derive_redirect_cave(
-                                gr_path, img_path, audio_patches, np, log, work,
-                                progress, extra_fw_writes=_vbypass)
+                                gr_path, img_path, audio_patches, np, log,
+                                grow_work, progress, extra_fw_writes=_vbypass)
                             # Safety net: boot the PATCHED firmware on the patched
                             # image (our whole bodies) and confirm every sound
                             # still derives stock codec params, else abort.
@@ -3473,6 +3498,10 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                                     audio_patches, params, np,
                                                     log, work)
                             pathA_applied = True
+                            # The bypass rode along inside the rebuilt firmware,
+                            # so this build's validator status is that overlay's.
+                            valpatch_mode = _vmode
+                            _vp.log_status(log, _vmode)
                         except Exception as e:
                             # Any failure (unsupported firmware, no free address
                             # space, a host that can't grow ext4 files, or a
@@ -3674,7 +3703,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if patched_gr is None:
             try:
                 from . import valpatch
-                writes += valpatch.compute_writes(reader, log)
+                _vwrites, valpatch_mode = valpatch.compute_writes(reader, log)
+                writes += _vwrites
             except Exception as e:
                 log("Validation bypass skipped (%s)." % e, "warning")
 
@@ -3690,9 +3720,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             else:
                 log("Couldn't resolve the game firmware's path on the card; the "
                     "blip-free firmware won't be written.", "error")
+        # ``cleanup`` is the scratch dir holding the rebuilt firmware; it has to
+        # survive until the caller has copied it onto the card, so the caller
+        # removes it (see the note where grow_work is created).
         grow_plan = ({"offset": reader.base, "jobs": grow_jobs,
-                      "n_video": len(video_grow_jobs)}
+                      "n_video": len(video_grow_jobs),
+                      "cleanup": grow_work}
                      if grow_jobs else None)
+        # Only a plan that actually carries the firmware job owns that dir; a
+        # video-only plan doesn't, and neither does a build whose cave was
+        # dropped after being written.
+        grow_work_handed_off = bool(grow_plan and grow_work
+                                    and patched_gr is not None)
 
         # Scene textures + radium-embedded images fold into the image count
         # (they ARE images) so the (audio, video, image, text) summary tuple
@@ -3703,9 +3742,13 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                   len(video_patches) + len(video_grow_jobs),
                   len(image_patches) + len(texture_patches) + n_radimg,
                   n_text + n_color)
-        return writes, counts, grow_plan, audio_mode
+        return writes, counts, grow_plan, audio_mode, valpatch_mode
     finally:
         _rmtree(work)
+        # Cancelled, raised, or the cave never made it into a grow job: nobody
+        # downstream is going to use (or clean up) the firmware scratch dir.
+        if grow_work and not grow_work_handed_off:
+            _rmtree(grow_work)
 
 
 def _apply_writes(out, writes):
@@ -3759,7 +3802,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
     try:
-        writes, counts, grow_plan, audio_mode = _compute_patches(
+        writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, label=label)
     except BaseException:
         copier.join()                       # let the copy finish before unlinking
@@ -3774,18 +3817,24 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         raise copy_err[0]
     if writes is None:                      # cancelled mid-compute
         _safe_remove(output_path)
-        return (0, 0, 0, 0), None
+        _rmtree_grow_plan(grow_plan)
+        return (0, 0, 0, 0), None, None
 
-    # the copy is already on disk; patch the changed bytes in place
-    with open(_lp(output_path), "r+b") as out:
-        _apply_writes(out, writes)
-        out.flush()
-        os.fsync(out.fileno())
-    # Grow the files that outgrew their slots (oversized videos kept at full
-    # quality, and the rebuilt firmware when a blip-free build is on) by copying
-    # them in through the ext4 driver — done AFTER the in-place writes so the
-    # filesystem it mounts is already consistent.
-    n_grown = _grow_video_slots(output_path, grow_plan, log)
+    try:
+        # the copy is already on disk; patch the changed bytes in place
+        with open(_lp(output_path), "r+b") as out:
+            _apply_writes(out, writes)
+            out.flush()
+            os.fsync(out.fileno())
+        # Grow the files that outgrew their slots (oversized videos kept at full
+        # quality, and the rebuilt firmware when a blip-free build is on) by
+        # copying them in through the ext4 driver — done AFTER the in-place
+        # writes so the filesystem it mounts is already consistent.
+        n_grown = _grow_video_slots(output_path, grow_plan, log)
+    finally:
+        # The rebuilt firmware has been copied onto the card (or has failed to
+        # be); either way its scratch dir is ours to remove now.
+        _rmtree_grow_plan(grow_plan)
     n_audio, n_video, n_image, n_text = counts
     n_planned = len(grow_plan["jobs"]) if grow_plan else 0
     # The firmware job is queued last, so jobs fail from the end: anything short
@@ -3820,8 +3869,21 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     # Return the per-type breakdown (not just the total) so the completion
     # dialog can name what actually changed instead of always saying "sound(s)",
     # plus the audio build mode so it can say whether the card is blip-free or
-    # keeps the original-sound scrap (a fallback was invisible outside the log).
-    return counts, audio_mode
+    # keeps the original-sound scrap (a fallback was invisible outside the log),
+    # and the validator status so it can say when the card will fail Stern's
+    # SD-card validation on the machine.
+    return counts, audio_mode, valpatch_mode
+
+
+def _rmtree_grow_plan(grow_plan):
+    """Remove the scratch dir a grow plan carries (the rebuilt firmware), if any.
+
+    ``_compute_patches`` hands its lifetime to whoever consumes the plan, so
+    every path out of that consumer has to come through here.
+    """
+    d = (grow_plan or {}).get("cleanup")
+    if d:
+        _rmtree(d)
 
 
 def _grow_video_slots(image_or_device, grow_plan, log):
@@ -4035,11 +4097,14 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     parts = device_partitions(device_path, partition_override, log=log)
 
     with RawDeviceFile(device_path, writable=False) as disk_f:
-        writes, counts, _grow_plan, audio_mode = _compute_patches(
+        writes, counts, _grow_plan, audio_mode, valpatch_mode = _compute_patches(
             disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
             dest_is_device=True)
+    # Direct-SD can't grow files, so a plan here carries nothing to copy — but
+    # it still owns a scratch dir if one was made, and nothing else will free it.
+    _rmtree_grow_plan(_grow_plan)
     if writes is None:                          # cancelled mid-compute
-        return (0, 0, 0, 0), None
+        return (0, 0, 0, 0), None, None
 
     phase(2)  # Write to SD card
     log("Writing changes directly to the SD card (in place)...", "info")
@@ -4055,8 +4120,9 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
     # Return the per-type breakdown (see write_image) so the completion dialog
     # names what changed rather than a bare total, plus the audio build mode --
     # Direct-SD can never grow game_real, so a card with re-encoded sounds is
-    # always a standard (scrap-remains) build and the dialog should say so.
-    return counts, audio_mode
+    # always a standard (scrap-remains) build and the dialog should say so --
+    # and the validator status, which applies to a card write just the same.
+    return counts, audio_mode, valpatch_mode
 
 
 # --------------------------------------------------------------------------

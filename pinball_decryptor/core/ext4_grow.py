@@ -156,9 +156,23 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     """
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
+    # A job whose source file has gone missing used to be dropped here without
+    # a word, and the caller read the resulting "0 grown" as an ordinary
+    # failure.  That is how a deleted scratch file turned into cards that had
+    # their .sidx already rewritten for a firmware which was never copied on
+    # (see engine._compute_patches' grow_work note).  Never drop one quietly.
+    missing = [rel for rel, src in jobs if not (src and os.path.isfile(src))]
+    for rel in missing:
+        log("Can't write %s onto the card: the prepared file is missing from "
+            "the build's scratch space. This is a bug — please report it."
+            % rel, "error")
     jobs = [(rel.lstrip("/"), src) for rel, src in jobs
             if src and os.path.isfile(src)]
     if not jobs:
+        if missing:
+            raise Ext4GrowError(
+                "None of the %d prepared file(s) could be found on disk when "
+                "it was time to copy them onto the card." % len(missing))
         return 0
 
     if sys.platform == "darwin":

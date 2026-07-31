@@ -37,10 +37,29 @@ def test_bash_script_has_the_critical_steps_and_is_quoted():
 
 
 def test_grow_files_no_jobs_is_a_noop():
-    # No jobs (or only jobs whose source is missing) -> 0, without touching WSL.
+    # Genuinely nothing to do -> 0, without touching WSL.
     assert ext4_grow.grow_files("/whatever.raw", 0, []) == 0
-    assert ext4_grow.grow_files(
-        "/whatever.raw", 0, [("a/b.asset", "/does/not/exist.mp4")]) == 0
+
+
+def test_grow_files_refuses_to_drop_a_job_whose_source_vanished():
+    """A missing source is a bug, and has to be loud.
+
+    This used to return 0 silently, which is exactly how the blip-free build
+    shipped broken cards: engine._compute_patches wrote the rebuilt firmware
+    into a scratch dir it then deleted in its own ``finally``, so by the time
+    the caller ran the grow the file was gone.  The job was dropped without a
+    word, the caller read "0 grown" as an ordinary failure, and the card went
+    out with its .sidx already rewritten to describe a firmware that had never
+    been copied on (and, because the blip-free path skips the in-place
+    validator bypass, with the validator still armed) -- a card the machine
+    rejects with GAME VALIDATION ERROR.
+    """
+    lines = []
+    with pytest.raises(ext4_grow.Ext4GrowError, match="could be found on disk"):
+        ext4_grow.grow_files(
+            "/whatever.raw", 0, [("a/b.asset", "/does/not/exist.mp4")],
+            log=lambda m, lvl="info": lines.append((m, lvl)))
+    assert any(lvl == "error" and "a/b.asset" in m for m, lvl in lines)
 
 
 def test_available_on_macos_requires_e2fsprogs(monkeypatch):

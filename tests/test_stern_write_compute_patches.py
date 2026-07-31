@@ -18,6 +18,7 @@ replaced.  These tests drive the orchestrator far enough to catch both.
 
 import inspect
 import io
+import os
 
 import pytest
 
@@ -359,3 +360,81 @@ def test_write_pipeline_summary_carries_the_validator_warning(tmp_path,
     assert "1 sound(s) and 2 image(s)" in got["summary"]
     assert "NOT bypassed" in got["summary"]
     assert "no signature match" in got["summary"]
+
+
+# --- the grow plan's sources must still exist when the caller uses them ------
+# _compute_patches builds the blip-free firmware into a scratch dir, but the
+# COPY onto the card happens in write_image, after _compute_patches has
+# returned and run its `finally`.  Building it into the dir that `finally`
+# deletes meant every blip-free write handed the caller a job pointing at a
+# file that no longer existed; ext4_grow dropped it silently, and the card
+# shipped with its .sidx already rewritten for a firmware that never landed
+# and with the validator still armed (flippermeister, James Bond, 2026-07-31 —
+# reproduced on the real card: game 8436832 bytes on disk, record claiming
+# 8441856, digests mismatched, no bx-lr at the validator entry).
+
+def test_write_image_grow_sources_still_exist_when_the_grow_runs(tmp_path,
+                                                                 monkeypatch):
+    src = _tiny_card(tmp_path)
+    out = tmp_path / "out.raw"
+    scratch = tmp_path / "grow_scratch"
+    scratch.mkdir()
+    firmware = scratch / "game_real_pathA"
+    firmware.write_bytes(b"REBUILT-FIRMWARE")
+    monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
+
+    plan = {"offset": 0, "jobs": [("game", str(firmware))], "n_video": 0,
+            "cleanup": str(scratch)}
+    monkeypatch.setattr(
+        engine, "_compute_patches",
+        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), plan,
+                         ("blip-free", ""), ("bypassed", "")))
+    monkeypatch.setattr(engine, "_apply_writes", lambda *a, **k: None)
+
+    seen = {}
+
+    def fake_grow(image, grow_plan, log):
+        # The whole point: the prepared file has to be readable RIGHT HERE.
+        seen["exists"] = [os.path.isfile(s) for _rel, s in grow_plan["jobs"]]
+        return len(grow_plan["jobs"])
+    monkeypatch.setattr(engine, "_grow_video_slots", fake_grow)
+
+    engine.write_image(str(src), str(tmp_path), str(out), log=_log)
+    assert seen["exists"] == [True]
+    # ...and once it has been copied on, the scratch dir is ours to remove.
+    assert not scratch.exists()
+
+
+def test_write_image_cleans_the_grow_scratch_even_when_growing_raises(
+        tmp_path, monkeypatch):
+    src = _tiny_card(tmp_path)
+    out = tmp_path / "out.raw"
+    scratch = tmp_path / "grow_scratch2"
+    scratch.mkdir()
+    (scratch / "game_real_pathA").write_bytes(b"X")
+    monkeypatch.setattr(engine, "_linux_partitions", lambda p: [])
+    plan = {"offset": 0, "jobs": [("game", str(scratch / "game_real_pathA"))],
+            "n_video": 0, "cleanup": str(scratch)}
+    monkeypatch.setattr(
+        engine, "_compute_patches",
+        lambda *a, **k: ({0: b"X"}, (1, 0, 0, 0), plan, None, None))
+    monkeypatch.setattr(engine, "_apply_writes", lambda *a, **k: None)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("mount failed")
+    monkeypatch.setattr(engine, "_grow_video_slots", boom)
+
+    with pytest.raises(RuntimeError, match="mount failed"):
+        engine.write_image(str(src), str(tmp_path), str(out), log=_log)
+    assert not scratch.exists()
+
+
+def test_compute_patches_cleans_its_grow_scratch_when_nobody_takes_it(tmp_path):
+    # A plan is only handed over when a firmware job actually rides on it; a
+    # cancelled or video-only build must not leave the scratch dir behind.
+    assert engine._rmtree_grow_plan(None) is None          # tolerates no plan
+    d = tmp_path / "leftover"
+    d.mkdir()
+    (d / "f").write_bytes(b"x")
+    engine._rmtree_grow_plan({"cleanup": str(d)})
+    assert not d.exists()

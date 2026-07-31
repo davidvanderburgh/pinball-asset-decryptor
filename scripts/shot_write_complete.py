@@ -1,16 +1,23 @@
-"""Capture the Write Complete dialog for a card whose validator wasn't bypassed.
+"""Capture the Write Complete dialog in the states a bad card comes out in.
 
-    python scripts/shot_write_complete.py <out_dir> <before|after>
+    python scripts/shot_write_complete.py <out_dir> <before|after> [scenario]
 
 A companion to ``take_screenshots.py`` for one screen that rig doesn't reach:
-the modal the Write pops when it finishes.  The interesting case is a firmware
-that carries Stern's SD-card validator but whose validator routine the Write
-could not locate -- the card then shows GAME VALIDATION ERROR on the machine.
+the modal the Write pops when it finishes.  Two scenarios:
 
-The summary string is built by the SAME pipeline helpers the real Write uses,
-from the REAL validator status of a real card's game binary (Jaws LE 1.01.0 in
-David's vendor library is the shipped title where the locator comes up empty),
-so the shot is the dialog a user actually gets rather than mocked-up text.
+``validator`` (default)
+    A firmware that carries Stern's SD-card validator but whose validator
+    routine the Write could not locate -- the card then shows GAME VALIDATION
+    ERROR on the machine.  Read from the REAL game binary of a real card (Jaws
+    LE 1.01.0 is the shipped title where the locator comes up empty).
+
+``blipfree``
+    A blip-free build whose rebuilt firmware never reached the card.  Both
+    modes here are the values two REAL James Bond LE 1.06.0 writes actually
+    returned -- before the grow-source fix, and after it.
+
+Either way the summary is built by the SAME pipeline helpers the real Write
+uses, so the shot is the dialog a user actually gets, not mocked-up text.
 
 Capture notes follow take_screenshots.py: DPI-unaware process, PrintWindow
 (PW_RENDERFULLCONTENT) rather than a screen grab.  The dialog runs its own
@@ -25,9 +32,12 @@ from ctypes import wintypes
 if sys.platform != "win32":
     sys.exit("Screenshot capture is Windows-only (PrintWindow/GDI).")
 
-if len(sys.argv) != 3 or sys.argv[2] not in ("before", "after"):
+if not (3 <= len(sys.argv) <= 4) or sys.argv[2] not in ("before", "after"):
     sys.exit(__doc__)
 OUT_DIR, WHEN = sys.argv[1], sys.argv[2]
+SCENARIO = sys.argv[3] if len(sys.argv) == 4 else "validator"
+if SCENARIO not in ("validator", "blipfree"):
+    sys.exit(__doc__)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB = (r"C:\Users\david\Documents\development\pinball-asset-decryptor"
@@ -44,34 +54,46 @@ from pinball_decryptor.plugins.stern import valpatch  # noqa: E402
 from pinball_decryptor.plugins.stern.engine import _locate  # noqa: E402
 from pinball_decryptor.plugins.stern.formats import linux_partitions  # noqa: E402
 
-# --- real validator status of a real card -----------------------------------
-cards = glob.glob(os.path.join(LIB, "jaws_le-*.raw"))
-if not cards:
-    sys.exit("Need a Jaws LE card in %s to capture this state." % LIB)
-card = cards[0]
-print("reading game binary from %s" % os.path.basename(card), flush=True)
-with open(card, "rb") as f:
-    reader, fw_node, _img = _locate(f, linux_partitions(card))
-    elf = bytes(reader.read_file_bytes(fw_node))
-
-if hasattr(valpatch, "bypass_overlay"):
-    try:
-        _ov, vmode = valpatch.bypass_overlay(elf)
-    except (TypeError, ValueError):
+if SCENARIO == "validator":
+    # --- real validator status of a real card --------------------------------
+    cards = glob.glob(os.path.join(LIB, "jaws_le-*.raw"))
+    if not cards:
+        sys.exit("Need a Jaws LE card in %s to capture this state." % LIB)
+    card = cards[0]
+    print("reading game binary from %s" % os.path.basename(card), flush=True)
+    with open(card, "rb") as f:
+        reader, fw_node, _img = _locate(f, linux_partitions(card))
+        elf = bytes(reader.read_file_bytes(fw_node))
+    if hasattr(valpatch, "bypass_overlay"):
+        try:
+            _ov, vmode = valpatch.bypass_overlay(elf)
+        except (TypeError, ValueError):
+            vmode = None
+        if not isinstance(vmode, tuple):      # pre-fix: no mode reported at all
+            vmode = None
+    else:
         vmode = None
-    if not isinstance(vmode, tuple):          # pre-fix: no mode reported at all
-        vmode = None
+    print("validator located: %s   reported mode: %r"
+          % (valpatch.find_validation_exec(elf) is not None, vmode), flush=True)
+    amode = ("blip-free", "")
+    counts = (1, 0, 2, 0)          # the reporter's card: one sound + two images
+    out_path = r"C:\Users\david\Desktop\jaws_modded.raw"
 else:
-    vmode = None
-print("validator located: %s   reported mode: %r"
-      % (valpatch.find_validation_exec(elf) is not None, vmode), flush=True)
+    # --- what two real James Bond LE 1.06.0 writes actually returned ---------
+    vmode = ("bypassed", "")
+    counts = (1, 0, 0, 0)
+    out_path = r"C:\Users\david\Desktop\james_bond_modded.raw"
+    amode = (("blip-free", "") if WHEN == "after" else
+             ("standard",
+              "the rebuilt blip-free firmware could not be copied onto the "
+              "card (see the build log; this image will fail SD validation "
+              "until rebuilt)"))
+    print("scenario=blipfree %s: audio_mode=%r" % (WHEN, amode), flush=True)
 
 # --- the summary the pipeline would hand the dialog -------------------------
-counts = (1, 0, 2, 0)              # Craig's card: one sound + two images
-out_path = r"C:\Users\david\Desktop\jaws_modded.raw"
 summary = ("Wrote %s to %s%s"
            % (pl._write_summary(counts), out_path,
-              pl._audio_mode_note(("blip-free", ""))))
+              pl._audio_mode_note(amode)))
 if hasattr(pl, "_valpatch_note"):
     summary += pl._valpatch_note(vmode)
 print("--- dialog text ---\n%s\n-------------------" % summary, flush=True)
@@ -149,7 +171,9 @@ def capture_then_close():
     if hwnd is None:
         print("!! dialog window not found", flush=True)
     else:
-        snap_hwnd(hwnd, "%s_write_complete.png" % WHEN)
+        name = ("%s_write_complete.png" % WHEN if SCENARIO == "validator"
+                else "%s_blipfree_write_complete.png" % WHEN)
+        snap_hwnd(hwnd, name)
         user32.PostMessageW(hwnd, 0x0010, 0, 0)     # WM_CLOSE
     root.after(600, root.destroy)
 

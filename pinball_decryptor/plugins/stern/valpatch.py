@@ -75,7 +75,16 @@ def find_validation_exec(elf):
     every ``0xEDB88320`` CRC32 immediate (built via ``movw``/``movt``), and pick
     the function that contains the most of them (the validator has several
     inlined CRC32 loops; nothing else has more than one).  The entry must be a
-    ``push {..., lr}`` prologue, else we refuse (wrong match / non-ARM image)."""
+    ``push {..., lr}`` prologue -- or the ``bx lr`` this module already put
+    there -- else we refuse (wrong match / non-ARM image).
+
+    Accepting our own patch is what makes this idempotent.  Only the 4-byte
+    prologue is overwritten, so a already-bypassed firmware still carries the
+    CRC32 loops and still resolves to the same function; without that case the
+    routine "disappeared" the moment it was patched, and re-running a Write
+    against an already-modded image (or a second Direct-SD write onto a card
+    that is already modded) would report the validator as unreachable and warn
+    about a card that is in fact correctly patched."""
     if elf[:4] != b"\x7fELF" or elf[4] != 1:
         return None
     ts = _text_section(elf)
@@ -117,6 +126,8 @@ def find_validation_exec(elf):
     if entry is None or n < 3:
         return None
     eoff = entry - code_base
+    if bytes(elf[eoff:eoff + 4]) == _BX_LR:   # already bypassed (idempotent)
+        return eoff
     w = struct.unpack_from("<I", elf, eoff)[0]
     # ``push {..., lr}`` == STMDB sp!, reglist: bits[27:20]=0x92, Rn=sp(13), bit14(lr)
     if not (((w >> 20) & 0xFF) == 0x92 and ((w >> 16) & 0xF) == 13 and (w & 0x4000)):

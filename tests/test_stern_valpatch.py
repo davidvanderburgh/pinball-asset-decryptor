@@ -185,3 +185,33 @@ def test_unreachable_validator_is_logged_as_an_error():
     valpatch.log_status(lambda m, lvl="info": lines.append((m, lvl)),
                         ("absent", ""))
     assert lines[0][1] == "info"              # nothing to warn about
+
+
+def test_locating_is_idempotent_on_an_already_bypassed_firmware():
+    """Re-running a Write must not "lose" a validator it already patched.
+
+    The bypass overwrites the function's push{lr} prologue, which is the very
+    thing the prologue check looks for -- so on a second pass (a build from an
+    already-modded image, or a second Direct-SD write onto a modded card) the
+    routine went missing and got reported as unreachable, warning about a card
+    that is correctly patched.
+    """
+    elf = bytearray(_build_elf(trailer=VALIDATOR_STRINGS))
+    eoff = valpatch.find_validation_exec(bytes(elf))
+    elf[eoff:eoff + 4] = valpatch._BX_LR              # apply the bypass
+    again = valpatch.find_validation_exec(bytes(elf))
+    assert again == eoff
+    assert valpatch.bypass_status(bytes(elf), again) == ("bypassed", "")
+    # ...and a third pass is still a stable no-op.
+    overlay, status = valpatch.bypass_overlay(bytes(elf))
+    assert overlay == {eoff: valpatch._BX_LR}
+    assert status == ("bypassed", "")
+
+
+def test_a_bare_bx_lr_without_crc_loops_is_still_not_a_validator():
+    # The idempotence allowance must not become a way to match any function
+    # that happens to start with `bx lr` -- the CRC32 evidence still rules.
+    elf = bytearray(_build_elf(inline_crc_loops=0, trailer=VALIDATOR_STRINGS))
+    elf[TEXT_OFF + (FN_V - TEXT_VADDR):TEXT_OFF + (FN_V - TEXT_VADDR) + 4] = \
+        valpatch._BX_LR
+    assert valpatch.find_validation_exec(bytes(elf)) is None

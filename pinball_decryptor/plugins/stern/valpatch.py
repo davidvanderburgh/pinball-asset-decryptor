@@ -30,23 +30,35 @@ less likely than one; if both come up empty on a firmware that *does* carry
 CRC32 machinery, the Write says so loudly rather than shipping a card whose
 validator is still live.
 
-**Jaws LE 1.01.0 remains unexplained, and is treated as unsafe rather than
-solved.**  Neither locator finds anything in either of its game binaries
-(``/jaws_le/game`` and ``spike_menu/game``); no ELF anywhere on that card holds
-more than one ``0xEDB88320``; it is not Thumb (same ``e_flags`` and ARM entry
-as every other card); and its six ``#N ... UPDATE SD CARD`` messages are
-present and byte-identical.  Tracing back from those messages doesn't help
-either -- on the cards where the validator *is* known, nothing referencing them
-calls it or is called by it, so they are reached through data tables.
+**Jaws LE 1.01.0 does not carry this validator at all.**  That was established
+positively, not inferred from our signature failing:
 
-It is tempting to read all that as "Jaws has no validator", and to stay quiet
-about it.  That is an argument from ignorance: it infers absence from our own
-signature failing, on a *newer* title, where a vendor is far likelier to have
-strengthened the check than dropped it.  Whatever that build does is simply
-unknown, so :func:`carries_validator` keeps trusting the messages and the Write
-warns.  A warning on a card that may not need one is cheap; silence on a card
-that does need one is a hardware test that fails for reasons the user cannot
-see.
+* Its ``game`` binary is the same build lineage as every other card -- pick a
+  function the cards share and its address-normalised instruction stream
+  matches Jaws exactly, so a null result there means something.
+* Against that baseline the validator's ~1545-instruction body scores **zero**
+  matching 8-grams, not just in ``game`` but in all 4,437 files on the card --
+  every ELF in both partitions.  The same sweep run against other cards lands
+  ~1300 hits squarely on their validator, so the method does find it when it
+  is there.
+* The routine's *private* string pool (:data:`_POOL_STRINGS`) is absent.  The
+  compiler has to emit that data for the routine; it is present on the 35
+  cards where we locate the validator and on no others.
+
+What misled the earlier reading is that Jaws does still ship the six ``#N ...
+UPDATE SD CARD`` messages.  Those turn out to be worthless as evidence: they
+are byte-identical on all 36 cards and, on *every* card including ones with a
+live validator, nothing references them directly -- they are reached through a
+data table.  A string the linker kept is not a check that runs.  The CRC32
+machinery Jaws does contain is the ordinary table-driven zlib helper shared by
+14 general-purpose callers, the same set as on every other card.
+
+So :func:`carries_validator` now tests the two markers that actually track the
+routine, and Jaws reports ``absent`` rather than warning.  The safety property
+is unchanged and is what the markers are for: if a firmware carries either
+marker and neither locator can pin the routine, that is ``unlocated`` and the
+Write says so loudly.  Absence is only ever asserted from evidence that had to
+be emitted, never from a signature coming up empty.
 
 NOTE: the tamper *state* is stored on the machine's board i2c/nvram, NOT on the
 SD card, so a machine that already booted an **unpatched** modded card can keep a
@@ -62,11 +74,20 @@ import struct
 _CRC32_POLY = 0xEDB88320
 _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
 
-# The six numbered messages the validator puts on the LCD.  Stern ships them
-# byte-identical in every Spike 2 firmware checked (all 36 cards in the vendor
-# library, Jaws included).  They are the validator's user-visible output, so a
-# build carrying them is assumed to still perform the check -- see
-# :func:`carries_validator` for why that assumption is the safe one.
+# The validator's *private* progress/format strings.  Every validation stage
+# has a tag (``SS`` ``GE`` ``CE`` ``ZK`` ``SF``) and emits "<tag>: <progress>";
+# the compiler has to emit this pool for the routine, so the pool is present
+# exactly when the routine was linked in.  Across the 36-card vendor library
+# these appear on the 35 cards whose validator we locate and on no other, which
+# makes them a *positive* presence test -- see :func:`carries_validator`.
+_POOL_STRINGS = (b"SS: %u:%u", b"GE: %5.2f%%", b"GE: PD", b"CE: %5.2f%%",
+                 b"ZK: %5.2f%%", b"SF: %u:%u:%u")
+
+# The six numbered messages the validator puts on the LCD.  Kept for reference
+# only: they are byte-identical on all 36 cards *including* the one with no
+# validator, and on every card they are reached through a data table rather
+# than a direct reference, so their presence says nothing about whether the
+# check was linked in.  Testing them is what produced the Jaws false alarm.
 _ERR_MSG_RE = re.compile(rb"#[1-6](?: %d:%d(?::%d)?)? UPDATE SD CARD\x00")
 
 
@@ -265,24 +286,32 @@ def _by_shape(elf, idx):
 def carries_validator(elf):
     """True when *elf* should be assumed to carry Stern's self/asset validator.
 
-    Keyed on the validator's six on-LCD ``#N ... UPDATE SD CARD`` messages
-    rather than on any code shape, so it stays true for a firmware neither
-    locator can match.  That distinction is the whole point: without it, "this
-    title has no validator" (harmless) and "this title's validator is still
-    armed and we couldn't reach it" (ships a card that errors on the machine)
-    look identical to the Write.
+    Keyed on two *independent* traces the validator leaves in the binary, and
+    on neither locator's code signature -- so it stays true for a firmware
+    whose routine we cannot match.  That distinction is the whole point:
+    without it, "this title has no validator" (harmless) and "this title's
+    validator is armed and we couldn't reach it" (ships a card that errors on
+    the machine) look identical to the Write.
 
-    It is deliberately the *cautious* test, and the caution is load-bearing.
-    Jaws LE 1.01.0 ships these messages while neither locator finds anything in
-    either of its game binaries, its ``.text`` holds no ``0xEDB88320`` at all,
-    and it is not Thumb -- so what that build actually does is unknown.  It
-    would be easy to read "our signature found nothing" as "there is nothing
-    there" and stay quiet; that is an argument from ignorance, and getting it
-    wrong means silently shipping a card the machine rejects.  Reporting the
-    uncertainty costs a warning on a card that may not need one.  Staying quiet
-    costs a bricked test run, so this errs toward the warning.
+    The two markers are the routine's private string pool (:data:`_POOL_STRINGS`)
+    and its inlined ``0xEDB88320`` sites.  Across the 36-card vendor library
+    each marker independently splits the set the same way: present on the 35
+    cards where the validator is located, absent on the one where it is not.
+    Either marker alone is enough to answer yes, so a build that stops inlining
+    its CRC32 -- or renames its progress tags -- is still reported as carrying
+    the check.  Only when *both* are missing is absence asserted.
+
+    That is a deliberate change from testing the on-LCD ``#N ... UPDATE SD
+    CARD`` messages.  Those are present on all 36 cards, unreferenced on every
+    one of them, so they cannot distinguish a firmware that validates from one
+    that doesn't -- and treating them as evidence is what made Jaws LE 1.01.0
+    warn.  Absence is now asserted from evidence the compiler had to emit,
+    rather than inferred from our own signature failing.
     """
-    return len(_ERR_MSG_RE.findall(elf)) >= 4
+    if any(s in elf for s in _POOL_STRINGS):
+        return True
+    idx = _index_text(elf)                    # only on the pool-absent path
+    return bool(idx) and len(idx["crc_sites"]) >= 3
 
 
 def bypass_status(elf, eoff):
@@ -290,12 +319,12 @@ def bypass_status(elf, eoff):
     *eoff* is :func:`find_validation_exec`'s answer.
 
     ``("bypassed", "")`` the validator was found and neutered; ``("absent", "")``
-    this firmware shows no sign of a validator, so there was nothing to do; and
-    ``("unlocated", why)`` the firmware looks like it carries one but neither
-    locator could pin the routine -- the case a card must never ship on
-    silently.  ``unlocated`` states uncertainty, not a diagnosis: it is what
-    Jaws LE 1.01.0 reports, and what that build actually does is unknown (see
-    the module docstring)."""
+    neither presence marker is in this firmware, so there was nothing to do
+    (Jaws LE 1.01.0 -- see the module docstring); and ``("unlocated", why)``
+    the firmware carries a marker but neither locator could pin the routine --
+    the case a card must never ship on silently.  ``unlocated`` states
+    uncertainty rather than a diagnosis, and no card in the vendor library
+    currently reports it."""
     if eoff is not None:
         return ("bypassed", "")
     if carries_validator(elf):

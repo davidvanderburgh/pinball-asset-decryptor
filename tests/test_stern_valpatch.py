@@ -114,14 +114,23 @@ def _build_elf(inline_crc_loops=5, trailer=b""):
     return bytes(out)
 
 
-# The validator's own on-LCD messages, as Stern ships them (byte-identical on
-# all 34 vendor cards checked, Jaws included).
+# The validator's own on-LCD messages, as Stern ships them.  Byte-identical on
+# all 36 vendor cards -- INCLUDING the one that carries no validator -- and on
+# every card they are reached through a data table rather than a direct
+# reference.  So they are decoration here, not evidence: a build can ship them
+# and still not perform the check.
 VALIDATOR_STRINGS = (b"GAME VALIDATION ERROR\x00#6 %d:%d:%d UPDATE SD CARD\x00"
                      b"GAME VALIDATION ERROR\x00#5 %d:%d UPDATE SD CARD\x00"
                      b"GAME VALIDATION ERROR\x00#4 %d:%d UPDATE SD CARD\x00"
                      b"GAME VALIDATION ERROR\x00#3 UPDATE SD CARD\x00"
                      b"GAME VALIDATION ERROR\x00#2 UPDATE SD CARD\x00"
                      b"GAME VALIDATION ERROR\x00#1 UPDATE SD CARD\x00")
+
+# The routine's PRIVATE progress-string pool -- data the compiler has to emit
+# for it, so it is present exactly when the routine was linked in (35 of the
+# 36 vendor cards, and precisely the 35 where we locate the validator).
+POOL_STRINGS = (b"SS: %u:%u\x00GE: PD\x00GE: %5.2f%%\x00CE: PD\x00"
+                b"CE: %5.2f%%\x00ZK: PD\x00ZK: %5.2f%%\x00SF: %u:%u:%u\x00")
 
 
 # --- the signature itself ----------------------------------------------------
@@ -152,21 +161,46 @@ def test_bypass_overlay_patches_the_entry_with_bx_lr():
 
 # --- telling "no validator" apart from "couldn't find the validator" ---------
 
-def test_carries_validator_reads_the_on_lcd_messages_not_the_code_shape():
-    # The Jaws shape: the routine is there (its six numbered messages are) but
-    # nothing in .text builds the polynomial, so the signature finds nothing.
+def test_carries_validator_keys_on_the_private_string_pool():
+    # The pool is data the compiler emits for the routine, so it answers "was
+    # this linked in?" without depending on how the routine was compiled --
+    # which is what lets a build that stops inlining its CRC32 still count.
+    pool_only = _build_elf(inline_crc_loops=0, trailer=POOL_STRINGS)
+    assert valpatch.find_validation_exec(pool_only) is None
+    assert valpatch.carries_validator(pool_only)
+
+
+def test_carries_validator_also_accepts_the_inlined_crc32_alone():
+    # Either marker is enough on its own, so renaming the progress tags does
+    # not make a live validator look absent.
+    assert valpatch.carries_validator(_build_elf(inline_crc_loops=5))
+
+
+def test_the_on_lcd_messages_alone_do_not_mean_a_validator_is_present():
+    """The Jaws case, and the reason this test exists.
+
+    Jaws LE 1.01.0 ships the six numbered messages but carries no validator:
+    the routine's ~1545-instruction body scores zero matching 8-grams against
+    every one of the 4,437 files on the card, and its private string pool is
+    absent -- while a function the cards share matches Jaws exactly, so the
+    binary is the same build lineage and the null result means something.
+    Treating the messages as evidence warned on a card that needs no warning.
+    """
     jaws_like = _build_elf(inline_crc_loops=0, trailer=VALIDATOR_STRINGS)
     assert valpatch.find_validation_exec(jaws_like) is None
-    assert valpatch.carries_validator(jaws_like)
+    assert not valpatch.carries_validator(jaws_like)
+    assert valpatch.bypass_overlay(jaws_like)[1] == ("absent", "")
 
 
-def test_a_firmware_without_the_messages_carries_no_validator():
+def test_a_firmware_with_no_marker_at_all_carries_no_validator():
     assert not valpatch.carries_validator(_build_elf(inline_crc_loops=0))
 
 
 def test_status_calls_an_unreachable_validator_a_failure_not_a_no_op():
-    jaws_like = _build_elf(inline_crc_loops=0, trailer=VALIDATOR_STRINGS)
-    overlay, status = valpatch.bypass_overlay(jaws_like)
+    # A firmware that carries a marker but whose routine neither locator can
+    # pin is the dangerous case: it ships a card the machine rejects.
+    armed = _build_elf(inline_crc_loops=0, trailer=POOL_STRINGS)
+    overlay, status = valpatch.bypass_overlay(armed)
     assert overlay == {}                      # nothing could be patched...
     assert status[0] == "unlocated"           # ...and that is a PROBLEM,
     assert status[1]                          # with a reason for the user.
@@ -291,7 +325,11 @@ def _build_shape_elf(with_poly=False, ncallees=22, loops=92, loads=269,
     out.extend(shstr)
     out.extend(sh(0, 0, 0, 0) + sh(1, TV, TO, len(text))
                + sh(7, 0, shstr_off, len(shstr)))
+    # A firmware that really carries the routine carries its data too, so the
+    # synthetic one models a build that stopped inlining CRC32 but is still
+    # recognisably armed.
     out.extend(VALIDATOR_STRINGS)
+    out.extend(POOL_STRINGS)
     return bytes(out), TO + (fn - TV)
 
 

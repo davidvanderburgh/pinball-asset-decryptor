@@ -3,13 +3,20 @@
     python scripts/shot_write_complete.py <out_dir> <before|after> [scenario]
 
 A companion to ``take_screenshots.py`` for one screen that rig doesn't reach:
-the modal the Write pops when it finishes.  Two scenarios:
+the modal the Write pops when it finishes.  Three scenarios:
 
 ``validator`` (default)
     A firmware that carries Stern's SD-card validator but whose validator
     routine the Write could not locate -- the card then shows GAME VALIDATION
     ERROR on the machine.  Read from the REAL game binary of a real card (Jaws
     LE 1.01.0 is the shipped title where the locator comes up empty).
+
+``jaws``
+    The same real Jaws LE 1.01.0 binary, for the change that stopped it
+    warning: once presence is tested by the routine's own markers instead of
+    by strings it merely ships, that card reports ``absent`` and the warning
+    paragraph goes away.  Same code path as ``validator``, separate filenames
+    so the two before/after pairs don't overwrite each other.
 
 ``blipfree``
     A blip-free build whose rebuilt firmware never reached the card.  Both
@@ -36,7 +43,7 @@ if not (3 <= len(sys.argv) <= 4) or sys.argv[2] not in ("before", "after"):
     sys.exit(__doc__)
 OUT_DIR, WHEN = sys.argv[1], sys.argv[2]
 SCENARIO = sys.argv[3] if len(sys.argv) == 4 else "validator"
-if SCENARIO not in ("validator", "blipfree"):
+if SCENARIO not in ("validator", "blipfree", "jaws"):
     sys.exit(__doc__)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,7 +61,7 @@ from pinball_decryptor.plugins.stern import valpatch  # noqa: E402
 from pinball_decryptor.plugins.stern.engine import _locate  # noqa: E402
 from pinball_decryptor.plugins.stern.formats import linux_partitions  # noqa: E402
 
-if SCENARIO == "validator":
+if SCENARIO in ("validator", "jaws"):
     # --- real validator status of a real card --------------------------------
     cards = glob.glob(os.path.join(LIB, "jaws_le-*.raw"))
     if not cards:
@@ -64,6 +71,23 @@ if SCENARIO == "validator":
     with open(card, "rb") as f:
         reader, fw_node, _img = _locate(f, linux_partitions(card))
         elf = bytes(reader.read_file_bytes(fw_node))
+    if SCENARIO == "jaws" and WHEN == "before":
+        # Judge the same real binary with the module as COMMITTED, so the pair
+        # is an actual A/B of the working-tree change rather than a retyped
+        # guess at what the old code reported.
+        import importlib.util
+        import subprocess
+        import tempfile
+        src = subprocess.check_output(
+            ["git", "show", "HEAD:pinball_decryptor/plugins/stern/valpatch.py"],
+            cwd=REPO)
+        tmp = os.path.join(tempfile.mkdtemp(), "valpatch_head.py")
+        with open(tmp, "wb") as fh:
+            fh.write(src)
+        spec = importlib.util.spec_from_file_location("valpatch_head", tmp)
+        valpatch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(valpatch)
+        print("using valpatch from git HEAD for the 'before' shot", flush=True)
     if hasattr(valpatch, "bypass_overlay"):
         try:
             _ov, vmode = valpatch.bypass_overlay(elf)
@@ -171,8 +195,10 @@ def capture_then_close():
     if hwnd is None:
         print("!! dialog window not found", flush=True)
     else:
-        name = ("%s_write_complete.png" % WHEN if SCENARIO == "validator"
-                else "%s_blipfree_write_complete.png" % WHEN)
+        name = "%s_%s.png" % (
+            WHEN, {"validator": "write_complete",
+                   "blipfree": "blipfree_write_complete",
+                   "jaws": "jaws_validator"}[SCENARIO])
         snap_hwnd(hwnd, name)
         user32.PostMessageW(hwnd, 0x0010, 0, 0)     # WM_CLOSE
     root.after(600, root.destroy)

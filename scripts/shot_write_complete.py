@@ -13,7 +13,7 @@ the modal the Write pops when it finishes.  Two scenarios:
 
 ``blipfree``
     A blip-free build whose rebuilt firmware never reached the card.  Both
-    modes here are the values two REAL James Bond LE 1.06.0 writes actually
+    modes here are the values two REAL James Bond Premium 1.06.0 writes
     returned -- before the grow-source fix, and after it.
 
 Either way the summary is built by the SAME pipeline helpers the real Write
@@ -79,7 +79,7 @@ if SCENARIO == "validator":
     counts = (1, 0, 2, 0)          # the reporter's card: one sound + two images
     out_path = r"C:\Users\david\Desktop\jaws_modded.raw"
 else:
-    # --- what two real James Bond LE 1.06.0 writes actually returned ---------
+    # --- what two real James Bond Premium 1.06.0 writes actually returned ---
     vmode = ("bypassed", "")
     counts = (1, 0, 0, 0)
     out_path = r"C:\Users\david\Desktop\james_bond_modded.raw"

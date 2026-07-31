@@ -43,6 +43,41 @@ def _human_size(n):
         n /= 1024.0
 
 
+# Extension → kind buckets for the import/export summaries.  The extracted
+# forms only (what actually sits in a project folder), pulled from the same
+# constants the Replace tabs scan with, so the buckets can't drift from what
+# the app itself calls audio/video/images.
+def _kind_of(name):
+    from .audio_slots import AUDIO_EXTS
+    from .image import IMAGE_EXTS
+    from .video import VIDEO_EXTS
+    ext = os.path.splitext(name)[1].lower()
+    if ext in AUDIO_EXTS:
+        return "audio"
+    if ext in VIDEO_EXTS:
+        return "video"
+    if ext in IMAGE_EXTS or ext == ".dds":
+        return "image"
+    return "other"
+
+
+def kind_summary(names):
+    """A human breakdown of *names* by asset kind — "2 audio, 1 video,
+    2 images" — so the import log says WHAT a pack changed, not just how
+    many files (a tester).  Empty string for an empty list; a bucket with
+    no files is left out."""
+    counts = {}
+    for name in names:
+        kind = _kind_of(name)
+        counts[kind] = counts.get(kind, 0) + 1
+    parts = []
+    for kind, label in (("audio", "audio"), ("video", "video"),
+                        ("image", "image(s)"), ("other", "other")):
+        if counts.get(kind):
+            parts.append("%d %s" % (counts[kind], label))
+    return ", ".join(parts)
+
+
 def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
     """Zip only files that differ from the baseline checksums.
 
@@ -136,7 +171,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
 
 
 def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None):
-    """Extract a mod-pack zip into *assets_folder*.  Returns file count.
+    """Extract a mod-pack zip into *assets_folder*.  Returns the list of
+    imported member names (so the caller can count AND summarize by kind).
 
     Packs written since batch 16 carry :data:`MANIFEST_NAME`, so we can say
     which extract they were built from and flag an obvious version mismatch.
@@ -181,4 +217,4 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None):
             zf.extract(name, assets_folder)
             if progress_cb:
                 progress_cb(i + 1, len(names), name)
-    return len(names)
+    return names

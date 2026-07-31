@@ -506,27 +506,46 @@ def open_properties(app, folder=None):
     frm = tk.Frame(win, bg=c["bg"])
     frm.pack(padx=16, pady=12, fill=tk.X)
 
-    def _row(r, label, value, extra=None):
+    def _row(r, label, value):
         tk.Label(frm, text=label, bg=c["bg"], fg=c["gray"], width=13,
                  anchor=tk.W, font=(_SANS_FONT, 9)).grid(
             row=r, column=0, sticky=tk.W, pady=2)
         tk.Label(frm, text=value, bg=c["bg"], fg=c["fg"],
                  font=(_SANS_FONT, 9), anchor=tk.W, wraplength=380,
                  justify=tk.LEFT).grid(row=r, column=1, sticky=tk.W, pady=2)
-        if extra is not None:
-            extra.grid(row=r, column=2, padx=(8, 0), pady=2)
+
+    def _link_row(r, label, folder):
+        """A folder path as a hyperlink — clicking opens it in the OS file
+        browser.  Replaces the "Reveal" button: "reveal" read as jargon,
+        and a link on the path itself says where the click goes (a
+        tester)."""
+        tk.Label(frm, text=label, bg=c["bg"], fg=c["gray"], width=13,
+                 anchor=tk.W, font=(_SANS_FONT, 9)).grid(
+            row=r, column=0, sticky=tk.W, pady=2)
+        lnk = tk.Label(frm, text=folder, bg=c["bg"], fg=c["accent"],
+                       font=(_SANS_FONT, 9, "underline"), anchor=tk.W,
+                       wraplength=380, justify=tk.LEFT, cursor="hand2")
+        lnk.grid(row=r, column=1, sticky=tk.W, pady=2)
+
+        def _open(_e):
+            if os.path.isdir(folder):
+                _reveal(folder)
+            else:
+                messagebox.showinfo(
+                    "Open folder",
+                    "This folder doesn't exist yet:\n%s" % folder,
+                    parent=win)
+        lnk.bind("<Button-1>", _open)
 
     mfr = get_manufacturer(data.get("manufacturer", "")) if data else None
-    reveal_btn = ttk.Button(frm, text="Reveal",
-                            command=lambda: _reveal(target))
-    _row(0, "Location:", target, reveal_btn)
+    _link_row(0, "Location:", target)
     _row(1, "Game:", (mfr.display if mfr else
                       (app._current_mfr.display
                        if is_active and app._current_mfr else "—")))
     _row(2, "Stock image:", data.get("stock_image") or
          (app.window.extract_input_var.get().strip() if is_active else "—"))
     build_dir = project_file.project_build_dir(target, data or None)
-    _row(3, "Build location:", build_dir)
+    _link_row(3, "Build location:", build_dir)
     _row(4, "Saved with:", data.get("saved_with") or "—")
 
     size_lbl = tk.Label(win, text="Measuring sizes…", bg=c["bg"],
@@ -539,9 +558,20 @@ def open_properties(app, folder=None):
                 % (_human_size(sizes["assets"]),
                    _human_size(sizes["build"]),
                    _human_size(sizes["mods"])))
+
+        def apply():
+            # The dialog may be long gone by the time the walk ends (a NAS
+            # project measures for minutes; the dialog closes in seconds).
+            # An unguarded configure here surfaced as the "invalid command
+            # name .!toplevel.!label" internal error (a tester) — the
+            # after() below only guards SCHEDULING, not the callback.
+            try:
+                size_lbl.configure(text=text)
+            except tk.TclError:
+                pass
         try:
-            size_lbl.after(0, lambda: size_lbl.configure(text=text))
-        except tk.TclError:
+            size_lbl.after(0, apply)
+        except (tk.TclError, RuntimeError):
             pass
     threading.Thread(target=fill_sizes, daemon=True).start()
 
@@ -550,7 +580,9 @@ def open_properties(app, folder=None):
     notes = tk.Text(win, width=58, height=5, bg=c["bg"], fg=c["fg"],
                     insertbackground=c["fg"], font=(_SANS_FONT, 9),
                     wrap=tk.WORD)
-    notes.pack(padx=16, pady=(2, 4))
+    # anchor=W: the box lines up with the labels above it instead of
+    # floating centered (a tester's alignment nit).
+    notes.pack(padx=16, pady=(2, 4), anchor=tk.W)
     notes.insert("1.0", data.get("notes") or "")
     if not anchored:
         notes.configure(state=tk.DISABLED)
@@ -590,7 +622,10 @@ def open_properties(app, folder=None):
         open_properties(app, target)      # reopen with fresh values
 
     def archive():
-        _archive_flow(app, target, parent_win=win)
+        # on_done=close: the dialog's rows (sizes, state) are stale the
+        # moment the archive lands, and close() still saves any notes typed
+        # before the click (archive keeps notes).
+        _archive_flow(app, target, parent_win=win, on_done=lambda: close())
 
     btns = tk.Frame(win, bg=c["bg"])
     btns.pack(pady=(6, 12))
@@ -616,25 +651,29 @@ def open_properties(app, folder=None):
 
 
 def _archive_flow(app, target, parent_win=None, on_done=None):
-    """Shared archive confirm + progress (Properties and the manager)."""
+    """Shared archive confirm + progress (Properties and the manager).
+
+    Archiving the OPEN project works too — it closes the project first-class
+    instead of refusing.  The old "open a different project first" dead-end
+    meant the Properties dialog (which the Project menu only opens for the
+    active project) showed an Archive button that could never succeed (a
+    tester: "it complains the project is open when I archive...it makes me
+    scratch my head")."""
     if app.window._is_running():
         return
     is_active = (os.path.normcase(os.path.normpath(target))
                  == os.path.normcase(
                      os.path.normpath(app._project_folder() or "x")))
+    msg = ("Archiving deletes the extracted files that still match the "
+           "stock baseline, plus the build output.  Your edited files, "
+           "revert backups and notes stay.\n\nOpening the project later "
+           "re-extracts to hydrate it.")
     if is_active:
-        messagebox.showinfo(
-            "Archive project",
-            "This project is currently open — open a different project "
-            "(or go back to the game picker) first, then archive it from "
-            "Projects….", parent=parent_win)
-        return
-    if not messagebox.askyesno(
-            "Archive project",
-            "Archiving deletes the extracted files that still match the "
-            "stock baseline, plus the build output.  Your edited files, "
-            "revert backups and notes stay.\n\nOpening the project later "
-            "re-extracts to hydrate it.  Continue?", parent=parent_win):
+        msg += ("\n\nThis project is currently open, so archiving also "
+                "closes it — the tabs empty until you open or extract "
+                "another project.")
+    if not messagebox.askyesno("Archive project", msg + "\n\nContinue?",
+                               parent=parent_win):
         return
     build_dir = project_file.project_build_dir(target)
 
@@ -653,6 +692,12 @@ def _archive_flow(app, target, parent_win=None, on_done=None):
             % (" (cancelled part-way; still safe)" if cancelled else "",
                deleted, _human_size(freed), target),
             "info" if cancelled else "success")
+        # Even a part-way cancel flags the anchor archived (archive()'s
+        # crash-safety rule), so the open project must close either way —
+        # otherwise the tabs sit on files that are gone and a restart
+        # would reopen the hollowed folder without its hydrate prompt.
+        if is_active:
+            app._close_active_project()
         if on_done:
             on_done()
 

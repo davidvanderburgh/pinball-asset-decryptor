@@ -127,7 +127,7 @@ def test_export_writes_manifest_and_import_reads_it(tmp_path):
     dest = tmp_path / "dest"
     dest.mkdir()
     n = modpack.import_mod_pack(zip_path, str(dest))
-    assert n == 1                                  # the manifest isn't an asset
+    assert n == ["a.wav"]                          # the manifest isn't an asset
     assert (dest / "a.wav").read_bytes() == b"CHANGED"
     assert not (dest / modpack.MANIFEST_NAME).exists()
 
@@ -153,7 +153,7 @@ def test_import_snapshots_pristine_originals(tmp_path):
         zf.writestr("extra.wav", b"NOT-IN-BASELINE")
 
     n = modpack.import_mod_pack(str(zip_path), str(dest))
-    assert n == 3
+    assert sorted(n) == ["a.wav", "b.wav", "extra.wav"]
     assert (dest / "a.wav").read_bytes() == b"MODDED-A"
     # pristine original captured; divergent + unknown files are not
     assert (dest / ".orig" / "a.wav").read_bytes() == b"orig-a"

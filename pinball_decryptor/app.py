@@ -344,6 +344,17 @@ class App:
     def _apply_manufacturer(self, mfr):
         self._current_mfr = mfr
         self._load_manufacturer_paths(mfr.key)
+        # The restored folder may already BE a project — put it (back) in
+        # the title bar.  Without this, a restart showed the detected card's
+        # caption while every tab pointed at the loaded project, and the
+        # title only healed on the next explicit Save/Open (a tester: "the
+        # title bar the project name did not update but in the properties
+        # you can see the location").  A non-project folder clears it so a
+        # manufacturer switch can't keep the previous game's project name.
+        from .core import project_file
+        folder = self._project_folder()
+        self._set_loaded_project(
+            folder if folder and project_file.has_anchor(folder) else None)
         self.window.apply_manufacturer(mfr)
         # Kick off the runtime-prereq check on a background thread.  The
         # GUI is already showing "[?] name" placeholders; results trickle
@@ -752,6 +763,15 @@ class App:
         # An extract writes state into the folder — that's the moment a
         # folder becomes a project (batch 19 materialization rule; same as
         # the sidecars we already drop silently).  Best-effort by design.
+        # The extract creates the output folder anyway; creating it now
+        # means a hand-typed brand-new folder anchors (and titles) like an
+        # existing one — _materialize_anchor refuses folders that aren't
+        # there yet, which left the new project out of the title bar and
+        # the registry until the next explicit Save (a tester).
+        try:
+            os.makedirs(output_path, exist_ok=True)
+        except OSError:
+            pass
         self._materialize_anchor(output_path)
         self._save_settings()
 
@@ -1803,18 +1823,27 @@ class App:
         ):
             return
 
-        self.window.append_log("Importing mod pack...", "info")
+        # "started" / "completed" bracket + a by-kind breakdown at the end —
+        # a bare "Importing mod pack..." left the log unable to say whether
+        # the import ever finished, and a bare file count didn't say what
+        # kind of files came in (a tester).
+        self.window.append_log(
+            "Importing mod pack started: %s" % os.path.basename(zip_path),
+            "info")
 
         def _run():
             try:
-                n = modpack.import_mod_pack(
+                names = modpack.import_mod_pack(
                     zip_path, assets_dir,
                     log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
                     progress_cb=lambda c, t, d="": self.msg_queue.put(
                         ProgressMsg(c, t, d)),
                 )
+                n = len(names)
+                kinds = modpack.kind_summary(names)
                 self.msg_queue.put(LogMsg(
-                    f"Mod pack imported: {n} file(s).", "success"))
+                    f"Mod pack import completed: {n} file(s)"
+                    + (f" — {kinds}." if kinds else "."), "success"))
                 # Re-scan the Replace tabs so the imported changes show up
                 # immediately — without this the tabs keep the pre-import scan
                 # ("0 slots changed") until a manual re-scan (a tester).  Same
@@ -1822,7 +1851,8 @@ class App:
                 self.root.after(0, self.window.reload_assets_tabs)
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Import Complete",
-                    f"Imported {n} file(s).\n\n"
+                    f"Imported {n} file(s)"
+                    + (f" ({kinds})" if kinds else "") + ".\n\n"
                     f"The Replace tabs are re-scanning so the imported "
                     f"changes show up."))
             except Exception as e:
@@ -3469,6 +3499,20 @@ class App:
         self._save_settings()
         self.window.invalidate_asset_scans()
         self.window.append_log("Project loaded: %s" % folder, "success")
+
+    def _close_active_project(self):
+        """Point the UI at no project: clear the shared project-folder field
+        (the Replace tabs mirror it), the title, and the saved restore
+        state.  Used after archiving the open project — the tabs must not
+        sit on files the archive just deleted, and a restart must not
+        reopen the hollowed folder without its hydrate prompt."""
+        self.window.extract_output_var.set("")
+        self._set_loaded_project(None)
+        self.window.invalidate_asset_scans()
+        self._save_settings()
+        self.window.append_log(
+            "Project closed — open or extract a project to continue.",
+            "info")
 
     def _save_project(self):
         """Project ▾ → Save: write the anchor into the active project

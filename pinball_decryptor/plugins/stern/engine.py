@@ -242,8 +242,15 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
                 return params
         except Exception:
             pass
-    log("Deriving codec parameters from the firmware (one-time per card, "
-        "~2-5 min)...", "info")
+    # No fixed time estimate: the derive is a strictly sequential walk of the
+    # card's sound catalog, so it scales with catalog size -- seconds for a
+    # small title, ~19 min for Deadpool Pro 1.16's 8175 sounds.  The old
+    # "~2-5 min" promise was the shape of the field report that opened PAD-2:
+    # a user watched an unmoving progress bar past the stated time and
+    # reasonably concluded it had hung.  derive_params reports per-record
+    # progress below as soon as it knows the count.
+    log("Deriving codec parameters from the firmware (one-time per card; "
+        "large sound catalogs take several minutes)...", "info")
     if progress:
         progress(0, 0, "Deriving codec parameters...")
     # Capture the master-directory consumed body offsets in the SAME derive
@@ -254,7 +261,7 @@ def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
         reads, hh = _install_consumed_hook(emu)
     except Exception:
         reads = hh = None
-    params = emu.derive_params()
+    params = emu.derive_params(progress=progress)
     if hh is not None:
         try:
             emu.mu.hook_del(hh)

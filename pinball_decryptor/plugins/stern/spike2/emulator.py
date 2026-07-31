@@ -177,6 +177,24 @@ def _accept_masterdir_malloc(cap, dst, n):
     return True
 
 
+PROGRESS_UPDATES = 200
+
+
+def _progress_step(nrec):
+    """Report every Nth record so a catalog of any size gets about
+    :data:`PROGRESS_UPDATES` updates.
+
+    The chain calls back from inside its hot loop, so this bounds how often a
+    slow consumer (a GUI marshalling to its main thread) is entered: without it
+    Deadpool Pro 1.16 would fire 8175 times.  Never 0 -- a 0 step would mean
+    ``idx % step`` raises and the derive dies for a small catalog.
+
+    Rounds the step UP: floor division leaves a step fractionally too small and
+    overshoots the budget (8175 // 200 = 40 gives 205 updates, not 200)."""
+    n = int(nrec)
+    return max(1, -(-n // PROGRESS_UPDATES))
+
+
 def _record_write_addr(md_range, r9):
     """Where the chain replay may write a master-directory record, or None.
 
@@ -843,11 +861,20 @@ class Spike2Emu:
         return _u16(bytes(self.mu.mem_read(self.QMUL_TABLE + 2 * v, 2)))
 
     # ---- params derivation (chain) -----------------------------------------
-    def derive_params(self):
+    def derive_params(self, progress=None):
         """Cold-derive the decode-params table for every cat-0 sound, straight
         from ``game_real`` + ``image.bin``.  Returns a list of dicts:
         ``{idx, body_off, length, pred16, seed_a, band0_keyoff_rel, stride,
-        chan, scale}``.  ~1 minute for ~2000 sounds.
+        chan, scale}``.
+
+        ``progress(done, total, message)`` is called as the record chain runs
+        (throttled to ~200 updates).  Cost scales with the catalog: measured
+        ~19 s of chain for TMNT 1.58's 2067 records against ~19 min for Deadpool
+        Pro 1.16's 8175.  The chain is strictly sequential and cannot be split
+        across processes -- each record's band build starts from the emulator
+        state the previous record left, so record N is not reachable without
+        having run 0..N-1 (replaying a late record from the initial state
+        produces no object at all).
         """
         mu = self.mu
         cap = {"mddst": None, "nrec": None, "state": None, "badrec": None,
@@ -954,8 +981,20 @@ class Spike2Emu:
         rows = []
         cur = dict(regs=list(cap["state"]["regs"]), sp=cap["state"]["sp"],
                    frame=cap["state"]["frame"])
+        # The record count is known here (the malloc hook caught it in the first
+        # instructions), so the chain can report real progress instead of
+        # leaving one indeterminate "Deriving codec parameters..." on screen for
+        # the whole run.  A big catalog takes many minutes -- Deadpool Pro 1.16
+        # is 8175 records and ~19 min -- and a silent progress bar for that long
+        # is what a field report read as an indefinite hang.  Throttled so a
+        # slow GUI callback can't dominate the loop.
+        step = _progress_step(nrec)
         try:
             for idx in range(nrec):
+                if progress is not None and (idx % step == 0 or idx == nrec - 1):
+                    progress(idx + 1, nrec,
+                             "Deriving codec parameters (sound %d of %d)..."
+                             % (idx + 1, nrec))
                 rec = md[idx * 24: idx * 24 + 24]
                 dw0 = _u32(rec, 0)
                 length = (self.LENGTH_XOR ^ _u32(rec, 16)) & 0xffffffff

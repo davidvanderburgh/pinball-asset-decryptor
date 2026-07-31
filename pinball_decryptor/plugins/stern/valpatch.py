@@ -30,8 +30,8 @@ less likely than one; if both come up empty on a firmware that *does* carry
 CRC32 machinery, the Write says so loudly rather than shipping a card whose
 validator is still live.
 
-**Jaws LE 1.01.0 does not carry this validator at all.**  That was established
-positively, not inferred from our signature failing:
+**Jaws LE does not carry this validator at all** -- in 1.01.0 or in 1.02.0.
+That was established positively, not inferred from our signature failing:
 
 * Its ``game`` binary is the same build lineage as every other card -- pick a
   function the cards share and its address-normalised instruction stream
@@ -43,15 +43,23 @@ positively, not inferred from our signature failing:
   is there.
 * The routine's *private* string pool (:data:`_POOL_STRINGS`) is absent.  The
   compiler has to emit that data for the routine; it is present on the 35
-  cards where we locate the validator and on no others.
+  cards where we locate the validator and on neither Jaws build.
+
+1.02.0 is the confirmation, and the reason to believe 1.01.0 was not a
+one-off build accident: it is a substantially different binary (``.text``
+grew ~10%, 6.16MB to 6.80MB), a later release of the *same title*, and the
+same three shared control functions still match it exactly -- while the
+validator body still scores zero and the pool is still absent.  A rebuild
+that size is a fair chance for a merely-unrecognised routine to resurface.
 
 What misled the earlier reading is that Jaws does still ship the six ``#N ...
-UPDATE SD CARD`` messages.  Those turn out to be worthless as evidence: they
-are byte-identical on all 36 cards and, on *every* card including ones with a
-live validator, nothing references them directly -- they are reached through a
-data table.  A string the linker kept is not a check that runs.  The CRC32
-machinery Jaws does contain is the ordinary table-driven zlib helper shared by
-14 general-purpose callers, the same set as on every other card.
+UPDATE SD CARD`` messages -- both builds do.  Those turn out to be worthless as
+evidence: they are byte-identical on all 37 cards and, on *every* card
+including ones with a live validator, nothing references them directly -- they
+are reached through a data table.  A string the linker kept is not a check that
+runs.  The CRC32 machinery Jaws does contain is the ordinary table-driven zlib
+helper shared by 14 general-purpose callers, the same set as on every other
+card.
 
 So :func:`carries_validator` now tests the two markers that actually track the
 routine, and Jaws reports ``absent`` rather than warning.  The safety property
@@ -77,15 +85,16 @@ _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
 # The validator's *private* progress/format strings.  Every validation stage
 # has a tag (``SS`` ``GE`` ``CE`` ``ZK`` ``SF``) and emits "<tag>: <progress>";
 # the compiler has to emit this pool for the routine, so the pool is present
-# exactly when the routine was linked in.  Across the 36-card vendor library
-# these appear on the 35 cards whose validator we locate and on no other, which
-# makes them a *positive* presence test -- see :func:`carries_validator`.
+# exactly when the routine was linked in.  Across the 37-card vendor library
+# these appear on the 35 cards whose validator we locate and on neither Jaws
+# build, which makes them a *positive* presence test -- see
+# :func:`carries_validator`.
 _POOL_STRINGS = (b"SS: %u:%u", b"GE: %5.2f%%", b"GE: PD", b"CE: %5.2f%%",
                  b"ZK: %5.2f%%", b"SF: %u:%u:%u")
 
 # The six numbered messages the validator puts on the LCD.  Kept for reference
-# only: they are byte-identical on all 36 cards *including* the one with no
-# validator, and on every card they are reached through a data table rather
+# only: they are byte-identical on all 37 cards *including* the two that carry
+# no validator, and on every card they are reached through a data table rather
 # than a direct reference, so their presence says nothing about whether the
 # check was linked in.  Testing them is what produced the Jaws false alarm.
 _ERR_MSG_RE = re.compile(rb"#[1-6](?: %d:%d(?::%d)?)? UPDATE SD CARD\x00")
@@ -294,19 +303,20 @@ def carries_validator(elf):
     the machine) look identical to the Write.
 
     The two markers are the routine's private string pool (:data:`_POOL_STRINGS`)
-    and its inlined ``0xEDB88320`` sites.  Across the 36-card vendor library
+    and its inlined ``0xEDB88320`` sites.  Across the 37-card vendor library
     each marker independently splits the set the same way: present on the 35
-    cards where the validator is located, absent on the one where it is not.
-    Either marker alone is enough to answer yes, so a build that stops inlining
-    its CRC32 -- or renames its progress tags -- is still reported as carrying
-    the check.  Only when *both* are missing is absence asserted.
+    cards where the validator is located, absent on the two where it is not
+    (Jaws LE 1.01.0 and 1.02.0).  Either marker alone is enough to answer yes,
+    so a build that stops inlining its CRC32 -- or renames its progress tags --
+    is still reported as carrying the check.  Only when *both* are missing is
+    absence asserted.
 
     That is a deliberate change from testing the on-LCD ``#N ... UPDATE SD
-    CARD`` messages.  Those are present on all 36 cards, unreferenced on every
+    CARD`` messages.  Those are present on all 37 cards, unreferenced on every
     one of them, so they cannot distinguish a firmware that validates from one
-    that doesn't -- and treating them as evidence is what made Jaws LE 1.01.0
-    warn.  Absence is now asserted from evidence the compiler had to emit,
-    rather than inferred from our own signature failing.
+    that doesn't -- and treating them as evidence is what made Jaws warn.
+    Absence is now asserted from evidence the compiler had to emit, rather than
+    inferred from our own signature failing.
     """
     if any(s in elf for s in _POOL_STRINGS):
         return True

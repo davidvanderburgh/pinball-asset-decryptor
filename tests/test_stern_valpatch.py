@@ -115,7 +115,7 @@ def _build_elf(inline_crc_loops=5, trailer=b""):
 
 
 # The validator's own on-LCD messages, as Stern ships them.  Byte-identical on
-# all 36 vendor cards -- INCLUDING the one that carries no validator -- and on
+# all 37 vendor cards -- INCLUDING the two that carry no validator -- and on
 # every card they are reached through a data table rather than a direct
 # reference.  So they are decoration here, not evidence: a build can ship them
 # and still not perform the check.
@@ -128,7 +128,7 @@ VALIDATOR_STRINGS = (b"GAME VALIDATION ERROR\x00#6 %d:%d:%d UPDATE SD CARD\x00"
 
 # The routine's PRIVATE progress-string pool -- data the compiler has to emit
 # for it, so it is present exactly when the routine was linked in (35 of the
-# 36 vendor cards, and precisely the 35 where we locate the validator).
+# 37 vendor cards, and precisely the 35 where we locate the validator).
 POOL_STRINGS = (b"SS: %u:%u\x00GE: PD\x00GE: %5.2f%%\x00CE: PD\x00"
                 b"CE: %5.2f%%\x00ZK: PD\x00ZK: %5.2f%%\x00SF: %u:%u:%u\x00")
 

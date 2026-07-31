@@ -23,7 +23,7 @@ import struct
 
 from unicorn import (UC_ARCH_ARM, UC_HOOK_CODE, UC_HOOK_MEM_FETCH_UNMAPPED,
                      UC_HOOK_MEM_READ_UNMAPPED, UC_HOOK_MEM_WRITE_UNMAPPED,
-                     UC_MODE_ARM, Uc, UcError)
+                     UC_MODE_ARM, UC_PROT_ALL, Uc, UcError)
 from unicorn.arm_const import (UC_ARM_REG_C1_C0_2, UC_ARM_REG_FPEXC,
                                UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0,
                                UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
@@ -352,6 +352,10 @@ class Spike2Emu:
         self.mm = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_READ)
         self.imgsize = self.mm.size()
         self.mapped_pages = set()
+        self._cardf = None          # private COW view backing the guest window
+        self._cardbuf = None        # ctypes handle on it (must outlive the map)
+        self._card_lo = self._card_hi = 0
+        # (mapped below, once self.log exists for its best-effort diagnostic)
 
         # GOT import stubs: point each slot at a per-name sentinel address.
         self.name2sent = {}; self.imports = {}
@@ -370,6 +374,9 @@ class Spike2Emu:
         self.fds = {}; self.nextfd = 10
         self.faults = []; self.ondemand = 0
         self.extra = {}; self.log = []
+        # Before _hooks(): its unmapped-memory handler calls _ensure_page, which
+        # must already know the card window is backed in one piece.
+        self._map_card_window()
         # Optional per-instruction watchdog (set only during params derivation).
         # The global code hook calls it each instruction so a mis-located build
         # can bail early instead of burning the whole instruction cap.
@@ -425,6 +432,46 @@ class Spike2Emu:
             self.CHAIN_STUBS = ()
             self.LENGTH_XOR = 0
 
+    # ---- card window --------------------------------------------------------
+    def _map_card_window(self):
+        """Back the whole offset-identity card window with ONE zero-copy region.
+
+        The fallback below pages the card in 4 KiB at a time, which makes every
+        later guest memory access search an ever-growing pile of tiny unicorn
+        regions: per-record derive cost is linear in the number of mapped pages,
+        so the derive is QUADRATIC in catalog size.  Measured on Deadpool Pro
+        1.16 (8175 sounds, 1.5 GiB image): 11.2 ms/record at record 100 rising
+        to 54.5 ms by record 3000, and 18.8 min for the full derive -- against a
+        flat 11.0 ms/record and ~1.5 min mapping the window in one piece.
+
+        ``ACCESS_COPY`` makes it a private copy-on-write view, so a guest write
+        to the card lands in a private page and never reaches image.bin -- the
+        same isolation the copying path gave, without the copy.  Pages only
+        materialise when touched (peak RSS 81 MB on the Deadpool derive).
+
+        Best effort: any build/platform where this doesn't take keeps the paging
+        path, which is still correct, just slower on big catalogs."""
+        span = self.imgsize & ~(PAGE - 1)     # whole pages; tail keeps paging
+        if span <= 0 or DESC_BASE + span > 0x1_0000_0000:
+            return                            # would leave the 32-bit guest space
+        try:
+            import ctypes
+            self._cardf = mmap.mmap(self._imgf.fileno(), 0, access=mmap.ACCESS_COPY)
+            self._cardbuf = (ctypes.c_char * span).from_buffer(self._cardf)
+            self.mu.mem_map_ptr(DESC_BASE, span, UC_PROT_ALL,
+                                ctypes.addressof(self._cardbuf))
+        except Exception as e:
+            self.log.append(("card_map_ptr", str(e)))
+            self._cardbuf = None
+            if self._cardf is not None:
+                try:
+                    self._cardf.close()
+                except Exception:
+                    pass
+                self._cardf = None
+            return
+        self._card_lo, self._card_hi = DESC_BASE, DESC_BASE + span
+
     # ---- on-demand paging ---------------------------------------------------
     def _backing_byte_offset(self, addr):
         if DESC_BASE <= addr < DESC_BASE + self.imgsize + 0x10000:
@@ -433,6 +480,8 @@ class Spike2Emu:
 
     def _ensure_page(self, addr):
         base = addr & ~(PAGE - 1)
+        if self._card_lo <= base < self._card_hi:
+            return True            # already backed by the one-piece card region
         if base in self.mapped_pages:
             return True
         try:
@@ -1415,6 +1464,22 @@ class Spike2Emu:
         return L[:n], R[:n], stereo
 
     def close(self):
+        # Tear the card window down first and in order: unicorn is pointing
+        # straight at the COW view, and the ctypes buffer holds an exported
+        # pointer that makes mmap.close() raise until it is dropped.
+        if self._card_hi > self._card_lo:
+            try:
+                self.mu.mem_unmap(self._card_lo, self._card_hi - self._card_lo)
+            except Exception:
+                pass
+            self._card_lo = self._card_hi = 0
+        self._cardbuf = None
+        if self._cardf is not None:
+            try:
+                self._cardf.close()
+            except Exception:
+                pass
+            self._cardf = None
         try:
             self.mm.close()
         except Exception:

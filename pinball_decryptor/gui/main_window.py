@@ -7523,6 +7523,40 @@ class MainWindow:
                 tails[k] = k[cut:]
         return tails
 
+    @staticmethod
+    def _image_search_hits_path(rel_path, query):
+        """Whether a search *query* may match through *rel_path* itself.
+
+        A glyph slice lives at ``glyphs/<atlas-stem>/U+0041_A.png`` — its
+        parent folder IS the font atlas's filename, and Stern prefixes
+        font names with "Stern_...".  So on a fresh (sliced) extract a
+        search for "stern" matched every letter tile through a folder name
+        that is the font's name, not the tile's: 3652 of 3710 hits on a
+        real Jaws extract (a tester's re-test after the pre-slicer fix).
+        A glyph matches on its own filename only; a query with a path
+        separator is a deliberate path search and still matches the whole
+        path — same contract as _image_group_matches."""
+        rel = rel_path.replace("\\", "/").lower()
+        if "/" in query or "\\" in query:
+            return query.replace("\\", "/") in rel
+        if "glyphs" in rel.split("/"):
+            return query in os.path.basename(rel)
+        return query in rel
+
+    @staticmethod
+    def _image_slot_search_hit(rel_path, query, group_hit):
+        """The full slot-level search decision: the path rule first, then
+        the container match — except glyph rows, whose fallback container
+        is the very glyphs/<atlas-stem>/ folder the path rule just vetoed,
+        so they get no second chance through it.  *group_hit* is a
+        zero-arg callable so the (dearer) container walk only runs when
+        the path said no."""
+        if MainWindow._image_search_hits_path(rel_path, query):
+            return True
+        if "glyphs" in rel_path.replace("\\", "/").lower().split("/"):
+            return False
+        return group_hit()
+
     def _image_group_matches(self, group, query):
         """True when *query* hits this container's display label, its user
         rename, or the distinguishing part of its card path (so a scene hash
@@ -7590,8 +7624,8 @@ class MainWindow:
             return None
 
         def _match(s):
-            return (query in s.rel_path.lower()
-                    or _matched_group(s) is not None)
+            return self._image_slot_search_hit(
+                s.rel_path, query, lambda: _matched_group(s) is not None)
         if query:
             slots = [s for s in slots if _match(s)]
         col, desc = self._image_sort

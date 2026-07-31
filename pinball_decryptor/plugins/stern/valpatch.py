@@ -19,17 +19,34 @@ inlined CRC32-``0xEDB88320`` loops), not a hardcoded address, so this works acro
 titles / editions / versions.
 
 That signature is a property of how the firmware was *compiled*, not of what it
-does, so it can miss: a build that factors its CRC32 out of line instead of
-inlining it carries no ``0xEDB88320`` immediate in ``.text`` at all.  Jaws LE
-1.01.0 is a shipped title exactly like that (33 of the 34 cards in the vendor
-library match the signature; Jaws matches nothing).  A miss used to be
-indistinguishable from a title that simply carries no validator, and both were
-reported as a mild "nothing to bypass" note -- so the Write quietly shipped a
-card whose validator is fully live, and the machine put up GAME VALIDATION ERROR
-/ UPDATE SD CARD on a mod the user was told had built fine.
-:func:`carries_validator` answers "is the validator in here at all?" from the
-validator's own on-LCD strings, independently of the code shape, so the two
-cases can be told apart and a miss is reported as the problem it is.
+does, so on its own it can miss: a build that factored its CRC32 out of line
+would carry no ``0xEDB88320`` immediate in ``.text`` at all.  So there is a
+second, independent locator (:func:`_by_shape`) keyed on the routine's measured
+*shape* -- 1537-1547 instructions, exactly 22 callees, 92 backward branches,
+269 loads, one caller.  That profile is stable across every build generation on
+hand and, required in full, selects the validator and nothing else on all 35
+vendor cards that carry it.  Two locators that agree 35/35 make a miss much
+less likely than one; if both come up empty on a firmware that *does* carry
+CRC32 machinery, the Write says so loudly rather than shipping a card whose
+validator is still live.
+
+**Jaws LE 1.01.0 remains unexplained, and is treated as unsafe rather than
+solved.**  Neither locator finds anything in either of its game binaries
+(``/jaws_le/game`` and ``spike_menu/game``); no ELF anywhere on that card holds
+more than one ``0xEDB88320``; it is not Thumb (same ``e_flags`` and ARM entry
+as every other card); and its six ``#N ... UPDATE SD CARD`` messages are
+present and byte-identical.  Tracing back from those messages doesn't help
+either -- on the cards where the validator *is* known, nothing referencing them
+calls it or is called by it, so they are reached through data tables.
+
+It is tempting to read all that as "Jaws has no validator", and to stay quiet
+about it.  That is an argument from ignorance: it infers absence from our own
+signature failing, on a *newer* title, where a vendor is far likelier to have
+strengthened the check than dropped it.  Whatever that build does is simply
+unknown, so :func:`carries_validator` keeps trusting the messages and the Write
+warns.  A warning on a card that may not need one is cheap; silence on a card
+that does need one is a hardware test that fails for reasons the user cannot
+see.
 
 NOTE: the tamper *state* is stored on the machine's board i2c/nvram, NOT on the
 SD card, so a machine that already booted an **unpatched** modded card can keep a
@@ -46,9 +63,10 @@ _CRC32_POLY = 0xEDB88320
 _BX_LR = bytes.fromhex("1eff2fe1")          # ARM A32 ``bx lr``
 
 # The six numbered messages the validator puts on the LCD.  Stern ships them
-# byte-identical in every Spike 2 firmware checked (34/34 cards in the vendor
-# library, Jaws included), which makes them a code-shape-free answer to "does
-# this title carry the validator?" -- see the module docstring.
+# byte-identical in every Spike 2 firmware checked (all 36 cards in the vendor
+# library, Jaws included).  They are the validator's user-visible output, so a
+# build carrying them is assumed to still perform the check -- see
+# :func:`carries_validator` for why that assumption is the safe one.
 _ERR_MSG_RE = re.compile(rb"#[1-6](?: %d:%d(?::%d)?)? UPDATE SD CARD\x00")
 
 
@@ -71,12 +89,18 @@ def _text_section(elf):
 def find_validation_exec(elf):
     """Return the ELF *file offset* of ``validation_exec``'s entry, or ``None``.
 
-    Located structurally: collect BL (call) targets as function entries, find
-    every ``0xEDB88320`` CRC32 immediate (built via ``movw``/``movt``), and pick
-    the function that contains the most of them (the validator has several
-    inlined CRC32 loops; nothing else has more than one).  The entry must be a
-    ``push {..., lr}`` prologue -- or the ``bx lr`` this module already put
-    there -- else we refuse (wrong match / non-ARM image).
+    Two independent locators, tried in order.  :func:`_by_crc32_immediates`
+    picks the function holding the most inlined ``0xEDB88320`` constants (the
+    validator has several such loops; nothing else has more than one).  If that
+    finds nothing -- which is what a build that stopped inlining its CRC32
+    would look like -- :func:`_by_shape` matches the routine's measured shape
+    instead.  Either way the entry must be a ``push {..., lr}`` prologue, or the
+    ``bx lr`` this module already put there, else we refuse (wrong match /
+    non-ARM image).
+
+    The two were checked against each other over the whole vendor library: on
+    all 35 cards that carry the validator they select the same single function,
+    and the shape locator raises no false positive on any of them.
 
     Accepting our own patch is what makes this idempotent.  Only the 4-byte
     prologue is overwritten, so a already-bypassed firmware still carries the
@@ -85,6 +109,40 @@ def find_validation_exec(elf):
     against an already-modded image (or a second Direct-SD write onto a card
     that is already modded) would report the validator as unreachable and warn
     about a card that is in fact correctly patched."""
+    idx = _index_text(elf)
+    if idx is None:
+        return None
+    entry = _by_crc32_immediates(elf, idx)
+    if entry is None:
+        # A build that factors its CRC32 out of line carries no 0xEDB88320
+        # immediate at all.  The shape of the routine is unchanged, though, so
+        # fall back to that (see :func:`_by_shape`).
+        entry = _by_shape(elf, idx)
+    if entry is None:
+        return None
+    eoff = entry - idx["code_base"]
+    if not _entry_ok(elf, eoff):
+        return None
+    return eoff
+
+
+def _entry_ok(elf, eoff):
+    """The word at *eoff* must be a ``push {..., lr}`` prologue, or the
+    ``bx lr`` this module already wrote there (which is what makes locating
+    idempotent -- see :func:`find_validation_exec`)."""
+    if bytes(elf[eoff:eoff + 4]) == _BX_LR:
+        return True
+    w = struct.unpack_from("<I", elf, eoff)[0]
+    # ``push {..., lr}`` == STMDB sp!, reglist: bits[27:20]=0x92, Rn=sp(13), bit14(lr)
+    return (((w >> 20) & 0xFF) == 0x92 and ((w >> 16) & 0xF) == 13
+            and bool(w & 0x4000))
+
+
+def _index_text(elf):
+    """One pass over ``.text``: function entries (BL targets), how many times
+    each is called, and every ``0xEDB88320`` immediate site.
+
+    Both locators share this, so a Write pays for it once."""
     if elf[:4] != b"\x7fELF" or elf[4] != 1:
         return None
     ts = _text_section(elf)
@@ -92,7 +150,7 @@ def find_validation_exec(elf):
         return None
     tva, toff, tsz = ts
     code_base = tva - toff                    # vaddr = file_off + code_base
-    entries = set()
+    ncalls = {}
     crc_sites = []
     movw = {}
     for i in range(toff, toff + tsz, 4):
@@ -103,7 +161,8 @@ def find_validation_exec(elf):
             imm = w & 0xFFFFFF                 # BL -> function entry
             if imm & 0x800000:
                 imm -= 0x1000000
-            entries.add(va + 8 + (imm << 2))
+            t = va + 8 + (imm << 2)
+            ncalls[t] = ncalls.get(t, 0) + 1
         top = (w >> 20) & 0xFF
         rd = (w >> 12) & 0xF
         if top == 0x30:                       # movw rd, #imm16
@@ -112,38 +171,117 @@ def find_validation_exec(elf):
             full = (((((w >> 16) & 0xF) << 12) | (w & 0xFFF)) << 16) | movw[rd]
             if full == _CRC32_POLY:
                 crc_sites.append(va)
-    if not crc_sites:
-        return None
+    ents = sorted(e for e in ncalls if tva <= e < tva + tsz)
+    return dict(tva=tva, toff=toff, tsz=tsz, code_base=code_base, ents=ents,
+                ncalls=ncalls, crc_sites=crc_sites)
+
+
+def _by_crc32_immediates(elf, idx):
+    """The function containing the most inlined ``0xEDB88320`` constants."""
     import bisect
     from collections import Counter
-    ents = sorted(e for e in entries if tva <= e < tva + tsz)
+    if not idx["crc_sites"]:
+        return None
+    ents = idx["ents"]
 
     def enclosing(a):
         j = bisect.bisect_right(ents, a) - 1
         return ents[j] if j >= 0 else None
 
-    entry, n = Counter(enclosing(s) for s in crc_sites).most_common(1)[0]
-    if entry is None or n < 3:
-        return None
-    eoff = entry - code_base
-    if bytes(elf[eoff:eoff + 4]) == _BX_LR:   # already bypassed (idempotent)
-        return eoff
-    w = struct.unpack_from("<I", elf, eoff)[0]
-    # ``push {..., lr}`` == STMDB sp!, reglist: bits[27:20]=0x92, Rn=sp(13), bit14(lr)
-    if not (((w >> 20) & 0xFF) == 0x92 and ((w >> 16) & 0xF) == 13 and (w & 0x4000)):
-        return None
-    return eoff
+    entry, n = Counter(enclosing(s)
+                       for s in idx["crc_sites"]).most_common(1)[0]
+    return None if (entry is None or n < 3) else entry
+
+
+# The validator's shape, measured on every one of the 35 vendor cards that
+# carry it.  It is one function, essentially unchanged across every build
+# generation on hand (Led Zeppelin 1.20-1.22, TMNT 1.58-1.59, Elvira
+# 1.11-1.13, King Kong 0.96, X-Men 0.97, ...): 1537-1547 instructions, exactly
+# 22 callees, 92 backward branches, 269 loads.  The bands below are those
+# measurements with headroom.  Requiring all six, plus a single caller and a
+# ``push {..., lr}`` prologue, picked the right function and ONLY the right
+# function on 35 of 35 cards -- and nothing at all on Jaws.
+_SHAPE = {"words": (1400, 1700), "ncallees": (20, 24), "loops": (80, 105),
+          "loads": (240, 300), "stores": (180, 215), "cmp": (140, 170)}
+_SHAPE_CAP = 0x4000                            # ~4x the routine; bounds a scan
+
+
+def _shape_of(elf, idx, fn):
+    """Count the shape features of the function entered at *fn* (a vaddr)."""
+    import bisect
+    ents, cb = idx["ents"], idx["code_base"]
+    j = bisect.bisect_right(ents, fn)
+    hi = min(ents[j] if j < len(ents) else fn + _SHAPE_CAP, fn + _SHAPE_CAP,
+             idx["tva"] + idx["tsz"],          # never past .text...
+             len(elf) + cb)                    # ...nor past the file itself
+    hi = max(hi, fn)
+    callees = set()
+    loops = loads = stores = cmps = 0
+    for a in range(fn, hi, 4):
+        w = struct.unpack_from("<I", elf, a - cb)[0]
+        if ((w >> 25) & 0x7) == 0b101:                    # B / BL
+            imm = w & 0xFFFFFF
+            if imm & 0x800000:
+                imm -= 0x1000000
+            t = a + 8 + (imm << 2)
+            if (w >> 24) & 1:
+                callees.add(t)
+            elif t < a:
+                loops += 1                                # backward = loop
+        if ((w >> 26) & 0x3) == 0b01:                     # load/store
+            if (w >> 20) & 1:
+                loads += 1
+            else:
+                stores += 1
+        if (((w >> 26) & 0x3) == 0b00 and ((w >> 28) & 0xF) != 0xF
+                and ((w >> 21) & 0xF) == 0xA):            # CMP
+            cmps += 1
+    return {"words": (hi - fn) // 4, "ncallees": len(callees), "loops": loops,
+            "loads": loads, "stores": stores, "cmp": cmps}
+
+
+def _by_shape(elf, idx):
+    """The one function matching the validator's measured shape, or ``None``.
+
+    Independent of how the CRC32 is emitted, so it still finds the routine on a
+    build that stopped inlining the polynomial.  Deliberately all-or-nothing:
+    it returns a function only when exactly one candidate matches every band,
+    because patching four bytes into the wrong function is how the pre-v0.94.0
+    cave landed on Elvira's node board table."""
+    hits = []
+    for fn in idx["ents"]:
+        if idx["ncalls"].get(fn) != 1:        # the validator has one caller
+            continue
+        if not _entry_ok(elf, fn - idx["code_base"]):
+            continue
+        s = _shape_of(elf, idx, fn)
+        if all(lo <= s[k] <= hi for k, (lo, hi) in _SHAPE.items()):
+            hits.append(fn)
+            if len(hits) > 1:                 # ambiguous -> refuse
+                return None
+    return hits[0] if hits else None
 
 
 def carries_validator(elf):
-    """True when *elf* carries Stern's self/asset validator at all.
+    """True when *elf* should be assumed to carry Stern's self/asset validator.
 
-    Keyed on the validator's own ``#N ... UPDATE SD CARD`` messages rather than
-    on any code shape, so it stays true for a firmware
-    :func:`find_validation_exec` can't match.  That distinction is the whole
-    point: without it, "this title has no validator" (harmless) and "this
-    title's validator is still armed and we couldn't reach it" (ships a card
-    that errors on the machine) look identical to the Write."""
+    Keyed on the validator's six on-LCD ``#N ... UPDATE SD CARD`` messages
+    rather than on any code shape, so it stays true for a firmware neither
+    locator can match.  That distinction is the whole point: without it, "this
+    title has no validator" (harmless) and "this title's validator is still
+    armed and we couldn't reach it" (ships a card that errors on the machine)
+    look identical to the Write.
+
+    It is deliberately the *cautious* test, and the caution is load-bearing.
+    Jaws LE 1.01.0 ships these messages while neither locator finds anything in
+    either of its game binaries, its ``.text`` holds no ``0xEDB88320`` at all,
+    and it is not Thumb -- so what that build actually does is unknown.  It
+    would be easy to read "our signature found nothing" as "there is nothing
+    there" and stay quiet; that is an argument from ignorance, and getting it
+    wrong means silently shipping a card the machine rejects.  Reporting the
+    uncertainty costs a warning on a card that may not need one.  Staying quiet
+    costs a bricked test run, so this errs toward the warning.
+    """
     return len(_ERR_MSG_RE.findall(elf)) >= 4
 
 
@@ -152,9 +290,12 @@ def bypass_status(elf, eoff):
     *eoff* is :func:`find_validation_exec`'s answer.
 
     ``("bypassed", "")`` the validator was found and neutered; ``("absent", "")``
-    this firmware carries no validator, so there was nothing to do; and
-    ``("unlocated", why)`` the firmware *does* carry one but its routine didn't
-    match the signature -- the case a card must never ship on silently."""
+    this firmware shows no sign of a validator, so there was nothing to do; and
+    ``("unlocated", why)`` the firmware looks like it carries one but neither
+    locator could pin the routine -- the case a card must never ship on
+    silently.  ``unlocated`` states uncertainty, not a diagnosis: it is what
+    Jaws LE 1.01.0 reports, and what that build actually does is unknown (see
+    the module docstring)."""
     if eoff is not None:
         return ("bypassed", "")
     if carries_validator(elf):

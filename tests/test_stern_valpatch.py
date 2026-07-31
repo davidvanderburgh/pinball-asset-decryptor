@@ -1,20 +1,28 @@
 """Stern's SD-card validator bypass: finding it, and admitting when we can't.
 
 ``valpatch`` writes the four bytes that stop a modded Spike 2 card raising
-``GAME VALIDATION ERROR / UPDATE SD CARD``, and it finds the routine to patch by
-code signature -- the one function carrying several inlined CRC32-``0xEDB88320``
-loops.  That signature describes how the firmware was *compiled*, not what it
-does, so it can come up empty on a build that factors its CRC32 out of line:
-across the 34 real vendor cards on hand it matches 33, and finds nothing at all
-in Jaws LE 1.01.0, whose ``.text`` carries no ``0xEDB88320`` immediate anywhere.
+``GAME VALIDATION ERROR / UPDATE SD CARD``.  It finds the routine to patch two
+independent ways: the function carrying several inlined CRC32-``0xEDB88320``
+loops, and -- because that describes how a firmware was *compiled* rather than
+what it does -- the routine's measured shape.  Profiled over the whole vendor
+library, the two select the same single function on all 35 cards that carry the
+validator, with no false positive from the shape locator on any of them.
+
+Jaws LE 1.01.0 matches neither, in either of its game binaries, and nothing on
+that card explains why: no ``0xEDB88320`` in any ELF's ``.text``, not Thumb, and
+its six on-LCD messages present and byte-identical.  It is reported as
+uncertain rather than resolved -- inferring "no validator" from our own
+signature failing would be an argument from ignorance, and on a newer title the
+expensive direction to be wrong in.
 
 A miss used to be indistinguishable from a title that carries no validator --
 both logged "nothing to bypass" and the Write reported success -- so the user
 got a card whose validator is fully armed and a machine that answers with the
 validation error and reboots instead of starting a game (flippermeister, James
-Bond with one replaced sound, 2026-07-31).  These tests pin the two halves:
-the signature still finds a normal validator, and a firmware that carries the
-validator without matching the signature is reported as a failure, not a no-op.
+Bond with one replaced sound, 2026-07-31).  These tests pin all of it: each
+locator finds a normal validator, the shape one refuses a wrong-shaped
+function, and a firmware that looks like it carries a validator without
+matching either is reported as a failure rather than a no-op.
 """
 
 import struct
@@ -215,3 +223,97 @@ def test_a_bare_bx_lr_without_crc_loops_is_still_not_a_validator():
     elf[TEXT_OFF + (FN_V - TEXT_VADDR):TEXT_OFF + (FN_V - TEXT_VADDR) + 4] = \
         valpatch._BX_LR
     assert valpatch.find_validation_exec(bytes(elf)) is None
+
+
+# --- the second locator: shape, for a build that stops inlining its CRC32 ----
+# The CRC-immediate signature describes how a firmware was COMPILED.  A second
+# locator keyed on the routine's measured shape (1537-1547 instructions, 22
+# callees, 92 backward branches, 269 loads, 198 stores, 156 compares, exactly
+# one caller) was profiled over the whole vendor library: on all 35 cards that
+# carry the validator the two locators select the SAME single function, and the
+# shape one raises no false positive on any of them.
+
+def _build_shape_elf(with_poly=False, ncallees=22, loops=92, loads=269,
+                     stores=198, cmps=156, nwords=1500):
+    """An ELF whose FN_V has the validator's shape but (by default) no CRC32
+    constant anywhere -- the case the first locator cannot see."""
+    TV, TO = 0x11000, 0x1000
+    total = 0x2000
+    words = [NOP] * total
+    fn = TV + 0x1000                       # the "validator"
+    fi = (fn - TV) // 4
+
+    def put(i, w):
+        words[i] = w
+
+    put(0, _bl(TV, fn))                    # exactly one caller
+    # callee targets sit immediately AFTER the body, so the next known entry
+    # lands exactly at fn+nwords and bounds the function at that size.
+    first_callee = fn + nwords * 4
+    put(fi, PUSH_LR)
+    k = fi + 1
+    for c in range(ncallees):
+        put(k, _bl(fn + (k - fi) * 4, first_callee + c * 4)); k += 1
+    for _ in range(loops):                 # backward B (not BL: no new entry)
+        at = fn + (k - fi) * 4
+        imm = ((fn - (at + 8)) >> 2) & 0xFFFFFF
+        put(k, 0xEA000000 | imm); k += 1
+    for _ in range(loads):
+        put(k, 0xE5910000); k += 1         # ldr r0,[r1]
+    for _ in range(stores):
+        put(k, 0xE5810000); k += 1         # str r0,[r1]
+    for _ in range(cmps):
+        put(k, 0xE3500000); k += 1         # cmp r0,#0
+    if with_poly:
+        for _ in range(5):
+            put(k, _movw(3, valpatch._CRC32_POLY & 0xFFFF)); k += 1
+            put(k, _movt(3, valpatch._CRC32_POLY >> 16)); k += 1
+    assert k < fi + nwords, (k, fi + nwords)
+
+    text = struct.pack("<%dI" % total, *words)
+    shstr = b"\x00.text\x00.shstrtab\x00"
+    shstr_off = TO + len(text)
+    sh_off = shstr_off + len(shstr)
+
+    def sh(name, addr, off, size):
+        return struct.pack("<10I", name, 1, 0, addr, off, size, 0, 0, 4, 0)
+
+    hdr = bytearray(b"\x00" * 0x34)
+    hdr[0:7] = b"\x7fELF\x01\x01\x01"
+    struct.pack_into("<H", hdr, 0x12, 40)
+    struct.pack_into("<I", hdr, 0x20, sh_off)
+    struct.pack_into("<H", hdr, 0x2e, 40)
+    struct.pack_into("<H", hdr, 0x30, 3)
+    struct.pack_into("<H", hdr, 0x32, 2)
+    out = bytearray(hdr)
+    out.extend(b"\x00" * (TO - len(out)))
+    out.extend(text)
+    out.extend(shstr)
+    out.extend(sh(0, 0, 0, 0) + sh(1, TV, TO, len(text))
+               + sh(7, 0, shstr_off, len(shstr)))
+    out.extend(VALIDATOR_STRINGS)
+    return bytes(out), TO + (fn - TV)
+
+
+def test_shape_locator_finds_a_validator_that_inlines_no_crc32():
+    elf, want = _build_shape_elf(with_poly=False)
+    idx = valpatch._index_text(elf)
+    assert valpatch._by_crc32_immediates(elf, idx) is None   # first one is blind
+    assert valpatch._by_shape(elf, idx) == want + idx["code_base"]
+    assert valpatch.find_validation_exec(elf) == want        # and the fallback runs
+    assert valpatch.bypass_status(elf, want) == ("bypassed", "")
+
+
+def test_both_locators_agree_when_the_crc32_is_inlined():
+    elf, want = _build_shape_elf(with_poly=True)
+    idx = valpatch._index_text(elf)
+    assert valpatch._by_crc32_immediates(elf, idx) == want + idx["code_base"]
+    assert valpatch._by_shape(elf, idx) == want + idx["code_base"]
+
+
+def test_shape_locator_refuses_a_function_of_the_wrong_shape():
+    # Every band has to hold; one badly-off feature is a refusal, not a guess.
+    for kw in ({"ncallees": 4}, {"loops": 3}, {"loads": 10}, {"cmps": 2}):
+        elf, _want = _build_shape_elf(**kw)
+        idx = valpatch._index_text(elf)
+        assert valpatch._by_shape(elf, idx) is None, kw

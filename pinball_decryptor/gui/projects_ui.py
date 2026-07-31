@@ -558,9 +558,20 @@ def open_properties(app, folder=None):
                 % (_human_size(sizes["assets"]),
                    _human_size(sizes["build"]),
                    _human_size(sizes["mods"])))
+
+        def apply():
+            # The dialog may be long gone by the time the walk ends (a NAS
+            # project measures for minutes; the dialog closes in seconds).
+            # An unguarded configure here surfaced as the "invalid command
+            # name .!toplevel.!label" internal error (a tester) — the
+            # after() below only guards SCHEDULING, not the callback.
+            try:
+                size_lbl.configure(text=text)
+            except tk.TclError:
+                pass
         try:
-            size_lbl.after(0, lambda: size_lbl.configure(text=text))
-        except tk.TclError:
+            size_lbl.after(0, apply)
+        except (tk.TclError, RuntimeError):
             pass
     threading.Thread(target=fill_sizes, daemon=True).start()
 

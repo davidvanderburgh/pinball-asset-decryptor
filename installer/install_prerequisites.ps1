@@ -32,8 +32,8 @@ try {
 # wsl.exe defaults to UTF-16LE output, which when captured by PowerShell
 # turns "Ubuntu" into "U\0b\0u\0n\0t\0u\0" and breaks every -match check.
 # WSL_UTF8=1 makes wsl.exe emit UTF-8 instead.  We also defensively strip
-# nulls below in Get-WslDistros for older wsl.exe builds that ignore the
-# env var.
+# nulls below in Get-WslInstallPlan for older wsl.exe builds that ignore
+# the env var.
 $env:WSL_UTF8 = "1"
 
 # --- Require admin -------------------------------------------------------
@@ -76,6 +76,33 @@ function Test-WslHasApt {
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
+    }
+}
+
+# --- wsl --install capability probe --------------------------------------
+# Older inbox wsl.exe builds (pre-Store WSL) reject options they don't
+# know by printing usage and exiting -1 WITHOUT installing anything, so
+# hardcoding --no-launch turned the whole Ubuntu install into a silent
+# no-op on those machines (PAD-19: summary showed "wsl --install exit -1"
+# while WSL2 itself reported OK).  Build the argument list from the flags
+# THIS machine's wsl.exe actually advertises in its own help text.
+function Get-WslInstallPlan {
+    $help = ""
+    try {
+        # Strip NULs: older wsl.exe ignores WSL_UTF8 and emits UTF-16LE,
+        # which a PowerShell 5.1 capture renders with interleaved NULs.
+        $help = ((& wsl --help 2>&1 | Out-String) -replace "`0", "")
+    } catch {}
+    # --no-launch skips the interactive 'create UNIX user' first boot; we
+    # only ever exec via 'wsl -u root' so a default user isn't needed.
+    $installArgs = @("--install", "-d", "Ubuntu")
+    if ($help -match '--no-launch') { $installArgs += "--no-launch" }
+    @{
+        InstallArgs = $installArgs
+        NoLaunch    = [bool]($help -match '--no-launch')
+        # --web-download fetches the distro from Microsoft's CDN — the
+        # fallback when the Store is broken, blocked, or signed out.
+        WebDownload = [bool]($help -match '--web-download')
     }
 }
 
@@ -467,7 +494,9 @@ if ($needsWsl) {
             # as required.  Just install it - asking again would be a useless
             # confirmation that, if declined, leaves nothing to install.
             Write-Host "  Installing WSL2 + Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
-            wsl --install -d Ubuntu --no-launch
+            $plan = Get-WslInstallPlan
+            $wslInstallArgs = $plan.InstallArgs
+            & wsl $wslInstallArgs
             $needsReboot = $true
             Write-Installed "WSL2 + Ubuntu (restart required)"
             # Remember which boot session did this, so a pre-restart re-run
@@ -488,28 +517,69 @@ if ($needsWsl) {
 
     if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
         # No usable distro yet - install Ubuntu directly.
-        # --no-launch skips the interactive 'create UNIX user' prompt; we
-        # only ever exec via 'wsl -u root' so a default user isn't needed.
         # We let wsl write its output to the console directly (no capture)
-        # because PowerShell 5.1's pipeline mangles its UTF-16LE output.
+        # because PowerShell 5.1's pipeline mangles its UTF-16LE output -
+        # and if this fails, the user needs to see wsl's own error text.
+        $plan = Get-WslInstallPlan
         Write-Host "  Installing Ubuntu into WSL (this may take a few minutes)..." -ForegroundColor Cyan
-        & wsl --install -d Ubuntu --no-launch
+        if (-not $plan.NoLaunch) {
+            # This wsl.exe launches Ubuntu's first-run setup itself (its
+            # --install has no --no-launch).  Warn before the window opens.
+            Write-Host "  Ubuntu may open its first-time setup when the download finishes." -ForegroundColor Yellow
+            Write-Host "  If it asks for a UNIX username/password, pick anything you like."  -ForegroundColor Yellow
+        }
+        $wslInstallArgs = $plan.InstallArgs
+        & wsl $wslInstallArgs
         $installExit = $LASTEXITCODE
 
         # Don't trust the install exit code (ERROR_ALREADY_EXISTS shows
         # up as a non-zero exit but means "already there, all good").
         # Re-test the actual capability we need.
         Start-Sleep -Seconds 2
+
+        if (-not (Test-WslHasApt) -and $installExit -ne 0 -and $plan.WebDownload) {
+            # A broken / blocked / signed-out Microsoft Store is the other
+            # common way this install dies; --web-download fetches the
+            # distro from Microsoft's CDN instead of the Store.
+            Write-Host ("  wsl --install exited with code {0} - retrying with --web-download (skips the Microsoft Store)..." -f $installExit) -ForegroundColor Cyan
+            $wslRetryArgs = $plan.InstallArgs + "--web-download"
+            & wsl $wslRetryArgs
+            $installExit = $LASTEXITCODE
+            Start-Sleep -Seconds 2
+        }
+
         if (Test-WslHasApt) {
             $ubuntuFound = $true
             Write-Installed "Ubuntu / apt-based distro"
+        } elseif ($installExit -eq 0 -and -not $plan.NoLaunch) {
+            # Install succeeded, but this wsl.exe hands registration to
+            # Ubuntu's own first-run window - apt only answers once the
+            # user finishes creating their UNIX account there.
+            Write-Host "  Finish Ubuntu's first-time setup in its own window (create the" -ForegroundColor Yellow
+            Write-Host "  username/password it asks for and wait for the green prompt)."  -ForegroundColor Yellow
+            Read-Host "  Then come back here and press Enter to continue (also fine if no window appeared)"
+            $ubuntuFound = $true
+            if (Test-WslHasApt) {
+                Write-Installed "Ubuntu / apt-based distro"
+            } else {
+                Write-Installed "Ubuntu (queued; first boot may still be initializing)"
+            }
         } elseif ($installExit -eq 0) {
             # Fresh install + first-boot may still be initializing;
             # trust wsl's success signal.
             $ubuntuFound = $true
             Write-Installed "Ubuntu (queued; first boot may still be initializing)"
         } else {
-            Write-FAIL ("Ubuntu (wsl --install exit {0}; try: wsl --list --verbose)" -f $installExit)
+            # Nothing worked.  wsl.exe printed its own error text above -
+            # point at it, and leave routes that don't need this script.
+            Write-Host ("  Ubuntu could not be installed automatically (wsl --install exit {0})." -f $installExit) -ForegroundColor Red
+            Write-Host "  The error text above, from wsl.exe itself, says why.  Manual routes:" -ForegroundColor Yellow
+            Write-Host "    1. In an admin PowerShell window run:   wsl --install -d Ubuntu"    -ForegroundColor Yellow
+            Write-Host "       Create the username/password it asks for, type exit at the"      -ForegroundColor Yellow
+            Write-Host "       Ubuntu prompt, then re-run this installer."                      -ForegroundColor Yellow
+            Write-Host "    2. Or install 'Ubuntu' from the Microsoft Store app, launch it"     -ForegroundColor Yellow
+            Write-Host "       once to finish its setup, then re-run this installer."           -ForegroundColor Yellow
+            Write-FAIL ("Ubuntu (wsl --install exit {0}; manual: wsl --install -d Ubuntu)" -f $installExit)
         }
     } elseif ($needsReboot -and -not $ubuntuFound) {
         Write-SKIP "Ubuntu (will install after the Windows restart)"

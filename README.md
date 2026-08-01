@@ -468,6 +468,15 @@ count). After the restart, run **Install Prerequisites** from the Start
 Menu once more to pick up the remaining WSL-side packages — the script is
 safe to re-run and skips anything already installed.
 
+If the summary reports **Ubuntu … Missing** even though WSL2 shows OK,
+your `wsl.exe` couldn't register the Ubuntu distro (the error it printed
+above the summary says why — a blocked Microsoft Store is a common
+cause). The installer already retries with a direct download where
+supported; if it still fails, run `wsl --install -d Ubuntu` in an admin
+PowerShell (create the username/password it asks for, then type `exit`),
+or install **Ubuntu** from the Microsoft Store app and launch it once —
+then run **Install Prerequisites** again.
+
 ### macOS
 
 1. Download the DMG matching your Mac from the

@@ -612,6 +612,62 @@ def test_wsl_install_detects_missed_restart():
         "the marker (PAD-16).")
 
 
+def test_wsl_install_flags_are_capability_detected():
+    """Regression guard — PAD-19 ("wsl --install exit -1", nothing installed).
+
+    Older inbox wsl.exe builds (pre-Store WSL) reject options they don't
+    know by printing usage and exiting -1 WITHOUT installing anything.
+    v0.103.x hardcoded `wsl --install -d Ubuntu --no-launch`, so on those
+    machines the Ubuntu step was a silent no-op: WSL2 reported OK, Ubuntu
+    reported Missing, and the user was stranded (the PAD-19 reporter hit
+    exactly this after the PAD-16/17 restart saga finally got WSL2 up).
+    The installer must derive its optional wsl --install flags from what
+    the machine's own wsl.exe advertises (`wsl --help`), never hardcode
+    them, and must keep the --web-download fallback for machines whose
+    Microsoft Store is broken or blocked.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "wsl --help" in ps1, (
+        "install_prerequisites.ps1 must probe `wsl --help` to learn which "
+        "--install flags this machine's wsl.exe supports — hardcoding "
+        "--no-launch makes old inbox builds exit -1 without installing "
+        "anything (PAD-19).")
+    assert "Ubuntu --no-launch" not in ps1, (
+        "install_prerequisites.ps1 hardcodes `--no-launch` onto the wsl "
+        "--install command line again — older wsl.exe builds reject the "
+        "unknown flag and install nothing (PAD-19). Gate it on the "
+        "capability probe instead.")
+    assert "--web-download" in ps1, (
+        "install_prerequisites.ps1 lost the --web-download retry — that "
+        "fallback is what rescues machines whose Microsoft Store is "
+        "broken/blocked, the other common cause of a failed Ubuntu "
+        "install.")
+
+
+def test_ubuntu_install_failure_names_a_manual_route():
+    """Regression guard — PAD-19 (dead-end failure hint).
+
+    When the automatic Ubuntu install fails, the old FAIL line said
+    'try: wsl --list --verbose' — a diagnostic that only re-confirms the
+    distro is missing (the PAD-19 reporter dutifully ran it and was no
+    further ahead). A failed install must instead name a manual route
+    the user can actually follow: `wsl --install -d Ubuntu` in an admin
+    PowerShell, or installing Ubuntu from the Microsoft Store app.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "try: wsl --list --verbose" not in ps1, (
+        "the dead-end 'try: wsl --list --verbose' failure hint is back — "
+        "it only re-confirms the distro is missing. Name the manual "
+        "install routes instead (PAD-19).")
+    assert "wsl --install -d Ubuntu" in ps1, (
+        "the Ubuntu failure path must spell out the manual command "
+        "(`wsl --install -d Ubuntu`) so a stranded user can finish the "
+        "install without this script.")
+    assert "Microsoft Store" in ps1, (
+        "the Ubuntu failure path must offer the Microsoft Store app as "
+        "the no-command-line fallback route.")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

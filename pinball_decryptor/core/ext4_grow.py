@@ -48,6 +48,46 @@ class Ext4GrowUnavailable(Ext4GrowError):
     back to size-neutral behaviour and warn."""
 
 
+# Can the executor's Linux hand out a loop device?  ``losetup -f`` only ASKS
+# for a free device (nothing is attached), so the probe is side-effect free —
+# but it is the exact call ``_bash_script`` opens with, so it fails when and
+# only when the mount would.  It matters because "WSL answers as root" is NOT
+# the same thing: a WSL 1 distro passes ``echo ok`` while owning zero loop
+# devices, which is how a 489-video write shipped nothing after the card's
+# .sidx had already been rewritten (PAD-13).  The modprobe is a cheap
+# remediation for a native kernel whose loop module simply isn't loaded, and
+# harmless where the driver is built in (WSL2) or absent entirely (WSL1).
+# The Stern prerequisite strip runs this same string (manufacturer.py) so the
+# GUI indicator can never disagree with what the write path actually needs.
+LOOP_PROBE = ("modprobe loop >/dev/null 2>&1 || true; "
+              "losetup -f >/dev/null && echo ok")
+
+
+def _loop_unavailable_reason(ex):
+    """``None`` when *ex*'s Linux can hand out a loop device, else a
+    user-facing reason naming the likely fix.  On Windows the classic culprit
+    is a WSL 1 distro (no loop devices, ever) — the message walks the user to
+    the version check and conversion instead of leaving them a bare losetup
+    error to search for."""
+    try:
+        ex.run(LOOP_PROBE, timeout=60)
+        return None
+    except Exception as e:  # noqa: BLE001 — executor raises CommandError
+        lines = [ln.strip() for ln in str(e).splitlines() if ln.strip()]
+        detail = next((ln for ln in lines if "losetup" in ln),
+                      lines[-1] if lines else "losetup -f failed")
+        if sys.platform == "win32":
+            return ("WSL can't create a loop device to mount the card image "
+                    "(%s). This usually means the default WSL distro runs "
+                    "under WSL 1: check with 'wsl -l -v' in PowerShell and "
+                    "convert it with 'wsl --set-version <name> 2'. If it "
+                    "already says VERSION 2, run 'wsl --shutdown' and try "
+                    "again" % detail)
+        return ("this system can't create a loop device to mount the card "
+                "image (%s); load the loop module (modprobe loop) or reboot, "
+                "then try again" % detail)
+
+
 def _find_e2fsprogs():
     """Locate macOS e2fsprogs binaries (Homebrew keg-only, so not on PATH).
 
@@ -89,7 +129,12 @@ def available():
     except Exception as e:  # noqa: BLE001
         return False, str(e)
     ok, msg = ex.check_available()
-    return ok, msg
+    if not ok:
+        return False, msg
+    reason = _loop_unavailable_reason(ex)
+    if reason:
+        return False, reason
+    return True, msg
 
 
 def _bash_script(loop_off, jobs_exec, image_exec):
@@ -185,6 +230,15 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         raise Ext4GrowUnavailable(
             "Can't grow files on this system: %s. The affected "
             "videos keep their stock content on the card." % msg)
+    # Re-checked here (not only in available()) so a caller that skipped the
+    # planning-time check still degrades to the graceful Unavailable path —
+    # a loop-less host used to reach losetup inside the mount script and come
+    # back as a raw Ext4GrowError with no hint at the fix (PAD-13).
+    reason = _loop_unavailable_reason(ex)
+    if reason:
+        raise Ext4GrowUnavailable(
+            "Can't grow files on this system: %s. The affected "
+            "videos keep their stock content on the card." % reason)
 
     image_exec = ex.to_exec_path(image_path)
     jobs_exec = [(rel, ex.to_exec_path(src)) for rel, src in jobs]

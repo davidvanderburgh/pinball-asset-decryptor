@@ -494,12 +494,21 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
 
     (win,) = _ext4_grow_prereqs("win32")
     assert win.name == "WSL2" and win.where == "wsl"
-    # Must mirror WslExecutor.check_available's probe (wsl -u root bash -c
-    # "echo ok") so the indicator can never disagree with what the write
-    # path's ext4_grow.available() actually tests.
-    assert win.probe == "echo ok"
+    # Must mirror the probe ext4_grow.available() actually runs on the write
+    # path so the indicator can never disagree with it.  That probe is
+    # LOOP_PROBE (losetup), NOT bare reachability: a WSL 1 distro answers
+    # `echo ok` as root while owning zero loop devices, so the strip said
+    # "All prerequisites OK" on a machine where every grow failed after the
+    # card's .sidx was already rewritten (PAD-13, a 489-video write that
+    # shipped nothing).
+    from pinball_decryptor.core.ext4_grow import LOOP_PROBE
+    assert win.probe == LOOP_PROBE
+    assert "losetup" in win.probe
     assert "Blip-free" in win.reason
     assert "wsl --install" in win.install_hint
+    # And the hint must carry the WSL 1 -> 2 conversion, the actual fix on
+    # the machines this probe newly catches.
+    assert "wsl --set-version" in win.install_hint
 
     (mac,) = _ext4_grow_prereqs("darwin")
     assert mac.name == "e2fsprogs" and mac.where == "host"

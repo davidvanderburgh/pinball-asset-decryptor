@@ -62,6 +62,78 @@ def test_grow_files_refuses_to_drop_a_job_whose_source_vanished():
     assert any(lvl == "error" and "a/b.asset" in m for m, lvl in lines)
 
 
+class _FakeExecutor:
+    """WSL-shaped executor double: reachable as root, but whether the kernel
+    hands out loop devices is up to the test."""
+
+    def __init__(self, loop_ok=True):
+        self.loop_ok = loop_ok
+        self.commands = []
+
+    def check_available(self):
+        return True, "WSL2 available"
+
+    def run(self, cmd, timeout=120):
+        self.commands.append(cmd)
+        if "losetup" in cmd and not self.loop_ok:
+            raise RuntimeError(
+                "Command failed (exit 32): %s\nlosetup: cannot find an "
+                "unused loop device: No such file or directory" % cmd)
+        return "ok\n"
+
+    def to_exec_path(self, p):
+        return p
+
+
+def test_available_probes_loop_devices_not_just_wsl_reachability(monkeypatch):
+    """PAD-13: a WSL 1 distro answers ``echo ok`` as root but owns zero loop
+    devices, so available() said yes, all 489 of a user's replaced videos
+    were planned as grow jobs, the blip-free preflight let the .sidx be
+    rewritten — and then every job died on losetup.  available() must fail on
+    such a host so both graceful fallbacks (fit-in-slot videos, standard
+    audio build) actually engage."""
+    monkeypatch.setattr(ext4_grow.sys, "platform", "win32")
+    ex = _FakeExecutor(loop_ok=False)
+    monkeypatch.setattr(ext4_grow, "create_executor", lambda: ex)
+    ok, msg = ext4_grow.available()
+    assert not ok
+    assert "wsl --set-version" in msg      # the actual fix, named
+    assert "losetup" in msg                # the probe's own evidence
+    assert any("losetup" in c for c in ex.commands)
+
+
+def test_available_ok_when_loop_probe_passes(monkeypatch):
+    monkeypatch.setattr(ext4_grow.sys, "platform", "win32")
+    ex = _FakeExecutor(loop_ok=True)
+    monkeypatch.setattr(ext4_grow, "create_executor", lambda: ex)
+    ok, _msg = ext4_grow.available()
+    assert ok
+    assert any("losetup" in c for c in ex.commands)
+
+
+def test_grow_files_raises_unavailable_not_error_on_loopless_host(
+        monkeypatch, tmp_path):
+    """Runtime double-check: even a caller that skipped available() must get
+    the *Unavailable* subclass (warning + honest fallback counts) BEFORE any
+    mount attempt — a loop-less host used to reach losetup inside the mount
+    script and surface as a raw Ext4GrowError with no hint at the fix."""
+    src = tmp_path / "big.mp4"
+    src.write_bytes(b"x" * 100)
+    monkeypatch.setattr(ext4_grow.sys, "platform", "win32")
+    ex = _FakeExecutor(loop_ok=False)
+    monkeypatch.setattr(ext4_grow, "create_executor", lambda: ex)
+    with pytest.raises(ext4_grow.Ext4GrowUnavailable, match="loop device"):
+        ext4_grow.grow_files("/card.raw", 4096, [("video/a.mov", str(src))])
+    assert not any("base64" in c for c in ex.commands)  # never got to mount
+
+
+def test_loop_probe_reason_on_native_linux_names_modprobe(monkeypatch):
+    monkeypatch.setattr(ext4_grow.sys, "platform", "linux")
+    reason = ext4_grow._loop_unavailable_reason(_FakeExecutor(loop_ok=False))
+    assert "modprobe loop" in reason
+    assert "losetup" in reason
+
+
 def test_available_on_macos_requires_e2fsprogs(monkeypatch):
     monkeypatch.setattr(ext4_grow.sys, "platform", "darwin")
     monkeypatch.setattr(ext4_grow, "_find_e2fsprogs", lambda: None)

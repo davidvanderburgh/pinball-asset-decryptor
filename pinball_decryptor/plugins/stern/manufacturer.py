@@ -16,6 +16,7 @@ normal Write copies verbatim).
 import re
 import sys
 
+from ...core.ext4_grow import LOOP_PROBE
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from ...core.transcribe import TranscribePipeline
@@ -86,16 +87,28 @@ def _ext4_grow_prereqs(platform):
     build still degrades gracefully and the completion dialog now says so);
     declaring it makes the gap visible BEFORE a card is built and tested.
 
-    Windows needs a WSL2 distro reachable as root (the probe mirrors
-    ``WslExecutor.check_available``); macOS needs e2fsprogs' ``debugfs``
-    (probed in the same keg-only locations ``ext4_grow._find_e2fsprogs``
-    searches); native Linux mounts ext4 itself — nothing to declare."""
+    Windows needs a WSL2 distro reachable as root **that can hand out loop
+    devices** — the probe is ``ext4_grow.LOOP_PROBE``, the exact capability
+    the write path's mount script opens with.  It used to be ``echo ok``
+    (mirroring ``WslExecutor.check_available``), which a WSL 1 distro passes
+    as root while owning zero loop devices: the strip said OK on a machine
+    where every grow failed with a bare losetup error, after the card's
+    .sidx had already been rewritten (PAD-13, a 489-video write that shipped
+    nothing).  macOS needs e2fsprogs' ``debugfs`` (probed in the same
+    keg-only locations ``ext4_grow._find_e2fsprogs`` searches); native Linux
+    mounts ext4 itself — nothing to declare."""
     if platform == "win32":
         return (
-            Prerequisite(name="WSL2", where="wsl", probe="echo ok",
+            Prerequisite(name="WSL2", where="wsl", probe=LOOP_PROBE,
                          reason=_EXT4_GROW_REASON,
-                         install_hint="wsl --install -d Ubuntu  "
-                                      "(admin PowerShell, then reboot)"),
+                         install_hint=(
+                             "wsl --install -d Ubuntu  "
+                             "(admin PowerShell, then reboot)\n"
+                             "Installed, but a loop-device error? That "
+                             "distro is WSL 1, which can't mount card "
+                             "images:\n"
+                             "wsl -l -v   (look at VERSION)\n"
+                             "wsl --set-version <name> 2")),
         )
     if platform == "darwin":
         return (

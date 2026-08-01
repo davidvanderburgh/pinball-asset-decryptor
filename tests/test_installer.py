@@ -504,7 +504,7 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
     from pinball_decryptor.core.ext4_grow import LOOP_PROBE
     assert win.probe == LOOP_PROBE
     assert "losetup" in win.probe
-    # The reason names both riders.  Video leads since v0.103.2 (blip-free went
+    # The reason names both riders.  Video leads since v0.104.0 (blip-free went
     # opt-in), but blip-free must stay named: a build that opts back in still
     # falls back to the scrap-remains card without this, silently.
     assert "video" in win.reason and "blip-free" in win.reason.lower()

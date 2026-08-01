@@ -8563,7 +8563,7 @@ class MainWindow:
         _rule()
 
         # Blip-free callouts (the master-directory scrap fix).  OFF by default
-        # since v0.103.2: the firmware cave has now boot-looped the same machine
+        # since v0.104.0: the firmware cave has now boot-looped the same machine
         # on three releases and has never been confirmed to boot on any, so it
         # is offered as an experiment rather than shipped as the standard build.
         blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free_optin", False)))

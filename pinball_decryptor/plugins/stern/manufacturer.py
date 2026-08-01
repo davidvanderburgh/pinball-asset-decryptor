@@ -81,7 +81,7 @@ def _ext4_grow_prereqs(platform):
     growing ``game_real``, but was never declared, so the strip said "All
     prerequisites OK" on machines whose every build was quietly falling back
     to the scrap-remains build — a tester burned two hardware tests that way
-    (Elvira spinner, 2026-07-30).  Blip-free going opt-in in v0.103.2 takes
+    (Elvira spinner, 2026-07-30).  Blip-free going opt-in in v0.104.0 takes
     the audio half of that off the default path, but does not retire the
     declaration: video still needs it, and a build that opts back in still
     falls back silently without it.  Missing is not fatal (the build still

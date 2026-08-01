@@ -5345,7 +5345,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 
 # --------------------------------------------------------------------------
 # Blip-free callouts — derive-read redirect firmware cave (the callout "blip"
-# COMPLETE fix).  OPT-IN since v0.103.2 (PAD_STERN_BLIP_FREE=1 / the GUI's
+# COMPLETE fix).  OPT-IN since v0.104.0 (PAD_STERN_BLIP_FREE=1 / the GUI's
 # Advanced Audio Options checkbox); PAD_STERN_SKIP_KEYPATCH=1 also forces it
 # off — see _pathA_enabled, and the field record at the end of this comment.
 #
@@ -5584,7 +5584,7 @@ _BLIP_FREE_OFF_REASON = ("not switched on for this build; it is off by default "
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
-    **Opt-in since v0.103.2**, surfaced as the "Blip-free callouts" checkbox in
+    **Opt-in since v0.104.0**, surfaced as the "Blip-free callouts" checkbox in
     the GUI's Advanced Audio Options.  It requires an explicit
     ``PAD_STERN_BLIP_FREE=1``; ``PAD_STERN_SKIP_KEYPATCH=1`` forces it off and
     wins, so anything that already sets the historical kill switch keeps

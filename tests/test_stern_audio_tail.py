@@ -1382,7 +1382,7 @@ def test_a_default_era_settings_file_cannot_re_arm_the_cave(monkeypatch):
     monkeypatch.delenv("PAD_STERN_BLIP_FREE", raising=False)
     app = object.__new__(App)
 
-    # The exact dict a v0.102.6 install persisted, replayed into v0.103.2.
+    # The exact dict a v0.102.6 install persisted, replayed into v0.104.0.
     App._apply_audio_advanced_env(app, {"head_mode": "encode",
                                         "leadout": "silence",
                                         "blip_free": True})

@@ -172,12 +172,15 @@ HELP_CONTENT = {
          "read at the copy, so your audio plays for the whole sound. It "
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. No card built "
-         "that way has been confirmed to boot yet — the checks all run in an "
-         "emulator, which cannot show how the real machine loads a game "
-         "binary that has grown — so leaving it off costs you only that "
-         "brief scrap and gets you the card everyone's working cards have "
-         "been."),
+         "longer, and it is skipped for a direct-SD write. A machine that "
+         "rebooted through its startup screen was traced to this and fixed: "
+         "the added code was working out where the sound data sat from the "
+         "first read of the right size, and on a real machine an unrelated "
+         "read can come first, which left it redirecting nothing. It now "
+         "identifies that read by the card's own contents. The fix has not "
+         "been confirmed on an actual machine yet, so leaving it off costs "
+         "you only that brief scrap and gets you the card everyone's working "
+         "cards have been."),
     ],
     "Replace Video": [
         ("Scan and assign",

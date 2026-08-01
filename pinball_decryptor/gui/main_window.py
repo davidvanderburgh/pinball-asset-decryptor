@@ -8654,14 +8654,19 @@ class MainWindow:
                  "Every build re-derives all the sounds' settings from the "
                  "patched firmware first and falls back to the plain "
                  "stock-byte restore if anything would drift. "
-                 "Leave this off unless you are helping test it. No card built "
-                 "this way has been confirmed to boot yet: the checks above all "
-                 "run in an emulator, which cannot tell us how the real machine "
-                 "loads a game binary that has grown, and the two reports from "
-                 "actual hardware were both a machine that would not start. "
-                 "Off, the card gets no firmware change at all and you hear the "
-                 "brief scrap; that is what the working cards have always "
-                 "been.").pack(
+                 "Turn this on only if you are helping test it. A machine that "
+                 "rebooted through its startup screen was traced to this: the "
+                 "added code worked out where the sound data sat in memory from "
+                 "the first read that looked like the right size, and on a real "
+                 "machine an unrelated read of that size can come first, which "
+                 "left it pointing at the wrong place and quietly redirecting "
+                 "nothing. It now identifies that read by the card's own "
+                 "contents instead, so the order no longer matters. That fix is "
+                 "checked instruction by instruction and against a real card "
+                 "here, but it has not yet been confirmed on an actual machine, "
+                 "and the same was believed the last two times. Off, the card "
+                 "gets no firmware change at all and you hear the brief scrap; "
+                 "that is what the working cards have always been.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()

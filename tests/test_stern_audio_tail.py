@@ -1375,6 +1375,222 @@ def test_a_pre_v0_102_4_settings_file_cannot_re_enable_the_cave(monkeypatch):
     assert "blip_free" not in App._AUDIO_ADV_DEFAULTS
 
 
+class _CaveRig:
+    """Runs the real emitted cave machine code under unicorn.
+
+    The cave is pure position-independent ARM against absolute VAs it was built
+    with, so it can be exercised standalone: map the blob, point r1/r2 at
+    synthetic buffers and single-step it to its return.  That puts the test at
+    the level the bug actually lived at -- what the code does when the calls
+    arrive in an order the emulator never produces."""
+    FN = 0x10000
+    CAVE = 0x200000
+    IMG = 0x400000
+    SPUR = 0x500000
+    STACK = 0x600000
+    FIRST_OFF = 0x800
+    WIN_LO, WIN_HI = 0x1000, 0x1200
+
+    def __init__(self):
+        import struct as _s
+
+        from pinball_decryptor.plugins.stern import engine as E
+        self.uc = pytest.importorskip("unicorn")
+        self.ret = self.FN + 12
+        prologue = _s.pack("<III", *E._CAVE_SIG)
+        ncode = E._CAVE_NCODE
+        self.table_va = self.CAVE + ncode * 4
+        self.basevar_va = self.CAVE + 49 * 4
+        self.sig_va = self.CAVE + 50 * 4
+        self.stock_va = self.table_va + 2 * 12          # one window + sentinel
+        self.sig = bytes(range(0x11, 0x21))             # distinctive, not a run
+
+        cave = bytearray(E._asm_derive_redirect_cave(
+            prologue, lambda va: va - self.FN, self.FN, self.ret, self.CAVE,
+            self.table_va, self.FIRST_OFF, self.basevar_va, self.sig_va))
+        cave[50 * 4:50 * 4 + 16] = self.sig
+        table = (_s.pack("<III", self.WIN_LO, self.WIN_HI, self.stock_va)
+                 + _s.pack("<III", 0, 0, 0))
+        self.blob = bytes(cave) + table + b"\x5a" * 0x200   # stock window copy
+
+    def run(self, r1, r2):
+        """Execute the cave once; return ``(final_r1, basevar)``."""
+        import struct as _s
+
+        from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
+        from unicorn.arm_const import (UC_ARM_REG_R1, UC_ARM_REG_R2,
+                                       UC_ARM_REG_SP)
+        mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+        for base, size in ((self.FN, 0x1000), (self.CAVE, 0x2000),
+                           (self.IMG, 0x4000), (self.SPUR, 0x1000),
+                           (self.STACK, 0x10000)):
+            mu.mem_map(base, size)
+        mu.mem_write(self.CAVE, self.blob)
+        # The "image": the calibration signature sits at FIRST_OFF, and the
+        # window carries card bytes that must NOT be what the derive ends up
+        # reading once the redirect fires.
+        mu.mem_write(self.IMG + self.FIRST_OFF, self.sig)
+        mu.mem_write(self.IMG + self.WIN_LO, b"\xc3" * 0x200)
+        mu.mem_write(self.SPUR, b"\xee" * 0x40)          # nothing like the sig
+        mu.reg_write(UC_ARM_REG_SP, self.STACK + 0x8000)
+        mu.reg_write(UC_ARM_REG_R1, r1)
+        mu.reg_write(UC_ARM_REG_R2, r2)
+        mu.emu_start(self.CAVE, self.ret)
+        basevar = _s.unpack("<I", mu.mem_read(self.basevar_va, 4))[0]
+        return mu.reg_read(UC_ARM_REG_R1), basevar
+
+
+def test_cave_ignores_a_foreign_buffer_and_still_calibrates(monkeypatch):
+    """The regression that boot-loops a machine, at the instruction level.
+
+    The window-read routine is a shared helper, so a call with r2 == 0x200 whose
+    r1 points somewhere other than the image can arrive first on a real boot.
+    The old cave latched its base off whatever that pointer was, which made every
+    later file offset wrong, matched no window, redirected nothing, and left the
+    boot-derive reading the re-encoded bytes -- a desynced codec chain, which is
+    the reboot.  The base is now taken only from a call whose r1 really points at
+    the card content the cave was built against, so the foreign call is ignored
+    and the genuine one still calibrates."""
+    rig = _CaveRig()
+
+    # A foreign r2==0x200 call: must change nothing at all.
+    r1, base = rig.run(rig.SPUR, 0x200)
+    assert base == 0, "a foreign buffer poisoned the calibration"
+    assert r1 == rig.SPUR, "a foreign buffer was redirected"
+
+    # The genuine first window read calibrates to the image's mapped base.
+    r1, base = rig.run(rig.IMG + rig.FIRST_OFF, 0x200)
+    assert base == rig.IMG, hex(base)
+
+    # An uncalibrated call redirects nothing, whatever its size -- the safe
+    # direction, since that is just the standard build's behaviour.
+    r1, _base = rig.run(rig.IMG + rig.WIN_LO, 0x100)
+    assert r1 == rig.IMG + rig.WIN_LO
+
+
+def test_cave_redirects_a_window_read_that_is_not_exactly_512():
+    """0x200 is not a length the firmware guarantees.
+
+    The master-directory reader computes its length as `bic r2, r5, #0x3f` --
+    the run rounded down to 64 -- so a window run that isn't a full 512 bytes
+    arrives as some other multiple of 64.  The cave used to gate its redirect on
+    `r2 == 0x200` exactly and passed anything else straight through, leaving
+    that window reading the re-encoded bytes on the card: a desynced codec chain
+    for that sound, which is a reboot.  Size now decides only whether to
+    calibrate; redirecting is decided by the file offset alone."""
+    import struct as _s
+
+    from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
+    from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP
+    rig = _CaveRig()
+    mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+    for base, size in ((rig.FN, 0x1000), (rig.CAVE, 0x2000), (rig.IMG, 0x4000),
+                       (rig.SPUR, 0x1000), (rig.STACK, 0x10000)):
+        mu.mem_map(base, size)
+    mu.mem_write(rig.CAVE, rig.blob)
+    mu.mem_write(rig.IMG + rig.FIRST_OFF, rig.sig)
+    mu.mem_write(rig.SPUR, b"\xee" * 0x40)
+    mu.reg_write(UC_ARM_REG_SP, rig.STACK + 0x8000)
+
+    def call(r1, r2):
+        mu.reg_write(UC_ARM_REG_R1, r1)
+        mu.reg_write(UC_ARM_REG_R2, r2)
+        mu.emu_start(rig.CAVE, rig.ret)
+        return mu.reg_read(UC_ARM_REG_R1)
+
+    call(rig.IMG + rig.FIRST_OFF, 0x200)                 # calibrate
+    assert _s.unpack("<I", mu.mem_read(rig.basevar_va, 4))[0] == rig.IMG
+    # A short run (0x1c0) and an over-long one (0x240) must both redirect.
+    assert call(rig.IMG + rig.WIN_LO, 0x1c0) == rig.stock_va
+    assert call(rig.IMG + rig.WIN_LO, 0x240) == rig.stock_va
+    # The firmware's own 0x40 scratch call, against its out-of-image buffer,
+    # still passes through: it matches no window.
+    assert call(rig.SPUR, 0x40) == rig.SPUR
+
+
+def test_cave_redirects_a_window_once_calibrated():
+    """A window read lands in the stock copy stashed in the firmware, and an
+    offset part-way into the window keeps its offset."""
+    # BASEVAR lives in the cave's own memory, so calibration and the reads it
+    # serves have to happen against ONE emulator instance -- exactly as they do
+    # in one booted game process.
+    rig = _CaveRig()
+    import struct as _s
+
+    from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
+    from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP
+    mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+    for base, size in ((rig.FN, 0x1000), (rig.CAVE, 0x2000), (rig.IMG, 0x4000),
+                       (rig.STACK, 0x10000)):
+        mu.mem_map(base, size)
+    mu.mem_write(rig.CAVE, rig.blob)
+    mu.mem_write(rig.IMG + rig.FIRST_OFF, rig.sig)
+    mu.reg_write(UC_ARM_REG_SP, rig.STACK + 0x8000)
+
+    def call(r1, r2):
+        mu.reg_write(UC_ARM_REG_R1, r1)
+        mu.reg_write(UC_ARM_REG_R2, r2)
+        mu.emu_start(rig.CAVE, rig.ret)
+        return mu.reg_read(UC_ARM_REG_R1)
+
+    assert call(rig.IMG + rig.FIRST_OFF, 0x200) == rig.IMG + rig.FIRST_OFF
+    assert _s.unpack("<I", mu.mem_read(rig.basevar_va, 4))[0] == rig.IMG
+    # Whole-window read -> start of the stock copy.
+    assert call(rig.IMG + rig.WIN_LO, 0x200) == rig.stock_va
+    # Part-way in -> same offset inside the stock copy.
+    assert call(rig.IMG + rig.WIN_LO + 0x40, 0x200) == rig.stock_va + 0x40
+    # Outside every window -> untouched.
+    assert call(rig.IMG + rig.WIN_HI, 0x200) == rig.IMG + rig.WIN_HI
+
+
+def test_cave_recalibrates_if_the_image_moves():
+    """The signature check runs on every call, not only while the base is zero,
+    so a second derive pass (or the image mapped somewhere else) re-latches
+    instead of going silently stale."""
+    import struct as _s
+
+    from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
+    from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP
+    rig = _CaveRig()
+    alt = rig.IMG + 0x2000                      # "remapped" image base
+    mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+    for base, size in ((rig.FN, 0x1000), (rig.CAVE, 0x2000), (rig.IMG, 0x8000),
+                       (rig.STACK, 0x10000)):
+        mu.mem_map(base, size)
+    mu.mem_write(rig.CAVE, rig.blob)
+    mu.mem_write(rig.IMG + rig.FIRST_OFF, rig.sig)
+    mu.mem_write(alt + rig.FIRST_OFF, rig.sig)
+    mu.reg_write(UC_ARM_REG_SP, rig.STACK + 0x8000)
+
+    def call(r1, r2=0x200):
+        mu.reg_write(UC_ARM_REG_R1, r1)
+        mu.reg_write(UC_ARM_REG_R2, r2)
+        mu.emu_start(rig.CAVE, rig.ret)
+        return mu.reg_read(UC_ARM_REG_R1)
+
+    call(rig.IMG + rig.FIRST_OFF)
+    assert _s.unpack("<I", mu.mem_read(rig.basevar_va, 4))[0] == rig.IMG
+    call(alt + rig.FIRST_OFF)
+    assert _s.unpack("<I", mu.mem_read(rig.basevar_va, 4))[0] == alt
+    assert call(alt + rig.WIN_LO) == rig.stock_va
+
+
+def test_card_bytes_at_overlays_the_replacement(tmp_path):
+    """The calibration signature has to be the CARD's bytes: the read it
+    identifies happens after the replaced bodies are on the card, so a signature
+    taken from the stock image would never match if the first window lands
+    inside one."""
+    from pinball_decryptor.plugins.stern import engine as E
+    img = tmp_path / "image.bin"
+    img.write_bytes(bytes(range(256)) * 4)
+    patches = {0x40: b"\xff" * 0x10}
+    assert E._card_bytes_at(str(img), {}, 0x40, 16) == bytes(range(0x40, 0x50))
+    assert E._card_bytes_at(str(img), patches, 0x40, 16) == b"\xff" * 16
+    # Straddling the patch: stock before, replacement after.
+    got = E._card_bytes_at(str(img), patches, 0x38, 16)
+    assert got == bytes(range(0x38, 0x40)) + b"\xff" * 8
+
+
 def _fake_elf(gap=0x8000, with_gnu_stack=True, nload=2):
     """Minimal 32-bit LE ARM ET_EXEC with two PT_LOADs separated by *gap* bytes
     of unclaimed VA, plus the advisory PT_GNU_STACK the cave repurposes."""

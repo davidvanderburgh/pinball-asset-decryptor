@@ -5389,31 +5389,62 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts in;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
 #
-# OFF BY DEFAULT since v0.102.4, and this is the important part: the
-# own-segment cave has never been confirmed to boot on a real machine.  Every
-# claim of hardware confirmation in this section belongs to the OLD, unsafe
-# data-segment placement (Led Zeppelin LE 1.22, 2026-07-25, pre-v0.94.0).  What
-# v0.94.0 proved about the new placement was proved OFFLINE, in the emulator --
+# WHY THIS CAVE HAD NEVER ACTUALLY BOOTED, and what was wrong with it.  Every
+# claim of hardware confirmation above belongs to the OLD, unsafe data-segment
+# placement (Led Zeppelin LE 1.22, 2026-07-25, pre-v0.94.0).  What v0.94.0
+# proved about the own-segment placement it proved OFFLINE, in the emulator --
 # and Spike2Emu maps each PT_LOAD's full p_memsz itself (spike2/emulator.py, the
-# mem_map over `_algn(vaddr + memsz)`), so it cannot see anything about how a
-# real ARM Linux ELF loader treats an appended segment.  Worse, from v0.94.0
-# through v0.102.2 the rebuilt firmware was deleted before it could be copied
-# onto the card on every host that has the ext4 driver (see PAD-6 /
-# grow_plan["cleanup"]), so no user ever booted this cave either: driver hosts
-# got a card the machine rejected, and every card that DID work was a non-driver
-# host silently falling back to the standard build.
+# mem_map over `_algn(vaddr + memsz)`), so it cannot see how a real ARM Linux
+# loader treats an appended segment.  Worse, from v0.94.0 through v0.102.2 the
+# rebuilt firmware was deleted before it could be copied onto the card on every
+# host that has the ext4 driver (see PAD-6 / grow_plan["cleanup"]), so no user
+# ever booted this cave either: driver hosts got a card the machine rejected,
+# and every card that DID work was a non-driver host silently falling back to
+# the standard build.
 #
-# v0.102.3 fixed the delivery, which made v0.102.3 the first release ever to put
-# this cave in front of a machine.  The first report back was a James Bond
-# Premium 1.06.0 that reboots partway through "Initializing" and loops there
-# forever (a tester, 2026-08-01) -- the same tester whose pre-v0.94.0 card froze
-# at the game logo on the old placement.  Two placements, two field reports, no
-# confirmed boot.
+# v0.102.3 fixed the delivery, which made it the first release ever to put this
+# cave in front of a machine.  The first report back was a James Bond Premium
+# 1.06.0 that reboots partway through "Initializing" and loops there (a tester,
+# 2026-08-01) -- the same tester whose pre-v0.94.0 card froze at the game logo
+# on the old placement.
 #
-# So it is opt-in until someone confirms a cave-built card boots.  The standard
-# build is what the working cards have always been, it touches no game code, and
-# it costs a ~6 ms scrap of the original at two points in each replaced sound.
-# Shipping that artifact by default beats shipping a machine that won't start.
+# The ELF geometry was audited across all 37 vendor firmwares and came back
+# clean (see _append_cave_segment, which records the result so it isn't
+# re-derived).  Both faults found are in the cave's RUNTIME behaviour, and both
+# end the same way -- a window that should have been redirected wasn't, so the
+# boot-derive read the re-encoded bytes the cave exists to hide from it, which
+# desyncs the codec forward chain, and a desynced chain is a reboot:
+#
+#   1. It latched the image's mapped base from the first call with r2 == 0x200,
+#      i.e. it took "a 512-byte read" to mean "the master directory's first
+#      window read".  Nothing established that; the routine has four call sites
+#      and _capture_first_window_off has always had to reject calls whose r1
+#      lands outside the image.  A foreign call arriving first poisons the base
+#      for the life of the process and NOTHING is redirected after that.
+#   2. It only redirected reads with r2 == 0x200 exactly.  But 0x200 is not a
+#      constant the firmware believes in: the stream reader computes
+#      `bic r2, r5, #0x3f` -- the run length rounded down to 64 -- so a window
+#      run that isn't a full 512 bytes arrives as some other multiple of 64 and
+#      was passed straight through.  The consumed map the table is built from
+#      has no size filter, so the table always described those runs; only the
+#      cave's own gate discarded them.
+#
+# _asm_derive_redirect_cave now identifies the calibrating read by the card's
+# own content instead of by call order, and decides redirects on the file offset
+# alone.  Both fixes are reasoned out in full there.  Measured on Bond 1.06
+# during the cat-0 derive: 4 static call sites (3 hard-coding r2=0x40, one
+# variable), 200/200 of the r2==0x200 calls in-image, the 0x40 scratch calls all
+# out-of-image -- so (1) is an unguarded assumption that happens to hold for
+# that pass, while (2) bites whenever a run isn't a full window.
+#
+# STILL OFF BY DEFAULT, deliberately.  The fix is verified at instruction level
+# (tests drive the emitted cave under unicorn through exactly the call order
+# that broke it) and end to end in the emulator, but "the emulator agrees" is
+# what was believed the last two times.  It needs one confirmed boot on a real
+# machine, and until then the standard build -- which touches no game code, is
+# what every working card has always been, and costs a ~6 ms scrap at two points
+# per replaced sound -- is the honest default.  PAD_STERN_BLIP_FREE=1 / the
+# Advanced Audio Options checkbox is how a tester opts in to confirming it.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5427,9 +5458,10 @@ _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
 _BLIP_FREE_OFF_REASON = (
-    "off by default: patching the game firmware is not yet confirmed to boot "
-    "on a real machine, so builds use the stock-byte restore instead (turn it "
-    "on in Advanced Audio Options to help test it)")
+    "off by default: the boot-calibration fault behind the reported reboot is "
+    "fixed, but no card built this way has been confirmed to boot on a real "
+    "machine yet, so builds use the stock-byte restore instead (turn it on in "
+    "Advanced Audio Options to help confirm the fix)")
 
 
 def _pathA_enabled():
@@ -5500,21 +5532,74 @@ def _locate_window_read_fn(raw):
     return hits[0] if len(hits) == 1 else None
 
 
+_CAVE_SIG_WORDS = 4              # 16 bytes of card content that identify FIRST_OFF
+_CAVE_NCODE = 54                 # code + literals + BASEVAR + signature, in words
+
+
 def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
-                              first_off, basevar_va):
+                              first_off, basevar_va, sig_va):
     """Assemble the self-calibrating derive-read redirect cave (ARM, little-
     endian) for the window-read function at *fn*, resuming at *ret* (= fn+12).
 
-    On the FIRST masterdir window read (``r2 == 0x200`` and the stored base is
-    still 0) it computes ``base = r1 - FIRST_OFF`` and caches it in a writable
-    word (BASEVAR); thereafter ``fileoff = r1 - base`` and it matches a FILE-OFFSET
-    table (card-position-independent).  A matched window redirects ``r1`` to that
-    window's stock copy; unmatched reads (and the non-window ``r2 != 0x200``
-    scratch call) pass through untouched.  The cave replicates the function's
-    3-word prologue (push / sub sp / add sb -- all position-independent) and
-    returns to *ret*.  ``game_real`` is ET_EXEC, so the absolute VAs baked as
-    literals are HW-valid; the code must live in an executable segment (see
-    :func:`_set_seg_exec`)."""
+    The cave turns a live source pointer into a FILE OFFSET so the redirect
+    table can be card-position-independent, which needs the address the image is
+    mapped at.  That is only knowable at runtime, so the cave recovers it as
+    ``base = r1 - FIRST_OFF`` on the master directory's first window read and
+    caches it in a writable word (BASEVAR).  Thereafter ``fileoff = r1 - base``
+    is matched against the table; a hit redirects ``r1`` into that window's stock
+    copy, a miss passes through untouched.
+
+    IDENTIFYING that first read is the delicate part, and getting it wrong is
+    silent.  The original cave took "the first call with ``r2 == 0x200``" as the
+    first window read.  That is not sound: this routine is a shared helper, and
+    ``_capture_first_window_off`` -- the build-time code that measures FIRST_OFF
+    in the first place -- has always had to reject calls whose ``r1`` points
+    outside the image, which is precisely an admission that ``r2 == 0x200`` on
+    its own does not mean "master directory window".  One such call arriving
+    ahead of the real one poisons BASEVAR for the life of the process: every
+    fileoff is then wrong, nothing matches the table, no window is redirected,
+    and the boot-derive reads the re-encoded bytes it was supposed to be
+    shielded from.  That desyncs the codec forward chain, which is the failure
+    the whole cave exists to prevent and which the machine answers by rebooting.
+    Nothing catches it in the emulator, because ``_assert_param_integrity``
+    calls ``derive_params()`` directly, so the first ``r2 == 0x200`` call it ever
+    sees IS the right one -- the ordering that makes this fail only exists on a
+    real boot, where the whole init runs first (a tester's James Bond Premium
+    1.06.0, rebooting partway through "Initializing", 2026-08-01).
+
+    So the base is no longer latched on position.  It is latched on EVIDENCE: 16
+    bytes of the card's own content at FIRST_OFF are baked into the cave (SIG),
+    and the base is taken only from a call whose ``r1`` actually points at those
+    bytes.  Anything else passes through without touching BASEVAR.  The check
+    runs on every call rather than only while BASEVAR is zero, so a second
+    derive pass, or the image being mapped somewhere else, re-latches instead of
+    silently going stale.  Until a match has been seen there is no base and
+    nothing is redirected, which is the safe direction: an un-redirected read
+    is the old standard build's behaviour, not a corrupt one.
+
+    ``r2 == 0x200`` now gates ONLY the calibration, not the redirect, and that
+    is a second fix rather than a tidy-up.  0x200 is not a constant the firmware
+    believes in: of the four call sites this routine has (identical layout on
+    all 37 vendor builds), three hard-code ``mov r2,#0x40`` and the fourth --
+    the master-directory stream reader, the only one that can ever present a
+    window -- computes ``bic r2, r5, #0x3f``, i.e. the run length rounded down
+    to 64.  It is 0x200 for a full window and something else for any run that
+    isn't, and the old cave answered a non-0x200 window read by passing it
+    straight through.  That leaves that window un-redirected while the card
+    carries re-encoded bytes underneath it, which is the same desync-the-chain
+    reboot as a poisoned base, just for one sound instead of all of them.  The
+    consumed map the table is built from comes from a memory-read hook with no
+    size filter, so the table always described those runs correctly; only the
+    cave's own gate threw them away.  Redirecting is now decided purely by
+    whether the file offset falls in a table window.  The ``r2 == 0x200`` test
+    survives in front of the signature check because that check dereferences
+    ``r1``, and a 512-byte read is the case we know carries a readable image
+    pointer; the scratch calls fall through to the table scan, where their
+    out-of-image pointer matches nothing and passes through untouched.
+
+    The cave replicates the function's 3-word prologue (push / sub sp / add sb
+    -- all position-independent) and returns to *ret*.  ``game_real`` is ET_EXEC,
+    so the absolute VAs baked as literals are HW-valid."""
     def w(x):
         return struct.pack("<I", x & 0xffffffff)
 
@@ -5526,36 +5611,71 @@ def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
 
     def iva(i):
         return cave_va + i * 4
-    LIT_BASE, LIT_FIRST, LIT_TABLE = iva(26), iva(27), iva(28)
+    LIT_BASE, LIT_SIG, LIT_FIRST, LIT_TABLE = (iva(45), iva(46), iva(47),
+                                               iva(48))
 
     def ldrpc(rt, frm, lit):
         return w(0xE59F0000 | (rt << 12) | (lit - (frm + 8)))
+    DONE, NOLATCH, HAVE_BASE, SCAN = iva(43), iva(26), iva(30), iva(32)
     words = [
         w(W_push), w(W_subsp),                  # 0,1  replicated prologue
-        w(0xE3520C02),                          # 2  cmp r2,#0x200   (window read?)
-        br(0x1, iva(3), iva(24)),               # 3  bne done
-        ldrpc(4, iva(4), LIT_BASE),             # 4  ldr r4,=&BASEVAR
-        w(0xE5948000),                          # 5  ldr r8,[r4]
-        w(0xE3580000),                          # 6  cmp r8,#0
-        br(0x1, iva(7), iva(11)),               # 7  bne have_base
-        ldrpc(5, iva(8), LIT_FIRST),            # 8  ldr r5,=FIRST_OFF
-        w(0xE0418005),                          # 9  sub r8,r1,r5
-        w(0xE5848000),                          # 10 str r8,[r4]     (base = r1 - FIRST_OFF)
-        w(0xE0418008),                          # 11 have_base: sub r8,r1,r8   (fileoff)
-        ldrpc(4, iva(12), LIT_TABLE),           # 12 ldr r4,=&TABLE
-        w(0xE4945004),                          # 13 scan: ldr r5,[r4],#4   (lo)
-        w(0xE3550000),                          # 14 cmp r5,#0
-        br(0x0, iva(15), iva(24)),              # 15 beq done  (zero sentinel)
-        w(0xE4946004), w(0xE4947004),           # 16,17 ldr r6/r7,[r4],#4   (hi, stockbuf)
-        w(0xE1580005), br(0x3, iva(19), iva(13)),  # 18 cmp r8,r5 ; 19 blo scan
-        w(0xE1580006), br(0x2, iva(21), iva(13)),  # 20 cmp r8,r6 ; 21 bhs scan
-        w(0xE0488005), w(0xE0871008),           # 22 sub r8,r8,r5 ; 23 add r1,r7,r8
-        w(W_addsb),                             # 24 done: add sb,r1,#0x40
-        br(0xE, iva(25), ret),                  # 25 b ret (fn+12)
-        w(basevar_va), w(first_off), w(table_va),  # 26,27,28 literals
-        w(0),                                   # 29 BASEVAR (writable, init 0)
+        w(0xE3520C02),                          # 2  cmp r2,#0x200 (calibration candidate?)
+        br(0x1, iva(3), NOLATCH),               # 3  bne nolatch -> still eligible to redirect
+        # --- is r1 really pointing at the card bytes that live at FIRST_OFF? ---
+        ldrpc(5, iva(4), LIT_SIG),              # 4  ldr r5,=&SIG
+        w(0xE5916000), w(0xE5957000),           # 5,6   ldr r6,[r1]    ; ldr r7,[r5]
+        w(0xE1560007), br(0x1, iva(8), NOLATCH),  # 7 cmp r6,r7 ; 8 bne nolatch
+        w(0xE5916004), w(0xE5957004),           # 9,10  ldr r6,[r1,#4] ; ldr r7,[r5,#4]
+        w(0xE1560007), br(0x1, iva(12), NOLATCH),  # 11 cmp ; 12 bne nolatch
+        w(0xE5916008), w(0xE5957008),           # 13,14 ldr r6,[r1,#8] ; ldr r7,[r5,#8]
+        w(0xE1560007), br(0x1, iva(16), NOLATCH),  # 15 cmp ; 16 bne nolatch
+        w(0xE591600C), w(0xE595700C),           # 17,18 ldr r6,[r1,#12]; ldr r7,[r5,#12]
+        w(0xE1560007), br(0x1, iva(20), NOLATCH),  # 19 cmp ; 20 bne nolatch
+        # --- matched: (re)latch base = r1 - FIRST_OFF ---
+        ldrpc(4, iva(21), LIT_BASE),            # 21 ldr r4,=&BASEVAR
+        ldrpc(5, iva(22), LIT_FIRST),           # 22 ldr r5,=FIRST_OFF
+        w(0xE0418005),                          # 23 sub r8,r1,r5
+        w(0xE5848000),                          # 24 str r8,[r4]
+        br(0xE, iva(25), HAVE_BASE),            # 25 b have_base   (r8 = base)
+        ldrpc(4, iva(26), LIT_BASE),            # 26 nolatch: ldr r4,=&BASEVAR
+        w(0xE5948000),                          # 27 ldr r8,[r4]
+        w(0xE3580000),                          # 28 cmp r8,#0
+        br(0x0, iva(29), DONE),                 # 29 beq done   (no base yet)
+        w(0xE0418008),                          # 30 have_base: sub r8,r1,r8  (fileoff)
+        ldrpc(4, iva(31), LIT_TABLE),           # 31 ldr r4,=&TABLE
+        w(0xE4945004),                          # 32 scan: ldr r5,[r4],#4   (lo)
+        w(0xE3550000),                          # 33 cmp r5,#0
+        br(0x0, iva(34), DONE),                 # 34 beq done  (zero sentinel)
+        w(0xE4946004), w(0xE4947004),           # 35,36 ldr r6/r7,[r4],#4 (hi, stockbuf)
+        w(0xE1580005), br(0x3, iva(38), SCAN),  # 37 cmp r8,r5 ; 38 blo scan
+        w(0xE1580006), br(0x2, iva(40), SCAN),  # 39 cmp r8,r6 ; 40 bhs scan
+        w(0xE0488005), w(0xE0871008),           # 41 sub r8,r8,r5 ; 42 add r1,r7,r8
+        w(W_addsb),                             # 43 done: add sb,r1,#0x40
+        br(0xE, iva(44), ret),                  # 44 b ret (fn+12)
+        w(basevar_va), w(sig_va), w(first_off), w(table_va),  # 45-48 literals
+        w(0),                                   # 49 BASEVAR (writable, init 0)
+        w(0), w(0), w(0), w(0),                 # 50-53 SIG (filled by the caller)
     ]
+    assert len(words) == _CAVE_NCODE, len(words)
     return b"".join(words)
+
+
+def _card_bytes_at(img_path, patches, off, n):
+    """The *n* bytes that will be at image file offset *off* ON THE CARD, i.e.
+    the stock image with *patches* (``{body_off: body}``) overlaid.
+
+    The cave's calibration signature has to be read from this, not from the
+    stock image: by the time the machine performs that read, the replaced bodies
+    are already on the card, so a signature taken from stock would simply never
+    match if the first window happens to land inside one."""
+    with open(img_path, "rb") as f:
+        f.seek(off)
+        buf = bytearray(f.read(n))
+    for boff, body in patches.items():
+        lo, hi = max(off, boff), min(off + n, boff + len(body))
+        if lo < hi:
+            buf[lo - off:hi - off] = body[lo - boff:hi - boff]
+    return bytes(buf)
 
 
 def _capture_first_window_off(gr_path, img_path, fn):
@@ -5847,10 +5967,10 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         raise RuntimeError("no master-directory windows found for the replaced "
                            "sound(s) -- nothing to redirect.")
 
-    # Layout, all contiguous inside the cave's own segment: 30-word cave (code +
-    # 3 literals + BASEVAR), the redirect table (12 bytes/window + a zero
-    # sentinel), then the stock window copies.
-    ncode = 30
+    # Layout, all contiguous inside the cave's own segment: the cave itself
+    # (code + 4 literals + BASEVAR + the 4-word signature), the redirect table
+    # (12 bytes/window + a zero sentinel), then the stock window copies.
+    ncode = _CAVE_NCODE
     table_bytes = (len(windows) + 1) * 12
     total_stock = sum(b - a for a, b in windows)
     needed = ncode * 4 + table_bytes + total_stock
@@ -5863,12 +5983,27 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
             "the located function did not perform an image window read -- "
             "unsupported firmware layout; using the standard build.")
 
+    # The content the cave identifies that first read BY (see
+    # _asm_derive_redirect_cave).  It has to be what the CARD will hold there,
+    # not what the stock image holds, because the read happens after our patches
+    # are on the card -- so overlay any replaced body covering those bytes.
+    sig = _card_bytes_at(img_path, patches, first_off, _CAVE_SIG_WORDS * 4)
+    if len(set(sig)) < 2:
+        # A run of identical bytes is not an identification; some other 512-byte
+        # buffer of the same filler would latch the base off the wrong pointer,
+        # which is the exact failure this signature exists to stop.
+        raise RuntimeError(
+            "the first master-directory window is %d identical bytes (0x%02x), "
+            "which can't identify the read the cave has to calibrate on -- "
+            "using the standard build." % (len(sig), sig[0] if sig else 0))
+
     # Give the cave a segment of its own rather than squatting on the game's
     # data (see the section comment): appended bytes at a virtual address no
     # PT_LOAD claims can't collide with anything the game owns.
     cave_va, append_off, gap = _append_cave_segment(raw, needed, fn)
     table_va = cave_va + ncode * 4
-    basevar_va = cave_va + 29 * 4
+    basevar_va = cave_va + 49 * 4
+    sig_va = cave_va + 50 * 4
     stock_va = table_va + table_bytes
     placements = []
     c = stock_va
@@ -5876,8 +6011,9 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         placements.append(c)
         c += (b0 - a0)
 
-    cave = _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
-                                     first_off, basevar_va)
+    cave = bytearray(_asm_derive_redirect_cave(
+        raw, va2off, fn, ret, cave_va, table_va, first_off, basevar_va, sig_va))
+    cave[50 * 4:50 * 4 + len(sig)] = sig
     table = b"".join(struct.pack("<III", a0, b0, sb)
                      for (a0, b0), sb in zip(windows, placements))
     table += struct.pack("<III", 0, 0, 0)     # zero sentinel

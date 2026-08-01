@@ -68,24 +68,25 @@ _WHITESTAR_PREREQS = (
 )
 
 _EXT4_GROW_REASON = (
-    "Blip-free callouts (and full-size video replacement): grows files "
-    "inside the card's ext4 partition through the platform's Linux "
-    "filesystem path. Without it a build silently falls back to the "
-    "standard build, whose replaced sounds keep a brief scrap of the "
-    "original audio at two points (a quick double click on quiet "
-    "replacements).")
+    "Full-size video replacement (and the opt-in blip-free callouts): grows "
+    "files inside the card's ext4 partition through the platform's Linux "
+    "filesystem path. Without it an oversized replacement clip is crushed "
+    "into its stock byte slot instead of going on at full quality.")
 
 
 def _ext4_grow_prereqs(platform):
-    """The platform dependency of :mod:`...core.ext4_grow` — what blip-free
-    callouts (v0.94.0+, on by default) and full-size video replacement ride
-    on.  It became load-bearing for AUDIO quality the moment the blip-free
-    cave started growing ``game_real``, but was never declared, so the strip
-    said "All prerequisites OK" on machines whose every build was quietly
-    falling back to the scrap-remains build — a tester burned two hardware
-    tests that way (Elvira spinner, 2026-07-30).  Missing is not fatal (the
-    build still degrades gracefully and the completion dialog now says so);
-    declaring it makes the gap visible BEFORE a card is built and tested.
+    """The platform dependency of :mod:`...core.ext4_grow` — what full-size
+    video replacement and the (now opt-in) blip-free cave ride on.  It became
+    load-bearing for AUDIO quality the moment the blip-free cave started
+    growing ``game_real``, but was never declared, so the strip said "All
+    prerequisites OK" on machines whose every build was quietly falling back
+    to the scrap-remains build — a tester burned two hardware tests that way
+    (Elvira spinner, 2026-07-30).  Blip-free going opt-in in v0.103.2 takes
+    the audio half of that off the default path, but does not retire the
+    declaration: video still needs it, and a build that opts back in still
+    falls back silently without it.  Missing is not fatal (the build still
+    degrades gracefully and the completion dialog now says so); declaring it
+    makes the gap visible BEFORE a card is built and tested.
 
     Windows needs a WSL2 distro reachable as root **that can hand out loop
     devices** — the probe is ``ext4_grow.LOOP_PROBE``, the exact capability

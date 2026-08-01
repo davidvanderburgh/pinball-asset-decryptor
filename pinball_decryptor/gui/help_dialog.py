@@ -161,7 +161,8 @@ HELP_CONTENT = {
          "menu and either confirm what the extract called that slot or pick "
          "the entry (type its number to find it) yourself."),
         ("Blip-free callouts (Advanced Audio Options)",
-         "On by default. The machine reads two ~512-byte windows out of "
+         "Off by default, and experimental. The machine reads two ~512-byte "
+         "windows out of "
          "every sound at boot to set up its decoder, and each result feeds "
          "the next, so re-encoding one sound would desync the whole bank. "
          "The plain fix puts the original bytes back in those two windows, "
@@ -171,14 +172,13 @@ HELP_CONTENT = {
          "read at the copy, so your audio plays for the whole sound. It "
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. A machine that "
-         "rebooted through its startup screen was traced to this and fixed "
-         "in v0.102.5: the added code was working out where the sound data "
-         "sat from the first read of the right size (an unrelated read can "
-         "come first on a real machine, leaving it redirecting nothing), and "
-         "it was acting only on reads of one exact size while the game works "
-         "that size out as it goes. If a card ever misbehaves, untick this "
-         "and rebuild — that costs you only the brief scrap."),
+         "longer, and it is skipped for a direct-SD write. It is off because "
+         "the one machine it has ever reached reboots partway through its "
+         "startup screen and loops there. Two faults in the added code were "
+         "found and fixed in v0.102.5 and that machine still does it, so the "
+         "cause is not yet known and no card built this way has been "
+         "confirmed to boot. Leaving it off costs you only the brief scrap "
+         "described above, which a tester listening for it could not hear."),
     ],
     "Replace Video": [
         ("Scan and assign",

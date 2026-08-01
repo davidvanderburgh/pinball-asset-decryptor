@@ -108,7 +108,10 @@ def _audio_mode_note(mode):
     kind, why = mode
     if kind == "blip-free":
         return ("\n\nBlip-free callouts: applied — replaced sounds play your "
-                "audio for their whole length.")
+                "audio for their whole length. This setting is experimental "
+                "and not known to boot: if the machine loops through its "
+                "startup screen, clear the box in Advanced Audio Options and "
+                "rebuild the card from your original image.")
     return ("\n\nBlip-free callouts: NOT applied — %s. Each replaced sound "
             "keeps a brief scrap of the original at two points in its slot, "
             "which can be heard as a quick double click on quiet "

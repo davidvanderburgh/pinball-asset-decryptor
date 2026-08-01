@@ -504,7 +504,10 @@ def test_stern_declares_ext4_grow_prereq_per_platform():
     from pinball_decryptor.core.ext4_grow import LOOP_PROBE
     assert win.probe == LOOP_PROBE
     assert "losetup" in win.probe
-    assert "Blip-free" in win.reason
+    # The reason names both riders.  Video leads since v0.103.2 (blip-free went
+    # opt-in), but blip-free must stay named: a build that opts back in still
+    # falls back to the scrap-remains card without this, silently.
+    assert "video" in win.reason and "blip-free" in win.reason.lower()
     assert "wsl --install" in win.install_hint
     # And the hint must carry the WSL 1 -> 2 conversion, the actual fix on
     # the machines this probe newly catches.

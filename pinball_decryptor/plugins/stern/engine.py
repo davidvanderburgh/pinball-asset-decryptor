@@ -3362,21 +3362,28 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             log("Advanced audio overrides active for this build: %s."
                 % "; ".join(adv), "warning")
         if not _pathA_enabled():
-            log("Blip-free callouts OFF for this build: a re-encoded sound keeps "
-                "a ~6 ms scrap of the original at the two master-directory "
-                "windows, and no code is added to the game firmware (only the "
-                "long-standing 4-byte validator bypass).", "info")
-        else:
-            log("Blip-free callouts on: patching game_real so the boot-derive "
-                "reads stock master-directory windows -- re-encoded callouts "
-                "play your audio for their whole length (no ~6 ms original "
-                "scrap). The patch gets a memory mapping of its own rather than "
-                "borrowing the game's, which is what broke node boards on some "
-                "titles before v0.94.0. Needs the Linux filesystem driver "
-                "because it grows the game binary; falls back to the standard "
-                "build for any firmware or host it can't safely handle. Turn it "
-                "off in Advanced Audio Options to leave the firmware alone.",
+            log("Blip-free callouts OFF for this build (the default): a "
+                "re-encoded sound keeps a ~6 ms scrap of the original at the "
+                "two master-directory windows, and no code is added to the game "
+                "firmware (only the long-standing 4-byte validator bypass).",
                 "info")
+        else:
+            # Warning, not info: this is an opt-in firmware patch that has
+            # boot-looped the only machine it has ever reached, so the build log
+            # has to say so where somebody diagnosing a dead machine will see it.
+            log("Blip-free callouts ON for this build -- this is the "
+                "experimental setting, and it is not known to boot. Patching "
+                "game_real so the boot-derive reads stock master-directory "
+                "windows means re-encoded callouts play your audio for their "
+                "whole length with no ~6 ms original scrap. Every card built "
+                "this way that has reached a machine has looped through the "
+                "startup screen, most recently on v0.102.6 after two faults in "
+                "the patch were fixed, and none has been confirmed to boot. If "
+                "yours does that, clear the box in Advanced Audio Options and "
+                "rebuild from your original image. Needs the Linux filesystem "
+                "driver because it grows the game binary; falls back to the "
+                "standard build for any firmware or host it can't safely "
+                "handle.", "warning")
         if _slot_seed_dbfs() is not None:
             log("Anti-pop seed ON (%.0f dBFS): mixing an inaudible low tone into "
                 "replacements so a callout is never digitally silent -- aimed at "
@@ -5338,8 +5345,9 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 
 # --------------------------------------------------------------------------
 # Blip-free callouts — derive-read redirect firmware cave (the callout "blip"
-# COMPLETE fix).  ON by default; the GUI's Advanced Audio Options checkbox and
-# PAD_STERN_SKIP_KEYPATCH=1 both turn it off — see _pathA_enabled.
+# COMPLETE fix).  OPT-IN since v0.103.2 (PAD_STERN_BLIP_FREE=1 / the GUI's
+# Advanced Audio Options checkbox); PAD_STERN_SKIP_KEYPATCH=1 also forces it
+# off — see _pathA_enabled, and the field record at the end of this comment.
 #
 # The firmware's boot-derive reads two ~512 B "windows" out of each sound's body
 # to set up that sound's (and, via a forward chain, every later sound's) codec
@@ -5386,7 +5394,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # Anything the locator can't pin down, a firmware with no free address space in
 # branch reach, a host that can't grow ext4 files, or a firmware that fails the
 # post-build integrity assert falls back to the standard
-# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=0 opts out;
+# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts IN;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
 #
 # WHY THIS CAVE HAD NEVER ACTUALLY BOOTED, and what was wrong with it.  Every
@@ -5446,15 +5454,38 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # A trace over that derive shows 9404 entries into the cave, exactly one
 # satisfying the new signature condition, latching the true mapping base.
 #
-# It stays ON BY DEFAULT on that evidence (David's call, 2026-08-01).  What is
-# still true, and worth keeping in view rather than burying: this remains a
-# firmware patch that has not yet been confirmed to boot on a real machine, and
-# "the emulator agrees" is what was believed the two times it shipped broken.
-# The difference now is that there are named faults with tests pinning them
-# rather than an unexplained field report.  Clearing the Advanced Audio Options
-# checkbox (PAD_STERN_BLIP_FREE=0) is the way out for anyone whose machine
-# objects, and it costs only a ~6 ms scrap of the original at two points per
-# replaced sound.
+# That evidence was judged good enough to keep the cave ON BY DEFAULT in
+# v0.102.5 (David's call, 2026-08-01).  THE FIELD SAYS NO (PAD-18, same tester,
+# same James Bond Premium 1.06.0, v0.102.6): with the checkbox ticked the
+# machine loops through Initializing exactly as before, and with it cleared the
+# card loads and the replaced sound plays correctly.  So neither v0.102.5 fix
+# was the cause, and the running score for this feature's own-segment placement
+# is three deliveries, one machine, three boot loops, zero confirmed boots.
+#
+# It is now OPT-IN (default off) and no longer describes itself as the standard
+# build.  Read that as a statement about what is KNOWN, not a verdict on the
+# design: every argument for it is still an offline one, and offline agreement
+# is precisely what was believed the three times it shipped broken.  The two
+# v0.102.5 fixes are kept -- they are real defects with tests pinning them, and
+# whoever picks this up next should not have to rediscover them -- but they are
+# no longer evidence of anything about hardware.
+#
+# What the same report also establishes is how little is being given up: the
+# tester replaced a sound with the cave off, listened for artefacts, and could
+# not hear the blip the cave exists to remove ("I did not hear any other
+# artifacts besides the song"). A ~6 ms scrap at two points inside a callout is
+# apparently at or below the audible floor on a real cabinet, which makes an
+# unbooted firmware patch a bad trade for it by default.
+#
+# WHERE TO LOOK NEXT, for whoever has a machine.  The structural lead recorded
+# in _append_cave_segment still stands and is still untested: Bond is one of
+# only 4 titles with no text/data gap, so its cave lands exactly on the stock
+# mm->start_brk.  Note the trap in reading that as "the difference between Bond
+# and cards that work" -- there are no cards that work.  The own-segment cave
+# has only ever reached one machine, so the 33/4 split explains nothing on its
+# own; it is a hypothesis to test, not a diagnosis.  The cheapest experiment
+# available is a title in the 33 (Led Zeppelin), because a boot loop there
+# would refute the placement theory outright.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5467,30 +5498,32 @@ _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
 _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
-_BLIP_FREE_OFF_REASON = ("turned off for this build (Advanced Audio Options / "
-                         "PAD_STERN_SKIP_KEYPATCH)")
+_BLIP_FREE_OFF_REASON = ("not switched on for this build; it is off by default "
+                         "(Advanced Audio Options)")
 
 
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
-    **On by default**, surfaced as the "Blip-free callouts" checkbox in the
-    GUI's Advanced Audio Options, which is also the way out if a machine ever
-    misbehaves on a card built this way.
+    **Opt-in since v0.103.2**, surfaced as the "Blip-free callouts" checkbox in
+    the GUI's Advanced Audio Options.  It requires an explicit
+    ``PAD_STERN_BLIP_FREE=1``; ``PAD_STERN_SKIP_KEYPATCH=1`` forces it off and
+    wins, so anything that already sets the historical kill switch keeps
+    working.  Either way the build falls back to
+    :func:`_restore_masterdir_consumed`, which touches no game code at all --
+    and so does any firmware or host the cave can't safely handle.
 
-    ``PAD_STERN_BLIP_FREE=0`` turns it off (what clearing the checkbox does);
-    ``PAD_STERN_SKIP_KEYPATCH=1`` also forces it off and wins, so anything that
-    already sets the historical kill switch keeps working.  Either way the build
-    falls back to :func:`_restore_masterdir_consumed`, which touches no game code
-    at all -- and so does any firmware or host the cave can't safely handle.
-
-    Unset means on, deliberately: that keeps this default true for headless and
-    worker processes that never go through the GUI's env mirroring, so the
-    checkbox and the engine can't disagree about what a build is doing.
+    Unset means OFF, and the polarity is the point.  Headless callers and the
+    spawned encode workers inherit ``os.environ`` without ever passing through
+    the GUI's env mirroring, so whatever "unset" means is what they build; it
+    now means the build that changes no game code.  Requiring "1" rather than
+    accepting "not 0" is the same argument: a stale or misspelled value fails
+    towards the standard build instead of towards a firmware patch that has
+    boot-looped a real machine on every release it has been delivered by.
     """
     if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
         return False
-    return os.environ.get("PAD_STERN_BLIP_FREE") != "0"
+    return os.environ.get("PAD_STERN_BLIP_FREE") == "1"
 
 
 def _cave_va2off(segs, va):

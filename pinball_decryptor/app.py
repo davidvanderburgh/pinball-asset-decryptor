@@ -3858,15 +3858,19 @@ class App:
     # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
     # Stern encoder reads, and a value at its default clears the var so the
     # engine baseline stays authoritative.
-    # "blip_free" keeps its original name on purpose.  The v0.102.5 fixes leave
-    # the default where it was (on), so the value worth preserving across the
-    # upgrade is a deliberate OFF -- somebody who cleared this box because a
-    # machine misbehaved must not have it silently switched back on by a key
-    # rename.
+    # The blip-free key is deliberately NOT the old "blip_free".  While the cave
+    # was the default build, a settings.json got "blip_free": true written into
+    # it by anyone who opened this dialog and pressed OK for some unrelated knob
+    # -- that value records the shipped default, not a decision.  Reading it
+    # under the new opt-in default would re-arm a firmware patch that has now
+    # boot-looped a real machine on three separate releases, for users who never
+    # chose it.  A fresh key means the old one is ignored and everybody starts
+    # from off; a deliberate ON has to be ticked once more, which is the safe
+    # direction to be wrong in.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free": True,
+        "blip_free_optin": False,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -3905,13 +3909,14 @@ class App:
             setenv("PAD_STERN_SLOT_SEED_DB", -max(min(mag, 90), 40))
         else:
             setenv("PAD_STERN_SLOT_SEED_DB", None)
-        # Blip-free callouts: ON is the engine baseline, so only the OFF case
-        # sets a var (matching how every other knob here leaves the default
-        # unset).  The engine reads "0" as off; anything else, including unset,
-        # is on -- which also keeps a spawned encode worker that never saw this
-        # dialog building the same way the GUI says it is.
+        # Blip-free callouts: OFF is the engine baseline now, so only the ON
+        # case sets a var and the engine requires an explicit "1".  The polarity
+        # matters beyond tidiness: spawned encode workers and headless callers
+        # inherit os.environ without ever going through this dialog, so whatever
+        # "unset" means is what they build.  Unset now means the standard build,
+        # which touches no game code at all.
         setenv("PAD_STERN_BLIP_FREE",
-               None if d.get("blip_free", True) else "0")
+               "1" if d.get("blip_free_optin", False) else None)
 
     def _on_audio_advanced_change(self, cfg):
         """Persist + apply the Advanced audio options."""

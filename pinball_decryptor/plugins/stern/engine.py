@@ -227,6 +227,32 @@ def _load_consumed(game_real_path, image_path):
         return None
 
 
+def _note_cold_consumed(log):
+    """Say, once per derive, why a Write is about to spend minutes in the
+    emulator.
+
+    The consumed-read map is written at Extract time into ``%TEMP%`` and keyed by
+    a fingerprint of the card, NOT by the project folder -- so it goes away when
+    the temp dir is cleaned, and it is deleted deliberately when an older
+    version's caches are swept (see :func:`clear_stale_params_caches`).  A Write
+    that misses it re-derives the whole record chain, which on a big catalog is
+    minutes with nothing on screen but a stationary bar.
+
+    A tester worked out empirically that "the version used to decrypt must be the
+    version that writes the card", and read the difference as the app freezing
+    (a tester, 2026-08-01).  That rule is really "the cache must still be there",
+    and the cost is time, not correctness -- but neither of those was sayable
+    from the outside, because this path logged nothing at all."""
+    if log:
+        log("No cached master-directory read map for this card, so it has to be "
+            "re-derived from the firmware before the sounds can be written. "
+            "This is the slow part of a Write (minutes on a big sound catalog) "
+            "and it happens when the card was extracted by a different version "
+            "of the app, or the temporary cache has since been cleaned up. "
+            "Nothing is wrong; extracting and writing on the same version, in "
+            "one sitting, skips it.", "info")
+
+
 def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     _clear_stale_params_caches_once(log)
     fp = _fingerprint(game_real_path, image_path)
@@ -3496,7 +3522,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                          "Verifying blip-free firmware patch...")
                             _assert_param_integrity(patched_gr, img_path,
                                                     audio_patches, params, np,
-                                                    log, work)
+                                                    log, work, progress)
                             pathA_applied = True
                             # The bypass rode along inside the rebuilt firmware,
                             # so this build's validator status is that overlay's.
@@ -3515,8 +3541,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "standard way instead (the brief original-callout "
                                 "scrap remains)." % e, "warning")
                     elif audio_patches:
-                        pathA_why = ("turned off for this build (Advanced "
-                                     "Audio Options / PAD_STERN_SKIP_KEYPATCH)")
+                        pathA_why = _BLIP_FREE_OFF_REASON
                     if (audio_patches and not pathA_applied
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
@@ -3526,7 +3551,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         if audio_patches is None:
                             return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
-                                                params, np, log, work)
+                                                params, np, log, work, progress)
                     if audio_patches:
                         why = pathA_why or "see the build log"
                         if os.environ.get(
@@ -5185,6 +5210,7 @@ def _params_for(gr_path, img_path, log, progress):
             return params
         except Exception:
             pass
+    _note_cold_consumed(log)
     from .spike2.emulator import Spike2Emu
     emu = Spike2Emu(gr_path, img_path)
     try:
@@ -5362,6 +5388,73 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # post-build integrity assert falls back to the standard
 # _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts in;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
+#
+# WHY THIS CAVE HAD NEVER ACTUALLY BOOTED, and what was wrong with it.  Every
+# claim of hardware confirmation above belongs to the OLD, unsafe data-segment
+# placement (Led Zeppelin LE 1.22, 2026-07-25, pre-v0.94.0).  What v0.94.0
+# proved about the own-segment placement it proved OFFLINE, in the emulator --
+# and Spike2Emu maps each PT_LOAD's full p_memsz itself (spike2/emulator.py, the
+# mem_map over `_algn(vaddr + memsz)`), so it cannot see how a real ARM Linux
+# loader treats an appended segment.  Worse, from v0.94.0 through v0.102.2 the
+# rebuilt firmware was deleted before it could be copied onto the card on every
+# host that has the ext4 driver (see PAD-6 / grow_plan["cleanup"]), so no user
+# ever booted this cave either: driver hosts got a card the machine rejected,
+# and every card that DID work was a non-driver host silently falling back to
+# the standard build.
+#
+# v0.102.3 fixed the delivery, which made it the first release ever to put this
+# cave in front of a machine.  The first report back was a James Bond Premium
+# 1.06.0 that reboots partway through "Initializing" and loops there (a tester,
+# 2026-08-01) -- the same tester whose pre-v0.94.0 card froze at the game logo
+# on the old placement.
+#
+# The ELF geometry was audited across all 37 vendor firmwares and came back
+# clean (see _append_cave_segment, which records the result so it isn't
+# re-derived).  Both faults found are in the cave's RUNTIME behaviour, and both
+# end the same way -- a window that should have been redirected wasn't, so the
+# boot-derive read the re-encoded bytes the cave exists to hide from it, which
+# desyncs the codec forward chain, and a desynced chain is a reboot:
+#
+#   1. It latched the image's mapped base from the first call with r2 == 0x200,
+#      i.e. it took "a 512-byte read" to mean "the master directory's first
+#      window read".  Nothing established that; the routine has four call sites
+#      and _capture_first_window_off has always had to reject calls whose r1
+#      lands outside the image.  A foreign call arriving first poisons the base
+#      for the life of the process and NOTHING is redirected after that.
+#   2. It only redirected reads with r2 == 0x200 exactly.  But 0x200 is not a
+#      constant the firmware believes in: the stream reader computes
+#      `bic r2, r5, #0x3f` -- the run length rounded down to 64 -- so a window
+#      run that isn't a full 512 bytes arrives as some other multiple of 64 and
+#      was passed straight through.  The consumed map the table is built from
+#      has no size filter, so the table always described those runs; only the
+#      cave's own gate discarded them.
+#
+# _asm_derive_redirect_cave now identifies the calibrating read by the card's
+# own content instead of by call order, and decides redirects on the file offset
+# alone.  Both fixes are reasoned out in full there.  Measured on Bond 1.06
+# during the cat-0 derive: 4 static call sites (3 hard-coding r2=0x40, one
+# variable), 200/200 of the r2==0x200 calls in-image, the 0x40 scratch calls all
+# out-of-image -- so (1) is an unguarded assumption that happens to hold for
+# that pass, while (2) bites whenever a run isn't a full window.
+#
+# Both fixes are verified at instruction level (tests drive the emitted cave
+# under unicorn through exactly the call order that broke it, and through a
+# window read that isn't 512 bytes) and end to end against the real Bond card:
+# _assert_param_integrity passes on the rebuilt firmware with all 2351 sounds
+# keeping valid parameters, while the same patches against STOCK firmware shift
+# 2348 of them -- so the check is sensitive and the cave is what makes it pass.
+# A trace over that derive shows 9404 entries into the cave, exactly one
+# satisfying the new signature condition, latching the true mapping base.
+#
+# It stays ON BY DEFAULT on that evidence (David's call, 2026-08-01).  What is
+# still true, and worth keeping in view rather than burying: this remains a
+# firmware patch that has not yet been confirmed to boot on a real machine, and
+# "the emulator agrees" is what was believed the two times it shipped broken.
+# The difference now is that there are named faults with tests pinning them
+# rather than an unexplained field report.  Clearing the Advanced Audio Options
+# checkbox (PAD_STERN_BLIP_FREE=0) is the way out for anyone whose machine
+# objects, and it costs only a ~6 ms scrap of the original at two points per
+# replaced sound.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5374,19 +5467,26 @@ _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
 _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
+_BLIP_FREE_OFF_REASON = ("turned off for this build (Advanced Audio Options / "
+                         "PAD_STERN_SKIP_KEYPATCH)")
+
+
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
     **On by default**, surfaced as the "Blip-free callouts" checkbox in the
-    GUI's Advanced Audio Options.  The cave now gets a segment of its own (see
-    :func:`_append_cave_segment`) instead of squatting on the game's data, which
-    is what made the pre-v0.94.0 placement unsafe.
+    GUI's Advanced Audio Options, which is also the way out if a machine ever
+    misbehaves on a card built this way.
 
-    ``PAD_STERN_BLIP_FREE=0`` turns it off (what the checkbox clears to);
+    ``PAD_STERN_BLIP_FREE=0`` turns it off (what clearing the checkbox does);
     ``PAD_STERN_SKIP_KEYPATCH=1`` also forces it off and wins, so anything that
     already sets the historical kill switch keeps working.  Either way the build
     falls back to :func:`_restore_masterdir_consumed`, which touches no game code
     at all -- and so does any firmware or host the cave can't safely handle.
+
+    Unset means on, deliberately: that keeps this default true for headless and
+    worker processes that never go through the GUI's env mirroring, so the
+    checkbox and the engine can't disagree about what a build is doing.
     """
     if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
         return False
@@ -5441,21 +5541,74 @@ def _locate_window_read_fn(raw):
     return hits[0] if len(hits) == 1 else None
 
 
+_CAVE_SIG_WORDS = 4              # 16 bytes of card content that identify FIRST_OFF
+_CAVE_NCODE = 54                 # code + literals + BASEVAR + signature, in words
+
+
 def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
-                              first_off, basevar_va):
+                              first_off, basevar_va, sig_va):
     """Assemble the self-calibrating derive-read redirect cave (ARM, little-
     endian) for the window-read function at *fn*, resuming at *ret* (= fn+12).
 
-    On the FIRST masterdir window read (``r2 == 0x200`` and the stored base is
-    still 0) it computes ``base = r1 - FIRST_OFF`` and caches it in a writable
-    word (BASEVAR); thereafter ``fileoff = r1 - base`` and it matches a FILE-OFFSET
-    table (card-position-independent).  A matched window redirects ``r1`` to that
-    window's stock copy; unmatched reads (and the non-window ``r2 != 0x200``
-    scratch call) pass through untouched.  The cave replicates the function's
-    3-word prologue (push / sub sp / add sb -- all position-independent) and
-    returns to *ret*.  ``game_real`` is ET_EXEC, so the absolute VAs baked as
-    literals are HW-valid; the code must live in an executable segment (see
-    :func:`_set_seg_exec`)."""
+    The cave turns a live source pointer into a FILE OFFSET so the redirect
+    table can be card-position-independent, which needs the address the image is
+    mapped at.  That is only knowable at runtime, so the cave recovers it as
+    ``base = r1 - FIRST_OFF`` on the master directory's first window read and
+    caches it in a writable word (BASEVAR).  Thereafter ``fileoff = r1 - base``
+    is matched against the table; a hit redirects ``r1`` into that window's stock
+    copy, a miss passes through untouched.
+
+    IDENTIFYING that first read is the delicate part, and getting it wrong is
+    silent.  The original cave took "the first call with ``r2 == 0x200``" as the
+    first window read.  That is not sound: this routine is a shared helper, and
+    ``_capture_first_window_off`` -- the build-time code that measures FIRST_OFF
+    in the first place -- has always had to reject calls whose ``r1`` points
+    outside the image, which is precisely an admission that ``r2 == 0x200`` on
+    its own does not mean "master directory window".  One such call arriving
+    ahead of the real one poisons BASEVAR for the life of the process: every
+    fileoff is then wrong, nothing matches the table, no window is redirected,
+    and the boot-derive reads the re-encoded bytes it was supposed to be
+    shielded from.  That desyncs the codec forward chain, which is the failure
+    the whole cave exists to prevent and which the machine answers by rebooting.
+    Nothing catches it in the emulator, because ``_assert_param_integrity``
+    calls ``derive_params()`` directly, so the first ``r2 == 0x200`` call it ever
+    sees IS the right one -- the ordering that makes this fail only exists on a
+    real boot, where the whole init runs first (a tester's James Bond Premium
+    1.06.0, rebooting partway through "Initializing", 2026-08-01).
+
+    So the base is no longer latched on position.  It is latched on EVIDENCE: 16
+    bytes of the card's own content at FIRST_OFF are baked into the cave (SIG),
+    and the base is taken only from a call whose ``r1`` actually points at those
+    bytes.  Anything else passes through without touching BASEVAR.  The check
+    runs on every call rather than only while BASEVAR is zero, so a second
+    derive pass, or the image being mapped somewhere else, re-latches instead of
+    silently going stale.  Until a match has been seen there is no base and
+    nothing is redirected, which is the safe direction: an un-redirected read
+    is the old standard build's behaviour, not a corrupt one.
+
+    ``r2 == 0x200`` now gates ONLY the calibration, not the redirect, and that
+    is a second fix rather than a tidy-up.  0x200 is not a constant the firmware
+    believes in: of the four call sites this routine has (identical layout on
+    all 37 vendor builds), three hard-code ``mov r2,#0x40`` and the fourth --
+    the master-directory stream reader, the only one that can ever present a
+    window -- computes ``bic r2, r5, #0x3f``, i.e. the run length rounded down
+    to 64.  It is 0x200 for a full window and something else for any run that
+    isn't, and the old cave answered a non-0x200 window read by passing it
+    straight through.  That leaves that window un-redirected while the card
+    carries re-encoded bytes underneath it, which is the same desync-the-chain
+    reboot as a poisoned base, just for one sound instead of all of them.  The
+    consumed map the table is built from comes from a memory-read hook with no
+    size filter, so the table always described those runs correctly; only the
+    cave's own gate threw them away.  Redirecting is now decided purely by
+    whether the file offset falls in a table window.  The ``r2 == 0x200`` test
+    survives in front of the signature check because that check dereferences
+    ``r1``, and a 512-byte read is the case we know carries a readable image
+    pointer; the scratch calls fall through to the table scan, where their
+    out-of-image pointer matches nothing and passes through untouched.
+
+    The cave replicates the function's 3-word prologue (push / sub sp / add sb
+    -- all position-independent) and returns to *ret*.  ``game_real`` is ET_EXEC,
+    so the absolute VAs baked as literals are HW-valid."""
     def w(x):
         return struct.pack("<I", x & 0xffffffff)
 
@@ -5467,36 +5620,71 @@ def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
 
     def iva(i):
         return cave_va + i * 4
-    LIT_BASE, LIT_FIRST, LIT_TABLE = iva(26), iva(27), iva(28)
+    LIT_BASE, LIT_SIG, LIT_FIRST, LIT_TABLE = (iva(45), iva(46), iva(47),
+                                               iva(48))
 
     def ldrpc(rt, frm, lit):
         return w(0xE59F0000 | (rt << 12) | (lit - (frm + 8)))
+    DONE, NOLATCH, HAVE_BASE, SCAN = iva(43), iva(26), iva(30), iva(32)
     words = [
         w(W_push), w(W_subsp),                  # 0,1  replicated prologue
-        w(0xE3520C02),                          # 2  cmp r2,#0x200   (window read?)
-        br(0x1, iva(3), iva(24)),               # 3  bne done
-        ldrpc(4, iva(4), LIT_BASE),             # 4  ldr r4,=&BASEVAR
-        w(0xE5948000),                          # 5  ldr r8,[r4]
-        w(0xE3580000),                          # 6  cmp r8,#0
-        br(0x1, iva(7), iva(11)),               # 7  bne have_base
-        ldrpc(5, iva(8), LIT_FIRST),            # 8  ldr r5,=FIRST_OFF
-        w(0xE0418005),                          # 9  sub r8,r1,r5
-        w(0xE5848000),                          # 10 str r8,[r4]     (base = r1 - FIRST_OFF)
-        w(0xE0418008),                          # 11 have_base: sub r8,r1,r8   (fileoff)
-        ldrpc(4, iva(12), LIT_TABLE),           # 12 ldr r4,=&TABLE
-        w(0xE4945004),                          # 13 scan: ldr r5,[r4],#4   (lo)
-        w(0xE3550000),                          # 14 cmp r5,#0
-        br(0x0, iva(15), iva(24)),              # 15 beq done  (zero sentinel)
-        w(0xE4946004), w(0xE4947004),           # 16,17 ldr r6/r7,[r4],#4   (hi, stockbuf)
-        w(0xE1580005), br(0x3, iva(19), iva(13)),  # 18 cmp r8,r5 ; 19 blo scan
-        w(0xE1580006), br(0x2, iva(21), iva(13)),  # 20 cmp r8,r6 ; 21 bhs scan
-        w(0xE0488005), w(0xE0871008),           # 22 sub r8,r8,r5 ; 23 add r1,r7,r8
-        w(W_addsb),                             # 24 done: add sb,r1,#0x40
-        br(0xE, iva(25), ret),                  # 25 b ret (fn+12)
-        w(basevar_va), w(first_off), w(table_va),  # 26,27,28 literals
-        w(0),                                   # 29 BASEVAR (writable, init 0)
+        w(0xE3520C02),                          # 2  cmp r2,#0x200 (calibration candidate?)
+        br(0x1, iva(3), NOLATCH),               # 3  bne nolatch -> still eligible to redirect
+        # --- is r1 really pointing at the card bytes that live at FIRST_OFF? ---
+        ldrpc(5, iva(4), LIT_SIG),              # 4  ldr r5,=&SIG
+        w(0xE5916000), w(0xE5957000),           # 5,6   ldr r6,[r1]    ; ldr r7,[r5]
+        w(0xE1560007), br(0x1, iva(8), NOLATCH),  # 7 cmp r6,r7 ; 8 bne nolatch
+        w(0xE5916004), w(0xE5957004),           # 9,10  ldr r6,[r1,#4] ; ldr r7,[r5,#4]
+        w(0xE1560007), br(0x1, iva(12), NOLATCH),  # 11 cmp ; 12 bne nolatch
+        w(0xE5916008), w(0xE5957008),           # 13,14 ldr r6,[r1,#8] ; ldr r7,[r5,#8]
+        w(0xE1560007), br(0x1, iva(16), NOLATCH),  # 15 cmp ; 16 bne nolatch
+        w(0xE591600C), w(0xE595700C),           # 17,18 ldr r6,[r1,#12]; ldr r7,[r5,#12]
+        w(0xE1560007), br(0x1, iva(20), NOLATCH),  # 19 cmp ; 20 bne nolatch
+        # --- matched: (re)latch base = r1 - FIRST_OFF ---
+        ldrpc(4, iva(21), LIT_BASE),            # 21 ldr r4,=&BASEVAR
+        ldrpc(5, iva(22), LIT_FIRST),           # 22 ldr r5,=FIRST_OFF
+        w(0xE0418005),                          # 23 sub r8,r1,r5
+        w(0xE5848000),                          # 24 str r8,[r4]
+        br(0xE, iva(25), HAVE_BASE),            # 25 b have_base   (r8 = base)
+        ldrpc(4, iva(26), LIT_BASE),            # 26 nolatch: ldr r4,=&BASEVAR
+        w(0xE5948000),                          # 27 ldr r8,[r4]
+        w(0xE3580000),                          # 28 cmp r8,#0
+        br(0x0, iva(29), DONE),                 # 29 beq done   (no base yet)
+        w(0xE0418008),                          # 30 have_base: sub r8,r1,r8  (fileoff)
+        ldrpc(4, iva(31), LIT_TABLE),           # 31 ldr r4,=&TABLE
+        w(0xE4945004),                          # 32 scan: ldr r5,[r4],#4   (lo)
+        w(0xE3550000),                          # 33 cmp r5,#0
+        br(0x0, iva(34), DONE),                 # 34 beq done  (zero sentinel)
+        w(0xE4946004), w(0xE4947004),           # 35,36 ldr r6/r7,[r4],#4 (hi, stockbuf)
+        w(0xE1580005), br(0x3, iva(38), SCAN),  # 37 cmp r8,r5 ; 38 blo scan
+        w(0xE1580006), br(0x2, iva(40), SCAN),  # 39 cmp r8,r6 ; 40 bhs scan
+        w(0xE0488005), w(0xE0871008),           # 41 sub r8,r8,r5 ; 42 add r1,r7,r8
+        w(W_addsb),                             # 43 done: add sb,r1,#0x40
+        br(0xE, iva(44), ret),                  # 44 b ret (fn+12)
+        w(basevar_va), w(sig_va), w(first_off), w(table_va),  # 45-48 literals
+        w(0),                                   # 49 BASEVAR (writable, init 0)
+        w(0), w(0), w(0), w(0),                 # 50-53 SIG (filled by the caller)
     ]
+    assert len(words) == _CAVE_NCODE, len(words)
     return b"".join(words)
+
+
+def _card_bytes_at(img_path, patches, off, n):
+    """The *n* bytes that will be at image file offset *off* ON THE CARD, i.e.
+    the stock image with *patches* (``{body_off: body}``) overlaid.
+
+    The cave's calibration signature has to be read from this, not from the
+    stock image: by the time the machine performs that read, the replaced bodies
+    are already on the card, so a signature taken from stock would simply never
+    match if the first window happens to land inside one."""
+    with open(img_path, "rb") as f:
+        f.seek(off)
+        buf = bytearray(f.read(n))
+    for boff, body in patches.items():
+        lo, hi = max(off, boff), min(off + n, boff + len(body))
+        if lo < hi:
+            buf[lo - off:hi - off] = body[lo - boff:hi - boff]
+    return bytes(buf)
 
 
 def _capture_first_window_off(gr_path, img_path, fn):
@@ -5534,14 +5722,19 @@ def _capture_first_window_off(gr_path, img_path, fn):
     return got.get("off")
 
 
-def _replaced_consumed_offsets(gr_path, img_path, patches, np):
+def _replaced_consumed_offsets(gr_path, img_path, patches, np, log=None,
+                               progress=None):
     """For each replaced body in *patches* (``{off: body}``), the sorted image
     file offsets the boot-derive CONSUMES within it (the two window runs).
 
     Uses the Extract-time consumed cache when present; otherwise runs one
     master-directory derive with a read hook over just the replaced extents -- so
     a legacy cache that stored params but not the consumed map still yields a
-    blip-free build instead of silently falling back to the standard one."""
+    blip-free build instead of silently falling back to the standard one.
+
+    That fallback derive is the expensive one (minutes on a big catalog), so it
+    reports progress and says why it is running: without both, a Write whose
+    cache had gone reads as a frozen app -- see :func:`_note_cold_consumed`."""
     out = {}
     cached = _load_consumed(gr_path, img_path)
     if cached is not None and len(cached):
@@ -5564,6 +5757,7 @@ def _replaced_consumed_offsets(gr_path, img_path, patches, np):
                 if b0 <= o + k < e0:
                     acc.add(o + k)
         return on_read
+    _note_cold_consumed(log)
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
@@ -5572,7 +5766,7 @@ def _replaced_consumed_offsets(gr_path, img_path, patches, np):
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
                             begin=(EM.DESC_BASE + off) & ~0xfff,
                             end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
-        emu.derive_params()
+        emu.derive_params(progress=progress)
     finally:
         emu.close()
     for off in patches:
@@ -5622,6 +5816,40 @@ def _append_cave_segment(raw, need, fn):
     Returns ``(cave_va, append_off, gap_bytes)``.  Raises ``RuntimeError`` (so
     the caller falls back to the standard build) if there's no repurposable
     header or no free address space within ARM branch reach of *fn*.
+
+    AUDITED against all 37 vendor firmwares while chasing the James Bond boot
+    loop (PAD-11), and the ELF geometry this produces came back clean, so don't
+    re-litigate it: p_offset/p_vaddr stay page-congruent, p_filesz never runs
+    past EOF, the new segment overlaps no existing one, and the game's .bss is
+    still mapped and zeroed exactly as stock.  That last one is worth spelling
+    out because it looks broken and isn't.  The cave does become the new maximum
+    for both ``elf_bss`` and ``elf_brk``, which does make binfmt_elf's
+    *post-loop* ``set_brk`` a no-op -- but PT_GNU_STACK is program header index
+    7, after both PT_LOADs, on every one of the 37.  So the cave is a LATER
+    PT_LOAD than the RW one, the in-loop ``if (elf_brk > elf_bss)`` fires on the
+    cave's own iteration, and it performs the identical ``vm_brk`` +
+    partial-page clear the stock load would have.  Rewriting this to sort the
+    headers, or to place the cave before the data segment, would break that.
+
+    Two things the audit did turn up, neither of them the Bond fault:
+
+    * **The placement splits the library 33/4, and Bond is in the minority.**
+      Where a title has a text/data gap big enough, the cave goes there (33
+      titles, Led Zeppelin among them).  Where it doesn't -- Bond LE 1.06,
+      Deadpool LE 1.14, Elvira 1.11, TMNT Pro 1.58 -- the only candidate left is
+      the synthetic "32 MB above the highest PT_LOAD", and ``cave_va`` is then
+      *precisely* the stock ``mm->start_brk``: the cave claims the bottom of the
+      heap arena and is safe only because ``set_brk`` afterwards pushes
+      ``start_brk`` past it.  Nothing here knows that, and nothing tests it.
+      This is the one structural axis on which the card that boot-loops differs
+      from every card anyone has booted, so it is where to look next.
+    * **The resulting PT_LOAD table is no longer sorted by p_vaddr** on the 33
+      gap-placed titles, because the cave keeps index 7 while sitting below the
+      data segment.  The gABI requires ascending order; Linux and glibc tolerate
+      it for ET_EXEC, which is why those titles work at all.  Left alone
+      deliberately: the fix is a header reshuffle, it would move the cave out of
+      last position and undo the .bss property above, and none of it can be
+      confirmed without a machine.
     """
     PAGE = 0x1000
     loads = [(va, mz) for _ph, va, _o, _fz, mz, _fl in _iter_phdrs(raw)]
@@ -5727,7 +5955,8 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
 
     # The exact bytes the boot-derive consumes for each replaced sound == the
     # window ranges to redirect (from the Extract cache, or a fresh derive).
-    per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np)
+    per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np, log,
+                                          progress)
     windows = []   # (lo, hi) image file-offset ranges (2 per mono sound)
     with open(img_path, "rb") as f:
         stock_chunks = []
@@ -5747,10 +5976,10 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         raise RuntimeError("no master-directory windows found for the replaced "
                            "sound(s) -- nothing to redirect.")
 
-    # Layout, all contiguous inside the cave's own segment: 30-word cave (code +
-    # 3 literals + BASEVAR), the redirect table (12 bytes/window + a zero
-    # sentinel), then the stock window copies.
-    ncode = 30
+    # Layout, all contiguous inside the cave's own segment: the cave itself
+    # (code + 4 literals + BASEVAR + the 4-word signature), the redirect table
+    # (12 bytes/window + a zero sentinel), then the stock window copies.
+    ncode = _CAVE_NCODE
     table_bytes = (len(windows) + 1) * 12
     total_stock = sum(b - a for a, b in windows)
     needed = ncode * 4 + table_bytes + total_stock
@@ -5763,12 +5992,27 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
             "the located function did not perform an image window read -- "
             "unsupported firmware layout; using the standard build.")
 
+    # The content the cave identifies that first read BY (see
+    # _asm_derive_redirect_cave).  It has to be what the CARD will hold there,
+    # not what the stock image holds, because the read happens after our patches
+    # are on the card -- so overlay any replaced body covering those bytes.
+    sig = _card_bytes_at(img_path, patches, first_off, _CAVE_SIG_WORDS * 4)
+    if len(set(sig)) < 2:
+        # A run of identical bytes is not an identification; some other 512-byte
+        # buffer of the same filler would latch the base off the wrong pointer,
+        # which is the exact failure this signature exists to stop.
+        raise RuntimeError(
+            "the first master-directory window is %d identical bytes (0x%02x), "
+            "which can't identify the read the cave has to calibrate on -- "
+            "using the standard build." % (len(sig), sig[0] if sig else 0))
+
     # Give the cave a segment of its own rather than squatting on the game's
     # data (see the section comment): appended bytes at a virtual address no
     # PT_LOAD claims can't collide with anything the game owns.
     cave_va, append_off, gap = _append_cave_segment(raw, needed, fn)
     table_va = cave_va + ncode * 4
-    basevar_va = cave_va + 29 * 4
+    basevar_va = cave_va + 49 * 4
+    sig_va = cave_va + 50 * 4
     stock_va = table_va + table_bytes
     placements = []
     c = stock_va
@@ -5776,8 +6020,9 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
         placements.append(c)
         c += (b0 - a0)
 
-    cave = _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
-                                     first_off, basevar_va)
+    cave = bytearray(_asm_derive_redirect_cave(
+        raw, va2off, fn, ret, cave_va, table_va, first_off, basevar_va, sig_va))
+    cave[50 * 4:50 * 4 + len(sig)] = sig
     table = b"".join(struct.pack("<III", a0, b0, sb)
                      for (a0, b0), sb in zip(windows, placements))
     table += struct.pack("<III", 0, 0, 0)     # zero sentinel
@@ -5873,6 +6118,7 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
                     % (off, n), "info")
         return patches
 
+    _note_cold_consumed(log)
     reads = {off: set() for off in patches}     # body_off -> consumed file offsets
 
     def _mk(b0, e0, acc):
@@ -5891,7 +6137,9 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
                             begin=(EM.DESC_BASE + off) & ~0xfff,
                             end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
-        emu.derive_params()         # the real MASTERDIR_DECODE pass
+        # Progress, because this is the multi-minute stretch a cold cache adds
+        # to a Write and a stationary bar here is what reads as a hang.
+        emu.derive_params(progress=progress)    # the real MASTERDIR_DECODE pass
         for off, body in patches.items():
             stock = bytes(emu.mm[off:off + len(body)])
             b = bytearray(body)
@@ -6012,12 +6260,16 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
 
 
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
-                            work_dir):
+                            work_dir, progress=None):
     """Write-time safety net: apply *patches* to a temp ``image.bin`` and confirm
     the firmware's master-directory decode derives the **same** codec scale /
     predictor for every sound as the stock card.  A non-empty shift list means the
     forward chain is still broken (a card that would reboot on audio), so we raise
-    rather than ship it.  Set ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1`` to skip."""
+    rather than ship it.  Set ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1`` to skip.
+
+    This one derives on EVERY audio Write, cache or no cache, so it reports
+    progress too -- it is the last multi-minute stretch before the card is
+    written and used to be the one with nothing on screen at all."""
     if not patches or os.environ.get("PAD_STERN_SKIP_MASTERDIR_VERIFY") == "1":
         return
     import shutil
@@ -6033,7 +6285,7 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
         emu = Spike2Emu(gr_path, tmp)
         try:
             emu.boot()
-            rows = emu.derive_params()
+            rows = emu.derive_params(progress=progress)
         finally:
             emu.close()
     finally:

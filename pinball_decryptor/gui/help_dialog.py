@@ -171,10 +171,14 @@ HELP_CONTENT = {
          "read at the copy, so your audio plays for the whole sound. It "
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. Every build "
-         "re-checks all the sounds against the patched firmware and quietly "
-         "falls back to the plain fix if anything looks wrong, so the only "
-         "cost of unticking it is that brief scrap."),
+         "longer, and it is skipped for a direct-SD write. A machine that "
+         "rebooted through its startup screen was traced to this and fixed "
+         "in v0.102.4: the added code was working out where the sound data "
+         "sat from the first read of the right size (an unrelated read can "
+         "come first on a real machine, leaving it redirecting nothing), and "
+         "it was acting only on reads of one exact size while the game works "
+         "that size out as it goes. If a card ever misbehaves, untick this "
+         "and rebuild — that costs you only the brief scrap."),
     ],
     "Replace Video": [
         ("Scan and assign",

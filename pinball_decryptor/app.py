@@ -3858,6 +3858,11 @@ class App:
     # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
     # Stern encoder reads, and a value at its default clears the var so the
     # engine baseline stays authoritative.
+    # "blip_free" keeps its original name on purpose.  The v0.102.4 fixes leave
+    # the default where it was (on), so the value worth preserving across the
+    # upgrade is a deliberate OFF -- somebody who cleared this box because a
+    # machine misbehaved must not have it silently switched back on by a key
+    # rename.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
@@ -3903,7 +3908,8 @@ class App:
         # Blip-free callouts: ON is the engine baseline, so only the OFF case
         # sets a var (matching how every other knob here leaves the default
         # unset).  The engine reads "0" as off; anything else, including unset,
-        # is on.
+        # is on -- which also keeps a spawned encode worker that never saw this
+        # dialog building the same way the GUI says it is.
         setenv("PAD_STERN_BLIP_FREE",
                None if d.get("blip_free", True) else "0")
 

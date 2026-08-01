@@ -8496,6 +8496,7 @@ class MainWindow:
                 "as-is." + (("\n\n" + note) if note else ""))
         return forces
 
+    # Keep in step with App._AUDIO_ADV_DEFAULTS.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
@@ -8610,8 +8611,8 @@ class MainWindow:
         _rule()
 
         # Blip-free callouts (the master-directory scrap fix).  On by default:
-        # this is the standard build now, and the checkbox is here so a card can
-        # be built without any firmware change at all if one is ever suspected.
+        # this is the standard build, and the checkbox is the way out if a
+        # machine ever objects to a card built this way.
         blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free", True)))
         ttk.Checkbutton(
             dlg, variable=blip_var,
@@ -8647,8 +8648,22 @@ class MainWindow:
                  "video replacement, and it is skipped for a direct-SD write. "
                  "Every build re-derives all the sounds' settings from the "
                  "patched firmware first and falls back to the plain "
-                 "stock-byte restore if anything would drift, so turning this "
-                 "off costs you the brief scrap and nothing else.").pack(
+                 "stock-byte restore if anything would drift. "
+                 "Two faults in that added code were found and fixed in "
+                 "v0.102.4, after a machine rebooted through its startup "
+                 "screen. It had been working out where the sound data sat in "
+                 "memory from the first read that merely looked like the right "
+                 "size, and on a real machine an unrelated read can come first, "
+                 "which left it pointing at the wrong place and redirecting "
+                 "nothing; it now identifies that read by the card's own "
+                 "contents, so the order no longer matters. It was also acting "
+                 "only on reads of one exact size, while the game works that "
+                 "size out as it goes, so some sounds were skipped. Either one "
+                 "leaves the game reading your new audio where it expected the "
+                 "original, which is what makes a machine reboot. If a card "
+                 "ever misbehaves, clear this box and rebuild: that gives you a "
+                 "card with no firmware change at all, at the cost of the brief "
+                 "scrap described above.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()

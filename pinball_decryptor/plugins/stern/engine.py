@@ -5470,6 +5470,43 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # whoever picks this up next should not have to rediscover them -- but they are
 # no longer evidence of anything about hardware.
 #
+# AND NEITHER OF THEM WAS EVER GOING TO FIX BOND.  Measured on the real card
+# (PAD-18) over the full cat-0 derive, which is the same trace the paragraph
+# above quotes 9404 from:
+#
+#   * of those 9404 entries at fn=0x2ef45c, 4702 carry r2 == 0x200 and ALL 4702
+#     have r1 inside the image; the other 4702 are the r2 == 0x40 scratch calls,
+#     all pointing at ctx+0x158, out of image.  There is no out-of-image 0x200
+#     call anywhere in the pass -- so fault (1), a foreign call arriving first
+#     and poisoning the base, has nothing to bite on here;
+#   * every window read is exactly 0x200, and every consumed run inside a body
+#     is exactly 512 contiguous bytes.  Fault (2)'s premise -- a run that isn't
+#     a full window arriving as some other multiple of 64 -- never occurs.
+#
+# Those numbers were already in this comment.  What was missing was the
+# conclusion: the v0.102.6 retest could not have come back any other way, and
+# reporting the fixes to the tester as the answer was a mistake made from data
+# already in hand.  The fixes are still right in general; they were never
+# Bond's fault.
+#
+# WORSE, THE SYMPTOM DOES NOT MATCH A DESYNC AT ALL.  The model this whole cave
+# is reasoned about says a desynced forward chain reboots the machine WHEN
+# AUDIO PLAYS, and the same tester's pre-v0.94.0 desync did exactly that: it
+# got through the initialization screen and froze at the game logo.  What the
+# caved card does is reboot mid-init, deterministically, always after the
+# second of the four progress periods, before the logo.  Both v0.102.5 faults
+# only change WHETHER A WINDOW GETS REDIRECTED, i.e. they only move the card
+# between "desync" and "no desync" -- neither can produce a hard stop at a
+# fixed, earlier point.  Three releases of work have been aimed at the wrong
+# failure.  A likelier shape is that the process dies on or near its FIRST
+# ENTRY into the cave, or that something rejects the grown binary before the
+# codec matters at all.
+#
+# Nothing offline can currently see that, which is the third thing to know:
+# Spike2Emu.boot() enters fn ZERO times, stock or caved.  Every offline result
+# about this cave comes from derive_params(), so the phase of a real boot where
+# the machine actually dies has no coverage here at all.
+#
 # What the same report also establishes is how little is being given up: the
 # tester replaced a sound with the cave off, listened for artefacts, and could
 # not hear the blip the cave exists to remove ("I did not hear any other
@@ -5477,15 +5514,57 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # apparently at or below the audible floor on a real cabinet, which makes an
 # unbooted firmware patch a bad trade for it by default.
 #
-# WHERE TO LOOK NEXT, for whoever has a machine.  The structural lead recorded
-# in _append_cave_segment still stands and is still untested: Bond is one of
-# only 4 titles with no text/data gap, so its cave lands exactly on the stock
-# mm->start_brk.  Note the trap in reading that as "the difference between Bond
-# and cards that work" -- there are no cards that work.  The own-segment cave
-# has only ever reached one machine, so the 33/4 split explains nothing on its
-# own; it is a hypothesis to test, not a diagnosis.  The cheapest experiment
-# available is a title in the 33 (Led Zeppelin), because a boot loop there
-# would refute the placement theory outright.
+# WHERE TO LOOK NEXT, for whoever has a machine.  Ranked by what the symptom
+# above actually points at, NOT by what is easiest to change here:
+#
+#   1. The process dies at/near its first entry into the cave, for a reason
+#      unicorn cannot show -- the RWX file mapping refused or not actually
+#      writable, `str r8,[r4]` into BASEVAR faulting, an exec-permission policy.
+#      This fits "always after two periods" and is present in v0.102.3 and
+#      v0.102.6 alike.  Settled cheaply: build a cave that never WRITES memory
+#      (no BASEVAR -- e.g. a second, R/W-only PT_LOAD, or no caching at all).
+#      Getting past two periods convicts the write; a serial console or dmesg
+#      off the machine names it outright and is worth more than any of this.
+#   2. Something outside the game rejects the grown / re-laid-out binary before
+#      the codec matters.  Settled by a build with p_flags=5 and no BASEVAR, or
+#      one placed without growing the file.
+#   3. The SIG compare does UNALIGNED word loads (four `ldr r6,[r1,#n]` below).
+#      On Bond FIRST_OFF=0x58df6 is 2 mod 4 and 2344 of the 4702 window
+#      pointers are 2 mod 4 -- and the stock transform assembles its own
+#      message block with 64 `ldrb`s precisely because that pointer is
+#      unaligned.  It cannot fault (r2 >= 0x200 guarantees the bytes are
+#      there), but on a core or kernel that doesn't give correct unaligned LDR
+#      the signature never matches, the base never latches and nothing is
+#      redirected.  A byte-wise compare removes the hazard for free.  Note it
+#      predicts the WRONG symptom (a late, audio-time failure) and postdates
+#      v0.102.3, so it is not the boot loop -- fix it while you are in here,
+#      not as the answer.
+#   4. The redirect has no caller discriminator.  fn is the SHA-1 block
+#      transform; its wrapper at 0x2f0314 has 9 call sites across at least 3
+#      functions, one of them (0x25e914) the very routine valpatch stubs out.
+#      Since v0.102.5 the redirect keys on the file offset alone, so any caller
+#      whose data pointer lands in a table window silently gets stock bytes.
+#      Not shown to fire; structurally unguarded.
+#
+# The placement lead in _append_cave_segment (Bond is one of 4 titles with no
+# text/data gap, so its cave lands exactly on the stock mm->start_brk) has been
+# re-derived across 36 vendor firmwares and comes back clean AGAIN, including
+# Bond concretely: in-loop set_brk maps [0x814000,0x8ba000) and clears 0xa1c
+# bytes at 0x8135e4, the cave maps [0x8ba000,0x8bb000) exactly adjacent with no
+# overlap, and the post-loop set_brk is a no-op that walks start_brk to
+# 0x8bb000.  Bond's phdr table is also SORTED by p_vaddr, so the unsorted-table
+# caveat belongs to the 33 gap-placed titles and not to the one that fails.
+# Keep the lead, but note the trap in reading it as "the difference between
+# Bond and the cards that work": there are no cards that work.  The own-segment
+# cave has only ever reached one machine, so the 33/4 split explains nothing on
+# its own.  A Led Zeppelin test is still worth doing -- a boot loop there
+# refutes the placement theory outright -- but it ranks below 1 and 2.
+#
+# Deliberately NOT changed here, and the reason matters: the next hardware test
+# needs to be against the SAME cave the three existing data points describe.
+# Shipping 3 and 4 now would buy a little correctness and cost the only clean
+# A/B available, which is the mistake v0.102.5 made -- plausible fixes to a
+# fault nobody had localised, reported as the answer.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2

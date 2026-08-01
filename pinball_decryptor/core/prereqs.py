@@ -10,6 +10,7 @@ short timeout and capture nothing — the only thing that matters is the
 exit code.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -82,14 +83,20 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
         * any other string -- shell command; exit-zero means OK.
           Runs on the host shell when ``where == "host"`` or inside
           WSL when ``where == "wsl"``.
+
+    A failed WSL probe may swap the prerequisite's static install hint
+    for a state-specific one (see :func:`_diagnose_wsl_unusable`) — the
+    result's :attr:`install_hint` is what the GUI must show, not the
+    :class:`Prerequisite`'s.
     """
+    hint_override = ""
     try:
         if prereq.probe.startswith("python:"):
             ok, msg = _probe_python_import(prereq.probe.split(":", 1)[1])
         elif prereq.where == "host":
             ok, msg = _probe_host(prereq.probe)
         elif prereq.where == "wsl":
-            ok, msg = _probe_wsl(prereq.probe)
+            ok, msg, hint_override = _probe_wsl(prereq.probe)
         else:
             ok, msg = False, f"unknown probe location: {prereq.where!r}"
     except Exception as e:
@@ -97,7 +104,8 @@ def check_prerequisite(prereq: Prerequisite) -> PrerequisiteResult:
 
     return PrerequisiteResult(
         name=prereq.name, ok=ok, message=msg,
-        reason=prereq.reason, install_hint=prereq.install_hint,
+        reason=prereq.reason,
+        install_hint=hint_override or prereq.install_hint,
     )
 
 
@@ -181,13 +189,27 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
 # (Docker / native execution is used by those platforms instead).
 # ---------------------------------------------------------------------------
 
-def _probe_wsl(cmd: str) -> Tuple[bool, str]:
+def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
+    """Run *cmd* inside WSL.  Returns ``(ok, message, hint_override)``;
+    the override is ``""`` whenever the prerequisite's static install
+    hint still applies.
+
+    A failing probe hides very different machine states behind the same
+    red X, and the static hint (``wsl --install`` + reboot) is only right
+    for one of them.  A user who HAD restarted Windows — leaving WSL
+    enabled but distro-less, because the distro install is the step that
+    runs after the restart — was told to install-and-reboot again, an
+    endless loop (PAD-17; the pre-restart half of it was PAD-16).  When
+    no registered distro can explain the failure, we diagnose which step
+    is actually missing and say that instead.
+    """
     global _wsl_boot_wait_failed
     if sys.platform != "win32":
-        return True, "n/a (non-Windows)"
+        return True, "n/a (non-Windows)", ""
 
     if shutil.which("wsl") is None:
-        return False, "wsl not on PATH"
+        msg, hint = _diagnose_wsl_unusable()
+        return False, msg, hint
 
     try:
         result = _run_in_wsl(cmd, PROBE_TIMEOUT)
@@ -199,8 +221,11 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str]:
         # Re-check right after installing WSL; restarting the app minutes
         # later (VM up by then) said OK.  Distinguish cold from absent via
         # the registration list, then wait the boot out.
-        if _wsl_boot_wait_failed or not _wsl_distro_registered():
-            return False, f"timed out after {PROBE_TIMEOUT}s"
+        if _wsl_boot_wait_failed:
+            return False, f"timed out after {PROBE_TIMEOUT}s", ""
+        if not _wsl_distro_registered():
+            msg, hint = _diagnose_wsl_unusable()
+            return False, msg, hint
         try:
             result = _run_in_wsl(cmd, WSL_BOOT_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -208,22 +233,34 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str]:
             return False, (
                 f"WSL is installed but didn't answer within "
                 f"{WSL_BOOT_TIMEOUT}s. If it was just installed, reboot "
-                f"Windows to finish setup, then hit Re-check.")
+                f"Windows to finish setup, then hit Re-check."), ""
 
     if result.returncode == 0:
         _wsl_boot_wait_failed = False
         out = (result.stdout or "").strip().splitlines()
-        return True, out[0] if out else "available"
+        return True, out[0] if out else "available", ""
+
+    # Non-zero exit with a registered distro: the distro answered and the
+    # tool inside it is missing/broken (e.g. the WSL 1 loop-device case) —
+    # the static hint is the right advice.  Without one, the "error" is
+    # just wsl.exe saying there is nothing to run the command in.
+    if not _wsl_distro_registered():
+        msg, hint = _diagnose_wsl_unusable()
+        return False, msg, hint
     err = (result.stderr or result.stdout or "").strip().splitlines()
-    return False, (err[0] if err else f"exit {result.returncode}")
+    return False, (err[0] if err else f"exit {result.returncode}"), ""
 
 
 def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
+    # WSL_UTF8=1: wsl.exe's own diagnostics ("no installed distributions",
+    # the 0x80370102 virtualization error, ...) default to UTF-16LE, which
+    # text=True renders as NUL-riddled mojibake in the tooltip and log.
     return subprocess.run(
         ["wsl", "-u", "root", "--", "bash", "-c", cmd],
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=dict(os.environ, WSL_UTF8="1"),
         creationflags=_CREATE_FLAGS,
     )
 
@@ -245,3 +282,98 @@ def _wsl_distro_registered() -> bool:
         ).returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# "Why can't WSL run anything?" diagnosis — feeds the state-specific
+# install hints (PAD-17).
+# ---------------------------------------------------------------------------
+
+# The prerequisite installer records which boot session ran `wsl --install`
+# here, keyed on LastBootUpTime (see installer/install_prerequisites.ps1,
+# PAD-16).  While the first line still equals the CURRENT boot session's
+# id, the Windows restart that finishes WSL2 setup hasn't happened yet.
+_RESTART_MARKER = os.path.join(
+    os.environ.get("ProgramData", r"C:\ProgramData"),
+    "Pinball Asset Decryptor", "wsl_restart_pending.txt")
+
+# LastBootUpTime can't change while this process lives (a reboot takes the
+# app down with it), so one PowerShell spawn per session is enough.
+_boot_session_id_cache: Optional[str] = None
+
+
+def _current_boot_session_id() -> str:
+    """This boot session's id, computed exactly like the installer writes
+    it (WMI LastBootUpTime as FILETIME) so the strings compare equal.
+    Empty string when it can't be determined."""
+    global _boot_session_id_cache
+    if _boot_session_id_cache is None:
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_OperatingSystem)"
+                 ".LastBootUpTime.ToFileTime()"],
+                capture_output=True,
+                text=True,
+                timeout=PROBE_TIMEOUT,
+                creationflags=_CREATE_FLAGS,
+            )
+            _boot_session_id_cache = ((result.stdout or "").strip()
+                                      if result.returncode == 0 else "")
+        except (subprocess.TimeoutExpired, OSError):
+            _boot_session_id_cache = ""
+    return _boot_session_id_cache
+
+
+def _wsl_restart_pending() -> bool:
+    """True when the installer ran `wsl --install` in THIS boot session,
+    i.e. the restart that finishes WSL2 setup hasn't happened yet.  (The
+    installer clears the marker once WSL2 answers; a marker from a
+    PREVIOUS session just means the user restarted and never re-ran it.)"""
+    try:
+        with open(_RESTART_MARKER, encoding="utf-8-sig") as f:
+            marker = f.readline().strip()
+    except OSError:
+        return False
+    if not marker:
+        return False
+    boot_id = _current_boot_session_id()
+    return bool(boot_id) and marker == boot_id
+
+
+def _wsl_status_ok() -> bool:
+    """True when the WSL framework itself is installed and answering
+    (``wsl --status`` exits 0 even with zero distros registered)."""
+    try:
+        return subprocess.run(
+            ["wsl", "--status"],
+            capture_output=True,
+            timeout=PROBE_TIMEOUT,
+            creationflags=_CREATE_FLAGS,
+        ).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _diagnose_wsl_unusable() -> Tuple[str, str]:
+    """(message, install_hint) when WSL can't run our probe at all — no
+    registered distro, or no WSL.  Three machine states hide behind that
+    one symptom and each has a different next step; naming the wrong one
+    (the static install-and-reboot hint) looped a user through pointless
+    restarts (PAD-17)."""
+    if _wsl_restart_pending():
+        return ("WSL2 was installed, but Windows has not been restarted "
+                "since — the restart is what finishes WSL2 setup.",
+                "Restart Windows (use Restart; with Fast Startup, Shut "
+                "down is not a restart), then click 'Install Missing' "
+                "above the tabs to finish.")
+    if _wsl_status_ok():
+        return ("WSL is enabled, but no Linux distro is installed yet — "
+                "normal right after the post-install restart; one step "
+                "remains.",
+                "Click 'Install Missing' above the tabs — it installs "
+                "Ubuntu and the Linux-side tools. No restart is needed "
+                "this time.")
+    return ("WSL is not installed on this machine.",
+            "Click 'Install Missing' above the tabs — it installs WSL2 + "
+            "Ubuntu and asks for one Windows restart.")

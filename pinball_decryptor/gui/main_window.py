@@ -17012,8 +17012,14 @@ class MainWindow:
                 "ok": None,   # None = still checking; drives strip auto-hide
             }
 
-    def set_prereq_result(self, name, ok, message):
-        """Update one indicator with the probe's result."""
+    def set_prereq_result(self, name, ok, message, install_hint=None):
+        """Update one indicator with the probe's result.
+
+        *install_hint* is the RESULT's hint — for WSL probes the check may
+        swap the static hint for a state-specific one (which step of the
+        WSL2 install is actually missing, PAD-17).  None falls back to the
+        prerequisite's static hint.
+        """
         entry = self._prereq_indicators.get(name)
         if not entry:
             return
@@ -17028,8 +17034,9 @@ class MainWindow:
                f"Status: {status}\n"
                f"{message}\n\n"
                f"Why: {p.reason}")
-        if not ok and p.install_hint:
-            tip += f"\n\nFix: {p.install_hint}"
+        hint = p.install_hint if install_hint is None else install_hint
+        if not ok and hint:
+            tip += f"\n\nFix: {hint}"
         entry["tooltip"].text = tip
         self._refresh_prereqs_visibility()
 

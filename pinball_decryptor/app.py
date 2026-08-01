@@ -313,7 +313,8 @@ class App:
                     if (self._current_mfr is not None and
                             self._current_mfr.key == msg.mfr_key):
                         self.window.set_prereq_result(
-                            msg.result.name, msg.result.ok, msg.result.message)
+                            msg.result.name, msg.result.ok,
+                            msg.result.message, msg.result.install_hint)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)

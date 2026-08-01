@@ -116,7 +116,7 @@ def test_wsl_cold_boot_timeout_retries_and_succeeds(monkeypatch):
     calls = []
     _scripted_run(monkeypatch, registered=True,
                   probe_outcomes=["timeout", 0], calls=calls)
-    ok, msg = prereqs._probe_wsl("echo ok")
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert ok is True
     assert calls == [("probe", prereqs.PROBE_TIMEOUT),
                      ("list", prereqs.PROBE_TIMEOUT),
@@ -127,12 +127,15 @@ def test_wsl_timeout_without_distro_still_reports_missing(monkeypatch):
     """No registered distro: the timeout is a genuine missing — no 90 s
     wait burned on a machine that plainly doesn't have WSL set up."""
     _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: False)
+    monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: False)
     calls = []
     _scripted_run(monkeypatch, registered=False,
                   probe_outcomes=["timeout"], calls=calls)
-    ok, msg = prereqs._probe_wsl("echo ok")
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert ok is False
-    assert "timed out" in msg
+    assert "WSL is not installed" in msg
+    assert "Install Missing" in hint
     assert ("probe", prereqs.WSL_BOOT_TIMEOUT) not in calls
 
 
@@ -145,12 +148,12 @@ def test_wsl_hung_vm_says_installed_and_latches(monkeypatch):
     _scripted_run(monkeypatch, registered=True,
                   probe_outcomes=["timeout", "timeout", "timeout"],
                   calls=calls)
-    ok, msg = prereqs._probe_wsl("echo ok")
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert ok is False
     assert "WSL is installed" in msg and "reboot" in msg
     assert prereqs._wsl_boot_wait_failed is True
 
-    ok2, msg2 = prereqs._probe_wsl("echo ok")   # e.g. next prereq in the row
+    ok2, _, _ = prereqs._probe_wsl("echo ok")   # e.g. next prereq in the row
     assert ok2 is False
     # Fast fail: one more short probe, no second registration check and no
     # second boot wait.
@@ -168,6 +171,114 @@ def test_wsl_success_clears_boot_latch(monkeypatch):
     calls = []
     _scripted_run(monkeypatch, registered=True,
                   probe_outcomes=[0], calls=calls)
-    ok, msg = prereqs._probe_wsl("echo ok")
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
     assert ok is True
     assert prereqs._wsl_boot_wait_failed is False
+
+
+# ---------------------------------------------------------------------------
+# State-aware install hints when WSL can't run anything (PAD-17).
+#
+# `wsl --install`, restart, app still says "WSL2 missing": the restart is
+# the step that ENABLES the framework, the distro install only happens on
+# the post-restart installer re-run — but the static hint told the user to
+# install-and-reboot again, an endless loop.  A failing probe with no
+# registered distro now names the step that is actually missing.
+# ---------------------------------------------------------------------------
+
+def test_wsl_no_distro_post_restart_says_install_missing_no_reboot(
+        monkeypatch):
+    """The PAD-17 reporter's state: restart done (wsl --status answers),
+    no distro yet.  The hint must send them to Install Missing and must
+    NOT ask for another restart."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: False)
+    monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: True)
+    calls = []
+    _scripted_run(monkeypatch, registered=False,
+                  probe_outcomes=[1], calls=calls)
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "no Linux distro" in msg
+    assert "Install Missing" in hint and "No restart" in hint
+
+
+def test_wsl_restart_pending_says_restart_windows(monkeypatch):
+    """Marker matches this boot session: the missing step is the restart
+    itself, not another install."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: True)
+    calls = []
+    _scripted_run(monkeypatch, registered=False,
+                  probe_outcomes=[1], calls=calls)
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "has not been restarted" in msg
+    assert "Restart Windows" in hint
+
+
+def test_wsl_fastfail_with_registered_distro_keeps_static_hint(monkeypatch):
+    """A registered distro whose probe fails (e.g. WSL 1's losetup) keeps
+    the real error line and the static hint (which carries the WSL 1
+    conversion steps)."""
+    _wsl_env(monkeypatch)
+
+    def _run(cmd, *a, **kw):
+        if "-l" in cmd:
+            return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="",
+            stderr="losetup: cannot find an unused loop device\n")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    ok, msg, hint = prereqs._probe_wsl("losetup -f")
+    assert ok is False
+    assert "losetup" in msg
+    assert hint == ""
+
+
+def test_check_prerequisite_wsl_hint_override_reaches_result(monkeypatch):
+    """The dynamic hint must land in PrerequisiteResult.install_hint (the
+    GUI's log line and tooltip read the RESULT's hint)."""
+    monkeypatch.setattr(prereqs, "_probe_wsl",
+                        lambda cmd: (False, "no distro", "dynamic hint"))
+    p = Prerequisite(name="WSL2", where="wsl", probe="losetup -f",
+                     reason="x", install_hint="static hint")
+    res = check_prerequisite(p)
+    assert res.install_hint == "dynamic hint"
+
+    monkeypatch.setattr(prereqs, "_probe_wsl",
+                        lambda cmd: (False, "tool missing", ""))
+    res = check_prerequisite(p)
+    assert res.install_hint == "static hint"
+
+
+def test_restart_pending_marker_compares_boot_session(monkeypatch, tmp_path):
+    marker = tmp_path / "wsl_restart_pending.txt"
+    monkeypatch.setattr(prereqs, "_RESTART_MARKER", str(marker))
+    monkeypatch.setattr(prereqs, "_current_boot_session_id", lambda: "123")
+
+    assert prereqs._wsl_restart_pending() is False   # no marker file
+    marker.write_text("123\n", encoding="utf-8")
+    assert prereqs._wsl_restart_pending() is True    # same boot session
+    marker.write_text("99\n", encoding="utf-8")
+    assert prereqs._wsl_restart_pending() is False   # restart happened
+
+    # Boot id unknown: never claim a restart is pending on guesswork.
+    monkeypatch.setattr(prereqs, "_current_boot_session_id", lambda: "")
+    marker.write_text("123\n", encoding="utf-8")
+    assert prereqs._wsl_restart_pending() is False
+
+
+def test_run_in_wsl_asks_for_utf8_errors(monkeypatch):
+    """wsl.exe must be told to emit UTF-8 — its default UTF-16LE turns
+    every error line into NUL-riddled mojibake under text=True."""
+    seen = {}
+
+    def _run(cmd, *a, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    prereqs._run_in_wsl("echo ok", 5)
+    assert seen["env"]["WSL_UTF8"] == "1"

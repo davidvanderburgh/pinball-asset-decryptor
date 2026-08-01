@@ -1134,6 +1134,53 @@ def test_write_machine_render(monkeypatch, tmp_path):
     assert not (out / "idx0008_machine_render.wav").exists()
 
 
+def test_final_patches_preview_keeps_stereo(monkeypatch, tmp_path):
+    """The end-of-build card decode overwrites the encoder's preview WAV, so
+    it must carry both channels: it used to rewrite every stereo slot's
+    preview as an L-channel-only mono file while the card itself plays
+    stereo (PAD-20)."""
+    import wave
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine
+    from pinball_decryptor.plugins.stern.spike2 import emulator as emu_mod
+
+    n = emu_mod.emitted_length(4000)
+    L = np.full(n, 1111, np.int64)
+    R = np.full(n, -2222, np.int64)
+    stock = bytes(64 + 4096)
+
+    class MM:
+        def __getitem__(self, sl):
+            return stock[sl]
+
+        def size(self):
+            return len(stock)
+
+    class FakeEmu:
+        def __init__(self, gr_path, img_path):
+            self.mm = MM()
+
+        def boot(self):
+            pass
+
+        def decode(self, p, cancel=None, progress=None):
+            return (L, R, True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(emu_mod, "Spike2Emu", FakeEmu)
+    out = tmp_path / "previews"
+    monkeypatch.setenv("PAD_STERN_PREVIEW_DIR", str(out))
+    p = {"idx": 12, "length": 4000, "body_off": 64, "chan": 2}
+    engine._verify_final_patches(
+        "gr", "img", {64: bytes(32)}, [p], np, lambda *a, **k: None)
+    with wave.open(str(out / "idx0012_machine_render.wav"), "rb") as w:
+        assert w.getnchannels() == 2
+        pcm = np.frombuffer(w.readframes(2), np.int16)
+    assert list(pcm) == [1111, -2222, 1111, -2222]
+
+
 def test_slot_seed_dbfs_env(monkeypatch):
     from pinball_decryptor.plugins.stern.engine import _slot_seed_dbfs
     monkeypatch.delenv("PAD_STERN_SLOT_SEED_DB", raising=False)

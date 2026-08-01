@@ -6337,6 +6337,12 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
             s = np.asarray(got[0], np.int64)[:n]
             if not len(s):
                 continue
+            # This render OVERWRITES the encoder's preview file, so it must
+            # carry the R channel too — dropping it here shipped mono preview
+            # WAVs for stereo slots while the card itself plays stereo.
+            chans = [s]
+            if got[2] and got[1] is not None:
+                chans.append(np.asarray(got[1], np.int64)[:n])
             peak = int(np.abs(s).max())
             head = int(np.abs(s[:BLOCK]).max()) if len(s) else 0
             # Peak within the master-directory-reverted words specifically:
@@ -6349,8 +6355,8 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
                 if len(ri):
                     rev_pk = int(np.abs(s[ri]).max())
             out.append((p["idx"], dbfs(peak), dbfs(head), dbfs(rev_pk)))
-            if peak:
-                _write_machine_render(p, [s], False, np)
+            if peak or any(int(np.abs(c).max()) for c in chans[1:]):
+                _write_machine_render(p, chans, len(chans) == 2, np)
             # A sound whose head is quiet but whose body carries a loud scrap
             # is the master-directory tradeoff surfacing — name it so a "why is
             # my quiet replacement not quiet?" is answered from the log.

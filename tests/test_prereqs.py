@@ -63,3 +63,111 @@ def test_check_prerequisite_ffmpeg_present(monkeypatch):
     res = check_prerequisite(p)
     assert res.ok is True
     assert res.name == "ffmpeg"
+
+
+# ---------------------------------------------------------------------------
+# WSL probe vs a cold / freshly-installed VM (PAD-12).
+#
+# A distro's very first boot — seconds after `wsl --install` — answers slower
+# than PROBE_TIMEOUT, and the timed-out probe is itself what starts the boot.
+# The probe used to report "missing", so a tester's Re-check right after
+# installing WSL brought the you-don't-have-WSL banner back; restarting the
+# app minutes later (VM up by then) said OK.  Now a timeout with a REGISTERED
+# distro waits the boot out instead of crying missing.
+# ---------------------------------------------------------------------------
+
+def _wsl_env(monkeypatch):
+    """Pretend we're on Windows with wsl.exe on PATH, latch reset."""
+    monkeypatch.setattr(prereqs.sys, "platform", "win32")
+    monkeypatch.setattr(prereqs.shutil, "which",
+                        lambda name: r"C:\Windows\System32\wsl.exe")
+    monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
+
+
+def _scripted_run(monkeypatch, *, registered, probe_outcomes, calls):
+    """Fake subprocess.run for wsl invocations only.
+
+    ``wsl -l -q`` exits 0 iff *registered*.  Each in-VM probe consumes the
+    next entry of *probe_outcomes*: "timeout" raises, an int returns that
+    exit code (stdout "ok").  Every call is appended to *calls* as
+    (kind, timeout)."""
+    outcomes = list(probe_outcomes)
+
+    def _run(cmd, *a, **kw):
+        assert cmd[0] == "wsl"
+        if "-l" in cmd:
+            calls.append(("list", kw.get("timeout")))
+            return subprocess.CompletedProcess(
+                cmd, 0 if registered else 1)
+        calls.append(("probe", kw.get("timeout")))
+        outcome = outcomes.pop(0)
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(cmd=cmd,
+                                            timeout=kw.get("timeout"))
+        return subprocess.CompletedProcess(cmd, outcome,
+                                           stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+
+
+def test_wsl_cold_boot_timeout_retries_and_succeeds(monkeypatch):
+    """Timeout + registered distro == a booting VM: wait it out and pass."""
+    _wsl_env(monkeypatch)
+    calls = []
+    _scripted_run(monkeypatch, registered=True,
+                  probe_outcomes=["timeout", 0], calls=calls)
+    ok, msg = prereqs._probe_wsl("echo ok")
+    assert ok is True
+    assert calls == [("probe", prereqs.PROBE_TIMEOUT),
+                     ("list", prereqs.PROBE_TIMEOUT),
+                     ("probe", prereqs.WSL_BOOT_TIMEOUT)]
+
+
+def test_wsl_timeout_without_distro_still_reports_missing(monkeypatch):
+    """No registered distro: the timeout is a genuine missing — no 90 s
+    wait burned on a machine that plainly doesn't have WSL set up."""
+    _wsl_env(monkeypatch)
+    calls = []
+    _scripted_run(monkeypatch, registered=False,
+                  probe_outcomes=["timeout"], calls=calls)
+    ok, msg = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "timed out" in msg
+    assert ("probe", prereqs.WSL_BOOT_TIMEOUT) not in calls
+
+
+def test_wsl_hung_vm_says_installed_and_latches(monkeypatch):
+    """Retry also times out (reboot pending): the message must say WSL IS
+    installed — not the misleading not-installed reason — and the latch
+    keeps the NEXT probe from burning another boot wait."""
+    _wsl_env(monkeypatch)
+    calls = []
+    _scripted_run(monkeypatch, registered=True,
+                  probe_outcomes=["timeout", "timeout", "timeout"],
+                  calls=calls)
+    ok, msg = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "WSL is installed" in msg and "reboot" in msg
+    assert prereqs._wsl_boot_wait_failed is True
+
+    ok2, msg2 = prereqs._probe_wsl("echo ok")   # e.g. next prereq in the row
+    assert ok2 is False
+    # Fast fail: one more short probe, no second registration check and no
+    # second boot wait.
+    assert calls == [("probe", prereqs.PROBE_TIMEOUT),
+                     ("list", prereqs.PROBE_TIMEOUT),
+                     ("probe", prereqs.WSL_BOOT_TIMEOUT),
+                     ("probe", prereqs.PROBE_TIMEOUT)]
+
+
+def test_wsl_success_clears_boot_latch(monkeypatch):
+    """Once the VM finally answers (say the user rebooted), the latch resets
+    so a later cold start gets the boot-wait treatment again."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", True)
+    calls = []
+    _scripted_run(monkeypatch, registered=True,
+                  probe_outcomes=[0], calls=calls)
+    ok, msg = prereqs._probe_wsl("echo ok")
+    assert ok is True
+    assert prereqs._wsl_boot_wait_failed is False

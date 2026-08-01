@@ -161,7 +161,8 @@ HELP_CONTENT = {
          "menu and either confirm what the extract called that slot or pick "
          "the entry (type its number to find it) yourself."),
         ("Blip-free callouts (Advanced Audio Options)",
-         "On by default. The machine reads two ~512-byte windows out of "
+         "Off by default, and best left that way unless you are helping "
+         "test it. The machine reads two ~512-byte windows out of "
          "every sound at boot to set up its decoder, and each result feeds "
          "the next, so re-encoding one sound would desync the whole bank. "
          "The plain fix puts the original bytes back in those two windows, "
@@ -171,10 +172,12 @@ HELP_CONTENT = {
          "read at the copy, so your audio plays for the whole sound. It "
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
-         "longer, and it is skipped for a direct-SD write. Every build "
-         "re-checks all the sounds against the patched firmware and quietly "
-         "falls back to the plain fix if anything looks wrong, so the only "
-         "cost of unticking it is that brief scrap."),
+         "longer, and it is skipped for a direct-SD write. No card built "
+         "that way has been confirmed to boot yet — the checks all run in an "
+         "emulator, which cannot show how the real machine loads a game "
+         "binary that has grown — so leaving it off costs you only that "
+         "brief scrap and gets you the card everyone's working cards have "
+         "been."),
     ],
     "Replace Video": [
         ("Scan and assign",

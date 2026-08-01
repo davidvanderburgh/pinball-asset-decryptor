@@ -8496,10 +8496,13 @@ class MainWindow:
                 "as-is." + (("\n\n" + note) if note else ""))
         return forces
 
+    # Keep in step with App._AUDIO_ADV_DEFAULTS, including the "blip_free_optin"
+    # spelling: the old "blip_free" key is deliberately dead so a settings.json
+    # from before v0.102.4 can't switch the firmware patch back on.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free": True,
+        "blip_free_optin": False,
     }
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
@@ -8609,14 +8612,17 @@ class MainWindow:
 
         _rule()
 
-        # Blip-free callouts (the master-directory scrap fix).  On by default:
-        # this is the standard build now, and the checkbox is here so a card can
-        # be built without any firmware change at all if one is ever suspected.
-        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free", True)))
+        # Blip-free callouts (the master-directory scrap fix).  OFF by default
+        # since v0.102.4: no card built this way has been confirmed to boot on
+        # a real machine, and the two field reports there are were both a
+        # machine that wouldn't start.  The checkbox is how someone opts in to
+        # testing it.
+        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free_optin", False)))
         ttk.Checkbutton(
             dlg, variable=blip_var,
             text="Blip-free callouts: patch the game firmware so a replaced "
-                 "sound plays your audio for its whole length (default on)"
+                 "sound plays your audio for its whole length (default off, "
+                 "hardware-unverified)"
         ).pack(anchor=tk.W, padx=12)
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
@@ -8647,8 +8653,15 @@ class MainWindow:
                  "video replacement, and it is skipped for a direct-SD write. "
                  "Every build re-derives all the sounds' settings from the "
                  "patched firmware first and falls back to the plain "
-                 "stock-byte restore if anything would drift, so turning this "
-                 "off costs you the brief scrap and nothing else.").pack(
+                 "stock-byte restore if anything would drift. "
+                 "Leave this off unless you are helping test it. No card built "
+                 "this way has been confirmed to boot yet: the checks above all "
+                 "run in an emulator, which cannot tell us how the real machine "
+                 "loads a game binary that has grown, and the two reports from "
+                 "actual hardware were both a machine that would not start. "
+                 "Off, the card gets no firmware change at all and you hear the "
+                 "brief scrap; that is what the working cards have always "
+                 "been.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()
@@ -8687,7 +8700,7 @@ class MainWindow:
                 "experiment_idxs": idxs,
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
-                "blip_free": bool(blip_var.get()),
+                "blip_free_optin": bool(blip_var.get()),
             }
 
         def _ok(_e=None):
@@ -8704,7 +8717,7 @@ class MainWindow:
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
-            blip_var.set(True)          # blip-free is the default build
+            blip_var.set(False)         # the standard build is the default
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))

@@ -227,6 +227,32 @@ def _load_consumed(game_real_path, image_path):
         return None
 
 
+def _note_cold_consumed(log):
+    """Say, once per derive, why a Write is about to spend minutes in the
+    emulator.
+
+    The consumed-read map is written at Extract time into ``%TEMP%`` and keyed by
+    a fingerprint of the card, NOT by the project folder -- so it goes away when
+    the temp dir is cleaned, and it is deleted deliberately when an older
+    version's caches are swept (see :func:`clear_stale_params_caches`).  A Write
+    that misses it re-derives the whole record chain, which on a big catalog is
+    minutes with nothing on screen but a stationary bar.
+
+    A tester worked out empirically that "the version used to decrypt must be the
+    version that writes the card", and read the difference as the app freezing
+    (a tester, 2026-08-01).  That rule is really "the cache must still be there",
+    and the cost is time, not correctness -- but neither of those was sayable
+    from the outside, because this path logged nothing at all."""
+    if log:
+        log("No cached master-directory read map for this card, so it has to be "
+            "re-derived from the firmware before the sounds can be written. "
+            "This is the slow part of a Write (minutes on a big sound catalog) "
+            "and it happens when the card was extracted by a different version "
+            "of the app, or the temporary cache has since been cleaned up. "
+            "Nothing is wrong; extracting and writing on the same version, in "
+            "one sitting, skips it.", "info")
+
+
 def _load_or_derive_params(emu, game_real_path, image_path, log, progress):
     _clear_stale_params_caches_once(log)
     fp = _fingerprint(game_real_path, image_path)
@@ -3496,7 +3522,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                          "Verifying blip-free firmware patch...")
                             _assert_param_integrity(patched_gr, img_path,
                                                     audio_patches, params, np,
-                                                    log, work)
+                                                    log, work, progress)
                             pathA_applied = True
                             # The bypass rode along inside the rebuilt firmware,
                             # so this build's validator status is that overlay's.
@@ -3515,8 +3541,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 "standard way instead (the brief original-callout "
                                 "scrap remains)." % e, "warning")
                     elif audio_patches:
-                        pathA_why = ("turned off for this build (Advanced "
-                                     "Audio Options / PAD_STERN_SKIP_KEYPATCH)")
+                        pathA_why = _BLIP_FREE_OFF_REASON
                     if (audio_patches and not pathA_applied
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
@@ -3526,7 +3551,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         if audio_patches is None:
                             return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
-                                                params, np, log, work)
+                                                params, np, log, work, progress)
                     if audio_patches:
                         why = pathA_why or "see the build log"
                         if os.environ.get(
@@ -5185,6 +5210,7 @@ def _params_for(gr_path, img_path, log, progress):
             return params
         except Exception:
             pass
+    _note_cold_consumed(log)
     from .spike2.emulator import Spike2Emu
     emu = Spike2Emu(gr_path, img_path)
     try:
@@ -5362,6 +5388,32 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # post-build integrity assert falls back to the standard
 # _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts in;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
+#
+# OFF BY DEFAULT since v0.102.4, and this is the important part: the
+# own-segment cave has never been confirmed to boot on a real machine.  Every
+# claim of hardware confirmation in this section belongs to the OLD, unsafe
+# data-segment placement (Led Zeppelin LE 1.22, 2026-07-25, pre-v0.94.0).  What
+# v0.94.0 proved about the new placement was proved OFFLINE, in the emulator --
+# and Spike2Emu maps each PT_LOAD's full p_memsz itself (spike2/emulator.py, the
+# mem_map over `_algn(vaddr + memsz)`), so it cannot see anything about how a
+# real ARM Linux ELF loader treats an appended segment.  Worse, from v0.94.0
+# through v0.102.2 the rebuilt firmware was deleted before it could be copied
+# onto the card on every host that has the ext4 driver (see PAD-6 /
+# grow_plan["cleanup"]), so no user ever booted this cave either: driver hosts
+# got a card the machine rejected, and every card that DID work was a non-driver
+# host silently falling back to the standard build.
+#
+# v0.102.3 fixed the delivery, which made v0.102.3 the first release ever to put
+# this cave in front of a machine.  The first report back was a James Bond
+# Premium 1.06.0 that reboots partway through "Initializing" and loops there
+# forever (a tester, 2026-08-01) -- the same tester whose pre-v0.94.0 card froze
+# at the game logo on the old placement.  Two placements, two field reports, no
+# confirmed boot.
+#
+# So it is opt-in until someone confirms a cave-built card boots.  The standard
+# build is what the working cards have always been, it touches no game code, and
+# it costs a ~6 ms scrap of the original at two points in each replaced sound.
+# Shipping that artifact by default beats shipping a machine that won't start.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5374,23 +5426,30 @@ _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
 _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
+_BLIP_FREE_OFF_REASON = (
+    "off by default: patching the game firmware is not yet confirmed to boot "
+    "on a real machine, so builds use the stock-byte restore instead (turn it "
+    "on in Advanced Audio Options to help test it)")
+
+
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
-    **On by default**, surfaced as the "Blip-free callouts" checkbox in the
-    GUI's Advanced Audio Options.  The cave now gets a segment of its own (see
-    :func:`_append_cave_segment`) instead of squatting on the game's data, which
-    is what made the pre-v0.94.0 placement unsafe.
+    **Off by default**, surfaced as the "Blip-free callouts" checkbox in the
+    GUI's Advanced Audio Options.  It is opt-in because no cave-built card has
+    ever been confirmed to boot -- see the section comment above for why the
+    emulator's approval doesn't count and why the field reports are the only
+    evidence there is.
 
-    ``PAD_STERN_BLIP_FREE=0`` turns it off (what the checkbox clears to);
-    ``PAD_STERN_SKIP_KEYPATCH=1`` also forces it off and wins, so anything that
+    ``PAD_STERN_BLIP_FREE=1`` opts in (what the checkbox sets);
+    ``PAD_STERN_SKIP_KEYPATCH=1`` forces it off and wins, so anything that
     already sets the historical kill switch keeps working.  Either way the build
     falls back to :func:`_restore_masterdir_consumed`, which touches no game code
     at all -- and so does any firmware or host the cave can't safely handle.
     """
     if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
         return False
-    return os.environ.get("PAD_STERN_BLIP_FREE") != "0"
+    return os.environ.get("PAD_STERN_BLIP_FREE") == "1"
 
 
 def _cave_va2off(segs, va):
@@ -5534,14 +5593,19 @@ def _capture_first_window_off(gr_path, img_path, fn):
     return got.get("off")
 
 
-def _replaced_consumed_offsets(gr_path, img_path, patches, np):
+def _replaced_consumed_offsets(gr_path, img_path, patches, np, log=None,
+                               progress=None):
     """For each replaced body in *patches* (``{off: body}``), the sorted image
     file offsets the boot-derive CONSUMES within it (the two window runs).
 
     Uses the Extract-time consumed cache when present; otherwise runs one
     master-directory derive with a read hook over just the replaced extents -- so
     a legacy cache that stored params but not the consumed map still yields a
-    blip-free build instead of silently falling back to the standard one."""
+    blip-free build instead of silently falling back to the standard one.
+
+    That fallback derive is the expensive one (minutes on a big catalog), so it
+    reports progress and says why it is running: without both, a Write whose
+    cache had gone reads as a frozen app -- see :func:`_note_cold_consumed`."""
     out = {}
     cached = _load_consumed(gr_path, img_path)
     if cached is not None and len(cached):
@@ -5564,6 +5628,7 @@ def _replaced_consumed_offsets(gr_path, img_path, patches, np):
                 if b0 <= o + k < e0:
                     acc.add(o + k)
         return on_read
+    _note_cold_consumed(log)
     emu = Spike2Emu(gr_path, img_path)
     try:
         emu.boot()
@@ -5572,7 +5637,7 @@ def _replaced_consumed_offsets(gr_path, img_path, patches, np):
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
                             begin=(EM.DESC_BASE + off) & ~0xfff,
                             end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
-        emu.derive_params()
+        emu.derive_params(progress=progress)
     finally:
         emu.close()
     for off in patches:
@@ -5727,7 +5792,8 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
 
     # The exact bytes the boot-derive consumes for each replaced sound == the
     # window ranges to redirect (from the Extract cache, or a fresh derive).
-    per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np)
+    per_body = _replaced_consumed_offsets(gr_path, img_path, patches, np, log,
+                                          progress)
     windows = []   # (lo, hi) image file-offset ranges (2 per mono sound)
     with open(img_path, "rb") as f:
         stock_chunks = []
@@ -5873,6 +5939,7 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
                     % (off, n), "info")
         return patches
 
+    _note_cold_consumed(log)
     reads = {off: set() for off in patches}     # body_off -> consumed file offsets
 
     def _mk(b0, e0, acc):
@@ -5891,7 +5958,9 @@ def _restore_masterdir_consumed(gr_path, img_path, patches, log, progress=None,
             emu.mu.hook_add(UC_HOOK_MEM_READ, _mk(off, end, reads[off]),
                             begin=(EM.DESC_BASE + off) & ~0xfff,
                             end=((EM.DESC_BASE + end) + 0xfff) & ~0xfff)
-        emu.derive_params()         # the real MASTERDIR_DECODE pass
+        # Progress, because this is the multi-minute stretch a cold cache adds
+        # to a Write and a stationary bar here is what reads as a hang.
+        emu.derive_params(progress=progress)    # the real MASTERDIR_DECODE pass
         for off, body in patches.items():
             stock = bytes(emu.mm[off:off + len(body)])
             b = bytearray(body)
@@ -6012,12 +6081,16 @@ def _verify_final_patches(gr_path, img_path, patches, params, np, log,
 
 
 def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
-                            work_dir):
+                            work_dir, progress=None):
     """Write-time safety net: apply *patches* to a temp ``image.bin`` and confirm
     the firmware's master-directory decode derives the **same** codec scale /
     predictor for every sound as the stock card.  A non-empty shift list means the
     forward chain is still broken (a card that would reboot on audio), so we raise
-    rather than ship it.  Set ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1`` to skip."""
+    rather than ship it.  Set ``PAD_STERN_SKIP_MASTERDIR_VERIFY=1`` to skip.
+
+    This one derives on EVERY audio Write, cache or no cache, so it reports
+    progress too -- it is the last multi-minute stretch before the card is
+    written and used to be the one with nothing on screen at all."""
     if not patches or os.environ.get("PAD_STERN_SKIP_MASTERDIR_VERIFY") == "1":
         return
     import shutil
@@ -6033,7 +6106,7 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
         emu = Spike2Emu(gr_path, tmp)
         try:
             emu.boot()
-            rows = emu.derive_params()
+            rows = emu.derive_params(progress=progress)
         finally:
             emu.close()
     finally:

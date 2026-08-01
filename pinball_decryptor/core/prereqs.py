@@ -22,6 +22,20 @@ _CREATE_FLAGS = (subprocess.CREATE_NO_WINDOW
 
 PROBE_TIMEOUT = 8
 
+# How long to indulge a WSL utility VM that is still booting before calling
+# the probe failed.  A distro's very first start — the one that happens
+# seconds after `wsl --install` finishes — unpacks the rootfs and registers
+# the user before it answers anything, routinely blowing far past
+# PROBE_TIMEOUT.  Only ever waited on when a distro is REGISTERED (see
+# _probe_wsl), so a machine with no WSL still fails fast.
+WSL_BOOT_TIMEOUT = 90
+
+# Latch: True after a boot-wait retry has itself timed out (VM hung — in
+# practice a pending post-install reboot).  While set, further probes skip
+# the WSL_BOOT_TIMEOUT wait so a 5-probe manufacturer doesn't spend 90 s
+# per probe on a VM that isn't coming up; any successful probe clears it.
+_wsl_boot_wait_failed = False
+
 
 @dataclass(frozen=True)
 class Prerequisite:
@@ -168,6 +182,7 @@ def _probe_host(cmd: str) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 def _probe_wsl(cmd: str) -> Tuple[bool, str]:
+    global _wsl_boot_wait_failed
     if sys.platform != "win32":
         return True, "n/a (non-Windows)"
 
@@ -175,18 +190,58 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str]:
         return False, "wsl not on PATH"
 
     try:
-        result = subprocess.run(
-            ["wsl", "-u", "root", "--", "bash", "-c", cmd],
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT,
-            creationflags=_CREATE_FLAGS,
-        )
+        result = _run_in_wsl(cmd, PROBE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return False, f"timed out after {PROBE_TIMEOUT}s"
+        # A cold utility VM — above all a distro's FIRST boot, seconds after
+        # `wsl --install` — takes longer than PROBE_TIMEOUT to answer, and
+        # the timed-out attempt is itself what kicks the boot off.  Reporting
+        # "missing" here handed a tester a you-don't-have-WSL banner on the
+        # Re-check right after installing WSL; restarting the app minutes
+        # later (VM up by then) said OK.  Distinguish cold from absent via
+        # the registration list, then wait the boot out.
+        if _wsl_boot_wait_failed or not _wsl_distro_registered():
+            return False, f"timed out after {PROBE_TIMEOUT}s"
+        try:
+            result = _run_in_wsl(cmd, WSL_BOOT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _wsl_boot_wait_failed = True
+            return False, (
+                f"WSL is installed but didn't answer within "
+                f"{WSL_BOOT_TIMEOUT}s. If it was just installed, reboot "
+                f"Windows to finish setup, then hit Re-check.")
 
     if result.returncode == 0:
+        _wsl_boot_wait_failed = False
         out = (result.stdout or "").strip().splitlines()
         return True, out[0] if out else "available"
     err = (result.stderr or result.stdout or "").strip().splitlines()
     return False, (err[0] if err else f"exit {result.returncode}")
+
+
+def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["wsl", "-u", "root", "--", "bash", "-c", cmd],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=_CREATE_FLAGS,
+    )
+
+
+def _wsl_distro_registered() -> bool:
+    """True when WSL has at least one registered distro.
+
+    ``wsl -l -q`` is answered by wslservice straight from the registry —
+    fast, and no VM boot — and exits non-zero both when the WSL feature is
+    absent and when no distro is installed yet.  Output is ignored on
+    purpose: wsl.exe prints UTF-16LE (``text=True`` would mangle it) and
+    only the exit code matters here."""
+    try:
+        return subprocess.run(
+            ["wsl", "-l", "-q"],
+            capture_output=True,
+            timeout=PROBE_TIMEOUT,
+            creationflags=_CREATE_FLAGS,
+        ).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False

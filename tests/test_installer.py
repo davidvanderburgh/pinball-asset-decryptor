@@ -552,6 +552,63 @@ def test_windows_installer_requires_wsl_for_stern():
         "then silently fall back on every Windows machine without WSL2.")
 
 
+def test_reboot_banner_names_the_start_menu_shortcut():
+    """Regression guard — PAD-16 (user looped on the WSL2 reboot step).
+
+    The post-install banner used to say "Re-run this script from the
+    Start Menu" without naming the shortcut; the user couldn't find it,
+    re-ran the setup .exe instead, and got the identical banner again.
+    The banner must name the exact Start Menu entry — and that entry
+    must actually exist in the .iss [Icons] section, so a shortcut
+    rename can't silently strand the banner text.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    shortcut = "Install Prerequisites"
+    icon_lines = [ln for ln in iss.splitlines()
+                  if ln.startswith("Name:") and shortcut in ln]
+    assert icon_lines, (
+        "pinball_decryptor.iss no longer creates the 'Install "
+        "Prerequisites' Start Menu shortcut — the .ps1 reboot banner "
+        "points users at it by name.")
+    assert shortcut in ps1, (
+        "install_prerequisites.ps1's restart banner must name the "
+        "'Install Prerequisites' Start Menu shortcut — 'Re-run this "
+        "script from the Start Menu' is what left the PAD-16 user "
+        "unable to find it.")
+    assert "Re-run this script" not in ps1, (
+        "the vague 'Re-run this script' wording is back — name the "
+        "Start Menu shortcut instead (PAD-16).")
+
+
+def test_wsl_install_detects_missed_restart():
+    """Regression guard — PAD-16 (re-run before the restart).
+
+    `wsl --install` only takes effect after a real Windows restart.  A
+    re-run before that restart used to re-run `wsl --install` and print
+    the same "reboot required" banner, giving the user no clue that the
+    restart itself was the missing step — an endless-looking loop.  The
+    installer must remember which boot session ran `wsl --install`
+    (LastBootUpTime marker: it only changes on a real restart, not a
+    Fast Startup shut down) and tell a same-session re-run plainly that
+    Windows has not been restarted yet.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "LastBootUpTime" in ps1, (
+        "install_prerequisites.ps1 must key its restart-pending marker "
+        "on LastBootUpTime — it only changes on a real restart, which "
+        "is the event WSL2 setup waits for (Fast Startup 'Shut down' "
+        "resumes the same session).")
+    assert "wsl_restart_pending" in ps1, (
+        "install_prerequisites.ps1 must persist a restart-pending "
+        "marker so a pre-restart re-run can say 'you haven't restarted "
+        "yet' instead of silently re-running wsl --install (PAD-16).")
+    assert "been restarted" in ps1, (
+        "the same-session re-run path must tell the user Windows has "
+        "not been restarted yet — that message is the whole point of "
+        "the marker (PAD-16).")
+
+
 def test_iss_repairs_python_permissions():
     """Regression guard — faster-whisper [Errno 13], install-over fix.
 

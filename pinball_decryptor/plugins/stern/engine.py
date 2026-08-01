@@ -5687,6 +5687,40 @@ def _append_cave_segment(raw, need, fn):
     Returns ``(cave_va, append_off, gap_bytes)``.  Raises ``RuntimeError`` (so
     the caller falls back to the standard build) if there's no repurposable
     header or no free address space within ARM branch reach of *fn*.
+
+    AUDITED against all 37 vendor firmwares while chasing the James Bond boot
+    loop (PAD-11), and the ELF geometry this produces came back clean, so don't
+    re-litigate it: p_offset/p_vaddr stay page-congruent, p_filesz never runs
+    past EOF, the new segment overlaps no existing one, and the game's .bss is
+    still mapped and zeroed exactly as stock.  That last one is worth spelling
+    out because it looks broken and isn't.  The cave does become the new maximum
+    for both ``elf_bss`` and ``elf_brk``, which does make binfmt_elf's
+    *post-loop* ``set_brk`` a no-op -- but PT_GNU_STACK is program header index
+    7, after both PT_LOADs, on every one of the 37.  So the cave is a LATER
+    PT_LOAD than the RW one, the in-loop ``if (elf_brk > elf_bss)`` fires on the
+    cave's own iteration, and it performs the identical ``vm_brk`` +
+    partial-page clear the stock load would have.  Rewriting this to sort the
+    headers, or to place the cave before the data segment, would break that.
+
+    Two things the audit did turn up, neither of them the Bond fault:
+
+    * **The placement splits the library 33/4, and Bond is in the minority.**
+      Where a title has a text/data gap big enough, the cave goes there (33
+      titles, Led Zeppelin among them).  Where it doesn't -- Bond LE 1.06,
+      Deadpool LE 1.14, Elvira 1.11, TMNT Pro 1.58 -- the only candidate left is
+      the synthetic "32 MB above the highest PT_LOAD", and ``cave_va`` is then
+      *precisely* the stock ``mm->start_brk``: the cave claims the bottom of the
+      heap arena and is safe only because ``set_brk`` afterwards pushes
+      ``start_brk`` past it.  Nothing here knows that, and nothing tests it.
+      This is the one structural axis on which the card that boot-loops differs
+      from every card anyone has booted, so it is where to look next.
+    * **The resulting PT_LOAD table is no longer sorted by p_vaddr** on the 33
+      gap-placed titles, because the cave keeps index 7 while sitting below the
+      data segment.  The gABI requires ascending order; Linux and glibc tolerate
+      it for ET_EXEC, which is why those titles work at all.  Left alone
+      deliberately: the fix is a header reshuffle, it would move the cave out of
+      last position and undo the .bss property above, and none of it can be
+      confirmed without a machine.
     """
     PAGE = 0x1000
     loads = [(va, mz) for _ph, va, _o, _fz, mz, _fl in _iter_phdrs(raw)]

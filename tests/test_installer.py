@@ -617,7 +617,7 @@ def test_wsl_install_flags_are_capability_detected():
 
     Older inbox wsl.exe builds (pre-Store WSL) reject options they don't
     know by printing usage and exiting -1 WITHOUT installing anything.
-    v0.103.x hardcoded `wsl --install -d Ubuntu --no-launch`, so on those
+    Releases through v0.104.1 hardcoded `wsl --install -d Ubuntu --no-launch`, so on those
     machines the Ubuntu step was a silent no-op: WSL2 reported OK, Ubuntu
     reported Missing, and the user was stranded (the PAD-19 reporter hit
     exactly this after the PAD-16/17 restart saga finally got WSL2 up).

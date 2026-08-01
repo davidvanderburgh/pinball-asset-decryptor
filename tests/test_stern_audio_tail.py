@@ -1357,7 +1357,7 @@ def test_gui_blip_free_option_round_trips_to_the_engine_var(monkeypatch):
 
 
 def test_a_deliberate_off_survives_the_upgrade(monkeypatch):
-    """The value worth preserving across v0.102.4 is a deliberate OFF.
+    """The value worth preserving across v0.102.5 is a deliberate OFF.
 
     Somebody who cleared this box because a machine misbehaved must not have the
     firmware patch switched back on by an upgrade, so the settings key keeps its

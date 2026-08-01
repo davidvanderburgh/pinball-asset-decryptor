@@ -8650,7 +8650,7 @@ class MainWindow:
                  "patched firmware first and falls back to the plain "
                  "stock-byte restore if anything would drift. "
                  "Two faults in that added code were found and fixed in "
-                 "v0.102.4, after a machine rebooted through its startup "
+                 "v0.102.5, after a machine rebooted through its startup "
                  "screen. It had been working out where the sound data sat in "
                  "memory from the first read that merely looked like the right "
                  "size, and on a real machine an unrelated read can come first, "

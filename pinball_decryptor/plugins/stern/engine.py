@@ -5386,7 +5386,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # Anything the locator can't pin down, a firmware with no free address space in
 # branch reach, a host that can't grow ext4 files, or a firmware that fails the
 # post-build integrity assert falls back to the standard
-# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=1 opts in;
+# _restore_masterdir_consumed build.  PAD_STERN_BLIP_FREE=0 opts out;
 # PAD_STERN_SKIP_KEYPATCH=1 forces the fallback everywhere and wins.
 #
 # WHY THIS CAVE HAD NEVER ACTUALLY BOOTED, and what was wrong with it.  Every

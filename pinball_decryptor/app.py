@@ -3858,7 +3858,7 @@ class App:
     # for the Spike 2 trigger-pop hunt: each maps to a PAD_STERN_* env var the
     # Stern encoder reads, and a value at its default clears the var so the
     # engine baseline stays authoritative.
-    # "blip_free" keeps its original name on purpose.  The v0.102.4 fixes leave
+    # "blip_free" keeps its original name on purpose.  The v0.102.5 fixes leave
     # the default where it was (on), so the value worth preserving across the
     # upgrade is a deliberate OFF -- somebody who cleared this box because a
     # machine misbehaved must not have it silently switched back on by a key

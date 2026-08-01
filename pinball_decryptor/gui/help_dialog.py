@@ -173,7 +173,7 @@ HELP_CONTENT = {
          "replacement uses) because it makes the game binary slightly "
          "longer, and it is skipped for a direct-SD write. A machine that "
          "rebooted through its startup screen was traced to this and fixed "
-         "in v0.102.4: the added code was working out where the sound data "
+         "in v0.102.5: the added code was working out where the sound data "
          "sat from the first read of the right size (an unrelated read can "
          "come first on a real machine, leaving it redirecting nothing), and "
          "it was acting only on reads of one exact size while the game works "

@@ -461,6 +461,13 @@ which manufacturers you'll actually use and installs only the tools those
 plugins need (see [Per-manufacturer prerequisites](#per-manufacturer-prerequisites)
 below).
 
+If your machine didn't already have WSL2, that first run ends with a
+**restart required** banner: WSL2 only finishes installing after Windows
+restarts (use *Restart* — with Fast Startup enabled, *Shut down* doesn't
+count). After the restart, run **Install Prerequisites** from the Start
+Menu once more to pick up the remaining WSL-side packages — the script is
+safe to re-run and skips anything already installed.
+
 ### macOS
 
 1. Download the DMG matching your Mac from the

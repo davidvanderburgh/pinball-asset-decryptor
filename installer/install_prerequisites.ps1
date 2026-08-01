@@ -79,6 +79,26 @@ function Test-WslHasApt {
     }
 }
 
+# --- WSL2 restart-pending marker -----------------------------------------
+# `wsl --install` on a machine without WSL2 enables Windows features that
+# only take effect after a RESTART.  Users who skip it (or use Shut down,
+# which with Fast Startup is NOT a restart) re-run the installer and used
+# to get the identical "reboot required" banner with no hint that the
+# restart never happened (PAD-16: a user looped on this).  We record which
+# boot session ran `wsl --install`; a re-run in the SAME session can then
+# say "you haven't restarted yet" instead of reinstalling into the void.
+$script:RestartMarker = Join-Path $env:ProgramData `
+    "Pinball Asset Decryptor\wsl_restart_pending.txt"
+
+function Get-BootSessionId {
+    # LastBootUpTime only changes on a real restart (a Fast Startup
+    # "Shut down" resumes the same kernel session) — which is exactly
+    # the event WSL2 setup is waiting for.
+    try {
+        (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTime().ToString()
+    } catch { "" }
+}
+
 function Write-Step($msg)  { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-OK($n)        { Write-Host "  [OK] $n"        -ForegroundColor Green;  $script:results += [PSCustomObject]@{Name=$n;Status="OK"} }
 function Write-Installed($n) { Write-Host "  [INSTALLED] $n" -ForegroundColor Green;  $script:results += [PSCustomObject]@{Name=$n;Status="Installed"} }
@@ -420,14 +440,44 @@ if ($needsWsl) {
         if ($LASTEXITCODE -eq 0) { $wslAvailable = $true; Write-OK "WSL2" }
     } catch {}
 
-    if (-not $wslAvailable) {
-        # User already approved the install plan, which listed "WSL2 + Ubuntu"
-        # as required.  Just install it - asking again would be a useless
-        # confirmation that, if declined, leaves nothing to install.
-        Write-Host "  Installing WSL2 + Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
-        wsl --install -d Ubuntu --no-launch
-        $needsReboot = $true
-        Write-Installed "WSL2 + Ubuntu (reboot required)"
+    if ($wslAvailable) {
+        # WSL2 answers, so any earlier restart-pending state is resolved.
+        if (Test-Path -LiteralPath $script:RestartMarker) {
+            Remove-Item -LiteralPath $script:RestartMarker -Force `
+                -ErrorAction SilentlyContinue
+        }
+    } else {
+        $bootId = Get-BootSessionId
+        $pendingSince = $null
+        if (Test-Path -LiteralPath $script:RestartMarker) {
+            $pendingSince = (Get-Content -LiteralPath $script:RestartMarker `
+                -ErrorAction SilentlyContinue | Select-Object -First 1)
+        }
+        if ($bootId -and $pendingSince -eq $bootId) {
+            # Same boot session as the run that installed WSL2: the restart
+            # hasn't happened yet, so running `wsl --install` again is a
+            # no-op.  Say what's actually missing instead.
+            Write-Host "  A previous run already installed WSL2, but Windows has NOT" -ForegroundColor Yellow
+            Write-Host "  been restarted since.  WSL2 cannot finish setup until the"  -ForegroundColor Yellow
+            Write-Host "  computer restarts (use Restart, not Shut down)."            -ForegroundColor Yellow
+            $needsReboot = $true
+            Write-SKIP "WSL2 + Ubuntu (waiting on a Windows restart)"
+        } else {
+            # User already approved the install plan, which listed "WSL2 + Ubuntu"
+            # as required.  Just install it - asking again would be a useless
+            # confirmation that, if declined, leaves nothing to install.
+            Write-Host "  Installing WSL2 + Ubuntu (this may take several minutes)..." -ForegroundColor Cyan
+            wsl --install -d Ubuntu --no-launch
+            $needsReboot = $true
+            Write-Installed "WSL2 + Ubuntu (restart required)"
+            # Remember which boot session did this, so a pre-restart re-run
+            # can tell the user the restart is the missing step.
+            try {
+                New-Item -ItemType Directory -Force `
+                    (Split-Path -Parent $script:RestartMarker) | Out-Null
+                Set-Content -LiteralPath $script:RestartMarker -Value $bootId
+            } catch {}
+        }
     }
 
     Write-Step "Checking for an apt-based WSL distro..."
@@ -462,7 +512,7 @@ if ($needsWsl) {
             Write-FAIL ("Ubuntu (wsl --install exit {0}; try: wsl --list --verbose)" -f $installExit)
         }
     } elseif ($needsReboot -and -not $ubuntuFound) {
-        Write-SKIP "Ubuntu (will install after WSL2 reboot)"
+        Write-SKIP "Ubuntu (will install after the Windows restart)"
     } elseif (-not $wslAvailable) {
         Write-SKIP "Ubuntu (WSL2 not available yet)"
     }
@@ -678,11 +728,17 @@ foreach ($r in $results) {
 if ($needsReboot) {
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Yellow
-    Write-Host "  A REBOOT IS REQUIRED to finish WSL2 setup."                -ForegroundColor Yellow
-    Write-Host "  Re-run this script from the Start Menu after reboot to"   -ForegroundColor Yellow
-    Write-Host "  install the remaining WSL packages."                       -ForegroundColor Yellow
+    Write-Host "  A RESTART IS REQUIRED to finish WSL2 setup."                -ForegroundColor Yellow
+    Write-Host "  (Use Restart - with Fast Startup, Shut down is not the"     -ForegroundColor Yellow
+    Write-Host "  same thing.)  After Windows restarts, open the Start Menu"  -ForegroundColor Yellow
+    Write-Host "  and run:"                                                   -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "      Pinball Asset Decryptor  >  Install Prerequisites"      -ForegroundColor White
+    Write-Host ""
+    Write-Host "  to install the remaining WSL packages.  (Re-running the"    -ForegroundColor Yellow
+    Write-Host "  setup .exe with 'Install prerequisites' ticked works too.)" -ForegroundColor Yellow
     Write-Host "============================================================" -ForegroundColor Yellow
-    $reboot = Read-Host "  Reboot now? (y/n)"
+    $reboot = Read-Host "  Restart now? (y/n)"
     if ($reboot -eq 'y') { Restart-Computer -Force }
 } else {
     $missing = ($results | Where-Object { $_.Status -eq "Missing" }).Count

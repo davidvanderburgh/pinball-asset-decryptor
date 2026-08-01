@@ -5437,14 +5437,24 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # out-of-image -- so (1) is an unguarded assumption that happens to hold for
 # that pass, while (2) bites whenever a run isn't a full window.
 #
-# STILL OFF BY DEFAULT, deliberately.  The fix is verified at instruction level
-# (tests drive the emitted cave under unicorn through exactly the call order
-# that broke it) and end to end in the emulator, but "the emulator agrees" is
-# what was believed the last two times.  It needs one confirmed boot on a real
-# machine, and until then the standard build -- which touches no game code, is
-# what every working card has always been, and costs a ~6 ms scrap at two points
-# per replaced sound -- is the honest default.  PAD_STERN_BLIP_FREE=1 / the
-# Advanced Audio Options checkbox is how a tester opts in to confirming it.
+# Both fixes are verified at instruction level (tests drive the emitted cave
+# under unicorn through exactly the call order that broke it, and through a
+# window read that isn't 512 bytes) and end to end against the real Bond card:
+# _assert_param_integrity passes on the rebuilt firmware with all 2351 sounds
+# keeping valid parameters, while the same patches against STOCK firmware shift
+# 2348 of them -- so the check is sensitive and the cave is what makes it pass.
+# A trace over that derive shows 9404 entries into the cave, exactly one
+# satisfying the new signature condition, latching the true mapping base.
+#
+# It stays ON BY DEFAULT on that evidence (David's call, 2026-08-01).  What is
+# still true, and worth keeping in view rather than burying: this remains a
+# firmware patch that has not yet been confirmed to boot on a real machine, and
+# "the emulator agrees" is what was believed the two times it shipped broken.
+# The difference now is that there are named faults with tests pinning them
+# rather than an unexplained field report.  Clearing the Advanced Audio Options
+# checkbox (PAD_STERN_BLIP_FREE=0) is the way out for anyone whose machine
+# objects, and it costs only a ~6 ms scrap of the original at two points per
+# replaced sound.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -5457,31 +5467,30 @@ _CAVE_MAX_BRANCH = 1 << 25  # ARM b reach (+/-32 MB); the fn<->cave hop must fit
 _PT_GNU_STACK = 0x6474E551  # advisory phdr the cave's PT_LOAD is carved from
 
 
-_BLIP_FREE_OFF_REASON = (
-    "off by default: the boot-calibration fault behind the reported reboot is "
-    "fixed, but no card built this way has been confirmed to boot on a real "
-    "machine yet, so builds use the stock-byte restore instead (turn it on in "
-    "Advanced Audio Options to help confirm the fix)")
+_BLIP_FREE_OFF_REASON = ("turned off for this build (Advanced Audio Options / "
+                         "PAD_STERN_SKIP_KEYPATCH)")
 
 
 def _pathA_enabled():
     """True when the blip-free firmware cave should be built for this write.
 
-    **Off by default**, surfaced as the "Blip-free callouts" checkbox in the
-    GUI's Advanced Audio Options.  It is opt-in because no cave-built card has
-    ever been confirmed to boot -- see the section comment above for why the
-    emulator's approval doesn't count and why the field reports are the only
-    evidence there is.
+    **On by default**, surfaced as the "Blip-free callouts" checkbox in the
+    GUI's Advanced Audio Options, which is also the way out if a machine ever
+    misbehaves on a card built this way.
 
-    ``PAD_STERN_BLIP_FREE=1`` opts in (what the checkbox sets);
-    ``PAD_STERN_SKIP_KEYPATCH=1`` forces it off and wins, so anything that
+    ``PAD_STERN_BLIP_FREE=0`` turns it off (what clearing the checkbox does);
+    ``PAD_STERN_SKIP_KEYPATCH=1`` also forces it off and wins, so anything that
     already sets the historical kill switch keeps working.  Either way the build
     falls back to :func:`_restore_masterdir_consumed`, which touches no game code
     at all -- and so does any firmware or host the cave can't safely handle.
+
+    Unset means on, deliberately: that keeps this default true for headless and
+    worker processes that never go through the GUI's env mirroring, so the
+    checkbox and the engine can't disagree about what a build is doing.
     """
     if os.environ.get("PAD_STERN_SKIP_KEYPATCH") == "1":
         return False
-    return os.environ.get("PAD_STERN_BLIP_FREE") == "1"
+    return os.environ.get("PAD_STERN_BLIP_FREE") != "0"
 
 
 def _cave_va2off(segs, va):

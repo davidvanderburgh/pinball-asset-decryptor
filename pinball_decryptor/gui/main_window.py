@@ -8496,13 +8496,11 @@ class MainWindow:
                 "as-is." + (("\n\n" + note) if note else ""))
         return forces
 
-    # Keep in step with App._AUDIO_ADV_DEFAULTS, including the "blip_free_optin"
-    # spelling: the old "blip_free" key is deliberately dead so a settings.json
-    # from before v0.102.4 can't switch the firmware patch back on.
+    # Keep in step with App._AUDIO_ADV_DEFAULTS.
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False,
+        "blip_free": True,
     }
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
@@ -8612,17 +8610,14 @@ class MainWindow:
 
         _rule()
 
-        # Blip-free callouts (the master-directory scrap fix).  OFF by default
-        # since v0.102.4: no card built this way has been confirmed to boot on
-        # a real machine, and the two field reports there are were both a
-        # machine that wouldn't start.  The checkbox is how someone opts in to
-        # testing it.
-        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free_optin", False)))
+        # Blip-free callouts (the master-directory scrap fix).  On by default:
+        # this is the standard build, and the checkbox is the way out if a
+        # machine ever objects to a card built this way.
+        blip_var = tk.BooleanVar(value=bool(cfg.get("blip_free", True)))
         ttk.Checkbutton(
             dlg, variable=blip_var,
             text="Blip-free callouts: patch the game firmware so a replaced "
-                 "sound plays your audio for its whole length (default off, "
-                 "hardware-unverified)"
+                 "sound plays your audio for its whole length (default on)"
         ).pack(anchor=tk.W, padx=12)
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
@@ -8654,19 +8649,21 @@ class MainWindow:
                  "Every build re-derives all the sounds' settings from the "
                  "patched firmware first and falls back to the plain "
                  "stock-byte restore if anything would drift. "
-                 "Turn this on only if you are helping test it. A machine that "
-                 "rebooted through its startup screen was traced to this: the "
-                 "added code worked out where the sound data sat in memory from "
-                 "the first read that looked like the right size, and on a real "
-                 "machine an unrelated read of that size can come first, which "
-                 "left it pointing at the wrong place and quietly redirecting "
-                 "nothing. It now identifies that read by the card's own "
-                 "contents instead, so the order no longer matters. That fix is "
-                 "checked instruction by instruction and against a real card "
-                 "here, but it has not yet been confirmed on an actual machine, "
-                 "and the same was believed the last two times. Off, the card "
-                 "gets no firmware change at all and you hear the brief scrap; "
-                 "that is what the working cards have always been.").pack(
+                 "Two faults in that added code were found and fixed in "
+                 "v0.102.4, after a machine rebooted through its startup "
+                 "screen. It had been working out where the sound data sat in "
+                 "memory from the first read that merely looked like the right "
+                 "size, and on a real machine an unrelated read can come first, "
+                 "which left it pointing at the wrong place and redirecting "
+                 "nothing; it now identifies that read by the card's own "
+                 "contents, so the order no longer matters. It was also acting "
+                 "only on reads of one exact size, while the game works that "
+                 "size out as it goes, so some sounds were skipped. Either one "
+                 "leaves the game reading your new audio where it expected the "
+                 "original, which is what makes a machine reboot. If a card "
+                 "ever misbehaves, clear this box and rebuild: that gives you a "
+                 "card with no firmware change at all, at the cost of the brief "
+                 "scrap described above.").pack(
             anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()
@@ -8705,7 +8702,7 @@ class MainWindow:
                 "experiment_idxs": idxs,
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
-                "blip_free_optin": bool(blip_var.get()),
+                "blip_free": bool(blip_var.get()),
             }
 
         def _ok(_e=None):
@@ -8722,7 +8719,7 @@ class MainWindow:
             idxs_var.set("")
             seed_var.set(False)
             seed_db_var.set("65")
-            blip_var.set(False)         # the standard build is the default
+            blip_var.set(True)          # blip-free is the default build
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))

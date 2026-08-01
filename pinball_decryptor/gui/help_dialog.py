@@ -161,8 +161,7 @@ HELP_CONTENT = {
          "menu and either confirm what the extract called that slot or pick "
          "the entry (type its number to find it) yourself."),
         ("Blip-free callouts (Advanced Audio Options)",
-         "Off by default, and best left that way unless you are helping "
-         "test it. The machine reads two ~512-byte windows out of "
+         "On by default. The machine reads two ~512-byte windows out of "
          "every sound at boot to set up its decoder, and each result feeds "
          "the next, so re-encoding one sound would desync the whole bank. "
          "The plain fix puts the original bytes back in those two windows, "
@@ -173,14 +172,13 @@ HELP_CONTENT = {
          "needs the Linux filesystem driver (the same one full-size video "
          "replacement uses) because it makes the game binary slightly "
          "longer, and it is skipped for a direct-SD write. A machine that "
-         "rebooted through its startup screen was traced to this and fixed: "
-         "the added code was working out where the sound data sat from the "
-         "first read of the right size, and on a real machine an unrelated "
-         "read can come first, which left it redirecting nothing. It now "
-         "identifies that read by the card's own contents. The fix has not "
-         "been confirmed on an actual machine yet, so leaving it off costs "
-         "you only that brief scrap and gets you the card everyone's working "
-         "cards have been."),
+         "rebooted through its startup screen was traced to this and fixed "
+         "in v0.102.4: the added code was working out where the sound data "
+         "sat from the first read of the right size (an unrelated read can "
+         "come first on a real machine, leaving it redirecting nothing), and "
+         "it was acting only on reads of one exact size while the game works "
+         "that size out as it goes. If a card ever misbehaves, untick this "
+         "and rebuild — that costs you only the brief scrap."),
     ],
     "Replace Video": [
         ("Scan and assign",

@@ -19,8 +19,9 @@ algorithm is "replace payload, keep wrapper":
   * ``.webp`` → ``.ctex``: replace the embedded RIFF/WEBP chunk
     inside the GST2 header.  Preserves width/height/format fields
     so Godot's loader still finds them.
-  * ``.ogv`` → ``.ctex``: replace the OGG payload that lives inside
-    BOF's video-as-texture .ctex variant.
+  * ``.ogv`` → ``.ctex``: BOF's video-as-texture .ctex has no GST2
+    wrapper at all — the imported binary IS the Ogg Theora file, byte
+    for byte — so this one is a validated passthrough.
   * ``.ogg`` → ``.oggvorbisstr``: replace the OggPacketSequence
     contents inside the Godot resource.  (Not yet implemented —
     these are rare in modding workflows; falls through to raw copy.)
@@ -510,6 +511,44 @@ def encode_image_to_ctex(image_path, orig_ctex_path, log_cb=None):
 
 
 # ---------------------------------------------------------------------------
+# .ogv → .ctex (raw Ogg Theora, no wrapper)
+# ---------------------------------------------------------------------------
+
+def encode_video_to_ctex(video_path, orig_ctex_path, log_cb=None):
+    """Return the new ``.ctex`` bytes for a replaced video.
+
+    Unlike the image variant there is nothing to splice: a video-bearing
+    ``.ctex`` carries no GST2 header, so the imported binary is the Ogg
+    Theora file verbatim (``source_converter._decode_ctex`` exports it by
+    returning the whole buffer unchanged).  The inverse is therefore a
+    straight passthrough — but a validated one, because silently writing a
+    WebP or an MP4 into a slot the engine will stream as Theora produces a
+    black picture on the machine rather than an error here.
+
+    Size may differ freely from the original: ``pck_directory.rewrite``
+    shifts every later entry's absolute offset on repack.
+    """
+    long_prefix = "\\\\?\\" if sys.platform == "win32" else ""
+    with open(long_prefix + os.path.abspath(orig_ctex_path), "rb") as f:
+        orig_magic = f.read(4)
+    if orig_magic != b"OggS":
+        # A GST2 .ctex is an image slot; a video dropped on it would never
+        # play.  Name both sides so the log says which pairing went wrong.
+        raise ValueError(
+            "original .ctex is a GST2 texture, not Ogg video — "
+            "an .ogv can't replace an image slot")
+    with open(long_prefix + os.path.abspath(video_path), "rb") as f:
+        new_video = f.read()
+    if not new_video.startswith(b"OggS"):
+        raise ValueError(
+            "replacement isn't an Ogg container — BOF video slots must be "
+            "Ogg Theora (.ogv)")
+    if log_cb:
+        log_cb(f"    video: {len(new_video)} bytes (Ogg passthrough)")
+    return new_video
+
+
+# ---------------------------------------------------------------------------
 # Top-level dispatch
 # ---------------------------------------------------------------------------
 
@@ -519,6 +558,7 @@ ENCODERS = {
     ".wav": encode_wav_to_sample,
     ".webp": encode_image_to_ctex,
     ".png": encode_image_to_ctex,
+    ".ogv": encode_video_to_ctex,
 }
 
 

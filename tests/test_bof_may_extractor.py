@@ -113,6 +113,97 @@ def _build_may_binary(tmp_path, *, font_payloads=None, texture_payload=None,
 
 
 # ----------------------------------------------------------------------
+# Directory-driven extraction (the authoritative path)
+# ----------------------------------------------------------------------
+
+def _build_directory_binary(tmp_path, files, base=104, name="dir.x86_64"):
+    """A binary carrying a real Godot v3 PCK directory (plaintext), the
+    same shape ``pck_directory.read`` parses.  ``files`` is
+    ``[(b"res path", data), ...]`` laid out contiguously from ofs 0."""
+    import hashlib
+
+    body = bytearray()
+    blob = bytearray()
+    ofs = 0
+    for path, data in files:
+        praw = path + b"\x00" * (((len(path) + 3) // 4 * 4) - len(path))
+        body += struct.pack("<I", len(praw)) + praw
+        body += struct.pack("<QQ", ofs, len(data))
+        body += hashlib.md5(data).digest() + struct.pack("<I", 0)
+        blob += data
+        ofs += len(data)
+
+    hdr = bytearray(104)
+    hdr[0:4] = b"GDPC"
+    struct.pack_into("<I", hdr, 4, 3)               # pack_format_version 3
+    struct.pack_into("<III", hdr, 8, 4, 5, 2)       # engine 4.5.2
+    struct.pack_into("<I", hdr, 20, 2)              # flags: REL_FILEBASE
+    struct.pack_into("<Q", hdr, 24, base)           # file_base
+    struct.pack_into("<Q", hdr, 32, base + ofs)     # v3 dir_offset
+    pck = bytes(hdr) + bytes(blob) + struct.pack("<I", len(files)) + bytes(body)
+    binary = tmp_path / name
+    binary.write_bytes(b"\x7fELF" + b"\x00" * 508 + pck
+                       + struct.pack("<Q", len(pck)) + b"GDPC")
+    return str(binary)
+
+
+def test_directory_extract_writes_standalone_video_at_exact_size(tmp_path):
+    # The bug this locks down: BOF stores its clips as plain PCK entries
+    # with no .import sidecar beside them, so the sidecar marker scan never
+    # saw them.  On the real Dune build that dropped all 297 videos (1.06 GB)
+    # and folded their bytes into the following texture.  The directory
+    # knows each entry's exact {ofs, size}, so nothing is inferred.
+    video = b"OggS" + bytes(range(256)) * 40
+    poster = b"GST2" + b"\x00" * 60 + b"RIFF" + b"WEBP_PIXELS" * 20
+    binary = _build_directory_binary(tmp_path, [
+        (b"assets/videos/arena/fight_loop.ogv", video),
+        (b".godot/imported/fight_loop.png-abc123.ctex", poster),
+    ])
+    out = tmp_path / "out"
+
+    stats = may_extractor.extract_pck(binary, str(out))
+
+    assert stats["via_directory"] is True
+    assert stats["md5_ok"] == 2 and stats["md5_bad"] == 0
+    got_video = out / "assets" / "videos" / "arena" / "fight_loop.ogv"
+    assert got_video.read_bytes() == video
+    # The poster must NOT have the video folded into it — that over-capture
+    # is exactly what turned a 175 KB .ctex into an 81 MB OggS blob.
+    got_poster = out / ".godot" / "imported" / "fight_loop.png-abc123.ctex"
+    assert got_poster.read_bytes() == poster
+    assert not got_poster.read_bytes().startswith(b"OggS")
+
+
+def test_directory_extract_decompresses_rscc_fonts(tmp_path):
+    # Fonts are the one entry type whose on-disk bytes legitimately differ
+    # from the packed bytes (RSCC Zstd container, RSRC magic stripped).
+    payload = b"FontFile" + b"GLYPH_DATA" * 200
+    binary = _build_directory_binary(tmp_path, [
+        (b".godot/imported/title.ttf-abc123.fontdata", _build_rscc(payload)),
+    ])
+    out = tmp_path / "out"
+
+    stats = may_extractor.extract_pck(binary, str(out))
+
+    assert stats["rscc_count"] == 1
+    got = (out / ".godot" / "imported" / "title.ttf-abc123.fontdata")
+    # "FontFile" in the first 64 bytes means the stripped RSRC is restored.
+    assert got.read_bytes() == b"RSRC" + payload
+
+
+def test_extract_falls_back_to_sidecar_scan_without_a_directory(tmp_path):
+    # Synthetic stubs and pre-May packs have no v3 directory; the heuristic
+    # must still run for them rather than the extract failing outright.
+    binary = _build_may_binary(tmp_path, font_payloads=[b"legacy" * 40])
+    out = tmp_path / "out"
+
+    stats = may_extractor.extract_pck(binary, str(out))
+
+    assert not stats.get("via_directory")
+    assert stats["adjacent_count"] == 1
+
+
+# ----------------------------------------------------------------------
 # Extractor tests
 # ----------------------------------------------------------------------
 

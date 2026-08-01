@@ -627,13 +627,26 @@ class DecryptPipeline(_BasePipeline):
                     stats = extract_pck(local_binary, pck_win,
                                         log_cb=self._log,
                                         progress_cb=_extract_progress)
-                    self._log(
-                        f"PCK extracted: {stats['files_written']} files "
-                        f"({stats['adjacent_count']} imported + "
-                        f"{stats['sequential_count']} scripts/scenes, "
-                        f"{stats['rscc_count']} Zstd-decompressed, "
-                        f"{stats['total_bytes'] / 1024 / 1024:.1f} MB).",
-                        "success")
+                    if stats.get("via_directory"):
+                        # The directory path knows exactly how many files
+                        # there are and has md5-checked every one, so report
+                        # that instead of the marker scan's adjacent/simple
+                        # split (which is meaningless here).
+                        self._log(
+                            f"PCK extracted: {stats['files_written']} of "
+                            f"{stats['directory_count']} files "
+                            f"({stats['md5_ok']} checksum-verified, "
+                            f"{stats['rscc_count']} Zstd-decompressed, "
+                            f"{stats['total_bytes'] / 1024 / 1024:.1f} MB).",
+                            "success")
+                    else:
+                        self._log(
+                            f"PCK extracted: {stats['files_written']} files "
+                            f"({stats['adjacent_count']} imported + "
+                            f"{stats['sequential_count']} scripts/scenes, "
+                            f"{stats['rscc_count']} Zstd-decompressed, "
+                            f"{stats['total_bytes'] / 1024 / 1024:.1f} MB).",
+                            "success")
                     if stats["unpaired_simple"]:
                         self._log(
                             f"  {len(stats['unpaired_simple'])} sidecar paths "
@@ -643,9 +656,13 @@ class DecryptPipeline(_BasePipeline):
                     # (.wav/.ogg/.webp/.ogv/.ttf/.otf) so the user can
                     # play / view / edit them in standard tools.  Saves
                     # under pck/_EDITABLE ASSETS/ alongside the imported tree.
+                    # Video is deliberately absent from this list: BOF's
+                    # clips are standalone .ogv PCK entries, already sitting
+                    # at pck/assets/videos/ in a playable form.  Only the
+                    # imported Godot binaries need decoding.
                     self._log(
                         "Converting imported assets to editable formats "
-                        "(audio→wav, textures→webp, video→ogv, fonts→ttf/otf)...",
+                        "(audio→wav, textures→webp, fonts→ttf/otf)...",
                         "info")
                     from .source_converter import EDITABLE_DIR_NAME
                     src_dir = os.path.join(pck_win, EDITABLE_DIR_NAME)

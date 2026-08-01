@@ -2260,61 +2260,13 @@ class MainWindow:
         # confirm dialog for that case, so the always-on inline warning was
         # redundant noise eating a row of vertical space (a tester).
 
-        # BOF-only callout — explains the custom-format conversion the
-        # Extract pipeline does behind the scenes.  Built but not packed;
-        # apply_manufacturer() packs it when the user picks BOF and
-        # hides it otherwise.  Stands out from the surrounding controls
-        # via a yellow background + amber border, matching the "tip"
-        # callout convention used elsewhere in the app.
-        self._extract_bof_banner = tk.Frame(
-            f, bg="#3a3416", padx=12, pady=10,
-            highlightbackground="#a08020", highlightthickness=1)
-        tk.Label(
-            self._extract_bof_banner, bg="#3a3416", fg="#ffd966",
-            font=(_SANS_FONT, 10, "bold"),
-            anchor=tk.W, justify=tk.LEFT,
-            text="About BOF Extract",
-        ).pack(anchor=tk.W)
-        tk.Label(
-            self._extract_bof_banner, bg="#3a3416", fg="#e8d8a0",
-            font=(_SANS_FONT, 9), anchor=tk.W, justify=tk.LEFT,
-            wraplength=720,
-            text=(
-                "Starting with the April 2026 firmware (Winchester 4/29, "
-                "Dune 5/13), BOF ships its games in a custom Godot PCK "
-                "format that no public extractor — including GDRE Tools — "
-                "can read. Older .fun files use stock Godot and work with "
-                "GDRE; this newer format needs the Pinball Asset Decryptor."
-            ),
-        ).pack(anchor=tk.W, pady=(4, 6))
-        tk.Label(
-            self._extract_bof_banner, bg="#3a3416", fg="#e8d8a0",
-            font=(_SANS_FONT, 9), anchor=tk.W, justify=tk.LEFT,
-            wraplength=720,
-            text=(
-                "During Extract, the app will:\n"
-                "   • Decrypt the .fun and pull out the Godot binary\n"
-                "   • Patch BOF's custom PCK magic markers back to stock Godot\n"
-                "   • Walk BOF's sequential file layout (no traditional directory)\n"
-                "   • Decompress fonts from BOF's Zstd \"RSCC\" container\n"
-                "   • Decode QOA-compressed audio → standard WAV\n"
-                "   • Unwrap textures (GST2 + WebP) → standard WEBP\n"
-                "   • Save everything to pck/_EDITABLE ASSETS/, organised "
-                "into audio/, images/, video/, and fonts/ subfolders"
-            ),
-        ).pack(anchor=tk.W, pady=(0, 6))
-        tk.Label(
-            self._extract_bof_banner, bg="#3a3416", fg="#a8e8a0",
-            font=(_SANS_FONT, 9, "italic"), anchor=tk.W, justify=tk.LEFT,
-            wraplength=720,
-            text=(
-                "After Extract, open _EDITABLE ASSETS/ — every audio file "
-                "is playable in VLC / Audacity, every texture in any image "
-                "viewer. Edit anything, then use the Write tab to repack "
-                "your changes back into a new .fun for the machine."
-            ),
-        ).pack(anchor=tk.W)
-
+        # NOTE: a tall yellow "About BOF Extract" callout used to live here,
+        # walking through the custom-PCK conversion Extract does behind the
+        # scenes.  It was reference material, not something you act on while
+        # filling in two paths, and it pushed the actual controls up off the
+        # window (a tester).  The same explanation now lives in the README's
+        # Barrels of Fun section.
+        #
         # JJP-only (capabilities.asset_filters): per-category Extract
         # filters.  Mirrors the standalone JJP decryptor: an "Extract:"
         # label followed by Graphics / Sounds / File System
@@ -13312,22 +13264,6 @@ class MainWindow:
                 self._image_note_lbl.pack(anchor=tk.W, padx=30, pady=(0, 2))
             else:
                 self._image_note_lbl.pack_forget()
-
-        # BOF-only Extract callout — pack just below the Extract tab's
-        # warning label so users see it before they hit Extract.  Other
-        # manufacturers don't need this preamble; their extracts use
-        # standard tools (or none at all).  Checking mfr.key directly is
-        # OK here because the banner copy is BOF-specific (mentions Dune
-        # / Winchester / Labyrinth by name, references "GBOF" magic,
-        # etc.); promoting this to a generic capability would mean
-        # plumbing per-plugin banner text through the manifest, more
-        # surface area for one banner.
-        if mfr.key == "bof":
-            self._extract_bof_banner.pack(
-                fill=tk.X, padx=10, pady=(6, 6),
-                after=self._extract_output_row_ref)
-        else:
-            self._extract_bof_banner.pack_forget()
 
         # Write-tab editable-folder hint is BOF-only — see widget
         # construction comment for why.  Showing it on JJP/CGC/PB/Spooky

@@ -96,6 +96,13 @@ class BOFManufacturer(Manufacturer):
         # there back into the PCK.  audio_slot_dirs() restricts the scan to
         # that folder so the dot-prefixed import cache never shows up.
         replace_audio=True,
+        # Replace-Video tab.  BOF ships its mode videos as plain standalone
+        # Ogg Theora entries in the PCK (Dune: 297 clips, 1280x720) — not as
+        # imported binaries — so they extract to their res:// path and Write
+        # substitutes them like any other changed file.  Replacements need
+        # not match the original size: pck_directory.rewrite() re-points the
+        # PCK's absolute offsets.
+        replace_video=True,
     )
     input_spec = InputSpec(
         label="Barrels of Fun game files",
@@ -163,18 +170,44 @@ class BOFManufacturer(Manufacturer):
             ("Next Write will stamp", next_date),
         ])]
 
-    def audio_slot_dirs(self, assets_dir):
-        """Restrict the Replace-Audio scan to the ``_EDITABLE ASSETS``
-        folder(s) — the only audio Write re-imports into the PCK.  Files
-        anywhere else (the .godot import cache, raw pck resources) would be
-        dead-ends if staged, so they're kept out of the slot list."""
-        import os
+    def _editable_roots(self, assets_dir):
+        """Every ``_EDITABLE ASSETS`` folder under *assets_dir*, or None.
+
+        Both Replace tabs scan out of here: it holds the only copies Write
+        re-imports into the PCK.  Anything else in the tree (the .godot
+        import cache, raw pck resources) would be a dead end if staged.
+
+        Dot-prefixed dirs are pruned before descending — .godot/imported
+        alone is thousands of files on a real extract, and the editable
+        folder is never inside one.
+        """
         from .source_converter import EDITABLE_DIR_NAME
         roots = []
         for dirpath, dirnames, _files in os.walk(assets_dir):
             if EDITABLE_DIR_NAME in dirnames:
                 roots.append(os.path.join(dirpath, EDITABLE_DIR_NAME))
+                dirnames.remove(EDITABLE_DIR_NAME)
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         return roots or None
+
+    def audio_slot_dirs(self, assets_dir):
+        """Restrict the Replace-Audio scan to the editable folder(s)."""
+        return self._editable_roots(assets_dir)
+
+    # NOTE: no video_slot_dirs override — unlike audio, BOF's video is NOT
+    # in the editable folder.  Its clips are plain standalone PCK entries
+    # (Dune: 297 .ogv under pck/assets/videos/), so they extract straight to
+    # their res:// path and Write substitutes them as ordinary files.  The
+    # default whole-tree scan finds them, and scan_video_slots already
+    # prunes dot-directories, which keeps pck/.godot/imported out of the
+    # list without naming it here.
+
+    def video_slot_exts(self, assets_dir):
+        """Only ``.ogv`` — Ogg Theora is the one video form BOF ships, and
+        the one ``may_packer`` will substitute.  Pinning it keeps a stray
+        .mp4 a modder left in the project folder from looking like a
+        replaceable slot."""
+        return (".ogv",)
 
     def audio_slot_exts(self, assets_dir):
         """Only surface ``.wav`` slots.  The editable-folder re-import

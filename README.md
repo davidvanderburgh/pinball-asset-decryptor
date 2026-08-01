@@ -148,7 +148,7 @@ menu → **View disclaimer…**.
 | Manufacturer | Games | Input formats | Capabilities |
 |---|---|---|---|
 | **American Pinball** | 6 (Houdini, Oktoberfest, Hot Wheels, Legends of Valhalla, Galactic Tank Force, Barry-O's BBQ) | `.pkg` (AES-256-CBC encrypted ZIP) | Extract, Write, Replace Audio, Replace Video — the P-ROC / pyprocgame game tree ships as an AES-256-CBC ZIP behind an `[8B size][16B IV]` header (the `pkgprocess` container, shared lineage with Spooky). A single **static key** — recovered from `PACKAGE_SIGNING_KEY` in `/usr/bin/pkgprocess` on the Houdini / Oktoberfest / Hot Wheels Clonezilla images — decrypts every title across 2020-2024, so Write re-zips the modified tree and re-encrypts with the same key. Clonezilla `.iso` extraction (partclone ext4) is planned. See [docs/AP_PKG_RE.md](docs/AP_PKG_RE.md). |
-| **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack, Replace Audio — native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes them back into Godot-format `.sample`/`.ctex`/`.fontdata` automatically.  The Replace Audio tab carries a per-track **Loop** toggle (defaulted on for `*LOOP*`-named mode-music tracks) that bakes a forward-loop flag into the rebuilt audio so a replacement loops to fill its mode in-game instead of going silent partway through.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss — and lists any staged Replace Audio / Video swaps as *Pending*) so you can see exactly what's about to ship before clicking *Build update*.  Write also stamps the package with an **update version date** one day past the installed code (shown in an editable *Update version* field — leave it on *Auto*, or override it to force-install, e.g. to put official code back over a higher-dated mod) so the machine accepts the update instead of logging "no new code". |
+| **Barrels of Fun** | 3 (Labyrinth, Dune, Winchester) | `.fun` | Extract, Write, Mod Pack, Replace Audio, Replace Video — see the [Barrels of Fun plugin](#barrels-of-fun-plugin) section for the full workflow. Native extractor for the **custom May 2026+ Godot PCK** variant (RSCC Zstd container + GBOF anti-tooling magic, no GDRE Tools needed; pre-May firmware still uses bundled GDRE).  Imported binaries are auto-decoded into editable formats under `pck/_EDITABLE ASSETS/` — `audio/` (`.wav`), `images/` (`.webp`), `video/` (`.ogv`), `fonts/` (`.ttf`/`.otf`) — so you can preview / play / edit them in standard tools and the Write pipeline re-encodes your edits back into the Godot-format binaries automatically (`.wav` → `.sample`, `.webp`/`.png` → `.ctex`; editable `.ogg` and font edits don't round-trip yet and are reported as skipped rather than shipped).  Video is separate: BOF stores its ~300 mode clips as plain Ogg Theora entries at `pck/assets/videos/`, and the Replace Video tab edits those in place.  Extraction is driven by the PCK's **own file directory** (AES-decrypted first on Dune) rather than by guessing file boundaries from the layout, so every one of the 5,296 entries lands byte-exact and is verified against the MD5 the directory records — which is also what lets a replacement of *any* size repack correctly, since the directory's absolute offsets are rewritten to match.  The Replace Audio tab carries a per-track **Loop** toggle (defaulted on for `*LOOP*`-named mode-music tracks) that bakes a forward-loop flag into the rebuilt audio so a replacement loops to fill its mode in-game instead of going silent partway through.  The Write tab shows a **Modified Files Preview** tree (MD5-based, catches rename swaps that mtime would miss — and lists any staged Replace Audio / Video swaps as *Pending*) so you can see exactly what's about to ship before clicking *Build update*.  Write also stamps the package with an **update version date** one day past the installed code (shown in an editable *Update version* field — leave it on *Auto*, or override it to force-install, e.g. to put official code back over a higher-dated mod) so the machine accepts the update instead of logging "no new code". |
 | **Chicago Gaming Company** | 5 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction, Cactus Canyon) | `.img` (raw bootable installer disk image; Cactus Canyon ships on a physical microSD master — image the whole card to `.img`) | Extract, Write, Mod Pack, Replace Audio. WPC remakes: 1300+ DCS `.wav` samples + ROM. Pulp Fiction: 6 JPS sound banks auto-decoded into ~1,000 `.wav` files and repacked on Write. **Cactus Canyon** (CGC `pin`-engine remake of the 1998 Bally game) decodes and **repacks** three surfaces: the original Williams DCS audio (`s2-s7.rom` ↔ addressable streams via the bundled DCSExplorer/DCSEncoder), CGC's added audio (the encrypted `usb.so` bank ↔ WAVs), and the colour LCD art (the obfuscated `cgc.so` archive ↔ 2044 RGB565 PNGs, including RLE-compressed sprites) — plus an optional pass that renders the art animation sequences to MP4 with a colour dot-matrix shader. Optional **Generate callouts.csv** (Whisper) and **Decode DMD scenes** (WPC remakes) round it out. See [docs/CC_REVISITED_RE.md](docs/CC_REVISITED_RE.md). |
 | **Data East** (classic DMD) | 16 (Lethal Weapon 3, Jurassic Park, Tales from the Crypt, Star Trek 25th Anniversary, Hook, Teenage Mutant Ninja Turtles, Batman, The Who's Tommy, Guns N' Roses, WWF Royal Rumble, etc.) | `.zip` (MAME ROM dumps) | **Capture** (libpinmame) — these games store their DMD animations *compressed* in the DMD ROM, decodable only by the game's own firmware, so extraction runs the game in attract mode under PinMAME and records the decoded **4-shade DMD animations + synced audio** as per-scene MP4s (the method the DMD-colorization community uses). No static-decode path — raw ROM bytes hit the compressed regions and decode to noise (see [docs/DE_DMD_RE.md](docs/DE_DMD_RE.md)). User-supplied ROMs; none are bundled or redistributed. Requires libpinmame + ffmpeg. |
 | **Dutch Pinball** | 2 (The Big Lebowski, Alice's Adventures in Wonderland) | TBL: `.zip` (full + delta updates); AAIW: `.img` (Clonezilla auto-installer) | Extract, Write, Apply Delta, Mod Pack, Replace Audio, Replace Video — **unencrypted**. **The Big Lebowski**: plain-zip extraction; the LCD's full-colour video ships as a custom `.cdmd` format the plugin decodes to MP4/PNG (audio auto-synced from the paired `.wav`), with an optional dot-matrix (DMD) display-effect shader. Supply a full image plus the delta(s) you need and Extract **auto-merges** them in version order (remapping onto the base version, validated against each delta's compatible-base list); Write rebuilds an installable update labelled one version newer than the merged version — with a fresh `delta` marker — so the machine's USB update accepts it. **Alice's Adventures in Wonderland**: reconstructs the game SSD from the Clonezilla partclone-v2 + zstd image with a pure-Python reader — fast local 7-Zip path (no WSL needed; WSL fallback). Assets are standard `.mp4` / `.mov` / `.wav` / `.png`; an optional toggle converts the game's ProRes `.mov` videos to playable H.264 MP4. |
@@ -375,6 +375,67 @@ with your password — until the app is granted Full Disk Access under
 System Settings → Privacy & Security. It's a one-time setup; the error
 message in the app spells out the exact steps. Quit (⌘Q) and reopen the
 app after granting it, then flash again.
+
+## Barrels of Fun plugin
+
+### Why this app is needed for recent firmware
+
+Starting with the April 2026 firmware (Winchester 4/29, Dune 5/13), BOF
+ships its games in a custom Godot PCK format that no public extractor —
+including GDRE Tools — can read. Older `.fun` files use stock Godot and
+work with GDRE; this newer format needs the Pinball Asset Decryptor.
+
+### What Extract does
+
+- Decrypts the `.fun` and pulls out the Godot binary
+- Patches BOF's custom PCK magic markers back to stock Godot
+- Reads the PCK's own file directory (decrypting it first on Dune) and
+  writes every entry at its exact recorded offset and size, checking each
+  one against the MD5 the directory carries
+- Decompresses fonts from BOF's Zstd "RSCC" container
+- Decodes QOA-compressed audio to standard WAV
+- Unwraps textures (GST2 + WebP) to standard WEBP
+- Lays the game's own `res://` tree out under `pck/`, and additionally
+  writes player-friendly copies of the *imported* assets to
+  `pck/_EDITABLE ASSETS/` (`audio/`, `images/`, `fonts/`)
+
+### Editing
+
+There are two places to edit, depending on the asset:
+
+**Imported assets — audio, textures, fonts.** These are Godot binaries
+(`.sample`, `.ctex`, `.fontdata`), so Extract decodes each into a normal
+file under `pck/_EDITABLE ASSETS/`. Edit those: every audio file is
+playable in VLC / Audacity, every texture opens in any image viewer.
+Keep each file's name as extracted — the 6-character hash in
+`title_card-7787d7.webp` is what pairs the edit back to its Godot binary,
+and renaming it means Write can't find what it belongs to. Moving a file
+between the `audio/` / `images/` / `fonts/` subfolders is fine.
+
+**Standalone files — video, and anything else the game stores plainly.**
+These sit at their real game path under `pck/` (video lives in
+`pck/assets/videos/<mode>/`). Edit or replace them in place, keeping the
+filename; Write picks them up by content hash.
+
+Either way, use the Write tab afterwards to repack into a new `.fun`.
+
+### Video slots
+
+BOF ships its mode videos as plain Ogg Theora files in the PCK — Dune
+carries 297 of them at 1280x720, about 1 GB, under
+`pck/assets/videos/`. The **Replace Video** tab lists them like any other
+game's clips: assign a replacement in any format and it's re-encoded to
+Theora at the slot's own resolution and frame rate. Replacements do not
+have to match the original's byte size — Write re-points the PCK's file
+offsets so a longer clip still loads.
+
+### What doesn't round-trip yet
+
+Editing an extracted `.ogg` (from `.oggvorbisstr`) or `.ttf`/`.otf` (from
+`.fontdata`) has no effect at Write — those inverse encoders aren't
+written yet, and the build log says so rather than failing silently. The
+compiled scripts and scenes (`.gdc` / `.scn` / `.res`) extract for
+reference but aren't substituted back.
 
 ## Install
 

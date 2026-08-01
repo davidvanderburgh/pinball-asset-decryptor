@@ -13,9 +13,9 @@ existing per-manufacturer Write pipeline picks it up as a changed asset and
 repacks it — no manual copy-paste-and-rename by the user.  This module is
 manufacturer-agnostic; it relies on the plugin laying its video down as loose
 files the Write step repacks (JJP loose containers, Dutch Pinball AAIW
-.mp4/.mov, Spooky Godot .ogv).  Plugins whose video can't round-trip (Dutch
-Pinball TBL .cdmd, BoF .ctex with no inverse encoder yet) don't enable the
-``replace_video`` capability, so their dead-end files never surface here.
+.mp4/.mov, Spooky Godot .ogv, BoF standalone .ogv in the PCK tree).  Plugins
+whose video can't round-trip don't enable the ``replace_video`` capability,
+so their dead-end files never surface here.
 
 This mirrors :mod:`core.audio_slots`.  A replacement that already matches the
 slot's container / codec / resolution / frame rate / alpha / pixel format /

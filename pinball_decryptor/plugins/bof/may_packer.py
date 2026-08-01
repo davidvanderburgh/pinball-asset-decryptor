@@ -233,10 +233,17 @@ def _read_pck_entries(pck_buf):
     return adjacent, sequential
 
 
-# Imported resource types we can substitute by raw bytes (the on-disk
-# extract holds the exact PCK bytes for these; fonts are RSCC-compressed
-# and not user-editable, so they're never substituted here).
-_SUBSTITUTABLE_EXTS = (".sample", ".ctex", ".oggvorbisstr")
+# Types we can substitute by raw bytes, because the on-disk extract holds
+# the exact PCK bytes for them.  ``.ogv`` is here because BOF ships its mode
+# videos as plain standalone PCK entries (Dune: 297 of them, 1.06 GB) rather
+# than as imported binaries — replacing one is a straight file substitution,
+# and pck_directory.rewrite() re-points the offsets so the new clip needn't
+# match the original's size.
+#
+# ``.fontdata`` is deliberately absent: extraction RSCC-decompresses it, so
+# the on-disk bytes never equal the packed bytes and every font would look
+# edited on every build.
+_SUBSTITUTABLE_EXTS = (".sample", ".ctex", ".oggvorbisstr", ".ogv")
 
 
 def _pack_via_directory(original_binary, pckdir, modified_pck_dir,

@@ -106,20 +106,57 @@ def test_longest_first_sort_uses_duration():
 def test_replace_video_capability_flags(manufacturers_by_key):
     # Enabled where Write round-trips loose files generically (JJP/Spooky/DP
     # ship video today; AP/PB repack any file the same way audio does, so the
-    # tab lights up if a game ships a clip and self-empties otherwise).
-    for key in ("jjp", "spooky", "dp", "ap", "pb"):
+    # tab lights up if a game ships a clip and self-empties otherwise).  BOF
+    # joins them via encode_video_to_ctex — its .ctex video slots are raw Ogg.
+    for key in ("jjp", "spooky", "dp", "ap", "pb", "bof"):
         assert manufacturers_by_key[key].capabilities.replace_video is True
-    # Disabled where it would be a dead-end: BOF has no .ogv->.ctex encoder;
-    # CGC renders all video in real time (no loose video files to replace).
-    for key in ("bof", "cgc"):
-        assert manufacturers_by_key[key].capabilities.replace_video is False
+    # Disabled where it would be a dead-end: CGC renders all video in real
+    # time, so there are no loose video files to replace.
+    assert manufacturers_by_key["cgc"].capabilities.replace_video is False
 
 
 def test_spooky_surfaces_ogv_only_others_default(manufacturers_by_key):
-    # Spooky narrows to .ogv (Godot, repackable); JJP uses the default whole
-    # VIDEO_EXTS set; DP adds its native .cdmd (covered in test_cdmd_replace).
+    # Spooky and BOF narrow to .ogv (Godot, repackable); JJP uses the default
+    # whole VIDEO_EXTS set; DP adds .cdmd (covered in test_cdmd_replace).
     assert manufacturers_by_key["spooky"].video_slot_exts("anything") == (".ogv",)
+    assert manufacturers_by_key["bof"].video_slot_exts("anything") == (".ogv",)
     assert manufacturers_by_key["jjp"].video_slot_exts("anything") is None
+
+
+def test_bof_surfaces_standalone_videos_not_the_import_cache(
+        manufacturers_by_key, tmp_path):
+    # BOF's real clips are standalone PCK entries at pck/assets/videos/ —
+    # NOT imported binaries — so the scan must reach them at their res://
+    # path.  The .godot import cache next door must stay out of the list;
+    # it's excluded by scan_video_slots' dot-directory prune rather than by
+    # a BOF-specific root, which is why there's no video_slot_dirs override.
+    bof = manufacturers_by_key["bof"]
+    vids = tmp_path / "pck" / "assets" / "videos" / "arena"
+    vids.mkdir(parents=True)
+    (vids / "1a_arena_fight_intro.ogv").write_bytes(b"OggS\x00")
+    cache = tmp_path / "pck" / ".godot" / "imported"
+    cache.mkdir(parents=True)
+    (cache / "poster.png-abc123.ctex").write_bytes(b"OggS\x00")
+    (cache / "stray.ogv").write_bytes(b"OggS\x00")
+
+    found = scan_video_slots(str(tmp_path),
+                             roots=bof.video_slot_dirs(str(tmp_path)),
+                             exts=bof.video_slot_exts(str(tmp_path)),
+                             probe=False)
+    assert [s.rel_path for s in found] == [
+        "pck/assets/videos/arena/1a_arena_fight_intro.ogv"]
+
+
+def test_bof_video_ext_is_substitutable_by_the_packer():
+    # The wiring that actually ships a replaced clip: the Replace-Video tab
+    # writes over pck/assets/videos/<name>.ogv, the MD5 walk reports it as
+    # changed, and _pack_via_directory only swaps extensions on this list.
+    # Without .ogv here every video edit is silently dropped at Write.
+    from pinball_decryptor.plugins.bof.may_packer import _SUBSTITUTABLE_EXTS
+    assert ".ogv" in _SUBSTITUTABLE_EXTS
+    # .fontdata must stay off it — extraction decompresses those, so they'd
+    # read as edited on every single build.
+    assert ".fontdata" not in _SUBSTITUTABLE_EXTS
 
 
 def test_dp_video_slot_dirs_excludes_decoded_videos(manufacturers_by_key, tmp_path):

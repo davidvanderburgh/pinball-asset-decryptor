@@ -1316,12 +1316,19 @@ def test_write_output_ext_forces_correct_extension(manufacturers_by_key):
     assert cgc.force_write_ext("installer") == "installer.img"
     assert cgc.force_write_ext("installer.img") == "installer.img"
 
-    # Plugins whose installer looks the file up by name pin nothing.
-    for key in ("jjp", "bof"):
-        mfr = manufacturers_by_key.get(key)
-        if mfr is not None:
-            assert mfr.write_output_ext() == ""
-            assert mfr.force_write_ext("update") == "update"
+    # JJP builds a Clonezilla-derived install ISO, so it pins .iso (v0.100.0,
+    # when the Build / make USB stick dialog started deriving its Build-to
+    # path from this).
+    jjp = manufacturers_by_key.get("jjp")
+    if jjp is not None:
+        assert jjp.write_output_ext() == ".iso"
+        assert jjp.force_write_ext("update") == "update.iso"
+
+    # BOF's machine looks the update up by name, so it pins nothing.
+    bof = manufacturers_by_key.get("bof")
+    if bof is not None:
+        assert bof.write_output_ext() == ""
+        assert bof.force_write_ext("update") == "update"
 
 
 def test_write_filename_forces_raw_extension_and_states_it(

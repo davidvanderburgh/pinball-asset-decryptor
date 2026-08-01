@@ -201,9 +201,11 @@ HELP_CONTENT = {
          "Patching is size-neutral: a same-or-smaller replacement fits "
          "as-is, a larger one is re-encoded down to the slot's byte budget. "
          "A replacement that already matches the slot's format is copied "
-         "through verbatim — no quality loss. On Stern Spike 2 an oversized "
-         "clip skips that budget entirely: the slot is grown on the card so "
-         "the clip keeps full quality."),
+         "through verbatim — no quality loss. Two exceptions where a "
+         "longer clip keeps full quality: on Stern Spike 2 the slot is "
+         "grown on the card, and on Barrels of Fun the update's file "
+         "offsets are rewritten around the new clip — so on both, an "
+         "oversized replacement skips the byte budget entirely."),
         ("What the machine can actually play",
          "A clip only goes onto a Spike 2 card untouched when it's a real "
          "drop-in for the one it replaces — same container, H.264, 8-bit "

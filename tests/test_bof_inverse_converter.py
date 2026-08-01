@@ -386,6 +386,61 @@ def test_encode_image_rejects_non_gst2(tmp_path):
 
 
 # ----------------------------------------------------------------------
+# .ogv → .ctex (video-as-texture passthrough)
+# ----------------------------------------------------------------------
+
+def test_encode_video_to_ctex_is_a_verbatim_passthrough(tmp_path):
+    # A video .ctex carries no GST2 wrapper — verified on the real Dune
+    # extract, where 1a_run_loop.png-<md5>.ctex and its exported
+    # 1a_run_loop-7787d7.ogv have identical MD5s.  So the new bytes go in
+    # whole, and a size change is fine (pck_directory re-points the offsets).
+    orig = tmp_path / "loop.ctex"
+    orig.write_bytes(b"OggS" + b"\x00" * 200)
+    new_video = b"OggS" + b"\x01" * 900
+    src = tmp_path / "loop-abc123.ogv"
+    src.write_bytes(new_video)
+
+    assert ic.encode_video_to_ctex(str(src), str(orig)) == new_video
+
+
+def test_encode_video_rejects_image_slot(tmp_path):
+    # Dropping an .ogv on a GST2 texture would play as a black frame in-game
+    # rather than fail here, so the pairing is checked up front.
+    orig = tmp_path / "tex.ctex"
+    orig.write_bytes(b"GST2" + b"\x00" * 100)
+    src = tmp_path / "clip-abc123.ogv"
+    src.write_bytes(b"OggS" + b"\x00" * 100)
+
+    with pytest.raises(ValueError, match="GST2 texture"):
+        ic.encode_video_to_ctex(str(src), str(orig))
+
+
+def test_encode_video_rejects_non_ogg_replacement(tmp_path):
+    # The Replace-Video tab re-encodes to Theora/Ogg for us, but a hand-copied
+    # .mp4 renamed to .ogv must not reach the PCK.
+    orig = tmp_path / "loop.ctex"
+    orig.write_bytes(b"OggS" + b"\x00" * 100)
+    src = tmp_path / "clip-abc123.ogv"
+    src.write_bytes(b"\x00\x00\x00\x20ftypisom" + b"\x00" * 100)
+
+    with pytest.raises(ValueError, match="isn't an Ogg container"):
+        ic.encode_video_to_ctex(str(src), str(orig))
+
+
+def test_ogv_is_registered_so_write_stops_skipping_video(tmp_path):
+    # The regression this guards: .ogv parsed + paired fine, but had no
+    # ENCODERS entry, so every video edit fell through reencode_source_file's
+    # "no inverse encoder" branch and vanished silently at Write.
+    assert ".ogv" in ic.ENCODERS
+    orig = tmp_path / "loop.ctex"
+    orig.write_bytes(b"OggS" + b"\x00" * 50)
+    src = tmp_path / "loop-abc123.ogv"
+    src.write_bytes(b"OggS" + b"\x02" * 77)
+
+    assert ic.reencode_source_file(str(src), str(orig)) == src.read_bytes()
+
+
+# ----------------------------------------------------------------------
 # apply_source_edits — top-level write-back
 # ----------------------------------------------------------------------
 

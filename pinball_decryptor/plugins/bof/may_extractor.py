@@ -32,25 +32,30 @@ The pairing model — two flavours of sidecar:
     type.  Covers .gdc (compiled scripts), .scn (binary scenes),
     .res (binary resources).  About 700 files in the Dune build.
 
-Extraction strategy (in order):
+Extraction strategy — the directory first, the sidecar scan only as a
+fallback:
 
-  1. Scan the PCK section for every ``[remap]\\n`` marker (sidecar
-     starts).  Parse each to get the path + classify as adjacent or
-     simple.
-  2. For adjacent sidecars: file data is between the previous
-     sidecar-end and the current sidecar-start, trimmed of zero
-     padding and the optional RSCC separator.  If the file data
-     starts with a RSCC v2 container, decompress it; otherwise save
-     raw.
-  3. For simple sidecars grouped by extension: scan the PCK for the
-     matching file magic (``GDSC`` for .gdc) and pair the Nth magic
-     occurrence with the Nth simple sidecar of that extension.
-  4. Optionally prepend ``RSRC`` magic to decompressed font files
-     (BOF strips it during compression).
+  1. **``_extract_via_directory``** reads the PCK's own v3 directory
+     (``pck_directory.read``) and writes each entry from its exact
+     ``{ofs, size}``, checking every slice against the md5 the directory
+     carries.  This is what the running game itself uses to locate
+     resources, so nothing is inferred.  Real BOF builds all have it.
+  2. **The sidecar marker scan** (everything below ``extract_pck``) is
+     the pre-``pck_directory`` heuristic, kept for binaries with no
+     directory — synthetic test stubs and pre-May packs.  It infers each
+     file's bounds from the gap between neighbouring ``[remap]``
+     sidecars, then pairs sidecar-less files by magic order.
 
-This recovers ~97% of the PCK contents on Dune (1.48 GB extracted,
-2180 / 2250 files validate by magic).  Remaining ~3% are .scn and
-.res files (need a different magic-detection heuristic — open work).
+Why the directory had to take over: the marker scan can only see files
+that have a sidecar beside them, and BOF stores plenty that don't.
+Measured against Dune's 5296 directory entries it wrote just 26% of them
+byte-correctly — it dropped all 297 standalone ``.ogv`` videos (1.06 GB)
+completely, and because their bytes sit between two sidecars it folded
+each video into the *following* imported texture: a 175 KB poster
+``.ctex`` came out as an 81 MB blob starting with ``OggS``.  Fonts,
+scenes (``.scn``), resources (``.res``) and most scripts were oversized
+the same way.  Only ``.sample`` audio (1025/1029) came out right, which
+is why the audio workflow worked while everything else quietly didn't.
 """
 
 import os
@@ -251,6 +256,110 @@ def _maybe_fix_resource_magic(data, ext):
     return data
 
 
+def _extract_via_directory(binary_path, out_dir, log_cb, progress_cb):
+    """Extract every file using the PCK's own v3 directory of absolute
+    offsets, or return ``None`` if this binary hasn't got one (in which
+    case ``extract_pck`` falls back to the sidecar scan — see the module
+    docstring for why that path can't be trusted where a directory exists).
+
+    The directory is what the *running game* uses to find each resource,
+    so its ``{path, ofs, size, md5}`` needs no guessing and every slice is
+    checked against the recorded md5 before it's written.
+
+    Files are streamed slice-by-slice off an mmap, so peak RSS stays flat
+    on a 2.9 GB binary with 80 MB entries in it.
+    """
+    import hashlib
+    import mmap
+    import sys as _sys
+
+    from . import pck_directory
+
+    def _log(msg, sev="info"):
+        if log_cb:
+            log_cb(msg, sev)
+
+    try:
+        pckdir = pck_directory.read(binary_path)
+    except Exception as ex:                       # unreadable / no key
+        _log(f"PCK directory unavailable ({ex}); falling back to the "
+             f"sidecar scan", "warning")
+        return None
+    if pckdir is None:
+        return None
+
+    entries = pckdir.entries
+    _log(f"PCK directory: {len(entries)} entries "
+         f"({'encrypted' if pckdir.encrypted else 'plaintext'})")
+
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir, exist_ok=True)
+
+    stats = {
+        "files_written": 0, "adjacent_count": 0, "sequential_count": 0,
+        "rscc_count": 0, "unpaired_simple": [], "total_bytes": 0,
+        "directory_count": len(entries), "md5_ok": 0, "md5_bad": 0,
+        "via_directory": True,
+    }
+    bad_md5 = []
+    long_prefix = "\\\\?\\" if _sys.platform == "win32" else ""
+    batch = max(1, len(entries) // 100)
+
+    f = open(long_prefix + os.path.abspath(binary_path), "rb")
+    try:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            for i, e in enumerate(entries):
+                path = e["praw"].rstrip(b"\x00").decode("utf-8", "replace")
+                start = pckdir.pck_off + pckdir.base + e["ofs"]
+                data = bytes(mm[start:start + e["size"]])
+                if len(data) != e["size"]:
+                    bad_md5.append(path)
+                    stats["md5_bad"] += 1
+                    continue
+                if hashlib.md5(data).digest() == e["md5"]:
+                    stats["md5_ok"] += 1
+                else:
+                    stats["md5_bad"] += 1
+                    if len(bad_md5) < 20:
+                        bad_md5.append(path)
+                # Fonts (and anything else BOF compressed) arrive wrapped
+                # in an RSCC Zstd container with the RSRC magic stripped.
+                if is_rscc_at(data, 0):
+                    try:
+                        data, _ = decompress(data, 0)
+                        stats["rscc_count"] += 1
+                    except Exception as ex:
+                        _log(f"  RSCC decompress failed for {path}: {ex}",
+                             "warning")
+                        continue
+                ext = os.path.splitext(path)[1].lower()
+                data = _maybe_fix_resource_magic(data, ext)
+                if _write_out(out_dir, path, data):
+                    stats["files_written"] += 1
+                    stats["adjacent_count"] += 1
+                    stats["total_bytes"] += len(data)
+                if progress_cb and (i + 1) % batch == 0:
+                    progress_cb(i + 1, len(entries),
+                                f"Extracting PCK... {i+1}/{len(entries)}")
+        finally:
+            mm.close()
+    finally:
+        f.close()
+
+    if stats["md5_bad"]:
+        # Not fatal — the bytes are still written — but it means this
+        # binary's layout doesn't match what the directory claims, which
+        # is worth seeing rather than discovering on the machine.
+        _log(f"{stats['md5_bad']} of {len(entries)} entries failed their "
+             f"directory md5 (e.g. {', '.join(bad_md5[:3])})", "warning")
+    _log(f"Extracted {stats['files_written']} files "
+         f"({stats['total_bytes'] / 1e9:.2f} GB) via the PCK directory; "
+         f"{stats['md5_ok']} verified against their directory md5")
+    return stats
+
+
 def extract_pck(binary_path, out_dir, log_cb=None, progress_cb=None):
     """Extract a BOF May 2026+ binary's PCK section into ``out_dir``.
 
@@ -263,6 +372,11 @@ def extract_pck(binary_path, out_dir, log_cb=None, progress_cb=None):
           couldn't locate (mostly .scn / .res today)
       ``total_bytes`` — total bytes written
 
+    Real BOF builds carry a v3 PCK directory, so the work is normally done
+    by :func:`_extract_via_directory` (which also reports ``md5_ok`` /
+    ``md5_bad`` / ``directory_count`` and sets ``via_directory``); the
+    sidecar scan below runs only when there's no directory to read.
+
     ``log_cb(msg, severity)`` is optional and receives progress info.
     ``progress_cb(current, total, label)`` is optional and is called
     on every batch of writes during the extract loop.
@@ -274,6 +388,12 @@ def extract_pck(binary_path, out_dir, log_cb=None, progress_cb=None):
     def _progress(cur, total, label):
         if progress_cb:
             progress_cb(cur, total, label)
+
+    stats = _extract_via_directory(binary_path, out_dir, log_cb, progress_cb)
+    if stats is not None:
+        return stats
+    _log("No v3 PCK directory — reconstructing file bounds from the "
+         "sidecar markers (heuristic; expect gaps)", "warning")
 
     pck_start, pck_end = find_pck_section(binary_path)
     _log(f"PCK section: bytes {pck_start} – {pck_end} ({pck_end - pck_start} bytes)")

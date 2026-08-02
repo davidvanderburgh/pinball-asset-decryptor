@@ -412,6 +412,17 @@ class FlashImageDialog:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_drives(self, my_id, drives, pick):
+        # The worker's after() hand-off can outlive the dialog: enumeration
+        # takes seconds (PowerShell/diskutil), and clicking Start or Cancel
+        # first destroys the window — after() still queues fine on a
+        # destroyed Toplevel, so the guard has to be here, not in the
+        # worker.  A tester's build log showed the fallout: TclError
+        # "invalid command name …!combobox" from poking the dead dropdown.
+        try:
+            if not self._dlg.winfo_exists():
+                return
+        except tk.TclError:
+            return
         if my_id != self._enum_id:
             return                       # a newer Refresh superseded this one
         from ..core.drives import visible_drives

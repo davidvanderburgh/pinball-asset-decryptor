@@ -146,6 +146,32 @@ def test_gdre_install_is_consolidated():
         "as a file instead.")
 
 
+def test_wsl_installs_check_firmware_virtualization():
+    """Regression guard — PAD-21 (virtualization disabled in BIOS/UEFI).
+
+    With firmware virtualization off, `wsl --install` fails with
+    0x80370102 in plain console color; the message scrolled past a user
+    unnoticed through three support round-trips of reinstall advice that
+    could never work.  Both WSL install paths (the framework install and
+    the Ubuntu registration) must consult Test-VirtualizationDisabled and
+    show the red banner instead of attempting a doomed install.  The
+    probe must gate on HypervisorPresent — Windows reports the firmware
+    flag False whenever a hypervisor is already running, so the flag
+    alone would false-positive on every healthy Hyper-V machine.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "HypervisorPresent" in ps1, (
+        "Test-VirtualizationDisabled must check HypervisorPresent first — "
+        "VirtualizationFirmwareEnabled reads False on machines where a "
+        "hypervisor is already running.")
+    assert "VirtualizationFirmwareEnabled" in ps1, (
+        "install_prerequisites.ps1 must probe the firmware virtualization "
+        "flag so a disabled BIOS/UEFI setting is named instead of retried.")
+    assert ps1.count("Test-VirtualizationDisabled") >= 3, (
+        "Both WSL install paths (WSL2 framework + Ubuntu registration) "
+        "must consult Test-VirtualizationDisabled before installing.")
+
+
 def test_pip_step_uses_bundled_python():
     """Regression guard — faster-whisper skip bug.
 

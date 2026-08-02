@@ -106,6 +106,47 @@ function Get-WslInstallPlan {
     }
 }
 
+# --- Firmware virtualization probe ---------------------------------------
+# WSL2 boots a real utility VM, so with virtualization switched off in the
+# BIOS/UEFI every install/first-launch dies with 0x80370102 ("virtualization
+# is not enabled").  wsl.exe does print that, but in plain console color —
+# it scrolled past a user unnoticed through three support round-trips while
+# the colored text around it drew the eye (PAD-21).  HypervisorPresent=True
+# means a hypervisor is already running, which is fine regardless of what
+# the firmware flag reads (Windows reports it False once a hypervisor owns
+# the CPU).  Only trust "disabled" when no hypervisor is running AND the
+# firmware flag explicitly reads False; a query error means "don't know",
+# never "disabled".
+function Test-VirtualizationDisabled {
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        if ($cs.HypervisorPresent) { return $false }
+        $cpu = @(Get-CimInstance Win32_Processor -ErrorAction Stop)[0]
+        if ($null -eq $cpu.VirtualizationFirmwareEnabled) { return $false }
+        return (-not $cpu.VirtualizationFirmwareEnabled)
+    } catch { return $false }
+}
+
+function Write-VirtualizationBanner {
+    Write-Host ""
+    Write-Host "  ============================================================" -ForegroundColor Red
+    Write-Host "  HARDWARE VIRTUALIZATION IS DISABLED ON THIS MACHINE"          -ForegroundColor Red
+    Write-Host "  ============================================================" -ForegroundColor Red
+    Write-Host "  WSL2 runs Linux in a virtual machine, and this computer's"    -ForegroundColor Red
+    Write-Host "  BIOS/UEFI firmware has virtualization switched off, so the"   -ForegroundColor Red
+    Write-Host "  WSL2/Ubuntu install cannot succeed no matter how many times"  -ForegroundColor Red
+    Write-Host "  it is re-run.  To fix it:"                                    -ForegroundColor Red
+    Write-Host "    1. Reboot into the BIOS/UEFI setup screen (usually Del,"    -ForegroundColor Yellow
+    Write-Host "       F2 or F10 during power-on)."                             -ForegroundColor Yellow
+    Write-Host "    2. Enable the option named Intel VT-x, AMD-V, SVM Mode,"    -ForegroundColor Yellow
+    Write-Host "       or Virtualization Technology (often under Advanced or"   -ForegroundColor Yellow
+    Write-Host "       CPU settings)."                                          -ForegroundColor Yellow
+    Write-Host "    3. Save, boot back into Windows, re-run this installer."    -ForegroundColor Yellow
+    Write-Host "  If the firmware has no such option, this machine cannot run"  -ForegroundColor Yellow
+    Write-Host "  WSL2 - the WSL-side features need a different PC."            -ForegroundColor Yellow
+    Write-Host ""
+}
+
 # --- WSL2 restart-pending marker -----------------------------------------
 # `wsl --install` on a machine without WSL2 enables Windows features that
 # only take effect after a RESTART.  Users who skip it (or use Shut down,
@@ -480,7 +521,12 @@ if ($needsWsl) {
             $pendingSince = (Get-Content -LiteralPath $script:RestartMarker `
                 -ErrorAction SilentlyContinue | Select-Object -First 1)
         }
-        if ($bootId -and $pendingSince -eq $bootId) {
+        if (Test-VirtualizationDisabled) {
+            # No point installing (or waiting on a restart): the VM WSL2
+            # boots cannot start until the firmware setting changes.
+            Write-VirtualizationBanner
+            Write-FAIL "WSL2 + Ubuntu (virtualization disabled in BIOS/UEFI)"
+        } elseif ($bootId -and $pendingSince -eq $bootId) {
             # Same boot session as the run that installed WSL2: the restart
             # hasn't happened yet, so running `wsl --install` again is a
             # no-op.  Say what's actually missing instead.
@@ -515,7 +561,15 @@ if ($needsWsl) {
         Write-OK "Ubuntu / apt-based distro"
     }
 
-    if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
+    if (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot -and
+        (Test-VirtualizationDisabled)) {
+        # `wsl --status` answers without booting anything (registry-backed),
+        # but REGISTERING a distro boots the WSL2 utility VM - exactly what
+        # firmware-disabled virtualization kills with 0x80370102.  This is
+        # the state the PAD-21 machine retried across three releases.
+        Write-VirtualizationBanner
+        Write-FAIL "Ubuntu (virtualization disabled in BIOS/UEFI)"
+    } elseif (-not $ubuntuFound -and $wslAvailable -and -not $needsReboot) {
         # No usable distro yet - install Ubuntu directly.
         # We let wsl write its output to the console directly (no capture)
         # because PowerShell 5.1's pipeline mangles its UTF-16LE output -

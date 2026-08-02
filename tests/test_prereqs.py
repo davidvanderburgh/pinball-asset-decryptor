@@ -77,11 +77,16 @@ def test_check_prerequisite_ffmpeg_present(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _wsl_env(monkeypatch):
-    """Pretend we're on Windows with wsl.exe on PATH, latch reset."""
+    """Pretend we're on Windows with wsl.exe on PATH, latch reset.
+
+    Firmware virtualization defaults to fine — the real probe would spawn
+    powershell, which the scripted subprocess fakes (rightly) reject.
+    Virtualization-specific tests override this."""
     monkeypatch.setattr(prereqs.sys, "platform", "win32")
     monkeypatch.setattr(prereqs.shutil, "which",
                         lambda name: r"C:\Windows\System32\wsl.exe")
     monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
+    monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: False)
 
 
 def _scripted_run(monkeypatch, *, registered, probe_outcomes, calls):
@@ -251,6 +256,79 @@ def test_check_prerequisite_wsl_hint_override_reaches_result(monkeypatch):
                         lambda cmd: (False, "tool missing", ""))
     res = check_prerequisite(p)
     assert res.install_hint == "static hint"
+
+
+# ---------------------------------------------------------------------------
+# Virtualization disabled in the BIOS/UEFI firmware (PAD-21).
+#
+# A laptop with virtualization switched off retried the WSL/Ubuntu install
+# across three releases: wsl.exe's own "virtualization is not enabled" text
+# scrolled past uncolored, and every diagnosis hint ("Install Missing", one
+# more restart) named a step that cannot succeed in that state.  The
+# firmware check now runs before the other diagnoses.
+# ---------------------------------------------------------------------------
+
+def test_wsl_virtualization_disabled_wins_diagnosis(monkeypatch):
+    """Firmware off: say so, and do NOT send the user to Install Missing
+    or another restart — neither can ever work.  Wins even over a pending
+    restart, which also can't fix firmware."""
+    _wsl_env(monkeypatch)
+    monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: True)
+    monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: True)
+    monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: True)
+    calls = []
+    _scripted_run(monkeypatch, registered=False,
+                  probe_outcomes=[1], calls=calls)
+    ok, msg, hint = prereqs._probe_wsl("echo ok")
+    assert ok is False
+    assert "virtualization is disabled" in msg
+    assert "BIOS" in hint
+    assert "Install Missing" not in msg
+
+
+def _cim_run(monkeypatch, stdout, returncode=0):
+    """Fake the one powershell CIM query behind _virtualization_disabled,
+    cache cleared so each scenario re-probes."""
+    def _run(cmd, *a, **kw):
+        assert cmd[0] == "powershell" and "HypervisorPresent" in " ".join(cmd)
+        return subprocess.CompletedProcess(cmd, returncode,
+                                           stdout=stdout, stderr="")
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    monkeypatch.setattr(prereqs, "_virt_disabled_cache", None)
+
+
+def test_virtualization_disabled_needs_explicit_double_false(monkeypatch):
+    _cim_run(monkeypatch, "False\nFalse\n")
+    assert prereqs._virtualization_disabled() is True
+    # Hypervisor already running: Windows reports the firmware flag False
+    # in that state, so the flag alone must not read as "disabled".
+    _cim_run(monkeypatch, "True\nFalse\n")
+    assert prereqs._virtualization_disabled() is False
+    _cim_run(monkeypatch, "False\nTrue\n")
+    assert prereqs._virtualization_disabled() is False
+    # Query failure / no answer: "don't know" is never "disabled" — a
+    # wrong go-fix-your-BIOS on a healthy machine beats the user up.
+    _cim_run(monkeypatch, "")
+    assert prereqs._virtualization_disabled() is False
+    _cim_run(monkeypatch, "False\nFalse\n", returncode=1)
+    assert prereqs._virtualization_disabled() is False
+
+
+def test_virtualization_probe_runs_once_per_session(monkeypatch):
+    """Firmware can't change without a reboot; a 5-probe manufacturer must
+    not pay the ~1 s powershell spawn five times."""
+    calls = []
+
+    def _run(cmd, *a, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="False\nFalse\n",
+                                           stderr="")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    monkeypatch.setattr(prereqs, "_virt_disabled_cache", None)
+    assert prereqs._virtualization_disabled() is True
+    assert prereqs._virtualization_disabled() is True
+    assert len(calls) == 1
 
 
 def test_restart_pending_marker_compares_boot_session(monkeypatch, tmp_path):

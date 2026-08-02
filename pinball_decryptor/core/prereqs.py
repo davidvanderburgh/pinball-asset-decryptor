@@ -355,12 +355,70 @@ def _wsl_status_ok() -> bool:
         return False
 
 
+# Firmware can't change while Windows is running (flipping it takes a trip
+# through the BIOS/UEFI setup screen and a reboot), so one PowerShell spawn
+# per session is enough — _diagnose_wsl_unusable runs once per failing probe
+# and a 5-probe manufacturer would otherwise pay ~1 s each.
+_virt_disabled_cache: Optional[bool] = None
+
+
+def _virtualization_disabled() -> bool:
+    """True only when this machine EXPLICITLY reports hardware
+    virtualization switched off in its BIOS/UEFI firmware.
+
+    Two WMI facts, checked in order: ``HypervisorPresent`` True means a
+    hypervisor is already running, so virtualization is fine — Windows
+    reports the firmware flag as False in that state, which is why the
+    flag alone can't be trusted.  Only with no hypervisor running AND
+    ``VirtualizationFirmwareEnabled`` explicitly False is the firmware
+    the problem.  Any query failure means "don't know", never "disabled"
+    — a wrong "enable it in your BIOS" on a healthy machine would be
+    worse than the generic hint."""
+    global _virt_disabled_cache
+    if _virt_disabled_cache is None:
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_ComputerSystem).HypervisorPresent;"
+                 "@(Get-CimInstance Win32_Processor)[0]"
+                 ".VirtualizationFirmwareEnabled"],
+                capture_output=True,
+                text=True,
+                timeout=PROBE_TIMEOUT,
+                creationflags=_CREATE_FLAGS,
+            )
+            lines = [ln.strip().lower()
+                     for ln in (result.stdout or "").splitlines()
+                     if ln.strip()]
+            _virt_disabled_cache = (result.returncode == 0
+                                    and lines == ["false", "false"])
+        except (subprocess.TimeoutExpired, OSError):
+            _virt_disabled_cache = False
+    return _virt_disabled_cache
+
+
 def _diagnose_wsl_unusable() -> Tuple[str, str]:
     """(message, install_hint) when WSL can't run our probe at all — no
-    registered distro, or no WSL.  Three machine states hide behind that
+    registered distro, or no WSL.  Four machine states hide behind that
     one symptom and each has a different next step; naming the wrong one
     (the static install-and-reboot hint) looped a user through pointless
-    restarts (PAD-17)."""
+    restarts (PAD-17).
+
+    The firmware check comes first: with virtualization disabled in the
+    BIOS/UEFI, no install, restart, or Install Missing click can ever
+    succeed — wsl.exe does say so, but its plain-color error scrolled
+    past a user unnoticed through three whole support round-trips while
+    every other state's hint kept him retrying the install (PAD-21)."""
+    if _virtualization_disabled():
+        return ("WSL2 cannot start: hardware virtualization is disabled "
+                "in this computer's BIOS/UEFI firmware, so installing "
+                "WSL/Ubuntu again will not help.",
+                "Reboot into the BIOS/UEFI setup screen and enable "
+                "virtualization — the option is named Intel VT-x, AMD-V, "
+                "SVM Mode, or Virtualization Technology, usually under "
+                "Advanced or CPU settings. Then click 'Install Missing' "
+                "above the tabs. If the firmware has no such option, this "
+                "machine cannot run WSL2.")
     if _wsl_restart_pending():
         return ("WSL2 was installed, but Windows has not been restarted "
                 "since — the restart is what finishes WSL2 setup.",

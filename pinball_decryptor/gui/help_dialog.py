@@ -86,7 +86,17 @@ HELP_CONTENT = {
          "replacement per slot — almost any audio format is accepted (mp3, "
          "wav, ogg, flac, m4a, …); it doesn't need to match the original, "
          "it's converted and fitted (length / sample rate / volume) "
-         "automatically when you build."),
+         "automatically when you build. Export from your editor at whatever "
+         "sample rate and bit depth it likes — 16, 24 or 32-bit, float or "
+         "integer, any rate — there's nothing to match by hand."),
+        ("Matching the original's volume",
+         "Replacements are levelled against the sound they replace, not to a "
+         "fixed peak: the original slot is decoded, its speech level "
+         "measured, and yours gained to match. That matters most when one "
+         "stray transient (a lip smack, a desk knock) is the loudest thing in "
+         "your recording — normalizing to that peak would leave the voice far "
+         "quieter than the callouts around it. It works the other way too, "
+         "bringing a hot music clip down to the level of its neighbours."),
         ("Assets folder + applying",
          "The assets folder is the one Extract produced — the same folder the "
          "Write tab reads. There's no separate \"stage\" step: the "
@@ -414,8 +424,25 @@ HELP_CONTENT = {
          "always kept alongside for reference. Edits are saved straight into "
          "the manifest and patched in on the next Write."),
         ("Length limits",
-         "Replacements live in the original string's slot: same-length or "
-         "shorter is padded automatically; over-long text is rejected."),
+         "Replacements live in the original string's slot: the Max column is "
+         "the byte budget, same-length or shorter is padded automatically, "
+         "and over-long text is rejected."),
+        ("Scene text vs game-program text",
+         "Two kinds of string are listed. Scene text lives in a scene file "
+         "(the Scene column names it). Game-program text is drawn by the game "
+         "code itself — mode titles, battle names, award lines — and shows "
+         "\"game program\" in that column. A scene's text is often only a "
+         "placeholder the code overwrites, so if a line still reads the old "
+         "way on the machine after you changed every scene copy of it, the "
+         "one that matters is the game-program row."),
+        ("Names that live inside a longer line",
+         "Some names have no string of their own: the machine draws the tail "
+         "end of a longer line, so \"EBIRAH\" is really the last part of "
+         "\"GODZILLA VS EBIRAH\". Those get their own row, budgeted by the "
+         "length of the line they sit inside. Edit BOTH rows and make the "
+         "line END with the new name — say \"GZ VS BIOLLANTE\" plus "
+         "\"BIOLLANTE\" — and the pointer is moved for you. If the two don't "
+         "agree, the build log says so and leaves that line alone."),
         ("Apply to all",
          "\"Apply to every scene with the same original text\" repeats the "
          "edit everywhere that exact original string occurs (many strings "
@@ -424,7 +451,8 @@ HELP_CONTENT = {
          "\"Show in Scenes…\" (also on the right-click menu) opens the "
          "Scenes window on the scene that draws the selected line, with the "
          "line itself picked out — so you can see the font, the colour and "
-         "the art it sits on before changing the words."),
+         "the art it sits on before changing the words. Game-program lines "
+         "have no scene to show: the game code draws them at runtime."),
     ],
     "Write": [
         ("What a build does",

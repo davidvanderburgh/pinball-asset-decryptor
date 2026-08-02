@@ -355,3 +355,100 @@ def test_shape_locator_refuses_a_function_of_the_wrong_shape():
         elf, _want = _build_shape_elf(**kw)
         idx = valpatch._index_text(elf)
         assert valpatch._by_shape(elf, idx) is None, kw
+
+
+# --- composing with other in-place firmware edits ----------------------------
+# The bypass is the LAST writer of the game ELF's .sidx record, so any OTHER
+# in-place edit this same Write makes to that file (today: the game-program
+# display-text patches, plugins.stern.progtext) has to be folded into the
+# digest it computes.  Without that the record describes a firmware that never
+# reaches the card, and ``spk`` rejects it -- a modded card that fails
+# validation for a reason nothing in the log mentions.
+
+class _StubReader:
+    """The slice of Ext4Reader compute_writes touches: one firmware file and
+    one .sidx manifest, both mapped 1:1 onto a flat 'disk'."""
+
+    FW_DISK = 0x10000
+    SIDX_DISK = 0x80000
+
+    def __init__(self, elf, sidx_blob):
+        self.elf = elf
+        self.sidx_blob = sidx_blob
+        self.fw_node = {"i_block": b"\x01" * 60, "size": len(elf)}
+        self.sidx_node = {"i_block": b"\x02" * 60, "size": len(sidx_blob)}
+
+    def find_spike_assets(self):
+        return 2, 3
+
+    def read_inode(self, ino):
+        return self.fw_node if ino == 3 else self.sidx_node
+
+    def read_file_bytes(self, node):
+        return (self.elf if node is self.fw_node else self.sidx_blob)
+
+    def disk_ranges(self, node, off, length):
+        base = (self.FW_DISK if node is self.fw_node else self.SIDX_DISK)
+        return [(base + off, length)]
+
+    def iter_regular_files(self, min_size=1, max_depth=20):
+        yield "/gz/game", 3, self.fw_node
+        yield "/spk/index/a.sidx", 4, self.sidx_node
+
+
+def _stub_sidx(paths):
+    """A minimal FI64 .sidx carrying a record per path (only the layout
+    parse_records + record_field_writes read)."""
+    from pinball_decryptor.plugins.stern import sidx as _sidx
+    blob = bytearray(b"SIDX" + b"\x00" * 12)
+    blob += b"STRS" + struct.pack("<I", sum(len(p) + 1 for p in paths))
+    for p in paths:
+        blob += p.encode() + b"\x00"
+    for _p in paths:
+        blob += b"FI64" + struct.pack("<I", 128) + b"\x00" * 128
+    return bytes(blob)
+
+
+def test_compute_writes_folds_other_firmware_edits_into_the_sidx_digest():
+    import hashlib
+    import hmac
+
+    from pinball_decryptor.plugins.stern import sidx as _sidx
+
+    elf = _build_elf(inline_crc_loops=5, trailer=VALIDATOR_STRINGS)
+    blob = _stub_sidx(["gz/game", "spk/index/a.sidx"])
+    recs, _crc, fmt = _sidx.parse_records(blob)
+    if "gz/game" not in recs:
+        import pytest
+        pytest.skip("stub .sidx doesn't parse on this format revision")
+
+    # a text-style edit elsewhere in the ELF, exactly as progtext emits it:
+    # a shorter string NUL-padded into the original's byte budget
+    tail = len(elf) - len(VALIDATOR_STRINGS)
+    overlay = {tail: b"CARD BAD".ljust(len(b"GAME VALIDATION ERROR"), b"\x00")}
+    assert elf[tail:tail + len(overlay[tail])] != overlay[tail]
+
+    rdr = _StubReader(elf, blob)
+    msgs = []
+    writes, status = valpatch.compute_writes(
+        rdr, lambda m, lvl="info": msgs.append(m), fw_overlay=overlay)
+    assert status[0] == "bypassed"
+
+    # The digest must be of ELF + overlay + bx lr — the file that ships.
+    eoff = valpatch.find_validation_exec(elf)
+    shipped = bytearray(elf)
+    for o, b in overlay.items():
+        shipped[o:o + len(b)] = b
+    shipped[eoff:eoff + 4] = valpatch._BX_LR
+    want_h = hmac.new(_sidx.SIDX_KEY, bytes(shipped), hashlib.sha1).digest()
+    want_m = hashlib.md5(bytes(shipped)).digest()
+    by_disk = dict(writes)
+    for foff, b in _sidx.record_field_writes(recs["gz/game"], want_h, want_m,
+                                             fmt):
+        assert by_disk[_StubReader.SIDX_DISK + foff] == b
+
+    # and NOT of the stock ELF + bx lr alone (the bug this pins)
+    stock = bytearray(elf)
+    stock[eoff:eoff + 4] = valpatch._BX_LR
+    bad_h = hmac.new(_sidx.SIDX_KEY, bytes(stock), hashlib.sha1).digest()
+    assert want_h != bad_h

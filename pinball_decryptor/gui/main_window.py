@@ -12106,11 +12106,14 @@ class MainWindow:
         _text_desc = ttk.Label(
             f,
             text="Edit the words shown on the machine's display — high scores, "
-                 "menu labels, status text. Pick your extracted folder, click a "
-                 "string, type the new text, and Apply. Each replacement must "
-                 "fit the original's length (it's space-padded for you), so "
-                 "shorter-or-equal works and longer is rejected. Build the "
-                 "update on the Write tab when you're done.",
+                 "menu labels, status text, and the game program's own strings "
+                 "(mode titles, battle names — Scene column: \"game program\"). "
+                 "Pick your extracted folder, click a string, type the new "
+                 "text, and Apply. Each replacement must fit its byte budget "
+                 "(the Max column). Some names are the tail end of a longer "
+                 "line (EBIRAH inside GODZILLA VS EBIRAH) — edit both rows so "
+                 "the line ends with the new name. Build the update on the "
+                 "Write tab when you're done.",
             font=(_SANS_FONT, 9, "italic"),
             wraplength=720, justify=tk.LEFT)
         _text_desc.pack(anchor=tk.W, **pad)
@@ -12259,6 +12262,8 @@ class MainWindow:
         if not parts:
             return path
         name = parts[-1]
+        if name in ("game", "game_real"):
+            return "game program"
         parent = parts[-2] if len(parts) >= 2 else ""
         if len(parent) > 14:
             parent = parent[:5] + "…" + parent[-4:]
@@ -12268,6 +12273,21 @@ class MainWindow:
     def _text_byte_len(s):
         """Byte length of *s* as the engine measures it for the size budget."""
         return len(s.encode("latin1", "replace"))
+
+    @classmethod
+    def _text_row_len(cls, r, s):
+        """Byte length of *s* for row *r*'s budget check.  Game-program rows
+        (the ones carrying an explicit budget) write ``\\n`` as ONE byte — a
+        real line break in a multi-line title."""
+        if r.get("budget"):
+            s = s.replace("\\n", "\n")
+        return cls._text_byte_len(s)
+
+    @staticmethod
+    def _text_row_budget(r):
+        """The row's replacement byte budget: the explicit game-program budget
+        when present, else the original's own length (radium in-place rule)."""
+        return r.get("budget") or len(r["original"].encode("latin1", "replace"))
 
     def _text_is_edited(self, r):
         return bool(r["replacement"]) and r["replacement"] != r["original"]
@@ -12334,8 +12354,13 @@ class MainWindow:
             rep = r["replacement"]
             if rep == r["original"]:
                 rep = ""                     # rep == orig => unchanged
-            rows.append({"path": r["path"], "original": r["original"],
-                         "replacement": rep})
+            row = {"path": r["path"], "original": r["original"],
+                   "replacement": rep}
+            # Game-program strings carry an explicit byte budget (a standalone
+            # name can outgrow its own text — it lives inside a longer line).
+            if r.get("budget"):
+                row["budget"] = r["budget"]
+            rows.append(row)
         self._text_rows = rows
         self._text_scan_dir = scan_dir
         self._text_clear_edit_panel()
@@ -12375,7 +12400,7 @@ class MainWindow:
             if col == "new":
                 return ((r["replacement"] or "").lower(), r["original"].lower())
             if col == "max":
-                return (self._text_byte_len(r["original"]),)
+                return (self._text_row_budget(r),)
             if col == "scene":
                 return (self._text_scene_label(r["path"]).lower(),
                         r["original"].lower())
@@ -12395,7 +12420,7 @@ class MainWindow:
         for i, r in visible:
             tree.insert(
                 "", tk.END, iid=str(i), text=r["original"],
-                values=(r["replacement"], self._text_byte_len(r["original"]),
+                values=(r["replacement"], self._text_row_budget(r),
                         self._text_scene_label(r["path"])),
                 tags=("assigned",) if self._text_is_edited(r) else ())
 
@@ -12424,7 +12449,14 @@ class MainWindow:
             return
         self._text_current_iid = iid
         self._text_orig_var.set(r["original"])
-        self._text_scene_full_var.set("Scene: " + r["path"])
+        if (r["path"] or "").lower().endswith(".radium"):
+            self._text_scene_full_var.set("Scene: " + r["path"])
+        else:
+            self._text_scene_full_var.set(
+                "Game program: %s — drawn by game code (mode titles, battle "
+                "names). \\n in a string is a real line break. Names shown on "
+                "their own may be the END of a longer line; edit both rows so "
+                "the line ends with the new name." % r["path"])
         # Pre-fill the entry with the current effective text (the edit, or the
         # original if untouched) so the user edits from what's shown today.
         self.text_new_var.set(r["replacement"] or r["original"])
@@ -12487,6 +12519,13 @@ class MainWindow:
                 "Pick a line of text first — the Scenes window then opens on "
                 "the scene that draws it.")
             return
+        if not (r["path"] or "").lower().endswith(".radium"):
+            messagebox.showinfo(
+                "Scenes",
+                "This is a game-program string — the game code draws it at "
+                "runtime, so there's no scene file to show. (It still writes "
+                "to the card like any other text edit.)")
+            return
         scene_dir = (r["path"] or "").replace("\\", "/").rsplit("/", 1)[0]
         if not scene_dir:
             messagebox.showinfo(
@@ -12529,8 +12568,8 @@ class MainWindow:
             r = self._text_rows[int(iid)]
         except (ValueError, IndexError):
             return
-        orig_len = self._text_byte_len(r["original"])
-        new_len = self._text_byte_len(self.text_new_var.get())
+        orig_len = self._text_row_budget(r)
+        new_len = self._text_row_len(r, self.text_new_var.get())
         over = new_len > orig_len
         self.text_budget_var.set(
             "%d / %d bytes%s" % (new_len, orig_len,
@@ -12551,13 +12590,13 @@ class MainWindow:
             return
         orig = r["original"]
         new = self.text_new_var.get()
-        if self._text_byte_len(new) > self._text_byte_len(orig):
+        if self._text_row_len(r, new) > self._text_row_budget(r):
             messagebox.showwarning(
                 "Replacement too long",
-                "“%s” is %d bytes but the original is only %d. On-screen text "
-                "is patched in place, so a replacement has to fit the "
-                "original's length — use a shorter string."
-                % (new, self._text_byte_len(new), self._text_byte_len(orig)))
+                "“%s” is %d bytes but only %d fit. On-screen text is patched "
+                "in place, so a replacement has to fit the available length "
+                "— use a shorter string."
+                % (new, self._text_row_len(r, new), self._text_row_budget(r)))
             return
         eff = "" if new == orig else new       # new == orig => unchanged
         prev = r.get("replacement") or ""

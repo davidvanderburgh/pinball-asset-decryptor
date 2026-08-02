@@ -101,3 +101,22 @@ def test_save_escapes_embedded_tabs(tmp_path):
     rows = tm.load(str(tmp_path))
     assert len(rows) == 1
     assert rows[0]["original"] == "TWO WORDS"
+
+
+def test_budget_column_round_trips(tmp_path):
+    """Game-program rows carry an explicit 4th-column byte budget (a
+    standalone name may exceed its own length — it lives inside a longer
+    line); radium rows never write the column."""
+    rows = [
+        {"path": "/g/a.radium", "original": "TILT", "replacement": ""},
+        {"path": "/g/game", "original": "EBIRAH", "replacement": "BIOLLANTE",
+         "budget": 18},
+    ]
+    tm.save(str(tmp_path), rows)
+    back = tm.load(str(tmp_path))
+    assert "budget" not in back[0]
+    assert back[1]["budget"] == 18
+    assert back[1]["replacement"] == "BIOLLANTE"
+    # the edit survives into changed() even though it exceeds len(original)
+    assert tm.changed(str(tmp_path)) == {
+        "/g/game": [("EBIRAH", "BIOLLANTE")]}

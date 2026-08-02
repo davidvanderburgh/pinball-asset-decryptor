@@ -390,9 +390,16 @@ def bypass_overlay(elf_bytes):
     return overlay, bypass_status(elf_bytes, eoff)
 
 
-def compute_writes(reader, log):
+def compute_writes(reader, log, fw_overlay=None):
     """``([(disk_offset, bytes), ...], status)`` that neuter ``validation_exec``
     on the card behind *reader* and refresh the game ELF's ``.sidx`` record.
+
+    *fw_overlay* (``{file_offset: bytes}``) is any OTHER in-place edit this
+    same Write is making to the game ELF — today the game-program display-text
+    patches (see :mod:`.progtext`).  It has to be folded in here because this
+    function is the last writer of the firmware's ``.sidx`` record, so a digest
+    computed from the stock ELF plus only our ``bx lr`` would describe a file
+    that never reaches the card, and ``spk`` would reject it.
 
     Best-effort and non-fatal: returns no writes (and logs) if the game ELF or
     the validator can't be found, so it never breaks a Write for a title that
@@ -408,6 +415,8 @@ def compute_writes(reader, log):
             return [], None
         fw_node = reader.read_inode(fw_ino)
         elf = bytearray(reader.read_file_bytes(fw_node))
+        for _off, _b in (fw_overlay or {}).items():
+            elf[_off:_off + len(_b)] = _b
         eoff = find_validation_exec(bytes(elf))
         status = bypass_status(bytes(elf), eoff)
         if eoff is None:

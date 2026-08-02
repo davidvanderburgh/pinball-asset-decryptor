@@ -1270,11 +1270,20 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
 
     log("Scanning .radium scene files for display text...", "info")
     rads = []
+    fw_cands = {}                # basename -> (card_path, node): the game ELF
     for path, _ino, node in reader.iter_regular_files(min_size=1):
         if cancel():
             return 0
         if path.lower().endswith(_RADIUM_EXT):
             rads.append((path, node))
+        else:
+            base = path.rsplit("/", 1)[-1]
+            if base in ("game_real", "game") and base not in fw_cands:
+                try:
+                    if reader.is_arm_elf(node):
+                        fw_cands[base] = (path, node)
+                except Exception:
+                    pass
     if not rads:
         log("No .radium scene files found.", "info")
         return 0
@@ -1305,7 +1314,34 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
             rows.append((path, text))
         manifest.append((path, len(seen), n_occ))
 
-    if not rows:
+    # Game-program strings: display text the game code composes at runtime
+    # (mode titles, battle names, award lines) lives in the ELF, not in any
+    # radium — the scene's Text node is a placeholder the code overwrites
+    # (Godzilla's battle intro was the proving case).  Best-effort: a title
+    # whose firmware can't be read/parsed just extracts no program rows.
+    prog_rows = []
+    fw = fw_cands.get("game_real") or fw_cands.get("game")
+    if fw is not None and not cancel():
+        from . import progtext
+        fw_path, fw_node = fw
+        try:
+            if progress:
+                progress(len(rads), len(rads) + 1,
+                         "Scanning the game program for display text")
+            entries = progtext.enumerate_program_strings(
+                reader.read_file_bytes(fw_node))
+            prog_rows = [
+                {"path": fw_path, "original": e["text"], "replacement": "",
+                 "budget": e["budget"]}
+                for e in entries]
+        except Exception as e:
+            log("Couldn't scan the game program for display text (%s); "
+                "program strings skipped." % e, "warning")
+        if prog_rows:
+            log("Found %d editable game-program string(s) in %s."
+                % (len(prog_rows), fw_path), "info")
+
+    if not rows and not prog_rows:
         log("No editable display text found in %d .radium file(s)."
             % len(rads), "info")
         return 0
@@ -1318,7 +1354,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
         # looks like every row is already duplicated.
         text_manifest.save(output_dir, [
             {"path": card_path, "original": original, "replacement": ""}
-            for card_path, original in rows])
+            for card_path, original in rows] + prog_rows)
     except Exception as e:
         log("Couldn't write display-text manifest (%s)." % e, "warning")
         return 0
@@ -1328,11 +1364,16 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
             f.write("# radium card path\tunique strings\toccurrences\n")
             for card_path, nuniq, nocc in manifest:
                 f.write("%s\t%d\t%d\n" % (card_path, nuniq, nocc))
+            if prog_rows:
+                f.write("%s\t%d\t%d\n" % (prog_rows[0]["path"],
+                                          len(prog_rows), len(prog_rows)))
     except Exception:
         pass
     log("Extracted %d editable display-text string(s) from %d radium scene(s) "
-        "to %s." % (len(rows), len(manifest), text_dir), "success")
-    return len(rows)
+        "%sto %s." % (len(rows), len(manifest),
+                      ("plus %d game-program string(s) " % len(prog_rows))
+                      if prog_rows else "", text_dir), "success")
+    return len(rows) + len(prog_rows)
 
 
 def _write_wav(path, L, R, stereo):
@@ -2490,7 +2531,53 @@ def _changed_radium_text(assets_dir):
     return text_manifest.changed(assets_dir)
 
 
-def _radium_text_writes(reader, assets_dir, log, cancel):
+def _program_text_writes(reader, node, card_path, pairs, patched_fw, log):
+    """Resolve game-program (ELF) display-text edits for one firmware file.
+
+    Two composition modes, mirroring how the firmware itself reaches the card:
+
+    * normally the ELF is untouched on disk, so the string/pointer patches are
+      emitted as in-place disk writes plus a file-relative overlay for the
+      ``.sidx`` digest refresh (same shape as the radium text overlays);
+    * when the blip-free audio cave rebuilt the firmware (*patched_fw* — a
+      staged whole-file copy that later replaces the on-card ELF), an in-place
+      disk write would be undone by that copy, so the edits are applied
+      directly INTO the staged file instead; its ``.sidx`` record is computed
+      from the file, so the digests cover the text automatically.
+
+    Returns ``(writes, n_strings, overlays)`` like the radium helper."""
+    from . import progtext
+
+    if patched_fw is not None:
+        with open(_lp(patched_fw), "rb") as f:
+            raw = f.read()
+    else:
+        raw = reader.read_file_bytes(node)
+    file_writes, n = progtext.plan_writes(raw, dict(pairs), log)
+    if not file_writes:
+        return [], n, {}
+    if patched_fw is not None:
+        buf = bytearray(raw)
+        for off, b in file_writes:
+            buf[off:off + len(b)] = b
+        with open(_lp(patched_fw), "wb") as f:
+            f.write(bytes(buf))
+        log("Program text: %d string edit(s) baked into the rebuilt firmware."
+            % n, "info")
+        return [], n, {}
+    writes = []
+    ov = {}
+    ib = bytes(node["i_block"])
+    for off, b in file_writes:
+        payload = b
+        for disk, cnt in reader.disk_ranges(node, off, len(b)):
+            writes.append((disk, payload[:cnt]))
+            payload = payload[cnt:]
+        ov.setdefault(ib, (node, {}))[1][off] = b
+    return writes, n, ov
+
+
+def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None):
     """Resolve the user's display-text edits to a flat list of in-place writes
     ``[(disk_offset, bytes), ...]`` (same form ``_compute_patches`` collects).
 
@@ -2502,20 +2589,28 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
     budget; it is space-padded to the exact original length so the file size and
     every other offset stay byte-identical.
 
-    Returns ``(writes, n_strings, overlays)`` where ``n_strings`` is the number
-    of unique (radium, original) strings actually patched and ``overlays`` is
-    ``{i_block: (node, {file_offset: bytes})}`` for every patched ``scene.radium``
-    inode, so the caller can recompute its ``.sidx`` digest from the patched
-    content."""
+    Rows whose path resolves to the ARM-ELF game firmware are game-program
+    strings, routed to :func:`_program_text_writes` (in-place C-string patch +
+    name-group pointer moves; *patched_fw* composes with the blip-free
+    firmware rebuild).
+
+    Returns ``(writes, n_strings, overlays, fw_overlay)`` where ``n_strings``
+    is the number of unique (asset, original) strings actually patched,
+    ``overlays`` is ``{i_block: (node, {file_offset: bytes})}`` for every
+    patched inode (so the caller can recompute its ``.sidx`` digest), and
+    ``fw_overlay`` is the game ELF's own ``{file_offset: bytes}`` — the
+    validator bypass is the LAST writer of that file's ``.sidx`` record, so it
+    has to fold these edits into the digest it computes."""
     from . import radium as _radium
 
     edits = _changed_radium_text(assets_dir)
     if not edits:
-        return [], 0, {}
+        return [], 0, {}, {}
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
 
     writes = []
     overlays = {}   # i_block -> (node, {file_off: bytes})
+    fw_overlay = {}  # game ELF file_off -> bytes
     n_strings = 0
     for card_path, pairs in edits.items():
         if cancel():
@@ -2524,6 +2619,19 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
         if node is None:
             log("Display text: radium %s wasn't found on the card; %d edit(s) "
                 "skipped." % (card_path, len(pairs)), "warning")
+            continue
+        try:
+            is_fw = reader.is_arm_elf(node)
+        except Exception:
+            is_fw = False
+        if is_fw:
+            pw, pn, pov = _program_text_writes(
+                reader, node, card_path, pairs, patched_fw, log)
+            writes += pw
+            n_strings += pn
+            _merge_radium_overlays(overlays, pov)
+            for _n, _ov in pov.values():
+                fw_overlay.update(_ov)
             continue
         ib = bytes(node["i_block"])
         data = reader.read_file_bytes(node)
@@ -2559,7 +2667,7 @@ def _radium_text_writes(reader, assets_dir, log, cancel):
             n_strings += 1
             log("Display text in %s: \"%s\" -> \"%s\" (%d occurrence(s))."
                 % (card_path, original, replacement, len(occs)), "info")
-    return writes, n_strings, overlays
+    return writes, n_strings, overlays, fw_overlay
 
 
 def _changed_radium_text_colors(assets_dir):
@@ -3609,11 +3717,15 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # Edited LCD display text -> already-flat (disk_offset, bytes) writes.
         text_writes = []
         n_text = 0
+        # Game-program text edits patch the game ELF in place; the validator
+        # bypass below is the last writer of that file's .sidx record, so it
+        # needs them to compute a digest of the firmware that actually ships.
+        fw_text_overlay = {}
         if text_edits:
             if progress:
                 progress(95, 100, "Preparing display text...")
-            text_writes, n_text, _t_ov = _radium_text_writes(
-                reader, assets_dir, log, cancel)
+            text_writes, n_text, _t_ov, fw_text_overlay = _radium_text_writes(
+                reader, assets_dir, log, cancel, patched_fw=patched_gr)
             _merge_radium_overlays(radium_overlays, _t_ov)
             if cancel():
                 return None, None, None, None
@@ -3735,7 +3847,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         if patched_gr is None:
             try:
                 from . import valpatch
-                _vwrites, valpatch_mode = valpatch.compute_writes(reader, log)
+                _vwrites, valpatch_mode = valpatch.compute_writes(
+                    reader, log, fw_overlay=fw_text_overlay)
                 writes += _vwrites
             except Exception as e:
                 log("Validation bypass skipped (%s)." % e, "warning")
@@ -4160,12 +4273,76 @@ def write_device(device_path, assets_dir, log=None, progress=None, cancel=None,
 # --------------------------------------------------------------------------
 # encode helpers
 # --------------------------------------------------------------------------
+def _read_wav_any(path, np):
+    """Decode *path* to ``(samples, channels, rate)`` with samples an int64
+    array of interleaved frames scaled to the 16-bit range — whatever the
+    file's own bit depth.
+
+    Replacement WAVs come straight from the user's editor, and editors default
+    to all sorts of PCM: a tester's callouts exported at their DAW's default
+    bit depth played as pure STATIC, because this loader used to interpret
+    every file as 16-bit (24-bit words read as garbage int16 pairs — while the
+    one file they happened to export as 16-bit worked, which pointed everyone
+    at the sample rate instead).  Sample rate was never the problem (any rate
+    resamples fine); bit depth was.  Handles 8/16/24/32-bit integer PCM via
+    the wave module and 32/64-bit IEEE float (which the wave module rejects)
+    via a minimal RIFF parse."""
+    try:
+        w = wave.open(path, "rb")
+        n = w.getnframes(); ch = w.getnchannels(); sw = w.getsampwidth()
+        sr = w.getframerate()
+        raw = w.readframes(n)
+        w.close()
+        if sw == 2:
+            a = np.frombuffer(raw, "<i2").astype(np.int64)
+        elif sw == 1:                       # unsigned 8-bit
+            a = (np.frombuffer(raw, np.uint8).astype(np.int64) - 128) << 8
+        elif sw == 3:                       # packed 24-bit: keep the top 16
+            b = np.frombuffer(raw, np.uint8)
+            b = b[: len(b) // 3 * 3].reshape(-1, 3)
+            a = (b[:, 1].astype(np.int64)
+                 | (b[:, 2].astype(np.int64) << 8))
+            a = np.where(a & 0x8000, a - 0x10000, a)
+        elif sw == 4:                       # 32-bit int: keep the top 16
+            a = np.frombuffer(raw, "<i4").astype(np.int64) >> 16
+        else:
+            raise ValueError("unsupported WAV sample width: %d" % sw)
+        return a, ch, sr
+    except wave.Error:
+        pass
+    # IEEE-float WAV (format 3 / EXTENSIBLE float): minimal RIFF walk.
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError("not a RIFF/WAVE file: %s" % path)
+    fmt = None
+    pos = 12
+    while pos + 8 <= len(data):
+        cid = data[pos:pos + 4]
+        ln = struct.unpack_from("<I", data, pos + 4)[0]
+        body = data[pos + 8:pos + 8 + ln]
+        if cid == b"fmt ":
+            fmt = body
+        elif cid == b"data" and fmt is not None:
+            tag, ch, sr, _br, _ba, bits = struct.unpack_from("<HHIIHH", fmt, 0)
+            if tag == 0xFFFE and len(fmt) >= 26:
+                tag = struct.unpack_from("<H", fmt, 24)[0]
+            if tag == 3 and bits in (32, 64):
+                a = np.frombuffer(body, "<f4" if bits == 32 else "<f8")
+                a = np.clip(a.astype(np.float64), -1.0, 1.0)
+                return (np.round(a * 32767.0).astype(np.int64), ch, sr)
+            raise ValueError(
+                "unsupported WAV format tag %d (%d-bit)" % (tag, bits))
+        pos += 8 + ln + (ln & 1)
+    raise ValueError("no data chunk found in %s" % path)
+
+
 def _load_wav(path, want_stereo, np):
-    w = wave.open(path, "rb")
-    n = w.getnframes(); ch = w.getnchannels(); sr = w.getframerate()
-    a = np.frombuffer(w.readframes(n), np.int16).astype(np.int64)
-    w.close()
-    a = a.reshape(-1, ch)
+    a, ch, sr = _read_wav_any(path, np)
+    a = a[: len(a) // ch * ch].reshape(-1, ch)
+    if ch > 2:                              # downmix surround to stereo L/R
+        a = a[:, :2]
+        ch = 2
     if sr != 44100 and len(a):
         idx = np.clip((np.arange(int(len(a) * 44100 / sr)) * sr / 44100).astype(int),
                       0, len(a) - 1)
@@ -4212,6 +4389,131 @@ def _amplitude_fit(samples, rng, np, headroom=0.97):
     if pk <= 0:
         return samples
     return (samples.astype(np.float64) * (rng * headroom / pk)).astype(np.int64)
+
+
+# ---- match the replacement's loudness to the sound it replaces -----------
+#
+# Peak-normalizing lands every replacement at one fixed PEAK, but a peak says
+# nothing about loudness: stock callouts are broadcast-compressed voice (high
+# RMS for their peak — Godzilla's mono callouts measure a crest factor of
+# ~2.6), while a home-recorded voiceover normalized to the very same peak
+# carries far less energy, and a single stray transient (a lip smack, a desk
+# knock) is enough to hold the whole recording down.  A tester's custom
+# callouts came out clearly quieter than the stock sounds around them ("I
+# will have to crank up the volume"), which is that gap.
+#
+# The honest reference is the sound being replaced: decode the stock slot,
+# measure its active-speech RMS, and gain the replacement to the same figure.
+# The subtlety — and the reason the first cut of this was a measured no-op —
+# is that a gain capped at the peak ceiling IS the peak-normalize gain
+# whenever the peak is a transient, i.e. in exactly the case worth fixing.
+# Reaching stock's energy therefore means letting the transient past the
+# ceiling and limiting it, which is what stock itself did upstream.  So:
+# match the RMS, then soft-knee limit (smooth, monotonic, asymptotic to the
+# ceiling) so nothing hard-clips.  Matching runs both ways — a hot music clip
+# dropped on a quiet callout slot is brought DOWN to its neighbours' level —
+# and the gain is bounded absolutely (_MATCH_MAX_GAIN) so a near-dead track
+# is never amplified into its own noise floor.  Measured on a real Godzilla
+# card: +5 dB on a transient-peaked recording, +9.5 dB on a quiet one with
+# several transients, -1.5 dB on a hot compressed source, and no change at
+# all on material already at stock level.  PAD_STERN_MATCH_LOUDNESS=0
+# restores the plain peak cap (rides the environment into the encode workers
+# like the other audio levers).
+_MATCH_CEILING = 0.97          # peak ceiling (stock reaches 1.0 of the range)
+_MATCH_MIN_ORIG_PEAK = 0.02    # orig quieter than 2% of range: not a reference
+_MATCH_KNEE = 0.70             # limiting starts at 70% of the ceiling
+# Absolute bound on the gain, NOT a bound relative to peak-normalizing: a
+# relative cap binds hardest exactly when the peak is a transient, which is
+# the one case worth fixing (measured: it held a +5 dB correction down to
+# +0 dB).  20x keeps a whisper or a near-dead track from being amplified into
+# its own noise floor while leaving every real recording room to reach stock.
+_MATCH_MAX_GAIN = 20.0
+
+
+def _match_loudness_enabled():
+    return os.environ.get("PAD_STERN_MATCH_LOUDNESS") != "0"
+
+
+def _active_rms(a, np):
+    """RMS over the audible part of *a* (samples above 2% of its own peak) —
+    comparing whole-slot RMS would let trailing silence in either sound skew
+    the gain."""
+    x = np.abs(np.asarray(a, np.float64)).ravel()
+    if not len(x):
+        return 0.0
+    pk = x.max()
+    if pk <= 0:
+        return 0.0
+    act = x[x > 0.02 * pk]
+    return float(np.sqrt((act ** 2).mean())) if len(act) else 0.0
+
+
+def _soft_limit(x, ceiling, np):
+    """Smoothly fold everything above ``_MATCH_KNEE * ceiling`` into the range
+    below *ceiling*: identity under the knee, ``tanh``-shaped above it, so the
+    waveform stays continuous and monotonic and no sample can reach the
+    ceiling.  Used only after a loudness match has deliberately pushed peaks
+    up; the body of the speech is under the knee and passes through
+    untouched."""
+    t = _MATCH_KNEE * ceiling
+    room = ceiling - t
+    if room <= 0:
+        return np.clip(x, -ceiling, ceiling)
+    ax = np.abs(x)
+    over = ax > t
+    if not over.any():
+        return x
+    y = np.array(x, np.float64, copy=True)
+    y[over] = np.sign(x[over]) * (t + room * np.tanh((ax[over] - t) / room))
+    return y
+
+
+def _stock_render(emu, p, np, stereo):
+    """Decoded stock audio for slot *p* (the loudness reference), or ``None``
+    (matching off / no emulator / decode failed — callers then keep the fixed
+    peak cap)."""
+    if emu is None or not _match_loudness_enabled():
+        return None
+    try:
+        out = emu.decode(p)
+    except Exception:
+        return None
+    if out is None:
+        return None
+    if stereo and len(out) > 2 and out[2] and out[1] is not None:
+        return np.stack([np.asarray(out[0], np.int64),
+                         np.asarray(out[1], np.int64)], axis=1)
+    return np.asarray(out[0], np.int64)
+
+
+def _fit_level(a, orig, rng, np, headroom):
+    """Level the replacement *a* (int64, mono 1-D or stereo ``(n, 2)``): match
+    the ORIGINAL sound's active RMS when a usable reference decoded, else fall
+    back to the fixed peak cap.  See the block comment above for why matching
+    limits rather than simply capping the gain."""
+    pk = int(np.abs(a).max()) if a.size else 0
+    if pk <= 0:
+        return a
+    if orig is not None and orig.size:
+        opk = float(np.abs(orig).max())
+        orms = _active_rms(orig, np)
+        arms = _active_rms(a, np)
+        if opk >= rng * _MATCH_MIN_ORIG_PEAK and orms > 0 and arms > 0:
+            ov = _env_float("PAD_STERN_HEADROOM")
+            ceil_frac = ov if (ov is not None and 0.05 <= ov <= 1.0) \
+                else _MATCH_CEILING
+            ceiling = rng * ceil_frac
+            gain = min(orms / arms, _MATCH_MAX_GAIN)
+            y = a.astype(np.float64) * gain
+            # Limit ONLY when the gain actually pushed peaks past the ceiling.
+            # Running the limiter unconditionally would shave the loudest 30%
+            # of audio that needed nothing, making it quieter than doing
+            # nothing at all — the opposite of matching (measured: -0.3 dB on
+            # material already at stock level).
+            if pk * gain > ceiling:
+                y = _soft_limit(y, ceiling, np)
+            return np.round(y).astype(np.int64)
+    return _amplitude_fit(a, rng, np, headroom=headroom)
 
 
 _MONO_RANGE = 11147
@@ -5140,10 +5442,12 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
     s = _load_wav(wav_path, False, np)
-    # Band-limit to stock callout bandwidth BEFORE the peak-normalize so the cap
-    # targets the audible (post-filter) peak, not HF we're about to remove.
+    # Band-limit to stock callout bandwidth BEFORE the level fit so the gain
+    # targets the audible (post-filter) signal, not HF we're about to remove.
     s = _lowpass(s, _declick_lowpass_hz(), np)
-    s = _amplitude_fit(s, _MONO_RANGE, np, headroom=headroom)
+    s = _fit_level(np.asarray(s, np.int64),
+                   _stock_render(emu, p, np, stereo=False),
+                   _MONO_RANGE, np, headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     seed = _slot_seed_for(p)
     if (seed is None and _pathA_enabled()
@@ -5166,9 +5470,10 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     fade_ms, headroom = _declick_params()
     lp = _declick_lowpass_hz()
     a = _load_wav(wav_path, True, np)
-    # Band-limit each channel before the peak-normalize (see _encode_mono).
+    # Band-limit each channel before the level fit (see _encode_mono).
     a = np.stack([_lowpass(a[:, 0], lp, np), _lowpass(a[:, 1], lp, np)], axis=1)
-    a = _amplitude_fit(a, _STEREO_RANGE, np, headroom=headroom)
+    a = _fit_level(a, _stock_render(emu, p, np, stereo=True),
+                   _STEREO_RANGE, np, headroom)
     L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,

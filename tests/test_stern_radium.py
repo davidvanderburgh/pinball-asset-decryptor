@@ -174,7 +174,7 @@ def test_replace_patches_all_occurrences_size_neutral(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
 
-    writes, n, _ov = engine._radium_text_writes(
+    writes, n, _ov, _fw = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     # one write per occurrence (4), each exactly the original byte length
@@ -196,7 +196,7 @@ def test_replace_rejects_over_length(tmp_path):
     _write_tsv(tmp_path, [("/g/a.radium", original, "EXTRA BALL LIT")])  # longer
 
     msgs = []
-    writes, n, _ov = engine._radium_text_writes(
+    writes, n, _ov, _fw = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == []
@@ -212,7 +212,7 @@ def test_replace_round_trip_reenumerate_reads_new_value(tmp_path):
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "SHOOT RIGHT")])
 
-    writes, n, _ov = engine._radium_text_writes(
+    writes, n, _ov, _fw = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     patched = _apply(buf, writes)
@@ -230,7 +230,7 @@ def test_replace_skips_missing_radium(tmp_path):
     reader = _FakeReader({"/g/present.radium": _make_radium("HELLO WORLD", 1)})
     _write_tsv(tmp_path, [("/g/missing.radium", "HELLO WORLD", "BYE WORLD")])
     msgs = []
-    writes, n, _ov = engine._radium_text_writes(
+    writes, n, _ov, _fw = engine._radium_text_writes(
         reader, str(tmp_path),
         log=lambda m, lvl=None: msgs.append((lvl, m)), cancel=lambda: False)
     assert writes == [] and n == 0
@@ -244,7 +244,7 @@ def test_radium_text_writes_emit_digest_overlays(tmp_path):
     buf = _make_radium(original, 3)
     reader = _FakeReader({"/g/a.radium": buf})
     _write_tsv(tmp_path, [("/g/a.radium", original, "OK")])
-    writes, n, ov = engine._radium_text_writes(
+    writes, n, ov, _fw = engine._radium_text_writes(
         reader, str(tmp_path), log=lambda *a, **k: None, cancel=lambda: False)
     assert n == 1
     # one overlay entry per patched inode (i_block keyed), with one file-offset

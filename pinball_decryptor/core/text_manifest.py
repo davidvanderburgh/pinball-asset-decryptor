@@ -25,7 +25,9 @@ HEADER = (
     "# Edit on-screen text: put your new text in the 3rd (replacement) column.\n"
     "# Leave it BLANK to keep the original unchanged. The replacement must be no\n"
     "# longer than the original (it's space-padded to the exact length on Write).\n"
-    "# asset_path\toriginal\treplacement\n")
+    "# Rows with a 4th (max_bytes) column may exceed the original's length up to\n"
+    "# that budget (game-program strings; \\n in them is a real line break).\n"
+    "# asset_path\toriginal\treplacement\tmax_bytes\n")
 
 
 def manifest_path(assets_dir):
@@ -57,11 +59,17 @@ def load(assets_dir):
             cols = line.split("\t")
             if len(cols) < 2:
                 continue
-            rows.append({
+            row = {
                 "path": cols[0],
                 "original": cols[1],
                 "replacement": cols[2] if len(cols) >= 3 else "",
-            })
+            }
+            # Optional 4th column: explicit byte budget (game-program strings,
+            # whose replacement may legitimately exceed the original's length
+            # — e.g. a standalone name that lives inside a longer line).
+            if len(cols) >= 4 and cols[3].strip().isdigit():
+                row["budget"] = int(cols[3].strip())
+            rows.append(row)
     return rows
 
 
@@ -77,15 +85,20 @@ def save(assets_dir, rows):
     with open(os.path.join(text_dir, FILENAME), "w", encoding="utf-8") as f:
         f.write(HEADER)
         for r in rows:
+            budget = None
             if isinstance(r, dict):
                 p = r.get("path", "")
                 original = r.get("original", "")
                 replacement = r.get("replacement", "") or ""
+                budget = r.get("budget")
             else:
                 seq = list(r) + ["", "", ""]
                 p, original, replacement = seq[0], seq[1], seq[2] or ""
-            f.write("%s\t%s\t%s\n" % (escape_cell(p), escape_cell(original),
-                                      escape_cell(replacement)))
+            line = "%s\t%s\t%s" % (escape_cell(p), escape_cell(original),
+                                   escape_cell(replacement))
+            if budget:
+                line += "\t%d" % budget
+            f.write(line + "\n")
 
 
 def changed(assets_dir):

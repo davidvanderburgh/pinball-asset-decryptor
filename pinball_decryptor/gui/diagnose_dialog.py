@@ -192,6 +192,15 @@ class DiagnoseCardDialog:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_drives(self, my_id, drives, pick):
+        # Same guard as FlashImageDialog: the enumeration can hand back
+        # after Close destroyed the window, and a late result must be
+        # dropped rather than applied to the dead combobox (TclError
+        # "invalid command name" in the session log).
+        try:
+            if not self._dlg.winfo_exists():
+                return
+        except tk.TclError:
+            return
         if my_id != self._enum_id:
             return
         from ..core.drives import visible_drives

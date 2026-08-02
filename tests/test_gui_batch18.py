@@ -239,6 +239,36 @@ def test_dialog_opens_without_default_position_flicker(app, monkeypatch):
         dlg._cancel()
 
 
+def test_late_drive_enumeration_after_close_is_dropped(app, monkeypatch):
+    """The drive enumeration runs on a worker thread for seconds
+    (PowerShell); clicking Start/Cancel first destroys the dialog, and the
+    late after() hand-off used to poke the dead combobox — TclError
+    \"invalid command name …!combobox\" in the session log, mid-build."""
+    _pick(app, "stern")
+    dlg = _make_dialog(
+        app, monkeypatch,
+        on_build_flash=lambda b, d: None,
+        build_target=FAKE_BUILD, can_build=True)
+    dlg._cancel()
+    app.root.update()
+    # Exactly what the worker's dlg.after(0, …) runs after the destroy.
+    dlg._apply_drives(dlg._enum_id, [], (None, None, None))
+
+
+def test_diagnose_late_drive_enumeration_after_close_is_dropped(
+        app, monkeypatch):
+    """DiagnoseCardDialog shares the worker-thread pattern — same race,
+    same guard."""
+    from pinball_decryptor.gui.diagnose_dialog import DiagnoseCardDialog
+    monkeypatch.setattr(DiagnoseCardDialog, "_refresh_drives",
+                        lambda self: None)
+    _pick(app, "stern")
+    dlg = DiagnoseCardDialog(app.root, app._current_mfr, "light")
+    dlg._close()
+    app.root.update()
+    dlg._apply_drives(dlg._enum_id, [], (None, None, None))
+
+
 def test_dialog_build_only_hands_off_without_confirm(app, monkeypatch):
     """Build-only (write section unticked) needs no erase confirm and hands
     (build_path, None) to the app."""

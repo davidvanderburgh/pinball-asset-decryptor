@@ -477,6 +477,14 @@ PowerShell (create the username/password it asks for, then type `exit`),
 or install **Ubuntu** from the Microsoft Store app and launch it once —
 then run **Install Prerequisites** again.
 
+If the installer instead stops with a red **virtualization is disabled
+in BIOS/UEFI** banner, WSL2 cannot run on your machine at all until you
+switch the CPU virtualization option back on in firmware setup (Intel
+**VT-x** / AMD **SVM**, usually under Advanced or CPU configuration) —
+no reinstall or restart helps until then. The app's prerequisite check
+reports the same condition in its tooltip. Enable the option, boot back
+into Windows, then run **Install Prerequisites** again.
+
 ### macOS
 
 1. Download the DMG matching your Mac from the

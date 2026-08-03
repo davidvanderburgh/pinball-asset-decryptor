@@ -1087,6 +1087,16 @@ def _stage_project_file(filename, cache_dir):
     return f"/tmp/{filename}"
 
 
+#: How many entries may be tried before the scheme detection gives up.
+#: Every attempt is a debugfs round-trip, so a reader that is broken rather
+#: than merely unlucky costs one of those per entry: a Sonic build spent
+#: 16m25s walking all 16,232 of them before saying a word.  A stale
+#: ``fl_decrypted.dat`` can legitimately name a handful of files this image
+#: no longer carries, so a few misses are normal and only a long run of them
+#: means the read itself is broken.
+_SCHEME_SAMPLE_ATTEMPTS = 25
+
+
 def _detect_write_scheme(entries, read_original, game_name, log=None):
     """Work out which asset-crypto scheme this image uses.
 
@@ -1095,16 +1105,31 @@ def _detect_write_scheme(entries, read_original, game_name, log=None):
     ``fl_decrypted.dat`` must not be able to pick the wrong cipher and
     corrupt a card.  Only a few entries are sampled — the scheme is a
     property of the image, not of individual files.
+
+    Raises:
+        PipelineError: when not one entry could be read.  The cipher cannot
+            be guessed from anything else: encrypting a scheme-3 asset with
+            the scheme-2 routine yields a file that passes every check this
+            app makes — the forged CRCs round-trip against the same routine
+            the write used — and is noise to the game, which reaches the
+            owner as a clip that plays black or a sound that never plays,
+            after a build that reported success.  See
+            :data:`crypto_v3.WRITE_UNSUPPORTED`; this is the same reasoning,
+            at the point where the choice is actually made.
     """
     from .crypto_v3 import detect_scheme, SCHEME_V3, SCHEME_LEGACY
 
     checked = 0
+    attempts = 0
+    last_error = None
     for entry in entries:
-        if checked >= 3:
+        if checked >= 3 or attempts >= _SCHEME_SAMPLE_ATTEMPTS:
             break
+        attempts += 1
         try:
             data = read_original(entry)
-        except Exception:
+        except Exception as e:
+            last_error = e
             continue          # unreadable sample proves nothing; try the next
         if not data or len(data) < 8:
             continue
@@ -1115,9 +1140,20 @@ def _detect_write_scheme(entries, read_original, game_name, log=None):
                 log(f"Asset crypto: scheme 3 (key '{game_name}') — "
                     f"replacements must keep their original size.", "info")
             return SCHEME_V3
-    if checked == 0 and log:
-        log("Could not sample the image to confirm its asset encryption; "
-            "assuming the standard scheme.", "info")
+    if checked == 0:
+        raise PipelineError(
+            "Encrypt",
+            "Could not read a single original asset off the image, so the "
+            "asset encryption this game uses cannot be confirmed.\n\n"
+            "The two ciphers can't be told apart by game name, and writing "
+            "with the wrong one produces files that pass every check this "
+            "app makes and are unreadable to the machine — a video clip "
+            "that plays black, a sound that never plays — while the build "
+            "still reports success. So the build stops here instead of "
+            "guessing.\n\n"
+            + (f"Last read error: {last_error}\n\n" if last_error else "")
+            + "Re-run Extract on this image to refresh fl_decrypted.dat, "
+              "then build again.")
     return SCHEME_LEGACY
 
 
@@ -1258,6 +1294,12 @@ def _validate_replacement(content, path):
     return None
 
 
+#: Video containers JJP ships loose in edata.  Only used to word the
+#: fixed-size refusal below; kept local so this module doesn't drag the GUI's
+#: video stack into the WSL-side deployment.
+_PINNED_VIDEO_EXTS = (".webm", ".mp4", ".mov", ".m4v", ".mkv", ".avi", ".ogv")
+
+
 def _encrypt_one(scheme, entry, content, game_name, read_original):
     """Encrypt one replacement asset.  Returns (bytes, note_for_log).
 
@@ -1290,7 +1332,7 @@ def _encrypt_one(scheme, entry, content, game_name, read_original):
         try:
             out = reencrypt_asset(original, content, entry.path, game_name,
                                   filler_size=f1)
-        except SizeMismatch:
+        except SizeMismatch as e:
             # A PNG can be padded to any length without changing a pixel,
             # so an image that is merely the wrong size is still usable.
             fitted = None
@@ -1298,6 +1340,18 @@ def _encrypt_one(scheme, entry, content, game_name, read_original):
                 target = len(_d3(original, f1, entry.path, game_name))
                 fitted = fit_png_to_size(content, target)
             if fitted is None:
+                if os.path.splitext(entry.path)[1].lower() in _PINNED_VIDEO_EXTS:
+                    # Say what the number means to someone replacing a clip.
+                    # Refusing is the right answer — the alternative is the
+                    # black screen this check exists to prevent — but "1020664
+                    # vs 2117960" on its own reads as a bug in the app.
+                    raise SizeMismatch(
+                        "%s.  Video is the one asset type this app can't pad "
+                        "to a fixed size yet (a PNG can carry the slack in a "
+                        "metadata chunk; a clip can't), so this game needs a "
+                        "replacement encoded to that exact byte count.  The "
+                        "original clip is left on the card untouched." % e
+                    ) from e
                 raise
             out = reencrypt_asset(original, fitted, entry.path, game_name,
                                   filler_size=f1)
@@ -5696,6 +5750,14 @@ class StandaloneModPipeline(ModPipeline):
     def _debugfs_dump_file(self, image_file_path, timeout=120):
         """Extract a file from the ext4 image via debugfs dump.
 
+        ``debugfs dump`` writes its output on whichever side *debugfs itself*
+        runs, so the read-back has to happen on that same side: a host file in
+        native mode, base64 through the executor when debugfs lives in
+        WSL/Docker.  ``self._debugfs_tmp`` is already set per mode (a host
+        ``mkdtemp`` vs. ``/var/tmp/jjp_debugfs_*`` inside the container);
+        reading it from the wrong side finds no file at all rather than the
+        asset.
+
         Returns the file contents as bytes.
         """
         import base64 as _b64
@@ -5705,6 +5767,15 @@ class StandaloneModPipeline(ModPipeline):
             f'dump "{image_file_path}" "{dump_path}"',
             timeout=timeout,
         )
+        if getattr(self, '_native_debugfs_path', None):
+            try:
+                with open(dump_path, "rb") as fh:
+                    return fh.read()
+            finally:
+                try:
+                    os.unlink(dump_path)
+                except OSError:
+                    pass
         enc_b64 = self.executor.run(
             f"base64 '{dump_path}'", timeout=timeout).strip()
         self.executor.run(f"rm -f '{dump_path}'", timeout=5)
@@ -6496,18 +6567,16 @@ class StandaloneModPipeline(ModPipeline):
         entries = parse_fl_dat(_fl_text(self.fl_dat_path))
         game_name = self.game_name or ""
 
+        # Straight through the shared reader.  This used to dump the asset
+        # into the HOST's temp dir while debugfs was running inside
+        # Docker/WSL, so the dump landed on a path the host has no file at
+        # and every read raised FileNotFoundError.  Nothing shouted about it:
+        # _detect_write_scheme simply never got a sample and fell back to the
+        # older cipher, which is how a Sonic build encrypted two replacement
+        # clips with the wrong routine, forged CRCs that matched it, reported
+        # success, and put a black screen on the machine.
         def _read_original(entry):
-            tmp = os.path.join(tempfile.gettempdir(),
-                               f"jjp_orig_{uuid.uuid4().hex[:8]}.bin")
-            try:
-                self._debugfs_run(f'dump "{entry.path}" "{tmp}"', timeout=60)
-                with open(tmp, "rb") as f:
-                    return f.read()
-            finally:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
+            return self._read_original_encrypted(entry)
 
         from .crypto_v3 import SCHEME_V3
         scheme = _detect_write_scheme(entries, _read_original, game_name,

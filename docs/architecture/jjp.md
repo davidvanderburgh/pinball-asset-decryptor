@@ -183,13 +183,25 @@ Exposed via `StandaloneModPipeline` wrapped by `_WriteWrapper` — [manufacturer
 
 **Extract / Prepare:** re-extract the raw ext4 image from the ISO (cached), then `_phase_mount_rw` ([pipeline.py:3772](../../pinball_decryptor/plugins/jjp/pipeline.py#L3772)) prepares it for **debugfs** access — no actual mount; files are read/written in the image via `debugfs dump` / `rm` / `write`.
 
-**Encrypt** (`_phase_encrypt_standalone`, [pipeline.py:4378](../../pinball_decryptor/plugins/jjp/pipeline.py#L4378)): the core of Write. `system/…` files are written verbatim via debugfs (no encryption — not in `fl.dat`). For each changed `edata` file:
+**Encrypt** (`_phase_encrypt_standalone`, [pipeline.py:4378](../../pinball_decryptor/plugins/jjp/pipeline.py#L4378)): the core of Write. `system/…` files are written verbatim via debugfs (no encryption — not in `fl.dat`). First, once per run, `_detect_write_scheme` samples a few originals off the image to decide **which cipher this image uses** (see [Choosing the cipher](#choosing-the-cipher-is-a-read-not-a-guess) below). Then, for each changed `edata` file:
 
 1. Look up its `FileEntry` (`filler_size`, `n2`, `n3`) — fails loudly if no `fl_decrypted.dat` is present, since the CRCs are mandatory.
 2. **Audio format-match** if `.wav`/`.ogg` (see [Audio](#audio-assets)).
 3. `encrypt_file(content, filler_size, path, orig_n2, orig_n3)` — pure-Python CRC32 forgery — [crypto.py:176](../../pinball_decryptor/plugins/jjp/crypto.py#L176).
 4. Round-trip verify: recompute `n2` (CRC of encrypted bytes) and `n3` (CRC of re-decrypted content) and require both to equal the originals; bail the file on mismatch.
 5. `debugfs rm` then `debugfs write` the new bytes; verify the on-disk size.
+
+### Choosing the cipher is a read, not a guess
+
+Two asset ciphers are in the wild — the original path-keyed `jcrypt` stream (**scheme 2**) and the engine rebuild that shipped with Sonic (**scheme 3**, [crypto_v3.py](../../pinball_decryptor/plugins/jjp/crypto_v3.py)). Nothing in a file name, a game name or `fl_decrypted.dat` reliably says which an image uses, so `_detect_write_scheme` decides by decrypting a few originals **read off the image itself** and seeing which routine finds their content.
+
+Getting that choice wrong is invisible from inside the app. Write forges the checksums of whichever routine it just used, so the size check, both CRC forges, the post-write spot-check and the ISO build all agree with it; only the machine ever disagrees, by playing a replaced clip black or never playing a replaced sound. That is why:
+
+- **A sample that can't be read is a hard stop**, not a fallback to the older cipher. Sampling and *then* defaulting is the same as guessing, and on a scheme-3 image the older cipher **is** the wrong guess.
+- **The read has to happen on debugfs's own side of the fence.** `debugfs dump` writes wherever debugfs runs, so `_debugfs_dump_file` reads the dump back as a host file in native mode and as base64 over the executor when debugfs is inside WSL/Docker. Dumping to the host's `tempfile.gettempdir()` while debugfs ran in a container is exactly how every sample came back unreadable, the detection fell through to scheme 2, and a Sonic build shipped two clips the machine could only render as a black screen (PAD-28).
+- **Sampling is bounded** (`_SCHEME_SAMPLE_ATTEMPTS`). A stale sidecar naming a few files this image no longer carries is normal; a reader that is broken rather than unlucky would otherwise burn one failed debugfs round-trip per `fl.dat` entry — 16,232 of them, about 16 minutes, in silence.
+
+Scheme 3 additionally **pins every asset's byte length** (`fl.dat` carries both pads and the length, and that generation encrypts `fl.dat` with the dongle, so it can be neither read nor rewritten). PNG replacements are refitted automatically ([`fit_png_to_size`](../../pinball_decryptor/plugins/jjp/pipeline.py) pads with a `tEXt` chunk, changing no pixel) and WAV replacements are spliced into the original's own container; **video has no equivalent yet**, so a clip that misses the slot's byte count is refused with that number and the original is left on the card.
 
 ### CRC32 forgery — why `fl.dat` is never rewritten
 

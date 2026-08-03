@@ -452,6 +452,154 @@ def test_both_encrypt_phases_stash_the_detected_scheme():
 
 
 # --------------------------------------------------------------------------
+# 2c-bis.  ...and the sample it detects from has to actually be readable
+#
+# PAD-28.  The ISO Encrypt phase dumped its sample with `debugfs dump` into
+# `tempfile.gettempdir()` — the HOST's temp dir — while debugfs itself was
+# running inside Docker/WSL.  The dump landed somewhere the host has no file,
+# every read raised FileNotFoundError, and _detect_write_scheme just ran out
+# of entries and returned the older cipher.  On a Sonic image (scheme 3) that
+# encrypted two replacement clips with the scheme-2 routine and forged the
+# CRCs that routine expects, so the size check, both CRC forges, the post-
+# write spot-check and the ISO build all passed — and the machine played a
+# black screen.  It also spent 16m25s doing it, one failed debugfs call per
+# fl.dat entry, all 16,232 of them.
+# --------------------------------------------------------------------------
+
+def _fl_entry(path=SONIC_PATH, filler=216):
+    from pinball_decryptor.plugins.jjp.filelist import FileEntry
+    return FileEntry(path=path, filler_size=filler,
+                     crc_encrypted=0, crc_decrypted=0)
+
+
+def test_the_scheme_is_read_off_the_image():
+    enc = _encrypt_v3(_png(), SONIC_PATH, "Sonic", lead=216, trail=96)
+    scheme = P._detect_write_scheme([_fl_entry()], lambda e: enc, "Sonic")
+    assert scheme == v3.SCHEME_V3
+
+
+def test_an_unreadable_image_stops_the_build_instead_of_guessing():
+    """The heart of it: no sample must never mean "assume the old cipher".
+
+    Guessing wrong is undetectable from inside the app — the write forges the
+    checksums of whichever routine it used, so everything downstream agrees
+    with it — and only the machine ever finds out.
+    """
+    def unreadable(entry):
+        raise FileNotFoundError(entry.path)
+
+    with pytest.raises(P.PipelineError) as excinfo:
+        P._detect_write_scheme([_fl_entry() for _ in range(200)],
+                               unreadable, "Sonic")
+    msg = str(excinfo.value)
+    assert "cannot be confirmed" in msg
+    assert "black" in msg                 # says what it would have looked like
+    assert "FileNotFoundError" in msg or SONIC_PATH in msg   # the real cause
+
+
+def test_detection_gives_up_long_before_it_walks_the_whole_file_list():
+    """16,232 failed debugfs round-trips is 16 minutes of silence."""
+    tried = []
+
+    def unreadable(entry):
+        tried.append(entry.path)
+        raise FileNotFoundError(entry.path)
+
+    with pytest.raises(P.PipelineError):
+        P._detect_write_scheme([_fl_entry() for _ in range(16232)],
+                               unreadable, "Sonic")
+    assert len(tried) <= P._SCHEME_SAMPLE_ATTEMPTS
+
+
+def test_a_few_stale_file_list_entries_do_not_stop_the_build():
+    """A sidecar from another release names files this image doesn't carry.
+    Those are misses, not a broken reader — keep going."""
+    enc = _encrypt_v3(_png(), SONIC_PATH, "Sonic", lead=216, trail=96)
+    reads = []
+
+    def flaky(entry):
+        reads.append(entry.path)
+        if len(reads) <= 4:
+            raise FileNotFoundError(entry.path)
+        return enc
+
+    assert P._detect_write_scheme([_fl_entry() for _ in range(9)],
+                                  flaky, "Sonic") == v3.SCHEME_V3
+
+
+def test_a_pre_sonic_image_still_reads_as_the_legacy_scheme():
+    """The fix must not push older titles down the scheme-3 path."""
+    from pinball_decryptor.plugins.jjp.crypto import encrypt_file
+    path = "/jjpe/gen1/Wonka/edata/graphics/UI/panel.png"
+    content = _png()
+    enc = encrypt_file(content, 216, path, 0, 0)
+    scheme = P._detect_write_scheme([_fl_entry(path)], lambda e: enc, "Wonka")
+    assert scheme == v3.SCHEME_LEGACY
+
+
+# --------------------------------------------------------------------------
+# 2c-ter.  debugfs dump writes on debugfs's side of the fence
+# --------------------------------------------------------------------------
+
+def test_dump_is_read_back_from_the_host_in_native_mode(tmp_path):
+    """Native debugfs runs on the host, so the dump is a host file — going
+    through the executor to read it would look in WSL/Docker for a path that
+    only exists here."""
+    image = FakeImage({})
+    pipe = _mod_pipe(tmp_path, image)
+
+    def fake_run(command, writable=False, timeout=120):
+        # what real debugfs does: write the asset at the dump target
+        dest = command.rsplit('" "', 1)[1].rstrip('"')
+        with open(dest, "wb") as fh:
+            fh.write(b"asset-bytes")
+        return ""
+
+    pipe._debugfs_run = fake_run
+    pipe.executor = None          # must not be touched in native mode
+    assert pipe._debugfs_dump_file("/jjpe/x.webm") == b"asset-bytes"
+    assert not os.path.exists(os.path.join(str(tmp_path), "dumped_file")), \
+        "the dump file must be cleaned up"
+
+
+def test_dump_is_read_back_through_the_executor_in_container_mode(tmp_path):
+    """Docker/WSL: debugfs wrote inside the container, so the read-back is
+    base64 over the executor — the path is meaningless on the host."""
+    import base64 as _b64
+
+    class _Exec:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command, timeout=None):
+            self.commands.append(command)
+            if command.startswith("base64 "):
+                return _b64.b64encode(b"asset-bytes").decode() + "\n"
+            return ""
+
+    pipe = _mod_pipe(tmp_path, FakeImage({}))
+    pipe._native_debugfs_path = None
+    pipe._debugfs_tmp = "/var/tmp/jjp_debugfs_dead1234"
+    pipe._debugfs_run = lambda *a, **k: ""
+    pipe.executor = _Exec()
+
+    assert pipe._debugfs_dump_file("/jjpe/x.webm") == b"asset-bytes"
+    assert any(c.startswith("base64 '/var/tmp/jjp_debugfs_dead1234/")
+               for c in pipe.executor.commands), pipe.executor.commands
+
+
+def test_no_encrypt_phase_dumps_into_the_hosts_temp_dir():
+    """The exact shape of the bug: a debugfs dump target built from
+    tempfile.gettempdir(), which is the host's and not debugfs's."""
+    import inspect
+    src = inspect.getsource(P)
+    for fn in ("_phase_encrypt_standalone", "_phase_encrypt_ssd"):
+        body = src.split("def %s" % fn, 1)[1].split("\n    def ", 1)[0]
+        assert "gettempdir" not in body, (
+            "%s builds a debugfs path from the host's temp dir" % fn)
+
+
+# --------------------------------------------------------------------------
 # 2d.  A replacement whose header lies must be refused, not written
 # --------------------------------------------------------------------------
 
@@ -494,6 +642,54 @@ def test_truncated_png_and_jpeg_are_refused():
 
 def test_unknown_types_are_left_alone():
     assert P._validate_replacement(b"anything at all", "/x/a.bin") is None
+
+
+# --------------------------------------------------------------------------
+# 2d-bis.  Refusing a clip that misses the pinned size has to read as an
+#          answer, not as an internal error
+# --------------------------------------------------------------------------
+
+SONIC_WEBM = "/jjpe/gen1/Sonic/edata/graphics/Attract Mode/Game_Logo_Sonic.webm"
+
+
+def _pinned_slot(path, orig_len=4000, lead=216, trail=96):
+    """(entry, read_original) for a scheme-3 slot holding *orig_len* bytes."""
+    orig = bytes(bytearray((0x77 for _ in range(orig_len))))
+    enc = _encrypt_v3(orig, path, "Sonic", lead=lead, trail=trail)
+    return _fl_entry(path, filler=lead), (lambda entry: enc)
+
+
+def test_a_video_that_misses_the_pinned_size_says_what_to_do():
+    """"1020664 vs 2117960" on its own reads as a bug in the app.  The size
+    pin is real and refusing is correct — the alternative is the black screen
+    the whole check exists to stop — so the message has to carry that."""
+    entry, read_original = _pinned_slot(SONIC_WEBM)
+    with pytest.raises(v3.SizeMismatch) as excinfo:
+        P._encrypt_one(v3.SCHEME_V3, entry, b"a much shorter clip",
+                       "Sonic", read_original)
+    msg = str(excinfo.value)
+    assert "4096" in msg, "the byte target the clip has to hit"
+    assert "exact byte count" in msg
+    assert "left on the card untouched" in msg
+
+
+def test_a_non_video_still_gets_the_plain_size_message():
+    """The clip-specific wording must not leak onto every other asset."""
+    entry, read_original = _pinned_slot(
+        "/jjpe/gen1/Sonic/edata/audio/music/theme.ogg")
+    with pytest.raises(v3.SizeMismatch) as excinfo:
+        P._encrypt_one(v3.SCHEME_V3, entry, b"short", "Sonic", read_original)
+    assert "exact byte count" not in str(excinfo.value)
+
+
+def test_a_video_that_does_hit_the_pinned_size_is_written():
+    """The refusal is about the size, not about being a video."""
+    entry, read_original = _pinned_slot(SONIC_WEBM, orig_len=4000)
+    fitted = bytes(bytearray((0x22 for _ in range(4096))))   # content + trail
+    out, note = P._encrypt_one(v3.SCHEME_V3, entry, fitted, "Sonic",
+                               read_original)
+    assert len(out) == len(read_original(entry))
+    assert "scheme 3" in note
 
 
 # --------------------------------------------------------------------------

@@ -459,9 +459,17 @@ def test_detect_write_scheme_leaves_legacy_alone():
     assert _detect_write_scheme(entries, lambda e: enc, "HarryPotter") ==         v3.SCHEME_LEGACY
 
 
-def test_detect_write_scheme_defaults_to_legacy_when_unreadable():
-    """An image we can't sample must not silently switch cipher."""
-    from pinball_decryptor.plugins.jjp.pipeline import _detect_write_scheme
+def test_detect_write_scheme_refuses_to_pick_when_unreadable():
+    """An image we can't sample must not silently pick a cipher — either one.
+
+    This used to fall back to legacy, on the reasoning that not switching is
+    the conservative move.  It isn't: on a scheme-3 image legacy IS the
+    switch, and it's undetectable from inside the app, because the write
+    forges the checksums of whatever routine it used.  A Sonic build shipped
+    two clips that way and the machine played them black (PAD-28).
+    """
+    from pinball_decryptor.plugins.jjp.pipeline import (_detect_write_scheme,
+                                                        PipelineError)
     from pinball_decryptor.plugins.jjp.filelist import FileEntry
 
     def boom(entry):
@@ -469,7 +477,8 @@ def test_detect_write_scheme_defaults_to_legacy_when_unreadable():
 
     entries = [FileEntry(path="/x/y.png", filler_size=8,
                          crc_encrypted=0, crc_decrypted=0)]
-    assert _detect_write_scheme(entries, boom, "Wonka") == v3.SCHEME_LEGACY
+    with pytest.raises(PipelineError):
+        _detect_write_scheme(entries, boom, "Wonka")
 
 
 def test_encrypt_one_routes_by_scheme():

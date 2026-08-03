@@ -201,7 +201,24 @@ Getting that choice wrong is invisible from inside the app. Write forges the che
 - **The read has to happen on debugfs's own side of the fence.** `debugfs dump` writes wherever debugfs runs, so `_debugfs_dump_file` reads the dump back as a host file in native mode and as base64 over the executor when debugfs is inside WSL/Docker. Dumping to the host's `tempfile.gettempdir()` while debugfs ran in a container is exactly how every sample came back unreadable, the detection fell through to scheme 2, and a Sonic build shipped two clips the machine could only render as a black screen (PAD-28).
 - **Sampling is bounded** (`_SCHEME_SAMPLE_ATTEMPTS`). A stale sidecar naming a few files this image no longer carries is normal; a reader that is broken rather than unlucky would otherwise burn one failed debugfs round-trip per `fl.dat` entry — 16,232 of them, about 16 minutes, in silence.
 
-Scheme 3 additionally **pins every asset's byte length** (`fl.dat` carries both pads and the length, and that generation encrypts `fl.dat` with the dongle, so it can be neither read nor rewritten). PNG replacements are refitted automatically ([`fit_png_to_size`](../../pinball_decryptor/plugins/jjp/pipeline.py) pads with a `tEXt` chunk, changing no pixel) and WAV replacements are spliced into the original's own container; **video has no equivalent yet**, so a clip that misses the slot's byte count is refused with that number and the original is left on the card.
+### Fitting a replacement to a pinned byte size
+
+Scheme 3 **pins every asset's byte length**: `fl.dat` carries both pads and the length, and that generation encrypts `fl.dat` with the dongle, so it can be neither read nor rewritten. A replacement has to land on the slot's content length to the byte. Every asset type gets there without losing anything, by using a hole the format already has for the purpose:
+
+| Type | How it hits the size |
+|---|---|
+| PNG | `fit_png_to_size` drops metadata chunks and pads with a `tEXt` chunk — not one pixel changes |
+| WAV | `_splice_wav_into_slot` swaps the samples inside the original's own container, keeping its cue points |
+| WebM / MKV | `fit_video_to_size` → [`pad_matroska_to_size`](../../pinball_decryptor/core/video.py): an EBML **`Void`** at the end of the Segment |
+| MP4 / M4V / MOV | `fit_video_to_size` → [`pad_isobmff_to_size`](../../pinball_decryptor/core/video.py): a trailing **`free`** box |
+| OGV / AVI | no ignorable-padding element, so these are still refused unless they already fit |
+
+A clip **at or under** the slot's size is padded with no re-encode at all. A clip **over** it is re-encoded down to the byte budget by `shrink_video_to_size` and then padded onto the exact figure; if even that overshoots it is refused and the original is left on the card.
+
+Two things make this correct rather than merely arithmetic:
+
+- **The target is the content length, not "everything after the lead pad".** Those differ by the trail pad, and the game takes its content length from `fl.dat`, so a clip built to the larger figure is handed to the player cut short by exactly the pad — a black screen from a write that hit the byte count it was given. `trim_trailing_filler` therefore parses the container's own declared end (`_webm_end` / `_isobmff_end` in [crypto_v3.py](../../pinball_decryptor/plugins/jjp/crypto_v3.py)); both answer −1 the moment the structure disagrees with the bytes, which falls back to leaving the content alone.
+- **The trail pad is left where it is.** The replacement occupies `[lead pad, lead pad + content length)` and nothing else, so the bytes past it are the original's, exactly as `fl.dat` describes them.
 
 ### CRC32 forgery — why `fl.dat` is never rewritten
 

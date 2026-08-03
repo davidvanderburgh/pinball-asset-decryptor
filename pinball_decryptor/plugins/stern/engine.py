@@ -2035,19 +2035,16 @@ def _pad_isobmff(data, target):
     """Pad an MP4/MOV (ISO-BMFF / QuickTime) byte string up to exactly *target*
     bytes by appending a trailing ``free`` box, which compliant demuxers skip —
     the original ``moov``/``mdat`` are left untouched.  ``len(data)`` must be
-    ``<= target``."""
-    pad = target - len(data)
-    if pad <= 0:
+    ``<= target``.
+
+    The padding itself lives in :func:`core.video.pad_isobmff_to_size`, which
+    JJP's fixed-size slots need too; the truncating guard stays here because
+    it is this caller's contract, not the format's.
+    """
+    if len(data) >= target:
         return data[:target]
-    if pad < 8:
-        # Too small for a box header; a few trailing bytes after a complete
-        # file are ignored by MP4/MOV demuxers.
-        return data + b"\x00" * pad
-    if pad < 0x1_0000_0000:
-        return data + pad.to_bytes(4, "big") + b"free" + b"\x00" * (pad - 8)
-    # 64-bit box: size word = 1, then the real size as an 8-byte largesize.
-    return (data + (1).to_bytes(4, "big") + b"free"
-            + pad.to_bytes(8, "big") + b"\x00" * (pad - 16))
+    from ...core.video import pad_isobmff_to_size
+    return pad_isobmff_to_size(data, target)
 
 
 def _changed_videos(assets_dir, baseline):

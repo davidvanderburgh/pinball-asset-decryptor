@@ -717,3 +717,118 @@ def test_transcode_keeps_audio_when_the_slot_has_it(monkeypatch, tmp_path):
     _video.transcode_video_to(str(tmp_path / "src.mov"), str(dst), info)
     assert "-an" not in seen["cmd"]
     assert "-c:a" in seen["cmd"]
+
+
+# ---- exact-size padding (core/video) -------------------------------------
+#
+# Cards that hold every asset at a fixed byte length (Stern's in-place SD
+# patch; JJP scheme 3, whose lengths live in a dongle-encrypted fl.dat) need a
+# replacement to land on the slot's size to the byte.  That costs nothing,
+# because both containers carry an element that exists to be ignored: an EBML
+# Void for Matroska/WebM, a `free` box for MP4/QuickTime.
+# -------------------------------------------------------------------------
+
+def test_void_element_is_exactly_the_size_asked_for():
+    from pinball_decryptor.core.video import _ebml_void
+    for total in [2, 3, 8, 127, 128, 129, 130, 16383, 16384, 1097296]:
+        void = _ebml_void(total)
+        assert void is not None and len(void) == total, total
+        assert void[0] == 0xEC                      # the Void element ID
+    # 0 needs no element and 1 has no legal encoding (ID + size won't fit).
+    assert _ebml_void(1) is None
+
+
+def test_padding_a_webm_hits_the_target_and_keeps_every_frame(tmp_path):
+    """The whole point: a clip fitted to a fixed slot must decode to the
+    identical picture, or 'it fits' has bought a black screen."""
+    from pinball_decryptor.core.video import find_ffmpeg, pad_video_to_size
+    ffmpeg = find_ffmpeg()
+    src = str(tmp_path / "a.webm")
+    if not (ffmpeg and _make_testsrc(src, seconds=1.0, ext="webm")):
+        pytest.skip("ffmpeg/libvpx not available")
+    with open(src, "rb") as fh:
+        clip = fh.read()
+
+    def raw(data):
+        p = tmp_path / "probe.webm"
+        p.write_bytes(data)
+        r = subprocess.run([ffmpeg, "-v", "error", "-i", str(p), "-f",
+                            "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           capture_output=True)
+        return r.stdout if r.returncode == 0 else None
+
+    before = raw(clip)
+    assert before, "the fixture itself must decode"
+    for pad in (0, 2, 3, 8, 129, 5000, 1097296):
+        out = pad_video_to_size(clip, len(clip) + pad)
+        assert out is not None and len(out) == len(clip) + pad, pad
+        assert raw(out) == before, f"padding by {pad} changed the picture"
+
+
+def test_padding_an_mp4_hits_the_target_and_keeps_every_frame(tmp_path):
+    from pinball_decryptor.core.video import find_ffmpeg, pad_video_to_size
+    ffmpeg = find_ffmpeg()
+    src = str(tmp_path / "a.mp4")
+    if not (ffmpeg and _make_testsrc(src, seconds=1.0, ext="mp4")):
+        pytest.skip("ffmpeg not available")
+    with open(src, "rb") as fh:
+        clip = fh.read()
+
+    def raw(data):
+        p = tmp_path / "probe.mp4"
+        p.write_bytes(data)
+        r = subprocess.run([ffmpeg, "-v", "error", "-i", str(p), "-f",
+                            "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           capture_output=True)
+        return r.stdout if r.returncode == 0 else None
+
+    before = raw(clip)
+    assert before
+    for pad in (0, 1, 7, 8, 4096):
+        out = pad_video_to_size(clip, len(clip) + pad)
+        assert out is not None and len(out) == len(clip) + pad, pad
+        assert raw(out) == before, f"padding by {pad} changed the picture"
+
+
+def test_padding_refuses_what_it_cannot_pad():
+    from pinball_decryptor.core.video import pad_video_to_size
+    assert pad_video_to_size(b"\x1a\x45\xdf\xa3" + b"\x00" * 40, 500) is None
+    assert pad_video_to_size(b"not a video at all", 500) is None
+    # already bigger than the slot is the caller's problem, not a silent crop
+    assert pad_video_to_size(b"\x00" * 100, 50) is None
+
+
+def test_the_shrink_budget_follows_the_clip_being_encoded(monkeypatch,
+                                                          tmp_path):
+    """original_info is a FORMAT template: a caller may pass the SLOT's own
+    clip to pin resolution / frame rate / codec.  Reading the duration off it
+    budgets the bitrate by the wrong clip's length, so a replacement longer
+    than the slot's original is encoded several times over its byte budget and
+    overshoots on every retry (PAD-28: a 9s clip budgeted as a 3s one)."""
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.core.video import VideoInfo
+
+    seen = []
+
+    def fake_run(cmd, limit, cancel_cb=None):
+        seen.append(cmd)
+        with open(cmd[-1], "wb") as fh:
+            fh.write(b"x")
+        return 0, b"", None
+
+    monkeypatch.setattr(V, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(V, "_run_ffmpeg_watched", fake_run)
+    monkeypatch.setattr(V, "probe_duration", lambda p: 9.0)   # the SOURCE
+
+    src = tmp_path / "replacement.webm"
+    src.write_bytes(b"x" * 10)
+    slot = VideoInfo(path="slot.webm", vcodec="vp8", width=320, height=240,
+                     fps=30.0, duration=3.0)                  # the TEMPLATE
+
+    ok, _ = V.shrink_video_to_size(str(src), str(tmp_path / "out.webm"),
+                                   90_000, original_info=slot)
+    assert ok
+    rate = int(seen[0][seen[0].index("-b:v") + 1])
+    # 90000 bytes over 9 seconds, with the module's 0.92 first-pass headroom.
+    assert rate == int(90_000 * 8 * 0.92 / 9), (
+        "bitrate was budgeted from the template's 3s, not the clip's 9s")

@@ -318,6 +318,122 @@ def _ogg_end(c):
     return end
 
 
+# ---------------------------------------------------------------------------
+# Video containers.
+#
+# These were the one shipped asset type with no structural end, so the
+# fallback below handed back the trailing filler glued onto every extracted
+# clip — and, far worse, told :func:`reencrypt_asset` that the slot's content
+# was "everything after the lead pad".  A replacement built to THAT length
+# overwrites the trail pad too, and the game takes its content length from
+# fl.dat, so its player gets the clip cut short by exactly the pad: a black
+# screen, from a write that hit the byte count it was asked for.  Both
+# containers say where they end; read it rather than guess.
+#
+# Every parser here answers -1 the moment the structure disagrees with the
+# bytes, which falls back to "return the content untouched" — exactly the
+# behaviour these extensions had before.
+# ---------------------------------------------------------------------------
+
+#: EBML elements that may appear at the top level of a real Matroska/WebM
+#: file.  Deliberately NOT including the global Void/CRC-32: accepting those
+#: would let one filler byte in 256 parse as content and drag part of the pad
+#: back in, and no muxer writes them at the root anyway.
+_EBML_TOP_IDS = (b"\x1a\x45\xdf\xa3",      # EBML header
+                 b"\x18\x53\x80\x67")      # Segment
+
+#: Top-level ISO-BMFF box types.  Same reasoning: any four printable bytes
+#: would otherwise pass as a box type and absorb filler.
+_ISOBMFF_BOXES = frozenset((
+    b"ftyp", b"styp", b"moov", b"mdat", b"moof", b"mfra", b"free", b"skip",
+    b"wide", b"pnot", b"uuid", b"meta", b"sidx", b"ssix", b"prft", b"emsg",
+))
+
+#: Box types a file may legally *start* with.
+_ISOBMFF_FIRST = frozenset((b"ftyp", b"styp", b"moov", b"mdat", b"wide",
+                            b"free", b"skip", b"pnot"))
+
+
+def _ebml_num_len(b):
+    """Length in bytes of the EBML ID / size whose first byte is *b*."""
+    if b == 0:
+        return -1
+    n, mask = 1, 0x80
+    while not b & mask:
+        mask >>= 1
+        n += 1
+    return n
+
+
+def _ebml_size(c, off):
+    """``(value, length)`` of the EBML variable-length size at *off*.
+
+    *value* is None for the all-ones "unknown size" encoding that streaming
+    muxers write, which by definition has no structural end.
+    """
+    if off >= len(c):
+        return None, -1
+    n = _ebml_num_len(c[off])
+    if n < 1 or n > 8 or off + n > len(c):
+        return None, -1
+    unknown = (0x80 >> (n - 1)) - 1
+    value = c[off] & unknown
+    for i in range(1, n):
+        value = (value << 8) | c[off + i]
+        unknown = (unknown << 8) | 0xFF
+    return (None if value == unknown else value), n
+
+
+def _webm_end(c):
+    """End of the Matroska/WebM data in *c*, or -1 if it can't be trusted."""
+    if not c.startswith(_EBML_TOP_IDS[0]):
+        return -1
+    off, end, saw_segment = 0, -1, False
+    while off < len(c):
+        idl = _ebml_num_len(c[off])
+        if idl < 1 or idl > 4 or off + idl > len(c):
+            break
+        eid = c[off:off + idl]
+        if eid not in _EBML_TOP_IDS:
+            break                      # not an element: this is the filler
+        size, slen = _ebml_size(c, off + idl)
+        if slen < 0 or size is None:
+            return -1                  # unknown-size Segment: no end to find
+        nxt = off + idl + slen + size
+        if nxt > len(c):
+            return -1                  # declared longer than the file: unsafe
+        if eid == _EBML_TOP_IDS[1]:
+            saw_segment = True
+        off = end = nxt
+    # Stopping before the Segment would truncate the clip to its header.
+    return end if saw_segment else -1
+
+
+def _isobmff_end(c):
+    """End of the MP4 / QuickTime data in *c*, or -1 if it can't be trusted."""
+    off, end, first = 0, -1, True
+    while off + 8 <= len(c):
+        size = struct.unpack_from(">I", c, off)[0]
+        typ = c[off + 4:off + 8]
+        if typ not in (_ISOBMFF_FIRST if first else _ISOBMFF_BOXES):
+            if first:
+                return -1              # not an ISO-BMFF file at all
+            break                      # not a box: this is the filler
+        first = False
+        hdr = 8
+        if size == 1:                  # 64-bit largesize follows the type
+            if off + 16 > len(c):
+                return -1
+            size = struct.unpack_from(">Q", c, off + 8)[0]
+            hdr = 16
+        elif size == 0:
+            return -1                  # "runs to EOF" would swallow the pad
+        if size < hdr or off + size > len(c):
+            return -1
+        off = end = off + size
+    return end
+
+
 def _sfnt_end(c):
     """TrueType/OpenType: end of the last table in the directory."""
     if len(c) < 12:
@@ -363,15 +479,23 @@ _ENDERS = {
     ".ogg": _ogg_end,
     ".ttf": _sfnt_end,
     ".otf": _sfnt_end,
+    ".webm": _webm_end,
+    ".mkv": _webm_end,
+    ".mp4": _isobmff_end,
+    ".m4v": _isobmff_end,
+    ".mov": _isobmff_end,
 }
 
 
 def trim_trailing_filler(content, path):
     """Cut the trailing filler off *content*.
 
-    Falls back to returning *content* untouched when the format has no
-    cheap structural end marker (webm, and anything unrecognised) — trailing
-    bytes are harmless there, and guessing risks truncating real data.
+    Falls back to returning *content* untouched for anything unrecognised, and
+    for a file whose own structure disagrees with its bytes — trailing bytes
+    are harmless there, and guessing risks truncating real data.  For video
+    the fallback is not merely untidy: the length this returns is what
+    :func:`reencrypt_asset` holds a replacement to, and a clip built to
+    "content + trail pad" is handed to the game's player cut short by the pad.
     """
     ext = os.path.splitext(path)[1].lower()
     ender = _ENDERS.get(ext)

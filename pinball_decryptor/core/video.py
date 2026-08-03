@@ -349,6 +349,144 @@ def isobmff_brand(path):
     return head[8:12]
 
 
+# ---------------------------------------------------------------------------
+# Padding a clip to an exact byte size
+#
+# Some cards hold every asset at a fixed byte length: Stern patches video into
+# the SD-card image in place, and JJP's scheme-3 titles read each asset's
+# length out of a dongle-encrypted fl.dat that can be neither read nor
+# rewritten.  A replacement therefore has to land on the slot's size to the
+# byte, which sounds like it should cost quality — and doesn't, because both
+# container formats carry a first-class "ignore these bytes" element for
+# exactly this: an EBML ``Void`` for Matroska/WebM (the same one muxers write
+# to reserve space for a SeekHead they will fill in later) and a ``free`` box
+# for MP4/QuickTime.  Padding with those changes no frame at all.
+#
+# The EBML primitives are spelled out here rather than shared with
+# jjp/crypto_v3.py, which needs its own copy: that module is also deployed
+# flat into WSL/Docker as jjp_crypto_v3.py, where this package doesn't exist.
+# ---------------------------------------------------------------------------
+
+_EBML_MAGIC = b"\x1a\x45\xdf\xa3"
+_EBML_SEGMENT_ID = b"\x18\x53\x80\x67"
+
+_ISOBMFF_FIRST_BOXES = frozenset((b"ftyp", b"styp", b"moov", b"mdat", b"wide",
+                                  b"free", b"skip", b"pnot"))
+
+
+def _read_ebml_size(data, off):
+    """``(value, length)`` of the EBML variable-length size at *off*; value is
+    None for the "unknown size" encoding or an unreadable one."""
+    if off >= len(data):
+        return None, -1
+    first = data[off]
+    if first == 0:
+        return None, -1
+    n, mask = 1, 0x80
+    while not first & mask:
+        mask >>= 1
+        n += 1
+    if n > 8 or off + n > len(data):
+        return None, -1
+    unknown = (0x80 >> (n - 1)) - 1
+    value = first & unknown
+    for i in range(1, n):
+        value = (value << 8) | data[off + i]
+        unknown = (unknown << 8) | 0xFF
+    return (None if value == unknown else value), n
+
+
+def _ebml_vint(value, length):
+    """*value* as an EBML variable-length integer of exactly *length* bytes."""
+    return ((1 << (7 * length)) | value).to_bytes(length, "big")
+
+
+def _ebml_void(total):
+    """A ``Void`` element occupying exactly *total* bytes, or None when *total*
+    can't hold one (0 needs no element; 1 has no legal encoding)."""
+    for slen in range(1, 9):
+        body = total - 1 - slen
+        if body < 0:
+            return None
+        if body <= (1 << (7 * slen)) - 2:
+            return b"\xec" + _ebml_vint(body, slen) + b"\x00" * body
+    return None
+
+
+def pad_matroska_to_size(data, target):
+    """Pad a Matroska / WebM clip to exactly *target* bytes, or None.
+
+    The slack goes in a ``Void`` at the end of the Segment.  Appending there
+    moves nothing, so every SeekHead / Cues offset stays valid (they are all
+    relative to the start of the Segment's data, so even widening the
+    Segment's own size field is safe) — and the decoded frames are bit-for-bit
+    what they were.
+    """
+    if not data.startswith(_EBML_MAGIC) or len(data) > target:
+        return None
+    hdr_size, hdr_len = _read_ebml_size(data, len(_EBML_MAGIC))
+    if hdr_size is None:
+        return None
+    seg_off = len(_EBML_MAGIC) + hdr_len + hdr_size
+    if data[seg_off:seg_off + 4] != _EBML_SEGMENT_ID:
+        return None
+    body_size, size_len = _read_ebml_size(data, seg_off + 4)
+    if body_size is None:
+        return None
+    body_off = seg_off + 4 + size_len
+    if body_off + body_size != len(data):
+        return None            # something follows the Segment — don't guess
+    head, body = data[:seg_off], data[body_off:]
+    # Try the width the size field already has, so the payload doesn't move at
+    # all; widen to the maximum only if the bigger Segment won't fit in it.
+    for slen in (size_len, 8):
+        void_len = target - len(head) - 4 - slen - body_size
+        if void_len < 0 or void_len == 1:
+            continue           # 1 byte can't carry an element header
+        if body_size + void_len > (1 << (7 * slen)) - 2:
+            continue
+        void = b"" if void_len == 0 else _ebml_void(void_len)
+        if void_len and void is None:
+            continue
+        out = (head + _EBML_SEGMENT_ID + _ebml_vint(body_size + void_len, slen)
+               + body + void)
+        if len(out) == target:
+            return out
+    return None
+
+
+def pad_isobmff_to_size(data, target):
+    """Pad an MP4 / QuickTime clip to exactly *target* bytes with a trailing
+    ``free`` box, which compliant demuxers skip — ``moov`` / ``mdat`` are left
+    untouched.  Returns None when *data* already overshoots."""
+    pad = target - len(data)
+    if pad < 0:
+        return None
+    if pad == 0:
+        return data
+    if pad < 8:
+        # No room for a box header; a few bytes after the last complete box
+        # are where a demuxer stops anyway.
+        return data + b"\x00" * pad
+    if pad < 0x1_0000_0000:
+        return data + pad.to_bytes(4, "big") + b"free" + b"\x00" * (pad - 8)
+    # 64-bit box: the size word is 1 and the real size follows the type.
+    return (data + (1).to_bytes(4, "big") + b"free"
+            + pad.to_bytes(8, "big") + b"\x00" * (pad - 16))
+
+
+def pad_video_to_size(data, target):
+    """Return *data* padded to exactly *target* bytes without changing a frame,
+    or None when it isn't a container we can pad (or already overshoots)."""
+    if len(data) > target:
+        return None
+    if data.startswith(_EBML_MAGIC):
+        return pad_matroska_to_size(data, target)
+    if len(data) >= 8 and data[4:8] in _ISOBMFF_FIRST_BOXES:
+        return pad_isobmff_to_size(data, target)
+    return None
+
+
 # 8-bit 4:2:0 — the only pixel format an embedded H.264 decoder is guaranteed
 # to handle (yuvj420p is the same layout with full-range flags).
 SAFE_PIX_FMTS = {"yuv420p", "yuvj420p", ""}
@@ -1021,8 +1159,15 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
         ext, alpha, ((info.vcodec or "") if info else "").lower())
     if vargs is None:
         return False, f"unsupported target format {ext}"
-    dur = (info.duration if info and info.duration > 0
-           else probe_duration(src_path))
+    # The byte budget buys bitrate × the length of the clip being ENCODED, so
+    # the duration has to come from the source.  *original_info* is a format
+    # template — a caller may pass the SLOT's own clip to pin resolution, frame
+    # rate and codec — and taking the length from that sets the rate by the
+    # wrong clip: a 9-second replacement budgeted as if it were the slot's
+    # 3-second original comes out three times over, on every retry.
+    dur = probe_duration(src_path)
+    if not dur or dur <= 0:
+        dur = info.duration if info and info.duration > 0 else 0
     if not dur or dur <= 0:
         return False, "could not determine clip duration"
     # Reserve some bits for an audio track (if any) + container overhead.

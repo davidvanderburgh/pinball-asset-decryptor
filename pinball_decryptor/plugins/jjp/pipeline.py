@@ -1294,13 +1294,85 @@ def _validate_replacement(content, path):
     return None
 
 
-#: Video containers JJP ships loose in edata.  Only used to word the
-#: fixed-size refusal below; kept local so this module doesn't drag the GUI's
-#: video stack into the WSL-side deployment.
-_PINNED_VIDEO_EXTS = (".webm", ".mp4", ".mov", ".m4v", ".mkv", ".avi", ".ogv")
+#: Video containers JJP ships loose in edata that :func:`fit_video_to_size`
+#: can hold to a fixed byte count.  ``.ogv`` and ``.avi`` are deliberately
+#: absent: neither has an ignorable-padding element we can lean on, so a clip
+#: in one of those still has to arrive at exactly the right size.
+_PINNED_VIDEO_EXTS = (".webm", ".mkv", ".mp4", ".m4v", ".mov")
 
 
-def _encrypt_one(scheme, entry, content, game_name, read_original):
+def fit_video_to_size(content, target, path, original=None, log=None,
+                      cancel_cb=None):
+    """Make a clip exactly *target* bytes without changing what it plays.
+
+    The mirror of :func:`fit_png_to_size` for video, and it works for the same
+    reason: the container formats carry a first-class "ignore these bytes"
+    element (an EBML ``Void``, an MP4 ``free`` box), so the slack a fixed-size
+    slot demands costs nothing but bytes.  A clip already at or under the slot
+    takes the slack straight away, with **no re-encode at all** — not one frame
+    is touched.  Only a clip too big for the slot is re-encoded down to the
+    budget first, and then padded onto the exact figure.
+
+    *original* is the slot's own clip, when we have it, so the shrink keeps its
+    resolution / frame rate / codec rather than inventing them.
+
+    Returns the fitted bytes, or None when the clip can't be made to fit.
+    """
+    import shutil as _shutil
+
+    from ...core.video import (detect_video_info, pad_video_to_size,
+                               shrink_video_to_size)
+
+    if len(content) <= target:
+        out = pad_video_to_size(content, target)
+        if out is not None and log and len(content) != target:
+            log("  Clip is %d bytes and the slot holds %d — padding it out "
+                "with %d bytes of empty container space (no re-encode, every "
+                "frame kept)"
+                % (len(content), target, target - len(content)), "info")
+        return out
+
+    ext = os.path.splitext(path)[1].lower() or ".webm"
+    work = tempfile.mkdtemp(prefix="jjp_fitvid_")
+    try:
+        src = os.path.join(work, "replacement" + ext)
+        with open(src, "wb") as fh:
+            fh.write(content)
+        info = None
+        if original:
+            ref = os.path.join(work, "slot" + ext)
+            with open(ref, "wb") as fh:
+                fh.write(original)
+            info = detect_video_info(ref)
+        if info is None:
+            info = detect_video_info(src)
+        if log:
+            log("  Clip is %d bytes and the slot holds %d — re-encoding it "
+                "down to fit (this is the slow part)..."
+                % (len(content), target), "info")
+        dst = os.path.join(work, "fitted" + ext)
+        ok, detail = shrink_video_to_size(src, dst, target,
+                                          original_info=info,
+                                          cancel_cb=cancel_cb)
+        if not ok:
+            if log:
+                log("  Could not re-encode it small enough (%s)" % detail,
+                    "info")
+            return None
+        with open(dst, "rb") as fh:
+            shrunk = fh.read()
+    finally:
+        _shutil.rmtree(work, ignore_errors=True)
+
+    out = pad_video_to_size(shrunk, target)
+    if out is not None and log:
+        log("  Re-encoded to %d bytes, then padded onto the slot's %d"
+            % (len(shrunk), target), "info")
+    return out
+
+
+def _encrypt_one(scheme, entry, content, game_name, read_original,
+                 log=None, cancel_cb=None):
     """Encrypt one replacement asset.  Returns (bytes, note_for_log).
 
     Scheme 3 rebuilds the file around the original's pads and forges the
@@ -1333,29 +1405,35 @@ def _encrypt_one(scheme, entry, content, game_name, read_original):
             out = reencrypt_asset(original, content, entry.path, game_name,
                                   filler_size=f1)
         except SizeMismatch as e:
-            # A PNG can be padded to any length without changing a pixel,
-            # so an image that is merely the wrong size is still usable.
+            # A PNG can be padded to any length without changing a pixel, and
+            # so can a clip: both formats carry an element that exists to be
+            # ignored (a tEXt chunk; an EBML Void / an MP4 free box).  So a
+            # replacement that is merely the wrong size is still usable.
             fitted = None
-            if entry.path.lower().endswith(".png"):
+            ext = os.path.splitext(entry.path)[1].lower()
+            if ext == ".png":
                 target = len(_d3(original, f1, entry.path, game_name))
                 fitted = fit_png_to_size(content, target)
+            elif ext in _PINNED_VIDEO_EXTS:
+                orig_content = _d3(original, f1, entry.path, game_name)
+                fitted = fit_video_to_size(content, len(orig_content),
+                                           entry.path, original=orig_content,
+                                           log=log, cancel_cb=cancel_cb)
             if fitted is None:
-                if os.path.splitext(entry.path)[1].lower() in _PINNED_VIDEO_EXTS:
-                    # Say what the number means to someone replacing a clip.
-                    # Refusing is the right answer — the alternative is the
-                    # black screen this check exists to prevent — but "1020664
-                    # vs 2117960" on its own reads as a bug in the app.
+                if ext in _PINNED_VIDEO_EXTS:
+                    # Only reachable when even a re-encode couldn't get under
+                    # the slot's size.  Say what the number means rather than
+                    # leave "1020664 vs 2117960" reading as an app bug.
                     raise SizeMismatch(
-                        "%s.  Video is the one asset type this app can't pad "
-                        "to a fixed size yet (a PNG can carry the slack in a "
-                        "metadata chunk; a clip can't), so this game needs a "
-                        "replacement encoded to that exact byte count.  The "
-                        "original clip is left on the card untouched." % e
+                        "%s.  This game holds every clip at a fixed byte "
+                        "size, and yours could not be re-encoded down to it "
+                        "even at low bitrate — try a shorter clip.  The "
+                        "original is left on the card untouched." % e
                     ) from e
                 raise
             out = reencrypt_asset(original, fitted, entry.path, game_name,
                                   filler_size=f1)
-            note_pad += (f", image refitted from {len(content)} to "
+            note_pad += (f", refitted from {len(content)} to "
                          f"{len(fitted)} bytes to match the slot")
         from .crypto import crc32_buf
         return out, (f"scheme 3, {len(out)} bytes, "
@@ -6663,7 +6741,9 @@ class StandaloneModPipeline(ModPipeline):
             # Encrypt with CRC forgery
             try:
                 encrypted, _note = _encrypt_one(
-                    scheme, entry, content, game_name, _read_original)
+                    scheme, entry, content, game_name, _read_original,
+                    log=self.log,
+                    cancel_cb=lambda: bool(getattr(self, "cancelled", False)))
                 if _note:
                     self.log(f"  {_note}", "info")
             except Exception as e:
@@ -9567,7 +9647,10 @@ class DirectSSDModPipeline(StandaloneModPipeline):
                 # Encrypt with CRC forgery
                 try:
                     encrypted, _note = _encrypt_one(
-                        scheme, entry, content, game_name, _read_original)
+                        scheme, entry, content, game_name, _read_original,
+                        log=self.log,
+                        cancel_cb=lambda: bool(
+                            getattr(self, "cancelled", False)))
                     if _note:
                         self.log(f"  {_note}", "info")
                 except Exception as e:

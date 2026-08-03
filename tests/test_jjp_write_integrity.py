@@ -659,17 +659,114 @@ def _pinned_slot(path, orig_len=4000, lead=216, trail=96):
     return _fl_entry(path, filler=lead), (lambda entry: enc)
 
 
-def test_a_video_that_misses_the_pinned_size_says_what_to_do():
-    """"1020664 vs 2117960" on its own reads as a bug in the app.  The size
-    pin is real and refusing is correct — the alternative is the black screen
-    the whole check exists to stop — so the message has to carry that."""
-    entry, read_original = _pinned_slot(SONIC_WEBM)
+def _ebml(eid, payload):
+    n = 1
+    while n < 8 and len(payload) > (1 << (7 * n)) - 2:
+        n += 1
+    return eid + ((1 << (7 * n)) | len(payload)).to_bytes(n, "big") + payload
+
+
+def _webm(body_len=400, fill=b"\x00"):
+    """A structurally valid (undecodable) WebM — enough for the byte-level
+    contract, which is all the crypto layer ever looks at."""
+    return (_ebml(b"\x1a\x45\xdf\xa3", b"\x42\x86\x81\x01")
+            + _ebml(b"\x18\x53\x80\x67", fill * body_len))
+
+
+def _webm_slot(path=SONIC_WEBM, body_len=4000, lead=224, trail=96):
+    """(entry, read_original, clip) for a scheme-3 slot holding a WebM."""
+    clip = _webm(body_len)
+    enc = _encrypt_v3(clip, path, "Sonic", lead=lead, trail=trail)
+    return _fl_entry(path, filler=lead), (lambda e: enc), clip
+
+
+def test_a_clip_smaller_than_the_slot_is_padded_not_refused():
+    """cooltoy's Game_Logo_Sonic: 1,020,664 bytes into a 2,117,960-byte slot.
+
+    WebM carries a Void element that exists to be ignored, so the slack the
+    fixed-size slot demands costs nothing and not one frame is re-encoded.
+    """
+    entry, read_original, clip = _webm_slot()
+    disk = read_original(entry)
+    small = _webm(200, fill=b"\x33")
+    assert len(small) < len(clip)
+
+    logged = []
+    out, note = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
+                               read_original,
+                               log=lambda m, l="info": logged.append(m))
+
+    # The game reads the whole file and checks its CRC against fl.dat, which
+    # we cannot rewrite — so both must come back untouched.
+    from pinball_decryptor.plugins.jjp.crypto import crc32_buf
+    assert len(out) == len(disk)
+    assert crc32_buf(out) == crc32_buf(disk)
+    assert "refitted from %d to %d" % (len(small), len(clip)) in note
+    assert any("no re-encode" in m for m in logged), logged
+
+    # The bytes the game hands its player are exactly our clip, padded.
+    from pinball_decryptor.core.video import pad_video_to_size
+    got = v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic")
+    assert got == pad_video_to_size(small, len(clip))
+
+
+def test_the_trailing_filler_is_left_alone_by_a_video_replacement():
+    """The pad past the content is invisible to the player: the game takes the
+    content length from fl.dat.  Spilling into it doesn't gain a byte, it just
+    truncates the clip by however much was spilled — which is the black screen
+    all of this exists to stop."""
+    entry, read_original, clip = _webm_slot()
+    disk = read_original(entry)
+    out, _ = P._encrypt_one(v3.SCHEME_V3, entry, _webm(200), "Sonic",
+                            read_original)
+    before = v3.decrypt_file(disk, 224, SONIC_WEBM, "Sonic", trim=False)
+    after = v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic", trim=False)
+    assert len(before) == len(after)
+    assert before[len(clip):] == after[len(clip):], "the trail pad moved"
+    assert before[len(clip):], "the fixture must actually have a trail pad"
+
+
+def test_a_clip_bigger_than_the_slot_is_re_encoded_down_then_padded(monkeypatch):
+    """Too big can't be padded away, so it goes through the encoder first and
+    is padded onto the exact figure afterwards."""
+    entry, read_original, clip = _webm_slot()
+    big = _webm(9000, fill=b"\x55")
+    assert len(big) > len(clip)
+    shrunk = _webm(300, fill=b"\x77")
+    calls = []
+
+    def fake_shrink(src, dst, max_bytes, original_info=None, **kw):
+        calls.append(max_bytes)
+        with open(dst, "wb") as fh:
+            fh.write(shrunk)
+        return True, str(len(shrunk))
+
+    import pinball_decryptor.core.video as V
+    monkeypatch.setattr(V, "shrink_video_to_size", fake_shrink)
+
+    out, note = P._encrypt_one(v3.SCHEME_V3, entry, big, "Sonic",
+                               read_original)
+    assert calls == [len(clip)], "the budget must be the slot's own size"
+    from pinball_decryptor.core.video import pad_video_to_size
+    assert v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic") == \
+        pad_video_to_size(shrunk, len(clip))
+    assert "refitted from %d to %d" % (len(big), len(clip)) in note
+
+
+def test_a_clip_that_will_not_shrink_far_enough_is_refused_with_a_reason(
+        monkeypatch):
+    """Still refuse rather than write something the game can't play — but say
+    what the number means and what to do about it."""
+    entry, read_original, clip = _webm_slot()
+    import pinball_decryptor.core.video as V
+    monkeypatch.setattr(V, "shrink_video_to_size",
+                        lambda *a, **k: (False, "smallest was still too big"))
+
     with pytest.raises(v3.SizeMismatch) as excinfo:
-        P._encrypt_one(v3.SCHEME_V3, entry, b"a much shorter clip",
-                       "Sonic", read_original)
+        P._encrypt_one(v3.SCHEME_V3, entry, _webm(9000), "Sonic",
+                       read_original)
     msg = str(excinfo.value)
-    assert "4096" in msg, "the byte target the clip has to hit"
-    assert "exact byte count" in msg
+    assert "fixed byte size" in msg and "shorter clip" in msg
     assert "left on the card untouched" in msg
 
 
@@ -679,17 +776,67 @@ def test_a_non_video_still_gets_the_plain_size_message():
         "/jjpe/gen1/Sonic/edata/audio/music/theme.ogg")
     with pytest.raises(v3.SizeMismatch) as excinfo:
         P._encrypt_one(v3.SCHEME_V3, entry, b"short", "Sonic", read_original)
-    assert "exact byte count" not in str(excinfo.value)
+    assert "fixed byte size" not in str(excinfo.value)
 
 
-def test_a_video_that_does_hit_the_pinned_size_is_written():
-    """The refusal is about the size, not about being a video."""
-    entry, read_original = _pinned_slot(SONIC_WEBM, orig_len=4000)
-    fitted = bytes(bytearray((0x22 for _ in range(4096))))   # content + trail
-    out, note = P._encrypt_one(v3.SCHEME_V3, entry, fitted, "Sonic",
-                               read_original)
-    assert len(out) == len(read_original(entry))
-    assert "scheme 3" in note
+def test_an_ogv_slot_is_still_refused_rather_than_mangled():
+    """Ogg/AVI have no ignorable-padding element, so a clip in one of those
+    genuinely has to arrive at the right size."""
+    entry, read_original = _pinned_slot(
+        "/jjpe/gen1/Sonic/edata/graphics/x.ogv")
+    with pytest.raises(v3.SizeMismatch):
+        P._encrypt_one(v3.SCHEME_V3, entry, b"OggS" + b"\x00" * 50, "Sonic",
+                       read_original)
+
+
+def test_end_to_end_the_bytes_the_game_plays_are_a_real_clip(tmp_path):
+    """The one that matters: run a REAL clip through the whole path and decode
+    exactly the bytes the machine would hand its player."""
+    import subprocess
+    from pinball_decryptor.core.video import detect_video_info, find_ffmpeg
+
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        pytest.skip("ffmpeg not available")
+
+    def render(name, seconds, bitrate):
+        path = str(tmp_path / name)
+        r = subprocess.run(
+            [ffmpeg, "-y", "-f", "lavfi",
+             "-i", "testsrc=size=320x240:rate=15:duration=%s" % seconds,
+             "-c:v", "libvpx", "-b:v", bitrate, "-deadline", "realtime",
+             "-cpu-used", "8", "-an", path], capture_output=True)
+        if r.returncode != 0 or not os.path.isfile(path):
+            return None
+        with open(path, "rb") as fh:
+            return fh.read()
+
+    slot_clip = render("slot.webm", 3, "500k")
+    replacement = render("rep.webm", 1, "120k")
+    if not slot_clip or not replacement or len(replacement) >= len(slot_clip):
+        pytest.skip("this ffmpeg build has no usable libvpx (VP8) encoder")
+
+    disk = _encrypt_v3(slot_clip, SONIC_WEBM, "Sonic", lead=224, trail=96)
+    entry = _fl_entry(SONIC_WEBM, filler=224)
+
+    # the slot's content length must be the clip, NOT clip + trailing pad
+    assert len(v3.decrypt_file(disk, 224, SONIC_WEBM, "Sonic")) == \
+        len(slot_clip)
+
+    out, _ = P._encrypt_one(v3.SCHEME_V3, entry, replacement, "Sonic",
+                            lambda e: disk)
+    full = v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic", trim=False)
+    played = full[:len(slot_clip)]          # exactly what the game passes on
+
+    result = tmp_path / "played.webm"
+    result.write_bytes(played)
+    info = detect_video_info(str(result))
+    assert info is not None, "the game would be handed something unplayable"
+    assert (info.vcodec, info.width, info.height) == ("vp8", 320, 240)
+    decoded = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", str(result), "-f", "rawvideo",
+         "-pix_fmt", "rgb24", "-"], capture_output=True)
+    assert decoded.returncode == 0 and decoded.stdout, "no frames decoded"
 
 
 # --------------------------------------------------------------------------

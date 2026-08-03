@@ -547,3 +547,93 @@ def test_deployed_module_can_import_flat(tmp_path):
                        cwd=str(tmp_path), capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "3 216 True True"
+
+
+# ------------------------------------------------- video structural ends
+#
+# Video was the one shipped asset type with no structural end, so
+# trim_trailing_filler handed back the trailing pad glued onto the clip.  That
+# is untidy on extract and wrong on write: the length it returns is what
+# reencrypt_asset holds a replacement to, and a clip built to
+# "content + trail pad" is handed to the game's player cut short by the pad,
+# which is a black screen from a write that hit the byte count it was given.
+
+def _ebml(eid, payload, size_len=None):
+    """One EBML element.  *size_len* forces a wider (still legal) size field."""
+    n = size_len or 1
+    while n < 8 and len(payload) > (1 << (7 * n)) - 2:
+        n += 1
+    return eid + ((1 << (7 * n)) | len(payload)).to_bytes(n, "big") + payload
+
+
+def _fake_webm(body=b"\x00" * 400):
+    return _ebml(b"\x1a\x45\xdf\xa3", b"\x42\x86\x81\x01") + \
+           _ebml(b"\x18\x53\x80\x67", body)
+
+
+def _box(typ, payload):
+    return (len(payload) + 8).to_bytes(4, "big") + typ + payload
+
+
+def _fake_mp4():
+    return (_box(b"ftyp", b"isom" + b"\x00" * 8) + _box(b"moov", b"\x00" * 120)
+            + _box(b"mdat", b"\x00" * 900))
+
+
+def test_webm_end_finds_the_clip_and_drops_the_pad():
+    clip = _fake_webm()
+    assert v3._webm_end(clip) == len(clip)
+    assert v3._webm_end(clip + os.urandom(96)) == len(clip)
+    assert v3.trim_trailing_filler(clip + b"\xde\xad" * 48, "/x/a.webm") == clip
+
+
+def test_webm_end_gives_up_rather_than_truncate():
+    clip = _fake_webm()
+    # unknown-size Segment (all data bits set): streaming muxers write these
+    # and they have no structural end at all
+    unknown = _ebml(b"\x1a\x45\xdf\xa3", b"\x42\x86\x81\x01") + \
+        b"\x18\x53\x80\x67" + b"\xff" + b"\x00" * 200
+    assert v3._webm_end(unknown) == -1
+    # a Segment that claims more than the file holds
+    assert v3._webm_end(clip[:len(clip) - 40]) == -1
+    assert v3._webm_end(b"not ebml at all") == -1
+    # and every one of those falls back to leaving the content alone
+    for bad in (unknown, clip[:len(clip) - 40], b"not ebml at all"):
+        assert v3.trim_trailing_filler(bad, "/x/a.webm") == bad
+
+
+def test_a_stray_pad_byte_cannot_pass_as_a_top_level_element():
+    """Void and CRC-32 are legal EBML anywhere, so accepting them at the root
+    would let one filler byte in 256 drag part of the pad back into the clip.
+    No muxer writes them there, so they are not accepted."""
+    clip = _fake_webm()
+    assert v3._webm_end(clip + b"\xec\x84" + b"\x00" * 4) == len(clip)
+    assert v3._webm_end(clip + b"\xbf\x84" + b"\x00" * 4) == len(clip)
+
+
+def test_isobmff_end_finds_the_clip_and_drops_the_pad():
+    clip = _fake_mp4()
+    assert v3._isobmff_end(clip) == len(clip)
+    assert v3._isobmff_end(clip + os.urandom(96)) == len(clip)
+    for ext in (".mp4", ".m4v", ".mov"):
+        assert v3.trim_trailing_filler(clip + b"\x99" * 64, "/x/a" + ext) == clip
+
+
+def test_isobmff_end_gives_up_rather_than_truncate():
+    assert v3._isobmff_end(b"\x00" * 64) == -1              # not ISO-BMFF
+    # a size-0 box runs "to end of file", which would swallow the pad
+    assert v3._isobmff_end(_box(b"ftyp", b"isom")
+                           + b"\x00\x00\x00\x00mdat" + b"\x00" * 40) == -1
+    # a box claiming more than the file holds
+    assert v3._isobmff_end(_fake_mp4()[:-100]) == -1
+
+
+def test_a_clip_with_no_pad_at_all_is_left_exactly_alone():
+    for data, ext in ((_fake_webm(), ".webm"), (_fake_mp4(), ".mp4")):
+        assert v3.trim_trailing_filler(data, "/x/a" + ext) == data
+
+
+def test_containers_without_an_end_marker_still_pass_through():
+    """.ogv and .avi have no parser here; the old behaviour must survive."""
+    blob = b"OggS" + b"\x00" * 200
+    assert v3.trim_trailing_filler(blob, "/x/a.ogv") == blob

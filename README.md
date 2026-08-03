@@ -630,10 +630,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    count so they stay in sync with their sound. If you would rather
    encode your own clips than let the app convert, right-click a slot
    and pick **What this slot needs…**: it reads that slot's own clip
-   and gives you the container, codec, H.264 profile and level, frame
-   size, frame rate and whether it carries audio, plus a copyable
-   ffmpeg command that pins only the flags that have to match — so
-   your own bitrate and key-frame settings stay yours. Get everything
+   and gives you the container, codec (with the H.264 profile and level
+   where those apply), frame size, frame rate and whether it carries
+   audio, plus a copyable ffmpeg command written in that slot's own
+   codec, pinning only the flags that have to match — so your own
+   bitrate and key-frame settings stay yours. Get everything
    but the container right and nothing is re-encoded: a clip that is
    already this slot's video in the wrong wrapper is repackaged with a
    stream copy, so every frame survives untouched. The **Convert**

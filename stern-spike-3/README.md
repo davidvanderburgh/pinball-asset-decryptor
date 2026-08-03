@@ -31,6 +31,7 @@ docs/
 tools/
   luks_otp.py              offline LUKS2 verifier + AES-XTS decryptor (pure Python, no cryptsetup)
   build_extractor_card.py  build a boot image that dumps the OTP key to the FAT partition
+  spike3_otp_probe.sh      read-only on-board probe: reports secure-boot enforcement + reads the OTP key (run on a board you own, over SSH/UART)
   xcheck_setup.sh          reproduces the cryptsetup cross-validation of luks_otp.py
 tests/
   test_luks_otp.py         self-tests + end-to-end verify against a known-key LUKS2 fixture

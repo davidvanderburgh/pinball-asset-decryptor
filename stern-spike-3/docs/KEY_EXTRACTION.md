@@ -86,6 +86,17 @@ vcmailbox 0x00030021 40 40 0 8 0 0 0 0 0 0 0 0 \
 # -> 64 hex chars = the 32-byte keyfile
 ```
 
+Rather than run that raw one-liner, use the packaged probe
+[../tools/spike3_otp_probe.sh](../tools/spike3_otp_probe.sh) — copy it to the
+board and run it as root. It is strictly **read-only** (no writes, no partition
+access, no `shred`), and in one shot it (a) reports whether secure boot is
+enforced (settles the row-90 question from the authoritative source — the
+bootloader config and the customer-key-hash OTP rows) and (b) reads the key,
+validating it two independent ways and refusing to emit a partial/mis-framed key
+instead of a wrong one. It prints a `SPIKE3_KEY=<64hex>` line to paste straight
+into `tools/luks_otp.py verify`. This same script also covers Method C (serial
+console) — it is just the on-board step, however you got the shell.
+
 Open questions to make this work (investigate on a live machine, or once Method A
 yields a key and we can decrypt+read the `rootfs`/`connectivity` partitions):
 

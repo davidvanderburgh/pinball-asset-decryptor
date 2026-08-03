@@ -42,6 +42,18 @@ These complement the deeper format reverse-engineering session logs:
   the normal Write step repacks them. Plugins narrow the scan via
   `Manufacturer.audio_slot_dirs()` (BoF → `_EDITABLE ASSETS`; others → whole
   tree). See [core/audio_slots.py](../../pinball_decryptor/core/audio_slots.py).
+- **Replace Video** — the same shape for video slots
+  ([core/video_slots.py](../../pinball_decryptor/core/video_slots.py)), with one
+  rule worth stating up front: **the clip already in the slot decides the
+  codec, not the container extension**. `.webm` is VP8 *or* VP9, `.mov` is
+  H.264 *or* ProRes, `.mkv` is anything — so `_video_codec_args`
+  ([core/video.py](../../pinball_decryptor/core/video.py)) re-encodes to
+  whatever ffprobe read off the original, falling back to the container's
+  historical default only when the slot was never probed. Handing an embedded
+  player a codec it lacks fails the same way a too-high H.264 profile does:
+  the demuxer finds the sound (which plays) and the picture stays **black**,
+  with nothing said at build time. The re-encode names the codec in the build
+  log when it came from the slot rather than the default.
 
 ## Conventions for these docs
 

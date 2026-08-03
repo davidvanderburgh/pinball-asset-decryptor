@@ -499,37 +499,113 @@ def encode_replacement(src_path, dst_path, slot_info, reference_path,
     return transcode_video_to(src_path, dst_path, slot_info,
                               match_length=match_length)
 
-def _video_codec_args(ext, alpha):
+# ffmpeg encoder flags per VIDEO CODEC — keyed by the ffprobe codec name of
+# the clip already in the slot, because that clip is the only proof of what
+# the machine's decoder accepts.  A container says far less than it looks
+# like it does: .webm is VP8 *or* VP9, .mov is H.264 or ProRes, .mkv is
+# anything at all.  Re-encoding a VP8 slot to VP9 because "webm means VP9"
+# hands an embedded player a codec it may not have — and that failure looks
+# exactly like the H.264-profile one this module already guards: the demuxer
+# still finds the sound (which plays) while the picture stays black.
+_ENCODERS = {
+    # libvpx-vp9 at its defaults (cpu-used 1, single-threaded rows) encodes
+    # long clips at a small fraction of realtime — a full-song 1360x768
+    # video can take the better part of an hour.  good/4 with row
+    # multithreading is several times faster at near-identical quality for
+    # this material.  ``-row-mt`` is a VP9-only private option, so the VP8
+    # encoder gets the two flags it does understand and no more.
+    "h264":   (["-c:v", "libx264", "-pix_fmt", "yuv420p"], ["-c:a", "aac"]),
+    "vp9":    (["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p",
+                "-deadline", "good", "-cpu-used", "4", "-row-mt", "1"],
+               ["-c:a", "libopus"]),
+    "vp8":    (["-c:v", "libvpx", "-pix_fmt", "yuv420p",
+                "-deadline", "good", "-cpu-used", "4"],
+               ["-c:a", "libvorbis"]),
+    "theora": (["-c:v", "libtheora", "-q:v", "7"], ["-c:a", "libvorbis"]),
+    "mpeg4":  (["-c:v", "mpeg4", "-qscale:v", "3"], ["-c:a", "libmp3lame"]),
+    "prores": (["-c:v", "prores_ks", "-profile:v", "3",
+                "-pix_fmt", "yuv422p10le"], ["-c:a", "pcm_s16le"]),
+}
+
+# The encoder each codec is produced by — the same table, for callers that
+# want the name rather than the flags (the "What this slot needs" recipe).
+_ENCODER_NAMES = {c: v[0][1] for c, v in _ENCODERS.items()}
+
+# What each container may legally hold.  A slot's codec is only copied when
+# the output container can actually carry it; anything else falls back to the
+# container's own default below.
+_CONTAINER_CODECS = {
+    ".mp4":  ("h264", "mpeg4"),
+    ".m4v":  ("h264", "mpeg4"),
+    ".mov":  ("h264", "prores", "mpeg4"),
+    ".mkv":  ("h264", "vp9", "vp8", "theora", "mpeg4", "prores"),
+    ".webm": ("vp9", "vp8"),
+    ".ogv":  ("theora",),
+    ".avi":  ("mpeg4",),
+}
+
+# Used when the slot's own clip was never probed (no ffmpeg/ffprobe on this
+# machine, or a file it couldn't read) — the historical extension-picks-codec
+# behaviour, which is right for every stock file we have ever seen.
+_DEFAULT_CODEC = {
+    ".mp4": "h264", ".m4v": "h264", ".mkv": "h264", ".mov": "h264",
+    ".webm": "vp9", ".ogv": "theora", ".avi": "mpeg4",
+}
+
+# Alpha is carried by exactly one encoder per container, so a transparent
+# slot's codec is decided by the container rather than by what it holds.
+_ALPHA_CODEC_ARGS = {
+    ".mov": (["-c:v", "prores_ks", "-profile:v", "4444",
+              "-pix_fmt", "yuva444p10le"], ["-c:a", "pcm_s16le"]),
+    ".webm": (["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+               "-deadline", "good", "-cpu-used", "4", "-row-mt", "1"],
+              ["-c:a", "libopus"]),
+}
+
+
+def encoder_codec(ext, alpha=False, slot_codec=""):
+    """Which codec a re-encode into *ext* should produce, or ``None`` when
+    *ext* isn't a container we can write.
+
+    *slot_codec* is the ffprobe codec name of the clip being replaced; it wins
+    whenever *ext* can carry it, so a VP8 slot stays VP8 and a ProRes slot
+    stays ProRes.  Unknown / unprobed / illegal-for-this-container falls back
+    to the container's default.  Alpha slots are decided by the container (see
+    :data:`_ALPHA_CODEC_ARGS`), so they report that codec instead.
+    """
+    default = _DEFAULT_CODEC.get(ext)
+    if default is None:
+        return None
+    if alpha and ext in _ALPHA_CODEC_ARGS:
+        return "prores" if ext == ".mov" else "vp9"
+    codec = (slot_codec or "").strip().lower()
+    if codec in _ENCODERS and codec in _CONTAINER_CODECS.get(ext, ()):
+        return codec
+    return default
+
+
+def _video_codec_args(ext, alpha, slot_codec=""):
     """Return ``(video_args, audio_args)`` ffmpeg flags for output *ext*.
 
-    The container extension selects the codec family; *alpha* keeps a
+    The codec is :func:`encoder_codec`'s answer — the slot's own codec where
+    the container can carry it, else the container's default; *alpha* keeps a
     transparency channel where the format supports it (ProRes 4444 for .mov,
     VP9-alpha for .webm).  Returns ``(None, None)`` for an unsupported ext.
     """
-    if ext in (".mp4", ".m4v", ".mkv"):
-        return (["-c:v", "libx264", "-pix_fmt", "yuv420p"], ["-c:a", "aac"])
-    if ext == ".mov":
-        if alpha:
-            return (["-c:v", "prores_ks", "-profile:v", "4444",
-                     "-pix_fmt", "yuva444p10le"], ["-c:a", "pcm_s16le"])
-        return (["-c:v", "libx264", "-pix_fmt", "yuv420p"], ["-c:a", "aac"])
-    if ext == ".webm":
-        # libvpx-vp9 at its defaults (cpu-used 1, single-threaded rows)
-        # encodes long clips at a small fraction of realtime — a full-song
-        # 1360x768 video can take the better part of an hour.  good/4 with
-        # row multithreading is several times faster at near-identical
-        # quality for this material.
-        speed = ["-deadline", "good", "-cpu-used", "4", "-row-mt", "1"]
-        if alpha:
-            return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p"] + speed,
-                    ["-c:a", "libopus"])
-        return (["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p"] + speed,
-                ["-c:a", "libopus"])
-    if ext == ".ogv":
-        return (["-c:v", "libtheora", "-q:v", "7"], ["-c:a", "libvorbis"])
-    if ext == ".avi":
-        return (["-c:v", "mpeg4", "-qscale:v", "3"], ["-c:a", "libmp3lame"])
-    return (None, None)
+    codec = encoder_codec(ext, alpha, slot_codec)
+    if codec is None:
+        return (None, None)
+    if alpha and ext in _ALPHA_CODEC_ARGS:
+        vargs, aargs = _ALPHA_CODEC_ARGS[ext]
+    else:
+        vargs, aargs = _ENCODERS[codec]
+    return (list(vargs), list(aargs))
+
+
+def _is_vpx(vargs):
+    """Whether *vargs* drives one of the libvpx encoders (VP8 or VP9), both
+    of which need ``-crf`` + ``-b:v 0`` spelled out for constant quality."""
+    return "libvpx" in vargs or "libvpx-vp9" in vargs
 
 
 # ffprobe profile name -> the x264 ``-profile:v`` value that reproduces it.
@@ -582,6 +658,21 @@ def _h264_profile_args(info, scaled_to_slot):
     return args
 
 
+# How each container is named on the "What this slot needs" panel.  Every
+# extension used to render as "MP4 (<ext>)", so a Spooky .ogv and a JJP .webm
+# both read as MP4 — which is exactly the assumption that put an H.264 recipe
+# under a WebM slot.
+_CONTAINER_NAMES = {
+    ".mov": "QuickTime (.mov)",
+    ".mp4": "MP4 (.mp4)",
+    ".m4v": "MP4 (.m4v)",
+    ".mkv": "Matroska (.mkv)",
+    ".webm": "WebM (.webm)",
+    ".ogv": "Ogg (.ogv)",
+    ".avi": "AVI (.avi)",
+}
+
+
 def dropin_spec(info, ext):
     """What a replacement must look like to go onto the card untouched, as an
     ordered ``[(label, value)]`` describing the clip already in the slot.
@@ -592,10 +683,12 @@ def dropin_spec(info, ext):
     """
     if info is None:
         return None
-    out = [("Container", "QuickTime (.mov)" if ext == ".mov"
-            else "MP4 (%s)" % (ext or ".mp4"))]
+    out = [("Container", _CONTAINER_NAMES.get(ext, "MP4 (%s)" % (ext or ".mp4")))]
     out.append(("Video codec", (info.vcodec or "?").upper()))
-    if info.profile:
+    # Profile is only listed for H.264, where it is a decode ceiling worth
+    # matching.  ffprobe reports a bare "0" for VP8/VP9, which rendered as a
+    # "Profile: 0" row that meant nothing to anyone reading it.
+    if info.profile and (info.vcodec or "").lower() == "h264":
         lvl = ("  level %.1f" % (info.level / 10.0)
                if info.level and 9 < info.level < 100 else "")
         out.append(("Profile", "%s%s" % (info.profile, lvl)))
@@ -629,13 +722,19 @@ def dropin_ffmpeg_command(info, ext, src="input.mov", dst="output"):
     """
     if info is None or not info.width or not info.height:
         return None
-    args = ["ffmpeg", "-i", src, "-c:v", "libx264"]
-    prof = _X264_PROFILES.get((info.profile or "").strip().lower())
-    if prof:
-        args += ["-profile:v", prof]
-        if info.level and 9 < info.level < 100:
-            args += ["-level", "%.1f" % (info.level / 10.0)]
-    args += ["-pix_fmt", "yuv420p",
+    codec = (info.vcodec or "").lower()
+    # The slot's own codec, not the container's default: a libx264 line under
+    # a .webm slot isn't merely suboptimal, ffmpeg refuses to mux it at all.
+    enc = _ENCODER_NAMES.get(codec) or _ENCODER_NAMES.get(
+        _DEFAULT_CODEC.get(ext or ".mp4", "h264"))
+    args = ["ffmpeg", "-i", src, "-c:v", enc]
+    if codec == "h264":
+        prof = _X264_PROFILES.get((info.profile or "").strip().lower())
+        if prof:
+            args += ["-profile:v", prof]
+            if info.level and 9 < info.level < 100:
+                args += ["-level", "%.1f" % (info.level / 10.0)]
+    args += ["-pix_fmt", info.pix_fmt or "yuv420p",
              "-vf", "scale=%d:%d" % (info.width, info.height)]
     if info.fps:
         args += ["-r", "%.6g" % info.fps]
@@ -761,11 +860,18 @@ def transcode_video_to(src_path, dst_path, original_info,
         return False, "need ffmpeg to convert video"
     ext = os.path.splitext(dst_path)[1].lower()
     alpha = bool(original_info and original_info.has_alpha)
-    vargs, aargs = _video_codec_args(ext, alpha)
+    slot_codec = ((original_info.vcodec or "") if original_info else "").lower()
+    vargs, aargs = _video_codec_args(ext, alpha, slot_codec)
     if vargs is None:
         return False, f"unsupported target format {ext}"
 
     actions = []
+    # Worth one word in the log when the slot's own codec is what we encoded
+    # to rather than the container's default — that IS the difference between
+    # a clip that plays and one that plays black, and nothing else says it.
+    chosen = encoder_codec(ext, alpha, slot_codec)
+    if chosen and chosen != _DEFAULT_CODEC.get(ext):
+        actions.append("%s (the slot's own codec)" % chosen.upper())
     vf = []
     scaled_to_slot = bool(original_info and original_info.width > 0
                           and original_info.height > 0)
@@ -809,11 +915,11 @@ def transcode_video_to(src_path, dst_path, original_info,
     cmd += vargs
     if "libx264" in vargs:
         cmd += _h264_profile_args(original_info, scaled_to_slot)
-    if "libvpx-vp9" in vargs:
-        # Pin constant-quality mode: with no explicit rate control the
-        # libvpx-vp9 default varies by ffmpeg build (older ones target
-        # 256kbps — visibly blocky at slot resolutions).  This path has no
-        # byte budget; shrink_video_to_size sets its own -b:v.
+    if _is_vpx(vargs):
+        # Pin constant-quality mode: with no explicit rate control the libvpx
+        # default varies by ffmpeg build (older ones target 256kbps — visibly
+        # blocky at slot resolutions).  This path has no byte budget;
+        # shrink_video_to_size sets its own -b:v.
         cmd += ["-crf", "32", "-b:v", "0"]
     # Match the slot's audio shape (see the docstring).  Only when we actually
     # probed the slot: an unprobed original is not evidence that it is silent.
@@ -911,7 +1017,8 @@ def shrink_video_to_size(src_path, dst_path, max_bytes, original_info=None,
     ext = os.path.splitext(dst_path)[1].lower()
     info = original_info or detect_video_info(src_path)
     alpha = bool(info and info.has_alpha)
-    vargs, aargs = _video_codec_args(ext, alpha)
+    vargs, aargs = _video_codec_args(
+        ext, alpha, ((info.vcodec or "") if info else "").lower())
     if vargs is None:
         return False, f"unsupported target format {ext}"
     dur = (info.duration if info and info.duration > 0

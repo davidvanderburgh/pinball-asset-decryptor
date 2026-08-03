@@ -169,6 +169,34 @@ def test_ffmpeg_recipe_pins_only_what_must_match():
         assert flag not in cmd
 
 
+def test_spec_names_the_real_container_and_skips_a_meaningless_profile():
+    """A WebM slot read as "MP4 (.webm)" and carried a "Profile: 0" row —
+    ffprobe's VP8 profile number, which means nothing to a reader.  Both come
+    off the clip now (PAD-27)."""
+    from pinball_decryptor.core.video import dropin_spec
+    info = _slot(".webm", codec="vp8").info
+    info.profile = "0"
+    rows = dict(dropin_spec(info, ".webm"))
+    assert rows["Container"] == "WebM (.webm)"
+    assert rows["Video codec"] == "VP8"
+    assert "Profile" not in rows
+    assert dict(dropin_spec(_slot(".ogv", codec="theora").info,
+                            ".ogv"))["Container"] == "Ogg (.ogv)"
+
+
+def test_recipe_encodes_to_the_slots_codec_not_h264():
+    """The recipe under a WebM slot was ``-c:v libx264 … output.webm``, which
+    ffmpeg refuses to mux at all — so the one user who wanted to encode his
+    own clips was handed a command that cannot run."""
+    from pinball_decryptor.core.video import dropin_ffmpeg_command
+    cmd = dropin_ffmpeg_command(_slot(".webm", codec="vp8").info, ".webm")
+    assert "-c:v libvpx" in cmd and "libx264" not in cmd
+    assert "-profile:v" not in cmd          # H.264-only, and VP8 has none
+    assert "scale=1360:768" in cmd and cmd.endswith("output.webm")
+    vp9 = dropin_ffmpeg_command(_slot(".webm", codec="vp9").info, ".webm")
+    assert "-c:v libvpx-vp9" in vp9
+
+
 def test_recipe_needs_a_probed_slot():
     from pinball_decryptor.core.video import (dropin_ffmpeg_command,
                                               dropin_spec)

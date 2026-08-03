@@ -197,6 +197,96 @@ def test_webm_codec_args_use_fast_vp9():
         assert aargs == ["-c:a", "libopus"]
 
 
+# ---------------------------------------------------------------------------
+# The re-encode copies the SLOT's codec, not the container's default.
+#
+# A container says less than it looks like it does: .webm is VP8 or VP9, .mov
+# is H.264 or ProRes.  Picking by extension turned a VP8 slot into VP9, which
+# an embedded player that only has VP8 demuxes far enough to play the sound
+# over a black picture — the same failure the H.264 profile ceiling already
+# guards against (PAD-27: two replacement clips black on the machine).
+# ---------------------------------------------------------------------------
+
+def test_a_vp8_slot_is_re_encoded_as_vp8():
+    from pinball_decryptor.core.video import _video_codec_args
+    vargs, aargs = _video_codec_args(".webm", False, "vp8")
+    assert "libvpx" in vargs and "libvpx-vp9" not in vargs
+    # -row-mt is a VP9-only private option; libvpx would error out on it.
+    assert "-row-mt" not in vargs
+    assert "-cpu-used" in vargs                  # still not the slow default
+    assert aargs == ["-c:a", "libvorbis"]
+
+
+def test_a_vp9_slot_is_still_re_encoded_as_vp9():
+    from pinball_decryptor.core.video import _video_codec_args
+    vargs, _ = _video_codec_args(".webm", False, "vp9")
+    assert "libvpx-vp9" in vargs and "-row-mt" in vargs
+
+
+def test_a_prores_mov_slot_stays_prores():
+    from pinball_decryptor.core.video import _video_codec_args
+    vargs, aargs = _video_codec_args(".mov", False, "prores")
+    assert "prores_ks" in vargs and "libx264" not in vargs
+    assert aargs == ["-c:a", "pcm_s16le"]
+
+
+def test_an_unprobed_slot_keeps_the_container_default():
+    """No ffprobe means no evidence, and a guess is not evidence — fall back
+    to what this app has always done rather than inventing a codec."""
+    from pinball_decryptor.core.video import _video_codec_args
+    assert "libvpx-vp9" in _video_codec_args(".webm", False, "")[0]
+    assert "libx264" in _video_codec_args(".mov", False, "")[0]
+    assert "libx264" in _video_codec_args(".mp4", False, None)[0]
+
+
+def test_a_codec_the_container_cannot_hold_is_not_copied():
+    """H.264 in a WebM is not a thing ffmpeg will mux, so a slot that somehow
+    probes that way must not drag the encoder there."""
+    from pinball_decryptor.core.video import _video_codec_args
+    assert "libvpx-vp9" in _video_codec_args(".webm", False, "h264")[0]
+    assert "libx264" in _video_codec_args(".mp4", False, "vp9")[0]
+
+
+def test_alpha_is_decided_by_the_container_not_the_slot_codec():
+    """Only one encoder per container carries transparency, so an alpha slot
+    keeps exactly the behaviour it had."""
+    from pinball_decryptor.core.video import _video_codec_args
+    vargs, _ = _video_codec_args(".mov", True, "vp8")
+    assert "prores_ks" in vargs and "yuva444p10le" in vargs
+    vargs, _ = _video_codec_args(".webm", True, "vp8")
+    assert "libvpx-vp9" in vargs and "yuva420p" in vargs
+
+
+def test_unsupported_container_still_reports_nothing_to_encode_with():
+    from pinball_decryptor.core.video import _video_codec_args
+    assert _video_codec_args(".xyz", False, "h264") == (None, None)
+
+
+def test_the_log_names_the_codec_only_when_it_saved_the_clip(monkeypatch,
+                                                             tmp_path):
+    """The one word that distinguishes a clip that plays from one that plays
+    black belongs in the build log; the container's default doesn't need
+    announcing."""
+    from pinball_decryptor.core import video
+    from pinball_decryptor.core.video import VideoInfo
+
+    monkeypatch.setattr(video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(video, "probe_duration", lambda p: 5.0)
+    monkeypatch.setattr(video, "_run_ffmpeg_watched",
+                        lambda cmd, limit, cancel_cb=None: (0, b"", None))
+    dst = tmp_path / "out.webm"
+    dst.write_bytes(b"x")
+
+    def _detail(codec):
+        info = VideoInfo(path="s.webm", vcodec=codec, width=320, height=240,
+                         fps=30.0, duration=5.0)
+        return video.transcode_video_to(str(tmp_path / "in.mp4"), str(dst),
+                                        info)[1]
+
+    assert "VP8" in _detail("vp8")
+    assert "VP9" not in _detail("vp9")        # that's the webm default
+
+
 def test_transcode_abort_reports_friendly_errors(monkeypatch, tmp_path):
     # A killed encode must not surface a raw ffmpeg command dump; each abort
     # reason maps to a human-readable detail ("cancelled" stays terse so the
@@ -283,6 +373,42 @@ def test_stage_reencodes_to_webm_slot(tmp_path):
     assert staged == 1 and failures == []
     after = detect_video_info(slot)
     assert after is not None and after.vcodec == "vp9"
+    assert after.width == 160 and after.height == 120
+
+
+def test_stage_reencodes_a_vp8_slot_back_to_vp8(tmp_path):
+    """PAD-27, end to end: the .webm slot holds VP8, so the replacement must
+    come out VP8.  It used to come out VP9 because the extension was all that
+    was consulted, and a player with only a VP8 decoder shows that as a black
+    picture with the sound still playing."""
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    ffmpeg = find_ffmpeg()
+    if not (ffmpeg and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    slot = str(tmp_path / "clips" / "attract.webm")
+    os.makedirs(os.path.dirname(slot), exist_ok=True)
+    made = subprocess.run(
+        [ffmpeg, "-y", "-f", "lavfi",
+         "-i", "testsrc=size=160x120:rate=10:duration=1",
+         "-c:v", "libvpx", "-b:v", "300k", "-an", slot],
+        capture_output=True)
+    if made.returncode != 0 or not os.path.isfile(slot):
+        pytest.skip("this ffmpeg build has no libvpx (VP8) encoder")
+    assert detect_video_info(slot).vcodec == "vp8"     # the premise
+
+    rep = str(tmp_path / "rep.mp4")
+    if not _make_testsrc(rep, seconds=1.0, width=320, height=240, ext="mp4"):
+        pytest.skip("ffmpeg could not render the replacement clip")
+
+    slots = {s.rel_path: s for s in scan_video_slots(
+        str(tmp_path), roots=[str(tmp_path / "clips")], exts=(".webm",))}
+    rel = "clips/attract.webm"
+    staged, failures = stage_replacements({rel: slots[rel]}, {rel: rep})
+    assert staged == 1 and failures == []
+    after = detect_video_info(slot)
+    assert after is not None and after.vcodec == "vp8"
     assert after.width == 160 and after.height == 120
 
 

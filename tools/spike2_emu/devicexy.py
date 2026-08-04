@@ -1,10 +1,29 @@
 #!/usr/bin/env python3
-"""ledxy.py [out.txt] - every LED's NAME, IMAGE and XY POSITION, from the game.
+"""devicexy.py [out.txt] - every SWITCH, COIL and LED: name, image, XY, address.
 
-THE GAME KNOWS WHERE ITS LEDS ARE. It has to: it authors spatial light shows
-(`blele --sweep N --lts <id> --direction ...`), and its own LED test draws each
-fixture on the playfield artwork. So the positions are data, not something to be
+THE GAME KNOWS WHERE ITS DEVICES ARE. It has to: it authors spatial light shows
+(`blele --sweep N --lts <id> --direction ...`), and its own test modes draw each
+device on the playfield artwork. So the positions are data, not something to be
 placed by hand or inferred from the order a sweep lights things in.
+
+**THIS IS NOT AN LED TABLE**, which is what it was first mistaken for and
+committed as. The `+0x08` field is a device CLASS and there are three of them:
+
+    1 = SWITCH   59 records, and they are the switch list name for name -
+                 DIP 2..8, Service Select/Plus/Minus/Back, the coin switches,
+                 Slam Tilt, Left Spinner, Maser Target, Pop Bumper, Mecha Exit
+                 Top/Bottom, the EOS switches, the outlanes and return lanes,
+                 the flipper buttons, Shooter Lane, the slingshots, Trough 6..1,
+                 Trough Jam, L Ramp Made Opto ... Shield Target Left/Right,
+                 Godzilla Magnet Fired Virtual. Same names, same ORDER as the
+                 switch ids the shim already knows, so id -> XY joins directly.
+    2 = COIL     10 records: Trough, Right/Left Slingshot, Auto Plunger, Left
+                 Flipper, Up Left Flip, Pop Bumper, Right Scoop, Godzilla
+                 Magnet, Coin Enable.
+    3 = LED      506 records, playfield and topper.
+
+A name can legitimately appear in more than one class - LEFT OUTLANE is both a
+switch and the insert lamp beside it - which is a good sign, not a collision.
 
 The record is **0x30 bytes**, not the 0x18 lednames.py walks - 0x18 is only the
 five-language name slot inside it, which is why scanning at that stride turns up
@@ -12,8 +31,10 @@ five-language name slot inside it, which is why scanning at that stride turns up
 
     +0x00  char*  image name: "playfield", "Test/scaled_godzilla_topper",
                   "System/TestMode/spike_2_speaker_panel_cropped"
-    +0x04  i16,i16  (group, index)
-    +0x08  i16,i16
+    +0x04  i16,i16  (group, index) - THE I/O ADDRESS. group 6 always carries
+                  connector 8a/8b/8c and group 7 carries 9a/9b/9c, i.e. group N
+                  is node N+2 and the letter picks the connector on that board.
+    +0x08  i16,i16  **CLASS** in the first half: 1 switch, 2 coil, 3 LED
     +0x0c  u32    constant 0x0aa00a71 across the playfield rows
     +0x10  i16,i16  **X, Y** in the image's own pixels
     +0x14  i16,i16  **W, H** of the marker (20x20 on the playfield)
@@ -80,7 +101,9 @@ def _one(d, cstr, va):
     if not (0 <= x <= 4000 and 0 <= y <= 4000 and 0 < w <= 200 and 0 < h <= 200):
         return None
     grp, idx = struct.unpack_from("<hh", d, o + 0x04)
+    cls = struct.unpack_from("<h", d, o + 0x08)[0]
     return dict(va=va, image=img, x=x, y=y, w=w, h=h, group=grp, index=idx,
+                cls=cls, kind={1: "switch", 2: "coil", 3: "led"}.get(cls, "?"),
                 conn=cstr(struct.unpack_from("<I", d, o + 0x18)[0]) or "",
                 part=cstr(struct.unpack_from("<I", d, o + 0x1C)[0]) or "",
                 name=name)
@@ -147,15 +170,22 @@ def main():
     print("# %d of %d -R/-G/-B stems have channels at different positions"
           % (split, len(stems)))
 
-    lines = ["# Godzilla Pro device positions, from the game binary.",
-             "# %d records, %d of them on the playfield image." % (len(keep), len(pf)),
-             "# playfield image: %s (%dx%d)" % (PLAYFIELD_PNG, PF_W, PF_H),
-             "# %-34s %5s %5s %4s %4s  %-6s %s" %
-             ("name", "x", "y", "w", "h", "conn", "image")]
+    counts = {}
     for r in keep:
-        lines.append("%-36s %5d %5d %4d %4d  %-6s %s"
-                     % (r["name"], r["x"], r["y"], r["w"], r["h"],
-                        r["conn"], r["image"]))
+        counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+    print("# by class: %s" % ", ".join("%s=%d" % kv for kv in sorted(counts.items())))
+
+    lines = ["# Godzilla Pro device positions, from the game binary.",
+             "# %d records (%s), %d on the playfield image."
+             % (len(keep), " ".join("%s=%d" % kv for kv in sorted(counts.items())),
+                len(pf)),
+             "# playfield image: %s (%dx%d)" % (PLAYFIELD_PNG, PF_W, PF_H),
+             "# %-7s %-34s %5s %5s %4s %4s %4s %5s  %-6s %s" %
+             ("class", "name", "x", "y", "w", "h", "grp", "index", "conn", "image")]
+    for r in keep:
+        lines.append("%-9s %-34s %5d %5d %4d %4d %4d %5d  %-6s %s"
+                     % (r["kind"], r["name"], r["x"], r["y"], r["w"], r["h"],
+                        r["group"], r["index"], r["conn"], r["image"]))
     text = "\n".join(lines) + "\n"
 
     if len(sys.argv) > 1:

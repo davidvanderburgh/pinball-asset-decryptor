@@ -14,7 +14,7 @@ import sys
 
 from PIL import Image, ImageDraw
 
-import ledxy
+import devicexy as ledxy
 
 PF = ("/home/david/spike2root/games/godzilla_pro/assets/nuk/images/Test/"
       "scaled_godzilla_pro_playfield.png")
@@ -31,15 +31,18 @@ def main():
     img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
     dr = ImageDraw.Draw(img)
 
-    # Colour each marker by its channel suffix, so an RGB triple that really is
-    # one physical LED shows up as three dots on top of each other.
-    colour = {"R": (255, 60, 60), "G": (60, 255, 60), "B": (80, 140, 255)}
+    # Colour by DEVICE CLASS, which is also how the classification gets checked:
+    # switches should land on lanes, targets, optos and the trough; coils on the
+    # slingshots, pop, scoop and plunger; LEDs on the inserts.
+    colour = {"switch": (0, 140, 255), "coil": (255, 40, 40), "led": (255, 200, 0)}
     for r in recs:
         cx, cy = r["x"] * scale, r["y"] * scale
         rad = max(3, (r["w"] * scale) // 4)
-        suffix = r["name"][-1] if r["name"][-2:-1] == "-" else ""
-        c = colour.get(suffix, (255, 220, 0))
-        dr.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], outline=c, width=2)
+        c = colour.get(r["kind"], (160, 160, 160))
+        if r["kind"] == "coil":                  # squares, so they read apart
+            dr.rectangle([cx - rad, cy - rad, cx + rad, cy + rad], outline=c, width=3)
+        else:
+            dr.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], outline=c, width=2)
 
     img.save(out)
     print("%d playfield markers -> %s (%dx%d)" % (len(recs), out, img.width, img.height))

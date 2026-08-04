@@ -4368,6 +4368,98 @@ static void nb_maybe_dump(void)
     nb_dump_census();
 }
 
+/* ---- LIVE LED STATE (padled.h) -----------------------------------------
+ *
+ * The C twin of leddecode.py, and it must stay a twin: same three shapes, same
+ * node restriction, same validity test. If one changes, change both.
+ *
+ *   body = [N idx][0x0f][N val]          len = 2N+1   (cmd 97 is the N=1 case)
+ *   body = [N idx][B][N val][C]          len = 2N+2
+ *   body = [N idx][B][0x0f][N val][C]    len = 2N+3
+ *
+ * ONLY NODES 1, 8 AND 9. The same command byte means something completely
+ * different on the strip boards - cmd a6 on node 14 is a masked RGB-triple
+ * frame, not this - and running it through here would produce confident
+ * nonsense at plausible-looking indices. That restriction is the whole reason
+ * this is safe to run against every frame.
+ *
+ * An index is only accepted if the board has enumerated it at boot (the 6-byte
+ * 0x84/0x85 walk), which is what makes "is this really an index?" checkable
+ * rather than assumed. */
+struct padled_shm {
+    unsigned magic, version, gen, decoded, skipped;
+    unsigned char val[16][96];
+};
+#define PADLED_MAGIC 0x44454c50u
+
+static struct padled_shm *led_shm;
+static unsigned char led_known[16][96];      /* seen in the boot enumeration */
+
+static int led_insert_node(unsigned node) { return node == 1 || node == 8 || node == 9; }
+
+static void led_map(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *m;
+    if (led_shm || tried) return;
+    tried = 1;
+    path = getenv("PAD_LED_SHM");
+    if (!path || !*path) return;
+    fd = open(path, 2 /*O_RDWR*/, 0);
+    if (fd < 0) return;
+    m = mmap(0, 4096, 3, 1, fd, 0);
+    close(fd);
+    if (!m || m == (void *)-1) return;
+    led_shm = (struct padled_shm *)m;
+    led_shm->magic = PADLED_MAGIC;
+    led_shm->version = 1;
+}
+
+static void led_publish(const unsigned char *p, int n)
+{
+    unsigned node, cmd, blen, i;
+    const unsigned char *body;
+    static const struct { int extra, gap; } shape[3] = { {1,1}, {2,1}, {3,2} };
+    int s;
+
+    if (n < 5 || !(p[0] & 0x80)) return;
+    node = p[0] & 0x3f;
+    cmd  = p[2];
+    if (!led_insert_node(node)) return;
+
+    /* The boot enumeration: remember which indices this board really has. */
+    if (n == 6 && (cmd == 0x84 || cmd == 0x85)) {
+        if (p[3] < 96) led_known[node][p[3]] = 1;
+        return;
+    }
+    if (cmd != 0x97 && cmd != 0xa2 && cmd != 0xa3 && cmd != 0xa4 &&
+        cmd != 0xa5 && cmd != 0xa6 && cmd != 0xb4 && cmd != 0xb5) return;
+
+    led_map();
+    if (!led_shm) return;
+
+    body = p + 3;
+    blen = (unsigned)n - 5;                  /* drop checksum + reply-length */
+    for (s = 0; s < 3; s++) {
+        unsigned extra = (unsigned)shape[s].extra, gap = (unsigned)shape[s].gap;
+        unsigned cnt;
+        if (blen < extra + 2 || ((blen - extra) & 1)) continue;
+        cnt = (blen - extra) / 2;
+        if (!cnt) continue;
+        for (i = 0; i < cnt; i++)
+            if (body[i] >= 96 || !led_known[node][body[i]]) break;
+        if (i != cnt) continue;              /* not all valid indices */
+        for (i = 0; i < cnt; i++)
+            led_shm->val[node][body[i]] = body[cnt + gap + i];
+        led_shm->decoded += cnt;
+        led_shm->gen++;
+        return;
+    }
+    led_shm->skipped++;
+}
+
 static void nb_log(const char *dir, const unsigned char *p, int n, unsigned long want)
 {
     char line[HEXBUF + 128], h[HEXBUF];
@@ -4911,6 +5003,7 @@ long shim_write(int fd, const void *b, unsigned long n)
             }
         }
         nb_log("TX", nb_req, nb_req_len, 0);
+        led_publish(nb_req, nb_req_len);
         nb_trace();
         nb_maybe_poke();
         nb_watch_flags();

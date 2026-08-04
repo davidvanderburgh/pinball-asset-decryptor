@@ -35,6 +35,11 @@ RING_GUEST=/dump/padgl
 # native renderer owns the window and so is the only thing that can see a key,
 # the shim inside the emulated game is the only thing that can press a switch.
 SW_HOST=/home/david/spike2root/dump/padsw
+# Live LED state (padled.h): the shim decodes the insert boards' per-LED writes
+# and publishes them here, so the virtual playfield needs no log and no
+# PAD_NB_LOG - raising that quadruples the boot.
+LED_HOST=/home/david/spike2root/dump/padled
+LED_GUEST=/dump/padled
 SW_GUEST=/dump/padsw
 # Audio: the guest writes PCM into a FIFO, a native ffmpeg drains it into WSLg's
 # PulseAudio. Same host-path/guest-path split as the GL ring and the keyboard.
@@ -112,6 +117,10 @@ if [ "${FREE_G:-999}" -lt 10 ]; then
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
+# The guest opens the LED block O_RDWR and will NOT create it, so make it here.
+# One page, zeroed: the shim stamps the magic once it maps it.
+rm -f "$LED_HOST"
+dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
 
 # Audio player first, so the FIFO exists before the game's first frame. It is
 # started with its own session and killed in teardown like everything else.
@@ -171,11 +180,21 @@ grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
 
 echo "[watch] starting the game (boot to the first picture takes ~15 s)"
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
-           PAD_SW_SHM="$SW_GUEST" PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
+           PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
+           PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            ./run_gz.sh > "$LOG" 2>&1 &
 GAMEPG=$!
+
+# The virtual playfield runs on WINDOWS, not here: this WSL has no Python GUI
+# toolkit at all (no tkinter, no gi, no Qt) and installing one needs a sudo the
+# rig does not have. Start it yourself alongside this:
+#
+#     python tools\spike2_emu\playfield.py
+#
+# It reads dump/padled over \\wsl.localhost for LED state and shells out to
+# swpoke.py for clicks, so it needs nothing from this script.
 
 # Wait for the guest to actually EXIST before treating its absence as "it
 # exited". run_gz.sh has to set up a pty, a user/mount/PID namespace and a

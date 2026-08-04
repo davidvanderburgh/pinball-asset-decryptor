@@ -1831,6 +1831,28 @@ static void audio_maybe_dump(void);
 static void voice_trace(void);
 extern int usleep(unsigned);
 
+/* The keyboard/switch shared block, and the one-shot tap that rides on it.
+ *
+ * MUST MATCH struct padsw_shm IN padsw.h FIELD FOR FIELD. This file is built
+ * -nostdlib with its own minimal declarations and does not include that header,
+ * so the two are kept in step by hand: a field added there has to be added here
+ * as well. Both are declared HERE rather than down with the rest of the switch
+ * code because the SPI ioctl, which is where a tap is served, is earlier in this
+ * file than that section. */
+struct padsw_shm {
+    unsigned magic; unsigned gen; unsigned char held[256];
+    unsigned tap_gen; unsigned tap_id; unsigned tap_reads;
+};
+#define PADSW_MAGIC 0x53444150u
+
+static const volatile struct padsw_shm *sw_shm;
+
+/* A tap in flight. `pad_tap_id` is consulted by sw_scan_bytes() exactly as if
+ * the switch were held; `tap_left` counts down the transfers it still has to
+ * appear in. padsw.h says why the unit is transfers and not milliseconds. */
+static int pad_tap_id = -1;
+static unsigned tap_left;
+
 /* Microseconds to hold each faked SPI transfer; see the long comment at the
  * ioctl site. 640 us is the real machine's 8 bytes at 100 kHz. PAD_SPI_US=0
  * restores the free-run. */
@@ -2048,6 +2070,26 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 }
             }
         }
+        /* ---- ONE-SHOT TAP, applied HERE and nowhere else ------------------
+         *
+         * This is the point at which the cabinet word is actually handed to the
+         * game, so it is the only place a press can be counted in transfers.
+         * Doing it where the word is REBUILT would not work: the game reads the
+         * same `bits` many times between rebuilds, so the switch would stay made
+         * for however long that happened to be - which is exactly the lottery
+         * this replaces. */
+        {
+            static unsigned tap_seen;
+            if (sw_shm && sw_shm->magic == PADSW_MAGIC &&
+                sw_shm->tap_gen != tap_seen) {
+                tap_seen  = sw_shm->tap_gen;
+                pad_tap_id = (int)sw_shm->tap_id;
+                tap_left   = sw_shm->tap_reads ? sw_shm->tap_reads : 1u;
+                have = sw_scan_bytes(0, bits);      /* word WITH the tap made */
+                seen_gen = sw_gen;                  /* do not fight the rebuild */
+                seen_kbd = sw_shm_gen();
+            }
+        }
         if (have) {
             sw_prime(0, bits);
             for (k = 0; k < msgs; k++) {
@@ -2072,6 +2114,17 @@ int shim_ioctl(int fd, unsigned long req, ...)
                              bits[7]);
                     logmsg(m2);
                 }
+            }
+            /* The tap has now appeared in one more transfer. When its count is
+             * spent, drop it and rebuild so the very next transfer is clean. */
+            if (pad_tap_id >= 0 && tap_left && --tap_left == 0) {
+                char m4[80];
+                snprintf(m4, sizeof m4, "[tap] id=%d served %u transfer(s)\n",
+                         pad_tap_id, sw_shm ? (sw_shm->tap_reads ?
+                                               sw_shm->tap_reads : 1u) : 1u);
+                logmsg(m4);
+                pad_tap_id = -1;
+                have = sw_scan_bytes(0, bits);
             }
         }
         /* ---- PACE THE SPI LOOP. This is the single biggest CPU cost in the
@@ -3427,10 +3480,9 @@ static void sw_prime(unsigned nid, const unsigned char bits[8])
  * scan is one frame of a switch being wrong - indistinguishable from the
  * contact bounce the game already debounces.
  */
-struct padsw_shm { unsigned magic; unsigned gen; unsigned char held[256]; };
-#define PADSW_MAGIC 0x53444150u
-
-static const volatile struct padsw_shm *sw_shm;
+/* Declared up with the other switch forward declarations, because the SPI
+ * ioctl - which is where a tap is actually served - comes earlier in this file
+ * than this section does. */
 
 /* RETRIED, not tried once. watch.sh deletes the file and padglhost only creates
  * it inside win_open() - which runs when the WINDOW opens, i.e. on the game's
@@ -3568,7 +3620,7 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
         if (node != nid || bit >= 64) continue;
         level = sw_inactive_level(cfg);
         if ((id < sizeof sw_active && sw_active[id]) || sw_shm_held(id) ||
-            sw_rest_pending(id))
+            (int)id == pad_tap_id || sw_rest_pending(id))
             level = !level;
 
         /* ---- THE SELF-CORRECTING RESYNC IS GONE, AND MUST NOT COME BACK ---

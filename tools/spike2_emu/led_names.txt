@@ -1,0 +1,494 @@
+# Godzilla Pro LED table, from the game binary at 0x766000.
+# 491 channels, 241 fixtures.
+# channel  fixture                              rgb
+      0  Heat Ray 9                           G
+      1  Heat Ray 8                           B
+      2  Heat Ray 8                           R
+      3  Heat Ray 8                           G
+      4  Heat Ray 7                           B
+      5  Heat Ray 7                           R
+      6  Heat Ray 7                           G
+      7  Heat Ray 6                           B
+      8  Heat Ray 6                           R
+      9  Heat Ray 6                           G
+     10  Heat Ray 5                           B
+     11  Heat Ray 5                           R
+     12  Heat Ray 5                           G
+     13  Heat Ray 4                           B
+     14  Heat Ray 4                           R
+     15  Heat Ray 4                           G
+     16  Heat Ray 3                           B
+     17  Heat Ray 3                           R
+     18  Heat Ray 3                           G
+     19  Heat Ray 2                           B
+     20  Heat Ray 2                           R
+     21  Heat Ray 2                           G
+     22  Heat Ray 1                           B
+     23  Heat Ray 1                           R
+     24  Heat Ray 1                           G
+     25  Topper Panel Left B                  B
+     26  Topper Panel Left B                  R
+     27  Topper Panel Left B                  G
+     28  Topper Panel Left A                  B
+     29  Topper Panel Left A                  R
+     30  Topper Panel Left A                  G
+     31  Tank 3B                              B
+     32  Tank 3B                              R
+     33  Tank 3B                              G
+     34  Tank 3A                              B
+     35  Tank 3A                              R
+     36  Tank 3A                              G
+     37  Tank 2B                              B
+     38  Tank 2B                              R
+     39  Tank 2B                              G
+     40  Tank 2A                              B
+     41  Tank 2A                              R
+     42  Tank 2A                              G
+     43  Tank 1B                              B
+     44  Tank 1B                              R
+     45  Tank 1B                              G
+     46  Tank 1A                              B
+     47  Tank 1A                              R
+     48  Tank 1A                              G
+     49  Building Fire Left 1                 G
+     50  Building Fire Left 1                 R
+     51  Building Fire Right 1                G
+     52  Building Fire Right 1                R
+     53  Building Fire Right 2                G
+     54  Building Fire Right 2                R
+     55  Building Fire Right 3                G
+     56  Building Fire Right 3                R
+     57  Powerline Left                       
+     58  Building                             B
+     59  Building                             G
+     60  Building                             R
+     61  Building Fire Left 3                 G
+     62  Building Fire Left 3                 R
+     63  Building Fire Left 2                 G
+     64  Building Fire Left 2                 R
+     65  Lite Destruction Jackpot             
+     66  Powerline Center                     
+     67  Top Spinner                          B
+     68  Top Spinner                          G
+     69  Top Spinner                          R
+     70  Tank 4                               
+     71  Tesla Strike                         
+     72  Top Spinner Flash                    
+     73  Mothra Flash                         
+     74  Backpanel Left Flash                 
+     75  Left BB-Bridge Out                   
+     76  Left BB-Lite Battle                  
+     77  Left BB-Bash Building                
+     78  Left Ramp                            B
+     79  Left Ramp                            G
+     80  Left Ramp                            R
+     81  Skill Shot                           
+     82  Magna Grab                           
+     83  Tank 3                               
+     84  Attack Bridge                        
+     85  Adv Train                            
+     86  Tank 2                               
+     87  Tanks                                
+     88  London                               
+     89  Globe Flash                          
+     90  Tail Whip                            
+     91  Destruction Jackpot                  
+     92  Big Loop                             B
+     93  Big Loop                             G
+     94  Big Loop                             R
+     95  NY                                   
+     96  Monster Zero Wiz                     
+     97  King of the Monsters Wiz             
+     98  Mecha Wiz                            
+     99  Planet X                             
+    100  Heat Ray                             
+    101  Heat Ray L3                          
+    102  Heat Ray L2                          
+    103  Heat Ray L1                          
+    104  Powerline Right                      
+    105  Tank 5                               
+    106  Right Ramp                           B
+    107  Right Ramp                           G
+    108  Right Ramp                           R
+    109  Tokyo                                
+    110  Paris                                
+    111  Backpanel Right Flash                
+    112  Right BB-Bridge Out                  
+    113  Right BB-Lite Battle                 
+    114  Right BB-Bash Building               
+    115  Power                                
+    116  Bridge                               
+    117  Kaiju                                
+    118  Upper Playfield GI-Wht(X12)          
+    119  Upper Playfield GI-Red(X9)           
+    120  Maser Ready                          
+    121  Maser                                
+    122  Building Spot                        
+    123  Maser Flash                          
+    124  Left Spinner                         B
+    125  Left Spinner                         G
+    126  Left Spinner                         R
+    127  Tank 1                               
+    128  Adv Rampage                          
+    129  Shoot Again (X2)                     
+    130  Adv Fighter Left                     
+    131  Fighter Left 3                       
+    132  Fighter Left 2                       
+    133  Fighter Left 1                       
+    134  Maser Fire Flash                     
+    135  Anguirus                             
+    136  Pop Bumper                           B
+    137  Pop Bumper                           G
+    138  Pop Bumper                           R
+    139  Rodan                                
+    140  Shield Center                        B
+    141  Shield Center                        G
+    142  Shield Center                        R
+    143  Shield Right                         B
+    144  Shield Right                         G
+    145  Shield Right                         R
+    146  Shield Left                          B
+    147  Shield Left                          G
+    148  Shield Left                          R
+    149  Top Saucer                           B
+    150  Top Saucer                           G
+    151  Top Saucer                           R
+    152  Mothra                               
+    153  Mecha Lane                           B
+    154  Mecha Lane                           G
+    155  Mecha Lane                           R
+    156  Attack Mecha                         
+    157  Tank 6                               
+    158  Select City                          
+    159  Bottom Saucer                        B
+    160  Bottom Saucer                        G
+    161  Bottom Saucer                        R
+    162  Scoop BB-Summon Ally                 
+    163  Scoop BB-Godzilla Pwr Up             
+    164  Scoop BB-Battle                      
+    165  Adv Fighter Right                    
+    166  Fighter Right 3                      
+    167  Fighter Right 2                      
+    168  Fighter Right 1                      
+    169  Saucer                               
+    170  Left Outlane                         
+    171  Left Return Lane                     
+    172  Right Outlane                        
+    173  Right Return Lane                    
+    174  Lower Playfield GI-Wht(X8)           
+    175  Lower Playfield GI-Red(X4)           
+    176  Action Button                        B
+    177  Action Button                        R
+    178  Action Button                        G
+    179  Tournament Start                     
+    180  Start Button                         
+    181  Coin Door GI                         
+    182  Coin Enable                          
+    183  Godzilla Magnet                      
+    184  Right Scoop                          
+    185  Pop Bumper                           
+    186  Up Left Flip                         
+    187  Left Flipper                         
+    188  Auto Plunger                         
+    189  Left Slingshot                       
+    190  Right Slingshot                      
+    191  Trough                               
+    192  Right Flipper                        
+    193  Ticket Dispenser                     
+    194  Ticket Meter                         
+    195  Coin Meter                           
+    196  Shaker Motor                         
+    197  ETopper Front LED 34                 B
+    198  ETopper Front LED 34                 G
+    199  ETopper Front LED 34                 R
+    200  ETopper Front LED 33                 B
+    201  ETopper Front LED 33                 G
+    202  ETopper Front LED 33                 R
+    203  ETopper Front LED 32                 B
+    204  ETopper Front LED 32                 G
+    205  ETopper Front LED 32                 R
+    206  ETopper Front LED 31                 B
+    207  ETopper Front LED 31                 G
+    208  ETopper Front LED 31                 R
+    209  ETopper Front LED 30                 B
+    210  ETopper Front LED 30                 G
+    211  ETopper Front LED 30                 R
+    212  ETopper Front LED 29                 B
+    213  ETopper Front LED 29                 G
+    214  ETopper Front LED 29                 R
+    215  ETopper Front LED 28                 B
+    216  ETopper Front LED 28                 G
+    217  ETopper Front LED 28                 R
+    218  ETopper Front LED 27                 B
+    219  ETopper Front LED 27                 G
+    220  ETopper Front LED 27                 R
+    221  ETopper Front LED 26                 B
+    222  ETopper Front LED 26                 G
+    223  ETopper Front LED 26                 R
+    224  ETopper Front LED 25                 B
+    225  ETopper Front LED 25                 G
+    226  ETopper Front LED 25                 R
+    227  ETopper Front LED 24                 B
+    228  ETopper Front LED 24                 G
+    229  ETopper Front LED 24                 R
+    230  ETopper Front LED 23                 B
+    231  ETopper Front LED 23                 G
+    232  ETopper Front LED 23                 R
+    233  ETopper Front LED 22                 B
+    234  ETopper Front LED 22                 G
+    235  ETopper Front LED 22                 R
+    236  ETopper Front LED 21                 B
+    237  ETopper Front LED 21                 G
+    238  ETopper Front LED 21                 R
+    239  ETopper Front LED 20                 B
+    240  ETopper Front LED 20                 G
+    241  ETopper Front LED 20                 R
+    242  ETopper Front LED 19                 B
+    243  ETopper Front LED 19                 G
+    244  ETopper Front LED 19                 R
+    245  ETopper Front LED 18                 B
+    246  ETopper Front LED 18                 G
+    247  ETopper Front LED 18                 R
+    248  ETopper Front LED 17                 B
+    249  ETopper Front LED 17                 G
+    250  ETopper Front LED 17                 R
+    251  ETopper Front LED 16                 B
+    252  ETopper Front LED 16                 G
+    253  ETopper Front LED 16                 R
+    254  ETopper Front LED 15                 B
+    255  ETopper Front LED 15                 G
+    256  ETopper Front LED 15                 R
+    257  ETopper Front LED 14                 B
+    258  ETopper Front LED 14                 G
+    259  ETopper Front LED 14                 R
+    260  ETopper Front LED 13                 B
+    261  ETopper Front LED 13                 G
+    262  ETopper Front LED 13                 R
+    263  ETopper Front LED 12                 B
+    264  ETopper Front LED 12                 G
+    265  ETopper Front LED 12                 R
+    266  ETopper Front LED 11                 B
+    267  ETopper Front LED 11                 G
+    268  ETopper Front LED 11                 R
+    269  ETopper Front LED 10                 B
+    270  ETopper Front LED 10                 G
+    271  ETopper Front LED 10                 R
+    272  ETopper Front LED 9                  B
+    273  ETopper Front LED 9                  G
+    274  ETopper Front LED 9                  R
+    275  ETopper Front LED 8                  B
+    276  ETopper Front LED 8                  G
+    277  ETopper Front LED 8                  R
+    278  ETopper Front LED 7                  B
+    279  ETopper Front LED 7                  G
+    280  ETopper Front LED 7                  R
+    281  ETopper Front LED 6                  B
+    282  ETopper Front LED 6                  G
+    283  ETopper Front LED 6                  R
+    284  ETopper Front LED 5                  B
+    285  ETopper Front LED 5                  G
+    286  ETopper Front LED 5                  R
+    287  ETopper Front LED 4                  B
+    288  ETopper Front LED 4                  G
+    289  ETopper Front LED 4                  R
+    290  ETopper Front LED 3                  B
+    291  ETopper Front LED 3                  G
+    292  ETopper Front LED 3                  R
+    293  ETopper Front LED 2                  B
+    294  ETopper Front LED 2                  G
+    295  ETopper Front LED 2                  R
+    296  ETopper Front LED 1                  B
+    297  ETopper Front LED 1                  G
+    298  ETopper Front LED 1                  R
+    299  ETopper Center LED 34                B
+    300  ETopper Center LED 34                G
+    301  ETopper Center LED 34                R
+    302  ETopper Center LED 33                B
+    303  ETopper Center LED 33                G
+    304  ETopper Center LED 33                R
+    305  ETopper Center LED 32                B
+    306  ETopper Center LED 32                G
+    307  ETopper Center LED 32                R
+    308  ETopper Center LED 31                B
+    309  ETopper Center LED 31                G
+    310  ETopper Center LED 31                R
+    311  ETopper Center LED 30                B
+    312  ETopper Center LED 30                G
+    313  ETopper Center LED 30                R
+    314  ETopper Center LED 29                B
+    315  ETopper Center LED 29                G
+    316  ETopper Center LED 29                R
+    317  ETopper Center LED 28                B
+    318  ETopper Center LED 28                G
+    319  ETopper Center LED 28                R
+    320  ETopper Center LED 27                B
+    321  ETopper Center LED 27                G
+    322  ETopper Center LED 27                R
+    323  ETopper Center LED 26                B
+    324  ETopper Center LED 26                G
+    325  ETopper Center LED 26                R
+    326  ETopper Center LED 25                B
+    327  ETopper Center LED 25                G
+    328  ETopper Center LED 25                R
+    329  ETopper Center LED 24                B
+    330  ETopper Center LED 24                G
+    331  ETopper Center LED 24                R
+    332  ETopper Center LED 23                B
+    333  ETopper Center LED 23                G
+    334  ETopper Center LED 23                R
+    335  ETopper Center LED 22                B
+    336  ETopper Center LED 22                G
+    337  ETopper Center LED 22                R
+    338  ETopper Center LED 21                B
+    339  ETopper Center LED 21                G
+    340  ETopper Center LED 21                R
+    341  ETopper Center LED 20                B
+    342  ETopper Center LED 20                G
+    343  ETopper Center LED 20                R
+    344  ETopper Center LED 19                B
+    345  ETopper Center LED 19                G
+    346  ETopper Center LED 19                R
+    347  ETopper Center LED 18                B
+    348  ETopper Center LED 18                G
+    349  ETopper Center LED 18                R
+    350  ETopper Center LED 17                B
+    351  ETopper Center LED 17                G
+    352  ETopper Center LED 17                R
+    353  ETopper Center LED 16                B
+    354  ETopper Center LED 16                G
+    355  ETopper Center LED 16                R
+    356  ETopper Center LED 15                B
+    357  ETopper Center LED 15                G
+    358  ETopper Center LED 15                R
+    359  ETopper Center LED 14                B
+    360  ETopper Center LED 14                G
+    361  ETopper Center LED 14                R
+    362  ETopper Center LED 13                B
+    363  ETopper Center LED 13                G
+    364  ETopper Center LED 13                R
+    365  ETopper Center LED 12                B
+    366  ETopper Center LED 12                G
+    367  ETopper Center LED 12                R
+    368  ETopper Center LED 11                B
+    369  ETopper Center LED 11                G
+    370  ETopper Center LED 11                R
+    371  ETopper Center LED 10                B
+    372  ETopper Center LED 10                G
+    373  ETopper Center LED 10                R
+    374  ETopper Center LED 9                 B
+    375  ETopper Center LED 9                 G
+    376  ETopper Center LED 9                 R
+    377  ETopper Center LED 8                 B
+    378  ETopper Center LED 8                 G
+    379  ETopper Center LED 8                 R
+    380  ETopper Center LED 7                 B
+    381  ETopper Center LED 7                 G
+    382  ETopper Center LED 7                 R
+    383  ETopper Center LED 6                 B
+    384  ETopper Center LED 6                 G
+    385  ETopper Center LED 6                 R
+    386  ETopper Center LED 5                 B
+    387  ETopper Center LED 5                 G
+    388  ETopper Center LED 5                 R
+    389  ETopper Center LED 4                 B
+    390  ETopper Center LED 4                 G
+    391  ETopper Center LED 4                 R
+    392  ETopper Center LED 3                 B
+    393  ETopper Center LED 3                 G
+    394  ETopper Center LED 3                 R
+    395  ETopper Center LED 2                 B
+    396  ETopper Center LED 2                 G
+    397  ETopper Center LED 2                 R
+    398  ETopper Center LED 1                 B
+    399  ETopper Center LED 1                 G
+    400  ETopper Center LED 1                 R
+    401  ETopper R Dome LED 12                B
+    402  ETopper R Dome LED 12                G
+    403  ETopper R Dome LED 12                R
+    404  ETopper R Dome LED 11                B
+    405  ETopper R Dome LED 11                G
+    406  ETopper R Dome LED 11                R
+    407  ETopper R Dome LED 10                B
+    408  ETopper R Dome LED 10                G
+    409  ETopper R Dome LED 10                R
+    410  ETopper R Dome LED 9                 B
+    411  ETopper R Dome LED 9                 G
+    412  ETopper R Dome LED 9                 R
+    413  ETopper R Dome LED 8                 B
+    414  ETopper R Dome LED 8                 G
+    415  ETopper R Dome LED 8                 R
+    416  ETopper R Dome LED 7                 B
+    417  ETopper R Dome LED 7                 G
+    418  ETopper R Dome LED 7                 R
+    419  ETopper R Dome LED 6                 B
+    420  ETopper R Dome LED 6                 G
+    421  ETopper R Dome LED 6                 R
+    422  ETopper R Dome LED 5                 B
+    423  ETopper R Dome LED 5                 G
+    424  ETopper R Dome LED 5                 R
+    425  ETopper R Dome LED 4                 B
+    426  ETopper R Dome LED 4                 G
+    427  ETopper R Dome LED 4                 R
+    428  ETopper R Dome LED 3                 B
+    429  ETopper R Dome LED 3                 G
+    430  ETopper R Dome LED 3                 R
+    431  ETopper R Dome LED 2                 B
+    432  ETopper R Dome LED 2                 G
+    433  ETopper R Dome LED 2                 R
+    434  ETopper R Dome LED 1                 B
+    435  ETopper R Dome LED 1                 G
+    436  ETopper R Dome LED 1                 R
+    437  ETopper L Dome LED 12                B
+    438  ETopper L Dome LED 12                G
+    439  ETopper L Dome LED 12                R
+    440  ETopper L Dome LED 11                B
+    441  ETopper L Dome LED 11                G
+    442  ETopper L Dome LED 11                R
+    443  ETopper L Dome LED 10                B
+    444  ETopper L Dome LED 10                G
+    445  ETopper L Dome LED 10                R
+    446  ETopper L Dome LED 9                 B
+    447  ETopper L Dome LED 9                 G
+    448  ETopper L Dome LED 9                 R
+    449  ETopper L Dome LED 8                 B
+    450  ETopper L Dome LED 8                 G
+    451  ETopper L Dome LED 8                 R
+    452  ETopper L Dome LED 7                 B
+    453  ETopper L Dome LED 7                 G
+    454  ETopper L Dome LED 7                 R
+    455  ETopper L Dome LED 6                 B
+    456  ETopper L Dome LED 6                 G
+    457  ETopper L Dome LED 6                 R
+    458  ETopper L Dome LED 5                 B
+    459  ETopper L Dome LED 5                 G
+    460  ETopper L Dome LED 5                 R
+    461  ETopper L Dome LED 4                 B
+    462  ETopper L Dome LED 4                 G
+    463  ETopper L Dome LED 4                 R
+    464  ETopper L Dome LED 3                 B
+    465  ETopper L Dome LED 3                 G
+    466  ETopper L Dome LED 3                 R
+    467  ETopper L Dome LED 2                 B
+    468  ETopper L Dome LED 2                 G
+    469  ETopper L Dome LED 2                 R
+    470  ETopper L Dome LED 1                 B
+    471  ETopper L Dome LED 1                 G
+    472  ETopper L Dome LED 1                 R
+    473  QR SCANNER STATUS NO READER          
+    474  QR SCANNER STATUS ERR6               
+    475  QR SCANNER STATUS ERR5               
+    476  QR SCANNER STATUS ERR4               
+    477  QR SCANNER STATUS ERR3               
+    478  QR SCANNER STATUS ERR2               
+    479  QR SCANNER STATUS ERR1               
+    480  QR SCANNER STATUS ERROR              
+    481  QR SCANNER STATUS CONFIG             
+    482  QR SCANNER STATUS FIFO OVERRUN       
+    483  QR SCANNER STATUS UNSUPPORTED_AP     
+    484  QR SCANNER STATUS OVERRUN            
+    485  QR SCANNER STATUS MISSED STRING      
+    486  QR SCANNER STATUS ENCODED DATA       
+    487  QR SCANNER STATUS STRING             
+    488  QR SCANNER STATUS READY              
+    489  QR SCANNER BACKLIGHT                 
+    490  BACKBOX GI                           

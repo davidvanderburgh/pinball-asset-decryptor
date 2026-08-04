@@ -145,6 +145,12 @@ class SternManufacturer(Manufacturer):
         write=True,
         modpack=True,
         direct_ssd=True,
+        # Spike 2 is the one generation whose game binary runs on a PC: an
+        # ordinary armhf Linux ELF under qemu-user with every peripheral
+        # replaced by an LD_PRELOAD shim.  The Emulate tab drives that rig.
+        # Spike 1 and 3 are deliberately left off - nothing is wired up for
+        # them, and a tab that starts nothing is worse than no tab.
+        emulate=True,
         # Audio is loose per-sound idxNNNN.wav in the extract output, so the
         # per-slot Replace Audio tab works: assignments are staged over those
         # WAVs and the Write pipeline re-encodes the changed ones into image.bin

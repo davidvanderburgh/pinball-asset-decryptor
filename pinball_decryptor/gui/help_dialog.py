@@ -671,6 +671,51 @@ HELP_CONTENT = {
          "machines need different defaults; tick it when one preset fits "
          "everything you build."),
     ],
+    "Emulate": [
+        ("What it does",
+         "Runs the real Stern Spike 2 game binary on this PC — in its own "
+         "window, at 60 fps on the graphics card, with sound and keyboard "
+         "input. Start it, and the game boots exactly as the machine does: "
+         "splash, then its own boot sequence, then attract mode or the "
+         "operator menu. Stop kills every part of it and then verifies "
+         "nothing survived."),
+        ("It does not emulate the image on the other tabs",
+         "This is the one tab that ignores the Input box. It runs a prepared "
+         "Spike 2 root filesystem that lives outside the app, so what you see "
+         "is that build of the game, not the card you happen to have loaded. "
+         "Replacing an asset on the Replace tabs does not change what the "
+         "emulator plays."),
+        ("Waiting at Tech Alerts is not a fault",
+         "The game boots to its Tech Alerts screen and waits there for an "
+         "operator, exactly like the real machine. Press a switch in the game "
+         "window — Enter is Service Select — and it carries on. The status "
+         "line says \"Waiting at Tech Alerts\" rather than pretending "
+         "something is wrong."),
+        ("Skip to attract mode",
+         "Ticked by default. It waits until the node bus has finished bringing "
+         "up — that is the point at which the game will actually accept an "
+         "operator — and then presses Service Back once, which takes it "
+         "straight to attract mode. It cannot be saved instead: the screen is "
+         "a live readout of the boot checks, not an acknowledgement the "
+         "machine remembers, and the emulator's NVRAM already persists between "
+         "runs. Untick it to drive the boot yourself."),
+        ("Sound",
+         "The game's audio is played out to your speakers through WSL. It "
+         "only makes sound while it is actually running, so silence after the "
+         "boot chime usually means it is still waiting at Tech Alerts. The "
+         "status line shows frames played and frames dropped — dropped should "
+         "stay at zero."),
+        ("Video does not play yet",
+         "The game's video decoder is an i.MX6 hardware block that this PC "
+         "does not have, and the card carries no software decoder to fall "
+         "back on, so clips stay black. Everything else — scenes, text, "
+         "lamps, switches, sound — works."),
+        ("What it costs",
+         "About 15% of one CPU core while waiting and roughly a third of a "
+         "core once it is running, plus 1–2 GB of memory. The status line "
+         "shows both live. There is a two-hour cap: it stops by itself so a "
+         "forgotten window cannot run all night."),
+    ],
     "Compare": [
         ("What it does",
          "Pick two card images of the same game — two releases, or a modded "

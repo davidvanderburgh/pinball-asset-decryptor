@@ -2034,6 +2034,7 @@ class MainWindow:
         self._tab_partition = ttk.Frame(self._notebook)
         self._tab_settings = ttk.Frame(self._notebook)
         self._tab_compare = ttk.Frame(self._notebook)
+        self._tab_emulate = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2051,6 +2052,7 @@ class MainWindow:
             (self._tab_modpack, "Mod Pack", "Mod Pack"),
             (self._tab_partition, "Partitions", "Partition Explorer"),
             (self._tab_compare, "Compare", "Compare"),
+            (self._tab_emulate, "Emulate", "Emulate"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2067,6 +2069,7 @@ class MainWindow:
         self._build_partition_tab()
         self._build_settings_tab()
         self._build_compare_tab()
+        self._build_emulate_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -11916,6 +11919,21 @@ class MainWindow:
         self.root.clipboard_append(_info_mod.as_text(self._info_sections))
         self._info_status.configure(text="Report copied to clipboard.")
 
+    def _build_emulate_tab(self):
+        """Build the 'Emulate' tab: start / stop the Stern Spike 2 emulator and
+        report what it is doing.
+
+        All the substance lives in :mod:`..gui.emulate_tab`, and the emulator
+        itself lives outside the repo entirely (a rig of shell scripts, an
+        LD_PRELOAD hardware shim and a native GL host, under ``c:\\tmp``).  This
+        method is only the seam.  Note the tab acts on the RIG, not on the image
+        in the Input box — see the module docstring for why that is called out
+        on the tab itself."""
+        from .emulate_tab import EmulatePanel
+        self._emulate_panel = EmulatePanel(self._tab_emulate,
+                                           log=self.append_log)
+        self._emulate_panel.build(self._tab_emulate)
+
     def _build_compare_tab(self):
         """Build the 'Compare' tab: pick two card images (two releases, or a
         modded card against its stock base) and get a what-changed report —
@@ -13185,6 +13203,7 @@ class MainWindow:
         self._configure_tab("Default Settings",
                             getattr(caps, "settings_editor", False))
         self._configure_tab("Compare", getattr(caps, "compare", False))
+        self._configure_tab("Emulate", getattr(caps, "emulate", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.

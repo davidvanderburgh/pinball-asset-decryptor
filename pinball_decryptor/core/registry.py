@@ -665,6 +665,24 @@ class Manufacturer(ABC):
         """
         return None
 
+    def video_pins_byte_size(self, assets_dir=None) -> bool:
+        """Whether this plugin's Write may hold a replacement clip to the
+        original's exact byte length.
+
+        When True, the staging re-encode is given that length as a byte
+        budget, so a clip bound for a fixed-size slot is encoded once instead
+        of being encoded to the slot's shape and then re-encoded again by the
+        build's fit — two generations of loss for one replacement.  Only
+        consulted when the user is also matching the slot's duration, since
+        the budget is only meaningful for a clip of the slot's own length
+        (see :func:`core.video_slots.stage_replacements`).
+
+        Answering True costs nothing when the size turns out not to be pinned:
+        the budget only sets the encoder's bitrate, and the build still fits
+        whatever it is handed.  Default False.
+        """
+        return False
+
     def video_length_note(self) -> str:
         """One-line guidance for the Replace-Video tab: does a replacement
         need to match the original clip's length?

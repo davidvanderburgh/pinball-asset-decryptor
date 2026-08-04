@@ -255,7 +255,7 @@ def _remuxable(slot: VideoSlot, replacement_path: str,
 
 def stage_replacement(slot: VideoSlot, replacement_path: str,
                       trim_to_length: bool = False, no_conversion: bool = False,
-                      cancel_cb=None):
+                      cancel_cb=None, byte_budget: Optional[int] = None):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -274,6 +274,11 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     (``.cdmd``) are routed to that backend's encoder instead.  When ffmpeg is
     unavailable a same-extension replacement is copied as-is (best effort, no
     conversion); any other case fails with a clear message.
+
+    *byte_budget*, when given, is the size the re-encode should land under
+    because the slot's byte length is pinned.  Only the re-encode branch can
+    honour it; a copy-through or a remux is lossless and is left alone, and
+    the build's own fit still backstops all three.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
     applied (may be empty, or note a copy-through); on failure it's an error
@@ -339,7 +344,8 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
             if not repacked:
                 ok, detail = transcode_video_to(
                     replacement_path, tmp, slot.info,
-                    match_length=trim_to_length, cancel_cb=cancel_cb)
+                    match_length=trim_to_length, cancel_cb=cancel_cb,
+                    max_bytes=byte_budget)
                 if not ok:
                     _remove(tmp)
                     return False, detail
@@ -369,7 +375,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        trim_to_length: bool = False,
                        no_conversion: bool = False,
                        log_cb=None, progress_cb=None, assets_dir=None,
-                       cancel_cb=None):
+                       cancel_cb=None, pin_byte_size: bool = False):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
@@ -384,6 +390,17 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     *cancel_cb* (returns truthy to abort) stops before the next item and is
     also polled inside each re-encode, so a user Cancel takes effect within
     seconds even mid-encode of a long clip.
+
+    *pin_byte_size* says this plugin's Write may hold a slot to its original
+    byte length, so the re-encode is given that length as a budget and the
+    build has nothing left to re-encode.  It is honoured only together with
+    *trim_to_length*, and that pairing is the whole safety argument: a
+    replacement held to the slot's duration AND its byte count is simply being
+    given the slot's own bitrate, which is what the game ships at that
+    resolution.  Budget a clip that may run to its own length and a 30-second
+    replacement for a 3-second slot would be crushed into the 3-second clip's
+    bytes.  The budget is a target, not a gate — a clip that misses it is
+    still staged and the build's fit re-encodes it as before.
     """
     from .checksums import read_baseline_any
     from . import staged_originals
@@ -408,9 +425,23 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
+        # The budget is the PRISTINE original's length.  slot.size is only
+        # that while the slot is untouched; re-staging over an earlier
+        # replacement would otherwise budget against that one and ratchet the
+        # quality down on every pass.  The snapshot above guarantees the
+        # ``.orig/`` copy exists by now whenever assets_dir is known.
+        budget = None
+        if pin_byte_size and trim_to_length:
+            orig = (staged_originals.snapshot_path(assets_dir, rel)
+                    if assets_dir else None)
+            if orig:
+                budget = os.path.getsize(orig)
+            elif slot.size > 0:
+                budget = slot.size
         ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
                                        no_conversion=no_conversion,
-                                       cancel_cb=cancel_cb)
+                                       cancel_cb=cancel_cb,
+                                       byte_budget=budget)
         if ok:
             staged += 1
             if log_cb:

@@ -2518,11 +2518,19 @@ class App:
         self.msg_queue.put(LogMsg(
             f"Applying {len(assignments)} video replacement(s) to the "
             f"assets folder...", "info"))
+        pin_size = False
+        if self._current_mfr is not None:
+            try:
+                pin_size = bool(
+                    self._current_mfr.video_pins_byte_size(assets_dir))
+            except Exception:
+                pin_size = False
         try:
             staged, failures = stage_replacements(
                 slots_by_rel, assignments, trim_to_length=trim,
                 no_conversion=no_conversion, log_cb=log_cb,
-                assets_dir=assets_dir, cancel_cb=cancel_cb)
+                assets_dir=assets_dir, cancel_cb=cancel_cb,
+                pin_byte_size=pin_size)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

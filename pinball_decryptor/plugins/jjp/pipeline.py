@@ -1373,7 +1373,14 @@ def fit_video_to_size(content, target, path, original=None, log=None,
 
 def _encrypt_one(scheme, entry, content, game_name, read_original,
                  log=None, cancel_cb=None):
-    """Encrypt one replacement asset.  Returns (bytes, note_for_log).
+    """Encrypt one replacement asset.
+
+    Returns ``(bytes, note_for_log, written_content)``.  *written_content* is
+    the content that actually went into the slot, which is **not** *content*
+    whenever a pinned slot forced a refit — the caller needs the real thing,
+    because the post-write spot-check compares the image against it and a
+    padded clip differs from the user's file in its first few bytes (padding
+    rewrites the container's own size field).
 
     Scheme 3 rebuilds the file around the original's pads and forges the
     CRC the loader checks; scheme 2 keeps the upstream CRC-forgery path
@@ -1383,6 +1390,7 @@ def _encrypt_one(scheme, entry, content, game_name, read_original,
     from .crypto import encrypt_file
 
     if scheme == SCHEME_V3:
+        written = content
         original = read_original(entry)
         if not original:
             raise ValueError("could not read the original asset off the "
@@ -1433,14 +1441,16 @@ def _encrypt_one(scheme, entry, content, game_name, read_original,
                 raise
             out = reencrypt_asset(original, fitted, entry.path, game_name,
                                   filler_size=f1)
+            written = fitted
             note_pad += (f", refitted from {len(content)} to "
                          f"{len(fitted)} bytes to match the slot")
         from .crypto import crc32_buf
         return out, (f"scheme 3, {len(out)} bytes, "
                      f"crc {crc32_buf(out):#010x} (matches original)"
-                     f"{note_pad}")
-    return encrypt_file(content, entry.filler_size, entry.path,
-                        entry.crc_encrypted, entry.crc_decrypted), None
+                     f"{note_pad}"), written
+    return (encrypt_file(content, entry.filler_size, entry.path,
+                         entry.crc_encrypted, entry.crc_decrypted),
+            None, content)
 
 
 def _fl_text(path):
@@ -6738,9 +6748,11 @@ class StandaloneModPipeline(ModPipeline):
                 fail += 1
                 continue
 
-            # Encrypt with CRC forgery
+            # Encrypt with CRC forgery.  `written` is what actually went into
+            # the slot: a pinned slot can force a refit, and the spot-check
+            # below has to compare the image against those bytes.
             try:
-                encrypted, _note = _encrypt_one(
+                encrypted, _note, written = _encrypt_one(
                     scheme, entry, content, game_name, _read_original,
                     log=self.log,
                     cancel_cb=lambda: bool(getattr(self, "cancelled", False)))
@@ -6873,13 +6885,17 @@ class StandaloneModPipeline(ModPipeline):
                 if hasattr(self, '_file_tree_cb'):
                     self._file_tree_cb(rel_path, "Encrypted OK")
                 ok += 1
-                # Save expected MD5 + size for the post-write spot-check
+                # Save expected MD5 + size for the post-write spot-check.
+                # Hash `written`, never the file the user picked: a refit
+                # rewrites the container's size field, so the clip on disk is
+                # not a prefix of theirs and the check would fail a write it
+                # had just confirmed byte-for-byte.
                 if not hasattr(self, '_expected_spot'):
                     self._expected_spot = {
                         'md5': _hl.md5(encrypted).hexdigest(),
                         'size': len(encrypted),
-                        'content_md5': _hl.md5(content).hexdigest(),
-                        'content_len': len(content),
+                        'content_md5': _hl.md5(written).hexdigest(),
+                        'content_len': len(written),
                     }
             except (CommandError, OSError) as e:
                 self.log(f"[FAIL] {rel_path} (write failed at step "
@@ -7052,17 +7068,22 @@ class StandaloneModPipeline(ModPipeline):
                         f"    On disk:  md5={raw_md5[:12]}... size={raw_size}",
                         "error")
 
-            # Decrypt and compare content against what the encrypt phase wrote.
-            # We use expected['content_md5'] (saved after audio resizing) rather
-            # than re-reading win_path, because the encrypt phase may have
-            # trimmed/padded audio to match original duration.
+            # Decrypt and compare content against what the encrypt phase
+            # wrote.  That is expected['content_md5'] and NOT the file on
+            # win_path: by the time bytes reach the slot they may have been
+            # resized twice over — audio trimmed/padded to the original's
+            # duration, a clip or a PNG refitted to a pinned slot's exact
+            # byte count.  Both leave the image legitimately different from
+            # the file the user picked.
             if entry and not verification_failed:
                 from .crypto_v3 import SCHEME_V3 as _S3
                 if expected and 'content_md5' in expected:
                     expected_content_md5 = expected['content_md5']
                     expected_content_len = expected.get('content_len')
                 else:
-                    # Fallback: read the file from disk (pre-audio-resize)
+                    # Fallback for a spot-check with nothing recorded: the
+                    # user's own file, before any of those resizes.  Only
+                    # sound when the asset went in untouched.
                     with open(win_path, 'rb') as fh:
                         _replacement = fh.read()
                     expected_content_md5 = _hl.md5(_replacement).hexdigest()
@@ -9646,7 +9667,7 @@ class DirectSSDModPipeline(StandaloneModPipeline):
 
                 # Encrypt with CRC forgery
                 try:
-                    encrypted, _note = _encrypt_one(
+                    encrypted, _note, _written = _encrypt_one(
                         scheme, entry, content, game_name, _read_original,
                         log=self.log,
                         cancel_cb=lambda: bool(

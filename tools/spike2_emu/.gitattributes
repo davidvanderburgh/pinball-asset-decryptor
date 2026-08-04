@@ -1,0 +1,11 @@
+# EVERYTHING in this directory is consumed by Linux tools inside WSL: bash runs
+# the scripts, arm-linux-gnueabihf-gcc compiles the C, python3 runs the rest.
+# The repo root already pins *.sh, but the C here is full of multi-line macros
+# with backslash continuations, which is precisely the shape a stray CR ruins —
+# the same failure the root .gitattributes records for Dockerfiles. Pin the lot
+# rather than reason about which file survives CRLF.
+* text eol=lf
+
+# Never touch the run artefacts, on the off-chance one is ever force-added.
+*.png binary
+*.raw binary

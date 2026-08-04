@@ -1,0 +1,31 @@
+  5a9df8:	e3023108 	movw	r3, #8456	@ 0x2108
+  5a9dfc:	e3403084 	movt	r3, #132	@ 0x84
+  5a9e00:	e5d33040 	ldrb	r3, [r3, #64]	@ 0x40
+  5a9e04:	e92d4010 	push	{r4, lr}
+  5a9e08:	e3530000 	cmp	r3, #0
+  5a9e0c:	e1a04000 	mov	r4, r0
+  5a9e10:	0a000009 	beq	5a9e3c <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc740>
+  5a9e14:	e59f0030 	ldr	r0, [pc, #48]	@ 5a9e4c <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc750>
+  5a9e18:	ebe9ae28 	bl	156c0 <pthread_mutex_lock@plt>
+  5a9e1c:	e3023108 	movw	r3, #8456	@ 0x2108
+  5a9e20:	e3403084 	movt	r3, #132	@ 0x84
+  5a9e24:	e8b30003 	ldm	r3!, {r0, r1}
+  5a9e28:	e5840000 	str	r0, [r4]
+  5a9e2c:	e2830020 	add	r0, r3, #32
+  5a9e30:	e5841004 	str	r1, [r4, #4]
+  5a9e34:	e8bd4010 	pop	{r4, lr}
+  5a9e38:	eae9b288 	b	16860 <pthread_mutex_unlock@plt>
+  5a9e3c:	ebffffb6 	bl	5a9d1c <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc620>
+  5a9e40:	e3500000 	cmp	r0, #0
+  5a9e44:	08bd8010 	popeq	{r4, pc}
+  5a9e48:	eafffff1 	b	5a9e14 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc718>
+  5a9e4c:	00842130 	addeq	r2, r4, r0, lsr r1
+  5a9e50:	e92d4038 	push	{r3, r4, r5, lr}
+  5a9e54:	e3025108 	movw	r5, #8456	@ 0x2108
+  5a9e58:	e3405084 	movt	r5, #132	@ 0x84
+  5a9e5c:	e1a04000 	mov	r4, r0
+  5a9e60:	e5d53040 	ldrb	r3, [r5, #64]	@ 0x40
+  5a9e64:	e3530000 	cmp	r3, #0
+  5a9e68:	0a000009 	beq	5a9e94 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc798>
+  5a9e6c:	e59f0034 	ldr	r0, [pc, #52]	@ 5a9ea8 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc7ac>
+  5a9e70:	ebe9ae12 	bl	156c0 <pthread_mutex_lock@plt>

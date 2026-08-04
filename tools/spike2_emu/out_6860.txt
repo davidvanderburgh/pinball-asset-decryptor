@@ -1,0 +1,27 @@
+  1e6838:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e683c:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6840:	e5933000 	ldr	r3, [r3]
+  1e6844:	e1500003 	cmp	r0, r3
+  1e6848:	3309358c 	movwcc	r3, #38284	@ 0x958c
+  1e684c:	3340307a 	movtcc	r3, #122	@ 0x7a
+  1e6850:	35933000 	ldrcc	r3, [r3]
+  1e6854:	30830280 	addcc	r0, r3, r0, lsl #5
+  1e6858:	35c01019 	strbcc	r1, [r0, #25]
+  1e685c:	e12fff1e 	bx	lr
+  1e6860:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e6864:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6868:	e5933000 	ldr	r3, [r3]
+  1e686c:	e1500003 	cmp	r0, r3
+  1e6870:	212fff1e 	bxcs	lr
+  1e6874:	e309358c 	movw	r3, #38284	@ 0x958c
+  1e6878:	e1a01080 	lsl	r1, r0, #1
+  1e687c:	e340307a 	movt	r3, #122	@ 0x7a
+  1e6880:	e5932000 	ldr	r2, [r3]
+  1e6884:	e593300c 	ldr	r3, [r3, #12]
+  1e6888:	e0820280 	add	r0, r2, r0, lsl #5
+  1e688c:	e5902008 	ldr	r2, [r0, #8]
+  1e6890:	e1d221be 	ldrh	r2, [r2, #30]
+  1e6894:	e18320b1 	strh	r2, [r3, r1]
+  1e6898:	e12fff1e 	bx	lr
+  1e689c:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e68a0:	e340307e 	movt	r3, #126	@ 0x7e

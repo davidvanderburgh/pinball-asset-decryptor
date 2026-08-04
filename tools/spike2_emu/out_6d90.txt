@@ -1,0 +1,21 @@
+  1e6d90:	e3500000 	cmp	r0, #0
+  1e6d94:	012fff1e 	bxeq	lr
+  1e6d98:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e6d9c:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6da0:	e5933000 	ldr	r3, [r3]
+  1e6da4:	e1500003 	cmp	r0, r3
+  1e6da8:	2a000009 	bcs	1e6dd4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x268c4>
+  1e6dac:	e309358c 	movw	r3, #38284	@ 0x958c
+  1e6db0:	e340307a 	movt	r3, #122	@ 0x7a
+  1e6db4:	e5933000 	ldr	r3, [r3]
+  1e6db8:	e0830280 	add	r0, r3, r0, lsl #5
+  1e6dbc:	e5903008 	ldr	r3, [r0, #8]
+  1e6dc0:	e5d00018 	ldrb	r0, [r0, #24]
+  1e6dc4:	e1d331bc 	ldrh	r3, [r3, #28]
+  1e6dc8:	e3130004 	tst	r3, #4
+  1e6dcc:	02200001 	eoreq	r0, r0, #1
+  1e6dd0:	e12fff1e 	bx	lr
+  1e6dd4:	e3a00000 	mov	r0, #0
+  1e6dd8:	e12fff1e 	bx	lr
+  1e6ddc:	e3500000 	cmp	r0, #0
+  1e6de0:	012fff1e 	bxeq	lr

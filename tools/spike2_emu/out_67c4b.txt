@@ -1,0 +1,15 @@
+  1e6800:	e7d10000 	ldrb	r0, [r1, r0]
+  1e6804:	e3500000 	cmp	r0, #0
+  1e6808:	112fff1e 	bxne	lr
+  1e680c:	e5931008 	ldr	r1, [r3, #8]
+  1e6810:	e7d10002 	ldrb	r0, [r1, r2]
+  1e6814:	e3500000 	cmp	r0, #0
+  1e6818:	01a02082 	lsleq	r2, r2, #1
+  1e681c:	0593300c 	ldreq	r3, [r3, #12]
+  1e6820:	019300b2 	ldrheq	r0, [r3, r2]
+  1e6824:	016f0f10 	clzeq	r0, r0
+  1e6828:	01a002a0 	lsreq	r0, r0, #5
+  1e682c:	e12fff1e 	bx	lr
+  1e6830:	e3a00000 	mov	r0, #0
+  1e6834:	e12fff1e 	bx	lr
+  1e6838:	e30433d8 	movw	r3, #17368	@ 0x43d8

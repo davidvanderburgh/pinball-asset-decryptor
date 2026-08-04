@@ -1,0 +1,55 @@
+  59ef60:	e080c080 	add	ip, r0, r0, lsl #1
+  59ef64:	e3013a08 	movw	r3, #6664	@ 0x1a08
+  59ef68:	e3403084 	movt	r3, #132	@ 0x84
+  59ef6c:	e1e00c80 	mvn	r0, r0, lsl #25
+  59ef70:	e083c10c 	add	ip, r3, ip, lsl #2
+  59ef74:	e1e00ca0 	mvn	r0, r0, lsr #25
+  59ef78:	e92d4070 	push	{r4, r5, r6, lr}
+  59ef7c:	e24dd018 	sub	sp, sp, #24
+  59ef80:	e5dc400f 	ldrb	r4, [ip, #15]
+  59ef84:	e1a05001 	mov	r5, r1
+  59ef88:	e1a06002 	mov	r6, r2
+  59ef8c:	e3a0e001 	mov	lr, #1
+  59ef90:	e3540000 	cmp	r4, #0
+  59ef94:	e3a01011 	mov	r1, #17
+  59ef98:	e3a0200a 	mov	r2, #10
+  59ef9c:	e5cd0004 	strb	r0, [sp, #4]
+  59efa0:	e5cde005 	strb	lr, [sp, #5]
+  59efa4:	e5cd1006 	strb	r1, [sp, #6]
+  59efa8:	e5cd2007 	strb	r2, [sp, #7]
+  59efac:	0a000007 	beq	59efd0 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x18d4>
+  59efb0:	e593441c 	ldr	r4, [r3, #1052]	@ 0x41c
+  59efb4:	e3a03002 	mov	r3, #2
+  59efb8:	e5cd2008 	strb	r2, [sp, #8]
+  59efbc:	e5cd3005 	strb	r3, [sp, #5]
+  59efc0:	e1e04004 	mvn	r4, r4
+  59efc4:	e21440ff 	ands	r4, r4, #255	@ 0xff
+  59efc8:	03a040a5 	moveq	r4, #165	@ 0xa5
+  59efcc:	e5cd4007 	strb	r4, [sp, #7]
+  59efd0:	e28d0004 	add	r0, sp, #4
+  59efd4:	e28d100c 	add	r1, sp, #12
+  59efd8:	ebfffef3 	bl	59ebac <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x14b0>
+  59efdc:	e3500000 	cmp	r0, #0
+  59efe0:	0a000011 	beq	59f02c <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x1930>
+  59efe4:	e2451001 	sub	r1, r5, #1
+  59efe8:	e28d200b 	add	r2, sp, #11
+  59efec:	e3a0c000 	mov	ip, #0
+  59eff0:	e26c3000 	rsb	r3, ip, #0
+  59eff4:	e5f2e001 	ldrb	lr, [r2, #1]!
+  59eff8:	e2033007 	and	r3, r3, #7
+  59effc:	e1a03334 	lsr	r3, r4, r3
+  59f000:	e1833c14 	orr	r3, r3, r4, lsl ip
+  59f004:	e28cc001 	add	ip, ip, #1
+  59f008:	e35c0008 	cmp	ip, #8
+  59f00c:	e023300e 	eor	r3, r3, lr
+  59f010:	e5e13001 	strb	r3, [r1, #1]!
+  59f014:	1afffff5 	bne	59eff0 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x18f4>
+  59f018:	e3560000 	cmp	r6, #0
+  59f01c:	15dd3014 	ldrbne	r3, [sp, #20]
+  59f020:	15dd2015 	ldrbne	r2, [sp, #21]
+  59f024:	11833402 	orrne	r3, r3, r2, lsl #8
+  59f028:	11c630b0 	strhne	r3, [r6]
+  59f02c:	e28dd018 	add	sp, sp, #24
+  59f030:	e8bd8070 	pop	{r4, r5, r6, pc}
+  59f034:	e3a02000 	mov	r2, #0
+  59f038:	eaffffc8 	b	59ef60 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x1864>

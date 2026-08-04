@@ -1,0 +1,30 @@
+  1e6abc:	e3500000 	cmp	r0, #0
+  1e6ac0:	e92d4008 	push	{r3, lr}
+  1e6ac4:	0a00000a 	beq	1e6af4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x265e4>
+  1e6ac8:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e6acc:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6ad0:	e5933000 	ldr	r3, [r3]
+  1e6ad4:	e1500003 	cmp	r0, r3
+  1e6ad8:	2a000005 	bcs	1e6af4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x265e4>
+  1e6adc:	e3053124 	movw	r3, #20772	@ 0x5124
+  1e6ae0:	e0800100 	add	r0, r0, r0, lsl #2
+  1e6ae4:	e3403070 	movt	r3, #112	@ 0x70
+  1e6ae8:	e5933000 	ldr	r3, [r3]
+  1e6aec:	e0830180 	add	r0, r3, r0, lsl #3
+  1e6af0:	e8bd8008 	pop	{r3, pc}
+  1e6af4:	e3a000d1 	mov	r0, #209	@ 0xd1
+  1e6af8:	eb09c4c0 	bl	457e00 <setcontext@@Base+0x119cec>
+  1e6afc:	e3a00000 	mov	r0, #0
+  1e6b00:	e8bd8008 	pop	{r3, pc}
+  1e6b04:	e3500000 	cmp	r0, #0
+  1e6b08:	012fff1e 	bxeq	lr
+  1e6b0c:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e6b10:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6b14:	e5933000 	ldr	r3, [r3]
+  1e6b18:	e1500003 	cmp	r0, r3
+  1e6b1c:	2a00000c 	bcs	1e6b54 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x26644>
+  1e6b20:	e309358c 	movw	r3, #38284	@ 0x958c
+  1e6b24:	e3510000 	cmp	r1, #0
+  1e6b28:	e340307a 	movt	r3, #122	@ 0x7a
+  1e6b2c:	e5933000 	ldr	r3, [r3]
+  1e6b30:	e0830280 	add	r0, r3, r0, lsl #5

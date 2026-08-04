@@ -1,0 +1,58 @@
+  1e75ec:	e1d431b6 	ldrh	r3, [r4, #22]
+  1e75f0:	e31b0901 	tst	fp, #16384	@ 0x4000
+  1e75f4:	e2433001 	sub	r3, r3, #1
+  1e75f8:	e6ff3073 	uxth	r3, r3
+  1e75fc:	12033001 	andne	r3, r3, #1
+  1e7600:	e1c431b6 	strh	r3, [r4, #22]
+  1e7604:	e3530000 	cmp	r3, #0
+  1e7608:	e5943004 	ldr	r3, [r4, #4]
+  1e760c:	15192bcc 	ldrne	r2, [r9, #-3020]	@ 0xfffff434
+  1e7610:	15094bcc 	strne	r4, [r9, #-3020]	@ 0xfffff434
+  1e7614:	15842004 	strne	r2, [r4, #4]
+  1e7618:	e3530000 	cmp	r3, #0
+  1e761c:	0a000020 	beq	1e76a4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27194>
+  1e7620:	e1a04003 	mov	r4, r3
+  1e7624:	e5d43014 	ldrb	r3, [r4, #20]
+  1e7628:	e1d421b2 	ldrh	r2, [r4, #18]
+  1e762c:	e1d411b6 	ldrh	r1, [r4, #22]
+  1e7630:	e0833103 	add	r3, r3, r3, lsl #2
+  1e7634:	e2025007 	and	r5, r2, #7
+  1e7638:	e1d471b0 	ldrh	r7, [r4, #16]
+  1e763c:	e3110001 	tst	r1, #1
+  1e7640:	e0883283 	add	r3, r8, r3, lsl #5
+  1e7644:	e08331a2 	add	r3, r3, r2, lsr #3
+  1e7648:	e5d33024 	ldrb	r3, [r3, #36]	@ 0x24
+  1e764c:	e1a05533 	lsr	r5, r3, r5
+  1e7650:	e2055001 	and	r5, r5, #1
+  1e7654:	02255001 	eoreq	r5, r5, #1
+  1e7658:	e3570000 	cmp	r7, #0
+  1e765c:	e5c45018 	strb	r5, [r4, #24]
+  1e7660:	1a000009 	bne	1e768c <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x2717c>
+  1e7664:	e594a008 	ldr	sl, [r4, #8]
+  1e7668:	e3550000 	cmp	r5, #0
+  1e766c:	e1dab1ba 	ldrh	fp, [sl, #26]
+  1e7670:	e1da11bc 	ldrh	r1, [sl, #28]
+  1e7674:	1affffc2 	bne	1e7584 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27074>
+  1e7678:	e3110004 	tst	r1, #4
+  1e767c:	e7e0255b 	ubfx	r2, fp, #10, #1
+  1e7680:	15981008 	ldrne	r1, [r8, #8]
+  1e7684:	17c15007 	strbne	r5, [r1, r7]
+  1e7688:	eaffffc2 	b	1e7598 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27088>
+  1e768c:	e1a00007 	mov	r0, r7
+  1e7690:	ebfffc72 	bl	1e6860 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x26350>
+  1e7694:	eafffff2 	b	1e7664 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27154>
+  1e7698:	e1a00007 	mov	r0, r7
+  1e769c:	eb0c1425 	bl	4ec738 <setcontext@@Base+0x1ae624>
+  1e76a0:	eaffffd1 	b	1e75ec <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270dc>
+  1e76a4:	e59f0014 	ldr	r0, [pc, #20]	@ 1e76c0 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x271b0>
+  1e76a8:	e28dd00c 	add	sp, sp, #12
+  1e76ac:	e8bd4ff0 	pop	{r4, r5, r6, r7, r8, r9, sl, fp, lr}
+  1e76b0:	eaf8bc6a 	b	16860 <pthread_mutex_unlock@plt>
+  1e76b4:	e1a00007 	mov	r0, r7
+  1e76b8:	eb0c1446 	bl	4ec7d8 <setcontext@@Base+0x1ae6c4>
+  1e76bc:	eaffffca 	b	1e75ec <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270dc>
+  1e76c0:	007aa99c 			@ <UNDEFINED> instruction: 0x007aa99c
+  1e76c4:	e92d4070 	push	{r4, r5, r6, lr}
+  1e76c8:	e30463d8 	movw	r6, #17368	@ 0x43d8
+  1e76cc:	e340607e 	movt	r6, #126	@ 0x7e
+  1e76d0:	e5963000 	ldr	r3, [r6]

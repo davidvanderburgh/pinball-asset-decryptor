@@ -1,0 +1,38 @@
+  1e6e6c:	e92d4038 	push	{r3, r4, r5, lr}
+  1e6e70:	e2504000 	subs	r4, r0, #0
+  1e6e74:	08bd8038 	popeq	{r3, r4, r5, pc}
+  1e6e78:	e30433d8 	movw	r3, #17368	@ 0x43d8
+  1e6e7c:	e340307e 	movt	r3, #126	@ 0x7e
+  1e6e80:	e5933000 	ldr	r3, [r3]
+  1e6e84:	e1540003 	cmp	r4, r3
+  1e6e88:	28bd8038 	popcs	{r3, r4, r5, pc}
+  1e6e8c:	e59f0020 	ldr	r0, [pc, #32]	@ 1e6eb4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x269a4>
+  1e6e90:	e1a05001 	mov	r5, r1
+  1e6e94:	ebf8ba09 	bl	156c0 <pthread_mutex_lock@plt>
+  1e6e98:	e309358c 	movw	r3, #38284	@ 0x958c
+  1e6e9c:	e340307a 	movt	r3, #122	@ 0x7a
+  1e6ea0:	e59f000c 	ldr	r0, [pc, #12]	@ 1e6eb4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x269a4>
+  1e6ea4:	e5933004 	ldr	r3, [r3, #4]
+  1e6ea8:	e7c35004 	strb	r5, [r3, r4]
+  1e6eac:	e8bd4038 	pop	{r3, r4, r5, lr}
+  1e6eb0:	eaf8be6a 	b	16860 <pthread_mutex_unlock@plt>
+  1e6eb4:	007aa99c 			@ <UNDEFINED> instruction: 0x007aa99c
+  1e6eb8:	e3500000 	cmp	r0, #0
+  1e6ebc:	012fff1e 	bxeq	lr
+  1e6ec0:	eafffe5c 	b	1e6838 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x26328>
+  1e6ec4:	e92d4038 	push	{r3, r4, r5, lr}
+  1e6ec8:	e2504000 	subs	r4, r0, #0
+  1e6ecc:	08bd8038 	popeq	{r3, r4, r5, pc}
+  1e6ed0:	e1d400b0 	ldrh	r0, [r4]
+  1e6ed4:	e1a05001 	mov	r5, r1
+  1e6ed8:	e3500000 	cmp	r0, #0
+  1e6edc:	08bd8038 	popeq	{r3, r4, r5, pc}
+  1e6ee0:	e1a01005 	mov	r1, r5
+  1e6ee4:	ebfffe53 	bl	1e6838 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x26328>
+  1e6ee8:	e1f400b2 	ldrh	r0, [r4, #2]!
+  1e6eec:	e3500000 	cmp	r0, #0
+  1e6ef0:	1afffffa 	bne	1e6ee0 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x269d0>
+  1e6ef4:	e8bd8038 	pop	{r3, r4, r5, pc}
+  1e6ef8:	e3500000 	cmp	r0, #0
+  1e6efc:	012fff1e 	bxeq	lr
+  1e6f00:	e30433d8 	movw	r3, #17368	@ 0x43d8

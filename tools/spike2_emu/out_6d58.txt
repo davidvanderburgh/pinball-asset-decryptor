@@ -1,0 +1,16 @@
+  1d6d58:	e92d4030 	push	{r4, r5, lr}
+  1d6d5c:	e24dd00c 	sub	sp, sp, #12
+  1d6d60:	e1a04000 	mov	r4, r0
+  1d6d64:	e1a05001 	mov	r5, r1
+  1d6d68:	e1a0000d 	mov	r0, sp
+  1d6d6c:	eb0f4c21 	bl	5a9df8 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0xc6fc>
+  1d6d70:	e6ef0074 	uxtb	r0, r4
+  1d6d74:	e1a0100d 	mov	r1, sp
+  1d6d78:	eb0042dd 	bl	1e78f4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x273e4>
+  1d6d7c:	e1a00004 	mov	r0, r4
+  1d6d80:	e1a0100d 	mov	r1, sp
+  1d6d84:	e1a02005 	mov	r2, r5
+  1d6d88:	ebfff9ca 	bl	1d54b8 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x14fa8>
+  1d6d8c:	e28dd00c 	add	sp, sp, #12
+  1d6d90:	e8bd8030 	pop	{r4, r5, pc}
+  1d6d94:	e92d43f0 	push	{r4, r5, r6, r7, r8, r9, lr}

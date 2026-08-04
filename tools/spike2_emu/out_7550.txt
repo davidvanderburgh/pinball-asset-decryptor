@@ -1,0 +1,49 @@
+  1e7530:	e1a00006 	mov	r0, r6
+  1e7534:	eb0c147f 	bl	4ec738 <setcontext@@Base+0x1ae624>
+  1e7538:	e1a00004 	mov	r0, r4
+  1e753c:	e8bd8070 	pop	{r4, r5, r6, pc}
+  1e7540:	e92d4ff0 	push	{r4, r5, r6, r7, r8, r9, sl, fp, lr}
+  1e7544:	e30b9584 	movw	r9, #46468	@ 0xb584
+  1e7548:	e24dd00c 	sub	sp, sp, #12
+  1e754c:	e59f016c 	ldr	r0, [pc, #364]	@ 1e76c0 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x271b0>
+  1e7550:	e340907a 	movt	r9, #122	@ 0x7a
+  1e7554:	ebf8b859 	bl	156c0 <pthread_mutex_lock@plt>
+  1e7558:	e5194bcc 	ldr	r4, [r9, #-3020]	@ 0xfffff434
+  1e755c:	e3540000 	cmp	r4, #0
+  1e7560:	0a00004f 	beq	1e76a4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27194>
+  1e7564:	e309858c 	movw	r8, #38284	@ 0x958c
+  1e7568:	e30b6a5a 	movw	r6, #47706	@ 0xba5a
+  1e756c:	e3a07000 	mov	r7, #0
+  1e7570:	e340807a 	movt	r8, #122	@ 0x7a
+  1e7574:	e5097bcc 	str	r7, [r9, #-3020]	@ 0xfffff434
+  1e7578:	e340607a 	movt	r6, #122	@ 0x7a
+  1e757c:	e58d7004 	str	r7, [sp, #4]
+  1e7580:	ea000027 	b	1e7624 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27114>
+  1e7584:	e3110002 	tst	r1, #2
+  1e7588:	e7e025db 	ubfx	r2, fp, #11, #1
+  1e758c:	15981008 	ldrne	r1, [r8, #8]
+  1e7590:	15dd3004 	ldrbne	r3, [sp, #4]
+  1e7594:	17c13007 	strbne	r3, [r1, r7]
+  1e7598:	e3520000 	cmp	r2, #0
+  1e759c:	0a000012 	beq	1e75ec <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270dc>
+  1e75a0:	e1d620b0 	ldrh	r2, [r6]
+  1e75a4:	e3520000 	cmp	r2, #0
+  1e75a8:	0a000001 	beq	1e75b4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270a4>
+  1e75ac:	e112000b 	tst	r2, fp
+  1e75b0:	0a00000d 	beq	1e75ec <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270dc>
+  1e75b4:	e59a1000 	ldr	r1, [sl]
+  1e75b8:	e3510000 	cmp	r1, #0
+  1e75bc:	0a000006 	beq	1e75dc <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x270cc>
+  1e75c0:	e1da21b8 	ldrh	r2, [sl, #24]
+  1e75c4:	e1da02b0 	ldrh	r0, [sl, #32]
+  1e75c8:	eb01b703 	bl	2551dc <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_ERKS6_S8_@@Base+0x2ed40>
+  1e75cc:	e3500000 	cmp	r0, #0
+  1e75d0:	11c07ab0 	strhne	r7, [r0, #160]	@ 0xa0
+  1e75d4:	159a2004 	ldrne	r2, [sl, #4]
+  1e75d8:	158020a8 	strne	r2, [r0, #168]	@ 0xa8
+  1e75dc:	e31b0a02 	tst	fp, #8192	@ 0x2000
+  1e75e0:	1a00002c 	bne	1e7698 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27188>
+  1e75e4:	e31b0a01 	tst	fp, #4096	@ 0x1000
+  1e75e8:	1a000031 	bne	1e76b4 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x271a4>
+  1e75ec:	e1d431b6 	ldrh	r3, [r4, #22]
+  1e75f0:	e31b0901 	tst	fp, #16384	@ 0x4000

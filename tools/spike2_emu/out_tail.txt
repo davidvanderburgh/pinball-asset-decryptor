@@ -1,0 +1,28 @@
+  1e7a54:	e2822001 	add	r2, r2, #1
+  1e7a58:	eaffffce 	b	1e7998 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27488>
+  1e7a5c:	e5d90000 	ldrb	r0, [r9]
+  1e7a60:	e11c0000 	tst	ip, r0
+  1e7a64:	05d50000 	ldrbeq	r0, [r5]
+  1e7a68:	01e03003 	mvneq	r3, r3
+  1e7a6c:	15d50000 	ldrbne	r0, [r5]
+  1e7a70:	11e03003 	mvnne	r3, r3
+  1e7a74:	06ef3073 	uxtbeq	r3, r3
+  1e7a78:	16ef3073 	uxtbne	r3, r3
+  1e7a7c:	118cc000 	orrne	ip, ip, r0
+  1e7a80:	00000003 	andeq	r0, r0, r3
+  1e7a84:	15c5c000 	strbne	ip, [r5]
+  1e7a88:	05c50000 	strbeq	r0, [r5]
+  1e7a8c:	eaffffe1 	b	1e7a18 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27508>
+  1e7a90:	007aa99c 			@ <UNDEFINED> instruction: 0x007aa99c
+  1e7a94:	e3500000 	cmp	r0, #0
+  1e7a98:	012fff1e 	bxeq	lr
+  1e7a9c:	eafffb7e 	b	1e689c <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x2638c>
+  1e7aa0:	e12fff1e 	bx	lr
+  1e7aa4:	e12fff1e 	bx	lr
+  1e7aa8:	e92d4ff0 	push	{r4, r5, r6, r7, r8, r9, sl, fp, lr}
+  1e7aac:	e3083054 	movw	r3, #32852	@ 0x8054
+  1e7ab0:	ed2d8b08 	vpush	{d8-d11}
+  1e7ab4:	e30b4584 	movw	r4, #46468	@ 0xb584
+  1e7ab8:	e340407a 	movt	r4, #122	@ 0x7a
+  1e7abc:	e1a02003 	mov	r2, r3
+  1e7ac0:	e2443d2f 	sub	r3, r4, #3008	@ 0xbc0

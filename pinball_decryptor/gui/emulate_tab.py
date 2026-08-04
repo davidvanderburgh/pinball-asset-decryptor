@@ -27,6 +27,7 @@ Three things about it are worth knowing before changing anything here:
 """
 
 import os
+import pathlib
 import subprocess
 import sys
 import threading
@@ -35,7 +36,12 @@ from tkinter import ttk
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-DEFAULT_RIG_DIR = r"c:\tmp\spike2_emu"
+#: The rig ships in the repo, next to this package, rather than in the temp
+#: directory it was developed in - so it survives a reboot and there is exactly
+#: one copy of it.  Resolved from this file so a checkout anywhere works.
+DEFAULT_RIG_DIR = str(
+    pathlib.Path(__file__).resolve().parents[2] / "tools" / "spike2_emu"
+)
 
 #: How the rig's ``state=`` word is shown to a human.  ``techalerts`` is not a
 #: fault: the game boots to its Tech Alerts screen and waits there for an
@@ -103,7 +109,7 @@ def state_text(info):
 
 
 def _wsl_path(win_path):
-    """``c:\\tmp\\spike2_emu`` -> ``/mnt/c/tmp/spike2_emu``."""
+    """``c:\\repo\\tools\\spike2_emu`` -> ``/mnt/c/repo/tools/spike2_emu``."""
     p = win_path.replace("\\", "/")
     if len(p) > 1 and p[1] == ":":
         p = "/mnt/" + p[0].lower() + p[2:]

@@ -1,0 +1,606 @@
+/* glbridge.c - guest side of the GL bridge. Becomes libGLESv2.so.2 INSTEAD of
+ * glraster.c when the rig is run in bridge mode.
+ *
+ * It implements no rendering at all. Every GL call is serialised into a shared
+ * memory ring (see padgl.h) and replayed by a native x86-64 helper on real
+ * GLES, because guest ARM code under qemu-user cannot reach a GPU itself.
+ *
+ * The design rests on measurements, not hope:
+ *   - the ONLY per-frame readbacks are glGetIntegerv(GL_BLEND_SRC/DST), which
+ *     are shadowed locally here, so nothing blocks per frame
+ *   - object names are allocated BY THE GUEST and mirrored on the host, so the
+ *     glGen and glCreate calls need no round trip either
+ *   - uniform locations are guest-assigned slot numbers; the host maps slot ->
+ *     real location using the name registered once at glGetUniformLocation
+ *
+ * Anything not implemented must fail LOUDLY. A GL bridge that silently drops
+ * calls produces a plausible-looking wrong picture, which is the same trap as
+ * the shim that faked successful reads.
+ */
+
+#include "padgl.h"
+
+extern void *memcpy(void *, const void *, unsigned long);
+extern void *memset(void *, int, unsigned long);
+extern unsigned long strlen(const char *);
+extern int strcmp(const char *, const char *);
+extern char *strstr(const char *, const char *);
+extern int snprintf(char *, unsigned long, const char *, ...);
+extern long write(int, const void *, unsigned long);
+extern int open(const char *, int, ...);
+extern int close(int);
+extern char *getenv(const char *);
+extern void *mmap(void *, unsigned long, int, int, int, long);
+extern int usleep(unsigned int);
+
+static void say(const char *s) { write(2, s, strlen(s)); }
+
+/* ---------------- ring ---------------- */
+static padgl_hdr *hdr;
+static unsigned char *ring;
+static unsigned int ring_bytes;
+static int bridge_dead;
+
+static int bridge_init(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *p;
+    unsigned long total;
+
+    if (hdr) return 1;
+    if (tried) return 0;
+    tried = 1;
+
+    path = getenv("PAD_GL_BRIDGE");
+    if (!path || !path[0]) return 0;
+
+    fd = open(path, 2 /*O_RDWR*/);
+    if (fd < 0) { say("[bridge] cannot open the shared ring; is padgl-host running?\n"); return 0; }
+
+    /* Map the header alone first so the real size can be read from it. */
+    p = mmap(0, PADGL_HDR_BYTES, 3 /*RW*/, 1 /*MAP_SHARED*/, fd, 0);
+    if (!p || p == (void *)-1) { say("[bridge] mmap of the header failed\n"); close(fd); return 0; }
+    {
+        padgl_hdr *h = (padgl_hdr *)p;
+        if (h->magic != PADGL_MAGIC || h->version != PADGL_VERSION) {
+            say("[bridge] ring magic/version mismatch\n"); close(fd); return 0;
+        }
+        ring_bytes = h->ring_bytes;
+    }
+    total = (unsigned long)PADGL_HDR_BYTES + ring_bytes;
+    p = mmap(0, total, 3, 1, fd, 0);
+    close(fd);
+    if (!p || p == (void *)-1) { say("[bridge] mmap of the ring failed\n"); return 0; }
+
+    hdr  = (padgl_hdr *)p;
+    ring = (unsigned char *)p + PADGL_HDR_BYTES;
+    hdr->guest_alive = 1;
+    {
+        char t[120];
+        snprintf(t, sizeof t, "[bridge] attached, ring %u MB, host target %ux%u\n",
+                 ring_bytes >> 20, hdr->fb_w, hdr->fb_h);
+        say(t);
+    }
+    return 1;
+}
+
+/* Reserve n bytes, waiting for the host to drain if the ring is full. */
+static unsigned char *reserve(unsigned int n, unsigned int *at)
+{
+    unsigned long long head, tail;
+    int spins = 0;
+    if (!hdr || bridge_dead) return 0;
+    n = (n + 7u) & ~7u;
+    if (n > ring_bytes / 2) { say("[bridge] command too large for the ring\n"); return 0; }
+    for (;;) {
+        head = hdr->head;
+        tail = hdr->tail;
+        if (head - tail + n <= ring_bytes) break;
+        if (++spins > 200000) { bridge_dead = 1; say("[bridge] host stalled; giving up\n"); return 0; }
+        usleep(50);
+    }
+    *at = (unsigned int)(hdr->head % ring_bytes);
+    return ring;
+}
+
+static void ring_put(unsigned int off, const void *src, unsigned int n)
+{
+    unsigned int first = ring_bytes - off;
+    if (n <= first) memcpy(ring + off, src, n);
+    else { memcpy(ring + off, src, first);
+           memcpy(ring, (const unsigned char *)src + first, n - first); }
+}
+
+/* One command: header + up to two payload chunks (fixed args, then bulk data). */
+static void emit(unsigned int op, const void *a, unsigned int alen,
+                 const void *b, unsigned int blen)
+{
+    padgl_cmd c;
+    unsigned int need, off;
+    if (!bridge_init()) return;
+    c.op = op;
+    c.len = alen + blen;
+    need = (unsigned int)sizeof c + ((c.len + 7u) & ~7u);
+    if (!reserve(need, &off)) return;
+    ring_put(off, &c, sizeof c);
+    off = (off + (unsigned int)sizeof c) % ring_bytes;
+    if (alen) { ring_put(off, a, alen); off = (off + alen) % ring_bytes; }
+    if (blen) { ring_put(off, b, blen); }
+    hdr->head += need;
+}
+
+static void emit_u(unsigned int op, const unsigned int *v, unsigned int count)
+{ emit(op, v, count * 4u, 0, 0); }
+
+/* ---------------- guest-side shadow state ---------------- */
+#define MAXPROG 128
+#define MAXUNI  32
+
+typedef struct { char name[40]; } Uni;
+static struct { Uni u[MAXUNI]; int n; } prog_uni[MAXPROG];
+
+static int id_tex = 1, id_buf = 1, id_fbo = 1, id_vao = 1, id_obj = 1;
+static int blend_src = 1, blend_dst = 0;          /* shadowed: read back per frame */
+static int fb_w = 1920, fb_h = 1080;
+static int frame_no;
+
+static int envint(const char *n, int dflt)
+{
+    char *p = getenv(n);
+    int v = 0, any = 0;
+    if (!p) return dflt;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); p++; any = 1; }
+    return any ? v : dflt;
+}
+
+int pad_fb_width(void)  { fb_w = envint("PAD_GL_W", 1920); return fb_w; }
+int pad_fb_height(void) { fb_h = envint("PAD_GL_H", 1080); return fb_h; }
+
+/* eglshim reports these; keep the symbols so it links against either backend. */
+long pad_readback_counts(long *e, long *i, long *u, long *a, long *s, long *p)
+{ *e = *i = *u = *a = *s = *p = 0; return frame_no; }
+long pad_getintegerv_hist(unsigned int *names, long *counts)
+{ int k; for (k = 0; k < 8; k++) { names[k] = 0; counts[k] = 0; } return 8; }
+
+void pad_present(void)
+{
+    unsigned int v[1];
+    if (!bridge_init()) return;
+    frame_no++;
+    v[0] = (unsigned int)frame_no;
+    emit_u(PADGL_SWAP, v, 1);
+    hdr->frame_seq++;
+    /* Frames in flight. Every one of these is 16.7 ms between the game reacting
+     * to a switch and the picture showing it, so this is an input-latency knob
+     * as much as a throughput one. 1 is the responsive setting and costs a
+     * little guest/host overlap; PAD_GL_INFLIGHT raises it if a slower host ever
+     * needs the slack back. */
+    {
+        static int inflight = -1;
+        int spins = 0;
+        if (inflight < 0) inflight = envint("PAD_GL_INFLIGHT", 1);
+        while (hdr->frame_seq - hdr->frame_ack > (unsigned long long)inflight) {
+            if (++spins > 200000) { bridge_dead = 1; break; }
+            usleep(50);
+        }
+    }
+}
+
+/* ---------------- GL entry points ---------------- */
+#define U(...) do { unsigned int _v[] = { __VA_ARGS__ }; \
+                    emit_u(op_, _v, sizeof _v / 4u); } while (0)
+
+int glViewport(int x, int y, int w, int h)
+{ const unsigned int op_ = PADGL_VIEWPORT; U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
+
+int glScissor(int x, int y, int w, int h)
+{ const unsigned int op_ = PADGL_SCISSOR; U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
+
+int glClearColor(float r, float g, float b, float a)
+{ float v[4]; v[0]=r; v[1]=g; v[2]=b; v[3]=a; emit(PADGL_CLEARCOLOR, v, 16, 0, 0); return 0; }
+
+int glClear(unsigned int mask)
+{ const unsigned int op_ = PADGL_CLEAR; U(mask); return 0; }
+
+int glEnable(unsigned int cap)  { const unsigned int op_ = PADGL_ENABLE;  U(cap); return 0; }
+int glDisable(unsigned int cap) { const unsigned int op_ = PADGL_DISABLE; U(cap); return 0; }
+int glIsEnabled(unsigned int cap) { (void)cap; return 1; }
+
+int glBlendFunc(unsigned int s, unsigned int d)
+{ const unsigned int op_ = PADGL_BLENDFUNC; blend_src = (int)s; blend_dst = (int)d; U(s,d); return 0; }
+
+int glBlendFuncSeparate(unsigned int s, unsigned int d, unsigned int as, unsigned int ad)
+{ const unsigned int op_ = PADGL_BLENDFUNCSEP; blend_src = (int)s; blend_dst = (int)d; U(s,d,as,ad); return 0; }
+
+int glBlendEquation(unsigned int m) { const unsigned int op_ = PADGL_BLENDEQ; U(m); return 0; }
+int glBlendEquationSeparate(unsigned int r, unsigned int a)
+{ const unsigned int op_ = PADGL_BLENDEQSEP; U(r,a); return 0; }
+
+/* ---- textures ---- */
+static int next_of(int *c, int max) { int v = *c; if (++(*c) >= max) *c = 1; return v; }
+
+int glGenTextures(int n, unsigned int *ids)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        const unsigned int op_ = PADGL_GENTEX;
+        ids[i] = (unsigned int)next_of(&id_tex, 4096);
+        U(ids[i]);
+    }
+    return 0;
+}
+int glDeleteTextures(int n, const unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELTEX; U(ids[i]); } return 0; }
+
+int glBindTexture(unsigned int t, unsigned int id)
+{ const unsigned int op_ = PADGL_BINDTEX; U(t,id); return 0; }
+int glActiveTexture(unsigned int u)
+{ const unsigned int op_ = PADGL_ACTIVETEX; U(u); return 0; }
+int glTexParameteri(unsigned int t, unsigned int p, int v)
+{ const unsigned int op_ = PADGL_TEXPARAM; U(t,p,(unsigned)v); return 0; }
+
+static unsigned int pixel_bytes(unsigned int fmt, unsigned int type, int w, int h)
+{
+    unsigned int c = 4;
+    switch (fmt) {
+    case 0x1908: c = 4; break;                       /* RGBA            */
+    case 0x1907: c = 3; break;                       /* RGB             */
+    case 0x190A: c = 2; break;                       /* LUMINANCE_ALPHA */
+    case 0x1909: case 0x1906: case 0x1903: c = 1; break;
+    default: c = 4; break;
+    }
+    if (type != 0x1401) c = 2;                       /* packed 16-bit types */
+    return c * (unsigned)w * (unsigned)h;
+}
+
+int glTexImage2D(unsigned int target, int level, int ifmt, int w, int h,
+                 int border, unsigned int fmt, unsigned int type, const void *px)
+{
+    unsigned int a[7];
+    (void)target; (void)border;
+    a[0] = (unsigned)level; a[1] = (unsigned)ifmt; a[2] = (unsigned)w; a[3] = (unsigned)h;
+    a[4] = fmt; a[5] = type; a[6] = px ? pixel_bytes(fmt, type, w, h) : 0;
+    emit(PADGL_TEXIMAGE, a, sizeof a, px, a[6]);
+    return 0;
+}
+
+int glTexSubImage2D(unsigned int target, int level, int x, int y, int w, int h,
+                    unsigned int fmt, unsigned int type, const void *px)
+{
+    unsigned int a[8];
+    (void)target;
+    a[0] = (unsigned)level; a[1] = (unsigned)x; a[2] = (unsigned)y;
+    a[3] = (unsigned)w; a[4] = (unsigned)h; a[5] = fmt; a[6] = type;
+    a[7] = px ? pixel_bytes(fmt, type, w, h) : 0;
+    emit(PADGL_TEXSUBIMAGE, a, sizeof a, px, a[7]);
+    return 0;
+}
+
+int glCompressedTexImage2D(unsigned int target, int level, unsigned int ifmt,
+                           int w, int h, int border, int size, const void *data)
+{
+    unsigned int a[5];
+    (void)target; (void)border;
+    a[0] = (unsigned)level; a[1] = ifmt; a[2] = (unsigned)w; a[3] = (unsigned)h;
+    a[4] = (unsigned)(size > 0 ? size : 0);
+    emit(PADGL_TEXCOMPRESSED, a, sizeof a, data, a[4]);
+    return 0;
+}
+
+int glCompressedTexSubImage2D(unsigned int t, int l, int x, int y, int w, int h,
+                              unsigned int f, int size, const void *d)
+{ (void)t;(void)l;(void)x;(void)y;(void)w;(void)h;(void)f;(void)size;(void)d; return 0; }
+
+/* ---- buffers / vertex arrays ---- */
+int glGenBuffers(int n, unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENBUF;
+    ids[i] = (unsigned int)next_of(&id_buf, 4096); U(ids[i]); } return 0; }
+int glDeleteBuffers(int n, const unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELBUF; U(ids[i]); } return 0; }
+int glBindBuffer(unsigned int t, unsigned int id)
+{ const unsigned int op_ = PADGL_BINDBUF; U(t,id); return 0; }
+
+int glBufferData(unsigned int target, long size, const void *data, unsigned int usage)
+{
+    unsigned int a[3];
+    a[0] = target; a[1] = usage; a[2] = (unsigned)(size > 0 ? size : 0);
+    emit(PADGL_BUFDATA, a, sizeof a, data, data ? a[2] : 0);
+    return 0;
+}
+
+int glBufferSubData(unsigned int target, long off, long size, const void *data)
+{
+    unsigned int a[3];
+    a[0] = target; a[1] = (unsigned)off; a[2] = (unsigned)(size > 0 ? size : 0);
+    emit(PADGL_BUFSUBDATA, a, sizeof a, data, data ? a[2] : 0);
+    return 0;
+}
+
+int glGenVertexArrays(int n, unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENVAO;
+    ids[i] = (unsigned int)next_of(&id_vao, 1024); U(ids[i]); } return 0; }
+int glDeleteVertexArrays(int n, const unsigned int *ids) { (void)n; (void)ids; return 0; }
+int glBindVertexArray(unsigned int id)
+{ const unsigned int op_ = PADGL_BINDVAO; U(id); return 0; }
+
+int glVertexAttribPointer(unsigned int idx, int size, unsigned int type,
+                          unsigned char norm, int stride, const void *ptr)
+{
+    const unsigned int op_ = PADGL_VERTEXATTRIB;
+    U(idx, (unsigned)size, type, (unsigned)norm, (unsigned)stride, (unsigned long)ptr);
+    return 0;
+}
+int glEnableVertexAttribArray(unsigned int i)
+{ const unsigned int op_ = PADGL_ENABLEATTRIB; U(i); return 0; }
+int glDisableVertexAttribArray(unsigned int i)
+{ const unsigned int op_ = PADGL_DISABLEATTRIB; U(i); return 0; }
+
+/* ---- shaders / programs ---- */
+int glCreateShader(unsigned int type)
+{
+    const unsigned int op_ = PADGL_CREATESHADER;
+    unsigned int id = (unsigned int)next_of(&id_obj, 4096);
+    U(id, type);
+    return (int)id;
+}
+int glCreateProgram(void)
+{
+    const unsigned int op_ = PADGL_CREATEPROGRAM;
+    unsigned int id = (unsigned int)next_of(&id_obj, 4096);
+    U(id);
+    if (id < MAXPROG) prog_uni[id].n = 0;
+    return (int)id;
+}
+
+int glShaderSource(unsigned int sh, int count, const char *const *str, const int *len)
+{
+    unsigned int a[2];
+    int i;
+    (void)len;
+    if (!str) return 0;
+    /* The game passes one string per shader in practice; concatenating would
+     * need a scratch buffer, so send each chunk and let the host join them. */
+    for (i = 0; i < count; i++) {
+        unsigned int n = str[i] ? (unsigned int)strlen(str[i]) : 0;
+        a[0] = sh; a[1] = n;
+        emit(PADGL_SHADERSOURCE, a, sizeof a, str[i], n);
+    }
+    return 0;
+}
+
+int glCompileShader(unsigned int sh) { const unsigned int op_ = PADGL_COMPILESHADER; U(sh); return 0; }
+int glAttachShader(unsigned int p, unsigned int s) { const unsigned int op_ = PADGL_ATTACHSHADER; U(p,s); return 0; }
+int glDetachShader(unsigned int p, unsigned int s) { (void)p; (void)s; return 0; }
+int glLinkProgram(unsigned int p) { const unsigned int op_ = PADGL_LINKPROGRAM; U(p); return 0; }
+int glUseProgram(unsigned int p)  { const unsigned int op_ = PADGL_USEPROGRAM;  U(p); return 0; }
+int glDeleteShader(unsigned int s) { (void)s; return 0; }
+int glDeleteProgram(unsigned int p) { (void)p; return 0; }
+
+int glBindAttribLocation(unsigned int p, unsigned int idx, const char *name)
+{
+    unsigned int a[2];
+    a[0] = p; a[1] = idx;
+    emit(PADGL_BINDATTRIBLOC, a, sizeof a, name, name ? (unsigned int)strlen(name) : 0);
+    return 0;
+}
+
+/* Attribute locations cannot be guessed: the host's linker assigns them, and
+ * guessing gave every ImGui attribute index 0, so Position, UV and Color all
+ * overwrote each other. Hand back a TOKEN encoding (program, slot) and let the
+ * host resolve it by name - the same trick used for uniforms, and still no
+ * round trip. */
+static struct { char name[40]; } prog_attr[MAXPROG][PADGL_ATTR_PER_PROG];
+static int prog_attr_n[MAXPROG];
+
+int glGetAttribLocation(unsigned int p, const char *name)
+{
+    int i;
+    unsigned int a[2];
+    if (p >= MAXPROG || !name) return -1;
+    for (i = 0; i < prog_attr_n[p]; i++)
+        if (!strcmp(prog_attr[p][i].name, name))
+            return (int)(PADGL_ATTR_TOKEN_BASE + p * PADGL_ATTR_PER_PROG + i);
+    if (prog_attr_n[p] >= PADGL_ATTR_PER_PROG) return -1;
+    i = prog_attr_n[p]++;
+    snprintf(prog_attr[p][i].name, 40, "%s", name);
+    a[0] = p; a[1] = (unsigned)i;
+    emit(PADGL_REGATTRIB, a, sizeof a, name, (unsigned int)strlen(name));
+    return (int)(PADGL_ATTR_TOKEN_BASE + p * PADGL_ATTR_PER_PROG + i);
+}
+
+/* Uniform "locations" handed to the game are (program, slot) pairs allocated
+ * here; the host resolves slot -> real location from the registered name. */
+int glGetUniformLocation(unsigned int p, const char *name)
+{
+    int i;
+    unsigned int a[2];
+    if (p >= MAXPROG || !name) return -1;
+    for (i = 0; i < prog_uni[p].n; i++)
+        if (!strcmp(prog_uni[p].u[i].name, name)) return (int)(p * MAXUNI + i);
+    if (prog_uni[p].n >= MAXUNI) return -1;
+    i = prog_uni[p].n++;
+    snprintf(prog_uni[p].u[i].name, 40, "%s", name);
+    a[0] = p; a[1] = (unsigned)i;
+    emit(PADGL_REGUNIFORM, a, sizeof a, name, (unsigned int)strlen(name));
+    return (int)(p * MAXUNI + i);
+}
+
+static void uniform(int loc, unsigned int kind, const void *data, unsigned int bytes)
+{
+    unsigned int a[3];
+    if (loc < 0) return;
+    a[0] = (unsigned)(loc / MAXUNI); a[1] = (unsigned)(loc % MAXUNI); a[2] = kind;
+    emit(PADGL_UNIFORM, a, sizeof a, data, bytes);
+}
+
+int glUniform1f(int l, float a) { uniform(l, PADGL_U1F, &a, 4); return 0; }
+int glUniform1i(int l, int a)   { uniform(l, PADGL_U1I, &a, 4); return 0; }
+int glUniform2f(int l, float a, float b)
+{ float v[2]; v[0]=a; v[1]=b; uniform(l, PADGL_U2F, v, 8); return 0; }
+int glUniform3f(int l, float a, float b, float c)
+{ float v[3]; v[0]=a; v[1]=b; v[2]=c; uniform(l, PADGL_U3F, v, 12); return 0; }
+int glUniform4f(int l, float a, float b, float c, float d)
+{ float v[4]; v[0]=a; v[1]=b; v[2]=c; v[3]=d; uniform(l, PADGL_U4F, v, 16); return 0; }
+int glUniform4fv(int l, int n, const float *v) { (void)n; uniform(l, PADGL_U4FV, v, 16); return 0; }
+int glUniformMatrix4fv(int l, int n, unsigned char tr, const float *v)
+{ (void)n; (void)tr; uniform(l, PADGL_UM4FV, v, 64); return 0; }
+
+/* ---- framebuffer objects ---- */
+int glGenFramebuffers(int n, unsigned int *ids)
+{ int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENFBO;
+    ids[i] = (unsigned int)next_of(&id_fbo, 256); U(ids[i]); } return 0; }
+int glBindFramebuffer(unsigned int t, unsigned int id)
+{ const unsigned int op_ = PADGL_BINDFBO; U(t,id); return 0; }
+int glFramebufferTexture2D(unsigned int t, unsigned int att, unsigned int tt,
+                           unsigned int tex, int level)
+{ const unsigned int op_ = PADGL_FBOTEX; U(t,att,tt,tex,(unsigned)level); return 0; }
+int glCheckFramebufferStatus(unsigned int t) { (void)t; return 0x8CD5; }
+
+/* ---- draws ---- */
+int glDrawArrays(unsigned int mode, int first, int count)
+{ const unsigned int op_ = PADGL_DRAWARRAYS; U(mode,(unsigned)first,(unsigned)count); return 0; }
+
+int glDrawElements(unsigned int mode, int count, unsigned int type, const void *idx)
+{ const unsigned int op_ = PADGL_DRAWELEMENTS; U(mode,(unsigned)count,type,(unsigned long)idx); return 0; }
+
+int glDrawRangeElements(unsigned int mode, unsigned int s, unsigned int e,
+                        int count, unsigned int type, const void *idx)
+{ (void)s; (void)e; return glDrawElements(mode, count, type, idx); }
+
+int glDrawBuffers(int n, const unsigned int *b) { (void)n; (void)b; return 0; }
+
+/* ---- queries, answered locally: see the header comment ---- */
+int glGetError(void) { return 0; }
+
+int glGetIntegerv(unsigned int p, int *v)
+{
+    if (!v) return 0;
+    switch (p) {
+    case 0x80CB: *v = blend_src; break;          /* GL_BLEND_SRC - per frame */
+    case 0x80CA: *v = blend_dst; break;          /* GL_BLEND_DST - per frame */
+    case 0x0D33: *v = 4096; break;
+    case 0x8872: *v = 8;    break;
+    case 0x8DFB: case 0x8DFC: *v = 256; break;
+    case 0x8869: *v = 16;   break;
+    default: *v = 0; break;
+    }
+    return 0;
+}
+int glGetBooleanv(unsigned int p, unsigned char *v) { (void)p; if (v) *v = 0; return 0; }
+int glGetShaderiv(unsigned int s, unsigned int p, int *v) { (void)s;(void)p; if (v) *v = 1; return 0; }
+int glGetProgramiv(unsigned int s, unsigned int p, int *v) { (void)s;(void)p; if (v) *v = 1; return 0; }
+int glGetShaderInfoLog(unsigned int s, int m, int *l, char *b)
+{ (void)s;(void)m; if (l) *l = 0; if (b) b[0] = 0; return 0; }
+int glGetProgramInfoLog(unsigned int s, int m, int *l, char *b)
+{ (void)s;(void)m; if (l) *l = 0; if (b) b[0] = 0; return 0; }
+int glReadPixels(int x,int y,int w,int h,unsigned int f,unsigned int t,void *p)
+{ (void)x;(void)y;(void)w;(void)h;(void)f;(void)t;(void)p; return 0; }
+
+static const char *VENDOR   = "pinball-asset-decryptor";
+static const char *RENDERER = "padgl bridge";
+static const char *VERSION  = "OpenGL ES 3.0 padgl";
+static const char *SLVER    = "OpenGL ES GLSL ES 3.00";
+const char *glGetString(unsigned int n)
+{
+    switch (n) {
+    case 0x1F00: return VENDOR;
+    case 0x1F01: return RENDERER;
+    case 0x1F02: return VERSION;
+    case 0x8B8C: return SLVER;
+    default: return "";
+    }
+}
+
+/* ---------------- GL_VIV_direct_texture: THE VIDEO UPLOAD PATH ----------------
+ *
+ * The game never uploads a video frame with glTexImage2D. SpiVideoStreamDecoder
+ * (0x5c0368) binds its own texture and calls
+ *
+ *     glTexDirectVIVMap(GL_TEXTURE_2D, w, h, GL_VIV_I420, &planes, &~0)
+ *     glTexDirectInvalidateVIV(GL_TEXTURE_2D)
+ *
+ * which are Vivante extensions resolved through eglGetProcAddress. On the real
+ * machine the texture unit converts YUV to RGB itself. There is nothing like it
+ * on the host, so the conversion happens there and the result is a plain RGBA
+ * glTexImage2D. That is why watching TEXIMAGE for a sign of video was always
+ * going to read zero: this path never touches it.
+ *
+ * Map only records; Invalidate is what sends. That is the extension's own
+ * contract - Map hands over an address, Invalidate says its contents changed -
+ * and it matters here because the game calls Map every frame with a new ring
+ * slot, so sending on Map would upload a frame the game has not finished with.
+ */
+static struct { unsigned w, h, fmt; const unsigned char *px; } viv;
+
+/* gstvid.c, inside the LD_PRELOADed hwshim.so. Weak so libGLESv2 still loads
+ * without it, in which case every frame takes the copying path. */
+extern long pad_vid_ring_offset(const void *) __attribute__((weak));
+
+static unsigned viv_frame_bytes(unsigned fmt, unsigned w, unsigned h)
+{
+    switch (fmt) {
+    case PADGL_VIV_I420: case PADGL_VIV_YV12:
+    case PADGL_VIV_NV12: case PADGL_VIV_NV21: return w * h * 3u / 2u;
+    case PADGL_VIV_YUY2: case PADGL_VIV_UYVY: return w * h * 2u;
+    default: return 0;
+    }
+}
+
+void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
+                       void **logical, const unsigned int *physical)
+{
+    (void)target; (void)physical;
+    viv.w = (unsigned)w; viv.h = (unsigned)h; viv.fmt = fmt;
+    viv.px = logical ? (const unsigned char *)*logical : 0;
+    /* Vivante's Map hands the CALLER an address to write into. This caller
+     * already has its frame at the address it passed in, so *logical is left
+     * exactly as it came - overwriting it would point the game at nothing. */
+}
+
+void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
+                    void **logical)
+{ glTexDirectVIVMap(target, w, h, fmt, logical, 0); }
+
+void glTexDirectInvalidateVIV(unsigned int target)
+{
+    unsigned int a[6];
+    unsigned int bytes;
+    long off = -1;
+    (void)target;
+    if (!viv.px || !viv.w || !viv.h) return;
+    bytes = viv_frame_bytes(viv.fmt, viv.w, viv.h);
+    if (!bytes) {
+        static int moaned;
+        if (!moaned) { moaned = 1; say("[bridge] unsupported glTexDirectVIV format\n"); }
+        return;
+    }
+    if (pad_vid_ring_offset) off = pad_vid_ring_offset(viv.px);
+    a[0] = viv.w; a[1] = viv.h; a[2] = viv.fmt;
+    if (off >= 0) {
+        /* The pixels are already in a block the host has open. Send six words. */
+        a[3] = PADGL_SRC_VIDSHM; a[4] = (unsigned)off; a[5] = bytes;
+        emit(PADGL_TEXDIRECT, a, sizeof a, 0, 0);
+    } else {
+        a[3] = PADGL_SRC_INLINE; a[4] = 0; a[5] = bytes;
+        emit(PADGL_TEXDIRECT, a, sizeof a, viv.px, bytes);
+    }
+}
+
+/* Name lookup for libEGL's eglGetProcAddress. The GL state lives in this
+ * library, so the resolution has to happen here too. */
+void *pad_gl_proc(const char *name)
+{
+    if (!name) return 0;
+    if (!strcmp(name, "glTexDirectVIVMap"))        return (void *)glTexDirectVIVMap;
+    if (!strcmp(name, "glTexDirectVIV"))           return (void *)glTexDirectVIV;
+    if (!strcmp(name, "glTexDirectInvalidateVIV")) return (void *)glTexDirectInvalidateVIV;
+    return 0;
+}
+
+int glLineWidth(float w) { (void)w; return 0; }
+int glFenceSync(unsigned int a, unsigned int b) { (void)a; (void)b; return 1; }
+int glClientWaitSync(int s, unsigned int f, unsigned long long t)
+{ (void)s;(void)f;(void)t; return 0x911A; }   /* ALREADY_SIGNALED */
+int glDeleteSync(int s) { (void)s; return 0; }

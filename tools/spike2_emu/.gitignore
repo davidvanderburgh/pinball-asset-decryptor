@@ -1,0 +1,10 @@
+# Everything a RUN produces. The rig writes frame dumps, disassembly listings
+# and logs next to its own scripts, which was fine in a temp directory and is
+# not fine now that this one is version controlled. 30 MB of screenshots and
+# half a megabyte of objdump output are all reproducible from the card image and
+# the scripts here, so none of it belongs in git.
+*.png
+*.dis
+*.log
+*.raw
+shots/

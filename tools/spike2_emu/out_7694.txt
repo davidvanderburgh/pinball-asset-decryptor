@@ -1,0 +1,21 @@
+  1d7660:	e5d42092 	ldrb	r2, [r4, #146]	@ 0x92
+  1d7664:	e7e0c9dc 	ubfx	ip, ip, #19, #1
+  1d7668:	e5cec114 	strb	ip, [lr, #276]	@ 0x114
+  1d766c:	eb0f230a 	bl	5a029c <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x2ba0>
+  1d7670:	e5d4308e 	ldrb	r3, [r4, #142]	@ 0x8e
+  1d7674:	e3530000 	cmp	r3, #0
+  1d7678:	1a000001 	bne	1d7684 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x17174>
+  1d767c:	e1a00004 	mov	r0, r4
+  1d7680:	ebfffabf 	bl	1d6184 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x15c74>
+  1d7684:	e5943004 	ldr	r3, [r4, #4]
+  1d7688:	e3130901 	tst	r3, #16384	@ 0x4000
+  1d768c:	1a000051 	bne	1d77d8 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x172c8>
+  1d7690:	e5d40000 	ldrb	r0, [r4]
+  1d7694:	eb004025 	bl	1e7730 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27220>
+  1d7698:	eaffffd6 	b	1d75f8 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x170e8>
+  1d769c:	e1a07004 	mov	r7, r4
+  1d76a0:	e59f5144 	ldr	r5, [pc, #324]	@ 1d77ec <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x172dc>
+  1d76a4:	e3a04000 	mov	r4, #0
+  1d76a8:	e5b53004 	ldr	r3, [r5, #4]!
+  1d76ac:	e3a01000 	mov	r1, #0
+  1d76b0:	e1a00004 	mov	r0, r4

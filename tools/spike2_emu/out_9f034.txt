@@ -1,0 +1,60 @@
+  59f034:	e3a02000 	mov	r2, #0
+  59f038:	eaffffc8 	b	59ef60 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x1864>
+  59f03c:	e52de004 	push	{lr}		@ (str lr, [sp, #-4]!)
+  59f040:	e24dd00c 	sub	sp, sp, #12
+  59f044:	e1e03c80 	mvn	r3, r0, lsl #25
+  59f048:	e28d0004 	add	r0, sp, #4
+  59f04c:	e3a0c001 	mov	ip, #1
+  59f050:	e3a02012 	mov	r2, #18
+  59f054:	e1e03ca3 	mvn	r3, r3, lsr #25
+  59f058:	e5cdc005 	strb	ip, [sp, #5]
+  59f05c:	e5cd3004 	strb	r3, [sp, #4]
+  59f060:	e3a03008 	mov	r3, #8
+  59f064:	e5cd2006 	strb	r2, [sp, #6]
+  59f068:	e5cd3007 	strb	r3, [sp, #7]
+  59f06c:	ebfffece 	bl	59ebac <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x14b0>
+  59f070:	e28dd00c 	add	sp, sp, #12
+  59f074:	e49df004 	pop	{pc}		@ (ldr pc, [sp], #4)
+  59f078:	e3520008 	cmp	r2, #8
+  59f07c:	9a000001 	bls	59f088 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x198c>
+  59f080:	e3a00000 	mov	r0, #0
+  59f084:	e12fff1e 	bx	lr
+  59f088:	e92d4010 	push	{r4, lr}
+  59f08c:	e24dd010 	sub	sp, sp, #16
+  59f090:	e1e03c80 	mvn	r3, r0, lsl #25
+  59f094:	e28d0007 	add	r0, sp, #7
+  59f098:	e282c001 	add	ip, r2, #1
+  59f09c:	e1a04002 	mov	r4, r2
+  59f0a0:	e5cdc005 	strb	ip, [sp, #5]
+  59f0a4:	e1e03ca3 	mvn	r3, r3, lsr #25
+  59f0a8:	e5cd3004 	strb	r3, [sp, #4]
+  59f0ac:	e3a03020 	mov	r3, #32
+  59f0b0:	e5cd3006 	strb	r3, [sp, #6]
+  59f0b4:	ebe9d9ed 	bl	15870 <memcpy@plt>
+  59f0b8:	e28d3010 	add	r3, sp, #16
+  59f0bc:	e3a02000 	mov	r2, #0
+  59f0c0:	e0833004 	add	r3, r3, r4
+  59f0c4:	e1a01002 	mov	r1, r2
+  59f0c8:	e28d0004 	add	r0, sp, #4
+  59f0cc:	e5432009 	strb	r2, [r3, #-9]
+  59f0d0:	ebfffeb5 	bl	59ebac <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x14b0>
+  59f0d4:	e28dd010 	add	sp, sp, #16
+  59f0d8:	e8bd8010 	pop	{r4, pc}
+  59f0dc:	e92d4070 	push	{r4, r5, r6, lr}
+  59f0e0:	e3510005 	cmp	r1, #5
+  59f0e4:	e24dd010 	sub	sp, sp, #16
+  59f0e8:	e1a0e001 	mov	lr, r1
+  59f0ec:	83a00000 	movhi	r0, #0
+  59f0f0:	e5dd5020 	ldrb	r5, [sp, #32]
+  59f0f4:	e1dd42d4 	ldrsb	r4, [sp, #36]	@ 0x24
+  59f0f8:	8a000012 	bhi	59f148 <_ZN6SoLoud6Thread11unlockMutexEPv@@Base+0x1a4c>
+  59f0fc:	e3a06000 	mov	r6, #0
+  59f100:	e1e0cc80 	mvn	ip, r0, lsl #25
+  59f104:	e1a01006 	mov	r1, r6
+  59f108:	e28d0004 	add	r0, sp, #4
+  59f10c:	e1e0ccac 	mvn	ip, ip, lsr #25
+  59f110:	e5cd2008 	strb	r2, [sp, #8]
+  59f114:	e5cdc004 	strb	ip, [sp, #4]
+  59f118:	e3a02032 	mov	r2, #50	@ 0x32
+  59f11c:	e1a0c443 	asr	ip, r3, #8
+  59f120:	e5cd3009 	strb	r3, [sp, #9]

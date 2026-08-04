@@ -7,8 +7,10 @@ believing the emulator was hung when it was doing exactly what the real machine
 does; a test is the cheapest way to stop that regressing into "Stuck".
 """
 
-from pinball_decryptor.gui.emulate_tab import (parse_status, state_text,
-                                               _wsl_path)
+import pathlib
+
+from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
+                                               state_text, _wsl_path)
 
 
 def test_parse_status_reads_key_value_lines():
@@ -75,7 +77,17 @@ def test_unknown_state_falls_back_to_the_raw_word():
 
 
 def test_windows_paths_map_into_wsl():
-    assert _wsl_path(r"c:\tmp\spike2_emu") == "/mnt/c/tmp/spike2_emu"
+    assert _wsl_path(r"c:\repo\tools\spike2_emu") == "/mnt/c/repo/tools/spike2_emu"
     assert _wsl_path(r"D:\a\b") == "/mnt/d/a/b"
     # Already a POSIX path (someone set PAD_EMU_DIR from inside WSL).
-    assert _wsl_path("/mnt/c/tmp/spike2_emu") == "/mnt/c/tmp/spike2_emu"
+    assert _wsl_path("/mnt/c/repo/tools/spike2_emu") == "/mnt/c/repo/tools/spike2_emu"
+
+
+def test_default_rig_dir_is_the_copy_in_the_repo():
+    # The rig used to live in c:\tmp, where a reboot could take it. It is in the
+    # repo now, and this default is what makes the Emulate tab find it - so a
+    # relocation that forgets this file breaks Start with no other symptom.
+    rig = pathlib.Path(DEFAULT_RIG_DIR)
+    assert rig.name == "spike2_emu" and rig.parent.name == "tools"
+    assert (rig / "watch.sh").is_file()
+    assert (rig / "status.sh").is_file()

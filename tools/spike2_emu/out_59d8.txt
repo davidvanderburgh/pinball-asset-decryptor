@@ -1,0 +1,21 @@
+  1d59a0:	e3403070 	movt	r3, #112	@ 0x70
+  1d59a4:	e1a04001 	mov	r4, r1
+  1d59a8:	e1a05000 	mov	r5, r0
+  1d59ac:	e1a00001 	mov	r0, r1
+  1d59b0:	e5c32000 	strb	r2, [r3]
+  1d59b4:	eb072c71 	bl	3a0b80 <setcontext@@Base+0x62a6c>
+  1d59b8:	e1a00004 	mov	r0, r4
+  1d59bc:	eb0c7676 	bl	4f339c <setcontext@@Base+0x1b5288>
+  1d59c0:	e1a00004 	mov	r0, r4
+  1d59c4:	eb098ce8 	bl	438d6c <setcontext@@Base+0xfac58>
+  1d59c8:	e5953004 	ldr	r3, [r5, #4]
+  1d59cc:	e1a00004 	mov	r0, r4
+  1d59d0:	e3833b02 	orr	r3, r3, #2048	@ 0x800
+  1d59d4:	e5853004 	str	r3, [r5, #4]
+  1d59d8:	eb004754 	bl	1e7730 <_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_@@Base+0x27220>
+  1d59dc:	e3a01001 	mov	r1, #1
+  1d59e0:	e1a00004 	mov	r0, r4
+  1d59e4:	eb07a6ca 	bl	3bf514 <setcontext@@Base+0x81400>
+  1d59e8:	e1a00004 	mov	r0, r4
+  1d59ec:	eb09fffd 	bl	4559e8 <setcontext@@Base+0x1178d4>
+  1d59f0:	e1a00004 	mov	r0, r4

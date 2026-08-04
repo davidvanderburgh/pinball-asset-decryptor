@@ -1,0 +1,54 @@
+node   idx   writes sw    switch name (from the game s own table)
+1      0x02  66     34  Action Button
+1      0x08  66     35  Ticket Notch
+1      0x0e  66     38  Tilt Pendulum
+1      0x10  66     39  Left Coin
+1      0x11  66     40  Center Coin
+1      0x12  66     41  Right Coin
+1      0x13  66     42  Fourth Coin
+1      0x14  66     43  Fifth Coin
+1      0x15  66     44  Sixth Coin
+8      0x08  66     46  Skill Shot
+8      0x09  66     47  Left Spinner
+8      0x0a  66     48  Maser Target
+8      0x0b  66     49  Pop Bumper
+8      0x0c  66     50  Mecha Exit Top
+8      0x0d  66     51  Mecha Exit Bottom
+8      0x0e  66     52  Up Left Flipper EOS
+8      0x0f  66     53  Right Scoop
+8      0x10  66     54  Left Flipper EOS
+8      0x11  66     55  Left Outlane
+8      0x12  66     56  Left Return Lane
+8      0x13  66     57  Right Return Lane
+8      0x14  66     58  Right Outlane
+8      0x18  66     59  Right Flipper Button
+8      0x19  66     60  Left Flipper Button
+8      0x1b  66     61  Up Left Flip Button
+8      0x1c  66     62  Shooter Lane
+8      0x1d  66     63  Right Slingshot
+8      0x1e  66     64  Left Slingshot
+8      0x1f  66     65  Right Flipper EOS
+8      0x20  66     66  Trough 6
+8      0x21  66     67  Trough 5
+8      0x22  66     68  Trough 4
+8      0x23  66     69  Trough 3
+8      0x24  66     70  Trough 2
+8      0x25  66     71  Trough 1
+8      0x26  66     72  Trough Jam
+9      0x08  66     73  L Ramp Made Opto
+9      0x09  66     74  Big Loop Exit
+9      0x0a  66     75  Building Exit
+9      0x0b  66     76  Godzilla Target
+9      0x0c  66     77  Building Hit Opto
+9      0x0d  66     78  Pwrline Left Tgt
+9      0x0e  66     79  Pwrline Center Tgt
+9      0x0f  66     80  Pwrline Right Tgt
+9      0x11  66     81  R Ramp Made Opto
+9      0x14  66     82  Big Loop Enter
+9      0x15  66     83  Top Spinner
+9      0x1c  66     84  Right Spinner
+9      0x1d  66     85  Shield Target Left
+9      0x1f  66     86  Shield Target Right
+9      0x20  66     87  Godzilla Magnet Fired Virtual
+
+51 distinct (node,index) pairs, 0 of them NOT switch coordinates

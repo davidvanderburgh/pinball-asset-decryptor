@@ -489,10 +489,11 @@ def test_encrypt_one_routes_by_scheme():
     orig = _scheme3_asset(png)
     entry = FileEntry(path=SAMPLE_PATH, filler_size=216,
                       crc_encrypted=0, crc_decrypted=0)
-    out, note = _encrypt_one(v3.SCHEME_V3, entry, png, "Sonic",
-                             lambda e: orig)
+    out, note, written = _encrypt_one(v3.SCHEME_V3, entry, png, "Sonic",
+                                      lambda e: orig)
     assert crc32_buf(out) == crc32_buf(orig)
     assert "scheme 3" in note
+    assert written == png, "an asset that needed no refit went in as-is"
 
 
 # -------------------------------------------------------------- packaging

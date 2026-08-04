@@ -180,13 +180,14 @@ def _encrypt_v3(content, path, game_name, lead, trail):
     return xor_keystream(bytes(body), p)
 
 
-def _verify_pipe(tmp_path, disk_encrypted, content, lead, scheme):
+def _verify_pipe(tmp_path, disk_encrypted, content, lead, scheme,
+                 path=SONIC_PATH):
     """A pipeline ready to run _verify_raw_image over one scheme-3 asset."""
     fl = tmp_path / "fl_decrypted.dat"
-    fl.write_text("%s,%d,0,0\n" % (SONIC_PATH, lead), encoding="latin-1")
+    fl.write_text("%s,%d,0,0\n" % (path, lead), encoding="latin-1")
 
-    rel = SONIC_PATH.split("/edata/", 1)[1]
-    replacement = tmp_path / "panel.png"
+    rel = path.split("/edata/", 1)[1]
+    replacement = tmp_path / os.path.basename(path)
     replacement.write_bytes(content)
 
     pipe = object.__new__(P.StandaloneModPipeline)
@@ -692,9 +693,9 @@ def test_a_clip_smaller_than_the_slot_is_padded_not_refused():
     assert len(small) < len(clip)
 
     logged = []
-    out, note = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
-                               read_original,
-                               log=lambda m, l="info": logged.append(m))
+    out, note, _written = P._encrypt_one(
+        v3.SCHEME_V3, entry, small, "Sonic", read_original,
+        log=lambda m, l="info": logged.append(m))
 
     # The game reads the whole file and checks its CRC against fl.dat, which
     # we cannot rewrite — so both must come back untouched.
@@ -717,13 +718,82 @@ def test_the_trailing_filler_is_left_alone_by_a_video_replacement():
     all of this exists to stop."""
     entry, read_original, clip = _webm_slot()
     disk = read_original(entry)
-    out, _ = P._encrypt_one(v3.SCHEME_V3, entry, _webm(200), "Sonic",
-                            read_original)
+    out, _, _ = P._encrypt_one(v3.SCHEME_V3, entry, _webm(200), "Sonic",
+                               read_original)
     before = v3.decrypt_file(disk, 224, SONIC_WEBM, "Sonic", trim=False)
     after = v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic", trim=False)
     assert len(before) == len(after)
     assert before[len(clip):] == after[len(clip):], "the trail pad moved"
     assert before[len(clip):], "the fixture must actually have a trail pad"
+
+
+def test_encrypt_one_reports_the_bytes_it_actually_encrypted():
+    """A refit happens inside _encrypt_one, so the caller cannot see it.
+
+    Anything downstream that asks "what went into this slot?" — the
+    post-write spot-check today — has to be told, or it will answer with the
+    file the user picked and be wrong by exactly the padding.
+    """
+    entry, read_original, clip = _webm_slot()
+    small = _webm(200, fill=b"\x33")
+
+    out, _note, written = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
+                                         read_original)
+
+    assert written != small, "the fixture must actually exercise a refit"
+    assert written == v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic")
+
+
+def test_the_spot_check_survives_a_padded_video_replacement(tmp_path):
+    """v0.105.4 made a clip fit a pinned slot, then refused to build the ISO.
+
+    Padding rewrites the Segment's size field, so a padded clip is not a
+    prefix of the user's file — it differs 13 bytes in.  The spot-check was
+    handed the pre-refit clip to compare against, so every video replacement
+    reported "Decrypted content does NOT match replacement file!" on a write
+    whose encrypted bytes it had just confirmed byte-for-byte, and the build
+    stopped one step from done.
+    """
+    entry, read_original, clip = _webm_slot()
+    small = _webm(200, fill=b"\x33")
+    out, _note, written = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
+                                         read_original)
+
+    pipe = _verify_pipe(tmp_path, out, written, 224, v3.SCHEME_V3,
+                        path=SONIC_WEBM)
+
+    pipe._verify_raw_image("/var/tmp/whatever.img")   # no raise
+
+
+def test_the_pre_refit_clip_is_what_used_to_fail_the_spot_check(tmp_path):
+    """Pins why the test above has to exist: hashing what the user picked
+    rather than what was written fails a write that is perfectly good."""
+    entry, read_original, clip = _webm_slot()
+    small = _webm(200, fill=b"\x33")
+    out, _note, _written = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
+                                          read_original)
+
+    pipe = _verify_pipe(tmp_path, out, small, 224, v3.SCHEME_V3,
+                        path=SONIC_WEBM)
+
+    with pytest.raises(P.PipelineError, match="did not persist"):
+        pipe._verify_raw_image("/var/tmp/whatever.img")
+
+
+def test_a_refitted_png_round_trips_through_the_spot_check_too(tmp_path):
+    """The same seam, the other pinned format: fit_png_to_size appends a tEXt
+    chunk before IEND, so a padded PNG is not a prefix of the original
+    either."""
+    entry, read_original = _pinned_slot(SONIC_PATH, orig_len=4000, lead=216)
+    small = _png(24)
+    assert len(small) < 4000
+
+    out, note, written = P._encrypt_one(v3.SCHEME_V3, entry, small, "Sonic",
+                                        read_original)
+    assert "refitted" in note and written != small
+
+    pipe = _verify_pipe(tmp_path, out, written, 216, v3.SCHEME_V3)
+    pipe._verify_raw_image("/var/tmp/whatever.img")   # no raise
 
 
 def test_a_clip_bigger_than_the_slot_is_re_encoded_down_then_padded(monkeypatch):
@@ -744,8 +814,8 @@ def test_a_clip_bigger_than_the_slot_is_re_encoded_down_then_padded(monkeypatch)
     import pinball_decryptor.core.video as V
     monkeypatch.setattr(V, "shrink_video_to_size", fake_shrink)
 
-    out, note = P._encrypt_one(v3.SCHEME_V3, entry, big, "Sonic",
-                               read_original)
+    out, note, _written = P._encrypt_one(v3.SCHEME_V3, entry, big, "Sonic",
+                                         read_original)
     assert calls == [len(clip)], "the budget must be the slot's own size"
     from pinball_decryptor.core.video import pad_video_to_size
     assert v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic") == \
@@ -823,8 +893,8 @@ def test_end_to_end_the_bytes_the_game_plays_are_a_real_clip(tmp_path):
     assert len(v3.decrypt_file(disk, 224, SONIC_WEBM, "Sonic")) == \
         len(slot_clip)
 
-    out, _ = P._encrypt_one(v3.SCHEME_V3, entry, replacement, "Sonic",
-                            lambda e: disk)
+    out, _, _ = P._encrypt_one(v3.SCHEME_V3, entry, replacement, "Sonic",
+                               lambda e: disk)
     full = v3.decrypt_file(out, 224, SONIC_WEBM, "Sonic", trim=False)
     played = full[:len(slot_clip)]          # exactly what the game passes on
 

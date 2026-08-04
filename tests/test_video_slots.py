@@ -832,3 +832,146 @@ def test_the_shrink_budget_follows_the_clip_being_encoded(monkeypatch,
     # 90000 bytes over 9 seconds, with the module's 0.92 first-pass headroom.
     assert rate == int(90_000 * 8 * 0.92 / 9), (
         "bitrate was budgeted from the template's 3s, not the clip's 9s")
+
+
+# --------------------------------------------------------------------------
+# A pinned slot's byte budget belongs to the STAGING encode (PAD-29)
+#
+# Staging re-encoded a clip to the slot's shape with no idea of its byte
+# budget, and the build then re-encoded whatever overshot down to the slot —
+# two generations of loss for one replacement.  cooltoy's JJP Logo RIP came
+# out of staging at 5,189,537 bytes for a 2,620,331-byte slot and was encoded
+# a second time to get there.
+# --------------------------------------------------------------------------
+
+def _budget_cmd(monkeypatch, tmp_path, max_bytes, *, src_dur=10.0,
+                slot_dur=20.0, size=b"x", has_audio=False):
+    """Run transcode_video_to under a fake ffmpeg; return (ok, detail, cmds)."""
+    from pinball_decryptor.core import video as V
+    from pinball_decryptor.core.video import VideoInfo
+
+    seen = []
+
+    def fake_run(cmd, limit, cancel_cb=None):
+        seen.append(list(cmd))
+        with open(cmd[-1], "wb") as fh:
+            fh.write(size)
+        return 0, b"", None
+
+    monkeypatch.setattr(V, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(V, "_run_ffmpeg_watched", fake_run)
+    monkeypatch.setattr(V, "probe_duration", lambda p: src_dur)
+
+    slot = VideoInfo(path="slot.webm", vcodec="vp8", width=320, height=240,
+                     fps=30.0, duration=slot_dur, has_audio=has_audio)
+    ok, detail = V.transcode_video_to(
+        str(tmp_path / "in.mov"), str(tmp_path / "out.webm"), slot,
+        match_length=True, max_bytes=max_bytes)
+    return ok, detail, seen
+
+
+def test_a_byte_budget_sets_the_rate_from_the_length_being_produced(
+        monkeypatch, tmp_path):
+    """The budget buys bitrate x the seconds actually encoded.
+
+    With trim/pad on, that is the SLOT's length, not the source's — budgeting
+    a 10s source that gets padded to a 20s slot as if it were 10s puts twice
+    the bitrate in and overshoots exactly the way the un-budgeted encode did.
+    """
+    ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, 1_000_000,
+                                   src_dur=10.0, slot_dur=20.0)
+    assert ok and len(cmds) == 1
+    cmd = cmds[0]
+    rate = int(cmd[cmd.index("-b:v") + 1])
+    assert rate == int(1_000_000 * 8 * 0.92 / 20.0)
+    # capped, not just targeted — libvpx will drift over a bare -b:v
+    assert cmd[cmd.index("-maxrate") + 1] == str(rate)
+    assert "-crf" not in cmd, "a budget replaces the constant-quality guess"
+    assert "fitted to the slot's 1000000 bytes" in detail
+
+
+def test_without_a_budget_the_vpx_encode_is_unchanged(monkeypatch, tmp_path):
+    """The no-budget path is every other manufacturer's staging encode and
+    must keep the pinned constant-quality flags."""
+    ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, None)
+    assert ok and len(cmds) == 1
+    cmd = cmds[0]
+    assert cmd[cmd.index("-crf") + 1] == "32"
+    assert cmd[cmd.index("-b:v") + 1] == "0"
+    assert "-maxrate" not in cmd
+    assert "fitted" not in detail
+
+
+def test_a_clip_that_will_not_reach_the_budget_is_still_staged(monkeypatch,
+                                                               tmp_path):
+    """The budget is a quality optimisation, not a gate.
+
+    libvpx overshoots a low -b:v on some material, and the build's own fit has
+    always handled that.  Failing here instead would drop the user's clip for
+    a reason that was never a correctness problem.
+    """
+    ok, detail, cmds = _budget_cmd(monkeypatch, tmp_path, 10,
+                                   size=b"x" * 5000)
+    assert ok, "an unreachable budget must not lose the replacement"
+    assert len(cmds) == 3, "it should try the whole headroom ladder first"
+    assert "the build will re-encode it to fit" in detail
+    rates = [int(c[c.index("-b:v") + 1]) for c in cmds]
+    assert rates == sorted(rates, reverse=True), "each retry aims lower"
+
+
+def _budget_seen(monkeypatch, tmp_path, **kw):
+    """Stage one assignment; return the byte_budget stage_replacement got."""
+    from pinball_decryptor.core import video_slots as VS
+
+    got = {}
+
+    def fake_stage(slot, rep, trim_to_length=False, no_conversion=False,
+                   cancel_cb=None, byte_budget=None):
+        got["budget"] = byte_budget
+        return True, ""
+
+    monkeypatch.setattr(VS, "stage_replacement", fake_stage)
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    (tmp_path / "rep.mp4").write_bytes(b"\x00" * 10)
+    slots = {s.rel_path: s for s in scan_video_slots(str(tmp_path),
+                                                     probe=False)}
+    VS.stage_replacements(slots, {"clip.mp4": str(tmp_path / "rep.mp4")},
+                          assets_dir=str(tmp_path), **kw)
+    return got.get("budget")
+
+
+def test_the_budget_needs_the_length_to_be_matched_too(monkeypatch, tmp_path):
+    """A clip free to run to its own length must NOT be squeezed into the
+    slot's bytes: a 30-second replacement for a 3-second slot would be
+    crushed.  The budget only means the slot's own bitrate when the duration
+    is the slot's too."""
+    assert _budget_seen(monkeypatch, tmp_path,
+                        pin_byte_size=True, trim_to_length=True) == 900
+    assert _budget_seen(monkeypatch, tmp_path,
+                        pin_byte_size=True, trim_to_length=False) is None
+    assert _budget_seen(monkeypatch, tmp_path,
+                        pin_byte_size=False, trim_to_length=True) is None
+
+
+def test_the_budget_is_the_pristine_original_not_the_last_replacement(
+        monkeypatch, tmp_path):
+    """Re-staging over an earlier replacement must budget against the slot the
+    game actually has, or every pass ratchets the quality down against the
+    previous pass's smaller file."""
+    from pinball_decryptor.core import staged_originals
+
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 900)
+    staged_originals.snapshot(str(tmp_path), "clip.mp4", None)
+    # ...now the slot on disk is an earlier, much smaller replacement
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 120)
+
+    assert _budget_seen(monkeypatch, tmp_path,
+                        pin_byte_size=True, trim_to_length=True) == 900
+
+
+def test_only_the_plugins_that_pin_a_slot_ask_for_a_budget():
+    from pinball_decryptor.core.registry import Manufacturer
+    from pinball_decryptor.plugins.jjp.manufacturer import JJPManufacturer
+
+    assert Manufacturer.video_pins_byte_size(object()) is False
+    assert JJPManufacturer().video_pins_byte_size(None) is True

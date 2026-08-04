@@ -215,6 +215,13 @@ Scheme 3 **pins every asset's byte length**: `fl.dat` carries both pads and the 
 
 A clip **at or under** the slot's size is padded with no re-encode at all. A clip **over** it is re-encoded down to the byte budget by `shrink_video_to_size` and then padded onto the exact figure; if even that overshoots it is refused and the original is left on the card.
 
+**The budget is handed to the staging encode, so it rarely comes to that.** Staging (`core/video_slots.stage_replacement`) already re-encodes the replacement to the slot's container, codec, resolution, frame rate and — with trim/pad — duration. It used to do all that with no idea of the slot's byte count, so a clip that came out over the slot was encoded a *second* time by the fit above: cooltoy's `JJP Logo RIP` was staged at 5,189,537 bytes for a 2,620,331-byte slot and then re-encoded down to 2,107,465, paying two generations of loss for one replacement. `transcode_video_to` now takes `max_bytes` and derives its rate from it, so the clip is encoded once. Two things keep that honest:
+
+- **The rate is budget × the length actually being produced**, i.e. after any trim/pad, not the source's own length — the same trap `shrink_video_to_size` documents.
+- **A missed budget stages the clip anyway.** libvpx drifts over a low `-b:v` on some material, and the fit above is the backstop it always was. Failing at staging would drop the user's replacement for a quality optimisation rather than a correctness problem.
+
+`Manufacturer.video_pins_byte_size()` says whether to ask, and it is honoured only alongside a duration match — the pairing is the safety argument. A clip held to the slot's duration *and* its bytes is simply being given the slot's own bitrate; budget a clip free to run to its own length and a 30-second replacement for a 3-second slot would be crushed into the 3-second clip's bytes.
+
 Two things make this correct rather than merely arithmetic:
 
 - **The target is the content length, not "everything after the lead pad".** Those differ by the trail pad, and the game takes its content length from `fl.dat`, so a clip built to the larger figure is handed to the player cut short by exactly the pad — a black screen from a write that hit the byte count it was given. `trim_trailing_filler` therefore parses the container's own declared end (`_webm_end` / `_isobmff_end` in [crypto_v3.py](../../pinball_decryptor/plugins/jjp/crypto_v3.py)); both answer −1 the moment the structure disagrees with the bytes, which falls back to leaving the content alone.

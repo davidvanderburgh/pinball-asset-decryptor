@@ -304,6 +304,15 @@ class JJPManufacturer(Manufacturer):
         # "Trim / pad" checkbox is forced on + disabled (see audio_length_note).
         return True
 
+    def video_pins_byte_size(self, assets_dir=None):
+        # Sonic-era images (asset scheme 3) hold every clip to its original
+        # byte length, and which scheme an image uses is only knowable once
+        # the image itself is open — long after this staging step runs.  So
+        # answer for the stricter case: with the duration already matched, the
+        # budget is the slot's own bitrate, which is a sane encode target on
+        # the older images too, and there the build ignores size anyway.
+        return True
+
     def detect(self, path):
         if not path.lower().endswith(".iso"):
             return None

@@ -969,7 +969,7 @@ def _run_ffmpeg_watched(cmd, limit, cancel_cb=None):
 
 
 def transcode_video_to(src_path, dst_path, original_info,
-                       match_length=False, cancel_cb=None):
+                       match_length=False, cancel_cb=None, max_bytes=None):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
@@ -990,6 +990,15 @@ def transcode_video_to(src_path, dst_path, original_info,
     titles found Led Zeppelin, Godzilla, Jaws and John Wick entirely silent
     but Deadpool carrying audio on 7 of its 99, so the clip being replaced is
     the only thing worth matching.
+
+    *max_bytes*, when given, is a byte budget the muxed result should land
+    under — for slots whose size is pinned (Sonic-era JJP, Spike 2), where a
+    clip that overshoots has to be re-encoded again at build time and pays a
+    second generation of loss for it.  Folding the budget into this encode
+    makes that one encode instead of two.  It is a target, not a guarantee:
+    if the budget still can't be met the oversized result is returned anyway
+    (with a note), because the build's own fit is a better place to fail than
+    a staging step that would otherwise drop the user's clip entirely.
 
     Requires ffmpeg.
     """
@@ -1026,11 +1035,9 @@ def transcode_video_to(src_path, dst_path, original_info,
             + (":color=#00000000" if alpha else ""))
         actions.append(f"→{original_info.width}x{original_info.height}")
 
-    cmd = [ffmpeg, "-y", "-i", src_path]
-
     # Length matching: trim a longer source, pad a shorter one.  enc_dur is
     # how many seconds of video the encode will actually produce — it drives
-    # the wall-clock cap below.
+    # the wall-clock cap below, and the byte budget when there is one.
     src_dur = probe_duration(src_path)
     enc_dur = src_dur
     cap_to = None
@@ -1046,46 +1053,80 @@ def transcode_video_to(src_path, dst_path, original_info,
             enc_dur = target
             actions.append(f"pad {src_dur:.1f}s→{target:.1f}s")
 
-    if vf:
-        cmd += ["-vf", ",".join(vf)]
-    if original_info and original_info.fps > 0:
-        cmd += ["-r", f"{original_info.fps:.4f}"]
-    cmd += vargs
-    if "libx264" in vargs:
-        cmd += _h264_profile_args(original_info, scaled_to_slot)
-    if _is_vpx(vargs):
-        # Pin constant-quality mode: with no explicit rate control the libvpx
-        # default varies by ffmpeg build (older ones target 256kbps — visibly
-        # blocky at slot resolutions).  This path has no byte budget;
-        # shrink_video_to_size sets its own -b:v.
-        cmd += ["-crf", "32", "-b:v", "0"]
     # Match the slot's audio shape (see the docstring).  Only when we actually
     # probed the slot: an unprobed original is not evidence that it is silent.
-    if original_info is not None and not original_info.has_audio:
-        cmd += ["-an"]
+    silent = original_info is not None and not original_info.has_audio
+    if silent:
         actions.append("no audio (slot has none)")
-    else:
-        cmd += aargs
-    if cap_to is not None:
-        cmd += ["-t", f"{cap_to:.3f}"]
-    cmd.append(dst_path)
 
+    # Rate control.  Without a budget this is a fixed-quality encode and the
+    # muxed size falls where it falls.  With one, the budget buys bitrate ×
+    # the seconds actually being produced (enc_dur, AFTER any trim/pad — the
+    # source's own length would set the rate by the wrong clip), and the
+    # result is measured and retried smaller if it overshoots.
+    budget = max_bytes if (max_bytes and max_bytes > 0
+                           and enc_dur and enc_dur > 0) else None
+    abps = 0 if silent else 96_000       # reserve bits for an audio track
     limit = _encode_timeout(enc_dur)
-    try:
-        rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
-    except OSError as e:
-        return False, str(e)
-    if abort == "cancelled":
-        return False, "cancelled"
-    if abort == "stall":
-        return False, _stall_error()
-    if abort == "timeout":
-        return False, _timeout_error(limit)
-    if rc == 0 and os.path.isfile(dst_path) \
-            and os.path.getsize(dst_path) > 0:
-        return True, ", ".join(a for a in actions if a)
-    err = stderr.decode("utf-8", "replace").strip().splitlines()
-    return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
+    over = ""
+
+    for hr in ([0.92, 0.80, 0.62] if budget else [None]):
+        cmd = [ffmpeg, "-y", "-i", src_path]
+        if vf:
+            cmd += ["-vf", ",".join(vf)]
+        if original_info and original_info.fps > 0:
+            cmd += ["-r", f"{original_info.fps:.4f}"]
+        cmd += vargs
+        if "libx264" in vargs:
+            cmd += _h264_profile_args(original_info, scaled_to_slot)
+        if budget:
+            vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
+            cmd += ["-b:v", str(vbps), "-maxrate", str(vbps),
+                    "-bufsize", str(vbps * 2)]
+        elif _is_vpx(vargs):
+            # Pin constant-quality mode: with no explicit rate control the
+            # libvpx default varies by ffmpeg build (older ones target
+            # 256kbps — visibly blocky at slot resolutions).
+            cmd += ["-crf", "32", "-b:v", "0"]
+        if silent:
+            cmd += ["-an"]
+        else:
+            cmd += aargs
+            if budget:
+                cmd += ["-b:a", str(abps)]
+        if cap_to is not None:
+            cmd += ["-t", f"{cap_to:.3f}"]
+        cmd.append(dst_path)
+
+        try:
+            rc, stderr, abort = _run_ffmpeg_watched(cmd, limit, cancel_cb)
+        except OSError as e:
+            return False, str(e)
+        if abort == "cancelled":
+            return False, "cancelled"
+        if abort == "stall":
+            return False, _stall_error()
+        if abort == "timeout":
+            return False, _timeout_error(limit)
+        if rc != 0 or not os.path.isfile(dst_path) \
+                or os.path.getsize(dst_path) == 0:
+            err = stderr.decode("utf-8", "replace").strip().splitlines()
+            return False, (err[-1] if err else f"ffmpeg failed (code {rc})")
+
+        size = os.path.getsize(dst_path)
+        if not budget or size <= budget:
+            if budget:
+                actions.append(f"fitted to the slot's {budget} bytes")
+            return True, ", ".join(a for a in actions if a)
+        over = (f"still {size} bytes against the slot's {budget} — "
+                f"the build will re-encode it to fit")
+
+    # Budget missed on every attempt.  The clip is staged anyway: the build's
+    # own fit handles it exactly as it did before there was a budget here, and
+    # refusing at this point would drop the user's replacement for a quality
+    # optimisation rather than a correctness problem.
+    actions.append(over)
+    return True, ", ".join(a for a in actions if a)
 
 
 def remux_video_to(src_path, dst_path, original_info, cancel_cb=None):

@@ -1732,13 +1732,30 @@ static void hex(char *out, const unsigned char *p, int n)
 /* hex() caps at 16 bytes, and EVERY node bus frame longer than that has been
  * silently cut off in every log this rig has ever written. The census entries
  * "86 <64 bytes>" and "41 <12 bytes>" were read off truncated lines and are
- * wrong about the payload. Anything that logs a whole frame uses this instead;
- * callers must give it 129 bytes. */
+ * wrong about the payload. Anything that logs a whole frame uses this instead.
+ *
+ * AND THEN THE SAME TRAP CAME BACK AT THE NEW LIMIT. This capped at 64, so the
+ * LED frames on nodes 7/12/14 - whose own length byte says up to 118 - were
+ * still being cut off, and every one of them logged as exactly 64 bytes. That
+ * produced a confident and wrong conclusion: "everything caps at 64 bytes and a
+ * long update is chunked" is a description of THIS FUNCTION, not of the
+ * protocol. It also made the strip-board mask/data split impossible to find,
+ * because the data was simply missing.
+ *
+ * The test that catches it costs nothing and is worth keeping in mind for any
+ * framed protocol: a frame's own length field must agree with how many bytes
+ * were logged. Here `len == plen + 3`, and 3573 frames disagreed - every single
+ * one of them observed at exactly the cap.
+ *
+ * 255 is past the 118 seen and past what a 0x100-byte length byte can express.
+ * Callers must give it HEXBUF bytes. */
+#define HEXMAX 255
+#define HEXBUF (HEXMAX * 2 + 1)
 static void hex64(char *out, const unsigned char *p, int n)
 {
     static const char d[] = "0123456789abcdef";
     int i;
-    if (n > 64) n = 64;
+    if (n > HEXMAX) n = HEXMAX;
     for (i = 0; i < n; i++) { *out++ = d[p[i] >> 4]; *out++ = d[p[i] & 15]; }
     *out = 0;
 }
@@ -2180,7 +2197,13 @@ int shim_ioctl(int fd, unsigned long req, ...)
  * that count IS the reply length the game expects for the request it just
  * sent. That turns the bus into a self-documenting protocol oracle.
  */
-static unsigned char nb_req[64];
+/* THE REAL CAP, and the one that hid behind hex64's. Widening the hex dumper
+ * changed nothing while this stayed at 64, because the shim only ever KEPT the
+ * first 64 bytes of a request - so a node 7/12/14 LED frame whose own length
+ * byte says 118 was already gone by the time anything tried to print it.
+ * Two caps in series, and fixing the visible one is not enough.
+ * The copy that fills this uses `sizeof nb_req`, so the size lives here alone. */
+static unsigned char nb_req[256];
 static int nb_req_len;
 static int nb_log_budget = 400;
 static int nb_reply = 1;           /* 0 = stay silent, 1 = answer with zeros */
@@ -4347,11 +4370,11 @@ static void nb_maybe_dump(void)
 
 static void nb_log(const char *dir, const unsigned char *p, int n, unsigned long want)
 {
-    char line[256], h[140];
+    char line[HEXBUF + 128], h[HEXBUF];
     static int inited;
     if (!inited) { inited = 1; nb_log_budget = nb_budget_init(); }
     if (nb_log_budget-- <= 0) return;
-    hex64(h, p, n < 64 ? n : 64);
+    hex64(h, p, n);
     if (want)
         snprintf(line, sizeof line, "[nb] %s want=%lu  last-tx=%s\n", dir, want, h);
     else
@@ -4379,7 +4402,7 @@ static void nb_trace(void)
     static int on = -1;
     static int budget = 400000;
     unsigned char cmd;
-    char line[200], h[140];
+    char line[HEXBUF + 128], h[HEXBUF];
     if (on == -1) {
         char *p = getenv("PAD_NB_TRACE");
         on = p && p[0] >= '1' && p[0] <= '9' ? p[0] - '0' : 0;
@@ -4880,7 +4903,7 @@ long shim_write(int fd, const void *b, unsigned long n)
             static unsigned char cmdseen[256];
             unsigned char cmd = nb_req_len > 2 && (nb_req[0] & 0x80) ? nb_req[2] : nb_req[0];
             if (!cmdseen[cmd]) {
-                char m[200], h[140];
+                char m[HEXBUF + 128], h[HEXBUF];
                 cmdseen[cmd] = 1;
                 hex64(h, nb_req, nb_req_len);
                 snprintf(m, sizeof m, "[nbcmd] %02x first frame %s\n", cmd, h);

@@ -1,0 +1,579 @@
+# Godzilla Pro device positions, from the game binary.
+# 575 records, 164 of them on the playfield image.
+# playfield image: assets/nuk/images/Test/scaled_godzilla_pro_playfield.png (313x710)
+# name                                   x     y    w    h  conn   image
+ETOPPER L DOME LED 1-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 1-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 2-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 2-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 2-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 3-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 3-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 3-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 4-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 4-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 4-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 5-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 5-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 5-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 6-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 6-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 6-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 7-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 7-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 7-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 8-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 8-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 8-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 9-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 9-G                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 9-B                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 10-R                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 10-G                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 10-B                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 11-R                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 11-G                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 11-B                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 12-R                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 12-G                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER L DOME LED 12-B                310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 1-R                 310   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 1-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 1-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 2-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 2-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 2-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 3-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 3-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 3-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 4-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 4-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 4-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 5-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 5-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 5-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 6-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 6-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 6-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 7-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 7-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 7-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 8-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 8-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 8-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 9-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 9-G                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 9-B                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 10-R                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 10-G                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 10-B                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 11-R                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 11-G                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 11-B                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 12-R                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 12-G                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER R DOME LED 12-B                408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 1-R                 408   249   40   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 1-G                  73   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 2-R                  73   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 2-G                 108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 2-B                 108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 3-R                 108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 3-G                 143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 3-B                 143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 4-R                 143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 4-G                 178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 4-B                 178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 5-R                 178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 5-G                 213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 5-B                 213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 6-R                 213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 6-G                 247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 6-B                 247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 7-R                 247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 7-G                 282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 7-B                 282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 8-R                 282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 8-G                 317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 8-B                 317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 9-R                 317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 9-G                 352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 9-B                 352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 10-R                352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 10-G                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 10-B                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 11-R                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 11-G                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 11-B                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 12-R                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 12-G                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 12-B                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 13-R                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 13-G                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 13-B                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 14-R                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 14-G                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 14-B                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 15-R                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 15-G                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 15-B                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 16-R                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 16-G                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 16-B                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 17-R                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 17-G                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 17-B                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 18-R                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 18-G                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 18-B                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 19-R                631   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 19-G                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 19-B                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 20-R                596   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 20-G                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 20-B                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 21-R                561   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 21-G                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 21-B                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 22-R                526   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 22-G                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 22-B                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 23-R                492   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 23-G                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 23-B                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 24-R                457   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 24-G                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 24-B                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 25-R                422   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 25-G                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 25-B                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 26-R                387   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 26-G                352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 26-B                352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 27-R                352   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 27-G                317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 27-B                317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 28-R                317   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 28-G                282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 28-B                282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 29-R                282   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 29-G                247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 29-B                247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 30-R                247   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 30-G                213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 30-B                213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 31-R                213   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 31-G                178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 31-B                178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 32-R                178   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 32-G                143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 32-B                143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 33-R                143   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 33-G                108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 33-B                108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 34-R                108   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 34-G                 73   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER CENTER LED 34-B                 73   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 1-R                   73   279   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 1-G                   73   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 1-B                   73   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 2-R                   73   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 2-G                  108   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 2-B                  108   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 3-R                  108   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 3-G                  143   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 3-B                  143   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 4-R                  143   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 4-G                  178   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 4-B                  178   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 5-R                  178   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 5-G                  213   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 5-B                  213   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 6-R                  213   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 6-G                  247   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 6-B                  247   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 7-R                  247   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 7-G                  282   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 7-B                  282   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 8-R                  282   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 8-G                  317   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 8-B                  317   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 9-R                  317   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 9-G                  352   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 9-B                  352   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 10-R                 352   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 10-G                 387   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 10-B                 387   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 11-R                 387   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 11-G                 422   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 11-B                 422   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 12-R                 422   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 12-G                 457   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 12-B                 457   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 13-R                 457   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 13-G                 492   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 13-B                 492   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 14-R                 492   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 14-G                 526   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 14-B                 526   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 15-R                 526   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 15-G                 561   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 15-B                 561   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 16-R                 561   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 16-G                 596   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 16-B                 596   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 17-R                 596   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 17-G                 631   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 17-B                 631   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 18-R                 631   297   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 18-G                 631   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 18-B                 631   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 19-R                 631   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 19-G                 596   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 19-B                 596   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 20-R                 596   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 20-G                 561   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 20-B                 561   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 21-R                 561   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 21-G                 526   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 21-B                 526   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 22-R                 526   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 22-G                 492   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 22-B                 492   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 23-R                 492   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 23-G                 457   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 23-B                 457   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 24-R                 457   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 24-G                 422   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 24-B                 422   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 25-R                 422   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 25-G                 387   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 25-B                 387   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 26-R                 387   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 26-G                 352   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 26-B                 352   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 27-R                 352   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 27-G                 317   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 27-B                 317   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 28-R                 317   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 28-G                 282   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 28-B                 282   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 29-R                 282   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 29-G                 247   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 29-B                 247   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 30-R                 247   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 30-G                 213   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 30-B                 213   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 31-R                 213   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 31-G                 178   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 31-B                 178   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 32-R                 178   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 32-G                 143   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 32-B                 143   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 33-R                 143   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 33-G                 108   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 33-B                 108   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 34-R                 108   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 34-G                  73   309   30   30         System/TestMode/universal_topper_scaled
+ETOPPER FRONT LED 34-B                  73   309   30   30         System/TestMode/universal_topper_scaled
+SHAKER MOTOR                            73   309   30   30         System/TestMode/universal_topper_scaled
+TROUGH                                 195   581   20   20         playfield
+RIGHT SLINGSHOT                        260   613   20   20         playfield
+LEFT SLINGSHOT                         219   503   20   20         playfield
+AUTO PLUNGER                            79   503   20   20         playfield
+LEFT FLIPPER                           283   638   20   20         playfield
+UP LEFT FLIP                            99   581   20   20         playfield
+POP BUMPER                              52   315   20   20         playfield
+RIGHT SCOOP                            251   413   20   20         playfield
+GODZILLA MAGNET                        250   357   20   20         playfield
+COIN ENABLE                             74   221   20   20         playfield
+START BUTTON                           268   255   30   30         System/TestMode/spike_2_cabinet_front_cropped
+TOURNAMENT START                       102   228   30   30         System/TestMode/spike_2_cabinet_front_cropped
+LOCKDOWN BUTTON-G                      102   277   30   30         System/TestMode/spike_2_cabinet_front_cropped
+LOCKDOWN BUTTON-R                      250   169   30   30         System/TestMode/spike_2_cabinet_front_cropped
+LOCKDOWN BUTTON-B                      250   169   30   30         System/TestMode/spike_2_cabinet_front_cropped
+LOWER PLAYFIELD GI-RED(X4)             250   169   30   30         System/TestMode/spike_2_cabinet_front_cropped
+RIGHT OUTLANE                          242   472   20   20         playfield
+LEFT RETURN LANE                       264   498   20   20         playfield
+LEFT OUTLANE                            53   472   20   20         playfield
+SAUCER                                  29   498   20   20  8b     playfield
+FIGHTER RIGHT 1                        225   450   20   20  8b     playfield
+FIGHTER RIGHT 2                        239   549   20   20  8b     playfield
+FIGHTER RIGHT 3                        227   558   20   20  8b     playfield
+ADV FIGHTER RIGHT                      215   566   20   20  8b     playfield
+SCOOP BB-BATTLE                        225   537   20   20  8b     playfield
+SCOOP BB-GODZILLA PWR UP               254   346   20   20  8b     playfield
+SCOOP BB-SUMMON ALLY                   254   346   20   20  8b     playfield
+BOTTOM SAUCER-R                        254   346   20   20  8b     playfield
+BOTTOM SAUCER-G                        215   436   20   20  8b     playfield
+BOTTOM SAUCER-B                        215   436   20   20  8b     playfield
+SELECT CITY                            215   436   20   20  8b     playfield
+TANK 6                                 236   380   20   20  8b     playfield
+ATTACK MECHA                           227   394   20   20  8b     playfield
+MECHA LANE-R                           200   381   20   20  8b     playfield
+MECHA LANE-G                           282   393   20   20  8b     playfield
+MECHA LANE-B                           282   393   20   20  8b     playfield
+MOTHRA                                 282   393   20   20  8b     playfield
+TOP SAUCER-R                           199   424   20   20  8b     playfield
+TOP SAUCER-G                           209   410   20   20  8b     playfield
+TOP SAUCER-B                           209   410   20   20  8b     playfield
+SHIELD LEFT-R                          209   410   20   20  8b     playfield
+SHIELD LEFT-G                          188   308   20   20  8b     playfield
+SHIELD LEFT-B                          188   308   20   20  8b     playfield
+SHIELD RIGHT-R                         188   308   20   20  8b     playfield
+SHIELD RIGHT-G                         223   335   20   20  8b     playfield
+SHIELD RIGHT-B                         223   335   20   20  8b     playfield
+SHIELD CENTER-R                        223   335   20   20  8b     playfield
+SHIELD CENTER-G                        195   332   20   20  8b     playfield
+SHIELD CENTER-B                        195   332   20   20  8b     playfield
+RODAN                                  195   332   20   20  8b     playfield
+POP BUMPER-R                           178   421   20   20  8b     playfield
+POP BUMPER-G                           251   413   20   20  8b     playfield
+POP BUMPER-B                           251   413   20   20  8b     playfield
+ANGUIRUS                               251   413   20   20  8b     playfield
+MASER FIRE FLASH                       186   439   20   20  8c     playfield
+FIGHTER LEFT 1                          91   438   20   20  8c     playfield
+FIGHTER LEFT 2                          57   549   20   20  8c     playfield
+FIGHTER LEFT 3                          69   558   20   20  8c     playfield
+ADV FIGHTER LEFT                        80   566   20   20  8c     playfield
+SHOOT AGAIN (X2)                        69   537   20   20  8c     playfield
+TANK 1                                  77   405   20   20  8c     playfield
+LEFT SPINNER-R                          69   391   20   20  8c     playfield
+LEFT SPINNER-G                          55   373   20   20  8c     playfield
+LEFT SPINNER-B                          55   373   20   20  8c     playfield
+MASER FLASH                             55   373   20   20  8c     playfield
+BUILDING SPOT                           30   388   20   20  8c     playfield
+MASER                                   57   382   20   20  8c     playfield
+MASER READY                             51   417   20   20  8c     playfield
+UPPER PLAYFIELD GI-RED(X9)              67   425   20   20         playfield
+BRIDGE                                 127   392   20   20  9a     playfield
+POWER                                  146   392   20   20  9a     playfield
+RIGHT BB-BASH BUILDING                 166   386   20   20  9a     playfield
+RIGHT BB-LITE BATTLE                   476    39   20   20  9a     Test/scaled_godzilla_pro_backpanel
+RIGHT BB-BRIDGE OUT                    476    61   20   20  9a     Test/scaled_godzilla_pro_backpanel
+BACKPANEL RIGHT FLASH                  476    83   20   20  9a     Test/scaled_godzilla_pro_backpanel
+PARIS                                  413    61   20   20  9a     Test/scaled_godzilla_pro_backpanel
+TOKYO                                  145   374   20   20  9a     playfield
+RIGHT RAMP-R                           155   360   20   20  9a     playfield
+RIGHT RAMP-G                           199   189   20   20  9a     playfield
+RIGHT RAMP-B                           199   189   20   20  9a     playfield
+TANK 5                                 199   189   20   20  9a     playfield
+POWERLINE RIGHT                        192   205   20   20  9a     playfield
+HEAT RAY L1                            212   204   20   20  9a     playfield
+HEAT RAY L2                            169   184   20   20  9a     playfield
+HEAT RAY L3                            172   172   20   20  9a     playfield
+HEAT RAY                               176   159   20   20  9a     playfield
+PLANET X                               180   144   20   20  9a     playfield
+MECHA WIZ                              137   353   20   20  9a     playfield
+KING OF THE MONSTERS WIZ               160   328   20   20  9a     playfield
+MONSTER ZERO WIZ                       137   331   20   20  9a     playfield
+NY                                     114   328   20   20  9a     playfield
+BIG LOOP-R                             118   360   20   20  9a     playfield
+BIG LOOP-G                             195   251   20   20  9a     playfield
+BIG LOOP-B                             195   251   20   20  9a     playfield
+DESTRUCTION JACKPOT                    195   251   20   20  9a     playfield
+TAIL WHIP                              170   273   20   20  9a     playfield
+GLOBE FLASH                            176   297   20   20  9a     playfield
+LONDON                                 287   206   20   20  9a     playfield
+TANKS                                  128   374   20   20  9a     playfield
+TANK 2                                 107   386   20   20  9b     playfield
+ADV TRAIN                               76   287   20   20  9b     playfield
+ATTACK BRIDGE                           83   304   20   20  9b     playfield
+TANK 3                                 102   292   20   20  9b     playfield
+MAGNA GRAB                              95   276   20   20  9b     playfield
+SKILL SHOT                              89   260   20   20  9b     playfield
+LEFT RAMP-R                             49   284   20   20  9b     playfield
+LEFT RAMP-G                             69   272   20   20  9b     playfield
+LEFT RAMP-B                             69   272   20   20  9b     playfield
+LEFT BB-BASH BUILDING                   69   272   20   20  9b     playfield
+LEFT BB-LITE BATTLE                     51    75   20   20  9b     Test/scaled_godzilla_pro_backpanel
+LEFT BB-BRIDGE OUT                      51   111   20   20  9b     Test/scaled_godzilla_pro_backpanel
+BACKPANEL LEFT FLASH                    51   147   20   20  9b     Test/scaled_godzilla_pro_backpanel
+MOTHRA FLASH                            76    50   20   20  9c     Test/scaled_godzilla_pro_backpanel
+TOP SPINNER FLASH                      343    76   20   20  9c     Test/scaled_godzilla_pro_backpanel
+TESLA STRIKE                           172   100   20   20  9c     playfield
+TANK 4                                 159   242   20   20  9c     playfield
+TOP SPINNER-R                          162   223   20   20  9c     playfield
+TOP SPINNER-G                          165   207   20   20  9c     playfield
+TOP SPINNER-B                          165   207   20   20  9c     playfield
+POWERLINE CENTER                       165   207   20   20  9c     playfield
+LITE DESTRUCTION JACKPOT               144   216   20   20  9c     playfield
+BUILDING FIRE LEFT 2-R                 124   220   20   20  9c     playfield
+BUILDING FIRE LEFT 2-G                 117   254   20   20  9c     playfield
+BUILDING FIRE LEFT 3-R                 117   254   20   20  9c     playfield
+BUILDING FIRE LEFT 3-G                 116   239   20   20  9c     playfield
+BUILDING-R                             116   239   20   20  9c     playfield
+BUILDING-G                             123   202   20   20  9c     playfield
+BUILDING-B                             123   202   20   20  9c     playfield
+POWERLINE LEFT                         123   202   20   20  9c     playfield
+BUILDING FIRE RIGHT 3-R                104   219   20   20  9c     playfield
+BUILDING FIRE RIGHT 3-G                135   238   20   20  9c     playfield
+BUILDING FIRE RIGHT 2-R                135   238   20   20  9c     playfield
+BUILDING FIRE RIGHT 2-G                136   254   20   20  9c     playfield
+BUILDING FIRE RIGHT 1-R                136   254   20   20  9c     playfield
+BUILDING FIRE RIGHT 1-G                137   265   20   20  9c     playfield
+BUILDING FIRE LEFT 1-R                 137   265   20   20  9c     playfield
+BUILDING FIRE LEFT 1-G                 118   267   20   20  9c     playfield
+TANK 1A-G                              118   267   20   20         playfield
+TANK 1A-R                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 1A-B                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 1B-G                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 1B-R                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 1B-B                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 2A-G                               45   133   20   20         Test/scaled_godzilla_topper
+TANK 2A-R                               84   119   20   20         Test/scaled_godzilla_topper
+TANK 2A-B                               84   119   20   20         Test/scaled_godzilla_topper
+TANK 2B-G                               84   119   20   20         Test/scaled_godzilla_topper
+TANK 2B-R                               93   119   20   20         Test/scaled_godzilla_topper
+TANK 2B-B                               93   119   20   20         Test/scaled_godzilla_topper
+TANK 3A-G                               93   119   20   20         Test/scaled_godzilla_topper
+TANK 3A-R                              137   128   20   20         Test/scaled_godzilla_topper
+TANK 3A-B                              137   128   20   20         Test/scaled_godzilla_topper
+TANK 3B-G                              137   128   20   20         Test/scaled_godzilla_topper
+TANK 3B-R                              149   128   20   20         Test/scaled_godzilla_topper
+TANK 3B-B                              149   128   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT A-G                  149   128   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT A-R                  135    57   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT A-B                  135    57   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT B-G                  135    57   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT B-R                  135    57   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL LEFT B-B                  135    57   20   20         Test/scaled_godzilla_topper
+HEAT RAY 1-G                           135    57   20   20         Test/scaled_godzilla_topper
+HEAT RAY 1-R                           321    68   20   20         Test/scaled_godzilla_topper
+HEAT RAY 1-B                           321    68   20   20         Test/scaled_godzilla_topper
+HEAT RAY 2-G                           321    68   20   20         Test/scaled_godzilla_topper
+HEAT RAY 2-R                           314    75   20   20         Test/scaled_godzilla_topper
+HEAT RAY 2-B                           314    75   20   20         Test/scaled_godzilla_topper
+HEAT RAY 3-G                           314    75   20   20         Test/scaled_godzilla_topper
+HEAT RAY 3-R                           305    86   20   20         Test/scaled_godzilla_topper
+HEAT RAY 3-B                           305    86   20   20         Test/scaled_godzilla_topper
+HEAT RAY 4-G                           305    86   20   20         Test/scaled_godzilla_topper
+HEAT RAY 4-R                           296    94   20   20         Test/scaled_godzilla_topper
+HEAT RAY 4-B                           296    94   20   20         Test/scaled_godzilla_topper
+HEAT RAY 5-G                           296    94   20   20         Test/scaled_godzilla_topper
+HEAT RAY 5-R                           285   107   20   20         Test/scaled_godzilla_topper
+HEAT RAY 5-B                           285   107   20   20         Test/scaled_godzilla_topper
+HEAT RAY 6-G                           285   107   20   20         Test/scaled_godzilla_topper
+HEAT RAY 6-R                           277   115   20   20         Test/scaled_godzilla_topper
+HEAT RAY 6-B                           277   115   20   20         Test/scaled_godzilla_topper
+HEAT RAY 7-G                           277   115   20   20         Test/scaled_godzilla_topper
+HEAT RAY 7-R                           296   120   20   20         Test/scaled_godzilla_topper
+HEAT RAY 7-B                           296   120   20   20         Test/scaled_godzilla_topper
+HEAT RAY 8-G                           296   120   20   20         Test/scaled_godzilla_topper
+HEAT RAY 8-R                           303   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 8-B                           303   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 9-G                           303   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 9-R                           315   129   20   20         Test/scaled_godzilla_topper
+HEAT RAY 9-B                           315   129   20   20         Test/scaled_godzilla_topper
+HEAT RAY 10-G                          315   129   20   20         Test/scaled_godzilla_topper
+HEAT RAY 10-R                          304   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 10-B                          304   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 11-G                          304   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 11-R                          290   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 11-B                          290   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 12-G                          290   136   20   20         Test/scaled_godzilla_topper
+HEAT RAY 12-R                          263   121   20   20         Test/scaled_godzilla_topper
+HEAT RAY 12-B                          263   121   20   20         Test/scaled_godzilla_topper
+HEAT RAY 13-G                          263   121   20   20         Test/scaled_godzilla_topper
+HEAT RAY 13-R                          263   113   20   20         Test/scaled_godzilla_topper
+HEAT RAY 13-B                          263   113   20   20         Test/scaled_godzilla_topper
+HEAT RAY 14-G                          263   113   20   20         Test/scaled_godzilla_topper
+HEAT RAY 14-R                          247   118   20   20         Test/scaled_godzilla_topper
+HEAT RAY 14-B                          247   118   20   20         Test/scaled_godzilla_topper
+HEAT RAY 15-G                          247   118   20   20         Test/scaled_godzilla_topper
+HEAT RAY 15-R                          262   139   20   20         Test/scaled_godzilla_topper
+HEAT RAY 15-B                          262   139   20   20         Test/scaled_godzilla_topper
+HEAT RAY 16-G                          262   139   20   20         Test/scaled_godzilla_topper
+HEAT RAY 16-R                          222   137   20   20         Test/scaled_godzilla_topper
+HEAT RAY 16-B                          222   137   20   20         Test/scaled_godzilla_topper
+HEAT RAY 17-G                          222   137   20   20         Test/scaled_godzilla_topper
+HEAT RAY 17-R                          218   127   20   20         Test/scaled_godzilla_topper
+HEAT RAY 17-B                          218   127   20   20         Test/scaled_godzilla_topper
+HEAT RAY 18-G                          218   127   20   20         Test/scaled_godzilla_topper
+HEAT RAY 18-R                          209   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 18-B                          209   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 19-G                          209   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 19-R                          202   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 19-B                          202   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 20-G                          202   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 20-R                          196   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 20-B                          196   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 21-G                          196   128   20   20         Test/scaled_godzilla_topper
+HEAT RAY 21-R                          188   138   20   20         Test/scaled_godzilla_topper
+HEAT RAY 21-B                          188   138   20   20         Test/scaled_godzilla_topper
+GODZILLA 1A-G                          188   138   20   20         Test/scaled_godzilla_topper
+GODZILLA 1A-R                          371   143   20   20         Test/scaled_godzilla_topper
+GODZILLA 1A-B                          371   143   20   20         Test/scaled_godzilla_topper
+GODZILLA 1B-G                          371   143   20   20         Test/scaled_godzilla_topper
+GODZILLA 1B-R                          387   143   20   20         Test/scaled_godzilla_topper
+GODZILLA 1B-B                          387   143   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT A-G                 387   143   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT A-R                 398    74   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT A-B                 398    74   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT B-G                 398    74   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT B-R                 398    74   20   20         Test/scaled_godzilla_topper
+TOPPER PANEL RIGHT B-B                 398    74   20   20         Test/scaled_godzilla_topper
+FLAME PANEL-L                          398    74   20   20  CN4    Test/scaled_godzilla_topper
+FLAME PANEL-C                           82    89   20   20  CN4    Test/scaled_godzilla_topper
+FLAME PANEL-R                          186    84   20   20  CN4    Test/scaled_godzilla_topper
+GODZILLA FLASHER                       273    77   20   20  CN4    Test/scaled_godzilla_topper
+DIP 1                                  337   134   20   20         Test/scaled_godzilla_topper
+DIP 2                                  398   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 3                                  404   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 4                                  410   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 5                                  416   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 6                                  422   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 7                                  428   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+DIP 8                                  434   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+SERVICE SELECT                         440   195   20   20         System/TestMode/cpu_board_from_manual_cropped
+SERVICE PLUS                           311   189   30   30         System/TestMode/chuck_buttons_cropped
+SERVICE MINUS                          272   173   30   30         System/TestMode/chuck_buttons_cropped
+SERVICE BACK                           233   158   30   30         System/TestMode/chuck_buttons_cropped
+HEADPHONE DETECT                       193   142   30   30         System/TestMode/chuck_buttons_cropped
+CENTER COIN                            261   334   30   30         System/TestMode/spike_2_cabinet_front_cropped
+RIGHT COIN                             203   342   51   50         System/TestMode/spike_2_cabinet_front_cropped
+FOURTH COIN                            299   334   30   30         System/TestMode/spike_2_cabinet_front_cropped
+FIFTH COIN                             203   342   51   50         System/TestMode/spike_2_cabinet_front_cropped
+SIXTH COIN                             203   342   51   50         System/TestMode/spike_2_cabinet_front_cropped
+SLAM TILT                              203   342   51   50         System/TestMode/spike_2_cabinet_front_cropped
+LEFT SPINNER                            43   288   20   20         playfield
+MASER TARGET                            50   359   20   20         playfield
+POP BUMPER                              37   406   20   20         playfield
+MECHA EXIT TOP                         251   413   20   20         playfield
+MECHA EXIT BOTTOM                      282   364   20   20         playfield
+UP LEFT FLIPPER EOS                    263   439   20   20         playfield
+RIGHT SCOOP                             72   324   20   20         playfield
+LEFT FLIPPER EOS                       250   359   20   20         playfield
+LEFT OUTLANE                           120   575   20   20         playfield
+LEFT RETURN LANE                        29   530   20   20         playfield
+RIGHT RETURN LANE                       53   505   20   20         playfield
+RIGHT OUTLANE                          241   505   20   20         playfield
+RIGHT FLIPPER BUTTON                   264   530   20   20         playfield
+LEFT FLIPPER BUTTON                    301   656   20   20         playfield
+UP LEFT FLIP BUTTON                     12   656   20   20         playfield
+SHOOTER LANE                            12   656   20   20         playfield
+RIGHT SLINGSHOT                        283   608   20   20         playfield
+LEFT SLINGSHOT                         217   503   20   20         playfield
+RIGHT FLIPPER EOS                       78   503   20   20         playfield
+TROUGH 6                               169   575   20   20  8a     playfield
+TROUGH 5                               210   635   20   20  8a     playfield
+TROUGH 4                               219   630   20   20  8a     playfield
+TROUGH 3                               228   626   20   20  8a     playfield
+TROUGH 2                               236   621   20   20  8a     playfield
+TROUGH 1                               245   617   20   20  8a     playfield
+TROUGH JAM                             254   612   20   20  8a     playfield
+L RAMP MADE OPTO                       254   607   20   20         playfield
+BIG LOOP EXIT                           62    82   20   20         playfield
+BUILDING EXIT                           90    82   20   20         playfield
+GODZILLA TARGET                         70   162   20   20         playfield
+BUILDING HIT OPTO                       72   215   20   20         playfield
+PWRLINE LEFT TGT                       121   178   20   20         playfield
+PWRLINE CENTER TGT                     102   206   20   20         playfield
+PWRLINE RIGHT TGT                      144   202   20   20         playfield
+R RAMP MADE OPTO                       223   194   20   20         playfield
+BIG LOOP ENTER                         225    32   20   20         playfield
+TOP SPINNER                            268    96   20   20         playfield
+RIGHT SPINNER                          181   141   20   20         playfield
+SHIELD TARGET LEFT                     227   329   20   20         playfield
+SHIELD TARGET RIGHT                    201   300   20   20         playfield
+GODZILLA MAGNET FIRED VIRTUAL          202   319   20   20         playfield

@@ -213,9 +213,15 @@ def main():
              "# %-7s %-34s %5s %5s %4s %4s %4s %5s  %-6s %s" %
              ("class", "name", "x", "y", "w", "h", "grp", "index", "conn", "image")]
     for r in keep:
+        # "-" rather than "" for a missing connector, so EVERY row has the same
+        # number of whitespace-separated fields. It does not here: coils carry no
+        # connector, an empty column made their rows one field short, and the
+        # only reader - which counts fields from the right, because the NAME is
+        # the multi-word one - silently read `h` as the group and the group as
+        # the index. Every coil tooltip said "group 20 index 6".
         lines.append("%-9s %-34s %5d %5d %4d %4d %4d %5d  %-6s %s"
                      % (r["kind"], r["name"], r["x"], r["y"], r["w"], r["h"],
-                        r["group"], r["index"], r["conn"], r["image"]))
+                        r["group"], r["index"], r["conn"] or "-", r["image"]))
     text = "\n".join(lines) + "\n"
 
     if len(sys.argv) > 1:

@@ -17,6 +17,14 @@
  * says how many writes have actually landed so a reader can tell "off" from
  * "no data". A dark playfield with decoded == 0 means the decoder never fired.
  *
+ * COILS TOO, since version 2. Same board, same frames, same reasoning - see
+ * coildecode.py. A coil is an EVENT rather than a level, so it is published as
+ * a wrapping fire COUNTER per (node, index): a reader flashes the marker when
+ * the counter moves and cannot miss a pulse between two polls the way a
+ * sampled on/off bit would. `lvl` carries the drive byte alongside it, because
+ * a hold (a flipper held up) and a pulse (a slingshot) look identical in a
+ * counter and different here.
+ *
  * SINGLE WRITER. The guest writes, the host only reads. `gen` is bumped after
  * each update so a reader can tell it moved without diffing 3 KB.
  */
@@ -24,14 +32,20 @@
 #define PADLED_H
 
 #define PADLED_MAGIC   0x44454c50u      /* 'PLED' */
-#define PADLED_VERSION 1
+#define PADLED_VERSION 2
 
 /* Node ids run to 14 and index to 95, so a flat [16][96] covers every board
  * with room to spare and needs no per-node base to get wrong. */
 #define PADLED_NODES 16
 #define PADLED_IDX   96
+#define PADLED_COILS 16
 #define PADLED_BYTES 4096
 
+/* APPEND ONLY. A reader compiled against version 1 maps the same page and finds
+ * every field it knows at the same offset, which is what lets the playfield
+ * window and the shim be updated independently. Offsets, since a Python reader
+ * has to hard-code them: val 20, coil 1556, lvl 1812, coil_gen 2068,
+ * coil_decoded 2072. */
 struct padled_shm {
     unsigned magic;
     unsigned version;
@@ -39,6 +53,10 @@ struct padled_shm {
     unsigned decoded;             /* total LED writes decoded, ever          */
     unsigned skipped;             /* frames that looked indexed but were not */
     unsigned char val[PADLED_NODES][PADLED_IDX];
+    unsigned char coil[PADLED_NODES][PADLED_COILS];  /* wrapping fire count  */
+    unsigned char lvl[PADLED_NODES][PADLED_COILS];   /* last drive byte      */
+    unsigned coil_gen;            /* bumped after every decoded coil frame   */
+    unsigned coil_decoded;        /* total coil fires decoded, ever          */
 };
 
 #endif

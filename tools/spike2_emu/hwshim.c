@@ -4389,6 +4389,9 @@ static void nb_maybe_dump(void)
 struct padled_shm {
     unsigned magic, version, gen, decoded, skipped;
     unsigned char val[16][96];
+    unsigned char coil[16][16];       /* wrapping fire counter, see coil_publish */
+    unsigned char lvl[16][16];        /* last drive byte                         */
+    unsigned coil_gen, coil_decoded;
 };
 #define PADLED_MAGIC 0x44454c50u
 
@@ -4414,7 +4417,58 @@ static void led_map(void)
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    led_shm->version = 1;
+    led_shm->version = 2;             /* 2 adds the coil block; see padled.h */
+}
+
+/* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
+ *
+ *     88 0b 40 <IDX> <PWR> 00 00 <B7> 00 00 00 00 <cksum> 00
+ *
+ * `cmd 0x40` on the coil boards addresses ONE COIL BY INDEX, and the index is
+ * the device table's own: node 8 carries 0..8 and node 9 carries 6, which is
+ * exactly the ten playfield coils the table lists under groups 6 and 7. Byte 4
+ * is drive strength - the AUTO PLUNGER goes out at 0x96 where everything else
+ * is 0xff, and the service menu's own "Trough Eject Power 225 (88%)" is the
+ * same scale.
+ *
+ * HOW IT WAS PINNED DOWN, because the reasoning matters more than the layout.
+ * Coils cannot be watched casually: 48V is interlocked to the coin door, and
+ * the door has to be CLOSED for anything to fire (the game says so on screen,
+ * "48V DISABLED / CLOSE COIN DOOR"). So: door closed, trough switches opened to
+ * say the balls are gone, Start pressed. The game put up LOCATING PINBALLS and
+ * ran a ball search on an 8.3 s cycle - and the frames that appeared carried
+ * indices 2, 3, 4, 7 and 8, which are RIGHT SLINGSHOT, LEFT SLINGSHOT, AUTO
+ * PLUNGER, POP BUMPER and RIGHT SCOOP. Those are precisely the coils a ball
+ * search fires, and precisely NOT the three flippers or the trough eject. The
+ * game labelled its own experiment.
+ *
+ * WHAT IS NOT DECODED: byte 7, which is 0xff for the slingshots and the pop
+ * bumper and 0x00 for the auto plunger and the scoop. On/off, hold power and
+ * "the board may self-fire this one from its own switch" all fit what has been
+ * seen and nothing distinguishes them yet. So this counts a coil being
+ * ADDRESSED, and the window says "addressed", not "energised for 30 ms".
+ *
+ * The FIRST 0x40 for a given coil is its boot configuration - nine arrive back
+ * to back on node 8 at startup, one on node 9 - so it seeds the record and does
+ * not count as an event. Everything after it does. */
+static void coil_publish(const unsigned char *p, int n)
+{
+    static unsigned char configured[16][16];
+    unsigned node, idx;
+
+    if (n != 14 || !(p[0] & 0x80) || p[2] != 0x40) return;
+    node = (unsigned)p[0] & 0x3f;
+    if (node != 8 && node != 9) return;
+    idx = p[3];
+    if (idx >= 16) return;
+
+    led_map();
+    if (!led_shm) return;
+    led_shm->lvl[node][idx] = p[4];
+    if (!configured[node][idx]) { configured[node][idx] = 1; return; }
+    led_shm->coil[node][idx]++;
+    led_shm->coil_decoded++;
+    led_shm->coil_gen++;
 }
 
 static void led_publish(const unsigned char *p, int n)
@@ -4458,6 +4512,69 @@ static void led_publish(const unsigned char *p, int n)
         return;
     }
     led_shm->skipped++;
+}
+
+/* ---- THE COIL PROBE (PAD_COIL_PROBE=1) ---------------------------------
+ *
+ * WHY NOT JUST RAISE PAD_NB_LOG. That is the obvious instrument and it is the
+ * wrong one twice over. It quadruples the boot, so a deliberate coil experiment
+ * - start a game, hit a slingshot, watch the wire - cannot reach a playable
+ * state inside a sane run; and it buries the ten frames that matter under a
+ * hundred thousand that do not. Worse, it is self-defeating here: at 1.5M lines
+ * the boot was still running after four minutes and the run had to be thrown
+ * away.
+ *
+ * WHAT THIS LOGS INSTEAD. Nodes 8 and 9 are the coil boards - the device table
+ * puts all ten playfield coils there, and the boot enumeration agrees to the
+ * index: nine `40 <idx>` records on node 8 for indices 0..8, exactly one on
+ * node 9 for index 6, against ten coils in the table with those same
+ * (group, index) pairs. This prints a frame from those two boards ONLY WHEN ITS
+ * PAYLOAD DIFFERS from the last frame carrying the same command byte. A status
+ * frame that repeats itself 188 times costs one line; the frame that changes
+ * the moment a solenoid fires costs one line too, and lands in a log with
+ * almost nothing else in it.
+ *
+ * The switch poll (0x11) and the LED writes are skipped - they change every
+ * frame by design and are already decoded. */
+static int coil_probe_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_COIL_PROBE");
+        v = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return v;
+}
+
+static void coil_probe(const unsigned char *p, int n)
+{
+    static unsigned char last[2][256][64];
+    static unsigned char lastlen[2][256];
+    static int budget = 20000;
+    unsigned node, cmd, slot, len, i;
+    char line[HEXBUF + 128], h[HEXBUF];
+
+    if (!coil_probe_on() || n < 3 || !(p[0] & 0x80)) return;
+    node = (unsigned)p[0] & 0x3f;
+    if (node != 8 && node != 9) return;
+    cmd = p[2];
+    if (cmd == 0x11) return;                                  /* switch poll  */
+    if (cmd == 0x97 || (cmd >= 0xa2 && cmd <= 0xa6) ||
+        cmd == 0xb4 || cmd == 0xb5) return;                   /* LED writes   */
+
+    slot = (node == 8) ? 0u : 1u;
+    len = (unsigned)n > 64 ? 64u : (unsigned)n;
+    if (lastlen[slot][cmd] == (unsigned char)len) {
+        for (i = 0; i < len; i++)
+            if (last[slot][cmd][i] != p[i]) break;
+        if (i == len) return;                                 /* unchanged    */
+    }
+    for (i = 0; i < len; i++) last[slot][cmd][i] = p[i];
+    lastlen[slot][cmd] = (unsigned char)len;
+    if (budget-- <= 0) return;
+    hex64(h, p, n);
+    snprintf(line, sizeof line, "[coil] node %u cmd %02x %s\n", node, cmd, h);
+    logmsg(line);
 }
 
 static void nb_log(const char *dir, const unsigned char *p, int n, unsigned long want)
@@ -5004,6 +5121,8 @@ long shim_write(int fd, const void *b, unsigned long n)
         }
         nb_log("TX", nb_req, nb_req_len, 0);
         led_publish(nb_req, nb_req_len);
+        coil_publish(nb_req, nb_req_len);
+        coil_probe(nb_req, nb_req_len);
         nb_trace();
         nb_maybe_poke();
         nb_watch_flags();

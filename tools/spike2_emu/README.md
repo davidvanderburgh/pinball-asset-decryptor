@@ -19,6 +19,8 @@ list of confident conclusions that turned out to be wrong — lives there.
 | GL backend B, the bridge (default) | `glbridge.c` + `padglhost.c` (native x86-64), `padgl.h` |
 | EGL, either backend | `eglshim.c` |
 | Host decoders / players | `padvidhost.py` (video), `playaudio.sh` (audio) |
+| Virtual playfield (Windows) | `playfield.py`, `coilact.py`, `plunge.py`, `swpoke.py` |
+| Device maps and decoders | `devicexy.py`, `ledio.py`, `leddecode.py`, `coildecode.py`, `padled.h` |
 | Build | `build.sh`, `buildgl.sh`, `buildbridge.sh` |
 | Run | `watch.sh`, `runbridge.sh`, `nbrun.sh`, `verify2.sh`, `verify3.sh` |
 | Safety | `alive.sh`, `killgame.sh`, `runlim.sh` |
@@ -51,6 +53,23 @@ ran last decides which backend is live. Re-run the one you want before measuring
 - **Bracket `pkill` patterns** — `pkill -f padvidhost.py` from inside
   `wsl -e bash -c '...'` matches the shell's own command line and kills it.
   Write `pkill -f "padvidhost[.]py"`.
+
+## The coin door interlock, which explains a whole class of "it does nothing"
+
+The emulated machine keeps the real one's interlock and it is not optional:
+
+- **Coin door CLOSED** (switch 33 held, the default) — 48V is live, so coils
+  fire. The service buttons are locked out; pressing Enter does nothing.
+- **Coin door OPEN** (switch 33 released) — the service menu works. 48V is off
+  and the game says so on its own screen: *48V DISABLED / CLOSE COIN DOOR*.
+  **No coil can fire in this state**, which makes a perfectly working playfield
+  look broken. The playfield window says so in the status bar.
+
+You can close the door *while in the menu* to get both at once, which is how the
+coil frames were captured. To see coils fire without playing: close the door,
+open the trough switches so the balls look missing, press Start — the game puts
+up LOCATING PINBALLS and ball-searches on an 8.3 s cycle. `coildecode.py` reads
+the result out of a `PAD_COIL_PROBE=1` capture.
 
 ## Requirements
 

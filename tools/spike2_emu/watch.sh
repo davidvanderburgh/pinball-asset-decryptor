@@ -195,20 +195,35 @@ GAMEPG=$!
 # up by itself rather than being one more thing to remember. PAD_PLAYFIELD=0
 # turns it off; set PAD_PF_PYTHON if python.exe is somewhere unusual.
 #
-# `cmd.exe /c start` detaches it, so closing the game does not take the window
-# with it and vice versa. It talks to the rig only through dump/padled (read)
-# and swpoke.py (clicks), so it survives the game restarting under it.
+# LAUNCH IT DIRECTLY, IN ITS OWN SESSION, AND DO NOT WAIT FOR IT. Every word of
+# that is load-bearing and the first version got two of them wrong:
+#
+#   * NOT `cmd.exe /c start`. That combination HUNG FOREVER against pythonw.exe
+#     and took the rest of this script with it - no autoattract, no wall-clock
+#     backstop, and no teardown when the window closed, so a run could only be
+#     stopped by hand. `start` returns promptly for a CONSOLE program because a
+#     new console is allocated and the child inherits none of our handles;
+#     pythonw.exe is a GUI-subsystem binary, gets no console, inherits the
+#     interop pipe instead, and /init then waits for the pipe to close - which
+#     it cannot until the playfield window is closed. Four leaked watch.sh trees
+#     were sitting on that line before anyone noticed, because the symptom is a
+#     script that looks like it is still starting up.
+#   * pythonw.exe rather than python.exe, still: a GUI-subsystem interpreter is
+#     what keeps a black console window from sitting beside the playfield. That
+#     is the same property that broke `start`, so the two fixes are one choice.
+#   * setsid, so the window is not in this script's process group and teardown's
+#     group kills leave it alone. It talks to the rig only through dump/padled
+#     (read) and swpoke.py (clicks), so it survives the game restarting under it.
+#   * </dev/null and &, so nothing can block here again.
 if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -f "$S/switch_xy.txt" ]; then
-    # pythonw.exe, NOT python.exe: the console-attached interpreter leaves a
-    # black terminal window sitting next to the playfield for the whole session.
     PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
     PF_WIN='C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu\playfield.py'
-    if command -v cmd.exe >/dev/null 2>&1; then
-        ( cd /mnt/c && cmd.exe /c start "" "$PF_PY" "$PF_WIN" ) >/dev/null 2>&1
+    if command -v "$PF_PY" >/dev/null 2>&1; then
+        setsid "$PF_PY" "$PF_WIN" </dev/null >/dev/null 2>&1 &
         echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
     else
         echo "[watch] no Windows interop; run playfield.py yourself:" >&2
-        echo "[watch]   python tools\\spike2_emu\\playfield.py" >&2
+        echo "[watch]   pythonw tools\\spike2_emu\\playfield.py" >&2
     fi
 fi
 

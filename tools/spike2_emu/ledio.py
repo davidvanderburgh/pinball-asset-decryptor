@@ -104,9 +104,12 @@ def main():
              "# %-4s %-5s %-34s %5s %5s  %-5s %s"
              % ("node", "index", "name", "x", "y", "conn", "image")]
     for node, r in rows:
+        # "-" not "" for a missing connector: the reader counts fields from the
+        # right (the NAME is the multi-word one), so an empty column silently
+        # shifts every number. It bit device_xy.txt's coils for real.
         lines.append("%-6d %-5d %-34s %5d %5d  %-5s %s"
                      % (node, r["index"], r["name"], r["x"], r["y"],
-                        r["conn"], r["image"]))
+                        r["conn"] or "-", r["image"]))
     text = "\n".join(lines) + "\n"
 
     if len(sys.argv) > 2:

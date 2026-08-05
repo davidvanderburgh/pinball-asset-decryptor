@@ -2,15 +2,15 @@
 # Position from the device table in the binary; node/index verified
 # against the boot enumeration on the wire (see ledio.py).
 # node index name                                   x     y  conn  image
-1      1     COIN DOOR GI                         268   255        System/TestMode/spike_2_cabinet_front_cropped
-1      2     START BUTTON                         102   228        System/TestMode/spike_2_cabinet_front_cropped
-1      3     TOURNAMENT START                     102   277        System/TestMode/spike_2_cabinet_front_cropped
-1      4     LOCKDOWN BUTTON-G                    250   169        System/TestMode/spike_2_cabinet_front_cropped
-1      5     LOCKDOWN BUTTON-R                    250   169        System/TestMode/spike_2_cabinet_front_cropped
-1      7     LOCKDOWN BUTTON-B                    250   169        System/TestMode/spike_2_cabinet_front_cropped
-8      4     RIGHT RETURN LANE                    242   472        playfield
-8      5     RIGHT OUTLANE                        264   498        playfield
-8      6     LEFT RETURN LANE                      53   472        playfield
+1      1     COIN DOOR GI                         268   255  -     System/TestMode/spike_2_cabinet_front_cropped
+1      2     START BUTTON                         102   228  -     System/TestMode/spike_2_cabinet_front_cropped
+1      3     TOURNAMENT START                     102   277  -     System/TestMode/spike_2_cabinet_front_cropped
+1      4     LOCKDOWN BUTTON-G                    250   169  -     System/TestMode/spike_2_cabinet_front_cropped
+1      5     LOCKDOWN BUTTON-R                    250   169  -     System/TestMode/spike_2_cabinet_front_cropped
+1      7     LOCKDOWN BUTTON-B                    250   169  -     System/TestMode/spike_2_cabinet_front_cropped
+8      4     RIGHT RETURN LANE                    242   472  -     playfield
+8      5     RIGHT OUTLANE                        264   498  -     playfield
+8      6     LEFT RETURN LANE                      53   472  -     playfield
 8      7     LEFT OUTLANE                          29   498  8b    playfield
 8      8     SAUCER                               225   450  8b    playfield
 8      9     FIGHTER RIGHT 1                      239   549  8b    playfield
@@ -60,7 +60,7 @@
 8      59    MASER FLASH                           30   388  8c    playfield
 8      60    BUILDING SPOT                         57   382  8c    playfield
 8      62    MASER                                 51   417  8c    playfield
-8      63    MASER READY                           67   425        playfield
+8      63    MASER READY                           67   425  -     playfield
 9      8     KAIJU                                127   392  9a    playfield
 9      9     BRIDGE                               146   392  9a    playfield
 9      10    POWER                                166   386  9a    playfield
@@ -129,4 +129,4 @@
 9      84    BUILDING FIRE RIGHT 1-R              137   265  9c    playfield
 9      85    BUILDING FIRE RIGHT 1-G              137   265  9c    playfield
 9      86    BUILDING FIRE LEFT 1-R               118   267  9c    playfield
-9      87    BUILDING FIRE LEFT 1-G               118   267        playfield
+9      87    BUILDING FIRE LEFT 1-G               118   267  -     playfield

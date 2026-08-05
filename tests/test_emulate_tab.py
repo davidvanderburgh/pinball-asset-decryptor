@@ -74,9 +74,38 @@ def test_auto_advance_wording_only_applies_at_tech_alerts():
 
 
 def test_every_state_the_rig_can_emit_has_wording():
-    for state in ("off", "booting", "techalerts", "running"):
+    # `attract` is the word status.sh emits now; `running` is what it emitted
+    # before, kept so an older rig still reads as something.
+    for state in ("off", "booting", "techalerts", "attract", "running"):
         label, _ = state_text({"state": state})
         assert label and label != state
+
+
+def test_attract_is_named_as_attract():
+    # The app said "Waiting at Tech Alerts" for a whole run while the game sat
+    # in attract mode on its high-score screen, because status.sh and
+    # autoattract.sh disagreed about what "past Tech Alerts" meant. The word
+    # the user reads has to be the one that matches the screen.
+    label, _ = state_text({"state": "attract"})
+    assert "attract" in label.lower()
+    assert "tech alert" not in label.lower()
+
+
+def test_auto_advance_giving_up_is_not_shown_as_ordinary_waiting():
+    # auto=0 means the helper is not running; it does NOT mean it succeeded.
+    # "finished the job" and "ran out of presses" both used to read as the
+    # same unchanging "Waiting at Tech Alerts", and they need opposite things
+    # from the human.
+    label, hint = state_text({"state": "techalerts", "auto": "0",
+                              "auto_result": "gaveup"})
+    assert "stuck" in label.lower()
+    assert "service menu" in hint.lower()
+    assert "esc" in hint.lower()
+    # ...and a helper that simply finished still reads as the ordinary wait.
+    label, hint = state_text({"state": "techalerts", "auto": "0",
+                              "auto_result": "ok"})
+    assert "Waiting" in label
+    assert "press a switch" in hint.lower()
 
 
 def test_unknown_state_falls_back_to_the_raw_word():

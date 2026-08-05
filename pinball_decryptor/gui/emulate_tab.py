@@ -60,6 +60,12 @@ _STATE_TEXT = {
     "techalerts": ("Waiting at Tech Alerts",
                    "Press a switch in the game window to carry on — this is "
                    "what the real machine does, not a fault."),
+    "attract": ("In attract mode", "Playing its attract loop, or in the "
+                                   "operator menu."),
+    # Kept: what status.sh emitted before it learned to say `attract`, so an
+    # older rig against a newer app still reads as something rather than as a
+    # bare word.  The rename happened because the old word was reached by a
+    # test that had quietly stopped working - see gamestate.sh.
     "running": ("Running", "Attract mode or the operator menu."),
 }
 
@@ -70,6 +76,15 @@ _STATE_TEXT = {
 _ADVANCING_HINT = ("Skipping to attract mode on its own — it waits for the "
                    "node bus to finish bringing up, then presses Service Back "
                    "once. Untick “Skip to attract mode” to do it by hand.")
+
+#: Shown when the auto-advance helper ran out of presses and stopped.  It names
+#: the service menu because that is the failure this cannot see: the menu opens
+#: no video clip, so from the outside it reads exactly like Tech Alerts.
+_GAVEUP_HINT = ("Auto-advance pressed Service Back several times and the "
+                "screen did not change. If an earlier press DID take, the game "
+                "is probably on the SERVICE MENU, which looks the same from "
+                "out here. Click the game window and press Esc: from the menu "
+                "it leaves toward attract, from Tech Alerts it clears them.")
 
 
 def rig_dir():
@@ -107,11 +122,19 @@ def state_text(info):
     ``auto=`` is the number of auto-advance helpers still running, so a
     non-zero value at Tech Alerts means the rig is already dealing with it and
     the user should be told to wait rather than to press something.
+
+    ``auto_result=gaveup`` is the case this used to hide.  The helper presses a
+    fixed number of times and then exits either way; with only ``auto=`` to go
+    on, "finished the job" and "gave up" both showed as the same unchanging
+    "Waiting at Tech Alerts", and the two want opposite things from the human.
     """
     label, hint = _STATE_TEXT.get(info.get("state", "off"),
                                   (info.get("state", ""), ""))
-    if info.get("state") == "techalerts" and info.get("auto", "0") != "0":
-        return label, _ADVANCING_HINT
+    if info.get("state") == "techalerts":
+        if info.get("auto", "0") != "0":
+            return label, _ADVANCING_HINT
+        if info.get("auto_result") == "gaveup":
+            return "Stuck at Tech Alerts", _GAVEUP_HINT
     return label, hint
 
 

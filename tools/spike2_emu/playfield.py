@@ -156,6 +156,13 @@ WSL_DIR = ("/mnt/c/Users/david/Documents/development/pinball-asset-decryptor"
 #: header; the header lists them next to the struct and says APPEND ONLY, so a
 #: version-1 shim and a version-2 reader still agree on everything below `coil`.
 PADLED_MAGIC = 0x44454C50
+#: `decoded` (12) is LED writes that landed. `skipped` (16) is frames that
+#: LOOKED like indexed LED writes and did not fit any shape the shim decodes -
+#: padled.h has counted it since version 1 and nothing has ever read it. It is
+#: the difference between "the game is not lighting anything" and "the game is
+#: lighting plenty and we are dropping it", which is the single question this
+#: window could never answer about itself.
+LED_DECODED_OFF, LED_SKIPPED_OFF = 12, 16
 LED_HDR, LED_IDX = 20, 96
 COIL_OFF, COIL_N = 1556, 16          # wrapping fire counter per (node, index)
 LVL_OFF = COIL_OFF + 16 * COIL_N     # last drive byte
@@ -213,11 +220,18 @@ def emu_gone(view, readable):
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
-def pick_scale(root, img_h, chrome=130):
+def pick_scale(root, img_h, chrome=170):
     """Fit the artwork to the screen.
 
     A flat 2x is 1420 px tall and puts the flippers and the trough off the
     bottom of a 1080p screen with no way to reach them. PAD_PF_SCALE overrides.
+
+    `chrome` is what the window needs AROUND the artwork: the title bar, the
+    button row and the status bar. It was 130 and that was about 40 px short -
+    measured on a 5120x1440 screen, the artwork claimed 1310 px, the window's
+    client area was 1362, and the status bar did not fit. Being wrong in this
+    direction costs a strip of artwork nobody looks at; being wrong the other
+    way costs the only line of text the window prints about itself.
     """
     env = os.environ.get("PAD_PF_SCALE")
     if env:
@@ -471,13 +485,22 @@ class Field:
         tk.Label(bar, text="  click a switch or a coil - hover anything for detail",
                  bg="#111", fg="#888", font=("Consolas", 9)).pack(side="left")
 
-        self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
-                            bg="black")
-        self.cv.pack()
-        self.cv.create_image(0, 0, anchor="nw", image=self.bg)
+        # THE STATUS BAR IS PACKED FIRST, AND side="bottom", AND THAT IS A FIX
+        # RATHER THAN A STYLE CHOICE. Packed after the canvas it is last in
+        # line for space, and the canvas is sized from the ARTWORK: on David's
+        # 5120x1440 screen the sum came to about 2 px more than the window had,
+        # so Tk simply did not show the label at all. Everything this window
+        # reports about itself - inserts lit, LED writes decoded, frames not
+        # decoded, the frame rate - lives in that label, so the one part that
+        # says whether the thing is working was invisible on the machine it was
+        # built for. Claiming space before the canvas cannot go wrong that way.
         self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
                                font=("Consolas", 9))
-        self.status.pack(fill="x")
+        self.status.pack(side="bottom", fill="x")
+        self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
+                            bg="black")
+        self.cv.pack(side="top")
+        self.cv.create_image(0, 0, anchor="nw", image=self.bg)
 
         self.info = {}          # canvas item -> dict describing it
         self.fixtures = group_fixtures(self.leds)
@@ -809,7 +832,8 @@ class Field:
         if d is None:
             self.status.config(text="no emulator (dump/padled not readable)")
         else:
-            decoded = struct.unpack_from("<I", d, 12)[0]
+            decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+            skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
             lit = self.draw_fixtures(d)
             coils = ""
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
@@ -818,12 +842,20 @@ class Field:
                     "<I", d, COIL_GEN_OFF + 4)[0]
                 if self.door_open():
                     coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
+            # THE DROPPED FRAMES ARE ON SCREEN TOO, and they are the honest
+            # answer to "are the LEDs working". A still picture here has two
+            # completely different causes - the game is not driving the lamps,
+            # or it is driving them through frames this rig cannot decode yet
+            # (handoff item 1b) - and the window used to look identical either
+            # way. Shown only once any have been dropped, so a clean run stays
+            # uncluttered.
+            drops = "   %d frames NOT decoded" % skipped if skipped else ""
             # THE RATE IS ON SCREEN. "At least 30 fps" is the requirement, so
             # the number that satisfies it has to be visible while the game is
             # running rather than inferred afterwards from a log.
             self.status.config(
-                text=" %d of %d inserts lit   %d LED writes decoded%s   %.0f fps"
-                     % (lit, len(self.fixtures), decoded, coils, self.fps))
+                text=" %d of %d inserts lit   %d LED writes decoded%s%s   %.0f fps"
+                     % (lit, len(self.fixtures), decoded, drops, coils, self.fps))
 
         # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
         # every interval and land at 20-25 fps while claiming 30; subtracting

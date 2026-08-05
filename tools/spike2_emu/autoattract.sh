@@ -68,6 +68,8 @@ set -u
 
 LOG=${1:-/home/david/gzwatch.log}
 S=$(dirname "$0")
+# shellcheck source=gamestate.sh
+. "$S/gamestate.sh"
 SW=/home/david/spike2root/dump/padsw
 
 BACK=28                              # Service Back == Esc in the legend window
@@ -93,25 +95,13 @@ WAIT_MAX=${PAD_AUTO_WAIT:-240}       # s to wait for the game to boot
 # it then dies with "integer expression expected". Take grep's own printed
 # count and only default it if grep produced nothing at all. Same trap alive.sh
 # documents for pgrep.
-count() {
-    local c=""
-    [ -r "$LOG" ] && c=$(grep -ac "$1" "$LOG" 2>/dev/null)
-    echo "${c:-0}"
-}
-booted()  { [ "$(count 'gst\] factory_make')" -ge 3 ]; }
-
-# PAST TECH ALERTS = THE GAME HAS OPENED A CLIP, which is what `filesrc` means:
-# the three factories built at t=0 (qtdemux, queue, vpudec) are the bring-up
-# probe and carry no source, and only a real attract clip adds filesrc.
-#
-# This used to count factory_make calls and want more than ten, which worked by
-# accident and then stopped: the video bug made the game tear the pipeline down
-# and rebuild it about 25 times a second, so ten arrived within half a second of
-# reaching attract. The proxy was measuring the BUG. With the pipeline no longer
-# thrashing, a whole run makes twelve - and autoattract reported "5 presses did
-# not clear it" while the game sat in attract mode playing video, which is as
-# wrong as an answer gets. Count the thing that actually means it instead.
-past()    { [ "$(count 'factory_make("filesrc"')" -ge 1 ]; }
+# BOTH TESTS NOW LIVE IN gamestate.sh, and this script is no longer the only
+# place that knows them. They were duplicated, they drifted, and status.sh was
+# left reporting "Tech Alerts" to the app while this script was correctly
+# reporting attract - see gamestate.sh for what that cost.
+count()   { gs_count "$1" "$LOG"; }
+booted()  { gs_booted "$LOG"; }
+past()    { gs_past_alerts "$LOG"; }
 probes()  { count 'ExchangeData: read failed'; }
 up()      { pgrep -x game >/dev/null 2>&1; }
 press()   { python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }

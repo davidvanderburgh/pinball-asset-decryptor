@@ -16,6 +16,11 @@ These have each been violated at least once and each cost a run or a window:
 - **NEVER wrap a run in `timeout`.** It leaks 140%-CPU processes forever. Use
   `runlim.sh` / `killgame.sh`.
 - **`alive.sh` must print 0 after every run.** Confirm it, do not assume it.
+- **Never let two scripts define the same fact.** `alive.sh` vs `killgame.sh`
+  disagreed about what a running rig is; `autoattract.sh` vs `status.sh`
+  disagreed about what "past Tech Alerts" means, so the app showed "Waiting at
+  Tech Alerts" for a whole run while the game sat in attract mode. Both are now
+  single-sourced (`alive.sh --total/--procs`, `gamestate.sh`).
 - **Anything a run starts goes into `alive.sh` the same day.** It is the rig's
   only definition of "clean", and it has been wrong twice. `killgame.sh` and
   `status.sh` ask it (`--total` / `--procs`) rather than keeping their own
@@ -54,8 +59,19 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1b. LED fade decode.** Second half of playfield LED rendering; 1a (stem
-      joining, 113 channels → 81 fixtures) is done.
+- [ ] **1b. LED fade decode — NOW THE TOP LIGHTING BLOCKER, and measured.**
+      Second half of playfield LED rendering; 1a (stem joining, 113 channels →
+      81 fixtures) is done. **In attract mode, 2026-08-05: `decoded` +229 vs
+      `skipped` +225 in 60 s — the shim throws away about half of the LED
+      frames the game sends, and during the stretches that look frozen the
+      dropped ones outnumber the decoded ones 3-8x** (skipped 3.0-4.2/s while
+      decoded ran 0.4-1.2/s). That is why attract lighting looks static: it is
+      not the window, the transport or the rate, it is coverage. `skipped` is
+      at offset 16 of the padled block and has been counted since version 1;
+      the playfield window now shows it. The handoff records 41% coverage of
+      indexed-command frames with the largest failing group `cmd a4` at body
+      length 3 with a non-index lead byte. Oracle remains the game's own
+      `Diagnostics → LED Tests`, one fixture at a time BY NAME.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
@@ -93,12 +109,11 @@ These have each been violated at least once and each cost a run or a window:
   across the VM boundary for a switch a human flips by hand. If that ever feels
   wrong in use, the fix is to read it on demand after a click rather than to
   raise the rate.
-- **Attract-mode LED churn has still never been watched end to end.** Both
-  measurement runs sat at Tech Alerts / early attract, where the decoded block
-  genuinely barely moves (the decoded counter rose by 2 in 5 s), which is item
-  1b's undecoded fade frames rather than a fault. The 30 fps number rests on a
-  worst-case synthetic (every channel changing every frame) plus a live run
-  with little movement.
+- **RESOLVED 2026-08-05: attract-mode LED churn HAS now been watched end to
+  end.** The game reaches attract (screenshot: the high-score attract screen),
+  the lamps do move (21 marker clusters changed between two playfield shots
+  3.2 s apart), and the reason it still looks static in stretches is item 1b -
+  half the frames are dropped undecoded. See item 1b for the numbers.
 - **The playfield's polite close failed in one card run out of three.** Removing
   `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
   still up after 5 s and had to be closed the hard way, which loses nothing now

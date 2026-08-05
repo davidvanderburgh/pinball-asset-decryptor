@@ -21,6 +21,8 @@
 set -u
 LOG=${1:-/home/david/gzwatch.log}
 S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+# shellcheck source=gamestate.sh
+. "$S/gamestate.sh"
 
 pid=$(pgrep -x game 2>/dev/null | head -1)
 hpid=$(pgrep -x padglhost 2>/dev/null | head -1)
@@ -54,22 +56,43 @@ if [ -n "$hpid" ]; then
     echo "host_cpu=$(ps -o pcpu= -p "$hpid" 2>/dev/null | tr -d ' ')"
 fi
 
-# `grep -c` PRINTS 0 and ALSO exits non-zero when it finds nothing, so the old
-# `$(grep -ac ... || echo 0)` here yielded "0\n0" and every [ -gt ] below then
-# failed with "integer expression expected". It happened to fall through to
-# `booting`, which is the right answer for a count of 0, so it never showed -
-# but it is the same trap alive.sh documents for pgrep and it is fixed now.
-gst=""
-[ -r "$LOG" ] && gst=$(grep -ac 'gst\] factory_make' "$LOG" 2>/dev/null)
-gst=${gst:-0}
-if [ "$gst" -gt 10 ]; then echo "state=running"
-elif [ "$gst" -ge 3 ]; then echo "state=techalerts"
-else echo "state=booting"; fi
+# WHERE THE GAME IS. Asked of gamestate.sh, which is also what autoattract.sh
+# asks, because these two used to disagree: with the game sitting in attract
+# mode on its high-score screen, autoattract.sh said "past Tech Alerts after 3
+# presses" while this script reported state=techalerts to the app, and the app
+# is the one David reads. The rule that did it counted `gst] factory_make` and
+# wanted more than ten; that count only ever exceeded ten because the video bug
+# was rebuilding the pipeline 25 times a second, and a whole run now makes
+# eight. See gamestate.sh for the full story - do not reinvent the count here.
+echo "state=$(gs_state "$LOG")"
 
 # Whether the auto-advance helper is still working on it. The tab uses this to
 # say "advancing on its own" rather than "press a switch yourself", which is
 # the difference between a wait and a job for the human.
 echo "auto=$(n -f autoattract.sh)"
+
+# ...AND HOW IT ENDED, which nothing reported until now. autoattract.sh exits
+# after a fixed number of presses whether or not they worked, and it says so
+# clearly in its own log - a log nobody reads while the app quietly shows the
+# same state word forever. `auto=0` alone cannot tell "finished the job" from
+# "gave up", and those need opposite things from the human. The last line of
+# its log is the answer, so publish it.
+#   ok      - it reached attract, or found the game already past
+#   gaveup  - the presses did not clear it (the game may be on the service menu)
+#   working - still going
+#   none    - it was never started (Skip to attract mode unticked)
+AUTOLOG=/home/david/padauto.log
+if [ "$(n -f autoattract.sh)" != 0 ]; then
+    echo "auto_result=working"
+elif [ ! -r "$AUTOLOG" ]; then
+    echo "auto_result=none"
+elif grep -aq 'past Tech Alerts\|already past\|nothing to do' "$AUTOLOG"; then
+    echo "auto_result=ok"
+elif grep -aq 'presses did not clear it\|gave up' "$AUTOLOG"; then
+    echo "auto_result=gaveup"
+else
+    echo "auto_result=none"
+fi
 
 # The renderer prints its rate every 2 s; take the most recent.
 f=$(grep -ao '[0-9.]* fps' /home/david/padglhost.log 2>/dev/null | tail -1)

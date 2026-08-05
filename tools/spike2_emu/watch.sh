@@ -394,6 +394,14 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -d "$S/games/$GAME" ]; then
     # The title goes on the COMMAND LINE, not in the environment: this is a
     # Windows process started through interop and only variables named in
     # WSLENV cross that boundary, which is one more thing to keep in step.
+    # PAD_PF_LOG reaches the playfield ONLY through WSLENV. It is a Windows
+    # process, so nothing in this shell's environment crosses unless it is
+    # named there; /p translates the value from a WSL path to a Windows one,
+    # so `PAD_PF_LOG=/tmp/pf.log watch.sh` writes where you would expect. The
+    # measurement that produced the 30 fps number had to bypass watch.sh
+    # entirely for want of this line.
+    [ -n "${PAD_PF_LOG:-}" ] && \
+        export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_LOG/p"
     if command -v "$PF_PY" >/dev/null 2>&1; then
         setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
         echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"

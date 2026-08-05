@@ -15,9 +15,19 @@ because the decryptor's own GUI uses them.
 HOW IT REACHES THE GAME, and both halves are deliberate:
 
   * LED STATE IS READ, not mapped. The shim publishes live values into
-    `dump/padled` (see padled.h) and this reads that file over
-    \\\\wsl.localhost every POLL_MS. A plain read needs no mmap coherence across
+    `dump/padled` (see padled.h) and this REOPENS and reads that file over
+    \\\\wsl.localhost every frame. A plain read needs no mmap coherence across
     the VM boundary, and it is measurably live - the generation counter climbs.
+
+    REOPENING IS NOT THE SLOW PART, AND HOLDING THE HANDLE OPEN IS A TRAP.
+    Measured 2026-08-05 from the Windows side: a reopen+read costs 3.4 ms
+    whatever it reads (8 bytes or 1908 - it is the round trip, not the
+    bytes), which is a 147 fps ceiling and never the reason this window was
+    slow. Holding one handle open instead measured 0.00 ms and 2.9 M ops/s,
+    which is what a CLIENT-SIDE CACHE looks like: against a WSL-side writer
+    that reached 188, the held handle read 0 for the entire test and never
+    moved. It would have frozen the playfield while looking like a 3000x
+    speedup.
   * SWITCH INPUT GOES THROUGH swpoke.py / plunge.py, as subprocesses. Writing
     the padsw block from Windows would be a shared-memory write racing a guest
     mmap across a 9p boundary, which is exactly the kind of thing that works in
@@ -33,6 +43,20 @@ its three channels compose to, not three orange dots. The device table wires
 board drives, but the playfield has one lens there, so the -R/-G/-B stems are
 joined per fixture (see group_fixtures) and the marker shows the joined colour
 with a soft glow behind it.
+
+WHAT BRIGHTNESS LOOKS LIKE. A lit insert is drawn at a SIZE and an OPACITY
+that both follow its duty cycle, so a half-lit lamp reads as half-lit at a
+glance instead of as fully on: markers run 3.8 px at 5% duty to 5.5 px at
+100%, blended 57% to 100% over the artwork behind them. Tk canvas items have
+no alpha at all, so the "opacity" is the fill colour mixed toward the pixels
+the marker covers, sampled from the artwork once at build time. Both scales
+have a floor on purpose - a lamp at 5% duty is ON, and must not render as a
+ghost. The HUE is still brightness-lifted so a dim insert keeps its colour.
+
+THE RATE IS 30 fps AND IT IS MEASURED, not assumed: the status bar shows the
+achieved rate, and PAD_PF_LOG=<path> writes a line a second breaking it into
+transport and drawing. It was 15 fps before that was measured, while nominally
+being a 20 Hz loop.
 
 A DARK INSERT HERE MEANS OFF, NOT "NO DATA" - which is worth stating plainly,
 because the docstring used to warn the opposite. The undecoded strip boards
@@ -77,6 +101,46 @@ PF_PNG = gameinfo.playfield_png(GAME)
 WINDOW_TITLE = "%s - virtual playfield" % GAME
 LED_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padled"
 
+#: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
+#: Unset in normal use; this is the instrument the 30 fps claim rests on.
+PF_LOG = os.environ.get("PAD_PF_LOG")
+
+
+def fine_timers():
+    """Ask Windows for 1 ms timers, and say whether it agreed.
+
+    WITHOUT THIS, 30 fps IS UNREACHABLE HERE AND THE REASON IS INVISIBLE.
+    Windows' default scheduler tick is 15.6 ms and Tk's `after` rounds up to
+    it, so a 4 ms frame asking for a 29 ms delay does not wait 29 ms - it
+    waits for the next tick, and sometimes the one after. Measured on this
+    box: frame work 3.6-4.3 ms, requested 29 ms, ACHIEVED 24-25 fps, i.e.
+    ~41 ms between frames. Nothing in the loop looks wrong; the loop is not
+    where the time goes.
+
+    timeBeginPeriod(1) is the documented way to ask for a finer tick and is
+    what media players use. It is process-wide and paired with timeEndPeriod
+    at exit. On anything that is not Windows this is a no-op, and the caller
+    treats failure as "run at whatever rate we get" rather than an error -
+    the window is still useful at 24 fps, it just must not CLAIM 30.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.winmm.timeBeginPeriod(1) == 0
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
+def coarse_timers():
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeEndPeriod(1)
+    except Exception:                                       # noqa: BLE001
+        pass
+
 #: The switch block, read for ONE thing: the coin door. 48V - the coil supply -
 #: is interlocked to it exactly as on the real machine, and with the door open
 #: the game will not fire anything and puts "48V DISABLED" on its own screen. A
@@ -100,14 +164,30 @@ PADLED_READ = COIL_GEN_OFF + 8
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
-#: readable flash, not a measurement.
-COIL_FLASH_MS = 260
+#: readable flash, not a measurement. SHORTENED from 260 ms with the move to
+#: 30 fps: at 33 ms a frame this is still four frames of magenta, which is
+#: comfortably visible, and it is four times closer to the real pulse - two
+#: slingshot hits 150 ms apart now read as two flashes rather than one long one.
+COIL_FLASH_MS = 130
 
 PRESS_MS = 150
 
-#: 20 Hz. The game blinks inserts at a few hertz, so polling at the old 120 ms
-#: aliased the blink into a flicker that looked like a bug in the decoder.
+#: THE TARGET, and it is David's acceptance test: "at least 30 fps feedback on
+#: coil, LED and switch state". The loop is PACED, not slept - see Field.tick -
+#: so this is the rate it aims at rather than a sleep between frames, and the
+#: rate it ACHIEVES is measured and printed in the status bar. An unmeasured
+#: frame rate is how this window sat at an unknown rate for weeks.
+TARGET_FPS = 30
+FRAME_MS = 1000.0 / TARGET_FPS
+
+#: Kept as the fallback pacing for the Schematic view, which draws nothing per
+#: frame and has no reason to run at 30 Hz.
 POLL_MS = 50
+
+#: Read the coin door every Nth tick instead of every tick. It is a whole extra
+#: round trip across the VM boundary (3.35 ms, measured) for a switch a human
+#: flips by hand; 4 Hz is still faster than anyone can act on the answer.
+DOOR_EVERY = max(1, int(TARGET_FPS / 4))
 
 #: Close with the run: once the emulator has been SEEN, this many consecutive
 #: failed polls of the LED block means the run has been torn down (watch.sh
@@ -223,26 +303,58 @@ def group_fixtures(leds):
 
 
 def fixture_color(vals):
-    """The composite (r, g, b) for a fixture's channel values, or None when off.
+    """(r, g, b), level for a fixture's channel values, or (None, 0) when off.
 
-    RGB fixtures join their three PWM bytes into one colour. Brightness is
-    lifted hue-preservingly (sqrt, close enough to display gamma): the wire
-    carries linear duty cycle, and drawing a 20%-duty insert at #33.. renders
-    a clearly-lit lamp as nearly off. Single-channel inserts keep the orange
-    ramp the window has always used - the lens colour is not in any table, and
-    the coil flash's "nothing else here is magenta" contrast depends on it.
+    TWO ANSWERS, NOT ONE, and the split is the whole point. The COLOUR is
+    brightness-lifted hue-preservingly (sqrt, close enough to display gamma)
+    so a dim insert still shows its real hue: the wire carries linear duty
+    cycle, and drawing a 20%-duty insert at #33.. renders a clearly-lit lamp
+    as nearly off. The LEVEL (0..1, the raw duty of the strongest channel) is
+    returned ALONGSIDE it, because that is what the marker's size and its
+    blend toward the artwork behind it are driven from - David asked for
+    brightness shown by transparency AND size, and folding brightness into
+    the colour is exactly what makes both of those impossible.
+
+    Single-channel inserts keep the orange ramp the window has always used -
+    the lens colour is not in any table, and the coil flash's "nothing else
+    here is magenta" contrast depends on it.
     """
     if "W" in vals:
         v = vals.get("W") or 0
         if not v:
-            return None
-        return (255, 60 + v * 3 // 4, 0)
+            return None, 0.0
+        return (255, 60 + v * 3 // 4, 0), v / 255.0
     r, g, b = (vals.get(c) or 0 for c in "RGB")
     m = max(r, g, b)
     if not m:
-        return None
+        return None, 0.0
     k = 255.0 * (m / 255.0) ** 0.5 / m
-    return (min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k)))
+    return ((min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k))),
+            m / 255.0)
+
+
+#: How a level (0..1) becomes a marker. Both floors are deliberate: a lamp at
+#: 15% duty is ON and must read as on, so the dimmest marker is still 60% of
+#: full size and 45% blended in, not a ghost. sqrt because the eye is not
+#: linear and neither is the duty cycle.
+def level_shape(level):
+    """(radius scale, opacity) for a brightness level."""
+    s = level ** 0.5
+    return 0.60 + 0.40 * s, 0.45 + 0.55 * s
+
+
+def blend(rgb, bg, alpha):
+    """rgb over bg at alpha, as a Tk colour string.
+
+    THE STAND-IN FOR ALPHA. Tk canvas items have no transparency at all - not
+    a missing feature, there is nowhere to put it - and `stipple` gives four
+    coarse levels of it at best. Blending toward the pixel that is actually
+    behind the marker (sampled from the artwork once, at build time) is what
+    gives smooth levels, and it is what a real translucent insert does.
+    """
+    return "#%02x%02x%02x" % tuple(
+        min(255, max(0, int(c * alpha + b * (1.0 - alpha))))
+        for c, b in zip(rgb, bg))
 
 
 #: Device-table group -> node on the bus, the same lookup ledio.py verified
@@ -342,7 +454,12 @@ class Field:
         img = Image.open(PF_PNG).convert("RGB")
         self.scale = pick_scale(root, img.height)
         w, h = int(img.width * self.scale), int(img.height * self.scale)
-        self.bg = ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
+        # KEPT, not discarded after the PhotoImage is made: each fixture blends
+        # toward the pixel that is actually behind it (see blend()), and that
+        # pixel has to be sampled from somewhere. Sampled once at build time,
+        # never during a tick.
+        self._art = img.resize((w, h), Image.LANCZOS)
+        self.bg = ImageTk.PhotoImage(self._art)
 
         bar = tk.Frame(root, bg="#111")
         bar.pack(fill="x")
@@ -367,6 +484,13 @@ class Field:
         self.coil_items = {}    # (node, index) -> canvas item
         self.coil_seen = {}     # (node, index) -> last fire counter read
         self.coil_until = {}    # (node, index) -> ms after which the flash ends
+        self.coil_drawn = {}    # (node, index) -> last hot/cold drawn
+        self.fps = 0.0          # measured, EWMA, shown in the status bar
+        self._t_last = None
+        self._door, self._door_n = False, 1
+        self._read_ms = 0.0     # last tick's transport cost, for PAD_PF_LOG
+        self._redrawn = 0       # fixtures actually reconfigured since the log
+        self._log_t, self._log_n = time.perf_counter(), 0
 
         # Every glow before any core marker: fixtures overlap on this picture
         # (the three SCOOP BB inserts share one XY), and interleaving would put
@@ -381,6 +505,11 @@ class Field:
             i = self.cv.create_oval(x - r, y - r, x + r, y + r,
                                     fill="#1a1a1a", outline="#3a3a3a")
             F["item"] = i
+            F["cx"], F["cy"] = x, y
+            F["bg"] = self._sample(x, y)
+            # What is on screen right now, so a tick can skip a fixture that
+            # has not changed. See draw_fixtures().
+            F["drawn"] = None
             self.info[i] = dict(kind="led", d=F)
 
         for C in self.coils:
@@ -401,6 +530,29 @@ class Field:
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
+
+    def _sample(self, x, y):
+        """The artwork's colour under a marker, averaged over its footprint.
+
+        One pixel is not enough: inserts sit on high-contrast art, and a
+        single sample that lands on a black outline makes the whole fixture
+        blend toward black while its neighbour blends toward white. A small
+        box average is stable and costs nothing here - this runs once per
+        fixture at build time, never in a tick.
+        """
+        w, h = self._art.size
+        r = int(LED_GLOW_R)
+        x0, y0 = max(0, int(x) - r), max(0, int(y) - r)
+        x1, y1 = min(w, int(x) + r + 1), min(h, int(y) + r + 1)
+        if x1 <= x0 or y1 <= y0:
+            return (0, 0, 0)
+        box = self._art.crop((x0, y0, x1, y1))
+        n = box.width * box.height
+        px = box.getdata()
+        tot = [0, 0, 0]
+        for p in px:
+            tot[0] += p[0]; tot[1] += p[1]; tot[2] += p[2]
+        return (tot[0] // n, tot[1] // n, tot[2] // n)
 
     # ---- hit testing and tooltips ----------------------------------------
     def _hit(self, ev):
@@ -497,7 +649,19 @@ class Field:
         return d
 
     def door_open(self):
-        """True when the coin door is open, so 48V is off and coils are dead."""
+        """True when the coin door is open, so 48V is off and coils are dead.
+
+        CACHED, and re-read only every DOOR_EVERY ticks. This is a SECOND
+        round trip across the VM boundary, and it used to happen on every
+        tick - at 30 fps that is 60 crossings a second for a switch a human
+        toggles by hand perhaps twice an hour. Measured: 3.35 ms, the same as
+        the LED read, because a 9p round trip costs what it costs regardless
+        of the 72 bytes it carries.
+        """
+        self._door_n -= 1
+        if self._door_n > 0:
+            return self._door
+        self._door_n = DOOR_EVERY
         try:
             with open(SW_PATH, "rb") as f:
                 d = f.read(SW_HELD + 64)
@@ -505,7 +669,8 @@ class Field:
             return False
         if len(d) < SW_HELD + 64 or struct.unpack_from("<I", d, 0)[0] != PADSW_MAGIC:
             return False
-        return not d[SW_HELD + SW_COIN_DOOR]
+        self._door = not d[SW_HELD + SW_COIN_DOOR]
+        return self._door
 
     def _chan_vals(self, F, d):
         """Live channel values for a fixture, e.g. {'R': 255, 'G': 40, 'B': 0}.
@@ -548,6 +713,12 @@ class Field:
             self.coil_seen[key] = c
             hot = self.coil_until.get(key, 0) > now
             fired += hot
+            # Same only-what-changed rule as the inserts: a coil is cold in
+            # almost every frame, and reconfiguring a cold coil 30 times a
+            # second is pure Tcl round trips for no pixels.
+            if self.coil_drawn.get(key) == hot:
+                continue
+            self.coil_drawn[key] = hot
             # MAGENTA, not a hotter orange. Single-channel inserts run
             # #ff3c00..#fffb00, so an orange coil flash is the one colour that
             # cannot be told apart from the thing next to it at a glance - and
@@ -559,8 +730,72 @@ class Field:
                                width=3 if hot else 2)
         return fired
 
+    def draw_fixtures(self, d):
+        """Repaint the inserts. Returns how many are lit.
+
+        ONLY WHAT CHANGED. This used to reconfigure all 81 fixtures - two
+        canvas items each, 162 calls - every single tick, whether or not a
+        single byte had moved, and a Tk itemconfig is a round trip into the
+        Tcl interpreter. On a real attract frame a handful of inserts change
+        and the rest are identical, so the cached-tuple compare turns almost
+        all of that work into a dict lookup. That, and not the transport, is
+        what makes 30 fps affordable.
+        """
+        lit = 0
+        for F in self.fixtures:
+            rgb, level = fixture_color(self._chan_vals(F, d))
+            if rgb:
+                lit += 1
+                rs, alpha = level_shape(level)
+                # Quantised so that PWM jitter of one duty step does not make
+                # the marker resize every frame; 0.25 px is finer than the eye
+                # and coarse enough to be stable.
+                r = round(LED_R * rs * 4) / 4.0
+                want = (blend(rgb, F["bg"], alpha),
+                        blend([c // 2 for c in rgb], F["bg"], alpha * 0.7), r)
+            else:
+                want = ("#1a1a1a", "", 0.0)
+            if want == F["drawn"]:
+                continue
+            prev = F["drawn"]
+            F["drawn"] = want
+            self._redrawn += 1
+            fill, glow, r = want
+            if r:
+                self.cv.itemconfig(F["item"], fill=fill, outline="")
+                self.cv.itemconfig(F["glow"], fill=glow)
+                if prev is None or prev[2] != r:
+                    x, y = F["cx"], F["cy"]
+                    self.cv.coords(F["item"], x - r, y - r, x + r, y + r)
+                    g = LED_GLOW_R * (r / LED_R)
+                    self.cv.coords(F["glow"], x - g, y - g, x + g, y + g)
+            else:
+                self.cv.itemconfig(F["item"], fill=fill, outline="#3a3a3a")
+                self.cv.itemconfig(F["glow"], fill="")
+                # An insert that fades out from dim would otherwise keep the
+                # SMALL radius it had while lit, so the dark dots would be
+                # different sizes depending on how each one last went out.
+                if prev is not None and prev[2] != LED_R:
+                    x, y = F["cx"], F["cy"]
+                    self.cv.coords(F["item"], x - LED_R, y - LED_R,
+                                   x + LED_R, y + LED_R)
+                    self.cv.coords(F["glow"], x - LED_GLOW_R, y - LED_GLOW_R,
+                                   x + LED_GLOW_R, y + LED_GLOW_R)
+        return lit
+
     def tick(self):
+        t0 = time.perf_counter()
+        # The achieved rate is measured from tick START to tick START, which is
+        # the interval a human actually sees. Measuring the work alone would
+        # report a rate this window has never run at.
+        if self._t_last:
+            dt = t0 - self._t_last
+            self.fps = 1.0 / dt if not self.fps else self.fps * 0.9 + 0.1 / dt
+        self._t_last = t0
+
+        t_read = time.perf_counter()
         d = self.read_leds()
+        self._read_ms = (time.perf_counter() - t_read) * 1000.0
         self.last = d
         if emu_gone(self, d is not None):
             # SAVE FIRST. Leaving with the run is the COMMON way this window
@@ -575,19 +810,7 @@ class Field:
             self.status.config(text="no emulator (dump/padled not readable)")
         else:
             decoded = struct.unpack_from("<I", d, 12)[0]
-            lit = 0
-            for F in self.fixtures:
-                rgb = fixture_color(self._chan_vals(F, d))
-                if rgb:
-                    lit += 1
-                    self.cv.itemconfig(F["item"], outline="",
-                                       fill="#%02x%02x%02x" % rgb)
-                    self.cv.itemconfig(F["glow"], fill="#%02x%02x%02x"
-                                       % (rgb[0] // 2, rgb[1] // 2, rgb[2] // 2))
-                else:
-                    self.cv.itemconfig(F["item"], fill="#1a1a1a",
-                                       outline="#3a3a3a")
-                    self.cv.itemconfig(F["glow"], fill="")
+            lit = self.draw_fixtures(d)
             coils = ""
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
                 self._tick_coils(d, time.monotonic() * 1000.0)
@@ -595,10 +818,45 @@ class Field:
                     "<I", d, COIL_GEN_OFF + 4)[0]
                 if self.door_open():
                     coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
+            # THE RATE IS ON SCREEN. "At least 30 fps" is the requirement, so
+            # the number that satisfies it has to be visible while the game is
+            # running rather than inferred afterwards from a log.
             self.status.config(
-                text=" %d of %d inserts lit   %d LED writes decoded%s"
-                     % (lit, len(self.fixtures), decoded, coils))
-        self.root.after(POLL_MS, self.tick)
+                text=" %d of %d inserts lit   %d LED writes decoded%s   %.0f fps"
+                     % (lit, len(self.fixtures), decoded, coils, self.fps))
+
+        # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
+        # every interval and land at 20-25 fps while claiming 30; subtracting
+        # the work keeps the START-to-START interval at the target. The 1 ms
+        # floor keeps Tk's event loop breathing when a frame overruns.
+        spent = (time.perf_counter() - t0) * 1000.0
+        self._log(t0, spent)
+        self.root.after(max(1, int(FRAME_MS - spent)), self.tick)
+
+    def _log(self, t0, spent):
+        """PAD_PF_LOG=<path>: one line a second of what the loop is doing.
+
+        The status bar shows the rate to the human; this exists so the rate
+        can be MEASURED rather than read off a screenshot of a smoothed
+        number, and so the split between the read and the drawing is on the
+        record. Off unless the variable is set, and it costs one compare when
+        it is off.
+        """
+        if not PF_LOG:
+            return
+        self._log_n += 1
+        if t0 - self._log_t < 1.0:
+            return
+        try:
+            with open(PF_LOG, "a") as f:
+                f.write("%.1f fps over %d ticks   frame %.1f ms "
+                        "(read %.1f, draw %.1f)   %d fixtures redrawn\n"
+                        % (self._log_n / (t0 - self._log_t), self._log_n,
+                           spent, self._read_ms, spent - self._read_ms,
+                           self._redrawn))
+        except OSError:
+            pass
+        self._log_t, self._log_n, self._redrawn = t0, 0, 0
 
 
 def load_state():
@@ -820,4 +1078,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # The finer timer is asked for around the WHOLE session and released after
+    # it, rather than per frame: timeBeginPeriod is a process-wide request with
+    # a reference count, and pairing it per tick would be 30 syscalls a second
+    # to say the same thing. try/finally so a crash still hands the system tick
+    # back - leaving it raised is a battery-life bug in every other process.
+    fine = fine_timers()
+    try:
+        main()
+    finally:
+        if fine:
+            coarse_timers()

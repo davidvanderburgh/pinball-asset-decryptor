@@ -26,15 +26,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **9. Virtual playfield needs real bandwidth.** David asked directly: at
-      least **30 fps** feedback on coil, LED and switch state, **LED brightness
-      shown by BOTH transparency and size**, and "full bandwidth to this virtual
-      playfield". Tk canvas has no alpha, so transparency has to be faked by
-      blending the fill toward the background colour. 9p round trips are the
-      suspect for the current rate; a socket transport is the recommended fix.
-      *Note: the old stake that playfield polling was degrading WSLg audio is
-      GONE — item 10 removed WSLg from the audio path entirely.*
-
 - [ ] **7. Switch input unreliable during keyboard play.** A playfield-window
       scoop click did not register and plunge looked dead. Prime suspect is the
       two-writers clobber `swhold.py` already documents: **padglhost rebuilds
@@ -97,6 +88,17 @@ These have each been violated at least once and each cost a run or a window:
   so powershell.exe is a match for itself. It has always worked in practice
   (the real player is enumerated first), and the two backstops added in item 12
   avoid it by also requiring `Name -like 'python*'`. Same shape, one line.
+- **The coin door now lags up to 250 ms** on the virtual playfield: it is read
+  every 8th frame instead of every frame, because it is a second round trip
+  across the VM boundary for a switch a human flips by hand. If that ever feels
+  wrong in use, the fix is to read it on demand after a click rather than to
+  raise the rate.
+- **Attract-mode LED churn has still never been watched end to end.** Both
+  measurement runs sat at Tech Alerts / early attract, where the decoded block
+  genuinely barely moves (the decoded counter rose by 2 in 5 s), which is item
+  1b's undecoded fade frames rather than a fault. The 30 fps number rests on a
+  worst-case synthetic (every channel changing every frame) plus a live run
+  with little movement.
 - **The playfield's polite close failed in one card run out of three.** Removing
   `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
   still up after 5 s and had to be closed the hard way, which loses nothing now
@@ -106,6 +108,20 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **9. Virtual playfield needs real bandwidth.** DONE 2026-08-05.
+      **15 fps → 30.3 fps**, measured the same way on identical input, and
+      brightness now shows as marker SIZE and opacity (blended toward the
+      artwork sampled behind each insert, since Tk has no alpha). **The
+      queued diagnosis was wrong and the measurement was cheap:** 9p is
+      3.4 ms a read regardless of size, a 147 fps ceiling, so the socket
+      publisher was not needed and was not built. The time was going to
+      Windows' 15.6 ms scheduler tick (Tk's `after(29)` delivered 35 ms until
+      `timeBeginPeriod(1)`) and to repainting all 81 fixtures every frame
+      whether or not anything changed. **Holding the file handle open, listed
+      as a cheap partial fix, is a trap: it reads a client-side cache and
+      returned 0 for a whole test while the truth reached 188.** The rate is
+      now measured and shown in the status bar, with `PAD_PF_LOG` for detail.
 
 - [x] **12. Closing the game window leaked processes and stranded a ghost
       window.** MOSTLY CLOSED 2026-08-05, `227cab6`. `alive.sh` counted 5 of the 13 things

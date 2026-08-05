@@ -5149,10 +5149,15 @@ static void led_publish(const unsigned char *p, int n)
         if (led_dec_log()) {
             char l[256];
             int q = 0;
-            q += snprintf(l + q, sizeof l - q, "[leddec] node=%u cmd=%02x idx=",
-                          node, cmd);
-            for (i = 0; i < cnt && q < (int)sizeof l - 6; i++)
-                q += snprintf(l + q, sizeof l - q, "%d,", body[i]);
+            /* The WHOLE body, and rlen, for the ones that decode: the 2-byte
+             * frames have to be read against the 3-byte form of the same
+             * command, and only the 3-byte form decodes. Logging just the
+             * index list answered a question nobody had. */
+            q += snprintf(l + q, sizeof l - q,
+                          "[leddec] node=%u cmd=%02x rlen=%u blen=%u body=",
+                          node, cmd, p[n - 1], blen);
+            for (i = 0; i < blen && q < (int)sizeof l - 6; i++)
+                q += snprintf(l + q, sizeof l - q, "%02x", body[i]);
             snprintf(l + q, sizeof l - q, "\n");
             logmsg(l);
         }
@@ -5225,7 +5230,47 @@ static void led_publish(const unsigned char *p, int n)
         }
     }
 
-    led_shm->skipped++;
+    /* ---- FRAMES THAT ARE NOT LAMP DATA AT ALL -----------------------------
+     *
+     * A 2-byte body whose first byte is a lamp this board announced and whose
+     * second byte is 0x80 | another announced lamp is a RANGE - two lamp
+     * REFERENCES and no level anywhere in it. Measured over 318 of them:
+     *
+     *   body[0] is an announced lamp                318/318 = 100%
+     *   body[1] & 0x7f is an announced lamp         318/318 = 100%
+     *   body[1] has bit 7 set                       318/318 = 100%
+     *   body[1] & 0x7f == body[0] + 1               285/318 =  90%
+     *                       (the rest are wider spans: 23->47, 30->38)
+     *
+     * ★ DO NOT "FIX" THIS BY ADDING A {0,0} SHAPE TO THE TABLE ABOVE. That is
+     * the obvious one-line change - a 2-byte body reads beautifully as
+     * (index, value) - and it is WRONG: it would write a LAMP NUMBER into a
+     * brightness. The thing that gives it away is that the second byte never
+     * once dips below 0x85 in 399 samples, because it is not a level, it is
+     * 0x80 | a lamp number. My own first test asked whether the RAW byte was
+     * an announced index, got 0 of 399, and concluded it was a value - a
+     * rigged question, since bit 7 is set in every single sample.
+     *
+     * They are NOT counted as skipped, because `skipped` is what the
+     * playfield window shows as "N frames NOT decoded" and these are not
+     * frames we are failing to read - they are frames with no lamp data in
+     * them. They were 88% of everything still being dropped, so counting them
+     * turned that indicator into a permanent false alarm. They still appear
+     * in PAD_LED_SKIP_LOG.
+     *
+     * `cmd a2` with a 6-byte body opens with the SAME range prefix (45 of 45:
+     * body[0] an announced lamp, body[1] = 0x80 | an announced lamp) followed
+     * by four payload bytes whose meaning is not established - patterns like
+     * `00 ff 0a 00` and `ff 00 00 0a` look like (from, to, rate, ...) but
+     * nobody has shown it. That is the sharpened remainder of this work. */
+    {
+        int is_range = blen == 2
+            && body[0] < 96 && led_known[node][body[0]]
+            && (body[1] & 0x80)
+            && (body[1] & 0x7f) < 96 && led_known[node][body[1] & 0x7f];
+        if (!is_range)
+            led_shm->skipped++;
+    }
 
     /* ---- PAD_LED_SKIP_LOG=N: SHOW THE FRAMES WE THROW AWAY ----------------
      *
@@ -5282,8 +5327,19 @@ static void led_publish(const unsigned char *p, int n)
                     logmsg(e);
                 }
             }
+            /* plen/sum/rlen come from the FRAME, not the payload:
+             *   [0x80|node] [payload_len+1] [payload...] [checksum] [reply_len]
+             * rlen is the one that matters. A frame the master expects an
+             * answer to is a READ, and decoding a read as a lamp write would
+             * light lamps nobody drove - which is precisely the failure this
+             * file keeps having to avoid. The 2-byte a4/a5 frames look like
+             * (index, value) and 360 of 399 of them carry the same second
+             * byte to the same lamp, which is what a poll looks like and not
+             * what a light show looks like. rlen settles it. */
             k += snprintf(line + k, sizeof line - k,
-                          "[ledskip] node=%u cmd=%02x blen=%u body=", node, cmd, blen);
+                          "[ledskip] node=%u cmd=%02x plen=%u rlen=%u sum=%02x "
+                          "blen=%u body=", node, cmd, p[1], p[n - 1], p[n - 2],
+                          blen);
             for (j = 0; j < (int)blen && k < (int)sizeof line - 4; j++)
                 k += snprintf(line + k, sizeof line - k, "%02x", body[j]);
             /* Which indices the board actually enumerated, so a reader can see

@@ -59,17 +59,18 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1c. The LED frame shapes that are STILL dropped.** With the a6 fade
-      frames decoding (item 1b, done), attract leaves ~3.5 dropped frames a
-      second. Two groups, both visible with `PAD_LED_SKIP_LOG=N`:
-      - **Bare `(index, value)` pairs, `blen=2`, cmd a4/a5** on nodes 1, 8 AND
-        9. The shape table starts at `{extra=1}` so it needs `blen>=3` and a
-        2-byte body matches nothing. Looks like a one-line addition (`{0,0}`),
-        but it was NOT done here because it was never verified - and node 8/9
-        are playfield boards, so getting it wrong is visible.
-      - **cmd a2/a3/b4/b5 with odd lengths** (15, 17, 18, 39). Different
-        format again; one ends in RGB-looking triples
-        `d8 e1e1e1 e4e4e4 a9 c4c4c4 98 6e6e6e` behind a per-group byte.
+- [ ] **1d. The a2 / b4 / b5 payload.** All that is left of the LED wire that
+      might carry lamp data: **~0.25 frames a second in attract**, 15 in a
+      60 s window. `cmd a2` with a 6-byte body is the bulk of it and its
+      SHAPE is known — `(start_lamp, 0x80|end_lamp, then 4 payload bytes)`,
+      the same range prefix as the 2-byte frames, verified 45/45 on both
+      positions. The four payload bytes are NOT understood: patterns like
+      `00 ff 0a 00` and `ff 00 00 0a` look like (from, to, rate, ...) but
+      nobody has shown it, so nothing is decoded. The longer a2 bodies and
+      `b4`/`b5` are a different shape again — **ruled out: the a6 bitmap
+      layout at payload width 1, 2, 3 and 4** (a2 fits at best 7 of 40).
+      Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
+      is `Diagnostics → LED Tests`.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
@@ -111,7 +112,8 @@ These have each been violated at least once and each cost a run or a window:
   and the static half of it is fixed.** The game reaches attract (screenshot:
   the high-score attract screen); the lamps moved 21 marker clusters per 3 s
   with half the frames being dropped, and **33 per 3 s** once the a6 fade
-  frames decoded (item 1b). What still drops is item 1c.
+  frames decoded (item 1b). What still drops is item 1d, and it is now
+  ~0.25 frames a second.
 - **The playfield's polite close failed in one card run out of three.** Removing
   `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
   still up after 5 s and had to be closed the hard way, which loses nothing now
@@ -121,6 +123,24 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **1c. The LED frame shapes that were still dropped.** DONE 2026-08-05.
+      **`skipped` in attract went 225 → 15 per 60 s** (and decoded held at
+      834), because 88% of what was still being counted as "not decoded" was
+      never lamp data at all.
+      **The 2-byte a4/a5 frames are a RANGE, not (index, value):** body[0] is
+      an announced lamp 318/318, `body[1] & 0x7f` is an announced lamp
+      318/318, bit 7 is set 318/318, and `body[1] & 0x7f == body[0] + 1` in
+      90% (the rest are wider spans, 23→47, 30→38). **The one-line `{0,0}`
+      shape this item proposed would have been WRONG** — it would have written
+      a lamp NUMBER into a brightness. What hid it: the second byte never dips
+      below 0x85 in 399 samples because it is `0x80 | a lamp number`, and my
+      own first test asked whether the RAW byte was an index, got 0/399, and
+      concluded "it must be a value". A rigged question — bit 7 is set in
+      every sample, so that test could never have said yes.
+      These frames are now recognised and NOT counted as skipped, so the
+      playfield's "N frames NOT decoded" stops being a permanent false alarm.
+      They still show up under `PAD_LED_SKIP_LOG`. Remainder is item 1d.
 
 - [x] **1b. LED fade decode.** DONE 2026-08-05, `b5bb67a`. The fade frames are **`cmd a6`
       on the insert boards**, and the format is

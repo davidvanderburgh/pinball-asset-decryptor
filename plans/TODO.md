@@ -72,6 +72,39 @@ These have each been violated at least once and each cost a run or a window:
       indexed-command frames with the largest failing group `cmd a4` at body
       length 3 with a non-index lead byte. Oracle remains the game's own
       `Diagnostics → LED Tests`, one fixture at a time BY NAME.
+      **THE DROPPED FRAMES CAN NOW BE SEEN: `PAD_LED_SKIP_LOG=N`** dumps the
+      first N of them (`[ledskip] node= cmd= blen= body= known=`) with no
+      `PAD_NB_LOG` and no boot cost. First capture in attract, and the two
+      groups want completely different work:
+      - **Node 1 (cabinet), cmd a4/a5, `blen=2`, body `0485` — 58 of 64
+        drops.** A bare (index, value) pair. The shape table starts at
+        `{extra=1}` so it needs `blen>=3`; a 2-byte body matches nothing. It
+        looks like a one-line fix (`{0,0}`) and it is NOT on the playfield
+        picture, so it changes no insert - do not let it look like progress.
+      - **★ Node 9, `cmd=a6` — THE FADE FRAMES, AND THE SHAPE FITS 41 OF 41.**
+        a6 is the command the handoff already named for fades, and here it is
+        on node 9, a PLAYFIELD insert board. Every captured a6 frame satisfies
+            blen = 3 header bytes + M mask bytes + one level byte per SET BIT
+        with M from 4 to 9 and blen from 22 to 40. Worked examples:
+            blen=23  hdr 87 1a f7  mask 44 01 30 08 30 10 82 20 (popcount 12)
+                     levels 7f 00 7f 7f 00 7f 7f 7f 7f 00 00 7f
+            blen=39  hdr 8f 1a fb  mask 32 0f 1f 08 88 57 3c 80 24 (pop 27)
+            blen=34  hdr 8f 19 f7  mask 85 4f 32 90 85 2f 10 80  (pop 23)
+        Level bytes across 42 frames are overwhelmingly **0 (355), 127 (259),
+        255 (69)** — off / half / full — with only 13 distinct values, which
+        is what a lamp level looks like and not what a coincidence looks like.
+        **NOT SHIPPABLE YET, and this is the trap the item already warns
+        about:** the arithmetic says where the levels ARE, it says nothing
+        about WHICH LED each mask bit means. That mapping needs the oracle
+        (`Diagnostics → LED Tests`, one fixture at a time BY NAME). Do not
+        guess it - a wrong mapping lights the wrong inserts convincingly.
+        Also unexplained: the 3 header bytes (byte0 is 8x, byte1 is 19/1a).
+      - **Still unsolved shapes:** node 8/9 `cmd=a2/a3`, odd `blen` 15/17/18,
+        and `b4/b5`. One a2 frame ends `d8 e1e1e1 e4e4e4 a9 c4c4c4 98 6e6e6e`
+        — RGB-looking triples behind a per-group byte. Different format, same
+        pass.
+      - Raw capture: `c:\tmp\ledskip_attract.txt` (401 lines) and the fit
+        checker `c:\tmp\a6fit.py`.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118

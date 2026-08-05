@@ -5114,6 +5114,55 @@ static void led_publish(const unsigned char *p, int n)
         return;
     }
     led_shm->skipped++;
+
+    /* ---- PAD_LED_SKIP_LOG=N: SHOW THE FRAMES WE THROW AWAY ----------------
+     *
+     * The counter above has existed since version 1 and says HOW MANY. It has
+     * never said WHAT, so the frames that carry the missing half of the light
+     * show have never been looked at. Measured in attract mode 2026-08-05:
+     * decoded +229 against skipped +225 over 60 s, and 3-8x more skipped than
+     * decoded during the stretches a human calls frozen. That is the material
+     * item 1b needs, and it was being dropped on the floor unseen.
+     *
+     * BUDGETED, and that is not a detail. PAD_NB_LOG is the obvious instrument
+     * and it is the wrong one: it quadruples the boot and buries the frames
+     * that matter under a hundred thousand that do not (see the coil probe
+     * below, which learned this the same way). This prints only frames that
+     * ALREADY failed to decode, and stops after N of them - default 200, which
+     * is a few seconds of attract and costs nothing measurable.
+     *
+     * The format is deliberately greppable and complete: node, command, body
+     * length, then every body byte, because the shape is exactly what is not
+     * understood yet. Nothing here interprets - interpreting is what produced
+     * the wrong decode the first time. */
+    {
+        static int budget = -1, used;
+        char line[256];
+        int k = 0, j;
+        if (budget < 0) {
+            const char *e = getenv("PAD_LED_SKIP_LOG");
+            budget = e ? atoi(e) : 0;
+            if (e && !*e) budget = 200;      /* set-but-empty means "on" */
+        }
+        if (budget > 0 && used < budget) {
+            used++;
+            k += snprintf(line + k, sizeof line - k,
+                          "[ledskip] node=%u cmd=%02x blen=%u body=", node, cmd, blen);
+            for (j = 0; j < (int)blen && k < (int)sizeof line - 4; j++)
+                k += snprintf(line + k, sizeof line - k, "%02x", body[j]);
+            /* Which indices the board actually enumerated, so a reader can see
+             * at a glance whether the lead bytes are indices at all - the
+             * validity test above is the thing that rejected this frame. */
+            k += snprintf(line + k, sizeof line - k, " known=");
+            for (j = 0; j < (int)blen && j < 8 && k < (int)sizeof line - 4; j++)
+                k += snprintf(line + k, sizeof line - k, "%d",
+                              body[j] < 96 && led_known[node][body[j]] ? 1 : 0);
+            snprintf(line + k, sizeof line - k, " (%d/%d)\n", used, budget);
+            logmsg(line);
+            if (used == budget)
+                logmsg("[ledskip] budget spent (raise PAD_LED_SKIP_LOG)\n");
+        }
+    }
 }
 
 /* ---- THE COIL PROBE (PAD_COIL_PROBE=1) ---------------------------------

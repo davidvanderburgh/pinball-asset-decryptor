@@ -95,6 +95,35 @@ These have each been violated at least once and each cost a run or a window:
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
 
+## Reference material that is NOT in this repo
+
+- **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own
+  README. The source WAV plus three captures David has already labelled
+  (flawless / crackly / fixed) and their expected `audioscore.py` scores.
+  **Any new audio metric must reproduce that ordering before it is trusted** —
+  three metrics built on 2026-08-05 failed exactly that check. Also holds
+  `fullplay.sh`, which drives the real `playaudio.sh` end to end, and `feed.py`,
+  which paces a WAV into a FIFO at exactly the right byte rate (`ffmpeg -re`
+  runs ~3.6% slow and starves the player, which then scores as damage).
+- **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
+  this machine. The deep detail behind every numbered item above.
+
+## Loose ends worth a look, not yet worth a queue slot
+
+- **`padrelay.py` accepts in a `while True` loop and never exits**, where the
+  `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the
+  script may now outlive a run instead of returning when the player goes away.
+  Teardown (`killgame.sh`) pkills it either way, so this has not been seen to
+  leak — but it was not deliberate, it is untested, and it overlaps item 12.
+- **The Emulate tab's "Fix crackly sound" button is now nearly vestigial.** It
+  shuts WSL down to rebuild WSLg's audio, and WSLg is no longer in the audio
+  path. It still applies to the `pulse` fallback, and it is genuinely the cure
+  for a stranded WSLg ghost window (item 12), so it should probably be renamed
+  rather than removed.
+- **New dependency on a fresh machine:** the Windows-side player needs
+  `py -m pip install sounddevice`. Without it `playaudio.sh` falls back to WSLg
+  audio and says so loudly, so it degrades visibly rather than silently.
+
 ## Done
 
 - [x] **10. Audio.** SOLVED 2026-08-05, `13c4410` / `7a81cb1` / `5ec9681`, David:

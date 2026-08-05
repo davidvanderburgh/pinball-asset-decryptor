@@ -116,7 +116,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Done
 
-- [x] **7. Switch input unreliable during keyboard play.** DONE 2026-08-05, `PENDING`.
+- [x] **7. Switch input unreliable during keyboard play.** DONE 2026-08-05, `26c9ebf`.
       **A 3000 ms `swpoke` press was reaching the game as 334/465/437/420 ms —
       14% of what was asked. It is now 3003/3002/3002/3003 ms.** The clobber was
       exactly what this item suspected: `sw_publish()` in padglhost memsets and

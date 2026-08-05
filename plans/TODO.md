@@ -122,7 +122,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Done
 
-- [x] **1b. LED fade decode.** DONE 2026-08-05. The fade frames are **`cmd a6`
+- [x] **1b. LED fade decode.** DONE 2026-08-05, `b5bb67a`. The fade frames are **`cmd a6`
       on the insert boards**, and the format is
       **3 payload bytes, then a BITMAP over the board's own enumerated LED
       list (LSB-first, truncated after the last set bit), then one level byte

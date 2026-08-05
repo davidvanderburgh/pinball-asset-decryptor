@@ -72,6 +72,10 @@ if [ -n "${PAD_CARD:-}" ]; then
     # The video host reads clips itself, outside the chroot, so it needs the
     # card's real path - the title is not under spike2root/games at all.
     export PAD_CARD PAD_VID_ROOT="$CARD_PATH"
+elif [ -n "${PAD_GAME_DIR:-}" ]; then
+    # A title directory anywhere on disk, bind mounted the same way.
+    GAME=$(basename "${PAD_GAME_DIR%/}")
+    export PAD_GAME_DIR PAD_VID_ROOT="${PAD_GAME_DIR%/}"
 fi
 [ -z "$GAME" ] && { GAME=$(readlink /home/david/spike2root/games/game 2>/dev/null); GAME=${GAME%/game}; }
 GAME=${GAME:-godzilla_pro}
@@ -210,7 +214,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
-           PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" \
+           PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
            bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 

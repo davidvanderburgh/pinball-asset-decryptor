@@ -8,11 +8,14 @@ truthfully what it is doing.  It deliberately does not reimplement any of it.
 
 Three things about it are worth knowing before changing anything here:
 
-* **It does not emulate the image loaded in the rest of PAD.**  The rig runs a
-  prepared root filesystem built once from a Godzilla Pro card.  Saying so on
-  the tab matters more than it looks: every other tab in this app acts on the
-  file in the Input box, and quietly breaking that expectation would be worse
-  than not having the tab.
+* **It runs whatever you point it at.**  A card image is mounted READ ONLY and
+  run in place, so nothing is extracted and the image cannot be written to; a
+  directory holding a ``game`` binary is bind mounted the same way.  The two
+  project buttons are shortcuts onto the app's own paths — the image on the
+  Extract tab is the original, the one the Write tab builds is the replacement —
+  so this tab agrees with the rest of the app instead of contradicting it.  It
+  used to run one prepared Godzilla Pro rootfs and say so; that is now only the
+  "Rig's own copy" option.
 
 * **It runs as the normal WSL user, not root.**  ``core.executor`` invokes
   ``wsl -u root``; the rig's scripts assume ``/home/david`` and a user-owned
@@ -127,9 +130,15 @@ class EmulatePanel:
     #: slow enough to cost nothing and fast enough to feel live.
     POLL_MS = 2000
 
-    def __init__(self, parent, log=None):
+    def __init__(self, parent, log=None, project_paths=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        # A zero-argument callable returning (original, build) from the rest of
+        # the app.  A CALLABLE and not two strings, because both are entry
+        # boxes the user edits after this panel is built; reading them at
+        # construction time would pin the buttons to whatever was there when
+        # the tab was first opened.
+        self._project_paths = project_paths
         self._proc = None            # the watch.sh child, while we own one
         # TWO flags, not one.  A single "_busy" covering both was a real bug:
         # the thread that drains watch.sh's output lives for as long as the
@@ -177,11 +186,13 @@ class EmulatePanel:
 
         intro = ttk.Label(
             frame, justify=tk.LEFT, wraplength=820,
-            text=("Runs the real Godzilla Pro game binary on this PC under "
+            text=("Runs a real Stern Spike 2 game binary on this PC under "
                   "emulation, in its own window, with sound.\n"
-                  "This does NOT emulate the image selected on the other tabs — "
-                  "it runs the prepared Spike 2 rig."))
+                  "Pick a card image and it runs straight off it — nothing is "
+                  "extracted and the image is opened read only."))
         intro.pack(anchor=tk.W, **pad)
+
+        self._build_source(frame, pad)
 
         btns = ttk.Frame(frame)
         btns.pack(fill=tk.X, **pad)
@@ -233,18 +244,10 @@ class EmulatePanel:
                                foreground="#888", text="")
         self._hint.pack(anchor=tk.W, **pad)
 
-        keys = ttk.LabelFrame(frame, text="Keys (click the game window first)")
-        keys.pack(fill=tk.X, **pad)
-        ttk.Label(keys, justify=tk.LEFT, wraplength=820, text=(
-            "Enter — Service Select      = / −  — Service Plus / Minus      "
-            "Backspace — Service Back\n"
-            "1 — Start      5 — Coin      Space — Action Button      T — Tilt\n"
-            "← → ↑ — flippers      F — shooter lane      Q W E R A S D Z X G — "
-            "playfield targets\n"
-            "C — coin door (starts closed)      B — six balls in the trough "
-            "(start in)\n\n"
-            "Service Back is press-length sensitive: a tap goes up one level, "
-            "holding it exits the menu.")).pack(anchor=tk.W, padx=8, pady=6)
+        # The key list that used to be here is gone. The rig opens its own
+        # Controls window listing every binding, and it is generated from the
+        # bindings themselves rather than typed out - so a copy on this tab was
+        # a second source of truth that could only ever drift out of date.
 
         if not rig_available():
             self._start_btn.configure(state=tk.DISABLED)
@@ -258,6 +261,143 @@ class EmulatePanel:
         # immediately as an error in the GUI smoke test.
         frame.bind("<Destroy>", self._on_destroy, add="+")
         self._schedule_poll()
+
+    def _build_source(self, frame, pad):
+        """What to emulate: a card image, or a directory holding a game.
+
+        TWO KINDS OF SOURCE, because they are genuinely different things and
+        collapsing them into one box would guess wrong:
+
+        * a CARD IMAGE (``.raw``/``.img``) is mounted read only and run in
+          place - no extraction, and nothing can write to the image;
+        * a DIRECTORY is a title already unpacked somewhere, which is what you
+          want while iterating on a build you keep rewriting.
+
+        The two project buttons fill the box from the rest of the app: the
+        image on the Extract tab is the ORIGINAL, and the one the Write tab
+        builds is the REPLACEMENT. They are only shortcuts - the path stays
+        editable, and a project with neither set simply leaves them disabled.
+        """
+        box = ttk.LabelFrame(frame, text="What to run")
+        box.pack(fill=tk.X, **pad)
+
+        self._src_kind = tk.StringVar(value="card")
+        self._src_path = tk.StringVar()
+
+        row = ttk.Frame(box)
+        row.pack(fill=tk.X, padx=8, pady=(6, 2))
+        ttk.Radiobutton(row, text="Card image", value="card",
+                        variable=self._src_kind,
+                        command=self._sync_source).pack(side=tk.LEFT)
+        ttk.Radiobutton(row, text="Extracted folder", value="dir",
+                        variable=self._src_kind,
+                        command=self._sync_source).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Radiobutton(row, text="Rig's own copy", value="rig",
+                        variable=self._src_kind,
+                        command=self._sync_source).pack(side=tk.LEFT, padx=(12, 0))
+
+        row2 = ttk.Frame(box)
+        row2.pack(fill=tk.X, padx=8, pady=2)
+        self._src_entry = ttk.Entry(row2, textvariable=self._src_path)
+        self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._browse_btn = ttk.Button(row2, text="Browse…", width=10,
+                                      command=self._browse)
+        self._browse_btn.pack(side=tk.LEFT, padx=(6, 0))
+
+        row3 = ttk.Frame(box)
+        row3.pack(fill=tk.X, padx=8, pady=(2, 6))
+        self._orig_btn = ttk.Button(row3, text="Use project original",
+                                    command=lambda: self._use_project(0))
+        self._orig_btn.pack(side=tk.LEFT)
+        self._build_btn = ttk.Button(row3, text="Use project build",
+                                     command=lambda: self._use_project(1))
+        self._build_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._src_note = ttk.Label(row3, foreground="#888", text="")
+        self._src_note.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._sync_source()
+
+    def _project_pair(self):
+        """(original, build) from the rest of the app, each possibly blank."""
+        if not self._project_paths:
+            return "", ""
+        try:
+            a, b = self._project_paths()
+        except Exception:                               # noqa: BLE001
+            return "", ""
+        return (a or ""), (b or "")
+
+    def _sync_source(self):
+        """Enable only what the current choice can use, and say what is set."""
+        kind = self._src_kind.get()
+        rig = kind == "rig"
+        for w in (self._src_entry, self._browse_btn):
+            w.configure(state=tk.DISABLED if rig else tk.NORMAL)
+        orig, build = self._project_pair()
+        # The project buttons fill an IMAGE path, so they only make sense for
+        # the card option - saying so by disabling them beats a button that
+        # quietly puts a .raw into a field labelled "folder".
+        self._orig_btn.configure(
+            state=tk.NORMAL if (kind == "card" and orig) else tk.DISABLED)
+        self._build_btn.configure(
+            state=tk.NORMAL if (kind == "card" and build) else tk.DISABLED)
+        if rig:
+            self._src_note.configure(
+                text="the title already prepared in the rig")
+        elif kind == "card":
+            self._src_note.configure(
+                text="" if (orig or build)
+                     else "no project image on the Extract or Write tab yet")
+        else:
+            self._src_note.configure(text="a folder holding a `game` binary")
+
+    def _use_project(self, which):
+        orig, build = self._project_pair()
+        path = (orig, build)[which]
+        if path:
+            self._src_kind.set("card")
+            self._src_path.set(path)
+            self._sync_source()
+
+    def _browse(self):
+        from tkinter import filedialog
+        if self._src_kind.get() == "dir":
+            path = filedialog.askdirectory(
+                title="Pick a folder holding a Spike 2 game")
+        else:
+            path = filedialog.askopenfilename(
+                title="Pick a Spike 2 card image",
+                filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if path:
+            self._src_path.set(path)
+
+    def _source_env(self):
+        """The environment for watch.sh, or None with a reason already shown.
+
+        Validated HERE rather than in the rig: a bad path should be a sentence
+        on the tab, not a shell script exiting into the log pane.
+        """
+        kind = self._src_kind.get()
+        if kind == "rig":
+            return []
+        path = self._src_path.get().strip().strip('"')
+        if not path:
+            self._hint.configure(text="Pick a card image or a folder first.")
+            return None
+        if kind == "card":
+            if not os.path.isfile(path):
+                self._hint.configure(text="No such image: %s" % path)
+                return None
+            return ["PAD_CARD=%s" % _wsl_path(path)]
+        if not os.path.isdir(path):
+            self._hint.configure(text="No such folder: %s" % path)
+            return None
+        if not os.path.isfile(os.path.join(path, "game")):
+            self._hint.configure(
+                text="%s holds no `game` binary — pick the title's own folder, "
+                     "the one with `game` and `assets` in it." % path)
+            return None
+        return ["PAD_GAME_DIR=%s" % _wsl_path(path)]
 
     def _on_destroy(self, event=None):
         # <Destroy> fires for every descendant too; only the frame itself means
@@ -285,7 +425,16 @@ class EmulatePanel:
         self._start_btn.configure(state=tk.DISABLED)
         self._set("state", "Starting…")
         d = _wsl_path(rig_dir())
-        env = ["LOG=%s" % self._logfile, "PAD_AUDIO_DUMP=30"]
+        # Validate the source BEFORE anything is launched, and put the reason
+        # on the tab.  A bad path reaching the rig becomes a shell error in the
+        # log pane, which is the wrong place to read it.
+        src = self._source_env()
+        if src is None:
+            self._starting = False
+            self._start_btn.configure(state=tk.NORMAL)
+            self._set("state", "Not running")
+            return
+        env = ["LOG=%s" % self._logfile, "PAD_AUDIO_DUMP=30"] + src
         if not self._audio_var.get():
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():

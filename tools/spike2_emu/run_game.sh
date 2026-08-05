@@ -18,6 +18,11 @@ S=$(cd "$(dirname "$0")" && pwd)
 # there for how that is done without root), and the title directory is bind
 # mounted into place inside the namespace below. Extracting a title copies 3-6
 # GB and takes minutes; this takes about a second and cannot modify the image.
+#
+# PAD_GAME_DIR runs a title from a directory ANYWHERE - an extraction that was
+# never put under games/, a working copy, a network share. Same bind mount, one
+# fewer step. Both take a title that is not in the rootfs and put it there for
+# the length of the run without copying it.
 CARD_SRC=""
 if [ -n "${PAD_CARD:-}" ]; then
     CARD_SRC=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
@@ -25,6 +30,13 @@ if [ -n "${PAD_CARD:-}" ]; then
     GAME=$(basename "$CARD_SRC")
     mkdir -p "$R/games/$GAME"
     echo "[run] title: $GAME (from the card, not extracted)"
+elif [ -n "${PAD_GAME_DIR:-}" ]; then
+    CARD_SRC=${PAD_GAME_DIR%/}
+    [ -x "$CARD_SRC/game" ] || {
+        echo "[run] $CARD_SRC holds no game ELF" >&2; exit 1; }
+    GAME=$(basename "$CARD_SRC")
+    mkdir -p "$R/games/$GAME"
+    echo "[run] title: $GAME (from $CARD_SRC)"
 fi
 
 # Otherwise the title is PAD_GAME, else whatever games/game already points at

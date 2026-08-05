@@ -1,13 +1,22 @@
 """Emulate tab: the parts that can be got wrong without anyone noticing.
 
-No Tk here on purpose — these are the pure pieces (status parsing, the wording
-shown for each state, the Windows->WSL path map).  The wording is tested because
-"Waiting at Tech Alerts" being read as a fault cost this project a whole pass of
-believing the emulator was hung when it was doing exactly what the real machine
-does; a test is the cheapest way to stop that regressing into "Stuck".
+Mostly the pure pieces — status parsing, the wording shown for each state, the
+Windows->WSL path map.  The wording is tested because "Waiting at Tech Alerts"
+being read as a fault cost this project a whole pass of believing the emulator
+was hung when it was doing exactly what the real machine does; a test is the
+cheapest way to stop that regressing into "Stuck".
+
+The source-picker tests at the bottom DO build widgets, on an invisible root,
+because what they check is the translation from what the user picked into the
+environment the rig is handed — and that only exists once the widgets do.  They
+skip rather than fail when Tk is unusable.
 """
 
 import pathlib
+
+import pytest
+
+from pinball_decryptor.gui import emulate_tab
 
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
                                                state_text, _wsl_path)
@@ -91,3 +100,116 @@ def test_default_rig_dir_is_the_copy_in_the_repo():
     assert rig.name == "spike2_emu" and rig.parent.name == "tools"
     assert (rig / "watch.sh").is_file()
     assert (rig / "status.sh").is_file()
+
+
+# --------------------------------------------------------------------------
+# Source picker
+# --------------------------------------------------------------------------
+
+def _panel(tmp_path, project=None):
+    """A built panel on an invisible root, or a skip when Tk is unusable."""
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:                          # no display / no Tcl
+        pytest.skip("Tk unavailable: %s" % exc)
+    root.attributes("-alpha", 0)
+    frame = tk.Frame(root)
+    frame.pack()
+    panel = emulate_tab.EmulatePanel(frame, project_paths=project)
+    panel.build(frame)
+    root.update()
+    return root, panel
+
+
+def test_card_source_becomes_pad_card(tmp_path):
+    """A card image is handed to the rig as PAD_CARD, in WSL form."""
+    img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    img.write_bytes(b"\0" * 16)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._src_kind.set("card")
+        panel._src_path.set(str(img))
+        env = panel._source_env()
+        assert len(env) == 1 and env[0].startswith("PAD_CARD=")
+        assert env[0].endswith(img.name)
+        assert "\\" not in env[0]      # a Windows path would not mount
+    finally:
+        root.destroy()
+
+
+def test_directory_source_needs_a_game_binary(tmp_path):
+    """A folder without `game` is refused HERE, with a reason, rather than
+    becoming a shell error in the log pane."""
+    d = tmp_path / "turtles_pro"
+    d.mkdir()
+    root, panel = _panel(tmp_path)
+    try:
+        panel._src_kind.set("dir")
+        panel._src_path.set(str(d))
+        assert panel._source_env() is None
+        assert "game" in panel._hint.cget("text")
+        (d / "game").write_bytes(b"\x7fELF")
+        env = panel._source_env()
+        assert env == ["PAD_GAME_DIR=" + emulate_tab._wsl_path(str(d))]
+    finally:
+        root.destroy()
+
+
+def test_rig_source_passes_no_override(tmp_path):
+    """"Rig's own copy" must add nothing: the rig then picks the title itself."""
+    root, panel = _panel(tmp_path)
+    try:
+        panel._src_kind.set("rig")
+        assert panel._source_env() == []
+    finally:
+        root.destroy()
+
+
+def test_project_buttons_fill_the_path(tmp_path):
+    """The two project buttons are shortcuts onto the same editable path, and
+    they select the card option because both are images."""
+    root, panel = _panel(tmp_path,
+                         project=lambda: (r"C:\proj\orig.raw", r"C:\proj\build.raw"))
+    try:
+        panel._src_kind.set("dir")
+        panel._use_project(0)
+        assert panel._src_kind.get() == "card"
+        assert panel._src_path.get() == r"C:\proj\orig.raw"
+        panel._use_project(1)
+        assert panel._src_path.get() == r"C:\proj\build.raw"
+    finally:
+        root.destroy()
+
+
+def test_project_buttons_disabled_without_a_project(tmp_path):
+    """No project set: the buttons are off rather than filling in a blank."""
+    root, panel = _panel(tmp_path, project=lambda: ("", ""))
+    try:
+        panel._src_kind.set("card")
+        panel._sync_source()
+        assert str(panel._orig_btn.cget("state")) == "disabled"
+        assert str(panel._build_btn.cget("state")) == "disabled"
+    finally:
+        root.destroy()
+
+
+def test_keys_help_is_gone(tmp_path):
+    """The rig's own Controls window is the single source of truth for the key
+    bindings; a copy on this tab could only drift."""
+    root, panel = _panel(tmp_path)
+    try:
+        texts = []
+        def walk(w):
+            for child in w.winfo_children():
+                try:
+                    texts.append(str(child.cget("text")))
+                except Exception:                        # noqa: BLE001
+                    pass
+                walk(child)
+        walk(root)
+        blob = " ".join(texts)
+        assert "Service Plus" not in blob
+        assert "shooter lane" not in blob
+    finally:
+        root.destroy()

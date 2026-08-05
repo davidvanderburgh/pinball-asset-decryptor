@@ -1972,11 +1972,12 @@ def test_image_search_finds_scene_by_any_occurrence(app, manufacturers_by_key,
     w.image_search_var.set("")
 
 
-def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
-                                             tmp_path):
+def test_image_grouped_mode_and_change_filter(app, manufacturers_by_key,
+                                              tmp_path):
     """Grouped mode nests slot rows (same iids) under collapsed per-scene
-    parents in play order; Changed-only prunes untouched rows and, in grouped
-    mode, whole untouched groups; flat mode is unchanged."""
+    parents in play order; the Show filter prunes untouched rows (and, in
+    grouped mode, whole untouched groups) or keeps only those; flat mode is
+    unchanged."""
     w = app.window
     app._on_manufacturer_change(manufacturers_by_key["spooky"])
     app.root.update()
@@ -2033,9 +2034,9 @@ def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
     assert len(tops) == 1 and len(tree.get_children(tops[0])) == 3
     w.image_search_var.set("")
 
-    # Changed-only: an assignment keeps its group; the untouched group goes.
+    # Show=Changed: an assignment keeps its group; the untouched group goes.
     w._image_assignments[rels[0]] = str(tmp_path / "rep.png")
-    w.image_changed_only_var.set(True)
+    w.image_change_filter_var.set("Changed")
     tops = list(tree.get_children())
     assert len(tops) == 1
     assert "Char_Select · a1b2c3d4" in tree.item(tops[0], "text")
@@ -2046,7 +2047,12 @@ def test_image_grouped_mode_and_changed_only(app, manufacturers_by_key,
     assert list(tree.get_children()) == [rels[0]]
     assert "n" not in tree["displaycolumns"]
 
-    w.image_changed_only_var.set(False)
+    # Show=Unchanged is its exact complement: everything BUT that row.
+    w.image_change_filter_var.set("Unchanged")
+    assert list(tree.get_children()) == [r for r in sorted(rels, key=str.lower)
+                                         if r != rels[0]]
+
+    w.image_change_filter_var.set("All")
     w._image_assignments.clear()
 
 

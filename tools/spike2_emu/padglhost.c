@@ -594,7 +594,12 @@ static void legend_open(int scr)
     XSelectInput(xdpy, legend_win, 1L | 2L | (1L << 15) | (1L << 17));
     XSetWMProtocols(xdpy, legend_win, &wm_delete, 1);
     XMapWindow(xdpy, legend_win);
-    XMoveWindow(xdpy, legend_win, win_w + 16, 0);
+    {   /* Beside the game by default, but back where it was left if it has been
+         * moved before. See winpos_* above. */
+        int lx = win_w + 16, ly = 0;
+        winpos_get("legend", &lx, &ly);
+        XMoveWindow(xdpy, legend_win, lx, ly);
+    }
     legend_gc = XCreateGC(xdpy, legend_win, 0, 0);
     /* Any of these may be absent; the error handler makes that harmless and the
      * server default font still draws. */
@@ -698,6 +703,10 @@ static int win_open(void)
         for (i = 0; i < NBINDS; i++) if (binds[i].toggle) key_latch[i] = 1;
     }
     sw_publish();
+    {   /* Reopen where the window was last closed. */
+        int gx, gy;
+        if (winpos_get("game", &gx, &gy)) XMoveWindow(xdpy, xwin, gx, gy);
+    }
     if (getenv("PAD_GL_LEGEND") == 0 || getenv("PAD_GL_LEGEND")[0] != '0')
         legend_open(scr);
     fprintf(stderr, "[padglhost] window opened %dx%d on DISPLAY=%s\n",
@@ -770,6 +779,17 @@ static void win_pump(void)
             /* The GAME window drives the drawable size; the legend window
              * resizing must not be mistaken for it. */
             if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; }
+            /* SAVE THE POSITION HERE, not at exit. Saving on shutdown does not
+             * survive contact with watch.sh, which SIGINTs and then SIGKILLs a
+             * second later - measured: the file was never written. A window
+             * move always produces this event, so recording it here is both
+             * more robust and always current. Throttled, because dragging a
+             * window produces a ConfigureNotify per pixel. */
+            {
+                static double last_saved;
+                double now = now_s();
+                if (now - last_saved > 1.0) { last_saved = now; winpos_save_all(); }
+            }
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;

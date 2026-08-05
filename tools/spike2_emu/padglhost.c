@@ -410,13 +410,14 @@ extern int XPeekEvent(XDisplay *, void *);
 extern unsigned long XLookupKeysym(void *, int);
 extern void *XSetErrorHandler(void *);
 
-/* WM_NORMAL_HINTS, so a remembered window position actually takes. An
- * XMoveWindow issued right after XMapWindow LOSES to the window manager's own
- * initial placement under WSLg - the game window got away with it by timing,
- * the Controls window measurably did not (.pad_windows said 941,930 and the
- * window opened at the default anyway). The X way to place a window is to
- * CREATE it at the position and say so in the size hints BEFORE mapping;
- * USPosition is the flag WMs treat as "the user chose this, respect it". */
+/* WM_NORMAL_HINTS. This is correct X11 - create the window at the position
+ * and say so in the size hints before mapping, USPosition being the flag WMs
+ * treat as "the user chose this, respect it" - and under WSLg it does NOT
+ * place the window: the compositor puts new RAIL toplevels wherever its own
+ * policy says (measured: .pad_windows said 941,930 and the Controls window
+ * opened at the default anyway). It is kept because it costs nothing and any
+ * ordinary WM honors it; the mechanism that actually restores position under
+ * WSLg is the delayed XMoveWindow in win_pump(). */
 typedef struct {
     long flags;
     int x, y;
@@ -501,11 +502,22 @@ static unsigned long legend_win;
 static XGC legend_gc;
 static int legend_dirty = 1;
 
-/* ---- WINDOW POSITIONS, REMEMBERED ---------------------------------------
+/* ---- WINDOW POSITIONS (AND THE GAME WINDOW'S SIZE), REMEMBERED ----------
  *
- * Both windows come back where they were left. The file is one line per
- * window in the user's home, not in the rig directory, because it is
- * per-machine state rather than part of the rig.
+ * Both windows come back where they were left; the game window also comes
+ * back at the SIZE it was left (David enlarges it every session). A line is
+ * "key x y" or "key x y w h" - the two size fields arrived later, and a
+ * 3-field line still parses, so an existing file keeps its positions. The
+ * file is one line per window in the user's home, not in the rig directory,
+ * because it is per-machine state rather than part of the rig.
+ *
+ * Size and position restore through DIFFERENT mechanisms, and the split is
+ * load-bearing under WSLg:
+ *   - SIZE requested at create time is honored. Easy half.
+ *   - POSITION at create time is ignored (the compositor places new RAIL
+ *     toplevels by its own policy), so it is replayed by a delayed
+ *     XMoveWindow from win_pump() once placement has settled. See the
+ *     comment there for the two proven-dead mechanisms this replaced.
  *
  * The position has to be read with XTranslateCoordinates against the root
  * rather than XGetGeometry alone: under a reparenting window manager - and
@@ -525,40 +537,62 @@ static const char *winpos_file(void)
     return winpos_path;
 }
 
-static int winpos_get(const char *key, int *x, int *y)
+/* w/h may be NULL for a caller that only wants the position; they are left
+ * untouched when the line has no size fields. */
+static int winpos_get(const char *key, int *x, int *y, int *w, int *h)
 {
     char line[160], k[64];
     FILE *f = fopen(winpos_file(), "r");
-    int gx, gy, hit = 0;
+    int gx, gy, gw, gh, n, hit = 0;
     if (!f) return 0;
-    while (fgets(line, sizeof line, f))
-        if (sscanf(line, "%63s %d %d", k, &gx, &gy) == 3 && !strcmp(k, key)) {
-            *x = gx; *y = gy; hit = 1;
+    while (fgets(line, sizeof line, f)) {
+        n = sscanf(line, "%63s %d %d %d %d", k, &gx, &gy, &gw, &gh);
+        if (n >= 3 && !strcmp(k, key)) {
+            *x = gx; *y = gy;
+            if (n >= 5 && w && h) { *w = gw; *h = gh; }
+            hit = 1;
         }
+    }
     fclose(f);
     return hit;
 }
 
-static void winpos_put(const char *key, int x, int y)
+/* w,h of 0 writes a position-only line (the legend is fixed-size). Lines for
+ * other keys are kept VERBATIM, not re-parsed and reformatted - reformatting
+ * through a 3-field sscanf is exactly how a 5-field line would lose its size. */
+static void winpos_put(const char *key, int x, int y, int w, int h)
 {
     char line[160], k[64];
     char keep[8][160];
-    int n = 0, gx, gy, i;
+    int n = 0, i;
     FILE *f = fopen(winpos_file(), "r");
     if (f) {
         while (n < 8 && fgets(line, sizeof line, f))
-            if (sscanf(line, "%63s %d %d", k, &gx, &gy) == 3 && strcmp(k, key))
-                snprintf(keep[n++], sizeof keep[0], "%s %d %d\n", k, gx, gy);
+            if (sscanf(line, "%63s", k) == 1 && strcmp(k, key))
+                snprintf(keep[n++], sizeof keep[0], "%s", line);
         fclose(f);
     }
     f = fopen(winpos_file(), "w");
     if (!f) return;
-    for (i = 0; i < n; i++) fputs(keep[i], f);
-    fprintf(f, "%s %d %d\n", key, x, y);
+    for (i = 0; i < n; i++) {
+        fputs(keep[i], f);
+        if (!strchr(keep[i], '\n')) fputc('\n', f);
+    }
+    if (w > 0 && h > 0) fprintf(f, "%s %d %d %d %d\n", key, x, y, w, h);
+    else                fprintf(f, "%s %d %d\n", key, x, y);
     fclose(f);
 }
 
-/* Absolute position of a window on the root, reparenting WM and all. */
+/* Absolute CLIENT position on the root, reparenting WM and all. Client space
+ * is the right space to save even though XMoveWindow does not land there
+ * directly: Weston places the VISIBLE frame corner at the requested
+ * coordinate, so the client comes back shifted by the visible insets -
+ * measured +6,+27 (border + title bar), identical for both windows. Saving
+ * the frame instead is WORSE: the X frame window carries a 32 px shadow
+ * margin (client sits at +38,+59 inside it), so frame coordinates are
+ * shadow-polluted and WM-specific. The restore therefore aims in client
+ * space and self-corrects from the measured miss - see the win_pump()
+ * restore machine - which assumes nothing about insets at all. */
 static int winpos_read(unsigned long w, int *x, int *y)
 {
     unsigned long root_ret, child;
@@ -575,9 +609,28 @@ static void winpos_save_all(void)
 {
     int x, y;
     if (!xdpy) return;
-    if (xwin && winpos_read(xwin, &x, &y)) winpos_put("game", x, y);
-    if (legend_win && winpos_read(legend_win, &x, &y)) winpos_put("legend", x, y);
+    /* win_w/win_h are the drawable (client-area) size, kept current by
+     * eglQuerySurface every frame - the same units XCreateSimpleWindow takes,
+     * so the saved size round-trips with no frame arithmetic. */
+    if (xwin && winpos_read(xwin, &x, &y)) winpos_put("game", x, y, win_w, win_h);
+    if (legend_win && winpos_read(legend_win, &x, &y)) winpos_put("legend", x, y, 0, 0);
 }
+
+/* The delayed position restore. Captured at create time, replayed by
+ * win_pump() in two steps (move, then one corrective nudge); saves are gated
+ * on the restore having FINISHED because the WM's initial placement also
+ * produces ConfigureNotify, and saving those would overwrite the remembered
+ * position with the default placement before the user ever saw it restored. */
+static double win_mapped_s;              /* when both windows were mapped     */
+static double restore_moved_s;           /* when the last restore step ran    */
+static int restore_state;                /* 0 pending, 1 converging,
+                                            2 settled - saves armed          */
+static int restore_tries;
+static int game_want_x, game_want_y, game_want_pos;
+static int legend_want_x, legend_want_y, legend_want_pos;
+static int game_aim_x, game_aim_y, game_settled;
+static int legend_aim_x, legend_aim_y, legend_settled;
+static int save_pending;                 /* a ConfigureNotify awaits saving   */
 
 /* Recompute held[] from scratch and publish. Rebuilding rather than patching
  * incrementally means two keys bound to the same switch cannot leave it stuck
@@ -624,12 +677,13 @@ static void legend_open(int scr)
 {
     unsigned long f;
     /* Beside the game by default, but back where it was left if it has been
-     * moved before. The position must be set BEFORE the map (create at it,
-     * then say so in WM_NORMAL_HINTS): the old move-after-map lost the race
-     * with WSLg's window manager every time, which is exactly "the Controls
-     * window does not remember its position". See win_place(). */
+     * moved before. Fixed-size, so position is the whole restore - and under
+     * WSLg the create-time position is ignored, so the real restore is the
+     * delayed XMoveWindow in win_pump(); the capture here just records where
+     * it should go. */
     int lx = win_w + 16, ly = 0;
-    winpos_get("legend", &lx, &ly);
+    legend_want_pos = winpos_get("legend", &lx, &ly, 0, 0);
+    legend_want_x = lx; legend_want_y = ly;
     legend_win = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
                                      lx, ly, 430,
                                      (unsigned)(NBINDS * 20 + 124), 0,
@@ -717,12 +771,18 @@ static int win_open(void)
     }
     scr  = XDefaultScreen(xdpy);
     win_w = fb_w; win_h = fb_h;
-    {   /* Reopen where the window was last closed. The position has to be on
-         * the window BEFORE it is mapped (create + WM_NORMAL_HINTS): a move
-         * issued after the map races the window manager's initial placement,
-         * and under WSLg the WM wins. */
-        int gx = 0, gy = 0;
-        winpos_get("game", &gx, &gy);
+    {   /* Reopen where - and at the size - the window was last left. The SIZE
+         * requested at create time is honored, so that half really happens
+         * here; the POSITION is not (WSLg ignores it), so that half is only
+         * captured here and replayed by the delayed XMoveWindow in win_pump().
+         * The bounds keep a corrupt line from creating a 3x2 or a 30000-wide
+         * window; out of bounds falls back to the framebuffer size. */
+        int gx = 0, gy = 0, gw = 0, gh = 0;
+        game_want_pos = winpos_get("game", &gx, &gy, &gw, &gh);
+        game_want_x = gx; game_want_y = gy;
+        if (gw >= 160 && gh >= 120 && gw <= 7680 && gh <= 4320) {
+            win_w = gw; win_h = gh;
+        }
         xwin = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr), gx, gy,
                                    (unsigned)win_w, (unsigned)win_h, 0,
                                    XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
@@ -765,6 +825,8 @@ static int win_open(void)
     sw_publish();
     if (getenv("PAD_GL_LEGEND") == 0 || getenv("PAD_GL_LEGEND")[0] != '0')
         legend_open(scr);
+    /* Both windows are mapped by here; the delayed restore counts from now. */
+    win_mapped_s = now_s();
     fprintf(stderr, "[padglhost] window opened %dx%d on DISPLAY=%s\n",
             win_w, win_h, getenv("DISPLAY") ? getenv("DISPLAY") : "?");
     return 1;
@@ -811,6 +873,83 @@ static void win_pump(void)
      * strict-aliasing violation that -O2 is entitled to miscompile. */
     union { long l[32]; unsigned long ul[32]; int i[64]; } ev;
     if (!win_on) return;
+
+    /* THE DELAYED MOVE - the one position-restore mechanism that works under
+     * WSLg, after two proven-dead ones (2026-08-05):
+     *   - create-at-position + USPosition hints: correct X11, ignored - the
+     *     compositor places new RAIL toplevels by its own policy.
+     *   - Windows-side SetWindowPos: "works", then breaks dragging. It moves
+     *     the msrdc proxy behind the compositor's back, the two sides of the
+     *     RAIL mirror disagree, and the stale server position is reasserted
+     *     against every user drag ("it won't let me move the two emulator
+     *     windows anymore"). NEVER bring that back.
+     * Moving from HERE, on the X side, 2.5 s after mapping, the COMPOSITOR
+     * performs the move after its initial placement has settled, so both
+     * sides of the mirror stay in agreement and a later user drag still
+     * works. That drag is the honest test for anything touched in this area:
+     * read-back plus screenshot once PASSED while dragging was broken.
+     *
+     * VERIFY AND RETRY, because a single move does not reliably land where
+     * it aims: Weston puts the VISIBLE frame corner at the requested
+     * coordinate, so the client ends up shifted by the visible insets
+     * (measured +6,+27 on both windows) - and its inset adjustment is
+     * ASYNCHRONOUS, so a single blind corrective nudge raced it and stuck in
+     * one run out of two. Instead: once a second, read where the client
+     * actually is; if off target, shift the aim by the measured error and
+     * move again; a window that reads exactly right is settled. Capped at 6
+     * tries so a user who grabs a window mid-restore is fought for seconds,
+     * not forever, and each try is logged so the next placement surprise
+     * explains itself. Only after convergence (or the cap) does one forced
+     * save record the settled truth and arm the event-driven saves - saving
+     * earlier recorded the pre-nudge spot and re-armed next run's drift. */
+    if (restore_state == 0 && now_s() - win_mapped_s > 2.5) {
+        restore_state = 1;
+        restore_moved_s = now_s();
+        game_aim_x = game_want_x;     game_aim_y = game_want_y;
+        legend_aim_x = legend_want_x; legend_aim_y = legend_want_y;
+        game_settled   = !game_want_pos;
+        legend_settled = !legend_want_pos || !legend_win;
+        if (!game_settled)   XMoveWindow(xdpy, xwin, game_aim_x, game_aim_y);
+        if (!legend_settled) XMoveWindow(xdpy, legend_win, legend_aim_x, legend_aim_y);
+        if (!game_settled || !legend_settled) XFlush(xdpy);
+    } else if (restore_state == 1 && now_s() - restore_moved_s > 1.0) {
+        int ax, ay, moved = 0;
+        restore_moved_s = now_s();
+        restore_tries++;
+        if (!game_settled && winpos_read(xwin, &ax, &ay)) {
+            if (ax == game_want_x && ay == game_want_y) game_settled = 1;
+            else {
+                game_aim_x += game_want_x - ax;
+                game_aim_y += game_want_y - ay;
+                fprintf(stderr, "[padglhost] restore try %d: game at %d,%d "
+                        "want %d,%d -> aim %d,%d\n", restore_tries, ax, ay,
+                        game_want_x, game_want_y, game_aim_x, game_aim_y);
+                XMoveWindow(xdpy, xwin, game_aim_x, game_aim_y);
+                moved = 1;
+            }
+        }
+        if (!legend_settled && winpos_read(legend_win, &ax, &ay)) {
+            if (ax == legend_want_x && ay == legend_want_y) legend_settled = 1;
+            else {
+                legend_aim_x += legend_want_x - ax;
+                legend_aim_y += legend_want_y - ay;
+                fprintf(stderr, "[padglhost] restore try %d: legend at %d,%d "
+                        "want %d,%d -> aim %d,%d\n", restore_tries, ax, ay,
+                        legend_want_x, legend_want_y, legend_aim_x, legend_aim_y);
+                XMoveWindow(xdpy, legend_win, legend_aim_x, legend_aim_y);
+                moved = 1;
+            }
+        }
+        if (moved) XFlush(xdpy);
+        if ((game_settled && legend_settled) || restore_tries >= 6) {
+            restore_state = 2;
+            fprintf(stderr, "[padglhost] restore %s after %d check(s)\n",
+                    game_settled && legend_settled ? "converged" : "GAVE UP",
+                    restore_tries);
+            winpos_save_all();
+        }
+    }
+
     while (XPending(xdpy) > 0) {
         XNextEvent(xdpy, &ev);
         switch (ev.i[0]) {
@@ -821,8 +960,11 @@ static void win_pump(void)
                 /* The last position save was up to 1 s ago (the throttle), so
                  * the final resting spot of a drag could be lost. This runs
                  * BEFORE watch.sh starts killing anything, so unlike a save
-                 * at exit it actually lands on disk. */
-                winpos_save_all();
+                 * at exit it actually lands on disk. Gated like the
+                 * ConfigureNotify save: a close before the restore settles
+                 * must not clobber the remembered spot with the WM's own
+                 * placement. */
+                if (restore_state == 2) winpos_save_all();
                 stop_now = 1;
             }
             break;
@@ -840,17 +982,15 @@ static void win_pump(void)
             /* The GAME window drives the drawable size; the legend window
              * resizing must not be mistaken for it. */
             if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; }
-            /* SAVE THE POSITION HERE, not at exit. Saving on shutdown does not
-             * survive contact with watch.sh, which SIGINTs and then SIGKILLs a
-             * second later - measured: the file was never written. A window
-             * move always produces this event, so recording it here is both
-             * more robust and always current. Throttled, because dragging a
-             * window produces a ConfigureNotify per pixel. */
-            {
-                static double last_saved;
-                double now = now_s();
-                if (now - last_saved > 1.0) { last_saved = now; winpos_save_all(); }
-            }
+            /* SAVE FROM HERE, not at exit. Saving on shutdown does not
+             * survive contact with watch.sh, which SIGINTs and then SIGKILLs
+             * a second later - measured: the file was never written. A window
+             * move always produces this event. The save itself is DEFERRED
+             * (flag, flushed below): saving inline under a 1 s throttle let
+             * the LAST event of a drag be swallowed, leaving the file up to a
+             * second behind the window's resting spot with nothing left to
+             * re-save it. */
+            save_pending = 1;
             break;
         case 12:                       /* Expose */
             legend_dirty = 1;
@@ -884,6 +1024,19 @@ static void win_pump(void)
             break;
         }
         default: break;
+        }
+    }
+    /* The deferred save. win_pump runs from the idle poll as well as per
+     * frame, so this fires ~1 s after the LAST ConfigureNotify even if no
+     * further event ever arrives - the drag's resting spot always lands on
+     * disk. Not armed until the restore has settled: the WM's initial
+     * placement also raises the flag, and saving it would overwrite the
+     * remembered position with the default before it was ever restored. */
+    if (restore_state == 2 && save_pending) {
+        static double last_saved;
+        double now = now_s();
+        if (now - last_saved > 1.0) {
+            last_saved = now; save_pending = 0; winpos_save_all();
         }
     }
     if (legend_dirty) legend_draw(XDefaultScreen(xdpy));

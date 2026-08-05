@@ -31,14 +31,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **7. Switch input unreliable during keyboard play.** A playfield-window
-      scoop click did not register and plunge looked dead. Prime suspect is the
-      two-writers clobber `swhold.py` already documents: **padglhost rebuilds
-      the whole `held[]` array from its own key state on ANY key event**, so
-      anything another writer put in `padsw` is wiped the moment David touches
-      the keyboard. This one breaks *playing the game*, which is why it sits
-      above the two cosmetic video items.
-
 - [ ] **6. Scene video noise in the TV inset.** The inset draws pink/green
       horizontal noise where character footage should be — NOISE, not black, so
       the frames arrive and are drawn but interpreted wrongly. The log points at
@@ -123,6 +115,36 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **7. Switch input unreliable during keyboard play.** DONE 2026-08-05, `PENDING`.
+      **A 3000 ms `swpoke` press was reaching the game as 334/465/437/420 ms —
+      14% of what was asked. It is now 3003/3002/3002/3003 ms.** The clobber was
+      exactly what this item suspected: `sw_publish()` in padglhost memsets and
+      rebuilds `held[]` from key state alone, over the one array the scripts also
+      wrote. `padsw` now has **three regions with one writer each** — keyboard,
+      scripts, and the merged answer the guest publishes back — and the shim
+      merges by **LAST EDGE WINS PER ID**.
+      **Not an OR, and that is the whole design.** padglhost latches the coin
+      door and all six trough balls ON at window open, so an OR would have left
+      `plunge.py` permanently unable to take a ball out of the trough: a stomp
+      swapped for a deadlock, and the deadlock looks deliberate. Last-edge-wins
+      means a rebuild that re-asserts what was already there moves nothing,
+      while a key that genuinely moves still wins instantly (both directions
+      confirmed live).
+      **It could not be measured before, which is why it sat this long.** The
+      trigger is a key press and a key press cannot be injected — SendInput into
+      WSLg is UIPI-blocked and this WSL has no X tools. `PAD_SW_KEYSIM=<ms>`
+      makes padglhost call the same `sw_publish()` on a timer, so the fault
+      reproduces on demand; that is what produced the before numbers above.
+      **Also fixed end to end:** `plunge` used to log `-71` then a `+71` nobody
+      asked for 376 ms later (ball back in the trough before the shooter lane
+      had even closed) and now runs its real 450/1200 ms story; a script-latched
+      coin door survived 6584 ms and ~13 republishes with the game drawing its
+      own `48V DISABLED` banner, screenshot-verified both ways.
+      **Bonus, and a stale comment killed:** padglhost's source claimed the
+      PLAYFIELD keys were inert (`live = 0`). They are not — holding 59+60
+      opened the game's own `CHOOSE YOUR MODE OF PLAY` and released back to
+      attract. The legend text had been corrected; the comment had not.
 
 - [x] **1c. The LED frame shapes that were still dropped.** DONE 2026-08-05, `4695bbd`.
       **`skipped` in attract went 225 → 15 per 60 s** (and decoded held at

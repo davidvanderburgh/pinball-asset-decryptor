@@ -21,15 +21,27 @@ closed for as long as it is there. swpoke.py pulses and would put the ball back.
 The order matters and is not arbitrary: open the trough switch BEFORE closing
 the shooter lane. A real ball cannot be in both places, and the game's ball
 accounting notices.
+
+WHY THERE IS A `take` CALL IN HERE. The trough is the one place the keyboard and
+the scripts genuinely both hold state: padglhost latches all six balls on when
+its window opens (B toggles them), and this script wants to take one out. The
+guest merges the two arrays by LAST EDGE WINS, so writing a 0 into a script byte
+that is already 0 would move nothing - `padsw.take` first copies the merged value
+across, silently, so the write after it is a real edge. Before the arrays were
+split this script "worked" by writing the keyboard's own array, and every key
+press put the ball straight back in the trough.
 """
-import mmap
-import struct
 import sys
 import time
 
-PATH = "/home/david/spike2root/dump/padsw"
-MAGIC = 0x53444150
-OFF_GEN, OFF_HELD = 4, 8
+import padsw
+
+PATH = padsw.PATH
+MAGIC = padsw.MAGIC
+#: Reads answer "where is the ball as far as the GAME is concerned", so they
+#: come from the merged array; writes go to the script array. Kept as
+#: module-level names because coilact.py uses them.
+OFF_GEN, OFF_HELD, OFF_MRG = padsw.OFF_SCR_GEN, padsw.OFF_SCR_HELD, padsw.OFF_MRG
 
 START, SHOOTER, TROUGH_JAM = 36, 62, 72
 TROUGH = (71, 70, 69, 68, 67, 66)        # Trough 1..6; 1 is nearest the eject
@@ -42,22 +54,20 @@ LANE_S = 1.2
 
 
 def _open():
-    f = open(PATH, "r+b")
-    m = mmap.mmap(f.fileno(), 4096)
-    if struct.unpack_from("<I", m, 0)[0] != MAGIC:
-        print("bad magic - is the emulator running?")
-        return None
-    return m
+    return padsw.open_block()
 
 
 def _set(m, sw, val):
-    m[OFF_HELD + sw] = 1 if val else 0
-    struct.pack_into("<I", m, OFF_GEN,
-                     struct.unpack_from("<I", m, OFF_GEN)[0] + 1)
-    m.flush()
+    padsw.set_held(m, sw, val)
+
+
+def _held(m, sw):
+    """What the GAME sees for `sw` - the merge, not either input."""
+    return padsw.merged(m, sw)
 
 
 def do_start(m):
+    padsw.take(m, (START,))
     _set(m, START, 1)
     time.sleep(0.15)
     _set(m, START, 0)
@@ -65,7 +75,8 @@ def do_start(m):
 
 
 def do_plunge(m):
-    ball = next((s for s in TROUGH if m[OFF_HELD + s]), None)
+    padsw.take(m, TROUGH + (SHOOTER,))
+    ball = next((s for s in TROUGH if _held(m, s)), None)
     if ball is None:
         print("no ball in the trough - run `plunge.py reset` first")
         return 1
@@ -81,13 +92,23 @@ def do_plunge(m):
 
 
 def do_reset(m):
-    for s in range(1, 256):
-        m[OFF_HELD + s] = 0
-    for s in REST:
-        m[OFF_HELD + s] = 1
-    struct.pack_into("<I", m, OFF_GEN,
-                     struct.unpack_from("<I", m, OFF_GEN)[0] + 1)
-    m.flush()
+    """The machine at rest, stated from the script side.
+
+    This clears the SCRIPT array only. It cannot clear what the keyboard holds,
+    and must not try: padglhost owns that half, and the merge would hand the
+    keyboard's value straight back on its next publish. What it can do - and
+    does - is assert the rest set as a genuine edge on every id in it, which is
+    what makes the merge adopt it.
+
+    ONE bump, after the whole array is staged. Clearing everything and then
+    setting the rest set, with a publish between, would show the guest an empty
+    trough for however long its next poll took - and its poll is sub-millisecond,
+    so it would land there sooner or later and report a ball drain nobody caused.
+    """
+    padsw.take(m, REST)
+    for s in range(1, padsw.MAX_ID):
+        m[OFF_HELD + s] = 1 if s in REST else 0
+    padsw.bump(m)
     print("six balls in the trough, coin door shut")
 
 

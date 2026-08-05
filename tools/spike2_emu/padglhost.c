@@ -454,18 +454,23 @@ struct keybind {
     const char   *what;
     short         ids[7];   /* 0-terminated list of switch ids */
     int           toggle;   /* 1 = latching, for things you hold for minutes */
-    int           live;     /* 0 = bound, but the game cannot see it yet */
+    int           live;     /* 0 = playfield; a SECTION MARKER, not "inert" */
 };
 
 /* Ids are the game own switch ids, straight out of its table (PAD_SW_MAP).
  *
- * `live` is not decoration. The CABINET switches (node 0) are read continuously
- * as the RX half of an SPI transfer, so they work. The PLAYFIELD switches come
- * over the node bus as command 0x11, and the game currently sends that exactly
- * ONCE per board per run - the service loop call to 0x1d6d94 is gated on
- * board[+4] bit 0, which nothing has been seen to set. Until that is found the
- * playfield keys are inert, and saying so on screen beats letting someone
- * conclude the whole channel is broken because the flippers do nothing. */
+ * `live` SPLITS THE LEGEND INTO TWO SECTIONS AND NOTHING ELSE. It once meant
+ * "the game cannot see this yet" - the playfield switches come over the node
+ * bus as command 0x11 and that was thought to be sent once per board per run -
+ * and the legend text was corrected when they started working, but this comment
+ * was not. Read as written it says the flipper keys do nothing, which is the
+ * opposite of the truth and is exactly the wrong thing to hand the next person
+ * debugging switch input.
+ *
+ * PROVEN WORKING 2026-08-05, by the game's own advertised behaviour rather than
+ * by a log: attract says HOLD BOTH FLIPPER BUTTONS FOR MENU, and holding 59 and
+ * 60 (both PLAYFIELD switches, both `live = 0` here) opened CHOOSE YOUR MODE OF
+ * PLAY and closed it again on release. Screenshot-verified both ways. */
 static struct keybind binds[] = {
     { 0xff0d, "Enter",  "Service Select",      { 25, 0 }, 0, 1 },
     { 0xff8d, "KP Ent", "Service Select",      { 25, 0 }, 0, 1 },
@@ -635,7 +640,15 @@ static int save_pending;                 /* a ConfigureNotify awaits saving   */
 
 /* Recompute held[] from scratch and publish. Rebuilding rather than patching
  * incrementally means two keys bound to the same switch cannot leave it stuck
- * on when only one of them is released. */
+ * on when only one of them is released.
+ *
+ * THIS WRITES ONLY held[] AND gen, and that is now load-bearing rather than
+ * incidental. The rebuild used to run over the ONE array the scripts also
+ * wrote, so every key press erased whatever swpoke.py or plunge.py had put
+ * there (REMAINING item 7). The scripts have their own array now - see the
+ * three-region comment in padsw.h - and the guest merges the two by last edge
+ * wins, so this function re-asserting a byte that has not moved is a no-op
+ * downstream instead of a stomp. Do not "simplify" it back into one array. */
 static void sw_publish(void)
 {
     unsigned char h[PADSW_MAX_ID];
@@ -667,11 +680,54 @@ static void sw_shm_open(void)
     swshm = mmap(0, PADSW_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (swshm == MAP_FAILED) { swshm = 0; return; }
-    memset(swshm, 0, PADSW_BYTES);
+    /* ONLY WIPE A BLOCK NOBODY IS USING. This runs from win_open(), i.e. on the
+     * game's first rendered frame - tens of seconds into the boot, by which
+     * time swinit.py or an early helper may already have written the script
+     * region. A blanket memset here would silently undo it, which is the same
+     * class of bug as the one this item is about. A live block announces itself
+     * with the magic, so honour it and clear only what this process owns. */
+    if (swshm->magic != PADSW_MAGIC) memset(swshm, 0, PADSW_BYTES);
+    else {
+        memset((void *)swshm->held, 0, sizeof swshm->held);
+        swshm->tap_gen = swshm->tap_id = swshm->tap_reads = 0;
+    }
     swshm->magic = PADSW_MAGIC;
     __sync_synchronize();
     swshm->gen = 1;
     fprintf(stderr, "[padglhost] keyboard -> switches via %s\n", path);
+}
+
+/* ---- PAD_SW_KEYSIM=<ms> - pretend a key event happened, every <ms> ms.
+ *
+ * This exists because the two-writers clobber above could not be MEASURED. A
+ * key press is the trigger, and a key press cannot be injected from a script
+ * here: SendInput into the WSLg window is rejected by UIPI, the same block that
+ * defeats PrtScn and WM_CLOSE, and this WSL has no X tools. So the fault could
+ * only ever be reproduced by David putting his hands on the keyboard, which is
+ * not an instrument.
+ *
+ * It calls the SAME sw_publish() the key handler calls, with the SAME key
+ * state, so it exercises the real path and not a model of it: with the old
+ * single array a 3 s swpoke press was released at the first tick after it
+ * started, and plunge.py's ball came straight back to the trough. Off unless
+ * set; it is a diagnostic, not part of a normal run. */
+static void sw_keysim(void)
+{
+    static int ms = -1;
+    static double next_s;
+    double t;
+    if (ms == -1) {
+        const char *e = getenv("PAD_SW_KEYSIM");
+        ms = (e && *e) ? atoi(e) : 0;
+        if (ms > 0)
+            fprintf(stderr, "[padglhost] PAD_SW_KEYSIM: republishing the key "
+                            "state every %d ms (diagnostic)\n", ms);
+    }
+    if (ms <= 0 || !swshm) return;
+    t = now_s();
+    if (t < next_s) return;
+    next_s = t + ms / 1000.0;
+    sw_publish();
 }
 
 static void legend_open(int scr)
@@ -874,6 +930,7 @@ static void win_pump(void)
      * strict-aliasing violation that -O2 is entitled to miscompile. */
     union { long l[32]; unsigned long ul[32]; int i[64]; } ev;
     if (!win_on) return;
+    sw_keysim();            /* diagnostic, off unless PAD_SW_KEYSIM is set */
 
     /* THE DELAYED MOVE - the one position-restore mechanism that works under
      * WSLg, after two proven-dead ones (2026-08-05):

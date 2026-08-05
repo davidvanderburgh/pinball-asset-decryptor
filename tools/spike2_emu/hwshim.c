@@ -2002,10 +2002,15 @@ extern int usleep(unsigned);
 struct padsw_shm {
     unsigned magic; unsigned gen; unsigned char held[256];
     unsigned tap_gen; unsigned tap_id; unsigned tap_reads;
+    unsigned scr_gen; unsigned char scr_held[256];
+    unsigned mrg_gen; unsigned char mrg[256];
 };
 #define PADSW_MAGIC 0x53444150u
 
-static const volatile struct padsw_shm *sw_shm;
+/* NOT const: mrg[]/mrg_gen are written from here. Everything else in the block
+ * is read-only to the guest, and stays that way - see padsw.h for which of the
+ * three regions each writer owns. */
+static volatile struct padsw_shm *sw_shm;
 
 /* A tap in flight. `pad_tap_id` is consulted by sw_scan_bytes() exactly as if
  * the switch were held; `tap_left` counts down the transfers it still has to
@@ -4071,13 +4076,67 @@ static void sw_shm_init(void)
      * would not see the host's later writes at all, which is the whole point. */
     m = real_mmap(0, 4096, 1 | 2, 0x01, fd, 0);
     if (m == (void *)-1) return;
-    sw_shm = (const volatile struct padsw_shm *)m;
+    sw_shm = (volatile struct padsw_shm *)m;
     {
         char b[160];
         snprintf(b, sizeof b, "[swshm] %s mapped at %p magic=0x%08x\n",
                  path, m, sw_shm->magic);
         logmsg(b);
     }
+}
+
+/* ---- THE MERGE. Two writers, one answer, and it is NOT an OR ------------
+ *
+ * padglhost owns held[] and rebuilds it from its key state on every key event;
+ * the scripts own scr_held[]. Before the split there was one array and the
+ * rebuild wiped the scripts' work on every key press - the scoop click that
+ * did not register and the plunge that looked dead (REMAINING item 7).
+ *
+ * OR IS THE OBVIOUS MERGE AND IT IS WRONG. padglhost latches the coin door and
+ * all six trough balls ON when its window opens, because that is a machine at
+ * rest, so `held[66] == 1` for the whole run. Under an OR plunge.py could never
+ * take a ball out of the trough again - it would have swapped a stomp for a
+ * deadlock, and the deadlock is worse because it looks deliberate.
+ *
+ * LAST EDGE WINS, PER ID. Each side is compared against what it said last time;
+ * only ids that MOVED are copied into the answer. A rebuild that re-asserts
+ * held[66] = 1 has not moved anything, so it cannot touch a 66 the script just
+ * opened - while pressing B, which really does move it, still wins immediately.
+ * Same-poll ties go to the keyboard: the window is one SPI iteration, so a true
+ * tie is a coincidence, and when a human and a script really do fight over one
+ * switch the human should win.
+ *
+ * The merged bytes are published back into mrg[] so a reader outside the guest
+ * can see what the game was handed rather than one of the two inputs. Nothing
+ * in the input path reads mrg[] back; it is an output. */
+static unsigned char sw_kbd_prev[256];
+static unsigned char sw_scr_prev[256];
+static unsigned char sw_mrg[256];
+
+static void sw_shm_merge(void)
+{
+    static unsigned seen_k = (unsigned)-1, seen_s = (unsigned)-1;
+    unsigned kg, sg;
+    int n, moved = 0;
+    if (!sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    kg = sw_shm->gen;
+    sg = sw_shm->scr_gen;
+    if (kg == seen_k && sg == seen_s) return;
+    seen_k = kg; seen_s = sg;
+    for (n = 0; n < 256; n++) {
+        unsigned char k = sw_shm->held[n] ? 1 : 0;
+        unsigned char s = sw_shm->scr_held[n] ? 1 : 0;
+        unsigned char want = sw_mrg[n];
+        if (k != sw_kbd_prev[n])      want = k;
+        else if (s != sw_scr_prev[n]) want = s;
+        sw_kbd_prev[n] = k;
+        sw_scr_prev[n] = s;
+        if (want != sw_mrg[n]) { sw_mrg[n] = want; moved = 1; }
+    }
+    if (!moved) return;
+    for (n = 0; n < 256; n++) sw_shm->mrg[n] = sw_mrg[n];
+    __sync_synchronize();
+    sw_shm->mrg_gen++;
 }
 
 /* PAD_LATENCY=1 - the two ends of "why does it feel slow".
@@ -4094,12 +4153,17 @@ static int lat_on(void)
     return on;
 }
 
+/* The change counter the SPI path caches against. It is the SUM of the two
+ * input generations because either writer moving is a reason to rebuild, and
+ * both only ever count up, so the sum only ever counts up too. It is NOT the
+ * "has the host published" test - that one wants the host's own counter and
+ * asks sw_shm->gen directly; see sw_rest_pending(). */
 static unsigned sw_shm_gen(void)
 {
     static unsigned last;
     unsigned g;
     if (!sw_shm || sw_shm->magic != PADSW_MAGIC) return 0;
-    g = sw_shm->gen;
+    g = sw_shm->gen + sw_shm->scr_gen;
     if (g != last) {
         last = g;
         if (lat_on()) {
@@ -4111,21 +4175,29 @@ static unsigned sw_shm_gen(void)
     return g;
 }
 
+/* The merged answer, never one of the two inputs. Cheap: sw_shm_merge() returns
+ * on an unchanged pair of generations, which is the common case by far. */
 static int sw_shm_held(unsigned id)
 {
     if (!sw_shm || sw_shm->magic != PADSW_MAGIC || id >= 256) return 0;
-    return sw_shm->held[id] != 0;
+    sw_shm_merge();
+    return sw_mrg[id] != 0;
 }
 
-/* [sw] - every EDGE in the padsw block, logged at the point the shim consumes
- * it. This is the switch-input instrument the rig lacked: a click on the
- * virtual playfield, a plunge.py sequence and a keyboard flipper all funnel
- * through held[], and "the script pressed it" and "the game was handed it" are
- * different claims - only the second one is evidence. It also makes the
- * two-writers hazard VISIBLE: padglhost rebuilds held[] from its own key state
- * on any key event (swhold.py documents this), so a script's write being
- * stomped shows up here as an edge nobody asked for, e.g. a trough switch
- * `-66` followed by a bare `+66` right after a flipper key.
+/* [sw] - every EDGE in the MERGED switch state, logged at the point the shim
+ * consumes it. This is the switch-input instrument the rig lacked: a click on
+ * the virtual playfield, a plunge.py sequence and a keyboard flipper all funnel
+ * through here, and "the script pressed it" and "the game was handed it" are
+ * different claims - only the second one is evidence.
+ *
+ * It reads the MERGED array on purpose, not held[]: the merge is what the game
+ * is handed, so an edge here is an edge the game saw. That also keeps the
+ * measurement comparable across the split - before it, held[] and the merge
+ * were the same thing, so a before/after run compares like with like. Which is
+ * how the two-writers clobber was finally measured rather than argued about:
+ * with one array, a 3000 ms `swpoke.py 53` logged its `-53` at the next key
+ * event instead of 3000 ms later, and plunge.py's `-66` was followed by a `+66`
+ * nobody asked for.
  *
  * One line per generation bump that changed anything: "[sw] 12345 ms +59 -66".
  * PAD_SW_LOG=0 turns it off; the budget stops a runaway (a stuck writer
@@ -4141,14 +4213,15 @@ static void sw_shm_edges(void)
     int n, len, count = 0;
     if (on == -1) { char *q = getenv("PAD_SW_LOG"); on = !(q && *q == '0'); }
     if (!on || budget <= 0 || !sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    sw_shm_merge();
     if (!primed) {
-        for (n = 0; n < 256; n++) prev[n] = sw_shm->held[n] ? 1 : 0;
+        for (n = 0; n < 256; n++) prev[n] = sw_mrg[n];
         primed = 1;
         return;
     }
     len = snprintf(line, sizeof line, "[sw] %lu ms", pad_ms());
     for (n = 0; n < 256; n++) {
-        unsigned char cur = sw_shm->held[n] ? 1 : 0;
+        unsigned char cur = sw_mrg[n];
         if (cur == prev[n]) continue;
         prev[n] = cur;
         if (len < (int)sizeof line - 8)
@@ -4188,7 +4261,11 @@ static int sw_rest_pending(unsigned id)
      * already in sw_active[] and this would just log a confusing line. */
     p = getenv("PAD_SW_SHM");
     if (!p || !*p) return 0;
-    if (sw_shm_gen()) {
+    /* sw_shm->gen, NOT sw_shm_gen(): this asks specifically whether the HOST
+     * has published, and sw_shm_gen() now also counts the script generation. A
+     * script that wrote before padglhost's window opened would otherwise end
+     * the machine-at-rest set early, which is the very window this exists for. */
+    if (sw_shm && sw_shm->magic == PADSW_MAGIC && sw_shm->gen) {
         if (said == 1) {
             said = 2;
             logmsg("[swrest] host published - it now owns the door and the trough\n");

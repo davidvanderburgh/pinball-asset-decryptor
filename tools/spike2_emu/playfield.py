@@ -78,6 +78,7 @@ import tkinter as tk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
 import gameinfo
+import padsw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -146,9 +147,15 @@ def coarse_timers():
 #: the game will not fire anything and puts "48V DISABLED" on its own screen. A
 #: playfield whose coils never flash is then working perfectly, which is not a
 #: thing to leave anyone to work out for themselves.
+#:
+#: It reads the MERGED array, which is what the guest hands the game, and not
+#: the keyboard's half of the block - those are different answers now that the
+#: two writers have an array each (padsw.py / padsw.h). Reading the keyboard's
+#: half would miss a door opened with swhold.py, which is exactly how the door
+#: gets opened from a script.
 SW_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padsw"
-PADSW_MAGIC = 0x53444150
-SW_HELD, SW_COIN_DOOR = 8, 33
+PADSW_MAGIC = padsw.MAGIC
+SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
 WSL_DIR = ("/mnt/c/Users/david/Documents/development/pinball-asset-decryptor"
            "/tools/spike2_emu")
 
@@ -680,6 +687,13 @@ class Field:
         toggles by hand perhaps twice an hour. Measured: 3.35 ms, the same as
         the LED read, because a 9p round trip costs what it costs regardless
         of the 72 bytes it carries.
+
+        The merged array is the right source and it is written by the GUEST, so
+        it is empty until the game is up and reading switches. An empty merge
+        would read as "door open" and put a 48V warning on a window that is
+        simply early, so fall back to the keyboard's half until the guest has
+        published once. Which half answered is not worth showing; being wrong
+        for the first few seconds of every run would have been.
         """
         self._door_n -= 1
         if self._door_n > 0:
@@ -692,7 +706,9 @@ class Field:
             return False
         if len(d) < SW_HELD + 64 or struct.unpack_from("<I", d, 0)[0] != PADSW_MAGIC:
             return False
-        self._door = not d[SW_HELD + SW_COIN_DOOR]
+        off = (SW_HELD if struct.unpack_from("<I", d, padsw.OFF_MRG_GEN)[0]
+               else padsw.OFF_HELD)
+        self._door = not d[off + SW_COIN_DOOR]
         return self._door
 
     def _chan_vals(self, F, d):

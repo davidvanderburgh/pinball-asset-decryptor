@@ -9,16 +9,22 @@ guest, whoever wrote it. This writes a valid header plus the machine-at-rest set
 with swpoke.py / swhold.py.
 
 Run it BEFORE the guest starts.
+
+It writes the SCRIPT half of the block and leaves the keyboard half at zero,
+which is the honest description of a run with no keyboard in it. padglhost, if
+one ever does open a window over this file, no longer wipes what it finds: it
+checks the magic and clears only its own region.
 """
 import struct
 
-PATH = '/home/david/spike2root/dump/padsw'
-MAGIC = 0x53444150
+import padsw
+
 REST = [33, 66, 67, 68, 69, 70, 71]
 
 buf = bytearray(4096)
-struct.pack_into('<II', buf, 0, MAGIC, 1)
+struct.pack_into('<I', buf, padsw.OFF_MAGIC, padsw.MAGIC)
+struct.pack_into('<I', buf, padsw.OFF_SCR_GEN, 1)
 for i in REST:
-    buf[8 + i] = 1
-open(PATH, 'wb').write(bytes(buf))
-print('wrote %s  magic ok, gen=1, held: %s' % (PATH, REST))
+    buf[padsw.OFF_SCR_HELD + i] = 1
+open(padsw.PATH, 'wb').write(bytes(buf))
+print('wrote %s  magic ok, scr_gen=1, held: %s' % (padsw.PATH, REST))

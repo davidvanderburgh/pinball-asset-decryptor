@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""padsw.py - the ONE definition of the switch block's layout, for the scripts.
+
+`padsw.h` is the definition for the two C programs. This is the same struct for
+the Python side, in one place, because four scripts had four copies of `OFF_HELD
+= 8` and the block just grew two more regions. The rig has been bitten by
+duplicated facts twice already (alive.sh vs killgame.sh, autoattract.sh vs
+status.sh), and both times the copies drifted rather than broke loudly.
+
+THREE REGIONS, ONE WRITER EACH - read padsw.h for why, but the short version is
+that padglhost REBUILDS its whole array on every key event, so when the scripts
+shared that array a flipper press erased whatever swpoke.py or plunge.py had
+just written:
+
+    held[]      the KEYBOARD's, written only by padglhost
+    scr_held[]  the SCRIPTS', written only by the helpers here
+    mrg[]       what the GAME IS HANDED, written only by the guest shim
+
+So: WRITE scr_held, READ mrg. Writing held[] from a script puts it back in a
+fight it cannot win, and reading held[] answers a question about the keyboard
+rather than about the machine.
+
+TAKING OWNERSHIP MATTERS, and it is the one non-obvious part. The shim merges by
+LAST EDGE WINS per id, so a write that does not CHANGE scr_held moves nothing.
+padglhost latches the coin door and the six trough balls on at window open, so
+`mrg[66]` is 1 while `scr_held[66]` is still 0 - and plunge.py writing 0 there
+would be a no-op. `take()` first copies the merged value into scr_held (silent,
+because it agrees with what the game already sees) so that the write after it is
+a real edge. Use it before changing anything the keyboard might also hold.
+"""
+import mmap
+import os
+import struct
+
+#: PAD_SW_FILE points the helpers at a block that is not a running game's, which
+#: is the only way to check any of this without one. The rig never sets it.
+PATH = os.environ.get("PAD_SW_FILE", "/home/david/spike2root/dump/padsw")
+MAGIC = 0x53444150
+MAX_ID = 256
+
+#: Byte offsets, matching struct padsw_shm in padsw.h field for field.
+OFF_MAGIC = 0
+OFF_GEN = 4                          # keyboard generation  (padglhost writes)
+OFF_HELD = 8                         # keyboard array       (padglhost writes)
+OFF_TAP_GEN = OFF_HELD + MAX_ID      # 264
+OFF_TAP_ID = OFF_TAP_GEN + 4         # 268
+OFF_TAP_READS = OFF_TAP_ID + 4       # 272
+OFF_SCR_GEN = OFF_TAP_READS + 4      # 276  script generation (WE write)
+OFF_SCR_HELD = OFF_SCR_GEN + 4       # 280  script array      (WE write)
+OFF_MRG_GEN = OFF_SCR_HELD + MAX_ID  # 536  merged generation (the shim writes)
+OFF_MRG = OFF_MRG_GEN + 4            # 540  merged array      (the shim writes)
+SIZE = OFF_MRG + MAX_ID              # 796, in a 4096-byte block
+
+
+def open_block(path=PATH):
+    """The mapped block, or None with a message if the emulator is not up."""
+    try:
+        f = open(path, "r+b")
+    except OSError as exc:
+        print("cannot open %s: %s" % (path, exc))
+        return None
+    m = mmap.mmap(f.fileno(), 4096)
+    if struct.unpack_from("<I", m, OFF_MAGIC)[0] != MAGIC:
+        print("bad magic - is the emulator running?")
+        m.close()
+        return None
+    return m
+
+
+def merged(m, sw):
+    """What the game is being handed for `sw` right now."""
+    return m[OFF_MRG + sw]
+
+
+def bump(m):
+    struct.pack_into("<I", m, OFF_SCR_GEN,
+                     struct.unpack_from("<I", m, OFF_SCR_GEN)[0] + 1)
+    m.flush()
+
+
+def set_held(m, sw, val):
+    """Drive one switch from the script side and publish it."""
+    m[OFF_SCR_HELD + sw] = 1 if val else 0
+    bump(m)
+
+
+def take(m, ids):
+    """Take ownership of `ids` at their CURRENT merged value, silently.
+
+    Only needed for switches padglhost also holds - the coin door and the
+    trough. See the module docstring: without this, writing the value the
+    merge already shows produces no edge and therefore no effect.
+    """
+    changed = False
+    for sw in ids:
+        want = 1 if m[OFF_MRG + sw] else 0
+        if m[OFF_SCR_HELD + sw] != want:
+            m[OFF_SCR_HELD + sw] = want
+            changed = True
+    if changed:
+        bump(m)

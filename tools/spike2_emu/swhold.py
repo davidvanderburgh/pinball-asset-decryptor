@@ -5,26 +5,25 @@ swpoke.py pulses (press then release). Some switches are latching state, not
 events: the coin door (33) and the six trough balls (66..71) are held for
 minutes, and padglhost models them as toggles. This sets one and leaves it set.
 
-Note padglhost REBUILDS held[] from its own key state on any key event, so a
-latch written here survives only until the next keypress in the window.
+A LATCH SET HERE NOW SURVIVES A KEYPRESS. It used to not: padglhost rebuilds its
+own array on any key event, both scripts and keyboard wrote the same array, and
+so `swhold.py 33 1` lasted until David next touched the keyboard. The two now
+have an array each and the guest merges them by last edge wins - see padsw.py.
+
+Because the merge needs an EDGE, this takes ownership at the current merged
+value first (padsw.take). Without that, latching 33 to the value the keyboard
+already holds would write a byte and change nothing.
 """
-import mmap
-import struct
 import sys
 
-PATH = '/home/david/spike2root/dump/padsw'
-MAGIC = 0x53444150
+import padsw
 
 sw = int(sys.argv[1])
 val = int(sys.argv[2])
-with open(PATH, 'r+b') as f:
-    m = mmap.mmap(f.fileno(), 4096)
-    magic, gen = struct.unpack_from('<II', m, 0)
-    if magic != MAGIC:
-        print('bad magic 0x%08x - is the emulator running?' % magic)
-        sys.exit(1)
-    print('id=%d was %d -> %d (gen %d)' % (sw, m[8 + sw], val, gen + 1))
-    m[8 + sw] = val
-    struct.pack_into('<I', m, 4, gen + 1)
-    m.flush()
-    m.close()
+m = padsw.open_block()
+if m is None:
+    sys.exit(1)
+padsw.take(m, (sw,))
+print('id=%d was %d -> %d' % (sw, padsw.merged(m, sw), val))
+padsw.set_held(m, sw, val)
+m.close()

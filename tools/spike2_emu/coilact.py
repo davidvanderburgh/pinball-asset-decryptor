@@ -29,6 +29,7 @@ import time
 #: module ON WINDOWS to read the descriptions - it only EXECUTES over in WSL.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import padsw
 import plunge
 
 #: coil name -> (kind, switch id, human sentence). `kind` is how the click is
@@ -59,8 +60,13 @@ def describe(name):
 def _lane(m):
     """The auto plunger. If a ball is already waiting in the shooter lane it
     just leaves; otherwise play the whole arrival-and-launch so the click does
-    something visible either way."""
-    if m[plunge.OFF_HELD + plunge.SHOOTER]:
+    something visible either way.
+
+    `_held` is the MERGED state - what the game is being handed - and not this
+    script's own half of the switch block. Asking our own half would answer
+    "did a script put a ball there", which is a different question and gets the
+    wrong answer whenever the keyboard's F key was the one that did it."""
+    if plunge._held(m, plunge.SHOOTER):
         plunge._set(m, plunge.SHOOTER, 0)
         print("shooter lane opened (ball launched)")
         return
@@ -83,8 +89,12 @@ def fire(name):
     if m is None:
         return 1
     if kind == "lane":
+        padsw.take(m, (plunge.SHOOTER,))
         _lane(m)
     else:
+        # Own it at its current merged value first, so the press below is an
+        # edge even for a switch the keyboard is also holding down.
+        padsw.take(m, (sw,))
         plunge._set(m, sw, 1)
         time.sleep(PULSE_MS / 1000.0)
         plunge._set(m, sw, 0)

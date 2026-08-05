@@ -76,6 +76,7 @@ list of confident conclusions that turned out to be wrong — lives there.
 | EGL, either backend | `eglshim.c` |
 | Host decoders / players | `padvidhost.py` (video), `playaudio.sh` (audio) |
 | Virtual playfield (Windows) | `playfield.py`, `coilact.py`, `plunge.py`, `swpoke.py` |
+| Switch block layout | `padsw.h` (C), `padsw.py` (the scripts) — three regions, one writer each |
 | Device maps and decoders | `devicexy.py`, `ledio.py`, `leddecode.py`, `coildecode.py`, `padled.h` |
 | Build | `build.sh`, `buildgl.sh`, `buildbridge.sh` |
 | Run | `watch.sh`, `runbridge.sh`, `nbrun.sh`, `verify2.sh`, `verify3.sh` |

@@ -8,10 +8,36 @@
  * opens by its WSL path and the chrooted guest opens by its /dump path - so the
  * switch channel is the same trick with a much smaller payload.
  *
- * There is deliberately no locking. The host writes bytes and then bumps `gen`;
- * the guest reads `gen`, reads the bytes, and re-reads `gen`. A torn read costs
- * one frame of a switch being wrong, which is far cheaper than any of the
- * alternatives and is indistinguishable from ordinary switch bounce.
+ * There is deliberately no locking. A writer writes bytes and then bumps its
+ * generation; the guest reads the generation, reads the bytes, and re-reads the
+ * generation. A torn read costs one frame of a switch being wrong, which is far
+ * cheaper than any of the alternatives and is indistinguishable from ordinary
+ * switch bounce.
+ *
+ * ---- THREE REGIONS, ONE WRITER EACH. This is the whole point of the layout.
+ *
+ * There used to be ONE array, and both the keyboard and the scripts wrote it.
+ * padglhost REBUILDS its picture of the switch matrix from scratch on every key
+ * event - deliberately, so two keys bound to one switch cannot leave it stuck -
+ * so every key press erased every byte swpoke.py, plunge.py, swhold.py or a
+ * virtual-playfield click had put there. That is REMAINING item 7: a scoop
+ * click that did not register, and a plunge that looked dead, both because
+ * David's hands were on the flipper keys at the time.
+ *
+ *   held[]     KEYBOARD    written only by padglhost, `gen` its counter
+ *   scr_held[] SCRIPTS     written only by the .py helpers, `scr_gen`
+ *   mrg[]      THE ANSWER  written only by the guest shim, `mrg_gen`
+ *
+ * The shim merges the first two by LAST EDGE WINS, PER ID - not by OR. An OR
+ * cannot work here: padglhost latches the coin door (C) and all six trough
+ * balls (B) ON when its window opens, because that is a machine at rest, so
+ * under an OR plunge.py could never take a ball OUT of the trough again.
+ * Last-edge-wins means a writer only ever moves the ids it actually changed,
+ * and a rebuild that re-asserts what was already there moves nothing.
+ *
+ * mrg[] is what the game is ACTUALLY handed, published back so a reader outside
+ * the guest (playfield.py, over 9p) can see it without having to guess at the
+ * merge. Reading held[] instead is reading one of the two inputs.
  */
 #ifndef PADSW_H
 #define PADSW_H
@@ -22,7 +48,7 @@
 
 struct padsw_shm {
     unsigned magic;
-    unsigned gen;                        /* bumped after every change */
+    unsigned gen;                        /* KEYBOARD generation; padglhost only */
     unsigned char held[PADSW_MAX_ID];    /* 1 = this switch id is held ACTIVE */
 
     /* ---- ONE-SHOT TAP, measured in SPI TRANSFERS rather than milliseconds ----
@@ -51,6 +77,21 @@ struct padsw_shm {
     unsigned tap_gen;                    /* host bumps to request a tap        */
     unsigned tap_id;                     /* which switch id                    */
     unsigned tap_reads;                  /* transfers to hold it; 0 means 1    */
+
+    /* ---- THE SCRIPT REGION. Everything that is not a key press writes here:
+     * swpoke.py, swhold.py, plunge.py, coilact.py, swinit.py, and the virtual
+     * playfield through them. padglhost never touches these two fields, and
+     * never zeroes them - not even in its own init, which is why it checks the
+     * magic first rather than memsetting the whole block. */
+    unsigned scr_gen;                    /* scripts bump after every change    */
+    unsigned char scr_held[PADSW_MAX_ID];
+
+    /* ---- WHAT THE GAME IS ACTUALLY BEING HANDED, published by the guest.
+     * Written only by hwshim's sw_shm_merge(); read by anyone who wants the
+     * truth rather than one of the two inputs. This is a diagnostic output, so
+     * nothing in the input path may ever read it back. */
+    unsigned mrg_gen;
+    unsigned char mrg[PADSW_MAX_ID];
 };
 
 #endif

@@ -1986,6 +1986,7 @@ static void sw_tap(void);
 static void sw_changes(void);
 static void sw_pend_trace(void);
 static unsigned sw_shm_gen(void);
+static void sw_shm_edges(void);
 static void audio_maybe_dump(void);
 static void voice_trace(void);
 extern int usleep(unsigned);
@@ -2204,6 +2205,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
             for (k = 0; k < 8; k++) was[k] = bits[k];
             seen_gen = sw_gen;
             seen_kbd = sw_shm_gen();
+            sw_shm_edges();
             have = sw_scan_bytes(0, bits);
             /* EVERY change to the cabinet word, with a timestamp. The menu
              * cursor was seen wandering on its own, and inferring the cause
@@ -4113,6 +4115,51 @@ static int sw_shm_held(unsigned id)
 {
     if (!sw_shm || sw_shm->magic != PADSW_MAGIC || id >= 256) return 0;
     return sw_shm->held[id] != 0;
+}
+
+/* [sw] - every EDGE in the padsw block, logged at the point the shim consumes
+ * it. This is the switch-input instrument the rig lacked: a click on the
+ * virtual playfield, a plunge.py sequence and a keyboard flipper all funnel
+ * through held[], and "the script pressed it" and "the game was handed it" are
+ * different claims - only the second one is evidence. It also makes the
+ * two-writers hazard VISIBLE: padglhost rebuilds held[] from its own key state
+ * on any key event (swhold.py documents this), so a script's write being
+ * stomped shows up here as an edge nobody asked for, e.g. a trough switch
+ * `-66` followed by a bare `+66` right after a flipper key.
+ *
+ * One line per generation bump that changed anything: "[sw] 12345 ms +59 -66".
+ * PAD_SW_LOG=0 turns it off; the budget stops a runaway (a stuck writer
+ * bumping gen forever) from flooding the log. watch.sh forwards these to its
+ * [event] stream. */
+static void sw_shm_edges(void)
+{
+    static unsigned char prev[256];
+    static int primed;
+    static int budget = 2000;
+    static int on = -1;
+    char line[160];
+    int n, len, count = 0;
+    if (on == -1) { char *q = getenv("PAD_SW_LOG"); on = !(q && *q == '0'); }
+    if (!on || budget <= 0 || !sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    if (!primed) {
+        for (n = 0; n < 256; n++) prev[n] = sw_shm->held[n] ? 1 : 0;
+        primed = 1;
+        return;
+    }
+    len = snprintf(line, sizeof line, "[sw] %lu ms", pad_ms());
+    for (n = 0; n < 256; n++) {
+        unsigned char cur = sw_shm->held[n] ? 1 : 0;
+        if (cur == prev[n]) continue;
+        prev[n] = cur;
+        if (len < (int)sizeof line - 8)
+            len += snprintf(line + len, sizeof line - len, " %c%d",
+                            cur ? '+' : '-', n);
+        count++;
+    }
+    if (!count) return;
+    snprintf(line + len, sizeof line - len, "\n");
+    logmsg(line);
+    if (--budget == 0) logmsg("[sw] edge budget spent (PAD_SW_LOG)\n");
 }
 
 /* THE HOST DOES NOT OWN THE LATCHING SWITCHES UNTIL IT HAS SPOKEN.

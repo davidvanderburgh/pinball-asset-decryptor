@@ -330,6 +330,7 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         /\[padglhost\] (window opened|video block|ring |UNKNOWN)/ \
                                  { print "[event] " $0; fflush(); next }
         /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
+        /\[sw\] |\[tap\] |\[cabchg\]/ { print "[event] " $0; fflush(); next }
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!

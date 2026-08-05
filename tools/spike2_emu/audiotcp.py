@@ -24,6 +24,7 @@ player), so this end only has to be a pipe that does not reorder or drop.
 import os
 import socket
 import sys
+import time
 
 
 def main():
@@ -83,12 +84,48 @@ def main():
                     print("[audiotcp] pre-buffered %d bytes before starting"
                           % len(held), flush=True)
                     conn.sendall(bytes(held))
+                # PAD_AUDIO_GAPLOG=1 - where the jitter actually is.
+                #
+                # "The music skips" has two completely different causes and
+                # they need different fixes: the GUEST going quiet for a while
+                # (a gap between reads here, which a bigger cushion absorbs),
+                # or the SEND stalling (backpressure from a player that is not
+                # keeping up, which a cushion cannot help at all). Guessing
+                # between them has already cost two wrong fixes, so measure:
+                # per 5 s, the worst read gap and the worst send stall.
+                # ON BY DEFAULT while the skipping is open: one line per 5 s in
+                # padaudio.log is nothing, and an instrument that has to be
+                # switched on is an instrument that is off on the run that
+                # mattered - which is exactly what happened the first time this
+                # was measured. PAD_AUDIO_GAPLOG=0 silences it.
+                gaplog = os.environ.get("PAD_AUDIO_GAPLOG", "1") != "0"
+                t_last = time.monotonic()
+                win_t0, win_read, win_send, win_bytes = t_last, 0.0, 0.0, 0
                 while True:
                     b = f.read(4096)
+                    now = time.monotonic()
+                    if gaplog:
+                        win_read = max(win_read, now - t_last)
                     if not b:
                         # Every writer closed: the run is going away.
                         break
+                    t_send = now
                     conn.sendall(b)
+                    t_last = time.monotonic()
+                    if gaplog:
+                        win_send = max(win_send, t_last - t_send)
+                        win_bytes += len(b)
+                        if t_last - win_t0 >= 5.0:
+                            span = t_last - win_t0
+                            print("[audiotcp] %5.1fs: %6.1f KB (%5.1f%% of real "
+                                  "time)  worst read gap %5.1f ms  worst send "
+                                  "stall %5.1f ms"
+                                  % (span, win_bytes / 1024.0,
+                                     100.0 * win_bytes / (176400.0 * span),
+                                     win_read * 1000.0, win_send * 1000.0),
+                                  flush=True)
+                            win_t0, win_read, win_send, win_bytes = \
+                                t_last, 0.0, 0.0, 0
         except (BrokenPipeError, ConnectionResetError):
             print("[audiotcp] player went away", flush=True)
         except OSError as exc:

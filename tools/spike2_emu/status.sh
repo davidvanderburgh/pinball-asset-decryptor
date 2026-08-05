@@ -25,9 +25,17 @@ S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_
 pid=$(pgrep -x game 2>/dev/null | head -1)
 hpid=$(pgrep -x padglhost 2>/dev/null | head -1)
 
+# ASK alive.sh, do not keep a second list here. This used to count four things
+# plus a pattern ('Godzilla Pro emulator') that had not matched anything for
+# months, so the app's idea of "a run is up" was built on a list that had
+# already drifted - the same drift that let seven leaked processes hide behind
+# "TOTAL STILL RUNNING : 0". --procs is deliberately the count WITHOUT card
+# mounts: an idle mount is worth reporting as unclean, but it must not make the
+# app's button say "Stop emulator".
+procs=$(bash "$S/alive.sh" --procs)
+# `pgrep -c` PRINTS 0 and ALSO exits non-zero on no match, so `|| echo 0` emits
+# "0\n0" and breaks every arithmetic use downstream. Take the value, default it.
 n() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
-procs=$(( $(n -x game) + $(n -f arm-binfmt) + $(n -x padglhost) \
-        + $(n -f nodebus.py) + $(n -f 'Godzilla Pro emulator') ))
 
 echo "procs=$procs"
 echo "log=$LOG"

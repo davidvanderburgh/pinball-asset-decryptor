@@ -563,6 +563,12 @@ class Field:
         d = self.read_leds()
         self.last = d
         if emu_gone(self, d is not None):
+            # SAVE FIRST. Leaving with the run is the COMMON way this window
+            # closes - the human closes the emulator, not the playfield - so a
+            # destroy without this meant the remembered position only ever came
+            # from the rare manual close, and a dragged playfield drifted back
+            # to where it was two runs ago.
+            save_state(self.root)
             self.root.destroy()             # the run ended; leave with it
             return
         if d is None:
@@ -740,6 +746,7 @@ class Schematic:
         except OSError:
             d = None
         if emu_gone(self, bool(d)):
+            save_state(self.root)           # see Field.tick: this is the COMMON close
             self.root.destroy()             # the run ended; leave with it
             return
         if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:

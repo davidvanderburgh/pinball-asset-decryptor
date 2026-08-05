@@ -22,7 +22,9 @@ S="$(cd "$(dirname "$0")" && pwd)"
 echo "[reset] tearing the rig down first"
 bash "$S/killgame.sh" || true
 sleep 1
-bash "$S/alive.sh" | tail -7
+# NOT `| tail -N`. alive.sh's report grew when it learned to count the interop
+# stubs and the card mounts, and a fixed tail silently cut the top off it.
+bash "$S/alive.sh"
 
 LEFT=$(pgrep -c -x game 2>/dev/null || echo 0)
 if [ "${LEFT:-0}" != 0 ]; then

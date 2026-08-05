@@ -99,16 +99,32 @@ killgame.sh       # emergency stop
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.
 
-## Three rules that are not negotiable
+## Four rules that are not negotiable
 
 - **Never wrap a run in `timeout`.** It signals only its direct child, which
   here is a `setsid` wrapper, so the guest survives it and spins at ~140% CPU
   forever. Use `watch.sh`'s own minute cap, or `runlim.sh`.
 - **Run `alive.sh` after every run** and confirm it prints 0. An orphaned guest
   is invisible and expensive.
+- **Anything a run starts goes in `alive.sh` the same day.** That list is the
+  rig's only definition of "clean", and it has twice been out of date: once it
+  reported `TOTAL STILL RUNNING : 0` over seven leaked Windows-interop stubs
+  and three orphaned card mounts. `killgame.sh` and `status.sh` now ASK
+  `alive.sh` (`--total` / `--procs`) instead of keeping their own copies, so
+  there is one list and one place to add to.
 - **Bracket `pkill` patterns** — `pkill -f padvidhost.py` from inside
   `wsl -e bash -c '...'` matches the shell's own command line and kills it.
   Write `pkill -f "padvidhost[.]py"`.
+
+### When a window will not close
+
+A window that WSLg is still painting after its X client has gone cannot be
+closed by clicking its X (there is nothing left to receive the close) and
+`msrdc` refuses `Stop-Process`. `wsl --shutdown` is the only cure found; the
+app's **Restart WSL…** button on the Emulate tab does it for you. Note that
+synthetic closes do NOT work as a test either: `WM_CLOSE` and `SC_CLOSE` posted
+to a RAIL window from Windows are both ignored, the same UIPI class as the
+`SendInput` and PrtScn blocks documented elsewhere.
 
 ## The coin door interlock, which explains a whole class of "it does nothing"
 

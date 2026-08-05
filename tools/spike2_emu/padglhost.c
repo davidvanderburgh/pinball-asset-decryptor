@@ -329,6 +329,7 @@ extern int XSetWMProtocols(XDisplay *, unsigned long, unsigned long *, int);
 extern int XPending(XDisplay *);
 extern int XNextEvent(XDisplay *, void *);
 extern int XFlush(XDisplay *);
+extern int XSync(XDisplay *, int);
 
 extern EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, unsigned long, const EGLint *);
 extern EGLBoolean eglSwapBuffers(EGLDisplay, EGLSurface);
@@ -1772,5 +1773,34 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "[padglhost] stopped after %ld frames in %.1f s (%.1f fps avg)\n",
             frames_done, now_s() - t0, frames_done / (now_s() - t0));
+
+    /* TAKE THE WINDOWS DOWN OURSELVES rather than letting process exit do it.
+     *
+     * Exiting drops the X connection and the server destroys our windows, which
+     * is correct X11 and was all this did for a long time. But these are RAIL
+     * windows: WSLg mirrors each one into a Windows window painted by msrdc,
+     * and a mirror that misses the destroy leaves a GHOST - a window still on
+     * the desktop with no X client behind it, whose X button therefore does
+     * nothing, and which cannot be killed either because msrdc is a protected
+     * process. David hit exactly that on 2026-08-05 with the Controls window,
+     * and the only cure found was `wsl --shutdown`.
+     *
+     * XSync (not XFlush) because the point is the ROUND TRIP: it returns once
+     * the server has processed the destroys, so the compositor has seen them
+     * while our connection is still healthy, instead of racing process exit.
+     *
+     * HONESTLY LABELLED: this is belt and braces, not a proven fix. The ghost
+     * did NOT reproduce in testing - a clean stop here removed both windows
+     * every time - and the one instrument that could have driven the real
+     * failure (posting WM_CLOSE/SC_CLOSE to the RAIL window from Windows) is
+     * ignored by msrdc, the same UIPI class as the SendInput and PrtScn blocks
+     * this rig has already run into. So this makes the shutdown more correct;
+     * it does not let anyone claim the ghost is gone. */
+    if (xdpy) {
+        if (legend_win) XDestroyWindow(xdpy, legend_win);
+        if (xwin)       XDestroyWindow(xdpy, xwin);
+        XSync(xdpy, 0);
+        XCloseDisplay(xdpy);
+    }
     return 0;
 }

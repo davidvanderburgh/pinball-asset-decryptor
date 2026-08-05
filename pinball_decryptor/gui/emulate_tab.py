@@ -214,14 +214,24 @@ class EmulatePanel:
                                    command=self._toggle, width=16)
         self._run_btn.pack(side=tk.LEFT)
 
-        # The remedy for a fault that is NOT ours and cannot be detected from
-        # inside WSL: WSLg's audio path to Windows degrades on a long session
-        # and everything the rig can measure still reads perfect (a pure sine
-        # captured at the sink came back mathematically clean while it was
-        # audibly breaking up).  `wsl --shutdown` rebuilds it.  It is here
-        # because the alternative is remembering a command that has nothing to
-        # do with pinball, at the moment you are least inclined to go looking.
-        self._fixaud_btn = ttk.Button(btns, text="Fix crackly sound…",
+        # The remedy for the faults that are NOT ours and cannot be fixed from
+        # inside WSL.  It used to be called "Fix crackly sound", after the only
+        # one known at the time; it now covers two, and the one it is reached
+        # for most is the second:
+        #   * a STRANDED EMULATOR WINDOW.  When WSLg's RAIL side keeps painting
+        #     a window whose X client has gone, clicking its X does nothing -
+        #     there is no client left to receive the close - and msrdc is a
+        #     protected process, so it cannot be killed either.  `wsl
+        #     --shutdown` is the only cure found.
+        #   * crackly sound on the WSLg fallback path.  Measured 2026-08-05: a
+        #     pure sine came back mathematically perfect off the sink's own
+        #     monitor while it was audibly breaking up in the room, so nothing
+        #     inside WSL can see it.  (The default sink no longer goes through
+        #     WSLg at all, so this half is now the fallback's problem only.)
+        # It is here because the alternative is remembering a command that has
+        # nothing to do with pinball, at the moment you are least inclined to
+        # go looking for one.
+        self._fixaud_btn = ttk.Button(btns, text="Restart WSL…",
                                       command=self._audio_reset, width=17)
         self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
 
@@ -475,16 +485,21 @@ class EmulatePanel:
         threading.Thread(target=run, daemon=True).start()
 
     def _audio_reset(self):
-        """Rebuild WSLg's audio path, which is what fixes crackly sound.
+        """Restart WSL: the cure for a stranded window, and for the old crackle.
 
         NOT A FIX FOR ANYTHING IN THE RIG, and the dialog says so, because
         reaching for this when the emulator really is at fault would only hide
-        the problem for a while.  The fault it does address lives in the WSLg
-        to Windows audio hop: measured 2026-08-05, a pure sine came back
-        mathematically perfect off the sink's own monitor (0 of 280490 samples
-        off a sine) while it was audibly breaking up in the room, so nothing
-        inside WSL can see it and no self-test could ever catch it.  A restart
-        of WSL rebuilds the PulseAudio server and that channel.
+        the problem for a while.  The two faults it does address both live
+        outside WSL's reach:
+
+        * a window WSLg keeps painting after its X client has gone.  Clicking
+          its X does nothing (nothing is left to receive the close) and msrdc
+          refuses Stop-Process, so a restart of WSL is the only way out.
+        * crackle on the WSLg audio fallback.  Measured 2026-08-05: a pure sine
+          came back mathematically perfect off the sink's own monitor (0 of
+          280490 samples off a sine) while it was audibly breaking up in the
+          room, so nothing inside WSL can see it and no self-test could catch
+          it.  A restart rebuilds the PulseAudio server and that channel.
 
         Terminates EVERY WSL distro, so it asks first and refuses while a run
         is up (the poll greys the button, and this re-checks).
@@ -495,17 +510,21 @@ class EmulatePanel:
             return
         if self._last_up:
             messagebox.showinfo(
-                "Fix crackly sound",
+                "Restart WSL",
                 "Stop the emulator first.\n\n"
                 "This restarts WSL, which would kill the running game without "
                 "letting it shut down cleanly.")
             return
         if not messagebox.askyesno(
-                "Fix crackly sound",
-                "Restart WSL to rebuild its audio path?\n\n"
-                "Crackly or stuttery sound is usually WSL's audio link to "
-                "Windows going bad after a long session, not the emulator "
-                "itself. Restarting WSL fixes it.\n\n"
+                "Restart WSL",
+                "Restart WSL?\n\n"
+                "This is the cure for two things the emulator cannot fix "
+                "itself:\n\n"
+                "  • an emulator window left on screen that will not close. "
+                "Its X button does nothing because nothing is behind it any "
+                "more.\n"
+                "  • crackly or stuttery sound, which is usually WSL's audio "
+                "link to Windows going bad after a long session.\n\n"
                 "This closes EVERYTHING running in WSL, not just the "
                 "emulator. Nothing on disk is lost, and WSL starts again by "
                 "itself the next time it is used.\n\n"

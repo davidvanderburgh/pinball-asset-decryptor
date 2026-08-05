@@ -65,9 +65,27 @@ export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmp
 # PAD_CARD runs a title straight off its card image with no extraction; the
 # title name then comes from the card, so ask cardmount.sh rather than guess.
 GAME=${PAD_GAME:-}
+# Set below only when THIS run creates the card mount, so teardown unmounts what
+# it mounted and leaves a card someone else mounted alone. DECLARED HERE, ABOVE
+# the block that sets it: the first version of this initialised it down with the
+# other teardown variables, which is BELOW this block, so every card run wiped
+# its own answer and quietly left the mount behind. The symptom was the exact
+# thing being fixed, which is a good way to waste a run.
+CARD_MNT=""
 if [ -n "${PAD_CARD:-}" ]; then
-    CARD_PATH=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
+    # Keep the WHOLE output, not just the path: it is the only place that says
+    # whether this run created the mount or joined one that already existed,
+    # and teardown must not unmount a card someone else is using. The [card]
+    # lines are republished because $(...) swallows them, and "which image, from
+    # the cache or from D:" is worth having in the run log.
+    CARD_OUT=$(bash "$S/cardmount.sh" "$PAD_CARD")
+    printf '%s\n' "$CARD_OUT" | grep '^\[card\]'
+    CARD_PATH=$(printf '%s\n' "$CARD_OUT" | tail -1)
     [ -d "$CARD_PATH" ] || { echo "[watch] could not mount $PAD_CARD" >&2; exit 1; }
+    case "$CARD_OUT" in
+        *"already mounted"*) CARD_MNT="" ;;
+        *)                   CARD_MNT=$(dirname "$CARD_PATH") ;;
+    esac
     GAME=$(basename "$CARD_PATH")
     # The video host reads clips itself, outside the chroot, so it needs the
     # card's real path - the title is not under spike2root/games at all.
@@ -100,6 +118,8 @@ esac
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""
+# NOTE: CARD_MNT is deliberately NOT reset here - it is set above, and this is
+# below that. See the comment on its declaration.
 
 teardown() {
     trap - INT TERM EXIT
@@ -110,11 +130,25 @@ teardown() {
     # the rig's historic 'godzilla_pro/game' pattern never could.
     pkill -9 -x game 2>/dev/null
     pkill -9 -f arm-binfmt 2>/dev/null
+    # SIGINT, THEN WAIT FOR IT, and only then SIGKILL. The old flat `sleep 1`
+    # then SIGKILL fired whether or not the renderer was already on its way out,
+    # and padglhost's shutdown now includes destroying its X windows so WSLg's
+    # RAIL mirror sees them go (see the end of main() in padglhost.c). Killing
+    # it in the middle of that is a plausible way to strand a window on the
+    # desktop with nothing behind it. Escalation is still guaranteed, just no
+    # longer premature - and it SAYS SO when it has to, because a renderer that
+    # needs SIGKILL is a fact worth seeing rather than a silent 1 s wait.
     [ -n "$HOSTPG" ] && kill -INT -"$HOSTPG" 2>/dev/null
     pkill -INT -x padglhost 2>/dev/null
-    sleep 1
-    [ -n "$HOSTPG" ] && kill -9 -"$HOSTPG" 2>/dev/null
-    pkill -9 -x padglhost 2>/dev/null
+    for _ in 1 2 3 4 5 6; do
+        pgrep -x padglhost >/dev/null || break
+        sleep 0.5
+    done
+    if pgrep -x padglhost >/dev/null; then
+        echo "[watch] the renderer did not stop on SIGINT; killing it"
+        [ -n "$HOSTPG" ] && kill -9 -"$HOSTPG" 2>/dev/null
+        pkill -9 -x padglhost 2>/dev/null
+    fi
     pkill -9 -f nodebus.py 2>/dev/null
     [ -n "$VIDPG" ] && kill -9 -"$VIDPG" 2>/dev/null
     pkill -9 -f 'padvidhost.py' 2>/dev/null
@@ -134,6 +168,78 @@ teardown() {
     # emu_gone). Removing it here is what makes closing the emulator window
     # close the playfield too. A new run recreates it before launching one.
     rm -f "$LED_HOST"
+
+    # ...AND THEN VERIFY IT, because "it closes itself" was only ever true of
+    # the WINDOW. The playfield is a Windows process reached through interop,
+    # and its WSL-side stub outlived the window seven times over in one session
+    # (oldest 2.5 h) while alive.sh reported the machine clean: once the stub's
+    # interop Relay has died, the stub sits in poll() forever with nothing
+    # behind it. Wait for the polite exit first - that is what lets it save its
+    # window position (GONE_POLLS is ~2 s) - then kill what is left.
+    #
+    # AND KILLING THE STUB IS NOT ENOUGH. The two halves are NOT symmetric, both
+    # directions measured 2026-08-05:
+    #   kill the WINDOWS process -> the stub exits by itself. Clean.
+    #   kill the STUB            -> the Windows process lives on. The playfield
+    #                               window sat on the desktop with nothing
+    #                               behind it, showing "no emulator" forever.
+    # So the forced path asks Windows FIRST and only then sweeps the stub.
+    # Matched on the SCRIPT PATH, never on the image name alone: killing every
+    # pythonw.exe would take out whatever else the user is running.
+    #
+    # Both loops give the polite close a real chance (5 s, against the ~2 s
+    # GONE_POLLS window) because it is worth having: the polite exit is what
+    # saves the window position, and it is what usually happens. It failed in
+    # one card run out of three, so this path is not theoretical.
+    if pgrep -f '^/init .*playfield\.py' >/dev/null; then
+        for _ in $(seq 1 10); do
+            sleep 0.5
+            pgrep -f '^/init .*playfield\.py' >/dev/null || break
+        done
+        if pgrep -f '^/init .*playfield\.py' >/dev/null; then
+            echo "[watch] the playfield did not close itself; closing it the hard way"
+            # `Name -like 'python*'` excludes THIS query: its own command line
+            # contains the pattern string, so a CommandLine-only filter kills
+            # the powershell.exe running it. Same self-match trap as pgrep.
+            /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
+              -Command "Get-CimInstance Win32_Process |
+                        Where-Object { \$_.Name -like 'python*' -and
+                                       \$_.CommandLine -like '*spike2_emu\playfield.py*' } |
+                        ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
+              >/dev/null 2>&1
+            pkill -9 -f '^/init .*playfield\.py'
+        fi
+    fi
+
+    # The card mount, IF THIS RUN MADE IT. cardmount.sh setsid's fuse2fs on
+    # purpose - a process-group kill used to take the mount out from under the
+    # game it had just started, which the game reports as sitting at "Startup
+    # In Progress" forever with no error anywhere - so no teardown has ever
+    # reached one, and three were found orphaned in a single session. The
+    # expensive part of a card boot is the local image CACHE, which is a file
+    # and survives; remounting costs a fraction of a second. -z as the fallback
+    # so a straggler holding a file cannot strand the mount for good.
+    # It SAYS which way it went, always. The first version printed only on
+    # success, and a run that quietly left a mount behind was then
+    # indistinguishable from one that had no card at all - which is how the
+    # leak being fixed here stayed invisible in the first place.
+    if [ -n "$CARD_MNT" ]; then
+        if mountpoint -q "$CARD_MNT" 2>/dev/null; then
+            fusermount -u "$CARD_MNT" 2>/dev/null \
+                || fusermount3 -u "$CARD_MNT" 2>/dev/null \
+                || fusermount -uz "$CARD_MNT" 2>/dev/null
+            rmdir "$CARD_MNT" 2>/dev/null
+            if mountpoint -q "$CARD_MNT" 2>/dev/null; then
+                echo "[watch] could NOT unmount the card at $CARD_MNT"
+            else
+                echo "[watch] unmounted the card"
+            fi
+        else
+            echo "[watch] the card was already unmounted"
+        fi
+    elif [ -n "${PAD_CARD:-}" ]; then
+        echo "[watch] leaving the card mounted: it was mounted before this run"
+    fi
     sleep 0.5
     echo "--- what is still running (all must be 0) ---"
     bash "$S/alive.sh"

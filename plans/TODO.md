@@ -16,38 +16,15 @@ These have each been violated at least once and each cost a run or a window:
 - **NEVER wrap a run in `timeout`.** It leaks 140%-CPU processes forever. Use
   `runlim.sh` / `killgame.sh`.
 - **`alive.sh` must print 0 after every run.** Confirm it, do not assume it.
+- **Anything a run starts goes into `alive.sh` the same day.** It is the rig's
+  only definition of "clean", and it has been wrong twice. `killgame.sh` and
+  `status.sh` ask it (`--total` / `--procs`) rather than keeping their own
+  lists, so there is exactly one place to add to.
 - **Never run two measurement runs at once.** `killgame.sh` is global, so the
   older script's teardown kills the newer run mid-boot.
 - **David pushes straight to main. No PRs.**
 
 ## Queue
-
-- [ ] **12. Closing the game window leaks processes and strands a ghost window.**
-      Hit David directly 2026-08-05: he X'd the emulator window and it froze
-      there. **It sits at the top of the queue because it breaks the safety net
-      the rest of this list depends on** — move it down if the playfield matters
-      more.
-      - **`alive.sh` LIES, and that is the serious part.** It printed
-        `TOTAL STILL RUNNING : 0 (clean)` while **seven leaked interop stubs**
-        for `playfield.py` (6 godzilla_pro, 1 turtles_pro, oldest ~2.5 h) and
-        **three orphaned `fuse2fs` processes** were live. It counts only the
-        five shapes it knows about. "alive.sh must print 0" is only as strong as
-        what it counts.
-      - **`killgame.sh` cannot finish the job.** The game left a **zombie**
-        (`[game] <defunct>`) whose parent is a WSL interop relay (`/init`,
-        `Relay(NNN)`) that **ignores SIGKILL from inside the VM**. killgame.sh
-        reported "killed 0; still running: 1" and gave up, with no hint that no
-        signal could ever fix it.
-      - **The Controls legend survives as a WSLg ghost.** `padglhost` exits but
-        the RAIL window stays painted by `msrdc.exe` with no X client behind it,
-        so clicking X does nothing — there is nothing left to receive the close.
-        `msrdc` is protected (`Stop-Process` → Access denied), so the only cure
-        found was **`wsl --shutdown`**.
-      - Fix direction: closing the window should tear down the whole run
-        (playfield, Controls, card mounts); `alive.sh` should count interop
-        stubs and `fuse2fs` orphans; `killgame.sh` should recognise a zombie
-        held by an interop relay and say plainly that only `wsl --shutdown`
-        clears it, instead of reporting a number and stopping.
 
 - [ ] **9. Virtual playfield needs real bandwidth.** David asked directly: at
       least **30 fps** feedback on coil, LED and switch state, **LED brightness
@@ -113,18 +90,38 @@ These have each been violated at least once and each cost a run or a window:
 - **`padrelay.py` accepts in a `while True` loop and never exits**, where the
   `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the
   script may now outlive a run instead of returning when the player goes away.
-  Teardown (`killgame.sh`) pkills it either way, so this has not been seen to
-  leak — but it was not deliberate, it is untested, and it overlaps item 12.
-- **The Emulate tab's "Fix crackly sound" button is now nearly vestigial.** It
-  shuts WSL down to rebuild WSLg's audio, and WSLg is no longer in the audio
-  path. It still applies to the `pulse` fallback, and it is genuinely the cure
-  for a stranded WSLg ghost window (item 12), so it should probably be renamed
-  rather than removed.
+  Teardown pkills it either way, and `alive.sh` counts it now, so a leak would
+  at least be visible — but it was not deliberate and it is untested.
+- **`playaudio.sh`'s `win_kill` can shoot itself.** Its `Stop-Process` filter
+  matches on CommandLine only, and its own command line contains the pattern,
+  so powershell.exe is a match for itself. It has always worked in practice
+  (the real player is enumerated first), and the two backstops added in item 12
+  avoid it by also requiring `Name -like 'python*'`. Same shape, one line.
+- **The playfield's polite close failed in one card run out of three.** Removing
+  `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
+  still up after 5 s and had to be closed the hard way, which loses nothing now
+  but is unexplained. Suspect `\\wsl.localhost` read caching hiding the removal.
 - **New dependency on a fresh machine:** the Windows-side player needs
   `py -m pip install sounddevice`. Without it `playaudio.sh` falls back to WSLg
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **12. Closing the game window leaked processes and stranded a ghost
+      window.** MOSTLY CLOSED 2026-08-05. `alive.sh` counted 5 of the 13 things
+      a run starts and reported "clean" over seven leaked interop stubs and
+      three orphaned card mounts; it now counts all of them and is the single
+      list `killgame.sh` and `status.sh` ask (`--total` / `--procs`). Teardown
+      closes the playfield (Windows side FIRST — killing the stub leaves the
+      Windows process alive, the reverse is clean) and unmounts the card it
+      mounted; a zombie held by an interop relay is now named as unkillable
+      with `wsl --shutdown` as the cure. **The ghost window itself is UNPROVEN:
+      it did not reproduce, and it CANNOT be driven from a script — WM_CLOSE
+      and SC_CLOSE to a RAIL window are both ignored by msrdc (UIPI), and this
+      WSL has no X tools to close from the other side. Reopening it needs
+      David to click the X while someone watches.** The Emulate tab's button is
+      now "Restart WSL…" and names the stranded window, since `wsl --shutdown`
+      remains the only known cure.
 
 - [x] **10. Audio.** SOLVED 2026-08-05, `13c4410` / `7a81cb1` / `5ec9681`, David:
       "this is working great". The WSLg → Windows hop was destroying the audio

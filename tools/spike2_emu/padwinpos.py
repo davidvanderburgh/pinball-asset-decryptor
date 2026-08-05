@@ -1,29 +1,26 @@
-"""padwinpos.py - remember and restore the emulator windows' positions, from
-the WINDOWS side, because the X side cannot win this fight.
+"""padwinpos.py - RECORD the emulator windows' desktop positions. Never move them.
 
-THE X-SIDE RESTORE IS CORRECT AND STILL LOSES. padglhost creates its windows at
-the remembered position with USPosition set before mapping - the textbook X11 -
-and .pad_windows was seen holding a real moved position (941,930) while the
-window still opened at the WSLg default. Under WSLg every X window is a RAIL
-proxy: a real Windows window owned by msrdc, placed by the compositor's own
-policy, and the compositor neither honours the client's position hint reliably
-nor reliably delivers moves back to the X client (the same one-way mirror that
-forced padglhost to poll eglQuerySurface for its own SIZE). So this script
-stops arguing with X and manages the only coordinates that are real to the
-user: the Windows desktop ones.
+THIS SCRIPT USED TO RESTORE POSITIONS WITH SetWindowPos AND THAT WAS A TRAP,
+kept here in writing because the failure is invisible to the obvious test. A
+programmatic SetWindowPos on a WSLg window moves the real Windows window but
+happens behind the compositor's back: WSLg windows are RAIL proxies, user
+drags are reported back to Weston but programmatic moves are NOT, so the X
+side and the Windows side end up disagreeing about where the window is - and
+from then on RAIL reasserts the stale server position against every user
+drag. The windows LOOK correctly restored (read-back said (900,500), the
+screenshot agreed) and are in fact STUCK: David could not drag either
+emulator window until the keeper was killed and both windows were
+minimize/restored to re-sync the two models. Proof of the divergence, from
+the live session: X's ~/.pad_windows said `legend 387 79` while Windows'
+GetWindowRect said (900,500) for the same window.
 
-watch.sh starts it through interop beside the playfield window (PAD_WINPOS=0
-to skip). It polls once a second; the first time each emulator window appears
-it is MOVED to its saved spot (SWP_NOACTIVATE - no focus theft), after that
-its position is RECORDED whenever it changes. State lives in
-%USERPROFILE%\\.pad_windows_win.json, per machine, like playfield.py's own
-(working) position memory. When every window it ever saw is gone it saves and
-exits; it also gives up quietly if no emulator window appears at all.
+The restore therefore has to be done by the COMPOSITOR - move the window
+through X (a delayed XMoveWindow from padglhost, well after mapping), so both
+sides of the RAIL mirror agree. That work is REMAINING item 5 in the handoff.
 
-The game window and the Controls window are matched by TITLE SUBSTRING because
-msrdc decorates titles ("[WARN:COPY MODE] godzilla_pro - Stern Spike 2
-emulator (Ubuntu)"), and tracked under fixed keys - positions are per-machine
-state, not per-title.
+What is left here is the harmless half: a passive recorder of where the
+emulator windows sit, in Windows desktop coordinates, useful for diagnosing
+the X<->Windows coordinate mapping. Nothing launches it automatically.
 """
 import ctypes
 import json
@@ -51,20 +48,12 @@ TRACK = (
 )
 
 POLL_S = 1.0
-#: Give up if no emulator window has appeared yet (the game takes ~20 s to its
-#: first frame; 180 covers a cold card boot with slack).
+#: Give up if no emulator window has appeared yet.
 NEVER_SEEN_S = 180
 #: Polls with every once-seen window gone before concluding the run ended.
 GONE_POLLS = 5
 
 EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x1, 0x4, 0x10
-
-
-def single_instance():
-    """One keeper at a time; two would fight over the state file."""
-    kernel32.CreateMutexW(None, False, "Local\\pad_winpos_keeper")
-    return kernel32.GetLastError() != 183          # ERROR_ALREADY_EXISTS
 
 
 def find_tracked():
@@ -98,7 +87,8 @@ def get_pos(hwnd):
 
 
 def onscreen(x, y):
-    """Reject positions off every monitor (76..79 = virtual screen metrics)."""
+    """Reject positions off every monitor (76..79 = virtual screen metrics);
+    also rejects the -32000 marker Windows parks minimized windows at."""
     vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
     vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
     return vx - 50 <= x <= vx + vw - 100 and vy - 20 <= y <= vy + vh - 80
@@ -121,14 +111,10 @@ def save_state(st):
 
 
 def main():
-    if not single_instance():
-        return 0
     st = load_state()
-    restored = set()
     seen_any = 0.0
     gone = 0
     start = time.monotonic()
-    dirty = False
 
     while True:
         wins = find_tracked()
@@ -143,24 +129,14 @@ def main():
         elif now - start > NEVER_SEEN_S:
             return 0                        # no emulator ever came up
 
+        dirty = False
         for key, hwnd in wins.items():
-            if key not in restored:
-                restored.add(key)
-                pos = st.get(key)
-                if pos and onscreen(pos[0], pos[1]):
-                    user32.SetWindowPos(hwnd, None, int(pos[0]), int(pos[1]),
-                                        0, 0,
-                                        SWP_NOSIZE | SWP_NOZORDER
-                                        | SWP_NOACTIVATE)
-                    continue                # record from the NEXT poll on
             pos = get_pos(hwnd)
             if pos and onscreen(pos[0], pos[1]) and st.get(key) != pos:
                 st[key] = pos
                 dirty = True
-
         if dirty:
             save_state(st)                  # survive a SIGKILL'd teardown
-            dirty = False
         time.sleep(POLL_S)
 
     save_state(st)

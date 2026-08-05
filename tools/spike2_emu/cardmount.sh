@@ -73,6 +73,15 @@ if [ "${2:-}" = "--umount" ]; then
     exit 0
 fi
 
+# A STALE MOUNT POINT IS NOT AN EMPTY ONE. If fuse2fs has died, the directory
+# is still a mountpoint with nothing behind it and every read returns an error
+# instead of a file - which is indistinguishable from a working mount until
+# something tries to read. Clear it before deciding anything else.
+if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null && ! ls "$MNT" >/dev/null 2>&1; then
+    echo "[card] stale mount at $MNT (its fuse2fs is gone) - clearing"
+    fusermount -u "$MNT" 2>/dev/null || fusermount3 -u "$MNT" 2>/dev/null
+fi
+
 # Already mounted and healthy? Then say so and stop - remounting a live card
 # under a running game is not something to do by accident.
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
@@ -88,8 +97,19 @@ OFF=$(games_offset "$IMG")
 mkdir -p "$MNT" || die "cannot create $MNT"
 
 echo "[card] mounting $(basename "$IMG") p3 at offset $OFF (read only)"
-"$FUSE2FS" -o ro,offset="$OFF" "$IMG" "$MNT" >/dev/null 2>&1 \
+# setsid, AND THAT IS THE WHOLE POINT OF IT. fuse2fs keeps running for as long
+# as the mount exists, so it must NOT be in the caller's process group:
+# watch.sh tears a run down by killing process groups, and that killed the
+# mount out from under the game it had just started. The symptom is the worst
+# kind - the game boots, loads a few assets, then sits at "Startup In
+# Progress" forever, because its files stopped existing halfway through. There
+# is no error anywhere; every read simply fails.
+setsid "$FUSE2FS" -o ro,offset="$OFF" "$IMG" "$MNT" >/dev/null 2>&1 \
     || die "fuse2fs refused $(basename "$IMG")"
+# setsid returns as soon as the daemon has forked, so wait for the mount to
+# actually appear rather than racing the first read of it.
+for _ in $(seq 1 40); do mountpoint -q "$MNT" 2>/dev/null && break; sleep 0.05; done
+mountpoint -q "$MNT" 2>/dev/null || die "fuse2fs did not mount $(basename "$IMG")"
 
 T=$(title_dir "$MNT") || {
     fusermount -u "$MNT" 2>/dev/null

@@ -106,7 +106,7 @@ def test_default_rig_dir_is_the_copy_in_the_repo():
 # Source picker
 # --------------------------------------------------------------------------
 
-def _panel(tmp_path, project=None):
+def _panel(tmp_path):
     """A built panel on an invisible root, or a skip when Tk is unusable."""
     tk = pytest.importorskip("tkinter")
     try:
@@ -116,7 +116,7 @@ def _panel(tmp_path, project=None):
     root.attributes("-alpha", 0)
     frame = tk.Frame(root)
     frame.pack()
-    panel = emulate_tab.EmulatePanel(frame, project_paths=project)
+    panel = emulate_tab.EmulatePanel(frame)
     panel.build(frame)
     root.update()
     return root, panel
@@ -151,35 +151,6 @@ def test_missing_image_is_refused_on_the_tab(tmp_path):
         root.destroy()
 
 
-def test_stock_and_modded_buttons_pick_between_the_project_images(tmp_path):
-    """The two buttons are the whole choice: stock or the build.  Which one you
-    want is a decision, so neither is forced."""
-    root, panel = _panel(tmp_path,
-                         project=lambda: (r"C:\proj\stock.raw",
-                                          r"C:\proj\modded.raw"))
-    try:
-        # The stock image is prefilled, so Start works with no decision made.
-        assert panel._src_path.get() == r"C:\proj\stock.raw"
-        panel._use_project(1)
-        assert panel._src_path.get() == r"C:\proj\modded.raw"
-        panel._use_project(0)
-        assert panel._src_path.get() == r"C:\proj\stock.raw"
-    finally:
-        root.destroy()
-
-
-def test_buttons_disabled_without_a_project(tmp_path):
-    """No project set: the buttons are off and the tab says so, rather than
-    filling the box with a blank."""
-    root, panel = _panel(tmp_path, project=lambda: ("", ""))
-    try:
-        assert str(panel._orig_btn.cget("state")) == "disabled"
-        assert str(panel._build_btn.cget("state")) == "disabled"
-        assert "Extract or Write" in panel._src_note.cget("text")
-    finally:
-        root.destroy()
-
-
 def test_no_folder_or_rig_options(tmp_path):
     """An extracted folder is the wrong shape for the rig and the rig's own
     copy is internal state; neither is offered any more."""
@@ -198,6 +169,9 @@ def test_no_folder_or_rig_options(tmp_path):
         blob = " ".join(texts)
         assert "Extracted folder" not in blob
         assert "Rig's own copy" not in blob
+        # And no buttons guessing which of the project's images you meant.
+        assert "Use stock image" not in blob
+        assert "Use modded image" not in blob
     finally:
         root.destroy()
 

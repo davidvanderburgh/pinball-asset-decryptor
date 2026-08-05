@@ -10,9 +10,8 @@ Three things about it are worth knowing before changing anything here:
 
 * **It runs a card image, and only a card image.**  The image is mounted READ
   ONLY and run in place: nothing is extracted, and nothing can write to it.  The
-  two buttons pick which of the project's images to run — the one Extract was
-  pointed at, or the one Write builds — so this tab acts on the same files as
-  the rest of the app instead of contradicting it.
+  user picks the file; whether that is a stock card or their own build is their
+  business, and this tab does not guess.
 
   Two other sources were offered briefly and both were wrong.  An "extracted
   folder" cannot work: PAD extracts ASSETS, and the rig needs a title directory
@@ -135,15 +134,9 @@ class EmulatePanel:
     #: slow enough to cost nothing and fast enough to feel live.
     POLL_MS = 2000
 
-    def __init__(self, parent, log=None, project_paths=None):
+    def __init__(self, parent, log=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
-        # A zero-argument callable returning (original, build) from the rest of
-        # the app.  A CALLABLE and not two strings, because both are entry
-        # boxes the user edits after this panel is built; reading them at
-        # construction time would pin the buttons to whatever was there when
-        # the tab was first opened.
-        self._project_paths = project_paths
         self._proc = None            # the watch.sh child, while we own one
         # TWO flags, not one.  A single "_busy" covering both was a real bug:
         # the thread that drains watch.sh's output lives for as long as the
@@ -268,75 +261,29 @@ class EmulatePanel:
         self._schedule_poll()
 
     def _build_source(self, frame, pad):
-        """The card image to run.  One box, because there is only one thing the
-        rig can be pointed at that a user of this app actually has.
+        """The card image to run.  One box and a Browse button.
 
-        AN EXTRACTED FOLDER IS NOT AN OPTION, and offering it was a mistake: PAD
-        extracts ASSETS, and the rig needs a title directory - a ``game`` binary
-        with ``assets/`` and the node ``.hex`` files beside it.  They are not the
-        same shape, so picking an extract folder here could only ever fail, and
-        it did.  A card image is mounted read only and run in place, so there is
-        nothing to prepare either way.
+        A CARD IMAGE IS THE ONLY SOURCE, and why the other two went is worth
+        keeping: an "extracted folder" cannot work, because PAD extracts ASSETS
+        and the rig needs a title directory - a ``game`` binary with ``assets/``
+        and the node ``.hex`` files beside it - which is a different shape, so
+        it could only ever fail.  A "rig's own copy" option exposed whatever
+        happened to be unpacked inside the rig on this machine, which is
+        internal state no user can create or reason about.
 
-        The two buttons pick which of the project's images to run: the one
-        Extract was pointed at (stock) or the one Write builds (the mod).  Which
-        of those you want is a decision, not something to guess, so both are
-        offered and neither is forced.
+        There are no "use the project's image" buttons either.  The user picks
+        the image; stock or modded is their business, and a pair of buttons
+        guessing at it was a second way to set one field for no gain.
         """
         box = ttk.LabelFrame(frame, text="Card image to run")
         box.pack(fill=tk.X, **pad)
-
         self._src_path = tk.StringVar()
-
         row = ttk.Frame(box)
-        row.pack(fill=tk.X, padx=8, pady=(6, 2))
+        row.pack(fill=tk.X, padx=8, pady=6)
         self._src_entry = ttk.Entry(row, textvariable=self._src_path)
         self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse…", width=10,
                    command=self._browse).pack(side=tk.LEFT, padx=(6, 0))
-
-        row2 = ttk.Frame(box)
-        row2.pack(fill=tk.X, padx=8, pady=(2, 6))
-        self._orig_btn = ttk.Button(row2, text="Use stock image",
-                                    command=lambda: self._use_project(0))
-        self._orig_btn.pack(side=tk.LEFT)
-        self._build_btn = ttk.Button(row2, text="Use modded image",
-                                     command=lambda: self._use_project(1))
-        self._build_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._src_note = ttk.Label(row2, foreground="#888", text="")
-        self._src_note.pack(side=tk.LEFT, padx=(12, 0))
-
-        self._sync_source()
-
-    def _project_pair(self):
-        """(stock, modded) from the rest of the app, each possibly blank."""
-        if not self._project_paths:
-            return "", ""
-        try:
-            a, b = self._project_paths()
-        except Exception:                               # noqa: BLE001
-            return "", ""
-        return (a or ""), (b or "")
-
-    def _sync_source(self):
-        """Offer only the project images that exist, and start from the stock
-        one so Start works without a decision on the common path."""
-        stock, mod = self._project_pair()
-        self._orig_btn.configure(state=tk.NORMAL if stock else tk.DISABLED)
-        self._build_btn.configure(state=tk.NORMAL if mod else tk.DISABLED)
-        if not self._src_path.get().strip() and stock:
-            self._src_path.set(stock)
-        if not (stock or mod) and not self._src_path.get().strip():
-            self._src_note.configure(
-                text="no image loaded on the Extract or Write tab yet")
-        else:
-            self._src_note.configure(text="")
-
-    def _use_project(self, which):
-        path = self._project_pair()[which]
-        if path:
-            self._src_path.set(path)
-            self._sync_source()
 
     def _browse(self):
         from tkinter import filedialog

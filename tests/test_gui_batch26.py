@@ -94,6 +94,16 @@ def test_modern_extract_keeps_its_hint_labels(tmp_path):
 # stopped pane rewinds; the sibling keeps its playhead.
 # ---------------------------------------------------------------------------
 
+class _WinStub:
+    """Only what stop_to_start reaches back into the window for."""
+
+    def __init__(self):
+        self.advance_cancels = 0
+
+    def _cancel_audio_advance(self):
+        self.advance_cancels += 1
+
+
 class _PaneStub:
     stop_to_start = _AudioPreviewPane.stop_to_start
 
@@ -101,6 +111,7 @@ class _PaneStub:
         self.pos = pos
         self.sibling = None
         self.stops = 0
+        self._win = _WinStub()
 
     def stop_playback(self):
         self.stops += 1
@@ -116,6 +127,9 @@ def test_stop_button_silences_both_audio_panes():
     assert a.stops == 1 and b.stops == 1
     assert a.pos == 0.0
     assert b.pos == 7.7                  # sibling keeps its playhead
+    # ...and it ends the audition rather than let the queued "next row" step
+    # restart the sound a moment after the press (batch 28).
+    assert a._win.advance_cancels == 1
 
 
 def test_stop_button_safe_before_the_sibling_is_wired():

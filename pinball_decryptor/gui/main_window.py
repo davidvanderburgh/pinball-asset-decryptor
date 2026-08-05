@@ -379,6 +379,10 @@ class _AudioPreviewPane:
         of you must not leave the other one playing ("tie the stop buttons
         together (like slings!)" — a tester).  Only this pane rewinds; the
         sibling keeps its playhead."""
+        # ■ ends the audition too: a clip that finished a moment ago has its
+        # "play the next row" step already queued, and that would restart the
+        # sound a fraction of a second after the press.
+        self._win._cancel_audio_advance()
         if self.sibling is not None:
             self.sibling.stop_playback()
         self.stop_playback()
@@ -1391,10 +1395,14 @@ class MainWindow:
         # else".  Categories are derived per scan (core.audio_categories);
         # the dropdown hides itself for folders where nothing classifies.
         self.audio_type_var = tk.StringVar(value="All types")
-        # "Changed only" — the same toggle the Images tab has had; a tester
-        # asked for it on audio + video too ("show only modified files").
-        # Persisted per assets folder with the other Replace toggles.
-        self.audio_changed_only_var = tk.BooleanVar(value=False)
+        # Change-state filter: All / Changed / Unchanged.  Was a "Changed only"
+        # checkbox (batch 16); batch 28 made it a dropdown because half-way
+        # through a card the useful view is the OTHER one — "If I could select
+        # unchanged, I could then filter out the ones I have already dealt with
+        # instead of scrolling up and down" (a tester with 90% of his callouts
+        # replaced).  Persisted per assets folder with the other Replace
+        # toggles.
+        self.audio_change_filter_var = tk.StringVar(value="All")
         self._audio_categories = {}      # rel_path -> music/sfx/callouts/other
         # Click-header sort state: (column_id, descending).  Defaults to the
         # name column ascending — matches the old "Name" dropdown default.
@@ -1465,18 +1473,22 @@ class MainWindow:
         self._audio_pane_orig = None
         self._audio_pane_rep = None
         self._audio_select_job = None    # debounce: load preview on select
+        # Queued "play the next row" step from sequential play (see
+        # _audio_on_clip_finished) — tracked so anything that stops playback
+        # can drop it instead of letting one more clip start.
+        self._audio_advance_job = None
         self._audio_current_rel = None   # the slot loaded in the preview panes
         self.audio_search_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
-        self.audio_changed_only_var.trace_add(
+        self.audio_change_filter_var.trace_add(
             "write", lambda *a: self._refresh_audio_list())
         # Replace-Video tab state (capabilities.replace_video plugins).
         # Mirrors the audio tab, but the preview is an embedded player: a
         # decode thread streams raw frames from ffmpeg to a canvas while
         # ffplay carries the sound, both seeked together.
         self.video_search_var = tk.StringVar()
-        # "Changed only" — mirrors the audio + image toggle (a tester).
-        self.video_changed_only_var = tk.BooleanVar(value=False)
+        # Change-state filter — mirrors the audio + image dropdown (a tester).
+        self.video_change_filter_var = tk.StringVar(value="All")
         self._video_sort = ("#0", False)  # (column_id, descending)
         self.video_trim_var = tk.BooleanVar(value=False)
         # "No conversion": copy the replacement through as-is (it must already be
@@ -1497,7 +1509,7 @@ class MainWindow:
         self._video_current_rel = None   # slot loaded in the preview panes
         self.video_search_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
-        self.video_changed_only_var.trace_add(
+        self.video_change_filter_var.trace_add(
             "write", lambda *a: self._refresh_video_list())
         # Replace-Image tab state (capabilities.replace_image plugins).
         # Mirrors the video tab, but the preview is a single static thumbnail
@@ -1505,12 +1517,12 @@ class MainWindow:
         self.image_search_var = tk.StringVar()
         self._image_sort = ("#0", False)  # (column_id, descending)
         self.image_status_var = tk.StringVar(value="")
-        # List-view toggles: show only assigned/changed slots, and group the
-        # rows under their scene/animation container (Stern manifests; every
-        # uncovered slot falls back to its parent folder).  Persisted per
-        # assets folder with the other Replace toggles (see
-        # _save_staged_changes / _populate_image_after_scan).
-        self.image_changed_only_var = tk.BooleanVar(value=False)
+        # List-view controls: the change-state filter (All / Changed /
+        # Unchanged), and group the rows under their scene/animation container
+        # (Stern manifests; every uncovered slot falls back to its parent
+        # folder).  Persisted per assets folder with the other Replace toggles
+        # (see _save_staged_changes / _populate_image_after_scan).
+        self.image_change_filter_var = tk.StringVar(value="All")
         self.image_group_by_scene_var = tk.BooleanVar(value=False)
         self._image_slots = []           # list[ImageSlot] from last scan
         self._image_slots_by_rel = {}    # rel_path -> ImageSlot
@@ -1545,7 +1557,7 @@ class MainWindow:
         self._image_current_rel = None   # slot shown in the static preview
         self.image_search_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
-        self.image_changed_only_var.trace_add(
+        self.image_change_filter_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
         self.image_group_by_scene_var.trace_add(
             "write", lambda *a: self._refresh_image_list())
@@ -3241,19 +3253,11 @@ class MainWindow:
             "assign a replacement to one copy, then right-click it and "
             "choose \"Apply to all copies\".",
             lambda: self._current_theme)
-        # "Changed only" — same toggle as the Images tab (feedback batch 16).
-        # It is always visible, so it doubles as the stable `before=` anchor
-        # for the optional Type / Group-duplicates widgets packed later.
-        self._audio_changed_only_cb = ttk.Checkbutton(
-            tools, text="Changed only",
-            variable=self.audio_changed_only_var,
-            command=self._save_staged_changes)
-        self._audio_changed_only_cb.pack(side=tk.LEFT)
-        _Tooltip(
-            self._audio_changed_only_cb,
-            "Show only the slots with a pending replacement or already "
-            "changed on disk by a previous build.",
-            lambda: self._current_theme)
+        # "Show: All / Changed / Unchanged" — same dropdown as the Images and
+        # Video tabs.  It is always visible, so it doubles as the stable
+        # `before=` anchor for the optional Type / Group-duplicates widgets
+        # packed later.
+        self._build_change_filter(tools, "audio").pack(side=tk.LEFT)
         # Button rightmost (flush with the list edge), counter to its left
         # (feedback batch 21).
         self._audio_csv_btn = ttk.Button(
@@ -3602,9 +3606,7 @@ class MainWindow:
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
-            if "audio_changed_only" in staged:
-                self.audio_changed_only_var.set(
-                    bool(staged["audio_changed_only"]))
+            self._restore_change_filter("audio", staged)
             # "Group duplicates" is NOT persisted/restored: it's off by
             # default and opt-in per session, so a new folder never
             # auto-kicks the (~10 s) bank scan on load.
@@ -3973,6 +3975,65 @@ class MainWindow:
         return staged_originals.snapshot_path(
             getattr(self, "_%s_scan_dir" % kind, None), rel) is not None
 
+    # ---- Replace tabs: change-state filter (shared) -------------------
+
+    # The three modes of the audio / video / image "Show" dropdown.
+    _CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
+
+    def _build_change_filter(self, parent, kind):
+        """Build the "Show: All / Changed / Unchanged" dropdown for a Replace
+        tab and return its frame (unpacked — the caller places it).
+
+        The list refresh comes off the variable's own trace (set up with the
+        tab's other filters), so this only has to persist the choice."""
+        frame = ttk.Frame(parent)
+        ttk.Label(frame, text="Show:").pack(side=tk.LEFT)
+        combo = ttk.Combobox(
+            frame, textvariable=getattr(self, "%s_change_filter_var" % kind),
+            state="readonly", width=10, values=self._CHANGE_FILTER_VALUES)
+        combo.pack(side=tk.LEFT, padx=(4, 0))
+        combo.bind("<<ComboboxSelected>>",
+                   lambda _e: self._save_staged_changes())
+        _Tooltip(
+            combo,
+            "Narrow the list by what you've already done to it. Changed = the "
+            "slots with a pending replacement or already changed on disk by a "
+            "previous build. Unchanged = everything you haven't touched yet, "
+            "so a part-finished pass is what's left in front of you instead "
+            "of something to scroll past.",
+            lambda: self._current_theme)
+        setattr(self, "_%s_change_filter_frame" % kind, frame)
+        setattr(self, "_%s_change_filter_combo" % kind, combo)
+        return frame
+
+    def _change_filter_pred(self, kind):
+        """A ``predicate(rel_path)`` for *kind*'s Show filter, or None for
+        "All" (nothing to filter).
+
+        "Changed" is a pending assignment OR a slot already changed on disk by
+        a previous build — the same set the status line counts — and
+        "Unchanged" is exactly its complement, so the two views together are
+        always the whole folder."""
+        mode = getattr(self, "%s_change_filter_var" % kind).get()
+        if mode not in ("Changed", "Unchanged"):
+            return None
+        touched = (set(getattr(self, "_%s_assignments" % kind))
+                   | getattr(self, "_%s_changed_on_disk" % kind))
+        want_changed = (mode == "Changed")
+        return lambda rel: (rel in touched) == want_changed
+
+    def _restore_change_filter(self, kind, staged):
+        """Restore *kind*'s Show filter from a folder's staged-changes sidecar.
+
+        Sidecars written before the dropdown existed carry the "changed only"
+        boolean it replaced; a ticked box restores as "Changed"."""
+        var = getattr(self, "%s_change_filter_var" % kind)
+        val = staged.get("%s_change_filter" % kind)
+        if val in self._CHANGE_FILTER_VALUES:
+            var.set(val)
+        elif "%s_changed_only" % kind in staged:
+            var.set("Changed" if staged["%s_changed_only" % kind] else "All")
+
     # ---- Replace tabs: click-header sorting (shared) -----------------
 
     @staticmethod
@@ -4033,7 +4094,7 @@ class MainWindow:
             return
         useful = any(c != "other" for c in self._audio_categories.values())
         if useful and not frame.winfo_ismapped():
-            frame.pack(side=tk.LEFT, before=self._audio_changed_only_cb)
+            frame.pack(side=tk.LEFT, before=self._audio_change_filter_frame)
         elif not useful and frame.winfo_ismapped():
             frame.pack_forget()
         if not useful:
@@ -4070,15 +4131,12 @@ class MainWindow:
         type_key = self._audio_type_filter()
         cats = self._audio_categories
         from ..core import audio_categories as _ac
-        # "Changed only": a pending assignment OR already changed on disk by a
-        # previous build — the same set the status line counts.
-        touched = (set(self._audio_assignments) | self._audio_changed_on_disk
-                   if self.audio_changed_only_var.get() else None)
+        change_ok = self._change_filter_pred("audio")
 
         def _passes(s):
             if query and query not in s.rel_path.lower():
                 return False
-            if touched is not None and s.rel_path not in touched:
+            if change_ok is not None and not change_ok(s.rel_path):
                 return False
             if type_key is None:
                 return True
@@ -4217,7 +4275,7 @@ class MainWindow:
                 # like a failed scan.  An empty category that an Auto-name
                 # pass would populate says which one (David's LZ extract:
                 # blank Callouts pane because transcription never ran).
-                hint = "Nothing matches the Search / Type filter."
+                hint = "Nothing matches the Search / Show / Type filters."
                 if not query and type_key == "callouts":
                     hint = ("No call-outs identified in this folder yet.\n"
                             "Tick \"Auto-name call-outs\" on the Extract tab "
@@ -4226,6 +4284,17 @@ class MainWindow:
                     hint = ("No music identified in this folder — no music "
                             "banks, no track 20 seconds or longer, and no "
                             "Auto-name music results.")
+                elif not query and type_key is None:
+                    # An empty change-state view is an answer, not a dead end:
+                    # "nothing left to do" and "nothing done yet" both read as
+                    # a failed scan without this.
+                    mode = self.audio_change_filter_var.get()
+                    if mode == "Unchanged":
+                        hint = ("Every slot in this folder has a replacement "
+                                "or already differs from the extract — "
+                                "nothing is left unchanged.")
+                    elif mode == "Changed":
+                        hint = "Nothing in this folder has been changed yet."
                 self._audio_empty.configure(text=hint)
                 self._audio_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
             else:
@@ -4263,6 +4332,9 @@ class MainWindow:
         """Open the replacement picker for *rel* and record the assignment."""
         if not rel or rel not in self._audio_slots_by_rel:
             return
+        # Nothing may still be playing behind the picker (batch 28) — see
+        # stop_playback_for_picker.
+        self.stop_playback_for_picker()
         path = filedialog.askopenfilename(
             title=f"Choose a replacement for {rel}",
             initialdir=self.last_browse_dir("audio_replacement"),
@@ -4979,6 +5051,7 @@ class MainWindow:
             side = "rep" if self._audio_rep_available(nxt) else "orig"
 
         def _advance():
+            self._audio_advance_job = None
             # Selecting the row drives the usual debounced preview load, so
             # the list, the panes and the title all stay in step; ask it to
             # keep playing on the same side.
@@ -4993,7 +5066,7 @@ class MainWindow:
         # that just exited, and starting the next one from inside it races
         # that cleanup.
         try:
-            self._tk_root().after(120, _advance)
+            self._audio_advance_job = self._tk_root().after(120, _advance)
         except tk.TclError:
             pass
 
@@ -5167,8 +5240,19 @@ class MainWindow:
             return slot_dur
         return None
 
+    def _cancel_audio_advance(self):
+        """Drop a queued sequential-play step, so a clip that has just finished
+        can't start the next one after something else asked for silence."""
+        if getattr(self, "_audio_advance_job", None) is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_advance_job)
+            except Exception:
+                pass
+            self._audio_advance_job = None
+
     def _audio_stop_playback(self):
         """Stop both preview panes (keeps their playheads where they landed)."""
+        self._cancel_audio_advance()
         for pane in (self._audio_pane_orig, self._audio_pane_rep):
             if pane is not None:
                 pane.stop_playback()
@@ -5341,16 +5425,7 @@ class MainWindow:
         ttk.Label(tools, text="Search:").pack(side=tk.LEFT)
         ttk.Entry(tools, textvariable=self.video_search_var, width=24).pack(
             side=tk.LEFT, padx=(4, 12))
-        self._video_changed_only_cb = ttk.Checkbutton(
-            tools, text="Changed only",
-            variable=self.video_changed_only_var,
-            command=self._save_staged_changes)
-        self._video_changed_only_cb.pack(side=tk.LEFT)
-        _Tooltip(
-            self._video_changed_only_cb,
-            "Show only the slots with a pending replacement or already "
-            "changed on disk by a previous build.",
-            lambda: self._current_theme)
+        self._build_change_filter(tools, "video").pack(side=tk.LEFT)
         # Button rightmost (flush with the list edge), counter to its left
         # (feedback batch 21).
         self._video_csv_btn = ttk.Button(
@@ -6004,9 +6079,7 @@ class MainWindow:
             if "video_no_conversion" in staged:
                 self.video_no_conversion_var.set(
                     bool(staged["video_no_conversion"]))
-            if "video_changed_only" in staged:
-                self.video_changed_only_var.set(
-                    bool(staged["video_changed_only"]))
+            self._restore_change_filter("video", staged)
             self._update_video_trim_enabled()
         else:
             self._video_assignments = {
@@ -6079,9 +6152,9 @@ class MainWindow:
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in self._video_slots
                  if not query or query in s.rel_path.lower()]
-        if self.video_changed_only_var.get():
-            touched = set(self._video_assignments) | self._video_changed_on_disk
-            slots = [s for s in slots if s.rel_path in touched]
+        change_ok = self._change_filter_pred("video")
+        if change_ok is not None:
+            slots = [s for s in slots if change_ok(s.rel_path)]
         col, desc = self._video_sort
 
         changed = self._video_changed_on_disk
@@ -6408,6 +6481,7 @@ class MainWindow:
         """Open the replacement picker for *rel* and record the assignment."""
         if not rel or rel not in self._video_slots_by_rel:
             return
+        self.stop_playback_for_picker()   # same as audio (batch 28)
         path = filedialog.askopenfilename(
             title=f"Choose a replacement for {rel}",
             initialdir=self.last_browse_dir("video_replacement"),
@@ -6835,6 +6909,19 @@ class MainWindow:
         except Exception:
             pass
 
+    def stop_playback_for_picker(self):
+        """Silence every preview before a modal "choose a replacement" dialog
+        opens.
+
+        A modal file dialog does NOT stop Tk's timers, so an audition running
+        under "Play sequentially" kept playing — and kept STEPPING DOWN THE
+        LIST — behind the open picker, which then handed the row back with a
+        different track loaded in the preview (a tester: "if I am playing audio
+        files sequentially and I double click to open the file replace dialog
+        on anything, the sounds just keeps going down the list").  Sequential
+        play stays ticked; pressing ▶ again resumes it from where you are."""
+        self.stop_all_preview_playback()
+
     def _video_clear_preview(self):
         """Reset both preview panes entirely (used on manufacturer switch)."""
         self._cancel_video_select_job()
@@ -6946,16 +7033,8 @@ class MainWindow:
             "scene.assets textures, radium-embedded images, or per-character "
             "font glyph slices (the Source column).",
             lambda: self._current_theme)
-        self._image_changed_only_cb = ttk.Checkbutton(
-            tools, text="Changed only",
-            variable=self.image_changed_only_var,
-            command=self._save_staged_changes)
-        self._image_changed_only_cb.pack(side=tk.LEFT, padx=(0, 8))
-        _Tooltip(
-            self._image_changed_only_cb,
-            "Show only the images with a pending replacement or already "
-            "changed on disk by a previous build.",
-            lambda: self._current_theme)
+        self._build_change_filter(tools, "image").pack(
+            side=tk.LEFT, padx=(0, 8))
         self._image_group_cb = ttk.Checkbutton(
             tools, text="Group by scene",
             variable=self.image_group_by_scene_var,
@@ -7176,9 +7255,7 @@ class MainWindow:
             self._warn_dropped_assignments(
                 "image", staged.get("image"), self._image_slots_by_rel,
                 scan_dir)
-            if "image_changed_only" in staged:
-                self.image_changed_only_var.set(
-                    bool(staged["image_changed_only"]))
+            self._restore_change_filter("image", staged)
             if "image_group_by_scene" in staged:
                 self.image_group_by_scene_var.set(
                     bool(staged["image_group_by_scene"]))
@@ -7559,8 +7636,9 @@ class MainWindow:
         touched = set(self._image_assignments) | changed
 
         slots = self._image_slots
-        if self.image_changed_only_var.get():
-            slots = [s for s in slots if s.rel_path in touched]
+        change_ok = self._change_filter_pred("image")
+        if change_ok is not None:
+            slots = [s for s in slots if change_ok(s.rel_path)]
         srcf = self.image_source_filter_var.get()
         if srcf and srcf != "All sources":
             slots = [s for s in slots
@@ -7805,7 +7883,7 @@ class MainWindow:
             pass
         if row.startswith(_IMG_GROUP_IID):
             # Group header: bulk actions over the children currently shown
-            # (the search / Changed-only filters have already been applied).
+            # (the search / Show filters have already been applied).
             kids = tuple(tree.get_children(row))
             n = len(kids)
             plural = "" if n == 1 else "s"
@@ -8009,7 +8087,7 @@ class MainWindow:
         if not tree.exists(rel):
             self.image_search_var.set("")
             self.image_source_filter_var.set("All sources")
-            self.image_changed_only_var.set(False)
+            self.image_change_filter_var.set("All")
             self._refresh_image_list()
         if tree.exists(rel):
             self._land_on_row(tree, rel)
@@ -8025,7 +8103,7 @@ class MainWindow:
             return
         if not tree.exists(rel):
             self.video_search_var.set("")
-            self.video_changed_only_var.set(False)
+            self.video_change_filter_var.set("All")
             self._refresh_video_list()
         if tree.exists(rel):
             self._land_on_row(tree, rel)
@@ -8117,7 +8195,7 @@ class MainWindow:
             self._image_tree.selection_set(group_iid)
             self._image_tree.see(group_iid)
         except tk.TclError:
-            pass    # the Changed-only filter may have dropped the group
+            pass    # the Show filter may have dropped the group
 
     def _image_group_assign(self, group_iid, rels):
         """Group menu: one picker, assigned to every shown slot in the group
@@ -8758,8 +8836,7 @@ class MainWindow:
             data["audio_loop"] = dict(self._audio_loop_flags)
             data["audio_keep"] = dict(self._audio_keep_full_flags)
             data["audio_trim"] = bool(self.audio_trim_var.get())
-            data["audio_changed_only"] = bool(
-                self.audio_changed_only_var.get())
+            data["audio_change_filter"] = self.audio_change_filter_var.get()
         if _live(self._video_scan_dir):
             hist += history_log.diff_assignments(
                 "video", data.get("video"), self._video_assignments)
@@ -8774,14 +8851,12 @@ class MainWindow:
             data["video_trim"] = bool(self.video_trim_var.get())
             data["video_no_conversion"] = bool(
                 self.video_no_conversion_var.get())
-            data["video_changed_only"] = bool(
-                self.video_changed_only_var.get())
+            data["video_change_filter"] = self.video_change_filter_var.get()
         if _live(self._image_scan_dir):
             hist += history_log.diff_assignments(
                 "image", data.get("image"), self._image_assignments)
             data["image"] = dict(self._image_assignments)
-            data["image_changed_only"] = bool(
-                self.image_changed_only_var.get())
+            data["image_change_filter"] = self.image_change_filter_var.get()
             data["image_group_by_scene"] = bool(
                 self.image_group_by_scene_var.get())
             data["image_group_tags"] = {
@@ -13320,7 +13395,7 @@ class MainWindow:
                 if not self._audio_dup_group_cb.winfo_ismapped():
                     self._audio_dup_group_cb.pack(
                         side=tk.LEFT, padx=(0, 12),
-                        before=self._audio_changed_only_cb)
+                        before=self._audio_change_filter_frame)
             else:
                 self._audio_dup_group_cb.pack_forget()
         self._audio_clear_preview()

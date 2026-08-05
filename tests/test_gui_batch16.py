@@ -1,7 +1,7 @@
 """GUI guards for feedback batch 16.
 
 Covers the pieces that are easy to break silently by editing layout code:
-the "Changed only" filters, the removed sort-hint labels + their former
+the change-state ("Show") filters, the removed sort-hint labels + their former
 `before=`/`after=` pack anchors, the new video Export CSV, and the themed
 replacements for the unthemed popups.
 """
@@ -59,9 +59,9 @@ def _show_tab(app, w, frame):
     app.root.update(); app.root.update_idletasks()
 
 
-# ---- "Changed only" filter (a tester: show only modified files) ----------
+# ---- change-state filter (a tester: show only modified files) -------------
 
-def test_audio_changed_only_filters_the_list(app):
+def test_audio_change_filter_filters_the_list(app):
     w = _stern(app)
     w._audio_slots = [_Slot("audio/a.wav"), _Slot("audio/b.wav"),
                       _Slot("audio/c.wav")]
@@ -69,30 +69,43 @@ def test_audio_changed_only_filters_the_list(app):
     w._audio_assignments = {"audio/b.wav": "C:\\rep.wav"}
     w._audio_changed_on_disk = {"audio/c.wav"}
 
-    w.audio_changed_only_var.set(False)
+    w.audio_change_filter_var.set("All")
     w._refresh_audio_list()
     assert len(w._audio_tree.get_children()) == 3
 
-    w.audio_changed_only_var.set(True)     # traced -> refreshes
+    w.audio_change_filter_var.set("Changed")   # traced -> refreshes
     app.root.update()
     rows = set(w._audio_tree.get_children())
     assert rows == {"audio/b.wav", "audio/c.wav"}, \
-        "changed-only must keep BOTH a pending pick and a changed-on-disk row"
+        "Changed must keep BOTH a pending pick and a changed-on-disk row"
+
+    # Unchanged is its exact complement, so the two views together are always
+    # the whole folder (batch 28: "if I could select unchanged, I could then
+    # filter out the ones I have already dealt with").
+    w.audio_change_filter_var.set("Unchanged")
+    app.root.update()
+    assert set(w._audio_tree.get_children()) == {"audio/a.wav"}
+    w.audio_change_filter_var.set("All")
 
 
-def test_video_changed_only_filters_the_list(app):
+def test_video_change_filter_filters_the_list(app):
     w = _stern(app)
     w._video_slots = [_Slot("video/a.mp4"), _Slot("video/b.mp4")]
     w._video_slots_by_rel = {s.rel_path: s for s in w._video_slots}
     w._video_assignments = {"video/b.mp4": "C:\\rep.mp4"}
     w._video_changed_on_disk = set()
 
-    w.video_changed_only_var.set(True)
+    w.video_change_filter_var.set("Changed")
     app.root.update()
     assert set(w._video_tree.get_children()) == {"video/b.mp4"}
 
+    w.video_change_filter_var.set("Unchanged")
+    app.root.update()
+    assert set(w._video_tree.get_children()) == {"video/a.mp4"}
+    w.video_change_filter_var.set("All")
 
-def test_changed_only_does_not_hide_the_total_count(app):
+
+def test_change_filter_does_not_hide_the_total_count(app):
     """The status line still reports the real total, with "(N shown)" so a
     filtered view can't be mistaken for the whole card."""
     w = _stern(app)
@@ -100,10 +113,11 @@ def test_changed_only_does_not_hide_the_total_count(app):
     w._audio_slots_by_rel = {s.rel_path: s for s in w._audio_slots}
     w._audio_assignments = {"audio/b.wav": "C:\\rep.wav"}
     w._audio_changed_on_disk = set()
-    w.audio_changed_only_var.set(True)
+    w.audio_change_filter_var.set("Changed")
     app.root.update()
     status = w.audio_status_var.get()
     assert "of 2 slots changed" in status and "1 shown" in status
+    w.audio_change_filter_var.set("All")
 
 
 # ---- the removed sort hints + their former pack anchors -------------------
@@ -132,10 +146,10 @@ def test_optional_toolbar_widgets_still_pack(app):
     # Spike 2 always length-matches, so the Trim/pad checkbox is hidden for
     # Stern (batch 20 — standard behavior isn't presented as an option).
     assert not w._audio_trim_cb.winfo_ismapped()
-    # ...and the Type filter still sits LEFT of the Changed-only checkbox.
+    # ...and the Type filter still sits LEFT of the Show dropdown.
     order = w._audio_type_frame.master.pack_slaves()
     assert order.index(w._audio_type_frame) < order.index(
-        w._audio_changed_only_cb)
+        w._audio_change_filter_frame)
 
 
 def test_audio_options_row_aligned(app):
@@ -197,7 +211,7 @@ def test_video_export_csv_writes_every_slot(app, tmp_path, monkeypatch):
     w._video_assignments = {"video/a.mp4": "C:\\rep.mp4"}
     w._video_changed_on_disk = {"video/b.mp4"}
     # Filter the view down — the CSV must still hold EVERY slot.
-    w.video_changed_only_var.set(True)
+    w.video_change_filter_var.set("Changed")
 
     out = tmp_path / "video_slots.csv"
     monkeypatch.setattr(

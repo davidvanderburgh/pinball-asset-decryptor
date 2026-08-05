@@ -17,7 +17,12 @@ installer/get-pip.py
 installer/python-embed.zip
 
 # Local planning scratch (not part of the shipped app)
-plans/
+# `plans/*` rather than `plans/`, because git never descends into an excluded
+# DIRECTORY and the negation below would silently do nothing.
+plans/*
+# ...except the task queue. It is what /next reads and it is the thread of the
+# work itself, so it should survive a clone and carry its own history.
+!plans/TODO.md
 
 # Claude Code runtime state
 .claude/

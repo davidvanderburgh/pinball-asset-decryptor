@@ -108,7 +108,7 @@ These have each been violated at least once and each cost a run or a window:
 ## Done
 
 - [x] **12. Closing the game window leaked processes and stranded a ghost
-      window.** MOSTLY CLOSED 2026-08-05. `alive.sh` counted 5 of the 13 things
+      window.** MOSTLY CLOSED 2026-08-05, `227cab6`. `alive.sh` counted 5 of the 13 things
       a run starts and reported "clean" over seven leaked interop stubs and
       three orphaned card mounts; it now counts all of them and is the single
       list `killgame.sh` and `status.sh` ask (`--total` / `--procs`). Teardown

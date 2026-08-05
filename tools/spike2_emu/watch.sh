@@ -271,6 +271,21 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -d "$S/games/$GAME" ]; then
     fi
 fi
 
+# Window positions, kept from the WINDOWS side. The X-side restore in padglhost
+# is correct X11 and still loses under WSLg (RAIL windows are placed by the
+# compositor, which ignores the client's position hint and does not reliably
+# report moves back) - padwinpos.py moves the real desktop windows instead.
+# Same interop launch rules as the playfield window above, and it exits by
+# itself when the emulator windows go away.
+if [ "${PAD_WINPOS:-1}" != 0 ]; then
+    WP_PY=${PAD_PF_PYTHON:-pythonw.exe}
+    WP_WIN='C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu\padwinpos.py'
+    if command -v "$WP_PY" >/dev/null 2>&1; then
+        setsid "$WP_PY" "$WP_WIN" </dev/null >/dev/null 2>&1 &
+        echo "[watch] window-position keeper up (PAD_WINPOS=0 to skip)"
+    fi
+fi
+
 # Wait for the guest to actually EXIST before treating its absence as "it
 # exited". run_game.sh has to set up a pty, a user/mount/PID namespace and a
 # chroot before it execs the game, so qemu is not visible for a second or two -

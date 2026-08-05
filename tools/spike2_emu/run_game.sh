@@ -8,23 +8,44 @@
 # directory under games/ holding its own `game` ELF and assets. Which one boots
 # is decided here and nowhere else.
 R=/home/david/spike2root
+S=$(cd "$(dirname "$0")" && pwd)
 
-# The title: PAD_GAME, else whatever games/game already points at (the machine's
-# own convention, so reading it is not a rig invention), else the only one
-# extracted.
-GAME=${PAD_GAME:-}
-if [ -z "$GAME" ]; then
-    GAME=$(readlink "$R/games/game" 2>/dev/null); GAME=${GAME%/game}
+# STRAIGHT OFF THE CARD, with no extraction:
+#
+#   PAD_CARD=.../jaws_le-1_02_0.Release.16G.sdcard.raw run_game.sh
+#
+# cardmount.sh puts the card's games partition on a read-only FUSE mount (see
+# there for how that is done without root), and the title directory is bind
+# mounted into place inside the namespace below. Extracting a title copies 3-6
+# GB and takes minutes; this takes about a second and cannot modify the image.
+CARD_SRC=""
+if [ -n "${PAD_CARD:-}" ]; then
+    CARD_SRC=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
+    [ -d "$CARD_SRC" ] || { echo "[run] could not mount $PAD_CARD" >&2; exit 1; }
+    GAME=$(basename "$CARD_SRC")
+    mkdir -p "$R/games/$GAME"
+    echo "[run] title: $GAME (from the card, not extracted)"
 fi
-if [ -z "$GAME" ]; then
-    GAME=$(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | head -1)
+
+# Otherwise the title is PAD_GAME, else whatever games/game already points at
+# (the machine's own convention, so reading it is not a rig invention), else the
+# only one extracted.
+if [ -z "$CARD_SRC" ]; then
+    GAME=${PAD_GAME:-}
+    if [ -z "$GAME" ]; then
+        GAME=$(readlink "$R/games/game" 2>/dev/null); GAME=${GAME%/game}
+    fi
+    if [ -z "$GAME" ]; then
+        GAME=$(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | head -1)
+    fi
+    if [ ! -x "$R/games/$GAME/game" ]; then
+        echo "[run] no game ELF at $R/games/$GAME/game" >&2
+        echo "[run] extracted titles: $(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')" >&2
+        echo "[run] or run it straight off a card: PAD_CARD=<image.raw>" >&2
+        exit 1
+    fi
+    echo "[run] title: $GAME"
 fi
-if [ ! -x "$R/games/$GAME/game" ]; then
-    echo "[run] no game ELF at $R/games/$GAME/game" >&2
-    echo "[run] extracted titles: $(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')" >&2
-    exit 1
-fi
-echo "[run] title: $GAME"
 
 mkdir -p "$R"/dev "$R"/proc "$R"/sys "$R"/data "$R"/dump/log/connectivity "$R"/tmp "$R"/run
 
@@ -49,10 +70,11 @@ NODEBUS_PTY=$(cat /home/david/nodebus.path 2>/dev/null)
 echo "[run] node bus pty: ${NODEBUS_PTY:-NONE}"
 trap 'kill $NODEBUS_PID 2>/dev/null' EXIT
 
-unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" "$GAME" <<'INNER'
+unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
+CARD_SRC="$4"
 # procfs needs a PID namespace to mount (see the -p -f on unshare below).
 # Without it this silently produced an EMPTY /proc: no /proc/meminfo, and the
 # game sizes its asset budget from that, so it loaded no scenes at all.
@@ -93,6 +115,16 @@ mount -t tmpfs tmpfs "$R/dev/shm"
 # checks /proc/mounts for them. Binding each directory onto itself makes it a
 # real mount point without disturbing its contents.
 for m in games data dump; do mount --bind "$R/$m" "$R/$m"; done
+
+# THE CARD ITSELF, if one was given. The FUSE mount was made outside this
+# namespace and so is inherited; binding its title directory into games/ is what
+# lets the guest see the assets without a byte being copied. It goes AFTER the
+# loop above, because binding it first would put it under a mount that is then
+# replaced, and the game would find an empty directory.
+if [ -n "$CARD_SRC" ]; then
+    mount --bind "$CARD_SRC" "$R/games/$GAME" \
+        || { echo "[run] could not bind the card at $CARD_SRC" >&2; exit 1; }
+fi
 
 # real host char devices
 for f in null zero urandom random; do mount --bind /dev/$f "$R/dev/$f"; done

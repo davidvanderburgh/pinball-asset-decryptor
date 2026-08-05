@@ -1202,6 +1202,11 @@ static int addr_readable(const void *p)
     return lastok;
 }
 
+/* Declared here because the SEGV report, far above where these are defined,
+ * asks "is this the title those addresses came from?" before printing any of
+ * them. Non-zero means the configured Godzilla Pro addresses are mapped. */
+static unsigned a_sw_struct(void);
+
 /* The audio streaming worker's start gate: a byte the worker reads ONCE and
  * then spins on in a register. 0x7acb54 is where Godzilla Pro 1.15.0 keeps it.
  * PAD_AUDIO_GATE=<hex> moves it for another title; unset and unmapped are
@@ -1499,13 +1504,23 @@ static void segv_handler(int sig, void *info, void *ucv)
      * byte at 0x7e1a10 is set, and the boot step waits on 0x7e1974. The shim
      * shares the guest address space, so both can just be read here. */
     {
+        /* GODZILLA PRO 1.15.0 ADDRESSES, and the danger on another title is not
+         * a crash - it is a LIE. EHOH printed "loader_gate=171 boot_ready=93"
+         * off unrelated data of its own, in a crash report, as fact. A report
+         * that invents findings is worse than one that says less, so these are
+         * printed only for the title they came from. */
         unsigned char *gate  = (unsigned char *)0x7e1a10;
         unsigned char *ready = (unsigned char *)0x7e1974;
         unsigned char *run   = (unsigned char *)0x794af5;
-        snprintf(b, sizeof b,
-                 "[segv] loader_gate[0x7e1a10]=%d boot_ready[0x7e1974]=%d "
-                 "thread_run[0x794af5]=%d scene_opens=%d\n",
-                 *gate, *ready, *run, scene_opens);
+        if (a_sw_struct())
+            snprintf(b, sizeof b,
+                     "[segv] loader_gate[0x7e1a10]=%d boot_ready[0x7e1974]=%d "
+                     "thread_run[0x794af5]=%d scene_opens=%d\n",
+                     *gate, *ready, *run, scene_opens);
+        else
+            snprintf(b, sizeof b,
+                     "[segv] scene_opens=%d (loader-gate addresses are Godzilla"
+                     " Pro's; not reported for this title)\n", scene_opens);
         logmsg(b);
         snprintf(b, sizeof b,
                  "[segv] filebuf::xsgetn=%d (small=%d) filebuf::underflow=%d "
@@ -1526,9 +1541,13 @@ static void segv_handler(int sig, void *info, void *ucv)
      * table at 0x7e4d48 is indexed by event id and each entry is a linked list
      * of {handler, priority, next}, so it can just be walked here. */
     {
+        /* Also Godzilla Pro 1.15.0's. Walking it on another title produced
+         * "[segv] event 93 has NO handlers", which is not a finding about that
+         * title - it is this shim reading someone else's memory and stating the
+         * result. Same rule as the block above. */
         unsigned long *tbl = (unsigned long *)0x7e4d48;
         int ev;
-        for (ev = 93; ev <= 94; ev++) {
+        for (ev = 93; a_sw_struct() && ev <= 94; ev++) {
             unsigned long node = tbl[ev];
             int k = 0;
             while (node && k < 12) {

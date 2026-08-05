@@ -62,7 +62,17 @@ export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmp
 
 # WHICH TITLE. PAD_GAME picks it; run_game.sh has the full rule and prints what
 # it chose. Everything below that is per-title reads it from here.
+# PAD_CARD runs a title straight off its card image with no extraction; the
+# title name then comes from the card, so ask cardmount.sh rather than guess.
 GAME=${PAD_GAME:-}
+if [ -n "${PAD_CARD:-}" ]; then
+    CARD_PATH=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
+    [ -d "$CARD_PATH" ] || { echo "[watch] could not mount $PAD_CARD" >&2; exit 1; }
+    GAME=$(basename "$CARD_PATH")
+    # The video host reads clips itself, outside the chroot, so it needs the
+    # card's real path - the title is not under spike2root/games at all.
+    export PAD_CARD PAD_VID_ROOT="$CARD_PATH"
+fi
 [ -z "$GAME" ] && { GAME=$(readlink /home/david/spike2root/games/game 2>/dev/null); GAME=${GAME%/game}; }
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
@@ -200,7 +210,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
-           PAD_GAME="$GAME" \
+           PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" \
            bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 

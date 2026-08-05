@@ -14,11 +14,32 @@ directory under `games/`. `PAD_GAME` picks one:
 PAD_GAME=turtles_pro watch.sh
 ```
 
-Verified on **Godzilla Pro 1.15.0** and **TMNT 1987 Pro 1.59.0**.
+## Straight off the card, with nothing extracted
 
-Adding a title is: extract `/games/<title>` out of its card's third partition
-with `debugfs -R "rdump ..."`, then run it. What the rig knows about a title it
-finds for itself:
+```bash
+PAD_CARD=images/Stern/spike2/jaws_le-1_02_0.Release.16G.sdcard.raw watch.sh
+```
+
+`cardmount.sh` puts the card's games partition on a **read-only FUSE mount** and
+`run_game.sh` bind-mounts the title into the chroot. No copy, no root, about a
+second, and the image cannot be modified. `mount -o loop,offset=` would need
+real root; fuse2fs does not, and `apt-get download` + `dpkg-deb -x` into a
+private prefix gets fuse2fs without a package manager or a password. Extraction
+still works and is still the faster option for a title you run constantly.
+
+## Titles
+
+| title | state |
+|---|---|
+| Godzilla Pro 1.15.0 | full: attract, video, audio, switches, coils, artwork playfield |
+| TMNT 1987 Pro 1.59.0 | attract, video, audio, switches, coils; schematic playfield; one Tech Alert (node 2 not registered) |
+| Jaws LE 1.02.0 | boots and renders, switch table found (109); crashes in libc during scene load |
+| Elvira's HoH 1.13.0 | boots to its title screen at 38 fps; crashes during scene load; switch table not found |
+
+The last two are honest "not yet", not "broken": both get through node bus
+bring-up and draw their own artwork, and both die later in asset loading.
+
+What the rig works out about a title by itself:
 
 | | |
 |---|---|

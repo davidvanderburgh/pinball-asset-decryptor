@@ -125,10 +125,9 @@ def _panel(tmp_path, project=None):
 def test_card_source_becomes_pad_card(tmp_path):
     """A card image is handed to the rig as PAD_CARD, in WSL form."""
     img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
-    img.write_bytes(b"\0" * 16)
+    img.write_bytes(bytes(16))
     root, panel = _panel(tmp_path)
     try:
-        panel._src_kind.set("card")
         panel._src_path.set(str(img))
         env = panel._source_env()
         assert len(env) == 1 and env[0].startswith("PAD_CARD=")
@@ -138,58 +137,67 @@ def test_card_source_becomes_pad_card(tmp_path):
         root.destroy()
 
 
-def test_directory_source_needs_a_game_binary(tmp_path):
-    """A folder without `game` is refused HERE, with a reason, rather than
-    becoming a shell error in the log pane."""
-    d = tmp_path / "turtles_pro"
-    d.mkdir()
+def test_missing_image_is_refused_on_the_tab(tmp_path):
+    """A bad path is a sentence on the tab, not a shell error in the log."""
     root, panel = _panel(tmp_path)
     try:
-        panel._src_kind.set("dir")
-        panel._src_path.set(str(d))
+        panel._src_path.set(str(tmp_path / "nope.raw"))
         assert panel._source_env() is None
-        assert "game" in panel._hint.cget("text")
-        (d / "game").write_bytes(b"\x7fELF")
-        env = panel._source_env()
-        assert env == ["PAD_GAME_DIR=" + emulate_tab._wsl_path(str(d))]
+        assert "No such image" in panel._hint.cget("text")
+        panel._src_path.set("")
+        assert panel._source_env() is None
+        assert "Pick a card image" in panel._hint.cget("text")
     finally:
         root.destroy()
 
 
-def test_rig_source_passes_no_override(tmp_path):
-    """"Rig's own copy" must add nothing: the rig then picks the title itself."""
-    root, panel = _panel(tmp_path)
-    try:
-        panel._src_kind.set("rig")
-        assert panel._source_env() == []
-    finally:
-        root.destroy()
-
-
-def test_project_buttons_fill_the_path(tmp_path):
-    """The two project buttons are shortcuts onto the same editable path, and
-    they select the card option because both are images."""
+def test_stock_and_modded_buttons_pick_between_the_project_images(tmp_path):
+    """The two buttons are the whole choice: stock or the build.  Which one you
+    want is a decision, so neither is forced."""
     root, panel = _panel(tmp_path,
-                         project=lambda: (r"C:\proj\orig.raw", r"C:\proj\build.raw"))
+                         project=lambda: (r"C:\proj\stock.raw",
+                                          r"C:\proj\modded.raw"))
     try:
-        panel._src_kind.set("dir")
-        panel._use_project(0)
-        assert panel._src_kind.get() == "card"
-        assert panel._src_path.get() == r"C:\proj\orig.raw"
+        # The stock image is prefilled, so Start works with no decision made.
+        assert panel._src_path.get() == r"C:\proj\stock.raw"
         panel._use_project(1)
-        assert panel._src_path.get() == r"C:\proj\build.raw"
+        assert panel._src_path.get() == r"C:\proj\modded.raw"
+        panel._use_project(0)
+        assert panel._src_path.get() == r"C:\proj\stock.raw"
     finally:
         root.destroy()
 
 
-def test_project_buttons_disabled_without_a_project(tmp_path):
-    """No project set: the buttons are off rather than filling in a blank."""
+def test_buttons_disabled_without_a_project(tmp_path):
+    """No project set: the buttons are off and the tab says so, rather than
+    filling the box with a blank."""
     root, panel = _panel(tmp_path, project=lambda: ("", ""))
     try:
-        panel._src_kind.set("card")
-        panel._sync_source()
         assert str(panel._orig_btn.cget("state")) == "disabled"
         assert str(panel._build_btn.cget("state")) == "disabled"
+        assert "Extract or Write" in panel._src_note.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_no_folder_or_rig_options(tmp_path):
+    """An extracted folder is the wrong shape for the rig and the rig's own
+    copy is internal state; neither is offered any more."""
+    root, panel = _panel(tmp_path)
+    try:
+        assert not hasattr(panel, "_src_kind")
+        texts = []
+        def walk(w):
+            for child in w.winfo_children():
+                try:
+                    texts.append(str(child.cget("text")))
+                except Exception:                        # noqa: BLE001
+                    pass
+                walk(child)
+        walk(root)
+        blob = " ".join(texts)
+        assert "Extracted folder" not in blob
+        assert "Rig's own copy" not in blob
     finally:
         root.destroy()
 

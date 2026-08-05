@@ -105,7 +105,14 @@ NODEBUS_PID=$!
 for _ in $(seq 1 50); do [ -s /home/david/nodebus.path ] && break; sleep 0.1; done
 NODEBUS_PTY=$(cat /home/david/nodebus.path 2>/dev/null)
 echo "[run] node bus pty: ${NODEBUS_PTY:-NONE}"
-trap 'kill $NODEBUS_PID 2>/dev/null' EXIT
+# The bind mount needs a mountpoint, so a card or folder run creates an empty
+# directory under games/ that outlives the run. Left behind it looks exactly
+# like an extracted title to anything that lists that directory - the Emulate
+# tab offered `elvira3` and `jaws_le` as runnable when both were empty shells.
+# rmdir only removes it if it is empty, so an extracted title is never at risk.
+STUB=""
+[ -n "$CARD_SRC" ] && STUB="$R/games/$GAME"
+trap 'kill $NODEBUS_PID 2>/dev/null; [ -n "$STUB" ] && rmdir "$STUB" 2>/dev/null' EXIT
 
 unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" <<'INNER'
 R="$1"

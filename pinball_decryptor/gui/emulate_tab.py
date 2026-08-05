@@ -8,14 +8,19 @@ truthfully what it is doing.  It deliberately does not reimplement any of it.
 
 Three things about it are worth knowing before changing anything here:
 
-* **It runs whatever you point it at.**  A card image is mounted READ ONLY and
-  run in place, so nothing is extracted and the image cannot be written to; a
-  directory holding a ``game`` binary is bind mounted the same way.  The two
-  project buttons are shortcuts onto the app's own paths — the image on the
-  Extract tab is the original, the one the Write tab builds is the replacement —
-  so this tab agrees with the rest of the app instead of contradicting it.  It
-  used to run one prepared Godzilla Pro rootfs and say so; that is now only the
-  "Rig's own copy" option.
+* **It runs a card image, and only a card image.**  The image is mounted READ
+  ONLY and run in place: nothing is extracted, and nothing can write to it.  The
+  two buttons pick which of the project's images to run — the one Extract was
+  pointed at, or the one Write builds — so this tab acts on the same files as
+  the rest of the app instead of contradicting it.
+
+  Two other sources were offered briefly and both were wrong.  An "extracted
+  folder" cannot work: PAD extracts ASSETS, and the rig needs a title directory
+  (a ``game`` binary with ``assets/`` and the node ``.hex`` files beside it),
+  which is a different shape — pointing it at an extract folder could only fail.
+  A "rig's own copy" option exposed whatever happened to be unpacked inside the
+  rig on this machine, which is internal state no user can create or reason
+  about.
 
 * **It runs as the normal WSL user, not root.**  ``core.executor`` invokes
   ``wsl -u root``; the rig's scripts assume ``/home/david`` and a user-owned
@@ -263,62 +268,48 @@ class EmulatePanel:
         self._schedule_poll()
 
     def _build_source(self, frame, pad):
-        """What to emulate: a card image, or a directory holding a game.
+        """The card image to run.  One box, because there is only one thing the
+        rig can be pointed at that a user of this app actually has.
 
-        TWO KINDS OF SOURCE, because they are genuinely different things and
-        collapsing them into one box would guess wrong:
+        AN EXTRACTED FOLDER IS NOT AN OPTION, and offering it was a mistake: PAD
+        extracts ASSETS, and the rig needs a title directory - a ``game`` binary
+        with ``assets/`` and the node ``.hex`` files beside it.  They are not the
+        same shape, so picking an extract folder here could only ever fail, and
+        it did.  A card image is mounted read only and run in place, so there is
+        nothing to prepare either way.
 
-        * a CARD IMAGE (``.raw``/``.img``) is mounted read only and run in
-          place - no extraction, and nothing can write to the image;
-        * a DIRECTORY is a title already unpacked somewhere, which is what you
-          want while iterating on a build you keep rewriting.
-
-        The two project buttons fill the box from the rest of the app: the
-        image on the Extract tab is the ORIGINAL, and the one the Write tab
-        builds is the REPLACEMENT. They are only shortcuts - the path stays
-        editable, and a project with neither set simply leaves them disabled.
+        The two buttons pick which of the project's images to run: the one
+        Extract was pointed at (stock) or the one Write builds (the mod).  Which
+        of those you want is a decision, not something to guess, so both are
+        offered and neither is forced.
         """
-        box = ttk.LabelFrame(frame, text="What to run")
+        box = ttk.LabelFrame(frame, text="Card image to run")
         box.pack(fill=tk.X, **pad)
 
-        self._src_kind = tk.StringVar(value="card")
         self._src_path = tk.StringVar()
 
         row = ttk.Frame(box)
         row.pack(fill=tk.X, padx=8, pady=(6, 2))
-        ttk.Radiobutton(row, text="Card image", value="card",
-                        variable=self._src_kind,
-                        command=self._sync_source).pack(side=tk.LEFT)
-        ttk.Radiobutton(row, text="Extracted folder", value="dir",
-                        variable=self._src_kind,
-                        command=self._sync_source).pack(side=tk.LEFT, padx=(12, 0))
-        ttk.Radiobutton(row, text="Rig's own copy", value="rig",
-                        variable=self._src_kind,
-                        command=self._sync_source).pack(side=tk.LEFT, padx=(12, 0))
+        self._src_entry = ttk.Entry(row, textvariable=self._src_path)
+        self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(row, text="Browse…", width=10,
+                   command=self._browse).pack(side=tk.LEFT, padx=(6, 0))
 
         row2 = ttk.Frame(box)
-        row2.pack(fill=tk.X, padx=8, pady=2)
-        self._src_entry = ttk.Entry(row2, textvariable=self._src_path)
-        self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._browse_btn = ttk.Button(row2, text="Browse…", width=10,
-                                      command=self._browse)
-        self._browse_btn.pack(side=tk.LEFT, padx=(6, 0))
-
-        row3 = ttk.Frame(box)
-        row3.pack(fill=tk.X, padx=8, pady=(2, 6))
-        self._orig_btn = ttk.Button(row3, text="Use project original",
+        row2.pack(fill=tk.X, padx=8, pady=(2, 6))
+        self._orig_btn = ttk.Button(row2, text="Use stock image",
                                     command=lambda: self._use_project(0))
         self._orig_btn.pack(side=tk.LEFT)
-        self._build_btn = ttk.Button(row3, text="Use project build",
+        self._build_btn = ttk.Button(row2, text="Use modded image",
                                      command=lambda: self._use_project(1))
         self._build_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._src_note = ttk.Label(row3, foreground="#888", text="")
+        self._src_note = ttk.Label(row2, foreground="#888", text="")
         self._src_note.pack(side=tk.LEFT, padx=(12, 0))
 
         self._sync_source()
 
     def _project_pair(self):
-        """(original, build) from the rest of the app, each possibly blank."""
+        """(stock, modded) from the rest of the app, each possibly blank."""
         if not self._project_paths:
             return "", ""
         try:
@@ -328,46 +319,30 @@ class EmulatePanel:
         return (a or ""), (b or "")
 
     def _sync_source(self):
-        """Enable only what the current choice can use, and say what is set."""
-        kind = self._src_kind.get()
-        rig = kind == "rig"
-        for w in (self._src_entry, self._browse_btn):
-            w.configure(state=tk.DISABLED if rig else tk.NORMAL)
-        orig, build = self._project_pair()
-        # The project buttons fill an IMAGE path, so they only make sense for
-        # the card option - saying so by disabling them beats a button that
-        # quietly puts a .raw into a field labelled "folder".
-        self._orig_btn.configure(
-            state=tk.NORMAL if (kind == "card" and orig) else tk.DISABLED)
-        self._build_btn.configure(
-            state=tk.NORMAL if (kind == "card" and build) else tk.DISABLED)
-        if rig:
+        """Offer only the project images that exist, and start from the stock
+        one so Start works without a decision on the common path."""
+        stock, mod = self._project_pair()
+        self._orig_btn.configure(state=tk.NORMAL if stock else tk.DISABLED)
+        self._build_btn.configure(state=tk.NORMAL if mod else tk.DISABLED)
+        if not self._src_path.get().strip() and stock:
+            self._src_path.set(stock)
+        if not (stock or mod) and not self._src_path.get().strip():
             self._src_note.configure(
-                text="the title already prepared in the rig")
-        elif kind == "card":
-            self._src_note.configure(
-                text="" if (orig or build)
-                     else "no project image on the Extract or Write tab yet")
+                text="no image loaded on the Extract or Write tab yet")
         else:
-            self._src_note.configure(text="a folder holding a `game` binary")
+            self._src_note.configure(text="")
 
     def _use_project(self, which):
-        orig, build = self._project_pair()
-        path = (orig, build)[which]
+        path = self._project_pair()[which]
         if path:
-            self._src_kind.set("card")
             self._src_path.set(path)
             self._sync_source()
 
     def _browse(self):
         from tkinter import filedialog
-        if self._src_kind.get() == "dir":
-            path = filedialog.askdirectory(
-                title="Pick a folder holding a Spike 2 game")
-        else:
-            path = filedialog.askopenfilename(
-                title="Pick a Spike 2 card image",
-                filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(
+            title="Pick a Spike 2 card image",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
         if path:
             self._src_path.set(path)
 
@@ -377,27 +352,16 @@ class EmulatePanel:
         Validated HERE rather than in the rig: a bad path should be a sentence
         on the tab, not a shell script exiting into the log pane.
         """
-        kind = self._src_kind.get()
-        if kind == "rig":
-            return []
         path = self._src_path.get().strip().strip('"')
         if not path:
-            self._hint.configure(text="Pick a card image or a folder first.")
-            return None
-        if kind == "card":
-            if not os.path.isfile(path):
-                self._hint.configure(text="No such image: %s" % path)
-                return None
-            return ["PAD_CARD=%s" % _wsl_path(path)]
-        if not os.path.isdir(path):
-            self._hint.configure(text="No such folder: %s" % path)
-            return None
-        if not os.path.isfile(os.path.join(path, "game")):
             self._hint.configure(
-                text="%s holds no `game` binary — pick the title's own folder, "
-                     "the one with `game` and `assets` in it." % path)
+                text="Pick a card image first — the one on the Extract tab, the "
+                     "one Write builds, or any other Spike 2 card.")
             return None
-        return ["PAD_GAME_DIR=%s" % _wsl_path(path)]
+        if not os.path.isfile(path):
+            self._hint.configure(text="No such image: %s" % path)
+            return None
+        return ["PAD_CARD=%s" % _wsl_path(path)]
 
     def _on_destroy(self, event=None):
         # <Destroy> fires for every descendant too; only the frame itself means

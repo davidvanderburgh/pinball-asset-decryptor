@@ -1214,15 +1214,23 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             yuv = pl + 24;
         }
         if (!yuv) { vid_dropped++; break; }
-        if (fmt != PADGL_VIV_I420) {
+        /* THE DIRECT TEXTURE PATH IS NOT A VIDEO PATH. It was written for
+         * Godzilla Pro, which only ever uses it for I420 video frames, so
+         * anything else was refused as "not I420". Jaws LE uses the same
+         * extension for plain GL_RGBA surfaces, which need no conversion at
+         * all - they are already in the layout the texture wants. */
+        if (fmt == 0x1908u) {                        /* GL_RGBA */
+            rgba = yuv;
+        } else if (fmt == PADGL_VIV_I420) {
+            rgba = i420_to_rgba(yuv, w, h);
+        } else {
             static int moaned;
             if (!moaned) { moaned = 1;
-                fprintf(stderr, "[padglhost] texdirect format 0x%x is not I420 - "
-                        "no converter for it\n", fmt); }
+                fprintf(stderr, "[padglhost] texdirect format 0x%x has no "
+                        "converter here\n", fmt); }
             vid_dropped++;
             break;
         }
-        rgba = i420_to_rgba(yuv, w, h);
         if (!rgba) { vid_dropped++; break; }
         vid_texdirect++;
         if (dbg) {

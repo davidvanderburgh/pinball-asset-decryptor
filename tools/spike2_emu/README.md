@@ -33,15 +33,12 @@ still works and is still the faster option for a title you run constantly.
 |---|---|
 | Godzilla Pro 1.15.0 | full: attract, video, audio, switches, coils, artwork playfield |
 | TMNT 1987 Pro 1.59.0 | attract, video, audio, switches, coils; schematic playfield; one Tech Alert (node 2 not registered) |
-| Elvira's HoH 1.13.0 | boots, 60 fps, switch input works, reaches its Guided Setup |
-| Jaws LE 1.02.0 | boots and renders, switch table found (109); still crashes in libc during scene load |
+| Elvira's HoH 1.13.0 | boots, 60 fps, switch input, reaches its Guided Setup |
+| Jaws LE 1.02.0 | boots, 60 fps, switch input, clears Tech Alerts, reaches its Guided Setup |
 
-Jaws is the one that does not work. It dies in `memcpy` with a null
-destination, called from the game at `0x66ebb4`, after 125 scene loads: an
-object's virtual "ensure capacity" at vtable+8 returns without setting the
-buffer pointer at `this+32`, and the game memmoves into it anyway. Reporting a
-realistic 1 GB of RAM (`PAD_MEMTOTAL_KB`) was the obvious theory and it made no
-difference at all - same address, same 125 scenes.
+All four boot, render at 60 fps and take input. EHOH and Jaws stop at Guided
+Setup because that is what a machine with no saved settings does on first boot,
+not because anything is wrong.
 
 What the rig works out about a title by itself:
 

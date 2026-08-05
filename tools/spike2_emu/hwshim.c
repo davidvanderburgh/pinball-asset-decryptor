@@ -5324,7 +5324,12 @@ long shim_read(int fd, void *b, unsigned long n)
                     static unsigned polls, nonzero;
                     polls++;
                     if (want) nonzero++;
-                    if (budget > 0 && want) {
+                    /* The two addresses below are Godzilla Pro 1.15.0's and
+                     * this is only a diagnostic, so it is skipped entirely on
+                     * any other title - Jaws faulted here, in a printf, for the
+                     * third time in this file. a_sw_struct() is the test for
+                     * "the configured addresses are this title's". */
+                    if (budget > 0 && want && a_sw_struct()) {
                         /* Print the two things 0x1d7d88 is about to test for
                          * this node, so a poll that leads nowhere says why:
                          *   board[+4] bit 0  (0x7bad88 + node*0xe0 + 4)

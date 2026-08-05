@@ -544,6 +544,12 @@ static unsigned viv_frame_bytes(unsigned fmt, unsigned w, unsigned h)
     case PADGL_VIV_I420: case PADGL_VIV_YV12:
     case PADGL_VIV_NV12: case PADGL_VIV_NV21: return w * h * 3u / 2u;
     case PADGL_VIV_YUY2: case PADGL_VIV_UYVY: return w * h * 2u;
+    /* NOT ONLY VIDEO. The Vivante direct-texture path takes plain colour
+     * formats too, and Jaws LE uses it for GL_RGBA - which is how "unsupported
+     * format" became a null buffer and a crash. GL_RGBA and GL_RGB are core GL
+     * enums, not Vivante ones, hence the bare numbers. */
+    case 0x1908u: return w * h * 4u;                 /* GL_RGBA */
+    case 0x1907u: return w * h * 3u;                 /* GL_RGB  */
     default: return 0;
     }
 }
@@ -559,9 +565,68 @@ void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
      * exactly as it came - overwriting it would point the game at nothing. */
 }
 
+/* glTexDirectVIV ALLOCATES; glTexDirectVIVMap ADOPTS. Forwarding one to the
+ * other looks harmless and is not, because the difference is which direction
+ * `logical` goes:
+ *
+ *   Map(...,  void **logical, ...)   the app OWNS the buffer and passes it IN
+ *   VIV(...,  void **logical)        the DRIVER allocates and writes it OUT
+ *
+ * This used to call Map, which reads *logical and never writes it. An app that
+ * calls glTexDirectVIV gets back whatever was already in its pointer variable -
+ * a null - and then copies a frame into it. That is precisely how Jaws LE died:
+ * memmove with a null destination, from a virtual "ensure capacity" at
+ * vtable+8 that returned without setting the buffer at this+32. The pointer it
+ * was waiting for was this function's to provide.
+ *
+ * One buffer, grown as needed and reused: the extension's contract is that the
+ * texture keeps the allocation until the target is respecified, and a video
+ * frame arrives 30 times a second. */
 void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
                     void **logical)
-{ glTexDirectVIVMap(target, w, h, fmt, logical, 0); }
+{
+    static unsigned char *buf;
+    static unsigned long bufsz;
+    unsigned need = viv_frame_bytes(fmt, (unsigned)w, (unsigned)h);
+
+    (void)target;
+    if (logical) *logical = 0;
+    if (!need) {
+        /* SAY WHICH FORMAT. "unsupported" on its own cost a whole run: Jaws
+         * does call this, so the entry point was right and the only thing left
+         * to learn was the four hex digits this did not print. */
+        static int moaned;
+        if (!moaned) {
+            static const char hx[] = "0123456789abcdef";
+            char m[64];
+            int i = 0, k;
+            const char *p = "[bridge] glTexDirectVIV: unsupported format 0x";
+            moaned = 1;
+            while (*p) m[i++] = *p++;
+            for (k = 7; k >= 0; k--) m[i++] = hx[(fmt >> (k * 4)) & 0xf];
+            p = ", no buffer given\n";
+            while (*p) m[i++] = *p++;
+            m[i] = 0;
+            say(m);
+        }
+        return;
+    }
+    if (need > bufsz) {
+        /* mmap rather than malloc: this file is the guest's libGLESv2 and does
+         * not link an allocator of its own. Anonymous, private, and never
+         * freed - there is one of these per texture size for the life of the
+         * process, and a leak of one frame buffer is not a leak worth code. */
+        void *p = mmap(0, need, 3 /*RW*/, 0x22 /*ANON|PRIVATE*/, -1, 0);
+        if (!p || p == (void *)-1) {
+            say("[bridge] glTexDirectVIV: could not allocate a frame buffer\n");
+            return;
+        }
+        buf = (unsigned char *)p;
+        bufsz = need;
+    }
+    if (logical) *logical = buf;
+    viv.w = (unsigned)w; viv.h = (unsigned)h; viv.fmt = fmt; viv.px = buf;
+}
 
 void glTexDirectInvalidateVIV(unsigned int target)
 {

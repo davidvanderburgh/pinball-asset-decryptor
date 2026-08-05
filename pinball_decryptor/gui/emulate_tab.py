@@ -39,7 +39,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -154,6 +154,7 @@ class EmulatePanel:
         # across the launch itself.
         self._starting = False
         self._stopping = False
+        self._resetting = False
         self._poll_job = None
         self._stopped = False
         self._logfile = "/home/david/gzpad.log"
@@ -203,12 +204,26 @@ class EmulatePanel:
 
         btns = ttk.Frame(frame)
         btns.pack(fill=tk.X, **pad)
-        self._start_btn = ttk.Button(btns, text="Start emulator",
-                                     command=self.start)
-        self._start_btn.pack(side=tk.LEFT)
-        self._stop_btn = ttk.Button(btns, text="Stop", command=self.stop,
-                                    state=tk.DISABLED)
-        self._stop_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # ONE button, not two.  Start and Stop are never both available - the
+        # emulator is either up or it is not - so a pair of buttons meant one of
+        # them was always greyed out, and the greyed one still had to be aimed
+        # at.  A single button that says what it will do next is the whole
+        # control.  _run_label() owns the text and the state; nothing else sets
+        # them, so the button cannot drift out of step with the rig.
+        self._run_btn = ttk.Button(btns, text="Start emulator",
+                                   command=self._toggle, width=16)
+        self._run_btn.pack(side=tk.LEFT)
+
+        # The remedy for a fault that is NOT ours and cannot be detected from
+        # inside WSL: WSLg's audio path to Windows degrades on a long session
+        # and everything the rig can measure still reads perfect (a pure sine
+        # captured at the sink came back mathematically clean while it was
+        # audibly breaking up).  `wsl --shutdown` rebuilds it.  It is here
+        # because the alternative is remembering a command that has nothing to
+        # do with pinball, at the moment you are least inclined to go looking.
+        self._fixaud_btn = ttk.Button(btns, text="Fix crackly sound…",
+                                      command=self._audio_reset, width=17)
+        self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # BOTH tickboxes are read ONCE, when Start builds the environment for
         # watch.sh, so they are start-time options and not live controls.  They
@@ -257,7 +272,8 @@ class EmulatePanel:
         # a second source of truth that could only ever drift out of date.
 
         if not rig_available():
-            self._start_btn.configure(state=tk.DISABLED)
+            self._run_btn.configure(state=tk.DISABLED)
+            self._fixaud_btn.configure(state=tk.DISABLED)
             self._hint.configure(
                 text=("The emulator rig was not found in %s.\n"
                       "It is not part of this repository; set PAD_EMU_DIR to "
@@ -342,11 +358,39 @@ class EmulatePanel:
     # start / stop
     # ------------------------------------------------------------------
 
+    def _toggle(self):
+        """The one button.  Dispatches on what is actually running rather than
+        on what the label says: the label is refreshed by a 1 s poll, so a run
+        that died a moment ago could still read "Stop".  Both branches are
+        already no-ops when they do not apply, so the worst case is nothing."""
+        if self._starting or self._stopping:
+            return
+        if self._last_up:
+            self.stop()
+        else:
+            self.start()
+
+    def _run_label(self, up, busy):
+        """Sole owner of the run button's text and state."""
+        try:
+            if busy:
+                self._run_btn.configure(
+                    state=tk.DISABLED,
+                    text="Stopping…" if self._stopping else "Starting…")
+            elif up:
+                self._run_btn.configure(state=tk.NORMAL, text="Stop emulator")
+            else:
+                self._run_btn.configure(
+                    state=tk.NORMAL if rig_available() else tk.DISABLED,
+                    text="Start emulator")
+        except tk.TclError:
+            pass
+
     def start(self):
         if self._starting or self._stopping or not rig_available():
             return
         self._starting = True
-        self._start_btn.configure(state=tk.DISABLED)
+        self._run_label(False, True)
         self._set("state", "Starting…")
         d = _wsl_path(rig_dir())
         # Validate the source BEFORE anything is launched, and put the reason
@@ -355,7 +399,7 @@ class EmulatePanel:
         src = self._source_env()
         if src is None:
             self._starting = False
-            self._start_btn.configure(state=tk.NORMAL)
+            self._run_label(False, False)
             self._set("state", "Not running")
             return
         env = ["LOG=%s" % self._logfile, "PAD_AUDIO_DUMP=30"] + src
@@ -400,7 +444,7 @@ class EmulatePanel:
         if self._stopping:
             return
         self._stopping = True
-        self._stop_btn.configure(state=tk.DISABLED)
+        self._run_label(True, True)
         self._set("state", "Stopping…")
         d = _wsl_path(rig_dir())
 
@@ -427,6 +471,76 @@ class EmulatePanel:
                     except Exception:                   # noqa: BLE001
                         pass
             self._stopping = False
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _audio_reset(self):
+        """Rebuild WSLg's audio path, which is what fixes crackly sound.
+
+        NOT A FIX FOR ANYTHING IN THE RIG, and the dialog says so, because
+        reaching for this when the emulator really is at fault would only hide
+        the problem for a while.  The fault it does address lives in the WSLg
+        to Windows audio hop: measured 2026-08-05, a pure sine came back
+        mathematically perfect off the sink's own monitor (0 of 280490 samples
+        off a sine) while it was audibly breaking up in the room, so nothing
+        inside WSL can see it and no self-test could ever catch it.  A restart
+        of WSL rebuilds the PulseAudio server and that channel.
+
+        Terminates EVERY WSL distro, so it asks first and refuses while a run
+        is up (the poll greys the button, and this re-checks).
+        """
+        if self._resetting or self._starting or self._stopping:
+            return
+        if not rig_available():
+            return
+        if self._last_up:
+            messagebox.showinfo(
+                "Fix crackly sound",
+                "Stop the emulator first.\n\n"
+                "This restarts WSL, which would kill the running game without "
+                "letting it shut down cleanly.")
+            return
+        if not messagebox.askyesno(
+                "Fix crackly sound",
+                "Restart WSL to rebuild its audio path?\n\n"
+                "Crackly or stuttery sound is usually WSL's audio link to "
+                "Windows going bad after a long session, not the emulator "
+                "itself. Restarting WSL fixes it.\n\n"
+                "This closes EVERYTHING running in WSL, not just the "
+                "emulator. Nothing on disk is lost, and WSL starts again by "
+                "itself the next time it is used.\n\n"
+                "Restart WSL now?"):
+            return
+
+        self._resetting = True
+        self._fixaud_btn.configure(state=tk.DISABLED)
+        self._set("state", "Restarting WSL…")
+        d = _wsl_path(rig_dir())
+
+        def run():
+            try:
+                # Tear the rig down first even though the button is only
+                # enabled when nothing is up: a terminal-started run the poll
+                # has not seen yet would otherwise be killed by the shutdown
+                # with no teardown at all.
+                subprocess.run(["wsl.exe", "-e", "bash", "%s/killgame.sh" % d],
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT,
+                               timeout=60, creationflags=_CREATE_FLAGS)
+                self._log("[emulate] restarting WSL to rebuild its audio path")
+                out = subprocess.run(["wsl.exe", "--shutdown"],
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT,
+                                     timeout=120, creationflags=_CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    if line.strip():
+                        self._log("[emulate] " + line)
+                self._log("[emulate] WSL is down; it restarts on next use. "
+                          "Start the emulator again and sound should be clean.")
+            except Exception as exc:                    # noqa: BLE001
+                self._log("[emulate] audio reset failed: %s" % exc)
+            finally:
+                self._resetting = False
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -532,10 +646,12 @@ class EmulatePanel:
             busy = self._starting or self._stopping
             up = info.get("running") == "1" or procs != "0"
             self._last_up = up
-            self._start_btn.configure(
-                state=tk.DISABLED if (up or busy) else tk.NORMAL)
-            self._stop_btn.configure(
-                state=tk.NORMAL if (up and not self._stopping) else tk.DISABLED)
+            self._run_label(up, busy)
+            # Resetting WSL audio kills every distro, so never offer it while a
+            # run is up or mid-transition: the honest order is stop, then reset.
+            self._fixaud_btn.configure(
+                state=tk.DISABLED if (up or busy or self._resetting
+                                      or not rig_available()) else tk.NORMAL)
             # Start-time options: they follow the Start button, because that is
             # the only moment they are read.
             opts = tk.DISABLED if (up or busy) else tk.NORMAL

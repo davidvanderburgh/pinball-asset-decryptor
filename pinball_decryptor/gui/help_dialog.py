@@ -742,6 +742,15 @@ HELP_CONTENT = {
          "core once it is running, plus 1–2 GB of memory. The status line "
          "shows both live. There is a two-hour cap: it stops by itself so a "
          "forgotten window cannot run all night."),
+        ("Restart WSL…",
+         "For the two faults that are not the emulator's to fix: a game "
+         "window left on screen that will not close (its X does nothing "
+         "because nothing is behind it any more), and crackly or stuttery "
+         "sound after a long session. Both live in WSL rather than in the "
+         "game, and restarting WSL is the cure for each. It closes "
+         "everything running in WSL, not just the emulator, so it asks "
+         "first and stays greyed out while a run is up — stop the game, "
+         "then use it. Nothing on disk is lost."),
     ],
     "Compare": [
         ("What it does",

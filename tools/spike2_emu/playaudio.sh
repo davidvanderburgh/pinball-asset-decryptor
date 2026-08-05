@@ -86,7 +86,23 @@ find_ffplay() {
     echo ""
 }
 
-SINK=${PAD_AUDIO_SINK:-auto}
+# DEFAULT IS `pulse`, AND THAT IS DELIBERATE ON TWO COUNTS.
+#
+# 1. CROSS-PLATFORM. The rig has to run on macOS and Linux as well, where
+#    there is no WSL boundary at all and ffmpeg's pulse/alsa/audiotoolbox
+#    output is simply the native path. The Windows bridge is a Windows-only
+#    workaround for a Windows-only fault, so it cannot be the default.
+# 2. IT IS THE ONE THAT CURRENTLY SOUNDS RIGHT. The bridge fixes the WSLg
+#    crackle for good, but as of 2026-08-05 it STUTTERS, and the cause is
+#    upstream of the player: a pure counter with no audio device attached
+#    receives exactly 90.0% of what the relay sends over the WSL -> Windows
+#    socket, every window, whether over localhost or the VM's own IP. Until
+#    that is understood, pulse is the honest default - it is smooth, and its
+#    known problem (WSLg audio degrading over a session) has a one-click
+#    remedy in the Emulate tab.
+#
+# PAD_AUDIO_SINK=win opts into the bridge for anyone continuing that work.
+SINK=${PAD_AUDIO_SINK:-pulse}
 FFPLAY=$(find_ffplay)
 if [ "$SINK" = auto ]; then
     [ -n "$FFPLAY" ] && SINK=win || SINK=pulse

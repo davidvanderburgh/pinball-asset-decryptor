@@ -539,11 +539,11 @@ HELP_CONTENT = {
     ],
     "Partition Explorer": [
         ("What it's for",
-         "Browse a raw card image (.raw / .img) the way a file manager would — "
-         "read-only. Handy for pulling a file (a radium scene, a boot script) "
-         "out of an old modded card to reuse, or dumping a folder to compare a "
-         "modded card against a stock one. Nothing on the card is ever "
-         "changed."),
+         "Browse a raw card image (.raw / .img) the way a file manager would. "
+         "Handy for pulling a file (a radium scene, a boot script) out of an "
+         "old modded card to reuse, or dumping a folder to compare a modded "
+         "card against a stock one. Browsing never changes the card — only "
+         "\"Replace with…\" writes to it, and only when you confirm."),
         ("Open a card",
          "Point \"Card Image\" at a card image and press Open. The app reads "
          "the disk's partitions and picks the first browsable Linux (ext4) one; "
@@ -559,6 +559,29 @@ HELP_CONTENT = {
          "folder's whole subtree, to a location you pick. \"Extract Whole "
          "Partition\" dumps the entire filesystem — useful for diffing two "
          "cards."),
+        ("Replace a file on the card",
+         "Right-click any file → \"Replace with…\" swaps it for one of your "
+         "own: a boot or game script, a font, the Stern splash screen on the "
+         "OS partition (sda2, /usr/local/spike/SternLogo.png). Your file does "
+         "NOT have to match the original's size. A same-size file is written "
+         "straight into the blocks the original occupied, which changes no "
+         "filesystem structure at all and needs nothing installed. A bigger "
+         "or smaller one has to have blocks allocated or freed, so the card "
+         "image is mounted through the Linux filesystem driver (WSL2 on "
+         "Windows — the same dependency full-size video replacement uses) and "
+         "the kernel does that part. Either way the file keeps its name, "
+         "location and permissions, and its Stern validation record is "
+         "refreshed — including the stored file size when the length "
+         "changed. The confirmation dialog tells you which of the two routes "
+         "your pick will take before anything is written."),
+        ("Before you replace",
+         "Work on a copy of the image if it's precious: a replace writes into "
+         "the image straight away and there is no undo. Files the validation "
+         "manifest doesn't index (everything on the OS partition, for "
+         "instance) simply have no record to refresh, and the log says so. A "
+         "resize needs free space on that partition, and you'll be told the "
+         "numbers rather than left with a half-written file if there isn't "
+         "any."),
     ],
     "Default Settings": [
         ("What it's for",

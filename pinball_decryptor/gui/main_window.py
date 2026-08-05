@@ -8842,10 +8842,12 @@ class MainWindow:
         intro = ttk.Label(
             f, text="Browse a raw Stern card image (.raw / .img): view its "
                     "partitions and files, extract any file or folder to disk, "
-                    "and (right-click) replace a file in place with an "
-                    "exact-size stand-in — validation records are refreshed "
-                    "automatically. Browsing never changes the card; only an "
-                    "explicit Replace writes to it.",
+                    "and (right-click) replace any file with one of your own — "
+                    "a same-size file is written straight into its slot, and a "
+                    "bigger or smaller one is resized on the card through the "
+                    "Linux filesystem driver (needs WSL2). Validation records "
+                    "are refreshed automatically. Browsing never changes the "
+                    "card; only an explicit Replace writes to it.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         # Rewrap to the actual window width instead of a fixed 720px
@@ -9426,7 +9428,7 @@ class MainWindow:
                              command=self._pex_extract_selected)
             if row not in self._pex_dirs:
                 menu.add_command(
-                    label="Replace with… (exact size)",
+                    label="Replace with…",
                     command=lambda r=row: self._pex_replace_selected(r))
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -9487,43 +9489,70 @@ class MainWindow:
         threading.Thread(target=_work, daemon=True).start()
 
     def _pex_replace_selected(self, iid):
-        """Right-click → Replace with…: exact-size in-place write of one file
-        into the card image, with the Spike 2 .sidx record refreshed (the
-        a tester wishlist item this whole tab started from)."""
+        """Right-click → Replace with…: write one file into the card image,
+        with the Spike 2 .sidx record refreshed (the a tester wishlist item
+        this whole tab started from).
+
+        A same-size file goes into its existing slot; a different-size one is
+        resized on the card by the ext4 driver, which is a bigger deal (it
+        moves blocks, and needs WSL2) — so the confirmation says which of the
+        two is about to happen and what it costs.
+        """
         if self._pex_busy or self._pex_card is None or iid in self._pex_dirs:
             return
         try:
-            cur_size = self._pex_tree.set(iid, "size")
-        except tk.TclError:
-            cur_size = ""
+            cur_size = self._pex_card.file_size(self._pex_part_index, iid)
+        except Exception:
+            cur_size = None
         src = filedialog.askopenfilename(
-            title="Replace %s (must be the exact same size)"
-                  % (os.path.basename(iid) or iid),
+            title="Replace %s" % (os.path.basename(iid) or iid),
             initialdir=self.last_browse_dir("pex_replace"))
         if not src:
             return
         self.remember_browse_dir("pex_replace", src)
+        try:
+            new_size = os.path.getsize(src)
+        except OSError:
+            new_size = None
+        if cur_size is None or new_size is None or new_size == cur_size:
+            note = ("The file's validation record is refreshed "
+                    "automatically.")
+        else:
+            note = (
+                "This file is a different size (%s → %s), so it is %s on the "
+                "card: the card image is mounted through the Linux filesystem "
+                "driver (WSL2) and the file's blocks are re-allocated, exactly "
+                "like a full-size video replacement. Its validation record — "
+                "digests AND stored size — is refreshed automatically."
+                % (self._pex_human(cur_size), self._pex_human(new_size),
+                   "grown" if new_size > cur_size else "shrunk"))
         if not messagebox.askyesno(
                 "Replace on card",
                 "This WRITES to the card image:\n\n  %s\n\nreplacing\n\n"
-                "  %s  (%s)\n\nwith\n\n  %s\n\nThe file's validation record "
-                "is refreshed automatically.  Keep a backup of the image if "
-                "it's precious.\n\nReplace it?"
+                "  %s  (%s)\n\nwith\n\n  %s\n\n%s  Keep a backup of the image "
+                "if it's precious.\n\nReplace it?"
                 % (os.path.normpath(self.partition_image_var.get() or ""),
-                   iid, cur_size or "size unknown", os.path.normpath(src)),
+                   iid,
+                   self._pex_human(cur_size) if cur_size is not None
+                   else "size unknown",
+                   os.path.normpath(src), note),
                 icon="warning"):
             return
-        self._pex_run_replace(iid, src)
+        self._pex_run_replace(iid, src, cur_size)
 
-    def _pex_run_replace(self, iid, src):
-        """Worker-thread in-place replace with the shared busy overlay.  No
-        mid-run Cancel: the extent writes are quick and interrupting a
-        half-written file is worse than finishing it."""
+    def _pex_run_replace(self, iid, src, cur_size=None):
+        """Worker-thread replace with the shared busy overlay.  No mid-run
+        Cancel: the extent writes are quick, and a resize is one ``cp`` under
+        the kernel's own driver — interrupting either is worse than finishing
+        it.
+
+        The worker never touches Tk, so the ext4 driver's progress lines are
+        buffered and appended to the log when the run lands."""
         import threading
         self._pex_busy = True
         part = self._pex_part_index
         image_path = self._pex_image_path
-        state = {"note": "", "done": None}
+        state = {"note": "", "done": None, "log": []}
         for b in (self._pex_extract_btn, self._pex_extract_part_btn,
                   self._pex_extract_all_btn):
             b.config(state=tk.DISABLED)
@@ -9537,10 +9566,17 @@ class MainWindow:
             try:
                 from ..plugins.stern.explorer import CardImage
                 with CardImage(image_path) as c:
-                    n, refreshed = c.replace_file(part, iid, src)
+                    n, refreshed = c.replace_file(
+                        part, iid, src, allow_resize=True,
+                        log=lambda m, lvl="info": state["log"].append((m, lvl)))
+                resized = ""
+                if cur_size is not None and n != cur_size:
+                    resized = (" — %s on the card from %s"
+                               % ("grown" if n > cur_size else "shrunk",
+                                  self._pex_human(cur_size)))
                 state["done"] = (
-                    "Replaced %s (%s)%s." % (
-                        iid, self._pex_human(n),
+                    "Replaced %s (%s)%s%s." % (
+                        iid, self._pex_human(n), resized,
                         ", validation record refreshed" if refreshed
                         else "; not in the validation manifest — no record "
                              "to refresh"))
@@ -9550,11 +9586,17 @@ class MainWindow:
         def _tick(i):
             if state["done"] is not None:
                 msg = state["done"]
+                for line, lvl in state["log"]:
+                    self.append_log(line, lvl)
                 self._pex_finish_extract(msg)
                 if not msg.startswith("Replace failed"):
                     # Re-open the card so the browse handle, preview and any
-                    # cached reads see the new bytes.
+                    # cached reads see the new bytes.  That reselects the
+                    # partition, which blanks the status line — so put the
+                    # result back afterwards, or the one operation on this tab
+                    # that WRITES is the only one to report nothing.
                     self._pex_open_image()
+                    self._pex_action_status.configure(text=msg)
                 return
             frame = self._SCAN_SPINNER[i % len(self._SCAN_SPINNER)]
             try:

@@ -68,10 +68,13 @@ _WHITESTAR_PREREQS = (
 )
 
 _EXT4_GROW_REASON = (
-    "Full-size video replacement (and the opt-in blip-free callouts): grows "
-    "files inside the card's ext4 partition through the platform's Linux "
+    "Full-size video replacement, the opt-in blip-free callouts, and "
+    "different-size file swaps in the Partition Explorer: resizes files "
+    "inside the card's ext4 partition through the platform's Linux "
     "filesystem path. Without it an oversized replacement clip is crushed "
-    "into its stock byte slot instead of going on at full quality.")
+    "into its stock byte slot instead of going on at full quality, and a "
+    "Partition Explorer replacement has to match the original's size "
+    "exactly.")
 
 
 def _ext4_grow_prereqs(platform):

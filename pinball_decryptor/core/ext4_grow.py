@@ -48,6 +48,13 @@ class Ext4GrowUnavailable(Ext4GrowError):
     back to size-neutral behaviour and warn."""
 
 
+class Ext4GrowNoSpace(Ext4GrowError):
+    """The partition hasn't room for the requested growth.  Split out from the
+    generic error so a caller can word it for what IT was growing — the base
+    message talks about videos on the data partition, which is wrong for e.g.
+    a Partition Explorer swap on the OS partition."""
+
+
 # Can the executor's Linux hand out a loop device?  ``losetup -f`` only ASKS
 # for a free device (nothing is attached), so the probe is side-effect free —
 # but it is the exact call ``_bash_script`` opens with, so it fails when and
@@ -266,7 +273,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
         # PAD_GROW_OK marker first) — surface that count to the caller.
         n_ok = text.count("PAD_GROW_OK ")
         if "PAD_GROW_ENOSPC" in text:
-            raise Ext4GrowError(
+            raise Ext4GrowNoSpace(
                 "Not enough free space on the card's data partition to grow "
                 "the videos to full size. The affected videos keep their "
                 "stock content on the card.", grown=n_ok) from e
@@ -368,7 +375,7 @@ def _grow_files_debugfs(image_path, part_offset, jobs, log, cancel, timeout):
         cur = _debugfs_file_size(tools, dev, card_rel, 60) or 0
         need += max(os.path.getsize(src) - cur, 0)
     if need > avail:
-        raise Ext4GrowError(
+        raise Ext4GrowNoSpace(
             "Not enough free space on the card's data partition to grow the "
             "videos to full size (need %d B more, %d B free). The affected "
             "videos keep their stock content on the card." % (need, avail))

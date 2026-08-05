@@ -8,12 +8,23 @@ of an old modded card to transfer into a new stock version, read/copy the boot
 
 Browsing composes the existing size-neutral machinery (:mod:`.formats` for the
 MBR + :class:`.ext4.Ext4Reader` for read-only ext4).  The one write the
-explorer offers is :meth:`CardImage.replace_file` — an EXACT-SIZE in-place
-replacement of a single file through the ext4 extent map, refreshing the
-file's Spike 2 ``.sidx`` validation record (feedback batch 14 wishlist:
-swap a radium/script file straight into a card without a full Write cycle).
-Anything that would change the filesystem's shape (sizes, allocation,
-names) stays out of scope — that's the engine's Write path.
+explorer offers is :meth:`CardImage.replace_file`, which takes one of two
+routes depending on the replacement's size:
+
+  * **same size** — rewritten in place through the ext4 extent map.  No
+    filesystem metadata moves at all, so this needs nothing but the image
+    file itself (feedback batch 14 wishlist: swap a radium/script file
+    straight into a card without a full Write cycle).
+  * **any other size** (opt-in via ``allow_resize``) — handed to the
+    platform's own ext4 driver via :mod:`...core.ext4_grow`, the same
+    loop-mount-and-``cp`` path full-size video replacement already uses.
+    The kernel reallocates the file's blocks; we never hand-edit an extent
+    tree or a bitmap.  Needs WSL2 on Windows / e2fsprogs on macOS.
+
+Either way the file's Spike 2 ``.sidx`` validation record is refreshed
+afterwards — including the two stored copies of its SIZE when the length
+changed.  Renaming, creating and deleting files stay out of scope; that's
+the engine's Write path.
 
 ``Ext4Reader``/``formats`` are referenced as module globals so tests can swap in
 a lightweight fake filesystem.
@@ -23,7 +34,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from . import formats
+from . import formats, sidx
 from .ext4 import S_IFDIR, S_IFMT, S_IFREG, Ext4Reader
 
 # ext4 mode bits the reader doesn't export.
@@ -37,6 +48,17 @@ _EXTENDED_TYPES = frozenset({0x05, 0x0F})
 # Files larger than this aren't previewed inline (extract them instead) — keeps
 # a "preview" from pulling a 700 MB image.bin fully into memory.
 PREVIEW_CAP = 256 * 1024
+
+
+def _extent_writes(reader, node, file_off, buf):
+    """``[(disk_offset, bytes), ...]`` placing *buf* at *file_off* within
+    *node*'s file, split across whatever extents that range spans."""
+    out = []
+    pos = 0
+    for doff, n in reader.disk_ranges(node, file_off, len(buf)):
+        out.append((doff, buf[pos:pos + n]))
+        pos += n
+    return out
 
 
 @dataclass
@@ -261,6 +283,22 @@ class CardImage:
                 progress(n_files, n_bytes, rel_path)
         return n_files, n_bytes
 
+    def file_size(self, part_index, path):
+        """Byte size of the regular file at *path*.
+
+        The tree's Size column is a rounded human string ("162.1 KB"), and a
+        replace has to compare against the file's real length — so callers
+        that need the number ask here rather than parsing the display.
+        """
+        reader = self._reader(part_index)
+        res = self._resolve(reader, path)
+        if res is None:
+            raise FileNotFoundError(path)
+        _ino, node = res
+        if (node["mode"] & S_IFMT) != S_IFREG:
+            raise IsADirectoryError(path)
+        return node["size"]
+
     def dir_stats(self, part_index, path, max_depth=64):
         """``(n_files, n_bytes)`` of every regular file at/under directory
         *path* — recursive folder sizes for the Properties view."""
@@ -279,29 +317,114 @@ class CardImage:
         return n, b
 
     # ---- in-place replace ----------------------------------------------------
-    def replace_file(self, part_index, path, src_path):
-        """Replace the regular file *path* with the EXACT-SIZE contents of
-        *src_path*, in place through the ext4 extent map, and refresh the
-        file's ``.sidx`` validation record when the manifest indexes it.
+    def replace_file(self, part_index, path, src_path, allow_resize=False,
+                     log=None):
+        """Replace the regular file *path* with the contents of *src_path* and
+        refresh its ``.sidx`` validation record when the manifest indexes it.
 
-        Same-size only: rewriting content into the file's own allocated
-        blocks touches no filesystem metadata (no inode, allocation or
-        checksum changes), which is what makes this safe on a real card —
-        the exact discipline the engine's size-neutral Write uses.  Raises
-        ``ValueError`` on a size mismatch or when the card was opened from a
-        stream rather than an image file.
+        A same-size replacement is rewritten into the file's own allocated
+        blocks, touching no filesystem metadata at all (no inode, allocation
+        or checksum changes) — the discipline the engine's size-neutral Write
+        uses, and why it needs nothing but the image file.
+
+        A different-size one is refused unless *allow_resize* is set, because
+        it cannot be done that way: the file needs blocks allocated or freed,
+        its extent tree rewritten and the group/superblock accounting kept
+        consistent.  With *allow_resize* the copy is handed to the platform's
+        own ext4 driver (:func:`...core.ext4_grow.grow_files`) so the kernel
+        does all of that, which is the same route full-size video replacement
+        takes; the record's stored size is then refreshed alongside its
+        digests.  *log* is an optional ``(message, level)`` callable for that
+        step's progress.
+
+        Raises ``ValueError`` when the card was opened from a stream rather
+        than an image file, when a resize is needed but not allowed, or when
+        the platform can't mount ext4.
 
         Returns ``(n_bytes, sidx_refreshed)``."""
+        new_size = os.path.getsize(src_path)
+        if allow_resize and new_size != self.file_size(part_index, path):
+            return self._resize_file(part_index, path, src_path, new_size, log)
         with open(src_path, "rb") as f:
             new = f.read()
         return self.replace_file_bytes(part_index, path, new)
+
+    def _resize_file(self, part_index, path, src_path, new_size, log=None):
+        """The different-size half of :meth:`replace_file`: let the platform's
+        ext4 driver copy *src_path* over the file (growing or shrinking the
+        inode), then refresh the ``.sidx`` record against the new bytes.
+
+        The refresh runs over a FRESH reader: the copy moved the file's blocks,
+        so every extent this instance cached is stale.  ``.sidx`` itself keeps
+        its length, so its own record fields are still patchable at raw disk
+        offsets the way a size-neutral write does it.
+        """
+        from ...core import ext4_grow
+        if not self._source_path:
+            raise ValueError(
+                "replace requires a card image file (not a raw stream)")
+        part = next((p for p in self._parts if p.index == part_index), None)
+        if part is None:
+            raise ValueError("no partition %r on this card" % part_index)
+        cur_size = self.file_size(part_index, path)
+        rel = self._norm(path).lstrip("/")
+
+        # Checked before the copy, not after it fails inside the mount script,
+        # so the user gets the fix (install/convert WSL) rather than a losetup
+        # error — and gets it while the card is still untouched.
+        ok, why = ext4_grow.available()
+        if not ok:
+            raise ValueError(
+                "a replacement of a different size has to go through the "
+                "platform's Linux filesystem driver, which isn't available "
+                "here: %s. Until then, replace %s with a file of exactly %d "
+                "bytes." % (why, rel, cur_size))
+        try:
+            grown = ext4_grow.grow_files(self._source_path, part.offset,
+                                         [(rel, src_path)], log=log)
+        except ext4_grow.Ext4GrowNoSpace as e:
+            raise ValueError(
+                "partition sda%d hasn't enough free space to hold %s at %d "
+                "bytes (it is %d bytes now); nothing was changed on the card."
+                % (part_index + 1, rel, new_size, cur_size)) from e
+        except ext4_grow.Ext4GrowUnavailable as e:
+            # available() said yes and the mount still couldn't run — report it
+            # as the platform problem it is rather than as a failed replace.
+            raise ValueError(
+                "the platform's Linux filesystem driver couldn't open the "
+                "card image: %s" % e) from e
+        if not grown:
+            raise ValueError("%s was not written to the card" % rel)
+
+        refreshed = False
+        with CardImage(self._source_path) as fresh:
+            reader = fresh._reader(part_index)
+            try:
+                _sidx_path, sidx_node = sidx.find_sidx(reader)
+            except Exception:
+                sidx_node = None
+            if sidx_node is not None:
+                sdata = reader.read_file_bytes(sidx_node)
+                recs, _crc, fmt = sidx.parse_records(sdata)
+                po = recs.get(rel)
+                if po is not None:
+                    hm, md = sidx.digests_file(src_path)
+                    writes = []
+                    for foff, b in sidx.record_field_writes(
+                            po, hm, md, fmt, size=new_size):
+                        writes.extend(_extent_writes(reader, sidx_node, foff, b))
+                    with open(self._source_path, "r+b") as wf:
+                        for doff, chunk in writes:
+                            wf.seek(doff)
+                            wf.write(chunk)
+                    refreshed = True
+        return new_size, refreshed
 
     def replace_file_bytes(self, part_index, path, new):
         """As :meth:`replace_file` but the replacement content is passed
         directly as *new* (bytes) — used by callers that generate the bytes in
         memory (e.g. the adjustment-default patcher).  Same exact-size rule and
         ``.sidx`` refresh.  Returns ``(n_bytes, sidx_refreshed)``."""
-        from . import sidx
         if not self._source_path:
             raise ValueError(
                 "replace requires a card image file (not a raw stream)")
@@ -315,19 +438,11 @@ class CardImage:
         if len(new) != node["size"]:
             raise ValueError(
                 "size mismatch: the replacement is %d bytes but %s is %d "
-                "bytes on the card — in-place replace must be exact-size "
-                "(pad or trim the file, or use the Write tab's flows)"
+                "bytes on the card — an in-place replace must be exact-size "
+                "(pad or trim the file, or allow the file to be resized)"
                 % (len(new), path, node["size"]))
 
-        def _writes_for(target_node, file_off, buf):
-            out = []
-            pos = 0
-            for doff, n in reader.disk_ranges(target_node, file_off, len(buf)):
-                out.append((doff, buf[pos:pos + n]))
-                pos += n
-            return out
-
-        writes = _writes_for(node, 0, new) if new else []
+        writes = _extent_writes(reader, node, 0, new) if new else []
 
         # Refresh the file's validation record (HMAC-SHA1 + MD5) so the card
         # still passes Stern's SD validation.  Files the manifest doesn't
@@ -345,7 +460,7 @@ class CardImage:
             if po is not None:
                 hm, md = sidx.digests(new)
                 for foff, b in sidx.record_field_writes(po, hm, md, fmt):
-                    writes.extend(_writes_for(sidx_node, foff, b))
+                    writes.extend(_extent_writes(reader, sidx_node, foff, b))
                 refreshed = True
 
         # All extents resolved before the first byte is written — a mapping

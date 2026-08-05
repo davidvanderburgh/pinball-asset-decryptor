@@ -162,6 +162,32 @@ rm -f "$RING_HOST" "$SW_HOST"
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
 
+# HOW LONG THIS WSL SESSION HAS BEEN UP, because it predicts a fault nothing
+# here can detect.
+#
+# 2026-08-05: audio crackled through a whole afternoon and every instrument
+# inside WSL said it was fine - the guest's PCM was clean, the sink's output
+# was byte-faithful to it, and a pure sine captured off RDPSink.monitor was
+# mathematically perfect (0 of 280490 samples off a sine) WHILE IT WAS AUDIBLY
+# BREAKING UP in the room. The damage is in the WSLg -> Windows RDP audio hop,
+# which is downstream of every microphone we have. `wsl --shutdown` fixed it
+# instantly; the session had been up ~2 hours and had been fine that morning.
+#
+# So this CANNOT be a self-test - one would always pass. It is a risk hint and
+# nothing more: print the session age, and say the magic words only once it is
+# old enough to be a plausible suspect, so the next person who hears crackle
+# reaches for the 20-second answer (tonetest.sh) instead of the whole
+# afternoon. /proc/uptime is the VM's, shared by every distro.
+if [ -r /proc/uptime ]; then
+    UPS=$(cut -d. -f1 /proc/uptime)
+    printf '[watch] WSL session up %dh %dm\n' $((UPS / 3600)) $(((UPS % 3600) / 60))
+    if [ "$UPS" -gt 10800 ]; then
+        echo "[watch] NOTE: WSLg audio can degrade on a long session. If sound" \
+             "crackles, it is almost certainly NOT the emulator - run" \
+             "tonetest.sh (20 s) to confirm, then 'wsl --shutdown'."
+    fi
+fi
+
 # Audio player first, so the FIFO exists before the game's first frame. It is
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then

@@ -115,7 +115,8 @@ if [ "$SINK" = win ]; then
     PRE_MS=${PAD_AUDIO_PREBUFFER_MS:-200}
     PRE_BYTES=$(( RATE * CH * 2 * PRE_MS / 1000 ))
     echo "[play] pre-buffer ${PRE_MS} ms (${PRE_BYTES} bytes)"
-    python3 "$(dirname "$0")/audiotcp.py" "$FIFO" "$PORT" "$PRE_BYTES" &
+    BPS=$(( RATE * CH * 2 ))
+    python3 "$(dirname "$0")/audiotcp.py" "$FIFO" "$PORT" "$PRE_BYTES" "$BPS" &
     SRV=$!
 
     # TEARING DOWN A WINDOWS CHILD. The player is a native Windows process

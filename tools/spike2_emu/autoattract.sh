@@ -74,7 +74,18 @@ BACK=28                              # Service Back == Esc in the legend window
 HOLD=${PAD_AUTO_HOLD:-500}           # ms to press; see the table above
 QUIET=${PAD_AUTO_QUIET:-2}           # s of bus silence that means "ready"
 TRIES=${PAD_AUTO_TRIES:-5}           # presses before giving up and saying so
-GAP=${PAD_AUTO_GAP:-6}               # s between presses if one does not take
+# 20 s, raised from 6 on 2026-08-05, after a card run pressed five times and
+# David found the game parked on the SERVICE MENU. The instrument below cannot
+# see that state - the menu opens no clip, so `past` reads exactly like Tech
+# Alerts and this script keeps pressing, blind. The exposure was the gap: the
+# handoff records the press->attract transition taking longer than 10 s
+# (splash first), so a 6 s recheck could fire press 2 into the splash - and a
+# press that lands after Tech Alerts is what walks INTO the menu (header,
+# above). 20 s covers the slow path; a genuinely swallowed press still gets
+# retried, just later. (The failed run's log was overwritten by the next run
+# before it could be mined - copy gzwatch.log aside before relaunching after
+# a failure.)
+GAP=${PAD_AUTO_GAP:-20}              # s between presses if one does not take
 WAIT_MAX=${PAD_AUTO_WAIT:-240}       # s to wait for the game to boot
 
 # `grep -c` PRINTS 0 and ALSO exits non-zero when it finds nothing, so the
@@ -177,5 +188,9 @@ for i in $(seq 1 "$TRIES"); do
     done
 done
 
-echo "[auto] $TRIES presses did not clear it - press Esc in the game window."
+echo "[auto] $TRIES presses did not clear it. If an earlier press DID take,"
+echo "[auto] the game is likely sitting on the SERVICE MENU (this script"
+echo "[auto] cannot tell - the menu opens no clip, so it reads like Tech"
+echo "[auto] Alerts). Press Esc in the game window; from the menu it exits"
+echo "[auto] toward attract, from Tech Alerts it clears it."
 exit 1

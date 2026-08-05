@@ -27,14 +27,20 @@ HOW IT REACHES THE GAME, and both halves are deliberate:
 WHAT THE COLOURS MEAN, honestly. Blue rings are switches, click to close one.
 Red squares are coils, which flash when the game fires them and play their
 switch when clicked (see coilact.py for why a click cannot be a real fire).
-Dots are inserts, lit from the wire.
+Dots are inserts, lit from the wire - an RGB insert is ONE dot in the colour
+its three channels compose to, not three orange dots. The device table wires
+"SHIELD LEFT-R/-G/-B" as three independent channels because that is what the
+board drives, but the playfield has one lens there, so the -R/-G/-B stems are
+joined per fixture (see group_fixtures) and the marker shows the joined colour
+with a soft glow behind it.
 
 A DARK INSERT HERE MEANS OFF, NOT "NO DATA" - which is worth stating plainly,
 because the docstring used to warn the opposite. The undecoded strip boards
 (nodes 7, 12 and 14) do exist, but every insert this window draws sits on node 8
 or node 9, and both of those are decoded index for index against the boot
 enumeration. The strip boards drive the TOPPER and the cabinet, and neither is
-on this picture. 113 inserts, 53 on node 8 and 60 on node 9, all covered.
+on this picture. 113 channels (53 on node 8, 60 on node 9) join into 81
+fixtures: 13 RGB, 6 red+green (the BUILDING FIRE pairs), 62 single. All covered.
 """
 import json
 import os
@@ -178,6 +184,67 @@ def load_leds():
     return out
 
 
+#: Insert marker geometry, in screen pixels. The old 3.5 px dot disappeared
+#: into the artwork; the glow is what makes a lit insert readable from across
+#: the room the way a real one is.
+LED_R, LED_GLOW_R = 5.5, 11
+
+
+def split_channel(name):
+    """('SHIELD LEFT', 'R') for 'SHIELD LEFT-R'; (name, 'W') for a plain insert."""
+    if len(name) > 2 and name[-2] == "-" and name[-1] in "RGB":
+        return name[:-2].rstrip(), name[-1]
+    return name, "W"
+
+
+def group_fixtures(leds):
+    """Join led_io.txt's per-channel rows into one fixture per name stem.
+
+    The device table wires an RGB insert as three channels with -R/-G/-B name
+    stems, and channels of one fixture can sit at DIFFERENT XY in the table -
+    that is correct data, not an error, so the join is by stem alone and the
+    marker goes at the channels' mean position.
+    """
+    fixtures, order = {}, []
+    for L in leds:
+        stem, chan = split_channel(L["name"])
+        f = fixtures.get(stem)
+        if f is None:
+            f = fixtures[stem] = dict(name=stem, channels={}, xs=[], ys=[])
+            order.append(f)
+        f["channels"][chan] = (L["node"], L["index"])
+        f["xs"].append(L["x"])
+        f["ys"].append(L["y"])
+    for f in order:
+        xs, ys = f.pop("xs"), f.pop("ys")
+        f["x"] = sum(xs) / float(len(xs))
+        f["y"] = sum(ys) / float(len(ys))
+    return order
+
+
+def fixture_color(vals):
+    """The composite (r, g, b) for a fixture's channel values, or None when off.
+
+    RGB fixtures join their three PWM bytes into one colour. Brightness is
+    lifted hue-preservingly (sqrt, close enough to display gamma): the wire
+    carries linear duty cycle, and drawing a 20%-duty insert at #33.. renders
+    a clearly-lit lamp as nearly off. Single-channel inserts keep the orange
+    ramp the window has always used - the lens colour is not in any table, and
+    the coil flash's "nothing else here is magenta" contrast depends on it.
+    """
+    if "W" in vals:
+        v = vals.get("W") or 0
+        if not v:
+            return None
+        return (255, 60 + v * 3 // 4, 0)
+    r, g, b = (vals.get(c) or 0 for c in "RGB")
+    m = max(r, g, b)
+    if not m:
+        return None
+    k = 255.0 * (m / 255.0) ** 0.5 / m
+    return (min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k)))
+
+
 #: Device-table group -> node on the bus, the same lookup ledio.py verified
 #: against the boot enumeration. Used here to turn a coil's (group, index) into
 #: the (node, index) the shim publishes fires under.
@@ -296,17 +363,25 @@ class Field:
         self.status.pack(fill="x")
 
         self.info = {}          # canvas item -> dict describing it
-        self.led_items = {}
+        self.fixtures = group_fixtures(self.leds)
         self.coil_items = {}    # (node, index) -> canvas item
         self.coil_seen = {}     # (node, index) -> last fire counter read
         self.coil_until = {}    # (node, index) -> ms after which the flash ends
 
-        for L in self.leds:
-            x, y, r = L["x"] * self.scale, L["y"] * self.scale, 3.5
+        # Every glow before any core marker: fixtures overlap on this picture
+        # (the three SCOOP BB inserts share one XY), and interleaving would put
+        # one fixture's halo over its neighbour's dot.
+        for F in self.fixtures:
+            x, y, r = F["x"] * self.scale, F["y"] * self.scale, LED_GLOW_R
+            F["glow"] = self.cv.create_oval(x - r, y - r, x + r, y + r,
+                                            fill="", outline="",
+                                            stipple="gray50")
+        for F in self.fixtures:
+            x, y, r = F["x"] * self.scale, F["y"] * self.scale, LED_R
             i = self.cv.create_oval(x - r, y - r, x + r, y + r,
                                     fill="#1a1a1a", outline="#3a3a3a")
-            self.led_items[(L["node"], L["index"])] = i
-            self.info[i] = dict(kind="led", d=L)
+            F["item"] = i
+            self.info[i] = dict(kind="led", d=F)
 
         for C in self.coils:
             x, y, r = C["x"] * self.scale, C["y"] * self.scale, 7
@@ -355,14 +430,19 @@ class Field:
             act = coilact.describe(d["name"])
             return "COIL  %s\n%s%s\nclick: %s" % (
                 d["name"], where, live, act or "nothing wired")
-        v = None
-        if self.last:
-            off = LED_HDR + d["node"] * LED_IDX + d["index"]
-            if off < len(self.last):
-                v = self.last[off]
-        return ("LED  %s\nnode %d  index %d\nvalue %s"
-                % (d["name"], d["node"], d["index"],
-                   "%d" % v if v is not None else "no data"))
+        vals = self._chan_vals(d, self.last)
+        fmt = lambda v: "%d" % v if v is not None else "no data"
+        if "W" in d["channels"]:
+            node, idx = d["channels"]["W"]
+            return ("LED  %s\nnode %d  index %d\nvalue %s"
+                    % (d["name"], node, idx, fmt(vals.get("W"))))
+        lines = ["LED  %s   (RGB fixture)" % d["name"]]
+        for chan in "RGB":
+            if chan in d["channels"]:
+                node, idx = d["channels"][chan]
+                lines.append("%s  node %d  index %d  value %s"
+                             % (chan, node, idx, fmt(vals.get(chan))))
+        return "\n".join(lines)
 
     def on_move(self, ev):
         i = self._hit(ev)
@@ -427,6 +507,19 @@ class Field:
             return False
         return not d[SW_HELD + SW_COIN_DOOR]
 
+    def _chan_vals(self, F, d):
+        """Live channel values for a fixture, e.g. {'R': 255, 'G': 40, 'B': 0}.
+        A channel with no readable byte reports None (distinct from 0 = off)."""
+        out = {}
+        for chan, (node, idx) in F["channels"].items():
+            v = None
+            if d:
+                off = LED_HDR + node * LED_IDX + idx
+                if off < len(d):
+                    v = d[off]
+            out[chan] = v
+        return out
+
     def _coil_state(self, d):
         """(fire count, drive byte) for a coil, or (None, None) with no data."""
         node = d["node"]
@@ -455,11 +548,12 @@ class Field:
             self.coil_seen[key] = c
             hot = self.coil_until.get(key, 0) > now
             fired += hot
-            # MAGENTA, not a hotter orange. Lit inserts run #ff3c00..#fffb00, so
-            # an orange coil flash is the one colour on this picture that cannot
-            # be told apart from the thing next to it at a glance - and it is
-            # ALSO exactly the ambiguity that made "did the flash render?"
-            # unanswerable from a screenshot. Nothing else here is magenta.
+            # MAGENTA, not a hotter orange. Single-channel inserts run
+            # #ff3c00..#fffb00, so an orange coil flash is the one colour that
+            # cannot be told apart from the thing next to it at a glance - and
+            # it is ALSO exactly the ambiguity that made "did the flash
+            # render?" unanswerable from a screenshot. An RGB fixture can now
+            # compose to magenta, but a coil is a filled SQUARE; no dot is one.
             self.cv.itemconfig(item, fill="#ff00c0" if hot else "",
                                outline="#ff80ff" if hot else "#ff4040",
                                width=3 if hot else 2)
@@ -476,15 +570,18 @@ class Field:
         else:
             decoded = struct.unpack_from("<I", d, 12)[0]
             lit = 0
-            for (node, idx), item in self.led_items.items():
-                off = LED_HDR + node * LED_IDX + idx
-                v = d[off] if off < len(d) else 0
-                if v:
+            for F in self.fixtures:
+                rgb = fixture_color(self._chan_vals(F, d))
+                if rgb:
                     lit += 1
-                    self.cv.itemconfig(item, outline="",
-                                       fill="#ff%02x00" % (60 + v * 3 // 4))
+                    self.cv.itemconfig(F["item"], outline="",
+                                       fill="#%02x%02x%02x" % rgb)
+                    self.cv.itemconfig(F["glow"], fill="#%02x%02x%02x"
+                                       % (rgb[0] // 2, rgb[1] // 2, rgb[2] // 2))
                 else:
-                    self.cv.itemconfig(item, fill="#1a1a1a", outline="#3a3a3a")
+                    self.cv.itemconfig(F["item"], fill="#1a1a1a",
+                                       outline="#3a3a3a")
+                    self.cv.itemconfig(F["glow"], fill="")
             coils = ""
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
                 self._tick_coils(d, time.monotonic() * 1000.0)
@@ -494,7 +591,7 @@ class Field:
                     coils += "   COIN DOOR OPEN: 48V off, no coil can fire"
             self.status.config(
                 text=" %d of %d inserts lit   %d LED writes decoded%s"
-                     % (lit, len(self.led_items), decoded, coils))
+                     % (lit, len(self.fixtures), decoded, coils))
         self.root.after(POLL_MS, self.tick)
 
 

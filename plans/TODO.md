@@ -124,7 +124,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Done
 
-- [x] **1c. The LED frame shapes that were still dropped.** DONE 2026-08-05.
+- [x] **1c. The LED frame shapes that were still dropped.** DONE 2026-08-05, `4695bbd`.
       **`skipped` in attract went 225 → 15 per 60 s** (and decoded held at
       834), because 88% of what was still being counted as "not decoded" was
       never lamp data at all.

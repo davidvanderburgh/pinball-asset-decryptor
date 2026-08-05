@@ -8,7 +8,7 @@ R=/home/david/spike2root
 rm -f $R/dump/tb.log
 export QEMU_LOG=in_asm
 export QEMU_LOG_FILENAME=/dump/tb.log
-./run_gz.sh > gz85.log 2>&1
+./run_game.sh > gz85.log 2>&1
 echo "tb.log size: $(du -h $R/dump/tb.log | cut -f1)"
 echo
 echo "=== did the worker execute these blocks? (1 = yes) ==="

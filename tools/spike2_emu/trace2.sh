@@ -7,7 +7,7 @@ R=/home/david/spike2root
 rm -f $R/dump/tb.log
 export QEMU_LOG=in_asm
 export QEMU_LOG_FILENAME=/dump/tb.log
-./run_gz.sh > gz69.log 2>&1
+./run_game.sh > gz69.log 2>&1
 echo "log size: $(du -h $R/dump/tb.log | cut -f1)"
 echo
 echo "=== was the loader body translated? blocks starting in 0x26aa..0x26ad ==="

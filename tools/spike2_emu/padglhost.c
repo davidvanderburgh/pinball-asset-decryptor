@@ -679,7 +679,18 @@ static int win_open(void)
     xwin = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr), 0, 0,
                                (unsigned)win_w, (unsigned)win_h, 0,
                                XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
-    XStoreName(xdpy, xwin, "Godzilla Pro - Stern Spike 2 emulator");
+    /* THE TITLE NAMES THE TITLE. It used to say "Godzilla Pro" whatever was
+     * running, which is merely untidy until you are looking at a screenshot of
+     * a TMNT boot with Godzilla in the title bar and trying to work out which
+     * game you are debugging. PAD_GAME is the rig's name for the directory
+     * under games/; watch.sh always sets it. */
+    {
+        static char title[160];
+        const char *g = getenv("PAD_GAME");
+        snprintf(title, sizeof title, "%s - Stern Spike 2 emulator",
+                 (g && *g) ? g : "Spike 2");
+        XStoreName(xdpy, xwin, title);
+    }
     /* StructureNotifyMask (1<<17) gives ConfigureNotify for resizes;
      * KeyPressMask (1) and KeyReleaseMask (2) are what make the keyboard work. */
     XSelectInput(xdpy, xwin, (1L << 17) | 1L | 2L);

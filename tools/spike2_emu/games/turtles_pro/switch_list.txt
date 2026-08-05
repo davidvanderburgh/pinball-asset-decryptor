@@ -1,0 +1,96 @@
+# turtles_pro switch list, from the shim's reading of the game's own table.
+# 93 switches on nodes [0, 1, 4, 8, 9].
+# id   num   node  bit  name
+1      0     4     0    QR SCANNER STATUS READY
+2      0     4     1    QR SCANNER STATUS STRING
+3      0     4     2    QR SCANNER STATUS ENCODED DATA
+4      0     4     3    QR SCANNER STATUS MISSED STRING
+5      0     4     4    QR SCANNER STATUS OVERRUN
+6      0     4     5    QR SCANNER STATUS UNSUPPORTED_AP
+7      0     4     6    QR SCANNER STATUS FIFO OVERRUN
+8      0     4     7    QR SCANNER STATUS CONFIG
+9      0     4     8    QR SCANNER STATUS ERROR
+10     0     4     9    QR SCANNER STATUS ERR1
+11     0     4     10   QR SCANNER STATUS ERR2
+12     0     4     11   QR SCANNER STATUS ERR3
+13     0     4     12   QR SCANNER STATUS ERR4
+14     0     4     13   QR SCANNER STATUS ERR5
+15     0     4     14   QR SCANNER STATUS ERR6
+16     0     4     15   QR SCANNER STATUS NO READER
+17     1     0     0    DIP 1
+18     2     0     1    DIP 2
+19     3     0     2    DIP 3
+20     4     0     3    DIP 4
+21     5     0     4    DIP 5
+22     6     0     5    DIP 6
+23     7     0     6    DIP 7
+24     8     0     7    DIP 8
+25     9     0     8    SERVICE SELECT
+26     10    0     9    SERVICE PLUS
+27     11    0     10   SERVICE MINUS
+28     12    0     11   SERVICE BACK
+29     17    0     16   HEADPHONE DETECT
+30     18    0     17   HEADPHONE KIT CABLE DETECT
+31     19    0     18   VOLUME ENCODER 1
+32     20    0     19   VOLUME ENCODER 2
+33     24    0     23   COIN DOOR INTERLOCK
+34     80    1     2    LOCKDOWN BUTTON
+35     93    1     8    TICKET NOTCH
+36     83    1     11   START BUTTON
+37     84    1     12   TOURNAMENT START BUTTON
+38     91    1     14   TILT PENDULUM
+39     86    1     16   LEFT COIN
+40     88    1     17   CENTER COIN
+41     87    1     18   RIGHT COIN
+42     89    1     19   FOURTH COIN
+43     90    1     20   FIFTH COIN
+44     92    1     21   SIXTH COIN
+45     94    1     22   SLAM TILT
+46     41    8     0    CENTER RAMP TARGET
+47     55    8     1    RIGHT RAMP ENTER
+48     36    8     2    LEFT RAMP LEFT TARGET
+49     37    8     3    LEFT RAMP RIGHT TARGET
+50     29    8     8    LOWER LOCK 1
+51     46    8     10   UPPER LOCK 1
+52     47    8     11   UPPER LOCK 2
+53     48    8     12   UPPER LOCK 3
+54     23    8     14   UP LEFT FLIPPER EOS
+55     43    8     15   SPINNER
+56     11    8     16   LEFT FLIPPER EOS
+57     1     8     17   LEFT OUTLANE
+58     2     8     18   LEFT RETURN LANE-LEFT
+59     5     8     19   RIGHT RETURN LANE
+60     6     8     20   RIGHT OUTLANE
+61     3     8     21   LEFT RETURN LANE-RIGHT
+62     28    8     22   LEFT BANK TARGET (2X)
+63     31    8     23   RIGHT BANK TARGET (2X)
+64     10    8     24   RIGHT FLIPPER BUTTON
+65     9     8     25   LEFT FLIPPER BUTTON
+66     14    9     27   UPPER SHOOTER LANE
+67     13    8     27   UP LEFT FLIPPER BUTTON
+68     22    8     28   SHOOTER LANE
+69     8     8     29   RIGHT SLINGSHOT
+70     7     8     30   LEFT SLINGSHOT
+71     12    8     31   RIGHT FLIPPER EOS
+72     15    8     32   TROUGH 6
+73     16    8     33   TROUGH 5
+74     17    8     34   TROUGH 4
+75     18    8     35   TROUGH 3
+76     19    8     36   TROUGH 2
+77     20    8     37   TROUGH 1
+78     21    8     38   TROUGH JAM
+79     40    9     16   LOWER POP TARGET
+80     62    9     17   LEFT ORBIT
+81     63    9     18   RIGHT ORBIT
+82     56    9     19   RAMP RIGHT EXIT
+83     66    9     21   LEFT TOP LANE
+84     67    9     22   RIGHT TOP LANE
+85     64    9     23   CENTER LOOP
+86     50    9     24   LEFT RAMP ENTER OPTO
+87     51    9     25   LEFT RAMP EXIT OPTO
+88     53    9     26   CENTER RAMP EXIT OPTO
+89     69    9     28   LEFT POP BUMPER
+90     70    9     29   RIGHT POP BUMPER
+91     71    9     30   BOTTOM POP BUMPER
+92     39    9     31   UPPER POP TARGET
+93     100   9     3    RAMP STOPPER CB

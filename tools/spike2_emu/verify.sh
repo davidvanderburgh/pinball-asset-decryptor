@@ -1,7 +1,7 @@
 #!/bin/bash
 cd /home/david
 L=gz70.log
-./run_gz.sh > $L 2>&1
+./run_game.sh > $L 2>&1
 echo "=== validation bar ==="
 printf '  ExchangeData errors : %s (want 0)\n'  "$(grep -c ExchangeData $L)"
 printf '  Radium warnings     : %s (want 45)\n' "$(grep -c 'Radium Warning' $L)"

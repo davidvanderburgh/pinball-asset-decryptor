@@ -7,7 +7,7 @@ rm -f $R/dump/tb.log
 export QEMU_LOG=exec,nochain
 export QEMU_LOG_FILENAME=/dump/tb.log
 export QEMU_DFILTER=0x444014..0x444160,0x26aa58..0x26ad00,0x27316c..0x2731b0
-./run_gz.sh > gz68.log 2>&1
+./run_game.sh > gz68.log 2>&1
 echo "log size: $(du -h $R/dump/tb.log 2>/dev/null | cut -f1)"
 echo
 echo "=== distinct basic blocks executed, in the loader ranges ==="

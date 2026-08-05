@@ -70,26 +70,53 @@ Nothing here is reachable by findref.sh or litref.py: every reference to this
 table goes through the GOT. It was found structurally, by noticing that a
 0x18-stride scan kept landing on a different field of one repeating record.
 """
+import os
+import re
 import struct
 import sys
 
-GAME = "/home/david/spike2root/games/godzilla_pro/game"
+#: NUL-terminated printable runs, the shape an image name has. 2..70 matches
+#: the length limit cstr() already applies.
+_STRINGS = re.compile(rb"([\x20-\x7e]{2,70})\x00")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
+
 VA_BIAS = 0x8000
 STRIDE = 0x30
-LO, HI = 0x750000, 0x790000
 
 #: Offset of THIS record's name. Negative: see the header - the pointer at
 #: +0x24 is the previous device's name, so the name for the position at +0x10
 #: lives 0x30 earlier, i.e. at +0x24 - 0x30.
 NAME_OFF = 0x24 - STRIDE
 
-#: The playfield artwork these coordinates are in, and its size.
-PLAYFIELD_PNG = "assets/nuk/images/Test/scaled_godzilla_pro_playfield.png"
+#: The image name every playfield device carries. It is the same word in every
+#: title - the machine's own test mode draws "playfield" - and it is what seeds
+#: the search below.
+PLAYFIELD_IMAGE = "playfield"
+
+#: Fallback artwork size, used only when the title's own drawing cannot be
+#: found. Godzilla Pro's, and the right order of magnitude for any Spike 2.
 PF_W, PF_H = 313, 710
 
 
-def load(path=GAME):
-    d = open(path, "rb").read()
+def playfield_size(game=None):
+    """The artwork's real pixel size, read from the PNG the game ships.
+
+    NOT a constant. It was 313x710 here and that is Godzilla Pro's drawing;
+    another title has its own, and hard-coding one title's would silently move
+    every marker on the next.
+    """
+    art = gameinfo.playfield_png(game)
+    if art and os.path.exists(art):
+        wh = gameinfo.png_size(art)
+        if wh:
+            return wh
+    return PF_W, PF_H
+
+
+def load(path=None):
+    d = open(path or gameinfo.elf(), "rb").read()
 
     def cstr(va):
         o = va - VA_BIAS
@@ -131,6 +158,43 @@ def _one(d, cstr, va):
                 name=name)
 
 
+def seeds(d):
+    """Candidate record addresses: every word that points at an image name.
+
+    THE ADDRESS WINDOW USED TO BE A CONSTANT - 0x750000..0x790000 - which is
+    where Godzilla Pro 1.15.0 happens to keep this table and tells you nothing
+    about any other title or build. Seeding from the data instead costs two
+    linear passes and works on a binary nobody has looked at:
+
+      * find every string that could be an image name, which is the same test
+        _one() applies: "playfield", or anything with a "/" in it;
+      * find every 4-byte little-endian word pointing at one of them.
+
+    A record begins with that pointer, so each hit is a candidate start. The run
+    check below still decides what is really a table, so a false seed costs
+    nothing but a few microseconds.
+
+    SEEDING ON "playfield" ALONE IS NOT ENOUGH, and it looks like it is. The
+    playfield devices all came out right - 164 records, every self-check
+    passing - while the count quietly fell from 575 to 288, because a run made
+    up entirely of TOPPER or CABINET records contains no pointer to "playfield"
+    and was never seeded at all. The six cabinet switches went with it. A check
+    that only looks at what it found cannot see that.
+    """
+    want = set()
+    for m in _STRINGS.finditer(d):
+        s = m.group(1)
+        if s == PLAYFIELD_IMAGE.encode() or b"/" in s:
+            want.add(m.start(1) + VA_BIAS)
+    if not want:
+        return []
+    out = []
+    for o in range(0, len(d) - 4, 4):
+        if struct.unpack_from("<I", d, o)[0] in want:
+            out.append(o + VA_BIAS)
+    return out
+
+
 def records(d, cstr):
     """Records found as RUNS at a true 0x30 stride.
 
@@ -144,7 +208,7 @@ def records(d, cstr):
     0x30 spacing, and let the run establish the phase.
     """
     seen, out = set(), []
-    for va in range(LO, HI, 4):
+    for va in seeds(d):
         if va in seen or _one(d, cstr, va) is None:
             continue
         # Walk back to the true start of this run, then forward through it.
@@ -165,22 +229,27 @@ def records(d, cstr):
 
 
 def main():
+    game = gameinfo.active()
+    art = gameinfo.find_playfield_art(game)
+    pf_w, pf_h = playfield_size(game)
     d, cstr = load()
     keep = sorted(records(d, cstr), key=lambda r: r["va"])
-    pf = [r for r in keep if r["image"] == "playfield"]
+    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    print("# %s: %d records from %s" % (game, len(keep), gameinfo.elf(game)))
 
     # SELF-CHECK. Positions must land inside the artwork they name; anything
     # outside means the record is being read one field over, or the coordinates
-    # are in some other image's pixels.
-    out = [r for r in pf if not (0 <= r["x"] <= PF_W and 0 <= r["y"] <= PF_H)]
+    # are in some other image's pixels. The size comes from the title's OWN
+    # drawing, so this is a real check on a title nobody has run before.
+    out = [r for r in pf if not (0 <= r["x"] <= pf_w and 0 <= r["y"] <= pf_h)]
     print("# %d playfield records, %d outside the %dx%d artwork"
-          % (len(pf), len(out), PF_W, PF_H))
+          % (len(pf), len(out), pf_w, pf_h))
 
     # THE CHECK THAT WOULD HAVE CAUGHT THE OFF-BY-ONE, so it runs every time.
     # 31 playfield devices are named LEFT-something or RIGHT-something, and a
     # correct table puts every one of them on the correct side of the
     # centreline. The wrong name offset scored 21/31; the right one scores 31/31.
-    mid, ok, wrong = PF_W / 2.0, 0, []
+    mid, ok, wrong = pf_w / 2.0, 0, []
     for r in pf:
         u = r["name"].upper()
         if u.startswith("LEFT "):
@@ -205,11 +274,12 @@ def main():
         counts[r["kind"]] = counts.get(r["kind"], 0) + 1
     print("# by class: %s" % ", ".join("%s=%d" % kv for kv in sorted(counts.items())))
 
-    lines = ["# Godzilla Pro device positions, from the game binary.",
+    lines = ["# %s device positions, from the game binary." % game,
              "# %d records (%s), %d on the playfield image."
              % (len(keep), " ".join("%s=%d" % kv for kv in sorted(counts.items())),
                 len(pf)),
-             "# playfield image: %s (%dx%d)" % (PLAYFIELD_PNG, PF_W, PF_H),
+             "# playfield image: %s (%dx%d)"
+             % (os.path.basename(art) if art else "(not found)", pf_w, pf_h),
              "# %-7s %-34s %5s %5s %4s %4s %4s %5s  %-6s %s" %
              ("class", "name", "x", "y", "w", "h", "grp", "index", "conn", "image")]
     for r in keep:
@@ -224,17 +294,28 @@ def main():
                         r["group"], r["index"], r["conn"] or "-", r["image"]))
     text = "\n".join(lines) + "\n"
 
-    if len(sys.argv) > 1:
-        open(sys.argv[1], "w").write(text)
-        print("%d records (%d on the playfield) -> %s"
-              % (len(keep), len(pf), sys.argv[1]))
-        xs = [r["x"] for r in pf]
-        ys = [r["y"] for r in pf]
-        if xs:
-            print("playfield x %d..%d (image %d), y %d..%d (image %d)"
-                  % (min(xs), max(xs), PF_W, min(ys), max(ys), PF_H))
-    else:
-        sys.stdout.write(text)
+    # Default to the title's own table directory rather than the cwd, and copy
+    # the artwork in beside it: the playfield window runs on Windows against a
+    # checkout, and pairing the drawing with the coordinates derived against it
+    # is what lets a title open with no card extracted.
+    dest = sys.argv[1] if len(sys.argv) > 1 else gameinfo.table("device_xy.txt", game)
+    d_dir = os.path.dirname(os.path.abspath(dest))
+    if not os.path.isdir(d_dir):
+        os.makedirs(d_dir)
+    with open(dest, "w", newline="") as f:      # newline='': LF even on Windows
+        f.write(text)
+    print("%d records (%d on the playfield) -> %s" % (len(keep), len(pf), dest))
+    xs = [r["x"] for r in pf]
+    ys = [r["y"] for r in pf]
+    if xs:
+        print("playfield x %d..%d (image %d), y %d..%d (image %d)"
+              % (min(xs), max(xs), pf_w, min(ys), max(ys), pf_h))
+    if art and os.path.exists(art):
+        local = os.path.join(d_dir, "playfield.png")
+        if not os.path.exists(local):
+            with open(art, "rb") as s, open(local, "wb") as t:
+                t.write(s.read())
+            print("playfield artwork -> %s" % local)
 
 
 if __name__ == "__main__":

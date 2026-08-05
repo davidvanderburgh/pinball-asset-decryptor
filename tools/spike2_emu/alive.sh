@@ -47,7 +47,7 @@ BUS=$(n -f nodebus.py)
 # ffmpeg constantly so `-x ffmpeg` would catch unrelated work, and `-f audio.fifo`
 # also matches any shell whose command line happens to contain it - including the
 # shell running this check, which is the exact trap documented above.
-AUD=$(n -f 'Godzilla Pro emulator')
+AUD=$(n -f 'ffmpeg.*-f pulse')
 TOTAL=$((GAME + QEMU + HOST + BUS + AUD))
 
 printf 'guest (comm=game)      : %s\n' "$GAME"

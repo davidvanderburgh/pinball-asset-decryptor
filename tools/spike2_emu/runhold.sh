@@ -4,7 +4,7 @@ LOG=${1:-gz58.log}
 SECS=${2:-25}
 export PAD_BOOT_DELAY=$SECS
 S=$(date +%s)
-./run_gz.sh > "$LOG" 2>&1
+./run_game.sh > "$LOG" 2>&1
 E=$(date +%s)
 echo "elapsed: $((E-S)) s   log: $LOG"
 echo

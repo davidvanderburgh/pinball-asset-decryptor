@@ -66,4 +66,6 @@ echo "[play] pulse buffer ${LAT} ms"
 
 exec ffmpeg -hide_banner -loglevel error \
      -f s16le -ar "$RATE" -ac "$CH" -i "$FIFO" \
-     -f pulse -buffer_duration "$LAT" "Godzilla Pro emulator"
+# The pulse stream name carries the title, so a mixer shows which game is
+# playing - and so teardown's pkill pattern still matches whatever ran.
+     -f pulse -buffer_duration "$LAT" "${PAD_GAME:-Spike 2} emulator"

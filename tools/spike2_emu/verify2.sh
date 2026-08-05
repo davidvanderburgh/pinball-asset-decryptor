@@ -1,7 +1,7 @@
 #!/bin/bash
 cd /home/david
 L=${1:-gz75.log}
-S=$(date +%s); ./run_gz.sh > $L 2>&1; E=$(date +%s)
+S=$(date +%s); ./run_game.sh > $L 2>&1; E=$(date +%s)
 echo "elapsed: $((E-S)) s"
 echo "=== milestone ==="
 printf '  scenes with bytes read > 0 : %s / %s\n' \

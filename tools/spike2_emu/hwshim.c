@@ -1168,6 +1168,127 @@ static int (*real_attr_setinheritsched)(void *, int);
 #define THMAX 128
 static struct { void *(*fn)(void *); void *arg; int id; } thslot[THMAX];
 
+/* ---- IS THIS ABSOLUTE ADDRESS MAPPED? -----------------------------------
+ *
+ * Every hard-coded address in this shim came out of ONE title's binary, and in
+ * another title's it is very likely not mapped at all. Dereferencing one does
+ * not produce a wrong answer, it kills the process - and it did: the first
+ * attempt to boot a second title (TMNT 1.59) died at 0.06 s inside the shim's
+ * own [thread] log line, because that line prints the audio gate byte from
+ * 0x7acb54 and TMNT's image ends around 0x6e8000. The crash looked like a
+ * threading bug and was a printf.
+ *
+ * write() to /dev/null returns EFAULT for an unreadable buffer rather than
+ * faulting, so this asks the kernel instead of assuming. The result is cached
+ * for the last address asked about, which is enough: these are asked per thread
+ * start and per log line, always about the same one or two addresses.
+ *
+ * ANY new absolute address in this file must go through here. */
+static int addr_readable(const void *p)
+{
+    static long (*w)(int, const void *, unsigned long);
+    static int nullfd = -2;
+    static const void *last;
+    static int lastok;
+    if (!p) return 0;
+    if (p == last) return lastok;
+    if (nullfd == -2) {
+        int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
+        w = dlsym(RTLD_NEXT, "write");
+        nullfd = ro ? ro("/dev/null", 1 /*O_WRONLY*/, 0) : -1;
+    }
+    last = p;
+    lastok = (nullfd >= 0 && w && w(nullfd, p, 1) == 1);
+    return lastok;
+}
+
+/* The audio streaming worker's start gate: a byte the worker reads ONCE and
+ * then spins on in a register. 0x7acb54 is where Godzilla Pro 1.15.0 keeps it.
+ * PAD_AUDIO_GATE=<hex> moves it for another title; unset and unmapped are
+ * treated the same, which is "there is no gate here" rather than a guess. */
+static unsigned char *gate_addr(void)
+{
+    static unsigned char *v;
+    static int done;
+    if (!done) {
+        const char *e = getenv("PAD_AUDIO_GATE");
+        unsigned long a = 0x7acb54UL;
+        done = 1;
+        if (e && *e) {
+            /* Parsed here rather than with the file's ishex/hexval, which are
+             * defined a thousand lines further down. */
+            a = 0;
+            if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X')) e += 2;
+            for (; *e; e++) {
+                int c = *e;
+                if (c >= '0' && c <= '9') c -= '0';
+                else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                else if (c >= 'A' && c <= 'F') c -= 'A' - 10;
+                else break;
+                a = a * 16 + (unsigned long)c;
+            }
+        }
+        v = (a && addr_readable((void *)a)) ? (unsigned char *)a : 0;
+    }
+    return v;
+}
+
+/* The gate's value, or -1 when this title has no gate we know of. */
+static int gate_val(void)
+{
+    unsigned char *g = gate_addr();
+    return g ? (int)*(volatile unsigned char *)g : -1;
+}
+
+/* An address of one of the GAME's own tables, from the environment if this
+ * title's is known, and 0 if what we have is not mapped - see the TITLE_ADDR
+ * block further down for the list and for why it exists. */
+static unsigned title_addr(const char *env, unsigned dflt)
+{
+    const char *e = getenv(env);
+    unsigned long a = dflt;
+    if (e && *e) {
+        a = 0;
+        if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X')) e += 2;
+        for (; *e; e++) {
+            int c = *e;
+            if (c >= '0' && c <= '9') c -= '0';
+            else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+            else if (c >= 'A' && c <= 'F') c -= 'A' - 10;
+            else break;
+            a = a * 16 + (unsigned long)c;
+        }
+    }
+    return (a && addr_readable((const void *)a)) ? (unsigned)a : 0u;
+}
+
+/* Resolve once, on first use, and remember - including remembering 0. */
+#define TITLE_ADDR(fn, env, dflt)                           \
+    static unsigned fn(void)                                \
+    {                                                       \
+        static unsigned v;                                  \
+        static int done;                                    \
+        if (!done) { done = 1; v = title_addr(env, dflt); } \
+        return v;                                           \
+    }
+
+/* READ ONE OF THE GAME'S TABLES SAFELY. A TITLE_ADDR is 0 when this title's
+ * address is unknown or unmapped, and `*(unsigned *)0` is as fatal as reading
+ * some other title's address - it is how the second boot attempt died, in
+ * sw_force(), which loads three of them before its first check.
+ *
+ * Every reader downstream already rejects a zero with sw_ok() or an equivalent
+ * bounds test, so returning 0 turns "we do not know where this title keeps its
+ * switch table" into "there is no switch state", which is true and survivable.
+ * Reading at an offset needs its own form: SW_STRUCT + 4 is 4, not 0, when the
+ * base is unknown, and 4 is just as unmapped and far less obvious. */
+static unsigned tread_at(unsigned base, unsigned off)
+{
+    return base ? *(const unsigned *)(unsigned long)(base + off) : 0u;
+}
+
+static unsigned tread(unsigned addr) { return tread_at(addr, 0); }
+
 static int thentry_enabled(void)
 {
     char *p = getenv("PAD_THREAD_ENTRY");
@@ -1188,24 +1309,25 @@ static void *th_tramp(void *p)
      * which loads the byte once and then spins on the register - so what
      * matters is the value at the instant the thread starts, not at the crash.
      * The audio streaming worker (body 0x459604) is one of them. */
-    snprintf(b, sizeof b, "[thread] #%d ENTERED body=0x%lx gate[0x7acb54]=%d\n",
-             s->id, (unsigned long)s->fn, *(unsigned char *)0x7acb54);
+    snprintf(b, sizeof b, "[thread] #%d ENTERED body=0x%lx gate=%d\n",
+             s->id, (unsigned long)s->fn, gate_val());
     logmsg(b);
     /* The audio streaming worker reads 0x7acb54 once and spins on the register,
      * so starting while the byte is 1 wedges it permanently even though the
      * byte is 0 seconds later. Do the re-reading wait the code meant to do,
      * on its own thread, before handing control over. */
-    if (ungate_enabled() && (unsigned long)s->fn == 0x459604) {
+    if (ungate_enabled() && (unsigned long)s->fn == 0x459604 && gate_addr()) {
         static int (*real_usleep)(unsigned long);
+        volatile unsigned char *g = gate_addr();
         int waited = 0;
         if (!real_usleep) real_usleep = dlsym(RTLD_NEXT, "usleep");
-        while (*(volatile unsigned char *)0x7acb54 && waited < 5000) {
+        while (*g && waited < 5000) {
             if (real_usleep) real_usleep(1000);
             waited++;
         }
         snprintf(b, sizeof b,
                  "[thread] #%d waited %d ms for gate; gate now %d\n",
-                 s->id, waited, *(volatile unsigned char *)0x7acb54);
+                 s->id, waited, (int)*g);
         logmsg(b);
     }
     {
@@ -1535,10 +1657,11 @@ static void segv_handler(int sig, void *info, void *ucv)
                  * never runs, queues are never recycled and the pool of 16
                  * empties permanently. */
                 {
-                    unsigned char gate = *(unsigned char *)0x7acb54;
                     snprintf(b, sizeof b,
-                             "[audio] worker spin gate [0x7acb54] = %d "
-                             "(non-zero at thread start = worker wedged)\n", gate);
+                             "[audio] worker spin gate = %d "
+                             "(non-zero at thread start = worker wedged; "
+                             "-1 = this title has no gate at PAD_AUDIO_GATE)\n",
+                             gate_val());
                     logmsg(b);
                 }
 
@@ -2340,8 +2463,95 @@ static const struct nb_ident nb_idents[] = {
     {  4, 0x00140040u, 0x98, 0x7c6b00u },  /* node4      LPC1124_303  as read */
 };
 
+/* THE FIRMWARE VERSION IS THE TITLE'S, AND IT IS WRITTEN ON THE TIN.
+ *
+ * 1.35.0 above is Godzilla Pro 1.15.0's, and claiming it at a title that ships
+ * anything else earns "Check Node Board N : Version Mismatch" on Tech Alerts -
+ * which is what TMNT 1.59 did, because TMNT ships 1.33.0. The game grades each
+ * board against the .hex images sitting beside its own binary, and those images
+ * carry the version IN THEIR FILENAMES:
+ *
+ *     pinnode-LPC1313-1_35_0.hex      Godzilla Pro 1.15.0
+ *     pinnode-LPC1313-1_33_0.hex      TMNT 1.59
+ *
+ * So read the directory. The guest chdir()s into its own game directory before
+ * exec, so "." is the right place and no title name has to be plumbed in.
+ *
+ * Only the boards whose table entry says 1.35.0 are moved: node 4's two images
+ * report versions that are not 1.x at all (124.107.0 and 146.13.128) and those
+ * are reproduced deliberately, not corrected. */
+static unsigned nb_fw_title(void)
+{
+    static unsigned v;
+    static int done;
+    void *(*ropendir)(const char *);
+    void *(*rreaddir)(void *);
+    int (*rclosedir)(void *);
+    void *d;
+
+    if (done) return v;
+    done = 1;
+    v = 0x012300u;                                   /* 1.35.0, the old value */
+    ropendir  = dlsym(RTLD_NEXT, "opendir");
+    rreaddir  = dlsym(RTLD_NEXT, "readdir");
+    rclosedir = dlsym(RTLD_NEXT, "closedir");
+    if (!ropendir || !rreaddir) return v;
+    d = ropendir(".");
+    if (!d) return v;
+    for (;;) {
+        /* glibc's struct dirent puts d_name at +19 on this ABI. */
+        const char *nm;
+        void *e = rreaddir(d);
+        int i, n, dot = -1, dash = -1;
+        if (!e) break;
+        nm = (const char *)e + 19;
+        for (n = 0; n < 120 && nm[n]; n++) {
+            if (nm[n] == '-') dash = n;
+            if (nm[n] == '.') dot = n;
+        }
+        if (n >= 120 || dash < 0 || dot <= dash + 1) continue;
+        if (nm[dot] != '.' || nm[dot + 1] != 'h' || nm[dot + 2] != 'e'
+            || nm[dot + 3] != 'x' || nm[dot + 4]) continue;
+        {   /* expect <maj>_<min>_<patch> between the last '-' and ".hex" */
+            unsigned part[3] = { 0, 0, 0 };
+            int k = 0, any = 0;
+            for (i = dash + 1; i < dot; i++) {
+                if (nm[i] >= '0' && nm[i] <= '9') {
+                    part[k] = part[k] * 10 + (unsigned)(nm[i] - '0');
+                    any = 1;
+                } else if (nm[i] == '_' && k < 2) {
+                    k++;
+                } else {
+                    any = 0;
+                    break;
+                }
+            }
+            if (any && k == 2 && part[0] < 256 && part[1] < 256 && part[2] < 256) {
+                unsigned f = (part[0] << 16) | (part[1] << 8) | part[2];
+                if (f != v) {
+                    char m[120];
+                    snprintf(m, sizeof m,
+                             "[nbfw] node firmware %u.%u.%u, from %s\n",
+                             part[0], part[1], part[2], nm);
+                    logmsg(m);
+                }
+                v = f;
+                break;
+            }
+        }
+    }
+    if (rclosedir) rclosedir(d);
+    return v;
+}
+
 /* PAD_NB_PART / PAD_NB_VARIANT / PAD_NB_FW still override, globally, so the
  * table can be bypassed for a sweep without editing code. */
+static unsigned nb_ident_fw(const struct nb_ident *i)
+{
+    if (!i) return NB_FW_DEFAULT;
+    return i->fw == 0x012300u ? nb_fw_title() : i->fw;
+}
+
 static const struct nb_ident *nb_ident_for(unsigned id)
 {
     unsigned i;
@@ -2431,7 +2641,8 @@ static void nb_dump_boards(void)
  * 0x59e904(part id), [+40..87] the 48-byte runtime-info record 0x5a2b88
  * builds, [+88] the hex-image owner, [+147]/[+148] two flags.
  */
-#define NB_OBJS   0x7bad88u
+TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
+#define NB_OBJS   a_nb_objs()
 #define NB_OBJ_SZ 0xe0u
 
 static const char *nb_status_name(unsigned s)
@@ -2448,6 +2659,10 @@ static void nb_dump_objs(void)
 {
     char line[400];
     unsigned id;
+    if (!NB_OBJS) {
+        logmsg("[nbobj] no node-object table known for this title\n");
+        return;
+    }
     logmsg("[nbobj] --- node board objects ---\n");
     for (id = 0; id < 32; id++) {
         const unsigned char *o =
@@ -2600,7 +2815,7 @@ static void nb_maybe_poke(void)
     static int on = -1;
     unsigned id;
     if (on == -1) { char *p = getenv("PAD_NB_POKE"); on = p && p[0] == '1'; }
-    if (!on) return;
+    if (!on || !NB_OBJS) return;
     for (id = 0; id < 16; id++) {
         unsigned char *o = (unsigned char *)(unsigned long)(NB_OBJS + id * NB_OBJ_SZ);
         if (nb_poke_tbl[id] == 0xff) continue;
@@ -2620,7 +2835,8 @@ static void nb_maybe_poke(void)
  * Also prints the global at 0x706464, because the suppression condition is
  *     skip if status in {2,7} AND ((flags & 3) == 3 OR [0x706464] == 0)
  * so if that global is 0 the flags stop mattering entirely. */
-#define NB_ALERT_GATE 0x706464u
+TITLE_ADDR(a_nb_alert_gate, "PAD_NB_ALERT_GATE", 0x706464u)
+#define NB_ALERT_GATE a_nb_alert_gate()
 
 static void nb_watch_flags(void)
 {
@@ -2632,9 +2848,9 @@ static void nb_watch_flags(void)
     char line[200];
 
     if (on == -1) { char *p = getenv("PAD_NB_WATCH"); on = p && p[0] == '1'; }
-    if (!on) return;
+    if (!on || !NB_OBJS) return;
 
-    gate = *(const unsigned *)(unsigned long)NB_ALERT_GATE;
+    gate = tread(NB_ALERT_GATE);
     if (gate != last_gate) {
         snprintf(line, sizeof line, "[nbflag] [0x%06x] alert gate %u -> %u\n",
                  NB_ALERT_GATE, last_gate, gate);
@@ -2690,20 +2906,39 @@ static void nb_watch_flags(void)
  * 0x217788 does - so asking a provider "how many entries do you have right
  * now" is the game's own contract, not a new one invented here.
  * ------------------------------------------------------------------------ */
-#define ALERT_HEAD  0x7ac834u   /* the list head                            */
-#define MSG_COUNT   0x5ec0c8u   /* u32, 3949                                */
-#define MSG_REMAP   0x7b9654u   /* u32 -> u16[count]: msgid -> table index   */
-#define MSG_PTRS    0x744c60u   /* u32[count]: index -> const char *[5] row  */
-#define MSG_LANG    0x708330u   /* u32, current language slot within the row */
+/* All five are GODZILLA PRO 1.15.0 addresses and all five are dereferenced, so
+ * all five go through TITLE_ADDR: on a title whose addresses are unknown they
+ * resolve to 0 and the alert text simply is not available, instead of the game
+ * dying inside a log line. See the TITLE_ADDR block for the whole argument. */
+TITLE_ADDR(a_alert_head, "PAD_ALERT_HEAD", 0x7ac834u)  /* the list head       */
+TITLE_ADDR(a_msg_count,  "PAD_MSG_COUNT",  0x5ec0c8u)  /* u32, 3949           */
+TITLE_ADDR(a_msg_remap,  "PAD_MSG_REMAP",  0x7b9654u)  /* msgid -> table index*/
+TITLE_ADDR(a_msg_ptrs,   "PAD_MSG_PTRS",   0x744c60u)  /* index -> char *[5]  */
+TITLE_ADDR(a_msg_lang,   "PAD_MSG_LANG",   0x708330u)  /* language slot       */
+
+#define ALERT_HEAD  a_alert_head()
+#define MSG_COUNT   a_msg_count()
+#define MSG_REMAP   a_msg_remap()
+#define MSG_PTRS    a_msg_ptrs()
+#define MSG_LANG    a_msg_lang()
+
+/* Every one of the tables above present and mapped. The readers below are
+ * pure reads through several indirections and each one starts here. */
+static int title_tables_ok(void)
+{
+    return MSG_COUNT && MSG_REMAP && MSG_PTRS && MSG_LANG;
+}
 
 /* msgid -> text, done by hand rather than by calling 0x34a764, because that
  * function's out-of-range path calls the game's error reporter. This is a
  * pure read: the same three indirections, with every pointer bounds-checked. */
 static const char *msg_text(unsigned msgid)
 {
-    unsigned count = *(const unsigned *)(unsigned long)MSG_COUNT;
-    unsigned rt    = *(const unsigned *)(unsigned long)MSG_REMAP;
-    unsigned lang  = *(const unsigned *)(unsigned long)MSG_LANG;
+    unsigned count;
+    if (!title_tables_ok()) return 0;
+    count = tread(MSG_COUNT);
+    unsigned rt    = tread(MSG_REMAP);
+    unsigned lang  = tread(MSG_LANG);
     unsigned idx, row, s;
     if (!count || count > 0x20000u || !rt) return 0;
     if (rt < 0x8000u || rt >= 0x10000000u) return 0;
@@ -2752,8 +2987,14 @@ static int alert_probe_on(void)
 static void alert_dump(void)
 {
     char line[420];
-    unsigned n = *(const unsigned *)(unsigned long)ALERT_HEAD;
+    unsigned n;
     int guard = 0, probe = alert_probe_on(), total = 0;
+
+    if (!ALERT_HEAD) {
+        logmsg("[alert] no provider-list address known for this title\n");
+        return;
+    }
+    n = *(const unsigned *)(unsigned long)ALERT_HEAD;
 
     snprintf(line, sizeof line,
              "[alert] --- providers, head [0x%08x] = 0x%08x ---\n", ALERT_HEAD, n);
@@ -2873,17 +3114,64 @@ static const char *val_state(unsigned s)
  *     entry+0  -> device object, whose (u16)[+20] bit 0 means MALFUNCTION
  *     entry+32 -> the device's NAME message row
  * ------------------------------------------------------------------------ */
-#define SW_STRUCT 0x7a958cu     /* +0 entry array, +4 raw state bytes        */
-#define SW_COUNT  0x7e43d8u
-#define DEV_TABLE 0x7446a4u     /* stride 40, 1-based                        */
-#define DEV_COUNT 0x5ec030u
+/* ---- THE GAME'S OWN TABLES, WHICH ARE PER TITLE -------------------------
+ *
+ * Every address here was read out of GODZILLA PRO 1.15.0 and means nothing in
+ * another title's binary. That was fine while the rig ran one game and fatal
+ * the first time it ran two: TMNT 1.59 died 0.06 s in, inside sw_scan_bytes,
+ * loading from 0x7a958c - an address past the end of its image.
+ *
+ * So each is resolved ONCE, through the environment for a title whose addresses
+ * are known, and then CHECKED. An address that is not mapped resolves to 0 and
+ * the feature that needs it turns itself off. The game boots either way; what
+ * it loses is the shim's view of the game's own switch table, which is a
+ * convenience for this rig and not something the game needs to run.
+ *
+ *   PAD_SW_STRUCT  the switch struct: +0 entry array, +4 raw state bytes
+ *   PAD_SW_COUNT   how many switches
+ *   PAD_DEV_TABLE  device table, stride 40, 1-based
+ *   PAD_DEV_COUNT  how many devices
+ *   PAD_MSG_LANG   the current language slot, for msg_row()
+ */
+TITLE_ADDR(a_sw_struct, "PAD_SW_STRUCT", 0x7a958cu)
+TITLE_ADDR(a_sw_count,  "PAD_SW_COUNT",  0x7e43d8u)
+TITLE_ADDR(a_dev_table, "PAD_DEV_TABLE", 0x7446a4u)
+TITLE_ADDR(a_dev_count, "PAD_DEV_COUNT", 0x5ec030u)
+
+/* The runtime finder's answer, for a title whose address is not configured.
+ * Two words of the shim's own, holding what the game's own SW_STRUCT and
+ * SW_COUNT hold, so every reader downstream is unchanged - see the FINDING THE
+ * SWITCH TABLE block below for how they get filled in. */
+static void sw_dump(void);
+static unsigned sw_shadow[2];            /* [0] entry[]  [1] raw[] (0 = none) */
+static unsigned sw_shadow_count;
+
+static unsigned sw_struct_addr(void)
+{
+    unsigned a = a_sw_struct();
+    if (a) return a;
+    return sw_shadow[0] ? (unsigned)(unsigned long)&sw_shadow[0] : 0u;
+}
+
+static unsigned sw_count_addr(void)
+{
+    unsigned a = a_sw_count();
+    if (a) return a;
+    return sw_shadow_count ? (unsigned)(unsigned long)&sw_shadow_count : 0u;
+}
+
+#define SW_STRUCT sw_struct_addr()
+#define SW_COUNT  sw_count_addr()
+#define DEV_TABLE a_dev_table()
+#define DEV_COUNT a_dev_count()
 
 /* 0x485918 in miniature: a message row is up to five const char*, one per
  * language, falling back to slot 0. */
 static const char *msg_row(unsigned row)
 {
-    unsigned lang = *(const unsigned *)(unsigned long)MSG_LANG;
-    unsigned s;
+    unsigned lang, s;
+    if (!MSG_LANG) return 0;
+    lang = tread(MSG_LANG);
     if (row < 0x8000u || row >= 0x800000u) return 0;
     s = ((const unsigned *)(unsigned long)row)[0];
     if (lang && lang < 5) {
@@ -2962,9 +3250,9 @@ static void sw_force(void)
 {
     static char *list = (char *)-1;
     static int idle = -1;
-    unsigned st = *(const unsigned *)(unsigned long)SW_STRUCT;
-    unsigned raw = *(const unsigned *)(unsigned long)(SW_STRUCT + 4);
-    unsigned n = *(const unsigned *)(unsigned long)SW_COUNT;
+    unsigned st = tread(SW_STRUCT);
+    unsigned raw = tread_at(SW_STRUCT, 4);
+    unsigned n = tread(SW_COUNT);
     unsigned id;
     char *p;
 
@@ -2992,20 +3280,202 @@ static void sw_force(void)
     }
 }
 
+/* ---- FINDING THE SWITCH TABLE WITHOUT BEING TOLD WHERE IT IS -------------
+ *
+ * SW_STRUCT is a Godzilla Pro 1.15.0 address and no other title keeps its
+ * switch table anywhere near it. Reversing each new title by hand is the
+ * obvious answer and the wrong one: the table has a SHAPE, and the shape is the
+ * same in every title because the code that walks it is the same. Look for the
+ * shape instead, and a title nobody has opened works on the first run.
+ *
+ * WHAT IT LOOKS LIKE. entry[] is an array of 32-byte records, one per switch,
+ * and these are the fields this shim already relies on:
+ *
+ *     +8   ptr  -> a config object   (+20 switch number, +28 flags)
+ *     +12  ptr  -> a name object     (+16 message row)
+ *     +18  u16  bit within the node's input word, always < 64
+ *     +20  u8   node id, always a board that is really on the bus
+ *     +24  u8   the logical level, 0 or 1
+ *
+ * Two live pointers, a small bit, a small node and a boolean, repeating every
+ * 32 bytes for as long as the machine has switches.
+ *
+ * THE CONFIRMATION IS NOT THE SEARCH, which is what makes this trustworthy
+ * rather than merely plausible. A run of the right shape is necessary and not
+ * sufficient, so a candidate must also satisfy two things a coincidence will
+ * not: every (node, bit) pair in the run is DISTINCT - two switches cannot
+ * share one input line - and the nodes form a small set of distinct boards
+ * rather than 24 different ones. A random stretch of heap that happens to
+ * validate field by field fails both.
+ *
+ * WHAT IT DOES WITH THE ANSWER is deliberately boring: it fills in two words of
+ * its own and points SW_STRUCT and SW_COUNT at them. Everything downstream then
+ * reads the table exactly as it always has, through the same two indirections,
+ * and there is no second code path to keep in step.
+ *
+ * raw[] is NOT found this way - it is the game's debounced state array and only
+ * the dump and force instruments use it - so it stays 0 and those two say so.
+ * Switch INPUT needs only entry[] and the count.
+ */
+static int sw_find_done;
+
+static int sw_ptr_ok(unsigned v)
+{
+    return v >= 0x8000u && v < 0xf0000000u
+           && addr_readable((const void *)(unsigned long)v);
+}
+
+static int sw_entry_ok(const unsigned char *e)
+{
+    unsigned p8, p12, bit, node, lvl;
+    if (!addr_readable(e) || !addr_readable(e + 28)) return 0;
+    p8   = *(const unsigned *)(e + 8);
+    p12  = *(const unsigned *)(e + 12);
+    bit  = *(const unsigned short *)(e + 18);
+    node = e[20];
+    lvl  = e[24];
+    if (!sw_ptr_ok(p8) || !sw_ptr_ok(p12)) return 0;
+    return bit < 64 && node < 16 && lvl <= 1;
+}
+
+static unsigned sw_run_len(unsigned base, unsigned cap)
+{
+    unsigned k = 0;
+    while (k < cap
+           && sw_entry_ok((const unsigned char *)(unsigned long)(base + k * 32)))
+        k++;
+    return k;
+}
+
+/* Distinct (node, bit) pairs and a small set of boards - see the header. */
+static int sw_run_consistent(unsigned base, unsigned n)
+{
+    unsigned char seen[16][8];
+    unsigned nodes = 0, i, j;
+    for (i = 0; i < 16; i++)
+        for (j = 0; j < 8; j++) seen[i][j] = 0;
+    for (i = 0; i < n; i++) {
+        const unsigned char *e =
+            (const unsigned char *)(unsigned long)(base + i * 32);
+        unsigned bit = *(const unsigned short *)(e + 18), node = e[20];
+        unsigned m = 1u << (bit & 7);
+        if (seen[node][bit >> 3] & m) return 0;      /* two switches, one line */
+        seen[node][bit >> 3] |= (unsigned char)m;
+    }
+    for (i = 0; i < 16; i++)
+        for (j = 0; j < 8; j++)
+            if (seen[i][j]) { nodes++; break; }
+    return nodes >= 2 && nodes <= 10;
+}
+
+/* Walk /proc/self/maps and try every writable region: the table is heap and the
+ * heap moves, so nothing here assumes an address. */
+static int sw_find_table(void)
+{
+    char buf[8192];
+    int fd, n;
+    int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
+    long (*rr)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
+    int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+    unsigned best = 0, best_n = 0;
+
+    if (!ro || !rr) return 0;
+    fd = ro("/proc/self/maps", 0, 0);
+    if (fd < 0) return 0;
+
+    while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
+        char *line = buf, *end = buf + n;
+        buf[n] = 0;
+        while (line < end) {
+            char *nl = line, *p = line;
+            unsigned long lo = 0, hi = 0;
+            while (nl < end && *nl != '\n') nl++;
+            if (nl >= end) break;
+            *nl = 0;
+            while (*p && *p != '-') {
+                int c = *p++;
+                if (c >= '0' && c <= '9') c -= '0';
+                else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                else break;
+                lo = lo * 16 + (unsigned long)c;
+            }
+            if (*p == '-') {
+                p++;
+                while (*p && *p != ' ') {
+                    int c = *p++;
+                    if (c >= '0' && c <= '9') c -= '0';
+                    else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                    else break;
+                    hi = hi * 16 + (unsigned long)c;
+                }
+            }
+            /* rw-, inside the guest's own range, and not enormous. */
+            if (hi > lo && hi - lo < 0x4000000UL && lo >= 0x8000UL
+                && hi < 0xf0000000UL && p[0] == ' ' && p[1] == 'r' && p[2] == 'w') {
+                unsigned a;
+                for (a = (unsigned)lo; a + 32 * 32 < (unsigned)hi; a += 4) {
+                    unsigned len;
+                    if (!sw_entry_ok((const unsigned char *)(unsigned long)a))
+                        continue;
+                    len = sw_run_len(a, 2048);
+                    if (len >= 24 && sw_run_consistent(a, len) && len > best_n) {
+                        best = a;
+                        best_n = len;
+                    }
+                    a += len * 32;
+                }
+            }
+            line = nl + 1;
+        }
+    }
+    if (rc) rc(fd);
+
+    if (best) {
+        char m[160];
+        /* entry[0] is a dummy the game skips (`for id = 1`), so the run found
+         * here starts at what the game calls index 1. Step the base back one
+         * record so the ids this shim reports are the game's own. */
+        sw_shadow[0] = best - 32;
+        sw_shadow[1] = 0;
+        sw_shadow_count = best_n + 1;
+        snprintf(m, sizeof m,
+                 "[swfind] found the switch table: entry[] at 0x%08x, "
+                 "%u switches\n", sw_shadow[0], sw_shadow_count);
+        logmsg(m);
+        sw_dump();          /* print it, so the find can be judged not trusted */
+        return 1;
+    }
+    return 0;
+}
+
+/* Try, at most every 256 bus writes, until it works: the table does not exist
+ * yet at the first ask, and a scan of the heap is not free. */
+static void sw_find_maybe(void)
+{
+    static unsigned tick;
+    if (sw_find_done || a_sw_struct()) return;      /* known title, nothing to do */
+    if (tick++ % 256) return;
+    if (sw_find_table()) sw_find_done = 1;
+}
+
 static void sw_dump(void)
 {
     char line[300];
-    unsigned st  = *(const unsigned *)(unsigned long)SW_STRUCT;
-    unsigned raw = *(const unsigned *)(unsigned long)(SW_STRUCT + 4);
-    unsigned n   = *(const unsigned *)(unsigned long)SW_COUNT;
-    unsigned dn  = *(const unsigned *)(unsigned long)DEV_COUNT;
+    unsigned st  = tread(SW_STRUCT);
+    unsigned raw = tread_at(SW_STRUCT, 4);
+    unsigned n   = tread(SW_COUNT);
+    unsigned dn  = tread(DEV_COUNT);
     unsigned id;
 
     snprintf(line, sizeof line,
              "[sw] --- switches: count=%u entry[]=0x%08x raw[]=0x%08x ---\n",
              n, st, raw);
     logmsg(line);
-    if (sw_ok(st) && sw_ok(raw) && n <= 4096) {
+    /* raw[] IS NOT REQUIRED. It used to be, and that silently emptied this
+     * whole dump for a title found by sw_find_table(), which locates entry[]
+     * and deliberately does not claim to know where the debounced state array
+     * is. One missing column is not a reason to print nothing. */
+    if (sw_ok(st) && n <= 4096) {
         for (id = 1; id < n; id++) {
             const unsigned char *e =
                 (const unsigned char *)(unsigned long)(st + id * 32);
@@ -3013,16 +3483,23 @@ static void sw_dump(void)
             unsigned nameobj = *(const unsigned *)(e + 12);
             const char *nm = 0;
             unsigned num = 0, fl = 0;
+            char rawtxt[8];
             if (sw_ok(cfg)) {
                 num = *(const unsigned short *)(unsigned long)(cfg + 20);
                 fl  = *(const unsigned short *)(unsigned long)(cfg + 28);
             }
             if (sw_ok(nameobj))
                 nm = msg_row(*(const unsigned *)(unsigned long)(nameobj + 16));
+            if (sw_ok(raw))
+                snprintf(rawtxt, sizeof rawtxt, "%u",
+                         ((const unsigned char *)(unsigned long)raw)[id]);
+            else
+                rawtxt[0] = '?', rawtxt[1] = 0;
             snprintf(line, sizeof line,
-                     "[sw] id=%-3u num=%-4u raw=%u logical=%u flags=0x%04x %s\n",
-                     id, num, ((const unsigned char *)(unsigned long)raw)[id],
-                     e[24], fl, nm ? nm : "?");
+                     "[sw] id=%-3u num=%-4u node=%-2u bit=%-2u raw=%s logical=%u "
+                     "flags=0x%04x %s\n",
+                     id, num, e[20], *(const unsigned short *)(e + 18),
+                     rawtxt, e[24], fl, nm ? nm : "?");
             logmsg(line);
         }
     }
@@ -3130,8 +3607,8 @@ static void swwalk_tick(void)
     if (!started) { started = 1; n = 2400; }
     if ((n - 2400) % (unsigned)swwalk_hold) return;
 
-    st = *(const unsigned *)(unsigned long)SW_STRUCT;
-    cnt = *(const unsigned *)(unsigned long)SW_COUNT;
+    st = tread(SW_STRUCT);
+    cnt = tread(SW_COUNT);
     if (sw_ok(st) && cnt <= 4096 && swwalk_step / 32 < SWWALK_NODES) {
         static unsigned char prev[512];
         static int primed;
@@ -3395,7 +3872,9 @@ static void nb_nodes_add_boards(void)
     static int on = -1;
     unsigned id;
     if (on == -1) { char *q = getenv("PAD_NB_SCHED_BOARDS"); on = !(q && *q == '0'); }
-    if (!on || nb_nnodes < 0) return;
+    /* NB_OBJS is a Godzilla address; without it there is no board table to
+     * scan and this must do nothing rather than walk from 0. */
+    if (!on || nb_nnodes < 0 || !NB_OBJS) return;
     for (id = 1; id < 32; id++) {
         const unsigned char *o =
             (const unsigned char *)(unsigned long)(NB_OBJS + id * NB_OBJ_SZ);
@@ -3407,8 +3886,8 @@ static void nb_nodes_add_boards(void)
 
 static void nb_nodes_init(void)
 {
-    unsigned st = *(const unsigned *)(unsigned long)SW_STRUCT;
-    unsigned n  = *(const unsigned *)(unsigned long)SW_COUNT;
+    unsigned st = tread(SW_STRUCT);
+    unsigned n  = tread(SW_COUNT);
     unsigned id;
     int i;
     if (nb_nnodes >= 0) return;
@@ -3476,7 +3955,7 @@ static void sw_prime(unsigned nid, const unsigned char bits[8])
     unsigned char *rec;
     unsigned i;
     if (nid >= 64 || primed[nid]) return;
-    if (!sw_ok(*(const unsigned *)(unsigned long)SW_STRUCT)) return;
+    if (!sw_ok(tread(SW_STRUCT))) return;
     primed[nid] = 1;
     rec = (unsigned char *)(unsigned long)SW_NODEREC(nid);
     for (i = 0; i < 8; i++) { rec[12 + i] = bits[i]; rec[20 + i] = bits[i]; }
@@ -3622,13 +4101,19 @@ static int sw_rest_pending(unsigned id)
 
 static int sw_scan_bytes(unsigned nid, unsigned char out[8])
 {
-    unsigned st = *(const unsigned *)(unsigned long)SW_STRUCT;
-    unsigned n  = *(const unsigned *)(unsigned long)SW_COUNT;
-    unsigned id;
+    unsigned st, n, id;
     int placed = 0;
 
     out[0] = out[1] = out[2] = out[3] = 0;
     out[4] = out[5] = out[6] = out[7] = 0;
+    /* THIS IS WHERE THE SECOND TITLE DIED. Both addresses are Godzilla Pro
+     * 1.15.0's and TMNT's image stops well short of them, so the two loads at
+     * the top of this function - before any check ran - killed the game 0.06 s
+     * in. Resolve first, and answer "no switch state" for a title whose table
+     * we cannot find, which costs the keyboard and costs the game nothing. */
+    if (!SW_STRUCT || !SW_COUNT) return 0;
+    st = tread(SW_STRUCT);
+    n  = tread(SW_COUNT);
     if (!sw_ok(st) || n > 4096) return 0;
     sw_hold_init();
     sw_shm_init();
@@ -3694,9 +4179,9 @@ static void sw_watch(void)
     if (list == (char *)-1) list = getenv("PAD_SW_WATCH");
     if (!list || !*list || budget <= 0) return;
     if (++n % 20) return;
-    st  = *(const unsigned *)(unsigned long)SW_STRUCT;
-    raw = *(const unsigned *)(unsigned long)(SW_STRUCT + 4);
-    cnt = *(const unsigned *)(unsigned long)SW_COUNT;
+    st  = tread(SW_STRUCT);
+    raw = tread_at(SW_STRUCT, 4);
+    cnt = tread(SW_COUNT);
     if (!sw_ok(st) || !sw_ok(raw) || cnt > 4096) return;
     budget--;
     k = snprintf(line, sizeof line, "[swwatch] n=%-6u", n);
@@ -3771,9 +4256,14 @@ extern unsigned long pad_pcm_backlog_ms(void);
 extern unsigned long pad_pcm_buffer_ms(void);
 extern unsigned long pad_pcm_fifo_ms(void);
 
+/* A RANGE CHECK IS NOT A MAPPING CHECK, and this used to be only the former.
+ * 0x10000..0xb0000000 says yes to every Godzilla address in this file, which is
+ * correct on Godzilla and fatal on a title whose image is smaller: the audio
+ * dump walks a voice table at 0x7b90c0 that TMNT does not have. Ask the kernel
+ * as well - the range test stays because it is free and rejects the obvious. */
 static int aud_readable(unsigned long p)
 {
-    return p > 0x10000 && p < 0xb0000000;
+    return p > 0x10000 && p < 0xb0000000 && addr_readable((const void *)p);
 }
 
 static void audio_dump(void)
@@ -3784,18 +4274,21 @@ static void audio_dump(void)
 
     snprintf(b, sizeof b,
              "[aud] --- %lu ms --- writei calls=%lu frames=%lu (%lu.%01lu s @ %u Hz "
-             "x %u ch)  main played=%lu dropped=%lu  center=%lu  gate[0x7acb54]=%d"
+             "x %u ch)  main played=%lu dropped=%lu  center=%lu  gate=%d"
              "  latency=%lu/%lu ms  fifo=%lu ms\n",
              pad_ms(), pad_pcm_calls, pad_pcm_frames,
              pad_pcm_rate ? pad_pcm_frames / pad_pcm_rate : 0,
              pad_pcm_rate ? (pad_pcm_frames * 10 / pad_pcm_rate) % 10 : 0,
              pad_pcm_rate, pad_pcm_channels,
              pad_pcm_played(), pad_pcm_drops(), pad_pcm_center(),
-             *(unsigned char *)0x7acb54,
+             gate_val(),
              pad_pcm_backlog_ms(), pad_pcm_buffer_ms(), pad_pcm_fifo_ms());
     logmsg(b);
 
-    for (n = 0; n < 8; n++) {
+    /* THE VOICE TABLE IS GODZILLA PRO 1.15.0's, at a fixed address. Another
+     * title has its own somewhere else, or none this rig has found, so check
+     * before walking rather than after crashing. */
+    for (n = 0; n < 8 && aud_readable(0x7b90c0UL); n++) {
         unsigned char *v = (unsigned char *)(0x7b90c0UL + n * 64);
         unsigned long *vw = (unsigned long *)v;
         if (!vw[0] && !vw[14]) continue;          /* empty slot, say nothing */
@@ -3807,6 +4300,10 @@ static void audio_dump(void)
         logmsg(b);
     }
 
+    if (!aud_readable(0x7b8990UL + 0x100)) {
+        logmsg("[aud] no queue pool pointer at 0x7b8a90 in this title\n");
+        return;
+    }
     pool = *(unsigned long *)(0x7b8990UL + 0x100);
     if (!aud_readable(pool)) {
         snprintf(b, sizeof b, "[aud] queue pool [0x7b8a90] = 0x%lx (not built yet)\n",
@@ -4013,8 +4510,8 @@ static void sw_tap(void)
 static void sw_map_dump(void)
 {
     char line[300];
-    unsigned st = *(const unsigned *)(unsigned long)SW_STRUCT;
-    unsigned n  = *(const unsigned *)(unsigned long)SW_COUNT;
+    unsigned st = tread(SW_STRUCT);
+    unsigned n  = tread(SW_COUNT);
     unsigned id;
 
     if (!sw_ok(st) || n > 4096) return;
@@ -4073,8 +4570,8 @@ static void sw_changes(void)
     now = pad_ms();
     if (primed && now - last < 20) return;
     last = now;
-    st  = *(const unsigned *)(unsigned long)SW_STRUCT;
-    cnt = *(const unsigned *)(unsigned long)SW_COUNT;
+    st  = tread(SW_STRUCT);
+    cnt = tread(SW_COUNT);
     if (!sw_ok(st) || cnt > 256) return;
     for (id = 1; id < cnt; id++) {
         const unsigned char *e =
@@ -4140,9 +4637,9 @@ static void sw_pend_trace(void)
     now = pad_ms();
     if (now == last) return;
     last = now;
-    st  = *(const unsigned *)(unsigned long)SW_STRUCT;
-    raw = *(const unsigned *)(unsigned long)(SW_STRUCT + 4);
-    cnt = *(const unsigned *)(unsigned long)SW_COUNT;
+    st  = tread(SW_STRUCT);
+    raw = tread_at(SW_STRUCT, 4);
+    cnt = tread(SW_COUNT);
     if (!sw_ok(st) || !sw_ok(raw) || cnt > 4096) return;
 
     for (p = list; *p; ) {
@@ -5030,8 +5527,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned part = nb_env_hex("PAD_NB_PART",
                                            ident ? ident->part : NB_PART_DEFAULT);
                 unsigned hwid = nb_env_hex("PAD_NB_HWID", NB_HWID_DEFAULT);
-                unsigned fw   = nb_env_hex("PAD_NB_FW",
-                                           ident ? ident->fw : NB_FW_DEFAULT);
+                unsigned fw   = nb_env_hex("PAD_NB_FW", nb_ident_fw(ident));
                 unsigned var  = nb_env_hex("PAD_NB_VARIANT",
                                            ident ? ident->variant : 0);
                 p[0]  = 0;
@@ -5120,6 +5616,7 @@ long shim_write(int fd, const void *b, unsigned long n)
             }
         }
         nb_log("TX", nb_req, nb_req_len, 0);
+        sw_find_maybe();
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
         coil_probe(nb_req, nb_req_len);

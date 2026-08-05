@@ -1,7 +1,7 @@
 #!/bin/bash
 cd /home/david
 export PAD_SCENE_VERBOSE=9d57875196c613785a1eee010c55223a0f1aa821
-./run_gz.sh > gz73.log 2>&1
+./run_game.sh > gz73.log 2>&1
 echo "=== the 17 fields cereal reads out of the failing scene ==="
 grep '\[hdr\]' gz73.log
 echo

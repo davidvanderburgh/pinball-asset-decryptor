@@ -37,7 +37,7 @@ pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'
 pkill -9 -f 'playaudio.sh'
-pkill -9 -f 'Godzilla Pro emulator'
+pkill -9 -f 'ffmpeg.*-f pulse'
 sleep 1
 
 after=$(total)

@@ -1,6 +1,6 @@
-# Godzilla Pro device positions, from the game binary.
+# godzilla_pro device positions, from the game binary.
 # 575 records (coil=10 led=506 switch=59), 164 on the playfield image.
-# playfield image: assets/nuk/images/Test/scaled_godzilla_pro_playfield.png (313x710)
+# playfield image: scaled_godzilla_pro_playfield.png (313x710)
 # class   name                                   x     y    w    h  grp index  conn   image
 led       ETOPPER L DOME LED 1-R               310   249   40   30    3     1  -      System/TestMode/universal_topper_scaled
 led       ETOPPER L DOME LED 1-G               310   249   40   30    3     0  -      System/TestMode/universal_topper_scaled

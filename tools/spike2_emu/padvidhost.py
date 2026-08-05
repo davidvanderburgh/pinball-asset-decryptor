@@ -56,10 +56,18 @@ for _i, _n in enumerate([
     F[_n] = _i * 4
 PATH_OFF = F["host_alive"] + 4
 
-# The guest sees /games/godzilla_pro; we see the same tree on the WSL side.
-GUEST_ROOT = "/games/godzilla_pro"
+# The guest sees /games/<title>; we see the same tree on the WSL side.
+#
+# THE TITLE MUST COME FROM THE ENVIRONMENT, not from a constant, and getting
+# that wrong is silent rather than loud: this ran a whole TMNT boot serving
+# GODZILLA video. The guest chdir()s into its own directory and asks for
+# "./assets/lcd/auto_loaded/<hash>/...", so a relative path resolved against
+# the wrong title's tree does not fail - the hash directories exist in both
+# and the clip plays. It looked like a working emulator showing the wrong film.
+_GAME = os.environ.get("PAD_GAME") or "godzilla_pro"
+GUEST_ROOT = "/games/" + _GAME
 HOST_ROOT = os.environ.get(
-    "PAD_VID_ROOT", "/home/david/spike2root/games/godzilla_pro")
+    "PAD_VID_ROOT", "/home/david/spike2root/games/" + _GAME)
 
 
 _T0 = time.monotonic()

@@ -33,10 +33,12 @@ channels with no playfield fixture behind them.
   ledio.py ~/gzwatch.log led_io.txt     # log from a run with PAD_NB_LOG raised
 """
 import collections
+import os
 import sys
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import devicexy
+import gameinfo
 import ledframes
 
 #: group in the device table -> node on the bus. Verified with devjoin.py
@@ -98,7 +100,7 @@ def main():
               " ~25 s, then re-run this.")
         return 2
 
-    lines = ["# Godzilla Pro LED I/O map.",
+    lines = ["# %s LED I/O map." % gameinfo.active(),
              "# Position from the device table in the binary; node/index verified",
              "# against the boot enumeration on the wire (see ledio.py).",
              "# %-4s %-5s %-34s %5s %5s  %-5s %s"
@@ -112,11 +114,15 @@ def main():
                         r["conn"] or "-", r["image"]))
     text = "\n".join(lines) + "\n"
 
-    if len(sys.argv) > 2:
-        open(sys.argv[2], "w").write(text)
-        print("\n%d LEDs -> %s" % (len(rows), sys.argv[2]))
-    else:
-        sys.stdout.write(text)
+    # Default into the TITLE's table directory, not the cwd: these tables are
+    # per title now, and a second game must not overwrite the first one's.
+    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("led_io.txt")
+    d = os.path.dirname(os.path.abspath(dest))
+    if not os.path.isdir(d):
+        os.makedirs(d)
+    with open(dest, "w", newline="") as f:       # newline='': LF even on Windows
+        f.write(text)
+    print("\n%d LEDs -> %s" % (len(rows), dest))
     return 0
 
 

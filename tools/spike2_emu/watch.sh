@@ -60,14 +60,30 @@ export PAD_GL_W=${PAD_GL_W:-1360}
 export PAD_GL_H=${PAD_GL_H:-768}
 export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmpipe
 
-# Node 2 is NOT populated on a Godzilla Pro: the game's own static config table
+# WHICH TITLE. PAD_GAME picks it; run_game.sh has the full rule and prints what
+# it chose. Everything below that is per-title reads it from here.
+GAME=${PAD_GAME:-}
+[ -z "$GAME" ] && { GAME=$(readlink /home/david/spike2root/games/game 2>/dev/null); GAME=${GAME%/game}; }
+GAME=${GAME:-godzilla_pro}
+export PAD_GAME="$GAME"
+
+# UNPOPULATED NODES ARE PER TITLE, so this is a lookup and not a constant.
+# Node 2 is not populated on a Godzilla Pro: the game's own static config table
 # assigns it no devices of any kind (board[+144] and its kind-1 counterpart are
 # both 0, against 69/460/276 on the other ws2812node boards). The shim otherwise
 # answers for all 64 addresses, which makes an absent board look present, and
 # slot 2 is the one board whose "registered" bit is board[+144] != 0 - so a
 # manufactured node 2 can never be suppressed and sits on Tech Alerts forever.
 # Staying silent for it is the accurate behaviour, not a workaround.
-export PAD_NB_SILENT=${PAD_NB_SILENT:-2}
+#
+# A title not listed here silences NOTHING, which is the safe direction: an
+# extra board answering is a Tech Alert you can see and then add here, whereas
+# silencing a board that IS populated loses its devices with no message at all.
+case "$GAME" in
+    godzilla_pro|godzilla_le) NB_SILENT_DEFAULT=2 ;;
+    *)                        NB_SILENT_DEFAULT="" ;;
+esac
+export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""
 
@@ -92,7 +108,7 @@ teardown() {
     pkill -9 -f 'autoattract.sh' 2>/dev/null
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
     pkill -9 -f 'playaudio.sh' 2>/dev/null
-    pkill -9 -f 'Godzilla Pro emulator' 2>/dev/null
+    pkill -9 -f 'ffmpeg.*-f pulse' 2>/dev/null
     rm -f "$AUD_HOST" "$AUD_FMT_HOST"
     sleep 0.5
     echo "--- what is still running (all must be 0) ---"
@@ -178,13 +194,14 @@ if ! pgrep -x padglhost >/dev/null; then
 fi
 grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
 
-echo "[watch] starting the game (boot to the first picture takes ~15 s)"
+echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
-           ./run_gz.sh > "$LOG" 2>&1 &
+           PAD_GAME="$GAME" \
+           bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 
 # The virtual playfield: clickable switches, inserts lit from the wire.
@@ -215,11 +232,14 @@ GAMEPG=$!
 #     group kills leave it alone. It talks to the rig only through dump/padled
 #     (read) and swpoke.py (clicks), so it survives the game restarting under it.
 #   * </dev/null and &, so nothing can block here again.
-if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -f "$S/switch_xy.txt" ]; then
+if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -d "$S/games/$GAME" ]; then
     PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
     PF_WIN='C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu\playfield.py'
+    # The title goes on the COMMAND LINE, not in the environment: this is a
+    # Windows process started through interop and only variables named in
+    # WSLENV cross that boundary, which is one more thing to keep in step.
     if command -v "$PF_PY" >/dev/null 2>&1; then
-        setsid "$PF_PY" "$PF_WIN" </dev/null >/dev/null 2>&1 &
+        setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
         echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
     else
         echo "[watch] no Windows interop; run playfield.py yourself:" >&2
@@ -228,7 +248,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -f "$S/switch_xy.txt" ]; then
 fi
 
 # Wait for the guest to actually EXIST before treating its absence as "it
-# exited". run_gz.sh has to set up a pty, a user/mount/PID namespace and a
+# exited". run_game.sh has to set up a pty, a user/mount/PID namespace and a
 # chroot before it execs the game, so qemu is not visible for a second or two -
 # and polling immediately made the first version of this script declare "the
 # game exited" 0.25 s in and kill a perfectly healthy run.

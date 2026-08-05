@@ -1,4 +1,4 @@
-# Godzilla Pro LED I/O map.
+# godzilla_pro LED I/O map.
 # Position from the device table in the binary; node/index verified
 # against the boot enumeration on the wire (see ledio.py).
 # node index name                                   x     y  conn  image

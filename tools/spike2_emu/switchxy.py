@@ -16,10 +16,12 @@ Names differ in case between the two sources ("Left Spinner" live, "LEFT SPINNER
 static), so the match is case-insensitive.
 """
 import re
+import os
 import sys
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import devicexy
+import gameinfo
 
 LIVE = re.compile(r"\[swmap\] id=(\d+)\s+node=(\d+)\s+bit=(\d+).*?lvl=\d+ (.+)$")
 
@@ -62,11 +64,15 @@ def main():
         lines.append("%-6d %-5d %-5d %-32s %5d %5d"
                      % (sid, node, bit, r["name"], r["x"], r["y"]))
     text = "\n".join(lines) + "\n"
-    if len(sys.argv) > 2:
-        open(sys.argv[2], "w").write(text)
-        print("-> %s" % sys.argv[2])
-    else:
-        sys.stdout.write(text)
+    # Default into the TITLE's table directory, not the cwd - these are per
+    # title now and a second game must not overwrite the first one's.
+    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("switch_xy.txt")
+    d = os.path.dirname(os.path.abspath(dest))
+    if not os.path.isdir(d):
+        os.makedirs(d)
+    with open(dest, "w", newline="") as f:
+        f.write(text)
+    print("-> %s" % dest)
     return 0
 
 

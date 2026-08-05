@@ -1,9 +1,43 @@
 # spike2_emu — running the Stern Spike 2 game on a PC
 
-The real Godzilla Pro 1.15.0 armhf game binary, running under `qemu-user` in a
-chroot of the card's own rootfs, with every piece of hardware replaced by
-`LD_PRELOAD` shims. It boots to attract mode by itself in about 15 seconds, at
-1360x768 / 60 fps on the GPU, with working audio, video and switch input.
+A real Stern Spike 2 armhf game binary, running under `qemu-user` in a chroot
+of the card's own rootfs, with every piece of hardware replaced by `LD_PRELOAD`
+shims. It boots to attract mode by itself in about 15 seconds, at 1360x768 /
+60 fps on the GPU, with working audio, video and switch input.
+
+## Any title
+
+The rootfs is the OS partition and carries no title of its own; each game is a
+directory under `games/`. `PAD_GAME` picks one:
+
+```bash
+PAD_GAME=turtles_pro watch.sh
+```
+
+Verified on **Godzilla Pro 1.15.0** and **TMNT 1987 Pro 1.59.0**.
+
+Adding a title is: extract `/games/<title>` out of its card's third partition
+with `debugfs -R "rdump ..."`, then run it. What the rig knows about a title it
+finds for itself:
+
+| | |
+|---|---|
+| the switch table | found in the heap at run time by SHAPE (`sw_find_table`), because the address differs per title and the layout does not |
+| node firmware version | read off the `.hex` filenames the title ships beside its binary |
+| device positions | scanned out of the binary by `devicexy.py`, seeded from the image-name strings rather than an address window |
+| playfield artwork | the title's own `assets/nuk/images/Test/*_playfield.png` |
+
+**Not every title has positions.** Godzilla Pro 1.15.0 ships a graphical device
+test mode - a playfield drawing and an XY record per switch, coil and insert.
+TMNT 1.59 ships neither: no `images/Test`, and "playfield" appears in its binary
+only inside adjustment help text. So the playfield window draws artwork when a
+title has it and a schematic switch list (`swtable.py`) when it does not. Both
+are clickable and live; only one is a picture.
+
+Anything the shim reads at a hard-coded address is a `TITLE_ADDR`: overridable
+per title, checked before use, and switched off rather than fatal when it is not
+mapped. That is not tidiness - the first attempt at a second title died 0.06 s
+in, inside a printf, reading Godzilla's audio gate.
 
 **`plans/spike2_pc_emulation_handoff.md` is the authoritative document.** It is
 not in git (`plans/` is ignored); this README only covers what you need to run

@@ -49,7 +49,7 @@ sleep 0.3
 grep -aE 'GL |ring |ready' "$HOSTLOG" | head -3
 
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
-           ./run_gz.sh > "$LOG" 2>&1 &
+           bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 
 # Ctrl-C used to leak BOTH processes: they are setsid'd into their own sessions

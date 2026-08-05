@@ -1,14 +1,38 @@
 #!/bin/bash
-# Boot the Stern Spike 2 Godzilla game binary under qemu-user in an ARM chroot.
+# Boot a Stern Spike 2 game binary under qemu-user in an ARM chroot.
+#
+#   PAD_GAME=turtles_pro run_game.sh
+#
+# ANY TITLE, not just the one this was written for. The rootfs is shared - it is
+# the OS partition and carries no title of its own - and each title is a
+# directory under games/ holding its own `game` ELF and assets. Which one boots
+# is decided here and nowhere else.
 R=/home/david/spike2root
+
+# The title: PAD_GAME, else whatever games/game already points at (the machine's
+# own convention, so reading it is not a rig invention), else the only one
+# extracted.
+GAME=${PAD_GAME:-}
+if [ -z "$GAME" ]; then
+    GAME=$(readlink "$R/games/game" 2>/dev/null); GAME=${GAME%/game}
+fi
+if [ -z "$GAME" ]; then
+    GAME=$(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | head -1)
+fi
+if [ ! -x "$R/games/$GAME/game" ]; then
+    echo "[run] no game ELF at $R/games/$GAME/game" >&2
+    echo "[run] extracted titles: $(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')" >&2
+    exit 1
+fi
+echo "[run] title: $GAME"
 
 mkdir -p "$R"/dev "$R"/proc "$R"/sys "$R"/data "$R"/dump/log/connectivity "$R"/tmp "$R"/run
 
 # /games/{game,conagent,data} are symlinks into the title directory on the card
 [ -d "$R/games/data" ] && [ ! -L "$R/games/data" ] && rmdir "$R/games/data" 2>/dev/null
-ln -sfn godzilla_pro/game     "$R/games/game"
-ln -sfn godzilla_pro/conagent "$R/games/conagent"
-ln -sfn godzilla_pro/data     "$R/games/data"
+ln -sfn "$GAME/game"     "$R/games/game"
+ln -sfn "$GAME/conagent" "$R/games/conagent"
+ln -sfn "$GAME/data"     "$R/games/data"
 
 # placeholder files that host device nodes get bind-mounted onto
 for f in null zero urandom random tty console spidev1.0 i2c-1 ttymxc1 ttymxc0 rtc mxc_vpu; do
@@ -25,9 +49,10 @@ NODEBUS_PTY=$(cat /home/david/nodebus.path 2>/dev/null)
 echo "[run] node bus pty: ${NODEBUS_PTY:-NONE}"
 trap 'kill $NODEBUS_PID 2>/dev/null' EXIT
 
-unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" <<'INNER'
+unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" "$GAME" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
+GAME="$3"
 # procfs needs a PID namespace to mount (see the -p -f on unshare below).
 # Without it this silently produced an EMPTY /proc: no /proc/meminfo, and the
 # game sizes its asset budget from that, so it loaded no scenes at all.
@@ -90,5 +115,5 @@ cd "$R"
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  'cd /games/godzilla_pro && LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 exec ./game'
+  "cd /games/$GAME && LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 exec ./game"
 INNER

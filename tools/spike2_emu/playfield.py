@@ -47,19 +47,28 @@ import tkinter as tk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
+import gameinfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-#: The window's title, which is also its single-instance handle - see
-#: raise_existing(). The tooltip Toplevel is deliberately titled something else.
-WINDOW_TITLE = "Godzilla Pro - virtual playfield"
+#: The window's title. It is also the single-instance handle (see
+#: raise_existing()), so it MUST carry the title of the game: with a fixed
+#: string, starting a Godzilla run while a TMNT window was open just raised the
+#: TMNT window and looked like the new run had drawn the wrong playfield. One
+#: window per title is the behaviour that was wanted anyway.
+#: The tooltip Toplevel is deliberately named something else.
 
 #: Where the window remembers itself. In the user's profile rather than beside
 #: the script, because the script's directory is version controlled and this is
 #: per-machine state, not part of the rig.
 STATE = os.path.join(os.path.expanduser("~"), ".pad_playfield.json")
 
-PF_PNG = os.path.join(HERE, "pf_ref.png")
+#: The title, and everything derived from it. watch.sh passes the name on the
+#: command line; gameinfo works it out otherwise.
+GAME = gameinfo.active(sys.argv[1] if len(sys.argv) > 1 else None)
+TDIR = gameinfo.table_dir(GAME)
+PF_PNG = gameinfo.playfield_png(GAME)
+WINDOW_TITLE = "%s - virtual playfield" % GAME
 LED_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padled"
 
 #: The switch block, read for ONE thing: the coin door. 48V - the coil supply -
@@ -130,13 +139,13 @@ def load_switches():
     """switch_xy.txt: id node bit NAME... x y"""
     return [dict(id=int(p[0]), node=int(p[1]), bit=int(p[2]),
                  name=" ".join(p[3:-2]), x=int(p[-2]), y=int(p[-1]))
-            for p in _rows(os.path.join(HERE, "switch_xy.txt"), 6)]
+            for p in _rows(os.path.join(TDIR, "switch_xy.txt"), 6)]
 
 
 def load_leds():
     """led_io.txt: node index NAME... x y conn image"""
     out = []
-    for p in _rows(os.path.join(HERE, "led_io.txt"), 6):
+    for p in _rows(os.path.join(TDIR, "led_io.txt"), 6):
         if p[-1] != "playfield":
             continue
         try:
@@ -164,7 +173,7 @@ def load_coils():
     land on a board the enumeration knows, rather than drawing a confident lie.
     """
     out = []
-    for p in _rows(os.path.join(HERE, "device_xy.txt"), 10):
+    for p in _rows(os.path.join(TDIR, "device_xy.txt"), 10):
         if p[0] != "coil" or p[-1] != "playfield":
             continue
         try:
@@ -176,6 +185,25 @@ def load_coils():
         except ValueError:
             continue
         out.append(c)
+    return out
+
+
+def load_switch_list():
+    """switch_list.txt: id num node bit NAME...  (see swtable.py)
+
+    The fallback, and the only thing available for most titles. It has no
+    positions because most titles HAVE no positions: Godzilla Pro 1.15.0 ships a
+    graphical device test mode with a playfield drawing and an XY record per
+    device, and TMNT 1.59 ships neither - no images/Test directory, and the word
+    "playfield" appears in its binary only in adjustment help text.
+    """
+    out = []
+    for p in _rows(os.path.join(TDIR, "switch_list.txt"), 5):
+        try:
+            out.append(dict(id=int(p[0]), num=int(p[1]), node=int(p[2]),
+                            bit=int(p[3]), name=" ".join(p[4:])))
+        except ValueError:
+            continue
     return out
 
 
@@ -480,6 +508,128 @@ def _onscreen(root, x, y):
             and -20 <= y <= root.winfo_screenheight() - 80)
 
 
+class Schematic:
+    """The window for a title with NO positions: every switch, by node, clickable.
+
+    This is not a lesser playfield, it is a different question answered. With no
+    device table there is nothing to place markers on and nothing to place them
+    from, and inventing coordinates from the names is exactly the guess this
+    project keeps having to undo. So it draws what the game actually knows: the
+    switch list it carries, in its own order, grouped by the board each switch is
+    wired to.
+
+    Clicking a row closes that switch through the same swpoke.py path the
+    artwork window uses, so a title with no drawing is still playable.
+    """
+
+    ROW_H = 19
+    COL_W = 300
+
+    def __init__(self, root, switches):
+        self.root = root
+        self.switches = switches
+        self.last = None
+
+        bar = tk.Frame(root, bg="#111")
+        bar.pack(fill="x")
+        tk.Label(bar, text="  %s: %d switches, no playfield artwork in this title"
+                           "  - click a row to close that switch"
+                      % (GAME, len(switches)),
+                 bg="#111", fg="#bbb", font=("Consolas", 9)).pack(side="left",
+                                                                  padx=4, pady=4)
+
+        by_node = {}
+        for sw in switches:
+            by_node.setdefault(sw["node"], []).append(sw)
+        cols = sorted(by_node)
+        tall = max(len(v) for v in by_node.values()) + 2
+        w = self.COL_W * len(cols)
+        h = self.ROW_H * tall + 8
+        h = min(h, root.winfo_screenheight() - 160)
+
+        self.cv = tk.Canvas(root, width=w, height=h, bg="#101010",
+                            highlightthickness=0)
+        self.cv.pack(fill="both", expand=True)
+        self.info = {}
+        for ci, node in enumerate(cols):
+            x = ci * self.COL_W + 10
+            self.cv.create_text(x, 12, anchor="w", fill="#7ecbff",
+                                font=("Consolas", 10, "bold"),
+                                text="node %d" % node)
+            for ri, sw in enumerate(sorted(by_node[node], key=lambda s: s["bit"])):
+                y = 30 + ri * self.ROW_H
+                i = self.cv.create_text(
+                    x, y, anchor="w", fill="#d8d8d8", font=("Consolas", 9),
+                    text="%3d  %-28s" % (sw["id"], sw["name"][:28]))
+                self.info[i] = dict(kind="switch", d=sw)
+
+        self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
+                               font=("Consolas", 9))
+        self.status.pack(fill="x")
+        self.tip = Tip(root)
+        self.cv.bind("<Button-1>", self.on_click)
+        self.cv.bind("<Motion>", self.on_move)
+        self.cv.bind("<Leave>", lambda e: self.tip.hide())
+        self.tick()
+
+    def _hit(self, ev):
+        for i in reversed(self.cv.find_overlapping(ev.x - 2, ev.y - 8,
+                                                   ev.x + 2, ev.y + 8)):
+            if i in self.info:
+                return i
+        return None
+
+    def on_move(self, ev):
+        i = self._hit(ev)
+        if i is None:
+            self.tip.hide()
+            return
+        d = self.info[i]["d"]
+        self.tip.show("SWITCH  %s\n"
+                      "id %d   num %d   node %d  bit %d\n"
+                      "click to close it"
+                      % (d["name"], d["id"], d["num"], d["node"], d["bit"]),
+                      ev.x_root, ev.y_root)
+
+    def on_click(self, ev):
+        i = self._hit(ev)
+        if i is None:
+            return
+        d = self.info[i]["d"]
+        self.cv.itemconfig(i, fill="#ffd400")
+        threading.Thread(target=self._press, args=(d, i), daemon=True).start()
+
+    def _press(self, sw, item):
+        try:
+            subprocess.run(["wsl.exe", "-e", "python3",
+                            "%s/swpoke.py" % WSL_DIR, str(sw["id"]),
+                            str(PRESS_MS)],
+                           capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
+        except Exception:
+            pass
+        self.root.after(0, lambda: self.cv.itemconfig(item, fill="#d8d8d8"))
+
+    def tick(self):
+        """The LED block still says whether the emulator is up, which is the one
+        thing this view can honestly report about it."""
+        try:
+            with open(LED_PATH, "rb") as f:
+                d = f.read(PADLED_READ)
+        except OSError:
+            d = None
+        if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
+            self.status.config(text="no emulator (dump/padled not readable)")
+        else:
+            self.status.config(
+                text=" emulator up   %d LED writes decoded   %d coils addressed"
+                     "   (no positions for this title: see swtable.py)"
+                     % (struct.unpack_from("<I", d, 12)[0],
+                        struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
+                        if len(d) >= PADLED_READ else 0))
+        self.root.after(POLL_MS, self.tick)
+
+
 def raise_existing():
     """True when a playfield window is already open - which is then brought to
     the front instead of a second one being created.
@@ -510,7 +660,22 @@ def main():
         return
     root = tk.Tk()
     root.title(WINDOW_TITLE)
-    Field(root)
+    # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
+    # real answers; which one applies is a property of the game, not of this
+    # window. See load_switch_list() for why most titles are the second case.
+    if PF_PNG and os.path.exists(PF_PNG) and load_switches():
+        Field(root)
+    else:
+        rows = load_switch_list()
+        if not rows:
+            tk.Label(root, padx=20, pady=20, justify="left", font=("Consolas", 10),
+                     text=("No tables for %s." + '\n\n' +
+                           "Positions:   devicexy.py   (needs a title that ships" '\n' +
+                           "             a device table; many do not)" '\n' +
+                           "Switch list: swtable.py <run.log> %s")
+                     % (GAME, GAME)).pack()
+        else:
+            Schematic(root, rows)
     pos = load_state().get("playfield_pos")
     if pos and _onscreen(root, *pos):
         root.geometry("+%d+%d" % (pos[0], pos[1]))

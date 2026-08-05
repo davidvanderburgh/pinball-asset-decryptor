@@ -134,10 +134,19 @@ class EmulatePanel:
     #: slow enough to cost nothing and fast enough to feel live.
     POLL_MS = 2000
 
-    def __init__(self, parent, log=None):
+    def __init__(self, parent, log=None, card_var=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        # The card path lives in a variable the WINDOW owns (when given one):
+        # the app persists it into the project anchor and restores it when a
+        # project loads, exactly like the Extract/Write path fields. The
+        # fallback keeps the panel testable on its own.
+        self._card_var = card_var
         self._proc = None            # the watch.sh child, while we own one
+        #: Whether the last status poll saw anything running. Read by
+        #: shutdown_sync() on app quit: a terminal-started run shows up here
+        #: too, and quitting PAD must take the emulator down either way.
+        self._last_up = False
         # TWO flags, not one.  A single "_busy" covering both was a real bug:
         # the thread that drains watch.sh's output lives for as long as the
         # emulator does, so a shared flag stayed set the whole session and Stop
@@ -273,11 +282,15 @@ class EmulatePanel:
 
         There are no "use the project's image" buttons either.  The user picks
         the image; stock or modded is their business, and a pair of buttons
-        guessing at it was a second way to set one field for no gain.
+        guessing at it was a second way to set one field for no gain.  The
+        picked path IS remembered with the project (the app stores it in the
+        anchor and restores it on project load) — remembering a choice is not
+        the same as guessing one.
         """
         box = ttk.LabelFrame(frame, text="Card image to run")
         box.pack(fill=tk.X, **pad)
-        self._src_path = tk.StringVar()
+        self._src_path = self._card_var if self._card_var is not None \
+            else tk.StringVar()
         row = ttk.Frame(box)
         row.pack(fill=tk.X, padx=8, pady=6)
         self._src_entry = ttk.Entry(row, textvariable=self._src_path)
@@ -417,6 +430,33 @@ class EmulatePanel:
 
         threading.Thread(target=run, daemon=True).start()
 
+    def shutdown_sync(self):
+        """Take the whole emulator down because PAD is quitting.  BLOCKING, on
+        the main thread, bounded by the subprocess timeout — quitting the app
+        must close the game window, the Controls window and the virtual
+        playfield, not leave them orphaned behind a vanished control surface.
+
+        Runs whenever this panel started a run OR the last status poll saw one
+        (so a terminal-started run is taken down too — the user asked for
+        "quitting PAD shuts down all the emulator windows", not "the ones PAD
+        started").  killgame.sh SIGKILLs all five processes and removes the
+        LED block, which is the playfield window's signal to close itself;
+        the game and Controls windows die with padglhost.
+        """
+        if not (self._proc is not None or self._last_up):
+            return
+        if not rig_available():
+            return
+        self._stopped = True             # no more polls into a dying Tk
+        d = _wsl_path(rig_dir())
+        try:
+            subprocess.run(
+                ["wsl.exe", "-e", "bash", "%s/killgame.sh" % d],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=25, creationflags=_CREATE_FLAGS)
+        except Exception:                               # noqa: BLE001
+            pass                     # quitting anyway; best effort by design
+
     # ------------------------------------------------------------------
     # status polling
     # ------------------------------------------------------------------
@@ -491,6 +531,7 @@ class EmulatePanel:
 
             busy = self._starting or self._stopping
             up = info.get("running") == "1" or procs != "0"
+            self._last_up = up
             self._start_btn.configure(
                 state=tk.DISABLED if (up or busy) else tk.NORMAL)
             self._stop_btn.configure(

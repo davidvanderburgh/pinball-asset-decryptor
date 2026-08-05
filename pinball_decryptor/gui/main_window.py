@@ -11930,9 +11930,22 @@ class MainWindow:
         in the Input box — see the module docstring for why that is called out
         on the tab itself."""
         from .emulate_tab import EmulatePanel
+        # The card path is a WINDOW variable so the app can persist it in the
+        # project anchor and restore it on project load, exactly like the
+        # Extract/Write path fields.
+        self.emulate_card_var = tk.StringVar()
         self._emulate_panel = EmulatePanel(self._tab_emulate,
-                                           log=self.append_log)
+                                           log=self.append_log,
+                                           card_var=self.emulate_card_var)
         self._emulate_panel.build(self._tab_emulate)
+
+    def emulate_shutdown(self):
+        """App-quit hook: take the emulator down with the app (blocking,
+        bounded).  A quit must not leave the game, Controls and playfield
+        windows orphaned behind a vanished control surface."""
+        panel = getattr(self, "_emulate_panel", None)
+        if panel is not None:
+            panel.shutdown_sync()
 
     def _build_compare_tab(self):
         """Build the 'Compare' tab: pick two card images (two releases, or a

@@ -278,6 +278,29 @@ class App:
             self.window.stop_all_preview_playback()
         except Exception:
             pass
+        # Quitting PAD takes the emulator down WITH it: the game window, the
+        # Controls window and the virtual playfield must not survive as
+        # orphans behind a vanished control surface (the guest alone burns
+        # ~140% CPU forever). Blocking, bounded, best-effort.
+        try:
+            self.window.emulate_shutdown()
+        except Exception:
+            pass
+        # The Emulate tab's card path is project state; a quit is the one
+        # save-point that always happens, so a changed path lands in the open
+        # project's anchor even when nothing else was extracted or staged.
+        try:
+            from .core import project_file
+            folder = self._project_path
+            card_var = getattr(self.window, "emulate_card_var", None)
+            if folder and card_var is not None \
+                    and project_file.has_anchor(folder):
+                card = card_var.get().strip()
+                data = project_file.load_anchor(folder)
+                if (data.get("emulate_card") or "") != card:
+                    project_file.update_anchor(folder, emulate_card=card)
+        except Exception:
+            pass
         self._save_settings()
         self.root.destroy()
 
@@ -3379,6 +3402,8 @@ class App:
         name_var = getattr(self.window, "write_filename_var", None)
         write_filename = name_var.get().strip() if name_var else ""
         opts = self.window.get_extract_options()
+        card_var = getattr(self.window, "emulate_card_var", None)
+        emulate_card = card_var.get().strip() if card_var else ""
         try:
             if project_file.has_anchor(folder):
                 project_file.update_anchor(
@@ -3388,6 +3413,7 @@ class App:
                     paths=paths,
                     write_filename=write_filename,
                     extract_options=opts,
+                    emulate_card=emulate_card,
                     saved_with=__version__)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
@@ -3407,7 +3433,11 @@ class App:
                     write_filename=write_filename,
                     app_version=__version__,
                     stock_image=paths["extract_input"],
-                    build_dir=build_dir)
+                    build_dir=build_dir,
+                    # save() writes explicit fields over *extra*, so a field
+                    # only this app version knows rides in extra and format-2
+                    # readers ignore it.
+                    extra={"emulate_card": emulate_card})
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")
@@ -3503,6 +3533,11 @@ class App:
         name_var = getattr(self.window, "write_filename_var", None)
         if name and name_var is not None:
             name_var.set(name)
+        # The Emulate tab's card image follows the project too. Set even when
+        # empty: the field must show THIS project's state, not the last one's.
+        card_var = getattr(self.window, "emulate_card_var", None)
+        if card_var is not None:
+            card_var.set(_rmd(str(data.get("emulate_card") or "")))
         self._registry_touch(folder)
         self._set_loaded_project(folder)
         self._save_settings()

@@ -3165,18 +3165,24 @@ static void sw_dump(void);
 static unsigned sw_shadow[2];            /* [0] entry[]  [1] raw[] (0 = none) */
 static unsigned sw_shadow_count;
 
+/* THE FOUND TABLE WINS OVER THE CONFIGURED ONE, because "configured" only ever
+ * means "mapped". EHOH's binary is big enough to cover Godzilla Pro's
+ * 0x7a958c, so a_sw_struct() returned an address, the finder was skipped as
+ * unnecessary, and the shim read a switch table out of somebody else's data.
+ * There was no error to see: no crash, no [swfind] line, just switches that
+ * never worked. sw_find_maybe() validates the configured address rather than
+ * trusting it, and puts its answer here when the configured one does not hold
+ * up. */
 static unsigned sw_struct_addr(void)
 {
-    unsigned a = a_sw_struct();
-    if (a) return a;
-    return sw_shadow[0] ? (unsigned)(unsigned long)&sw_shadow[0] : 0u;
+    if (sw_shadow[0]) return (unsigned)(unsigned long)&sw_shadow[0];
+    return a_sw_struct();
 }
 
 static unsigned sw_count_addr(void)
 {
-    unsigned a = a_sw_count();
-    if (a) return a;
-    return sw_shadow_count ? (unsigned)(unsigned long)&sw_shadow_count : 0u;
+    if (sw_shadow_count) return (unsigned)(unsigned long)&sw_shadow_count;
+    return a_sw_count();
 }
 
 #define SW_STRUCT sw_struct_addr()
@@ -3397,6 +3403,10 @@ static int sw_find_table(void)
     long (*rr)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
     int (*rc)(int) = dlsym(RTLD_NEXT, "close");
     unsigned best = 0, best_n = 0;
+    /* The longest run seen at all, accepted or not. When nothing qualifies this
+     * is the only thing that says WHY - too short, or shaped right but
+     * inconsistent - and without it a title that fails here is a blank. */
+    unsigned near = 0, near_n = 0;
 
     if (!ro || !rr) return 0;
     fd = ro("/proc/self/maps", 0, 0);
@@ -3437,6 +3447,7 @@ static int sw_find_table(void)
                     if (!sw_entry_ok((const unsigned char *)(unsigned long)a))
                         continue;
                     len = sw_run_len(a, 2048);
+                    if (len > near_n) { near = a; near_n = len; }   /* diagnosis */
                     if (len >= 24 && sw_run_consistent(a, len) && len > best_n) {
                         best = a;
                         best_n = len;
@@ -3464,16 +3475,44 @@ static int sw_find_table(void)
         sw_dump();          /* print it, so the find can be judged not trusted */
         return 1;
     }
+    if (near_n) {
+        static int said;
+        if (!said) {
+            char m[160];
+            said = 1;
+            snprintf(m, sizeof m,
+                     "[swfind] no switch table yet. Longest run of the right "
+                     "shape: %u records at 0x%08x (%s)\n", near_n, near,
+                     near_n < 24 ? "too short"
+                                 : "long enough but (node,bit) not distinct");
+            logmsg(m);
+        }
+    }
     return 0;
 }
 
 /* Try, at most every 256 bus writes, until it works: the table does not exist
  * yet at the first ask, and a scan of the heap is not free. */
+/* Does the CONFIGURED address really point at a switch table in THIS title?
+ * Mapped is not correct - see sw_struct_addr(). Re-asked rather than cached,
+ * because the table does not exist yet at the first bus write. */
+static int sw_configured_ok(void)
+{
+    unsigned a = a_sw_struct(), st;
+    if (!a || !a_sw_count()) return 0;
+    st = *(const unsigned *)(unsigned long)a;
+    if (!sw_ok(st)) return 0;
+    /* Entry 0 is a dummy, so check from entry 1, and ask for rather less than
+     * the finder does - this is a confirmation, not a search. */
+    return sw_run_len(st + 32, 64) >= 8;
+}
+
 static void sw_find_maybe(void)
 {
     static unsigned tick;
-    if (sw_find_done || a_sw_struct()) return;      /* known title, nothing to do */
+    if (sw_find_done) return;
     if (tick++ % 256) return;
+    if (sw_configured_ok()) { sw_find_done = 1; return; }   /* the known title */
     if (sw_find_table()) sw_find_done = 1;
 }
 

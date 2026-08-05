@@ -49,6 +49,31 @@ fi
 
 mkdir -p "$R"/dev "$R"/proc "$R"/sys "$R"/data "$R"/dump/log/connectivity "$R"/tmp "$R"/run
 
+# PAD_MEMTOTAL_KB=1048576 makes the guest see a machine with 1 GB, which is
+# what an i.MX6 Spike 2 board has, instead of this PC's 31.
+#
+# OPT-IN, because the theory it was built for turned out to be WRONG. Jaws LE
+# dies in memcpy with a null destination, and the plausible story was that the
+# game sizes its asset budget from MemTotal and a 32-bit process cannot use
+# 31 GB. Reporting 1 GB changed nothing: same crash, same address, after the
+# same 125 scene loads. The reasoning about the address space is still sound and
+# the knob is still worth having, but it does not get to quietly change how
+# every title loads on the strength of a theory that failed its one test.
+MEM_KB=${PAD_MEMTOTAL_KB:-}
+[ -n "$MEM_KB" ] && awk -v t="$MEM_KB" '
+    BEGIN { OFS="" }
+    { name=$1; val=$2; unit=$3 }
+    name=="MemTotal:"     { val=t }
+    name=="MemFree:"      { val=int(t/2) }
+    name=="MemAvailable:" { val=int(t*3/4) }
+    name=="Buffers:"      { val=int(t/64) }
+    name=="Cached:"       { val=int(t/8) }
+    name=="SwapTotal:"    { val=0 }
+    name=="SwapFree:"     { val=0 }
+    { printf "%-15s %8s %s\n", name, val, unit }
+' /proc/meminfo > "$R/dump/meminfo" 2>/dev/null
+[ -n "$MEM_KB" ] || rm -f "$R/dump/meminfo"
+
 # /games/{game,conagent,data} are symlinks into the title directory on the card
 [ -d "$R/games/data" ] && [ ! -L "$R/games/data" ] && rmdir "$R/games/data" 2>/dev/null
 ln -sfn "$GAME/game"     "$R/games/game"
@@ -79,6 +104,12 @@ CARD_SRC="$4"
 # Without it this silently produced an EMPTY /proc: no /proc/meminfo, and the
 # game sizes its asset budget from that, so it loaded no scenes at all.
 mount -t proc proc "$R/proc"
+
+# The guest's /proc/meminfo, when PAD_MEMTOTAL_KB asked for one. See where it
+# is written, above, for what it is for and why it is not on by default.
+if [ -f "$R/dump/meminfo" ]; then
+    mount --bind "$R/dump/meminfo" "$R/proc/meminfo"
+fi
 # A writable fake /sys: the real one has none of the i.MX6 nodes the game reads
 # (soc_id, the OTP fuse table, the LVDS backlight), so sysfs is no better here.
 mount -t tmpfs tmpfs "$R/sys"

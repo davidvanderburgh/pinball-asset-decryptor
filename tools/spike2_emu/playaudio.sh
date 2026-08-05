@@ -56,22 +56,25 @@ trap 'kill $HOLD 2>/dev/null; rm -f "$FIFO"' EXIT
 
 # ---- WHICH SPEAKER: Windows directly, or WSLg's PulseAudio ----------------
 #
-# WSLg's audio link to Windows is the weak part of this whole rig. It degrades
-# on a live session - measured 2026-08-05: a pure sine came back mathematically
-# perfect off pulse's own monitor (0 of 280490 samples off a sine) while it was
-# audibly breaking up in the room, and a WAV played by Windows itself at the
-# same moment was clean. So the fault is entirely in the WSLg -> Windows hop,
-# nothing inside WSL can see it, and `wsl --shutdown` was the only cure.
+# WSLg's audio link to Windows is the weak part of this whole rig, and how badly
+# is measurable: play a known file through it, record the speakers, align the
+# recording to the source and subtract (audioscore.py). Windows playing that file
+# itself scores -13.6 dB of residual; through WSLg's PulseAudio it scores
+# +16.4 dB, i.e. THE ERROR IS LOUDER THAN THE SIGNAL. Buffer size, sample rate
+# and CPU load all leave that untouched.
+#
+# BEWARE THE TEST THAT SAYS IT IS FINE. A pure sine comes back clean through
+# this path - clean at the sink AND clean at the speakers - while music through
+# it at the same moment is wrecked. A sine survives a bad path nearly intact, so
+# a tone test can only ever produce a false negative here.
 #
 # So DO NOT USE THAT HOP. The guest's PCM is already raw s16le in a FIFO; serve
-# it over TCP and let a WINDOWS ffplay.exe be the speaker. PulseAudio, Weston
-# and RDP all drop out of the audio path. Two facts make it work: WSL can
-# execute a Windows binary directly (interop), and WSL2 forwards Windows'
-# localhost onto listeners inside the VM, so the player connects to 127.0.0.1.
-#
-# PAD_AUDIO_SINK=pulse forces the old path back (it is still correct, just
-# fragile); =win forces this one and fails loudly if ffplay is missing; the
-# default picks Windows when ffplay.exe can be found and falls back otherwise.
+# it over TCP and let a WINDOWS python running padplay.py be the speaker.
+# PulseAudio, Weston and RDP all drop out of the audio path. Two facts make it
+# work: WSL can execute a Windows binary directly (interop), and WSL2 forwards
+# Windows' localhost onto listeners inside the VM, so the player connects to
+# 127.0.0.1. Scored the same way, that path is -14.7 dB: level with Windows
+# playing the file directly.
 is_wsl() { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; }
 
 # A Windows Python that can actually open a sound device. Both halves matter:

@@ -59,52 +59,17 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1b. LED fade decode — NOW THE TOP LIGHTING BLOCKER, and measured.**
-      Second half of playfield LED rendering; 1a (stem joining, 113 channels →
-      81 fixtures) is done. **In attract mode, 2026-08-05: `decoded` +229 vs
-      `skipped` +225 in 60 s — the shim throws away about half of the LED
-      frames the game sends, and during the stretches that look frozen the
-      dropped ones outnumber the decoded ones 3-8x** (skipped 3.0-4.2/s while
-      decoded ran 0.4-1.2/s). That is why attract lighting looks static: it is
-      not the window, the transport or the rate, it is coverage. `skipped` is
-      at offset 16 of the padled block and has been counted since version 1;
-      the playfield window now shows it. The handoff records 41% coverage of
-      indexed-command frames with the largest failing group `cmd a4` at body
-      length 3 with a non-index lead byte. Oracle remains the game's own
-      `Diagnostics → LED Tests`, one fixture at a time BY NAME.
-      **THE DROPPED FRAMES CAN NOW BE SEEN: `PAD_LED_SKIP_LOG=N`** dumps the
-      first N of them (`[ledskip] node= cmd= blen= body= known=`) with no
-      `PAD_NB_LOG` and no boot cost. First capture in attract, and the two
-      groups want completely different work:
-      - **Node 1 (cabinet), cmd a4/a5, `blen=2`, body `0485` — 58 of 64
-        drops.** A bare (index, value) pair. The shape table starts at
-        `{extra=1}` so it needs `blen>=3`; a 2-byte body matches nothing. It
-        looks like a one-line fix (`{0,0}`) and it is NOT on the playfield
-        picture, so it changes no insert - do not let it look like progress.
-      - **★ Node 9, `cmd=a6` — THE FADE FRAMES, AND THE SHAPE FITS 41 OF 41.**
-        a6 is the command the handoff already named for fades, and here it is
-        on node 9, a PLAYFIELD insert board. Every captured a6 frame satisfies
-            blen = 3 header bytes + M mask bytes + one level byte per SET BIT
-        with M from 4 to 9 and blen from 22 to 40. Worked examples:
-            blen=23  hdr 87 1a f7  mask 44 01 30 08 30 10 82 20 (popcount 12)
-                     levels 7f 00 7f 7f 00 7f 7f 7f 7f 00 00 7f
-            blen=39  hdr 8f 1a fb  mask 32 0f 1f 08 88 57 3c 80 24 (pop 27)
-            blen=34  hdr 8f 19 f7  mask 85 4f 32 90 85 2f 10 80  (pop 23)
-        Level bytes across 42 frames are overwhelmingly **0 (355), 127 (259),
-        255 (69)** — off / half / full — with only 13 distinct values, which
-        is what a lamp level looks like and not what a coincidence looks like.
-        **NOT SHIPPABLE YET, and this is the trap the item already warns
-        about:** the arithmetic says where the levels ARE, it says nothing
-        about WHICH LED each mask bit means. That mapping needs the oracle
-        (`Diagnostics → LED Tests`, one fixture at a time BY NAME). Do not
-        guess it - a wrong mapping lights the wrong inserts convincingly.
-        Also unexplained: the 3 header bytes (byte0 is 8x, byte1 is 19/1a).
-      - **Still unsolved shapes:** node 8/9 `cmd=a2/a3`, odd `blen` 15/17/18,
-        and `b4/b5`. One a2 frame ends `d8 e1e1e1 e4e4e4 a9 c4c4c4 98 6e6e6e`
-        — RGB-looking triples behind a per-group byte. Different format, same
-        pass.
-      - Raw capture: `c:\tmp\ledskip_attract.txt` (401 lines) and the fit
-        checker `c:\tmp\a6fit.py`.
+- [ ] **1c. The LED frame shapes that are STILL dropped.** With the a6 fade
+      frames decoding (item 1b, done), attract leaves ~3.5 dropped frames a
+      second. Two groups, both visible with `PAD_LED_SKIP_LOG=N`:
+      - **Bare `(index, value)` pairs, `blen=2`, cmd a4/a5** on nodes 1, 8 AND
+        9. The shape table starts at `{extra=1}` so it needs `blen>=3` and a
+        2-byte body matches nothing. Looks like a one-line addition (`{0,0}`),
+        but it was NOT done here because it was never verified - and node 8/9
+        are playfield boards, so getting it wrong is visible.
+      - **cmd a2/a3/b4/b5 with odd lengths** (15, 17, 18, 39). Different
+        format again; one ends in RGB-looking triples
+        `d8 e1e1e1 e4e4e4 a9 c4c4c4 98 6e6e6e` behind a per-group byte.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
@@ -156,6 +121,40 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **1b. LED fade decode.** DONE 2026-08-05. The fade frames are **`cmd a6`
+      on the insert boards**, and the format is
+      **3 payload bytes, then a BITMAP over the board's own enumerated LED
+      list (LSB-first, truncated after the last set bit), then one level byte
+      per set bit**, levels `0x00 / 0x7f / 0xff`. Decoded in `hwshim.c`.
+      **Attract, before → after: `decoded` +229 vs `skipped` +225 → `decoded`
+      +684..851 vs `skipped` +203..212 in the same 60 s window**, and LED bytes
+      moving in a busy 20 s window went from single digits to 306. The
+      playfield's visible change rate went from 21 to 33 marker clusters per
+      3 s. `1a` (stem joining, 113 channels → 81 fixtures) was already done.
+      **How the mapping was established without the operator menu**, because
+      "it looks plausible" is the trap this item warned about:
+      - the split is forced — 44 of 45 frames have exactly ONE split whose
+        level region is drawn purely from {00,7f,ff}, and scanning mask length
+        upward and taking the first fit lands on that same split, so the
+        decoder needs no heuristic;
+      - **raw index is dead**: node 9 announced 71 LEDs at indices 0,1,8..87
+        and has NO lamp at 2..7, so a raw reading addresses hardware that is
+        not on the board **21% of the time** (160 of 769 bits) against 2/769
+        for the enumerated-list reading, and a 9-byte mask is exactly
+        ceil(71/8), the longest ever seen;
+      - **against a control**, because the first test tried (overlap with the
+        indexed path) had NO power — a shuffled control scored the same, 26%
+        vs 26%. Shuffling the announced list keeps every lamp valid and
+        destroys the structure: complete RGB triples addressed in one frame go
+        **23 (this mapping) vs 1 (shuffled) vs 4 (raw)**.
+      **The one thing still unproven:** that the k-th announced LED is the
+      lamp the TABLE calls index k. This is verified against the BOARD, not
+      against the physical playfield, so a systematic permutation within a
+      board would render a coherent-looking light show and still be wrong.
+      The oracle for that remains `Diagnostics → LED Tests`, one fixture at a
+      time BY NAME. Also: 1 frame in 45 first-fits to the wrong split and
+      writes wrong values for that frame; the next frame corrects it.
 
 - [x] **9. Virtual playfield needs real bandwidth.** DONE 2026-08-05, `19e1b85`.
       **15 fps → 30.3 fps**, measured the same way on identical input, and

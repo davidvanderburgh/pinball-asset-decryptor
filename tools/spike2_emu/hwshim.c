@@ -4999,6 +4999,10 @@ struct padled_shm {
 
 static struct padled_shm *led_shm;
 static unsigned char led_known[16][96];      /* seen in the boot enumeration */
+/* The same enumeration IN ORDER, which is what a bitmap frame indexes into:
+ * led_order[node][k] is the LED index the board announced k-th. */
+static unsigned char led_order[16][96];
+static unsigned char led_count[16];
 
 static int led_insert_node(unsigned node) { return node == 1 || node == 8 || node == 9; }
 
@@ -5073,6 +5077,20 @@ static void coil_publish(const unsigned char *p, int n)
     led_shm->coil_gen++;
 }
 
+/* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run
+ * decodes thousands of these; the point is a SAMPLE to compare against the
+ * dropped frames, not a transcript. */
+static int led_dec_log(void)
+{
+    static int budget = -1, used;
+    if (budget < 0) {
+        const char *e = getenv("PAD_LED_DEC_LOG");
+        budget = e ? (*e ? atoi(e) : 200) : 0;
+    }
+    if (budget > 0 && used < budget) { used++; return 1; }
+    return 0;
+}
+
 static void led_publish(const unsigned char *p, int n)
 {
     unsigned node, cmd, blen, i;
@@ -5085,9 +5103,21 @@ static void led_publish(const unsigned char *p, int n)
     cmd  = p[2];
     if (!led_insert_node(node)) return;
 
-    /* The boot enumeration: remember which indices this board really has. */
+    /* The boot enumeration: remember which indices this board really has.
+     *
+     * ORDER IS RECORDED, not just membership. The a6 fade frames carry a
+     * BITMAP rather than indices, so bit k has to mean "the k-th LED of this
+     * board" - and which LED that is depends on the order the board announced
+     * them in. led_known is a bitmap and cannot answer that; led_order can.
+     * Measured: node 9 announces 71 LEDs and a 9-byte bitmap is exactly
+     * ceil(71/8), which is the observation that made the bitmap reading
+     * credible in the first place. */
     if (n == 6 && (cmd == 0x84 || cmd == 0x85)) {
-        if (p[3] < 96) led_known[node][p[3]] = 1;
+        if (p[3] < 96) {
+            if (!led_known[node][p[3]] && led_count[node] < 96)
+                led_order[node][led_count[node]++] = p[3];
+            led_known[node][p[3]] = 1;
+        }
         return;
     }
     if (cmd != 0x97 && cmd != 0xa2 && cmd != 0xa3 && cmd != 0xa4 &&
@@ -5111,8 +5141,90 @@ static void led_publish(const unsigned char *p, int n)
             led_shm->val[node][body[i]] = body[cnt + gap + i];
         led_shm->decoded += cnt;
         led_shm->gen++;
+        /* The lamps the WORKING path addresses, under the same env var. The
+         * bitmap reading of the a6 frames has to be checked against something,
+         * and "do the two paths drive the same lamps" is a check that does not
+         * need the operator menu: a mapping that is off by an offset would
+         * light a set of lamps the indexed path never touches. */
+        if (led_dec_log()) {
+            char l[256];
+            int q = 0;
+            q += snprintf(l + q, sizeof l - q, "[leddec] node=%u cmd=%02x idx=",
+                          node, cmd);
+            for (i = 0; i < cnt && q < (int)sizeof l - 6; i++)
+                q += snprintf(l + q, sizeof l - q, "%d,", body[i]);
+            snprintf(l + q, sizeof l - q, "\n");
+            logmsg(l);
+        }
         return;
     }
+    /* ---- THE BITMAP SHAPE (cmd a6): the other half of the light show ------
+     *
+     * The indexed shapes above carry (index, value) pairs. This one carries a
+     * BITMAP over the board's own LED list and then one level per set bit:
+     *
+     *   [3 payload bytes] [mask bytes] [one level per set bit]
+     *   bit k (LSB first within each byte) = the k-th LED THIS BOARD
+     *   ANNOUNCED at boot, not raw index k
+     *   levels are 0x00, 0x7f or 0xff
+     *
+     * Everything about that sentence was measured on 396 dropped frames from
+     * attract mode, and it is worth writing down HOW, because "a decode that
+     * looks plausible" is the failure mode this file has already had once:
+     *
+     *  - THE SPLIT. 44 of 45 frames have exactly one split whose level region
+     *    is drawn purely from {00,7f,ff}; a wrong split spills mask bytes into
+     *    it. Scanning the mask length upward and taking the first length that
+     *    satisfies blen = 3 + mlen + popcount() lands on that same split, so
+     *    the parse below needs no heuristic.
+     *  - THE MAPPING, versus the obvious alternative. Node 9 announced 71 LEDs
+     *    at indices 0,1,8,9..87 - it has NO lamp at index 2..7. Read as raw
+     *    indices, these frames address hardware that is not on the board 21%
+     *    of the time (160 of 769 bits). Read as positions in the announced
+     *    list: 2 of 769, and both are one bit past the end of a truncated
+     *    mask. A 9-byte mask is also exactly ceil(71/8), and 9 is the longest
+     *    mask ever seen.
+     *  - AGAINST A CONTROL, because the first test I ran had no power and a
+     *    shuffled control scored the same as the hypothesis. Shuffling the
+     *    announced list keeps every lamp valid and destroys the structure:
+     *    complete RGB triples addressed in one frame go from 23 (this
+     *    mapping) to 1 (shuffled) to 4 (raw).
+     *
+     * WHAT IS STILL NOT PROVEN: that the k-th announced LED is the lamp the
+     * TABLE calls index k - i.e. this is verified against the board, not
+     * against the physical playfield. The oracle for that is the game's own
+     * Diagnostics -> LED Tests, one fixture at a time by name. Until someone
+     * runs it, a systematic permutation within the board would be invisible
+     * here. It renders a coherent light show either way, which is exactly why
+     * that caveat needs to stay in writing. */
+    if (cmd == 0xa6 && blen >= 4) {
+        unsigned mlen;
+        for (mlen = 1; 3 + mlen <= blen; mlen++) {
+            unsigned bits = 0, j, k, ok = 1, wrote = 0;
+            for (j = 0; j < mlen; j++)
+                for (k = 0; k < 8; k++)
+                    bits += (body[3 + j] >> k) & 1;
+            if (3 + mlen + bits != blen) continue;
+            /* Every bit must land on a lamp the board announced. A frame that
+             * fails this is left to the skip counter rather than guessed at -
+             * writing val[] for a lamp that does not exist is how a decode
+             * starts lighting the wrong inserts convincingly. */
+            for (j = 0; j < mlen && ok; j++)
+                for (k = 0; k < 8; k++)
+                    if ((body[3 + j] >> k) & 1)
+                        if (j * 8 + k >= led_count[node]) { ok = 0; break; }
+            if (!ok) break;
+            for (j = 0; j < mlen; j++)
+                for (k = 0; k < 8; k++)
+                    if ((body[3 + j] >> k) & 1)
+                        led_shm->val[node][led_order[node][j * 8 + k]] =
+                            body[3 + mlen + wrote++];
+            led_shm->decoded += wrote;
+            led_shm->gen++;
+            return;
+        }
+    }
+
     led_shm->skipped++;
 
     /* ---- PAD_LED_SKIP_LOG=N: SHOW THE FRAMES WE THROW AWAY ----------------
@@ -5146,6 +5258,30 @@ static void led_publish(const unsigned char *p, int n)
         }
         if (budget > 0 && used < budget) {
             used++;
+            /* THE BOARD'S OWN ENUMERATION, once per node, before the frames.
+             * The a6 frames appear to carry a BITMAP over this board's LEDs
+             * rather than raw indices - the longest mask seen on node 9 is 9
+             * bytes = 72 slots, which is ceil(69/8) for the 69 LEDs led_io.txt
+             * lists. That is a hypothesis about which the TABLE cannot be the
+             * judge: the table is what a human wrote down, and led_known is
+             * what the BOARD said on the wire at boot. Print the wire's answer
+             * so the mapping is tested against the machine. */
+            {
+                static unsigned char dumped[64];
+                if (node < 16 && !dumped[node]) {
+                    char e[512];
+                    int q = 0, x;
+                    dumped[node] = 1;
+                    /* IN ARRIVAL ORDER. Printing the bitmap instead would sort
+                     * it by index and quietly answer a different question. */
+                    q += snprintf(e + q, sizeof e - q, "[ledenum] node=%u order=", node);
+                    for (x = 0; x < led_count[node]; x++)
+                        if (q < (int)sizeof e - 8)
+                            q += snprintf(e + q, sizeof e - q, "%d,", led_order[node][x]);
+                    snprintf(e + q, sizeof e - q, " count=%d\n", led_count[node]);
+                    logmsg(e);
+                }
+            }
             k += snprintf(line + k, sizeof line - k,
                           "[ledskip] node=%u cmd=%02x blen=%u body=", node, cmd, blen);
             for (j = 0; j < (int)blen && k < (int)sizeof line - 4; j++)

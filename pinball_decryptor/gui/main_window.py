@@ -11930,14 +11930,8 @@ class MainWindow:
         in the Input box — see the module docstring for why that is called out
         on the tab itself."""
         from .emulate_tab import EmulatePanel
-        self._emulate_panel = EmulatePanel(
-            self._tab_emulate, log=self.append_log,
-            # The project's two images: what Extract was pointed at (the
-            # original card) and what Write builds (the replacement).  Passed
-            # as a callable so the panel reads them when the user clicks,
-            # not when the tab is built.
-            project_paths=lambda: (self.extract_input_var.get(),
-                                   self.write_output_var.get()))
+        self._emulate_panel = EmulatePanel(self._tab_emulate,
+                                           log=self.append_log)
         self._emulate_panel.build(self._tab_emulate)
 
     def _build_compare_tab(self):

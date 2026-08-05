@@ -28,9 +28,11 @@ import sys
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: audiotcp.py <fifo> <port>", file=sys.stderr)
+        print("usage: audiotcp.py <fifo> <port> [prebuffer_bytes]",
+              file=sys.stderr)
         return 2
     fifo, port = sys.argv[1], int(sys.argv[2])
+    prebuf = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -56,6 +58,31 @@ def main():
             continue
         try:
             with os.fdopen(fd, "rb", buffering=0) as f:
+                # PRE-BUFFER, and this is the difference between "not crackly"
+                # and "smooth".
+                #
+                # A live stream that arrives at exactly real time gives the
+                # player NO CUSHION: it plays as fast as it receives, so every
+                # hiccup in the game's output becomes an underrun and the music
+                # audibly skips beats. Player-side flags cannot fix that -
+                # there is nothing queued to ride out the gap. Measured while
+                # it was skipping: the guest's own `dropped=0` and `fifo=0 ms`,
+                # so nothing was being lost here at all; the player was simply
+                # always hungry.
+                #
+                # So hold back the first chunk and hand it over in one go. The
+                # player's queue then carries that much slack for the rest of
+                # the session, at the cost of the same delay once at startup.
+                held = bytearray()
+                while prebuf and len(held) < prebuf:
+                    b = f.read(4096)
+                    if not b:
+                        break
+                    held += b
+                if held:
+                    print("[audiotcp] pre-buffered %d bytes before starting"
+                          % len(held), flush=True)
+                    conn.sendall(bytes(held))
                 while True:
                     b = f.read(4096)
                     if not b:

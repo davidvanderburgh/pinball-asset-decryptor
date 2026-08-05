@@ -109,7 +109,13 @@ if [ "$SINK" = win ]; then
     # SOCKET. The player then finds nothing to connect to and the run is
     # silent. audiotcp.py listens first and opens the FIFO only once a player
     # has attached.
-    python3 "$(dirname "$0")/audiotcp.py" "$FIFO" "$PORT" &
+    # The cushion the player rides on, in bytes of PCM. See audiotcp.py: a
+    # live stream delivered at exactly real time leaves the player permanently
+    # hungry, and the music skips. PAD_AUDIO_PREBUFFER_MS moves it.
+    PRE_MS=${PAD_AUDIO_PREBUFFER_MS:-200}
+    PRE_BYTES=$(( RATE * CH * 2 * PRE_MS / 1000 ))
+    echo "[play] pre-buffer ${PRE_MS} ms (${PRE_BYTES} bytes)"
+    python3 "$(dirname "$0")/audiotcp.py" "$FIFO" "$PORT" "$PRE_BYTES" &
     SRV=$!
 
     # TEARING DOWN A WINDOWS CHILD. The player is a native Windows process
@@ -143,18 +149,34 @@ if [ "$SINK" = win ]; then
     # which is what the probe was for, so the probe only ever added a fake
     # connection.
     #
-    # ffplay 8.x has no -ac; channels come from -ch_layout. The low-delay flags
-    # matter: the default buffering is fine for a file and useless for a
-    # machine that has to answer a flipper button.
+    # ffplay 8.x has no -ac; channels come from -ch_layout.
+    #
+    # BUFFERING: the first version ran `-fflags nobuffer -flags low_delay
+    # -probesize 32 -analyzeduration 0` on the theory that a pinball machine
+    # must answer a flipper immediately. It does answer immediately, and it
+    # SKIPS - David: "it sounds like we are dropping frames, I can hear the
+    # music skipping some beats". Measured at the same time: `dropped=0` and
+    # `fifo=0 ms` on the guest side, i.e. every frame left WSL and the relay
+    # was idling, so nothing was lost here - the player simply had no buffer
+    # to ride out the jitter in the game's own output, and each gap became an
+    # underrun. The old pulse path hid that behind a 40 ms buffer.
+    #
+    # So let ffplay buffer by default. PAD_AUDIO_LOWDELAY=1 restores the
+    # aggressive flags for anyone who would rather have the latency back.
+    LOWDELAY=""
+    if [ "${PAD_AUDIO_LOWDELAY:-0}" = 1 ]; then
+        LOWDELAY="-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0"
+        echo "[play] low-delay flags ON (PAD_AUDIO_LOWDELAY=1) - may skip"
+    fi
     #
     # RESTARTED IF IT DIES, because it is the speaker and a run that quietly
     # loses it is the "audio was silently dead for weeks" failure this rig has
     # already had once. The loop exits with the relay.
     (
         while kill -0 $SRV 2>/dev/null; do
+            # shellcheck disable=SC2086
             "$FFPLAY" -hide_banner -loglevel error -nodisp -autoexit \
-                -fflags nobuffer -flags low_delay -probesize 32 \
-                -analyzeduration 0 \
+                $LOWDELAY \
                 -f s16le -ar "$RATE" -ch_layout "$LAYOUT" \
                 -i "tcp://127.0.0.1:$PORT" >/dev/null 2>&1
             kill -0 $SRV 2>/dev/null || break

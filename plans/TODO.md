@@ -107,11 +107,11 @@ These have each been violated at least once and each cost a run or a window:
   across the VM boundary for a switch a human flips by hand. If that ever feels
   wrong in use, the fix is to read it on demand after a click rather than to
   raise the rate.
-- **RESOLVED 2026-08-05: attract-mode LED churn HAS now been watched end to
-  end.** The game reaches attract (screenshot: the high-score attract screen),
-  the lamps do move (21 marker clusters changed between two playfield shots
-  3.2 s apart), and the reason it still looks static in stretches is item 1b -
-  half the frames are dropped undecoded. See item 1b for the numbers.
+- **RESOLVED 2026-08-05: attract-mode LED churn has been watched end to end,
+  and the static half of it is fixed.** The game reaches attract (screenshot:
+  the high-score attract screen); the lamps moved 21 marker clusters per 3 s
+  with half the frames being dropped, and **33 per 3 s** once the a6 fade
+  frames decoded (item 1b). What still drops is item 1c.
 - **The playfield's polite close failed in one card run out of three.** Removing
   `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
   still up after 5 s and had to be closed the hard way, which loses nothing now

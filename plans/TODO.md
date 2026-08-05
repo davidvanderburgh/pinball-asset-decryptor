@@ -109,7 +109,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Done
 
-- [x] **9. Virtual playfield needs real bandwidth.** DONE 2026-08-05.
+- [x] **9. Virtual playfield needs real bandwidth.** DONE 2026-08-05, `19e1b85`.
       **15 fps → 30.3 fps**, measured the same way on identical input, and
       brightness now shows as marker SIZE and opacity (blended toward the
       artwork sampled behind each insert, since Tk has no alpha). **The

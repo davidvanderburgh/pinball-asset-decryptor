@@ -103,6 +103,27 @@ PRESS_MS = 150
 #: aliased the blink into a flicker that looked like a bug in the decoder.
 POLL_MS = 50
 
+#: Close with the run: once the emulator has been SEEN, this many consecutive
+#: failed polls of the LED block means the run has been torn down (watch.sh
+#: removes dump/padled on exit precisely so this can tell), and the window
+#: closes itself instead of sitting around as "no emulator". ~2 s of misses
+#: rather than one, because a read over \\wsl.localhost can fail transiently
+#: while everything is fine. A playfield started with no emulator at all never
+#: trips this - nothing was seen, so there is nothing to close with.
+GONE_POLLS = 40
+
+
+def emu_gone(view, readable):
+    """Track LED-block readability; True when a once-seen emulator has left."""
+    if readable:
+        view._seen_emu = True
+        view._gone = 0
+        return False
+    if not getattr(view, "_seen_emu", False):
+        return False
+    view._gone = getattr(view, "_gone", 0) + 1
+    return view._gone >= GONE_POLLS
+
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -447,6 +468,9 @@ class Field:
     def tick(self):
         d = self.read_leds()
         self.last = d
+        if emu_gone(self, d is not None):
+            self.root.destroy()             # the run ended; leave with it
+            return
         if d is None:
             self.status.config(text="no emulator (dump/padled not readable)")
         else:
@@ -618,6 +642,9 @@ class Schematic:
                 d = f.read(PADLED_READ)
         except OSError:
             d = None
+        if emu_gone(self, bool(d)):
+            self.root.destroy()             # the run ended; leave with it
+            return
         if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
             self.status.config(text="no emulator (dump/padled not readable)")
         else:

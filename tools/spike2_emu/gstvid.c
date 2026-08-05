@@ -14,6 +14,17 @@
  *   3. structure_get_int("width")    -> what the host probed
  *   4. the "handoff" signal          -> we call it ourselves, per frame
  *
+ * STREAMS, PLURAL. The first version kept ONE of everything - one pipeline
+ * pointer, one location, one shm request slot - because Godzilla's attract
+ * loop only ever played one clip at a time. Then the attract playlist
+ * crossfaded: a second pipeline was built WHILE the first was still looping,
+ * the two prepares raced on the single request slot, the loser waited for an
+ * ack generation the host had already jumped past ("[vid] host did not
+ * answer"), and the game spent the rest of the run retrying seek+play on a
+ * pipeline this file no longer recognised - at ~25 errors a second. Now every
+ * pipeline the game creates gets its own stream slot with its own shm CHANNEL
+ * (padvid.h v2), and nothing is shared between clips but the code.
+ *
  * ZERO COPY IN THE GUEST, and this is the whole performance story. The frame
  * buffer handed to the game points DIRECTLY into the shared ring the host
  * decoded into. Nothing in the emulated guest touches the 1.5 MB of pixels -
@@ -77,37 +88,77 @@ static void vid_map(void)
         VLOG("[vid] bad magic - is padvidhost running?\n");
         return;
     }
+    if (((struct padvid_shm *)p)->version != PADVID_VERSION) {
+        VLOG("[vid] block version %u, this shim wants %u - rebuild the other side\n",
+             ((struct padvid_shm *)p)->version, PADVID_VERSION);
+        return;
+    }
     vshm = (struct padvid_shm *)p;
     vring = (unsigned char *)p + PADVID_HDR;
-    VLOG("[vid] bridge attached: %s\n", path);
+    VLOG("[vid] bridge attached: %s (%u channels)\n", path, PADVID_CHANNELS);
 }
 
-/* ---- the pipeline we are standing in for -------------------------------- */
+/* ---- the streams --------------------------------------------------------- */
 
-static void *cur_pipeline;          /* the last pipeline_new() result        */
-static void *cur_fakesink;          /* the object that got signal-handoffs   */
-static void *cur_sinkpad;           /* its real "sink" pad - the handoff
-                                     * callback is handed this and a consumer
-                                     * that asks the pad for caps gets NULL, or
-                                     * worse, if it is not a real pad. */
-static void (*cur_handoff)(void *, void *, void *, void *);
-static void *cur_handoff_data;
-static char cur_location[PADVID_PATH_MAX];
-static int  cur_ready;              /* host answered with a size             */
-static int  cur_playing;
-static unsigned cur_w, cur_h;
+struct stream {
+    void *pipeline;             /* identity; 0 = free slot                   */
+    void *fakesink;             /* the object that got signal-handoffs       */
+    void *sinkpad;              /* its real "sink" pad - the handoff callback
+                                 * is handed this, and a consumer that asks
+                                 * the pad for caps must get OUR caps.       */
+    void *decoder;              /* SpiVideoStreamDecoder, for diagnostics    */
+    void (*handoff)(void *, void *, void *, void *);
+    void *handoff_data;
+    char location[PADVID_PATH_MAX];
+    int  ready;                 /* host answered with a size                 */
+    int  playing;
+    unsigned run_id;            /* bumped per play(); a thread that wakes to
+                                 * find it changed belongs to a PREVIOUS run
+                                 * and must touch nothing on its way out. The
+                                 * old single-stream code let a late-waking
+                                 * thread clear `playing` under the run that
+                                 * had just re-armed it, and the host read
+                                 * that as "guest stopped playback".         */
+    unsigned w, h;
+    long long pos_ns;
+    void *buf;                  /* this stream's GstBuffer                   */
+    /* Our own caps/structure objects. Never handed to real GStreamer - every
+     * unref path recognises them by address. Per stream, because two live
+     * clips can have two different sizes. */
+    unsigned long fake_caps[8];
+    unsigned long fake_struct[8];
+};
 
-/* Our own caps/structure. Never handed to real GStreamer - every unref path is
- * interposed and recognises these two by address. */
-static unsigned long fake_caps[8];
-static unsigned long fake_struct[8];
+static struct stream streams[PADVID_CHANNELS];
+
+/* Where construction-time facts attach. The game builds one pipeline at a
+ * time on its UI thread: pipeline_new, then the elements, then the filesrc
+ * location, then the handoff connect - so "the stream created last" is the
+ * right home for each of those calls, none of which carries the pipeline. */
+static struct stream *last_created;
+
+static int chan_of(const struct stream *s) { return (int)(s - streams); }
+
+static struct stream *find_pipeline(void *p)
+{
+    int i;
+    if (!p) return 0;
+    for (i = 0; i < PADVID_CHANNELS; i++)
+        if (streams[i].pipeline == p) return &streams[i];
+    return 0;
+}
+
+int pad_vid_is_pipeline(void *p) { return find_pipeline(p) != 0; }
 
 int pad_vid_is_ours(void *p)
 {
-    return p && (p == (void *)fake_caps || p == (void *)fake_struct);
+    int i;
+    if (!p) return 0;
+    for (i = 0; i < PADVID_CHANNELS; i++)
+        if (p == (void *)streams[i].fake_caps ||
+            p == (void *)streams[i].fake_struct) return 1;
+    return 0;
 }
-
-int pad_vid_is_pipeline(void *p) { return p && p == cur_pipeline; }
 
 /* The GL bridge needs to NAME the frame it is about to upload without copying
  * it. The pointer the game hands glTexDirectVIVMap is one of our ring slots, so
@@ -121,7 +172,7 @@ long pad_vid_ring_offset(const void *p)
 {
     unsigned long base = (unsigned long)vring;
     unsigned long q = (unsigned long)p;
-    unsigned long span = (unsigned long)PADVID_SLOTS * PADVID_SLOT_BYTES;
+    unsigned long span = (unsigned long)PADVID_RING_BYTES;
     if (!vring || q < base || q >= base + span) return -1;
     return (long)(q - base);
 }
@@ -136,37 +187,73 @@ static void str_copy(char *d, const char *s, int n)
 
 void pad_vid_note_location(const char *loc)
 {
-    str_copy(cur_location, loc, sizeof cur_location);
+    if (!last_created) return;
+    str_copy(last_created->location, loc, sizeof last_created->location);
 }
 
-void pad_vid_note_pipeline(void *p) { cur_pipeline = p; cur_ready = 0; cur_playing = 0; }
+void pad_vid_note_pipeline(void *p)
+{
+    struct stream *s;
+    int i;
+    if (!p) return;
+    /* The same heap address coming back from pipeline_new means the OLD
+     * pipeline was freed and its slot is stale - reuse it, do not double it. */
+    s = find_pipeline(p);
+    if (!s) {
+        for (i = 0; i < PADVID_CHANNELS && !s; i++)
+            if (!streams[i].pipeline) s = &streams[i];
+        for (i = 0; i < PADVID_CHANNELS && !s; i++)
+            if (!streams[i].playing) s = &streams[i];
+        if (!s) {
+            /* Every slot is playing. Steal the oldest; a fifth simultaneous
+             * clip is beyond anything the game has shown, and stealing is
+             * still strictly better than the old behaviour, which stole slot
+             * ONE of one on every new clip. */
+            s = &streams[0];
+            VLOG("[vid] all %u channels busy, stealing channel 0\n", PADVID_CHANNELS);
+        }
+    }
+    s->playing = 0;
+    if (vshm) vshm->ch[chan_of(s)].playing = 0;
+    s->pipeline = p;
+    s->fakesink = 0; s->sinkpad = 0; s->decoder = 0;
+    s->handoff = 0; s->handoff_data = 0;
+    s->location[0] = 0;
+    s->ready = 0;
+    s->pos_ns = 0;
+    last_created = s;
+}
 
 void pad_vid_note_handoff(void *sink, void *fn, void *data)
 {
     static void *(*get_pad)(void *, const char *);
-    cur_fakesink = sink;
+    struct stream *s = last_created;
+    if (!s) return;
+    s->fakesink = sink;
     if (!get_pad) get_pad = dlsym(RTLD_NEXT, "gst_element_get_static_pad");
-    cur_sinkpad = (get_pad && sink) ? get_pad(sink, "sink") : 0;
-    cur_handoff = (void (*)(void *, void *, void *, void *))fn;
-    cur_handoff_data = data;
+    s->sinkpad = (get_pad && sink) ? get_pad(sink, "sink") : 0;
+    s->handoff = (void (*)(void *, void *, void *, void *))fn;
+    s->handoff_data = data;
 }
+
+void pad_vid_note_decoder(void *p) { if (last_created) last_created->decoder = p; }
 
 /* ---- GstBuffer, layout derived at run time ------------------------------ */
 
-static void *vid_buf;
 static int   off_data = -1, off_size = -1;
+static void *(*real_buf_alloc)(unsigned);
 
 static int buf_layout(void)
 {
-    static void *(*real_alloc)(unsigned);
     unsigned probe = 0x00ABCDE0u;
     void *b;
     unsigned long *w;
     int i;
     if (off_data >= 0) return 1;
-    if (!real_alloc) real_alloc = dlsym(RTLD_NEXT, "gst_buffer_new_and_alloc");
-    if (!real_alloc) { VLOG("[vid] no gst_buffer_new_and_alloc\n"); return 0; }
-    b = real_alloc(probe);
+    if (!real_buf_alloc)
+        real_buf_alloc = dlsym(RTLD_NEXT, "gst_buffer_new_and_alloc");
+    if (!real_buf_alloc) { VLOG("[vid] no gst_buffer_new_and_alloc\n"); return 0; }
+    b = real_buf_alloc(probe);
     if (!b) return 0;
     w = (unsigned long *)b;
     for (i = 2; i < 16; i++) {
@@ -175,7 +262,6 @@ static int buf_layout(void)
             off_data = (i - 1) * 4;
             VLOG("[vid] GstBuffer layout: data at +%d, size at +%d\n",
                  off_data, off_size);
-            vid_buf = b;
             return 1;
         }
     }
@@ -183,74 +269,70 @@ static int buf_layout(void)
     return 0;
 }
 
-/* ---- the streaming thread ----------------------------------------------- */
-
-/* Defined below; the thread needs them before the file gets to them. */
-static void post_eos(void *pipeline);
-long long pad_vid_duration_ns(void);
-
-/* The SpiVideoStreamDecoder, straight from gst_bus_add_watch's user_data. Its
- * own fields decide what the EOS handler at 0x5c1e7c does, so read them rather
- * than reason about them:
- *   +0x04 loop flag     +0x08 loop count   +0x0c its state (the EOS path needs
- *   1 or 2)             +0x19 frame-completed flag   +0x49 new-frame flag  */
-static void *cur_decoder;
-
-void pad_vid_note_decoder(void *p) { cur_decoder = p; }
-
-static void vid_dump_decoder(const char *when)
+/* One GstBuffer per stream: two live streams hand frames to two different
+ * handoffs, and a single shared buffer would have each overwrite the other's
+ * data pointer mid-frame. The buffer is real (from the real allocator) so any
+ * timestamp sort or unref the game does sees a well-formed object. */
+static int stream_buf(struct stream *s)
 {
-    const unsigned char *b = (const unsigned char *)cur_decoder;
-    if (!b) return;
-    VLOG("[vid] decoder %s: loop=%u count=%u state=%u done19=%u new49=%u\n",
-         when, b[4], *(const unsigned *)(b + 8), *(const unsigned *)(b + 12),
-         b[0x19], b[0x49]);
+    if (s->buf) return 1;
+    if (!buf_layout()) return 0;
+    s->buf = real_buf_alloc(64);
+    return s->buf != 0;
 }
 
-/* Where playback has got to. This is not decoration: the game's bus handler
- * (0x5c1e3c) only acts on EOS if gst_element_query_position and
- * query_duration come back within 0.2 s of each other, and query_position used
- * to answer a flat 0. With a duration of several seconds the difference was
- * always too large, so even a correctly posted EOS would have been discarded. */
-static long long cur_pos_ns;
+/* ---- the streaming thread ----------------------------------------------- */
+
+static void post_eos(void *pipeline);
+long long pad_vid_duration_ns(void *pipeline);
+
+static void vid_dump_decoder(struct stream *s, const char *when)
+{
+    const unsigned char *b = (const unsigned char *)s->decoder;
+    if (!b) return;
+    VLOG("[vid] ch%d decoder %s: loop=%u count=%u state=%u done19=%u new49=%u\n",
+         chan_of(s), when, b[4], *(const unsigned *)(b + 8),
+         *(const unsigned *)(b + 12), b[0x19], b[0x49]);
+}
 
 static void *vid_thread(void *arg)
 {
+    struct stream *s = (struct stream *)arg;
+    struct padvid_chan *c = &vshm->ch[chan_of(s)];
+    unsigned char *ring = vring + (unsigned long)chan_of(s)
+                                * PADVID_SLOTS * PADVID_SLOT_BYTES;
+    unsigned my_run = s->run_id;
     unsigned consumed = 0;
-    unsigned delay;
-    (void)arg;
-    if (!vshm) return 0;
-    delay = 33333;
-    if (vshm->fps_num && vshm->fps_den)
-        delay = (unsigned)(1000000ull * vshm->fps_den / vshm->fps_num);
-    VLOG("[vid] streaming %ux%u at %u/%u fps (%u us/frame)\n",
-         vshm->width, vshm->height, vshm->fps_num, vshm->fps_den, delay);
-    while (cur_playing && vshm->playing) {
-        unsigned produced = vshm->write_idx;
+    unsigned delay = 33333;
+    if (c->fps_num && c->fps_den)
+        delay = (unsigned)(1000000ull * c->fps_den / c->fps_num);
+    VLOG("[vid] ch%d streaming %ux%u at %u/%u fps (%u us/frame)\n",
+         chan_of(s), c->width, c->height, c->fps_num, c->fps_den, delay);
+    while (s->run_id == my_run && s->playing && c->playing) {
+        unsigned produced = c->write_idx;
         if (consumed >= produced) {
-            if (vshm->eos) {
+            if (c->eos) {
                 /* Looping is the game's business: it seeks or rebuilds. Stop
                  * here rather than inventing a loop it did not ask for - but it
                  * cannot make that decision until it is TOLD the clip ended,
-                 * and EOS is the only message that tells it. Without this the
-                 * game stayed in its playing state with the last frame frozen
-                 * on screen, which is exactly what "the video plays and then
-                 * stalls" was. Report the position as exactly the duration
-                 * first, because the handler checks that before it acts. */
-                cur_pos_ns = pad_vid_duration_ns();
-                VLOG("[vid] end of stream after %u frames, posting EOS "
-                     "(pos=dur=%u ms)\n", consumed,
-                     (unsigned)(cur_pos_ns / 1000000ll));
-                vid_dump_decoder("at EOS");
+                 * and EOS is the only message that tells it. Report the
+                 * position as exactly the duration first, because the handler
+                 * checks that before it acts. */
+                if (s->run_id != my_run) return 0;   /* superseded mid-wake */
+                s->pos_ns = pad_vid_duration_ns(s->pipeline);
+                VLOG("[vid] ch%d end of stream after %u frames, posting EOS "
+                     "(pos=dur=%u ms)\n", chan_of(s), consumed,
+                     (unsigned)(s->pos_ns / 1000000ll));
+                vid_dump_decoder(s, "at EOS");
                 /* STAND DOWN BEFORE POSTING, not after. The handler runs on
                  * the game's main loop and it answers EOS by seeking straight
                  * back to 0, which arrives about a millisecond later. If this
                  * thread were still flagged as playing at that moment,
                  * pad_vid_play() would decline to start the next one and the
                  * loop would die silently. */
-                cur_playing = 0;
-                vshm->playing = 0;
-                post_eos(cur_pipeline);
+                s->playing = 0;
+                c->playing = 0;
+                post_eos(s->pipeline);
                 return 0;
             }
             usleep(1000);
@@ -258,57 +340,61 @@ static void *vid_thread(void *arg)
         }
         {
             unsigned slot = consumed % PADVID_SLOTS;
-            unsigned char *px = vring + (unsigned long)slot * PADVID_SLOT_BYTES;
+            unsigned char *px = ring + (unsigned long)slot * PADVID_SLOT_BYTES;
+            if (s->run_id != my_run) return 0;       /* superseded mid-wake */
             /* POINT the buffer at the ring. No copy. */
-            *(unsigned long *)((char *)vid_buf + off_data) = (unsigned long)px;
-            *(unsigned *)((char *)vid_buf + off_size) = vshm->frame_bytes;
+            *(unsigned long *)((char *)s->buf + off_data) = (unsigned long)px;
+            *(unsigned *)((char *)s->buf + off_size) = c->frame_bytes;
             /* timestamp/duration sit right after size in the 0.10 layout, both
              * 64-bit. A consumer that sorts or drops on timestamp sees every
              * buffer at 0 otherwise, which looks like one frame repeated. */
             if (off_size + 4 + 8 <= 64) {
                 unsigned long long *ts =
-                    (unsigned long long *)((char *)vid_buf + off_size + 4);
+                    (unsigned long long *)((char *)s->buf + off_size + 4);
                 ts[0] = (unsigned long long)consumed * delay * 1000ull;
                 ts[1] = (unsigned long long)delay * 1000ull;
             }
-            if (cur_handoff)
-                cur_handoff(cur_fakesink, vid_buf, cur_sinkpad, cur_handoff_data);
+            if (s->handoff)
+                s->handoff(s->fakesink, s->buf, s->sinkpad, s->handoff_data);
             consumed++;
-            cur_pos_ns = (long long)consumed * delay * 1000ll;
+            s->pos_ns = (long long)consumed * delay * 1000ll;
             /* Only now may the host reuse this slot. */
-            vshm->read_idx = consumed;
+            c->read_idx = consumed;
         }
         usleep(delay);
     }
-    cur_playing = 0;
-    vshm->playing = 0;
+    /* Reaching here means someone else already cleared a flag (stop, or a new
+     * run superseding this one). Write NOTHING: clearing c->playing now could
+     * land on top of a prepare() that just re-armed the channel, and the host
+     * would read it as "guest stopped playback" on a clip that is starting. */
     return 0;
 }
 
 /* ---- entry points called from gststub.c --------------------------------- */
 
-/* Ask the host to open the current location. Returns 1 if it can be played. */
-int pad_vid_prepare(void)
+/* Ask the host to open a stream's location. Returns 1 if it can be played. */
+int pad_vid_prepare(void *pipeline)
 {
+    struct stream *s = find_pipeline(pipeline);
+    struct padvid_chan *c;
     unsigned gen;
     int spins = 0;
-    if (!vid_on()) return 0;
+    if (!s || !vid_on()) return 0;
     vid_map();
-    if (!vshm || !cur_location[0]) return 0;
-    if (!buf_layout()) return 0;
+    if (!vshm || !s->location[0]) return 0;
+    if (!stream_buf(s)) return 0;
+    c = &vshm->ch[chan_of(s)];
 
     /* RESET THE POSITION HERE, not just in pad_vid_play().
      *
      * The game queries position and duration while the pipeline is at PAUSED,
-     * before it ever plays. Leaving cur_pos_ns holding the PREVIOUS clip's
+     * before it ever plays. Leaving pos_ns holding the PREVIOUS clip's
      * duration meant it compared a stale position against the new clip's
      * duration, decided the new clip was already finished, and tore the
      * pipeline down - then built it again, ~25 times a second, so nothing ever
-     * played and the video panel stayed black. In attract mode it is the same
-     * clip over and over, so the stale value happened to be right and the bug
-     * did not show; in a game, where clips differ, it thrashes. */
-    cur_pos_ns = 0;
-    str_copy(vshm->path, cur_location, PADVID_PATH_MAX);
+     * played and the video panel stayed black. */
+    s->pos_ns = 0;
+    str_copy(c->path, s->location, PADVID_PATH_MAX);
     /* PREROLL: tell the host to start decoding NOW, at PAUSED, not at PLAYING.
      *
      * This was a real race and it produced a perfectly healthy-looking bridge
@@ -320,27 +406,23 @@ int pad_vid_prepare(void)
      * Starting here is also what a real pipeline does. PAUSED means preroll,
      * and the ring is only 4 frames deep, so the host fills it and blocks
      * rather than running away. */
-    vshm->playing = 1;
-    gen = vshm->req_gen + 1;
-    vshm->req_gen = gen;
+    c->playing = 1;
+    gen = c->req_gen + 1;
+    c->req_gen = gen;
     /* 3 s is generous: a probe measured 0.08 s. It exists so a dead host
-     * cannot wedge the game's UI thread, which is what calls this. */
-    while (vshm->ack_gen != gen && spins++ < 3000) usleep(1000);
-    if (vshm->ack_gen != gen) { VLOG("[vid] host did not answer\n"); return 0; }
-    if (vshm->status != PADVID_OK) return 0;
-    cur_w = vshm->width;
-    cur_h = vshm->height;
-    cur_ready = 1;
+     * cannot wedge the game's UI thread, which is what calls this. Nothing
+     * else can bump this channel's req_gen - that is the whole point of
+     * channels - so the generation we wait for cannot be jumped past. */
+    while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
+    if (c->ack_gen != gen) { VLOG("[vid] ch%d host did not answer\n", chan_of(s)); return 0; }
+    if (c->status != PADVID_OK) return 0;
+    s->w = c->width;
+    s->h = c->height;
+    s->ready = 1;
     return 1;
 }
 
 /* Tell the game's bus watch what a real pipeline would have told it.
- *
- * The game adds a bus watch (gst_bus_add_watch) and imports
- * gst_message_parse_state_changed, so its video object is waiting to be told
- * the pipeline prerolled. Our set_state posts nothing, so it waited forever:
- * frames arrived at the handoff and were dropped because, as far as the object
- * was concerned, playback had never started.
  *
  * These are REAL GStreamer messages posted on the REAL bus of a real pipeline
  * object - only the state transitions they describe are invented. That means
@@ -405,41 +487,73 @@ static void post_eos(void *pipeline)
     if (unref) unref(bus);
 }
 
-void pad_vid_announce(int oldst, int newst)
+void pad_vid_announce(void *pipeline, int oldst, int newst)
 {
-    if (cur_pipeline) post_state(cur_pipeline, oldst, newst, 0);
+    if (find_pipeline(pipeline)) post_state(pipeline, oldst, newst, 0);
 }
 
-int  pad_vid_ready(void) { return cur_ready; }
-void *pad_vid_caps(void) { return (void *)fake_caps; }
-void *pad_vid_structure(void) { return (void *)fake_struct; }
-
-int pad_vid_get_int(const char *field, int *value)
+/* The caps question arrives on a PAD, not a pipeline: the game asks the
+ * fakesink's sink pad what got negotiated. Streams remember their pad. A pad
+ * that is no stream's pad but SOME stream is ready falls back to the newest
+ * ready stream - the game has only ever been seen asking about the pad it
+ * connected the handoff to, but a NULL here is precisely the error state this
+ * whole file exists to prevent. */
+void *pad_vid_caps_for_pad(void *pad)
 {
-    if (!value || !field) return 0;
-    if (field[0] == 'w') { *value = (int)cur_w; return 1; }
-    if (field[0] == 'h') { *value = (int)cur_h; return 1; }
+    int i;
+    struct stream *fb = 0;
+    for (i = 0; i < PADVID_CHANNELS; i++) {
+        if (!streams[i].ready) continue;
+        if (pad && streams[i].sinkpad == pad) return (void *)streams[i].fake_caps;
+        fb = &streams[i];
+    }
+    return fb ? (void *)fb->fake_caps : 0;
+}
+
+void *pad_vid_structure_for(void *caps)
+{
+    int i;
+    for (i = 0; i < PADVID_CHANNELS; i++)
+        if (caps == (void *)streams[i].fake_caps)
+            return (void *)streams[i].fake_struct;
     return 0;
 }
 
-void pad_vid_play(void)
+int pad_vid_get_int(void *strct, const char *field, int *value)
 {
+    int i;
+    if (!value || !field) return 0;
+    for (i = 0; i < PADVID_CHANNELS; i++) {
+        if (strct != (void *)streams[i].fake_struct) continue;
+        if (field[0] == 'w') { *value = (int)streams[i].w; return 1; }
+        if (field[0] == 'h') { *value = (int)streams[i].h; return 1; }
+        return 0;
+    }
+    return 0;
+}
+
+void pad_vid_play(void *pipeline)
+{
+    struct stream *s = find_pipeline(pipeline);
     unsigned long th;
-    if (!cur_ready || cur_playing || !vshm) return;
-    cur_pos_ns = 0;
-    cur_playing = 1;
-    vshm->playing = 1;
-    if (pthread_create(&th, 0, vid_thread, 0) != 0) {
-        cur_playing = 0;
-        vshm->playing = 0;
-        VLOG("[vid] could not start the streaming thread\n");
+    if (!s || !s->ready || s->playing || !vshm) return;
+    s->pos_ns = 0;
+    s->run_id++;                /* orphan any thread from a previous run */
+    s->playing = 1;
+    vshm->ch[chan_of(s)].playing = 1;
+    if (pthread_create(&th, 0, vid_thread, s) != 0) {
+        s->playing = 0;
+        vshm->ch[chan_of(s)].playing = 0;
+        VLOG("[vid] ch%d could not start the streaming thread\n", chan_of(s));
     }
 }
 
-void pad_vid_stop(void)
+void pad_vid_stop(void *pipeline)
 {
-    cur_playing = 0;
-    if (vshm) vshm->playing = 0;
+    struct stream *s = find_pipeline(pipeline);
+    if (!s) return;
+    s->playing = 0;
+    if (vshm) vshm->ch[chan_of(s)].playing = 0;
 }
 
 /* LOOPING. The game does not rebuild a pipeline per repeat: its bus handler
@@ -451,27 +565,39 @@ void pad_vid_stop(void)
  * The host decoder cannot seek - it is one ffmpeg per request - so a rewind is
  * served by asking for the same file again, which starts it from frame 0.
  * That is the only position the game ever asks for. */
-int pad_vid_seek(long long pos_ns)
+int pad_vid_seek(void *pipeline, long long pos_ns)
 {
-    if (!cur_ready || !vshm || !cur_location[0]) return 0;
+    struct stream *s = find_pipeline(pipeline);
+    if (!s || !s->ready || !vshm || !s->location[0]) return 0;
     if (pos_ns != 0)
-        VLOG("[vid] seek to %u ms requested; only rewind is supported, "
-             "restarting from 0\n", (unsigned)(pos_ns / 1000000ll));
-    pad_vid_stop();
-    if (!pad_vid_prepare()) { VLOG("[vid] rewind failed to re-arm the host\n"); return 0; }
-    pad_vid_play();
+        VLOG("[vid] ch%d seek to %u ms requested; only rewind is supported, "
+             "restarting from 0\n", chan_of(s), (unsigned)(pos_ns / 1000000ll));
+    pad_vid_stop(pipeline);
+    if (!pad_vid_prepare(pipeline)) {
+        VLOG("[vid] ch%d rewind failed to re-arm the host\n", chan_of(s));
+        return 0;
+    }
+    pad_vid_play(pipeline);
     return 1;
 }
 
 /* Duration in nanoseconds, for query_duration. */
-long long pad_vid_duration_ns(void)
+long long pad_vid_duration_ns(void *pipeline)
 {
-    if (!vshm || !vshm->nframes || !vshm->fps_num) return 0;
-    return (long long)vshm->nframes * 1000000000ll * vshm->fps_den / vshm->fps_num;
+    struct stream *s = find_pipeline(pipeline);
+    struct padvid_chan *c;
+    if (!s || !vshm) return 0;
+    c = &vshm->ch[chan_of(s)];
+    if (!c->nframes || !c->fps_num) return 0;
+    return (long long)c->nframes * 1000000000ll * c->fps_den / c->fps_num;
 }
 
 /* Playback position in nanoseconds, for query_position. Set to exactly the
  * duration at end of stream so the bus handler's "are we actually at the end"
  * test passes; it compares only the LOW 32 bits of the difference, so anything
  * approximate here would be a coin toss rather than a small error. */
-long long pad_vid_position_ns(void) { return cur_pos_ns; }
+long long pad_vid_position_ns(void *pipeline)
+{
+    struct stream *s = find_pipeline(pipeline);
+    return s ? s->pos_ns : 0;
+}

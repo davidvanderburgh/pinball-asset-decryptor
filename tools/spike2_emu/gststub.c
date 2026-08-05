@@ -37,25 +37,29 @@ extern int snprintf(char *, unsigned long, const char *, ...);
 extern char *getenv(const char *);
 extern void pad_say(const char *);          /* hwshim.c's timestamped logger */
 
-/* gstvid.c - the bridge that actually answers for the video pipeline. This file
- * stays the API surface and the trace; that one owns the state and the frames. */
+/* gstvid.c - the bridge that actually answers for the video pipelines. This
+ * file stays the API surface and the trace; that one owns the state and the
+ * frames. Everything that used to be implicit "the one current clip" now
+ * carries the object the game passed - the pipeline for state and seeks, the
+ * pad for caps, the caps/structure pointer for reads - because since the
+ * multi-stream rework there can be several clips alive at once and the
+ * pipeline IS the stream's identity. */
 extern void pad_vid_note_location(const char *);
 extern void pad_vid_note_pipeline(void *);
 extern void pad_vid_note_handoff(void *, void *, void *);
-extern int  pad_vid_prepare(void);
-extern int  pad_vid_ready(void);
-extern void *pad_vid_caps(void);
-extern void *pad_vid_structure(void);
-extern int  pad_vid_get_int(const char *, int *);
-extern void pad_vid_play(void);
-extern void pad_vid_stop(void);
+extern int  pad_vid_prepare(void *);
+extern void *pad_vid_caps_for_pad(void *);
+extern void *pad_vid_structure_for(void *);
+extern int  pad_vid_get_int(void *, const char *, int *);
+extern void pad_vid_play(void *);
+extern void pad_vid_stop(void *);
 extern int  pad_vid_is_ours(void *);
 extern int  pad_vid_is_pipeline(void *);
-extern long long pad_vid_duration_ns(void);
-extern long long pad_vid_position_ns(void);
+extern long long pad_vid_duration_ns(void *);
+extern long long pad_vid_position_ns(void *);
 extern void pad_vid_note_decoder(void *);
-extern int  pad_vid_seek(long long);
-extern void pad_vid_announce(int, int);
+extern int  pad_vid_seek(void *, long long);
+extern void pad_vid_announce(void *, int, int);
 
 static int gst_trace_on(void)
 {
@@ -173,16 +177,16 @@ int gst_element_set_state(void *element, int state)
      * and the thing that wedged the boot the last time its firmware loaded. */
     if (pad_vid_is_pipeline(element)) {
         if (state <= 2) {                 /* NULL / READY: tear down */
-            pad_vid_stop();
+            pad_vid_stop(element);
             r = 1;
         } else if (state == 3) {          /* PAUSED: this is where it used to
                                            * fail, and where the host is asked
                                            * to open the file */
-            r = pad_vid_prepare() ? 1 : 0;
-            if (r) pad_vid_announce(2, 3);        /* READY -> PAUSED, prerolled */
+            r = pad_vid_prepare(element) ? 1 : 0;
+            if (r) pad_vid_announce(element, 2, 3);   /* READY -> PAUSED, prerolled */
         } else {                          /* PLAYING */
-            pad_vid_play();
-            pad_vid_announce(3, 4);               /* PAUSED -> PLAYING */
+            pad_vid_play(element);
+            pad_vid_announce(element, 3, 4);          /* PAUSED -> PLAYING */
             r = 1;
         }
         GSTLOG("[gst] set_state(%p, %s) -> %d  [bridge]\n", element,
@@ -214,7 +218,7 @@ int gst_element_query_duration(void *element, int *format, long long *dur)
 {
     static int (*real)(void *, int *, long long *);
     if (pad_vid_is_pipeline(element)) {
-        if (dur) *dur = pad_vid_duration_ns();
+        if (dur) *dur = pad_vid_duration_ns(element);
         return 1;
     }
     if (!real) real = dlsym(RTLD_NEXT, "gst_element_query_duration");
@@ -269,9 +273,10 @@ void *gst_pad_get_negotiated_caps(void *pad)
 {
     static void *(*real)(void *);
     void *r;
-    if (pad_vid_ready()) {
-        GSTLOG("[gst] pad_get_negotiated_caps(%p) -> bridge caps\n", pad);
-        return pad_vid_caps();
+    void *ours = pad_vid_caps_for_pad(pad);
+    if (ours) {
+        GSTLOG("[gst] pad_get_negotiated_caps(%p) -> bridge caps %p\n", pad, ours);
+        return ours;
     }
     if (!real) real = dlsym(RTLD_NEXT, "gst_pad_get_negotiated_caps");
     r = real ? real(pad) : 0;
@@ -283,7 +288,7 @@ void *gst_pad_get_negotiated_caps(void *pad)
 void *gst_caps_get_structure(void *caps, unsigned index)
 {
     static void *(*real)(void *, unsigned);
-    if (pad_vid_is_ours(caps)) return pad_vid_structure();
+    if (pad_vid_is_ours(caps)) return pad_vid_structure_for(caps);
     if (!real) real = dlsym(RTLD_NEXT, "gst_caps_get_structure");
     return real ? real(caps, index) : 0;
 }
@@ -293,7 +298,7 @@ int gst_structure_get_int(void *s, const char *field, int *value)
     static int (*real)(void *, const char *, int *);
     int r;
     if (pad_vid_is_ours(s)) {
-        r = pad_vid_get_int(field, value);
+        r = pad_vid_get_int(s, field, value);
         GSTLOG("[gst] structure_get_int(\"%s\") -> %d value=%d  [bridge]\n",
                field ? field : "(null)", r, (r && value) ? *value : -1);
         return r;
@@ -375,7 +380,7 @@ int gst_element_query_position(void *element, int *format, long long *pos)
          * when duration - position is inside 0.2 s, so a constant 0 position
          * against a multi-second duration made every end-of-clip look like a
          * mid-clip hiccup and the game never moved on. */
-        if (pos) *pos = pad_vid_position_ns();
+        if (pos) *pos = pad_vid_position_ns(element);
         if ((n++ % 200) == 0) GSTLOG("[gst] query_position #%lu [ours]\n", n);
         return 1;
     }
@@ -393,7 +398,7 @@ int gst_element_seek(void *element, double rate, int format, int flags,
     static int (*real)(void *, double, int, int, int, long long, int, long long);
     (void)stop_type; (void)stop;
     if (pad_vid_is_pipeline(element)) {
-        int r = pad_vid_seek(cur_type ? cur : 0);
+        int r = pad_vid_seek(element, cur_type ? cur : 0);
         GSTLOG("[gst] seek(rate=%d/100 fmt=%d flags=%d to=%d ms) -> %d  [bridge]\n",
                (int)(rate * 100), format, flags, (int)(cur / 1000000ll), r);
         return r;

@@ -10,51 +10,59 @@ there is no i.MX6 here. This process decodes with ffmpeg on the WSL side and
 publishes raw I420 frames into a shared ring the guest reads. Same host/guest
 split as the GL bridge and the audio player.
 
+CHANNELS (padvid.h v2). One stream was enough until the attract playlist
+crossfaded: the game keeps TWO pipelines alive across a transition, and two
+prepares racing on one request slot is how "[vid] host did not answer" and a
+run full of Radium retry errors happened. Each channel is served by its own
+thread with its own ffmpeg; they share nothing but the mmap.
+
 WHY PYTHON AND NOT C, unlike padglhost: ffmpeg does every expensive thing. This
 process only copies finished planes into a ring, which is one memoryview slice
 assignment per frame - about 47 MB/s at 1360x768x30, nothing for a modern core.
-padglhost is C because it has to call EGL/GLES; this has no such constraint, and
-the C would only be a slower thing to write and a harder thing to change.
+The GIL does not matter here either: readinto() releases it, and the ring copy
+holds it for microseconds.
 
 PERFORMANCE, deliberately:
   * ffmpeg writes rawvideo straight to a pipe, so there is no intermediate file
     and no per-frame process start.
   * frames are read with readinto() into a preallocated buffer, then copied once
     into the ring. Two copies total, both memcpy speed.
-  * decoding runs AHEAD of the guest by up to PADVID_SLOTS frames and then
-    blocks on the ring, so a slow guest throttles the decoder instead of the
-    decoder throwing frames away.
-  * the loop is DEMAND DRIVEN: no request means it sleeps, so an idle emulator
-    pays nothing. This matters because the game rebuilds its video pipeline
-    continuously in attract mode.
+  * decoding runs AHEAD of the guest by up to SLOTS frames and then blocks on
+    the ring, so a slow guest throttles the decoder instead of the decoder
+    throwing frames away.
+  * each channel loop is DEMAND DRIVEN: no request means it sleeps, so an idle
+    emulator pays nothing. This matters because the game rebuilds its video
+    pipelines continuously in attract mode.
 """
 import mmap
 import os
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 MAGIC = 0x56444150
-VERSION = 1
+VERSION = 2
+CHANNELS = 4
 SLOTS = 4
 MAX_W, MAX_H = 1920, 1088
 SLOT_BYTES = MAX_W * MAX_H * 3 // 2
 HDR = 4096
-TOTAL = HDR + SLOTS * SLOT_BYTES
+TOTAL = HDR + CHANNELS * SLOTS * SLOT_BYTES
 PATH_MAX = 512
 
 IDLE, OK, ERR = 0, 1, 2
 
-# Field offsets, in the order padvid.h declares them. Kept as names so a
-# mismatch with the header is a one-line fix rather than a hunt.
-F = {}
-for _i, _n in enumerate([
-        "magic", "version", "req_gen", "ack_gen", "status",
-        "width", "height", "nframes", "fps_num", "fps_den", "frame_bytes",
-        "write_idx", "read_idx", "playing", "eos", "host_alive"]):
-    F[_n] = _i * 4
-PATH_OFF = F["host_alive"] + 4
+# Layout, in the order padvid.h declares it: three globals, then CHANNELS
+# copies of the per-channel struct. Kept as names so a mismatch with the
+# header is a one-line fix rather than a hunt.
+G = {"magic": 0, "version": 4, "host_alive": 8}
+CH_FIELDS = ["req_gen", "ack_gen", "status",
+             "width", "height", "nframes", "fps_num", "fps_den", "frame_bytes",
+             "write_idx", "read_idx", "playing", "eos"]
+CH_BYTES = len(CH_FIELDS) * 4 + PATH_MAX          # 564
+CH_BASE = 12
 
 # The guest sees /games/<title>; we see the same tree on the WSL side.
 #
@@ -71,25 +79,34 @@ HOST_ROOT = os.environ.get(
 
 
 _T0 = time.monotonic()
+_LOGLOCK = threading.Lock()
 
 
 def log(msg):
-    sys.stderr.write("[padvid %7.2f] %s\n" % (time.monotonic() - _T0, msg))
-    sys.stderr.flush()
+    with _LOGLOCK:
+        sys.stderr.write("[padvid %7.2f] %s\n" % (time.monotonic() - _T0, msg))
+        sys.stderr.flush()
 
 
-def get(m, name):
-    return struct.unpack_from("<I", m, F[name])[0]
+def get(m, c, name):
+    return struct.unpack_from("<I", m, CH_BASE + c * CH_BYTES + CH_FIELDS.index(name) * 4)[0]
 
 
-def put(m, name, v):
-    struct.pack_into("<I", m, F[name], v & 0xFFFFFFFF)
+def put(m, c, name, v):
+    struct.pack_into("<I", m, CH_BASE + c * CH_BYTES + CH_FIELDS.index(name) * 4,
+                     v & 0xFFFFFFFF)
+
+
+def get_path(m, c):
+    off = CH_BASE + c * CH_BYTES + len(CH_FIELDS) * 4
+    raw = bytes(m[off:off + PATH_MAX])
+    return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
 
 
 def host_path(p):
     """Map what the game asked for onto a path this process can open.
 
-    The game chdir()s to /games/godzilla_pro and uses relative paths, so almost
+    The game chdir()s to /games/<title> and uses relative paths, so almost
     everything arrives as './assets/...'. Absolute guest paths are translated
     too. Anything that escapes the tree is refused rather than opened - this
     process runs outside the chroot, so a path from inside it is untrusted
@@ -152,9 +169,11 @@ def probe(path):
     return w, h, n, num, den
 
 
-def serve(m, path, w, h):
-    """Decode `path` into the ring until the guest stops asking or ffmpeg ends."""
+def serve(m, c, path, w, h):
+    """Decode `path` into channel c's ring until the guest stops asking or
+    ffmpeg ends."""
     frame_bytes = w * h * 3 // 2
+    ring0 = HDR + c * SLOTS * SLOT_BYTES
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
            "-i", path, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]
     # ffmpeg's stderr goes to OUR stderr, i.e. padvid.log. It used to go to
@@ -165,24 +184,24 @@ def serve(m, path, w, h):
     buf = bytearray(frame_bytes)
     view = memoryview(buf)
     produced = 0
-    gen = get(m, "req_gen")
+    gen = get(m, c, "req_gen")
     try:
         while True:
-            if get(m, "req_gen") != gen:
-                log("superseded after %d frames" % produced)
+            if get(m, c, "req_gen") != gen:
+                log("ch%d superseded after %d frames" % (c, produced))
                 return
-            if not get(m, "playing"):
-                log("guest stopped playback after %d frames" % produced)
+            if not get(m, c, "playing"):
+                log("ch%d guest stopped playback after %d frames" % (c, produced))
                 return
             # Block while the ring is full. Throttling the DECODER is right:
             # dropping frames here would show as a stutter with no way to tell
             # it from a decode problem.
-            while produced - get(m, "read_idx") >= SLOTS:
-                if get(m, "req_gen") != gen:
-                    log("superseded while throttled after %d frames" % produced)
+            while produced - get(m, c, "read_idx") >= SLOTS:
+                if get(m, c, "req_gen") != gen:
+                    log("ch%d superseded while throttled after %d frames" % (c, produced))
                     return
-                if not get(m, "playing"):
-                    log("guest stopped while throttled after %d frames" % produced)
+                if not get(m, c, "playing"):
+                    log("ch%d guest stopped while throttled after %d frames" % (c, produced))
                     return
                 time.sleep(0.002)
             got = 0
@@ -192,22 +211,67 @@ def serve(m, path, w, h):
                     break
                 got += n
             if got < frame_bytes:
-                put(m, "eos", 1)
+                put(m, c, "eos", 1)
                 rc = proc.poll()
-                log("ffmpeg ended after %d frames (%d trailing bytes, rc=%s)"
-                    % (produced, got, rc))
+                log("ch%d ffmpeg ended after %d frames (%d trailing bytes, rc=%s)"
+                    % (c, produced, got, rc))
                 return
             slot = produced % SLOTS
-            off = HDR + slot * SLOT_BYTES
+            off = ring0 + slot * SLOT_BYTES
             m[off:off + frame_bytes] = buf
             produced += 1
-            put(m, "write_idx", produced)
+            put(m, c, "write_idx", produced)
     finally:
         try:
             proc.kill()
             proc.wait(timeout=5)
         except Exception:                           # noqa: BLE001
             pass
+
+
+def chan_loop(m, c):
+    """One channel, forever. Nothing here touches any other channel."""
+    while True:
+        req = get(m, c, "req_gen")
+        if req == get(m, c, "ack_gen"):
+            time.sleep(0.01)                 # idle: cost nothing
+            continue
+        want = get_path(m, c)
+        full = host_path(want)
+        put(m, c, "write_idx", 0)
+        put(m, c, "read_idx", 0)
+        put(m, c, "eos", 0)
+        if not full:
+            log("ch%d cannot open %r" % (c, want))
+            put(m, c, "status", ERR)
+            put(m, c, "ack_gen", req)
+            continue
+        info = probe(full)
+        if not info:
+            put(m, c, "status", ERR)
+            put(m, c, "ack_gen", req)
+            continue
+        w, h, n, num, den = info
+        put(m, c, "width", w)
+        put(m, c, "height", h)
+        put(m, c, "nframes", n)
+        put(m, c, "fps_num", num)
+        put(m, c, "fps_den", den)
+        put(m, c, "frame_bytes", w * h * 3 // 2)
+        put(m, c, "status", OK)
+        # Publish the answer BEFORE decoding: the guest is blocked waiting for
+        # width/height to build its textures, and making it wait for the first
+        # frame as well would add a whole decode start-up to every clip.
+        put(m, c, "ack_gen", req)
+        # Log what was actually ASKED FOR. The basename of the parent directory
+        # is "2.asset" for every video in the game, so the old form made two
+        # different clips look like the same clip served twice.
+        log("ch%d serving %dx%d %d frames %s" % (c, w, h, n, want))
+        try:
+            serve(m, c, full, w, h)
+        except Exception as exc:                    # noqa: BLE001
+            log("ch%d decode failed: %s" % (c, exc))
+            put(m, c, "eos", 1)
 
 
 def main():
@@ -217,56 +281,20 @@ def main():
         os.ftruncate(fd, TOTAL)
     m = mmap.mmap(fd, TOTAL)
     os.close(fd)
-    put(m, "magic", MAGIC)
-    put(m, "version", VERSION)
-    put(m, "ack_gen", get(m, "req_gen"))
-    log("ready: %s (%d MB ring, %d slots)" % (path, TOTAL // (1 << 20), SLOTS))
+    struct.pack_into("<I", m, G["magic"], MAGIC)
+    struct.pack_into("<I", m, G["version"], VERSION)
+    for c in range(CHANNELS):
+        put(m, c, "ack_gen", get(m, c, "req_gen"))
+        t = threading.Thread(target=chan_loop, args=(m, c), daemon=True)
+        t.start()
+    log("ready: %s (%d MB, %d channels x %d slots)"
+        % (path, TOTAL // (1 << 20), CHANNELS, SLOTS))
 
     beat = 0
     while True:
         beat += 1
-        put(m, "host_alive", beat)
-        req = get(m, "req_gen")
-        if req == get(m, "ack_gen"):
-            time.sleep(0.01)                 # idle: cost nothing
-            continue
-        raw = bytes(m[PATH_OFF:PATH_OFF + PATH_MAX])
-        want = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
-        full = host_path(want)
-        put(m, "write_idx", 0)
-        put(m, "read_idx", 0)
-        put(m, "eos", 0)
-        if not full:
-            log("cannot open %r" % want)
-            put(m, "status", ERR)
-            put(m, "ack_gen", req)
-            continue
-        info = probe(full)
-        if not info:
-            put(m, "status", ERR)
-            put(m, "ack_gen", req)
-            continue
-        w, h, n, num, den = info
-        put(m, "width", w)
-        put(m, "height", h)
-        put(m, "nframes", n)
-        put(m, "fps_num", num)
-        put(m, "fps_den", den)
-        put(m, "frame_bytes", w * h * 3 // 2)
-        put(m, "status", OK)
-        # Publish the answer BEFORE decoding: the guest is blocked waiting for
-        # width/height to build its textures, and making it wait for the first
-        # frame as well would add a whole decode start-up to every clip.
-        put(m, "ack_gen", req)
-        # Log what was actually ASKED FOR. The basename of the parent directory
-        # is "2.asset" for every video in the game, so the old form made two
-        # different clips look like the same clip served twice.
-        log("serving %dx%d %d frames %s" % (w, h, n, want))
-        try:
-            serve(m, full, w, h)
-        except Exception as exc:                    # noqa: BLE001
-            log("decode failed: %s" % exc)
-            put(m, "eos", 1)
+        struct.pack_into("<I", m, G["host_alive"], beat & 0xFFFFFFFF)
+        time.sleep(0.01)
 
 
 if __name__ == "__main__":

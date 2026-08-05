@@ -64,8 +64,16 @@ trap 'kill $HOLD 2>/dev/null; rm -f "$FIFO"' EXIT
 LAT=${PAD_AUDIO_LATENCY_MS:-40}
 echo "[play] pulse buffer ${LAT} ms"
 
-exec ffmpeg -hide_banner -loglevel error \
-     -f s16le -ar "$RATE" -ac "$CH" -i "$FIFO" \
 # The pulse stream name carries the title, so a mixer shows which game is
 # playing - and so teardown's pkill pattern still matches whatever ran.
+#
+# NOTHING MAY COME BETWEEN THESE LINES, not even a comment. A `\` continuation
+# followed by a comment line does not continue anything: the backslash-newline
+# is removed FIRST, so the `#` lands inside the command and eats the rest of it.
+# ffmpeg then ran with an input and NO OUTPUT, said "At least one output file
+# must be specified", and exited - and because this is `exec`, the player was
+# gone. Every run since that comment was added has been silent, and the script
+# still passes `bash -n` because the orphaned last line is valid on its own.
+exec ffmpeg -hide_banner -loglevel error \
+     -f s16le -ar "$RATE" -ac "$CH" -i "$FIFO" \
      -f pulse -buffer_duration "$LAT" "${PAD_GAME:-Spike 2} emulator"

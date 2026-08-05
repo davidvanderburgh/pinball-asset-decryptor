@@ -43,11 +43,15 @@ BUS=$(n -f nodebus.py)
 # The audio player is the FIFTH thing a run starts, and the whole point of this
 # script is that a process nothing counts is a process that leaks.
 #
-# Matched on the PulseAudio stream name, not on the fifo path: PAD itself runs
-# ffmpeg constantly so `-x ffmpeg` would catch unrelated work, and `-f audio.fifo`
-# also matches any shell whose command line happens to contain it - including the
-# shell running this check, which is the exact trap documented above.
-AUD=$(n -f 'ffmpeg.*-f pulse')
+# Matched on "starts with ffmpeg and reads the audio fifo". The ^ anchor is what
+# keeps this from matching a shell whose command line merely CONTAINS the text
+# (the exact trap documented above): a shell's cmdline starts with bash/sh, never
+# ffmpeg. And it must NOT be the old 'ffmpeg.*-f pulse' - when playaudio.sh's
+# command line was severed (the comment-inside-a-continuation bug), the broken
+# player had no '-f pulse' in it at all, and two of them sat on the fifo for
+# hours of CPU while this script reported 0. Match what the player cannot run
+# without (the fifo), not what it is supposed to do with it (pulse).
+AUD=$(n -f '^ffmpeg .*audio\.fifo')
 TOTAL=$((GAME + QEMU + HOST + BUS + AUD))
 
 printf 'guest (comm=game)      : %s\n' "$GAME"

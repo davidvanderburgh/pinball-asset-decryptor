@@ -209,6 +209,13 @@ static void vid_open(void)
         munmap(p, PADVID_BYTES);
         return;
     }
+    if (((const struct padvid_shm *)p)->version != PADVID_VERSION) {
+        fprintf(stderr, "[padglhost] video block is version %u, this build "
+                "wants %u - restart padvidhost.py\n",
+                ((const struct padvid_shm *)p)->version, PADVID_VERSION);
+        munmap(p, PADVID_BYTES);
+        return;
+    }
     vid_ring = (const unsigned char *)p + PADVID_HDR;
     fprintf(stderr, "[padglhost] video block attached: %s\n", path);
 }
@@ -403,6 +410,38 @@ extern int XPeekEvent(XDisplay *, void *);
 extern unsigned long XLookupKeysym(void *, int);
 extern void *XSetErrorHandler(void *);
 
+/* WM_NORMAL_HINTS, so a remembered window position actually takes. An
+ * XMoveWindow issued right after XMapWindow LOSES to the window manager's own
+ * initial placement under WSLg - the game window got away with it by timing,
+ * the Controls window measurably did not (.pad_windows said 941,930 and the
+ * window opened at the default anyway). The X way to place a window is to
+ * CREATE it at the position and say so in the size hints BEFORE mapping;
+ * USPosition is the flag WMs treat as "the user chose this, respect it". */
+typedef struct {
+    long flags;
+    int x, y;
+    int width, height;
+    int min_width, min_height;
+    int max_width, max_height;
+    int width_inc, height_inc;
+    struct { int x, y; } min_aspect, max_aspect;
+    int base_width, base_height;
+    int win_gravity;
+} XSizeHints;
+#define PAD_USPosition (1L << 0)
+#define PAD_PPosition  (1L << 1)
+extern void XSetWMNormalHints(XDisplay *, unsigned long, XSizeHints *);
+
+static void win_place(unsigned long w, int x, int y)
+{
+    XSizeHints h;
+    int i;
+    for (i = 0; i < (int)sizeof h; i++) ((char *)&h)[i] = 0;
+    h.flags = PAD_USPosition | PAD_PPosition;
+    h.x = x; h.y = y;
+    XSetWMNormalHints(xdpy, w, &h);
+}
+
 /* An X protocol error must never be fatal here: the default handler EXITS, so
  * one unavailable font name would otherwise take the emulator down with it. */
 static int x_swallow_error(void *dpy, void *err) { (void)dpy; (void)err; return 0; }
@@ -584,22 +623,24 @@ static void sw_shm_open(void)
 static void legend_open(int scr)
 {
     unsigned long f;
+    /* Beside the game by default, but back where it was left if it has been
+     * moved before. The position must be set BEFORE the map (create at it,
+     * then say so in WM_NORMAL_HINTS): the old move-after-map lost the race
+     * with WSLg's window manager every time, which is exactly "the Controls
+     * window does not remember its position". See win_place(). */
+    int lx = win_w + 16, ly = 0;
+    winpos_get("legend", &lx, &ly);
     legend_win = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
-                                     win_w + 16, 0, 430,
+                                     lx, ly, 430,
                                      (unsigned)(NBINDS * 20 + 124), 0,
                                      XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
+    win_place(legend_win, lx, ly);
     XStoreName(xdpy, legend_win, "Controls - Spike 2 emulator");
     /* KeyPress | KeyRelease | Exposure | StructureNotify. Keys are selected on
      * this window too, so whichever of the two has focus can drive the game. */
     XSelectInput(xdpy, legend_win, 1L | 2L | (1L << 15) | (1L << 17));
     XSetWMProtocols(xdpy, legend_win, &wm_delete, 1);
     XMapWindow(xdpy, legend_win);
-    {   /* Beside the game by default, but back where it was left if it has been
-         * moved before. See winpos_* above. */
-        int lx = win_w + 16, ly = 0;
-        winpos_get("legend", &lx, &ly);
-        XMoveWindow(xdpy, legend_win, lx, ly);
-    }
     legend_gc = XCreateGC(xdpy, legend_win, 0, 0);
     /* Any of these may be absent; the error handler makes that harmless and the
      * server default font still draws. */
@@ -676,9 +717,17 @@ static int win_open(void)
     }
     scr  = XDefaultScreen(xdpy);
     win_w = fb_w; win_h = fb_h;
-    xwin = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr), 0, 0,
-                               (unsigned)win_w, (unsigned)win_h, 0,
-                               XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
+    {   /* Reopen where the window was last closed. The position has to be on
+         * the window BEFORE it is mapped (create + WM_NORMAL_HINTS): a move
+         * issued after the map races the window manager's initial placement,
+         * and under WSLg the WM wins. */
+        int gx = 0, gy = 0;
+        winpos_get("game", &gx, &gy);
+        xwin = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr), gx, gy,
+                                   (unsigned)win_w, (unsigned)win_h, 0,
+                                   XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
+        win_place(xwin, gx, gy);
+    }
     /* THE TITLE NAMES THE TITLE. It used to say "Godzilla Pro" whatever was
      * running, which is merely untidy until you are looking at a screenshot of
      * a TMNT boot with Godzilla in the title bar and trying to work out which
@@ -714,10 +763,6 @@ static int win_open(void)
         for (i = 0; i < NBINDS; i++) if (binds[i].toggle) key_latch[i] = 1;
     }
     sw_publish();
-    {   /* Reopen where the window was last closed. */
-        int gx, gy;
-        if (winpos_get("game", &gx, &gy)) XMoveWindow(xdpy, xwin, gx, gy);
-    }
     if (getenv("PAD_GL_LEGEND") == 0 || getenv("PAD_GL_LEGEND")[0] != '0')
         legend_open(scr);
     fprintf(stderr, "[padglhost] window opened %dx%d on DISPLAY=%s\n",
@@ -773,6 +818,11 @@ static void win_pump(void)
             /* data.l[0] is at byte 56 = index 7, verified on this box. */
             if (ev.ul[7] == wm_delete) {
                 fprintf(stderr, "[padglhost] window closed; stopping\n");
+                /* The last position save was up to 1 s ago (the throttle), so
+                 * the final resting spot of a drag could be lost. This runs
+                 * BEFORE watch.sh starts killing anything, so unlike a save
+                 * at exit it actually lands on disk. */
+                winpos_save_all();
                 stop_now = 1;
             }
             break;
@@ -1207,8 +1257,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         if (len < 24 || !w || !h) { vid_dropped++; break; }
         if (src == PADGL_SRC_VIDSHM) {
             vid_open();
+            /* The offset spans ALL channels' rings - the guest names a frame
+             * by its distance from the ring base, whichever channel it is in. */
             if (vid_ring && (unsigned long)u[4] + u[5] <=
-                    (unsigned long)PADVID_SLOTS * PADVID_SLOT_BYTES)
+                    (unsigned long)PADVID_RING_BYTES)
                 yuv = vid_ring + u[4];
         } else if (len >= 24 + u[5]) {
             yuv = pl + 24;

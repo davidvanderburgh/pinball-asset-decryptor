@@ -37,7 +37,12 @@ pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'
 pkill -9 -f 'playaudio.sh'
-pkill -9 -f 'ffmpeg.*-f pulse'
+# ^-anchored, and matched on the fifo not on '-f pulse': a severed player
+# command line (see playaudio.sh) had no pulse output yet still held the fifo.
+pkill -9 -f '^ffmpeg .*audio\.fifo'
+# The LED block doubles as the virtual playfield's liveness signal; removing
+# it lets that window close itself instead of surviving the kill.
+rm -f /home/david/spike2root/dump/padled
 sleep 1
 
 after=$(total)

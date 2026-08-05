@@ -23,10 +23,83 @@ set -u
 SELF=$(cd "$(dirname "$0")" && pwd)
 PREFIX=/home/david/local
 CARDS=/home/david/card
+CACHE=/home/david/cardcache
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 die() { echo "[card] $*" >&2; exit 1; }
+
+# LOCAL IMAGE CACHE - why card boots were slow, and why the SECOND one is not.
+#
+# The card images live on the Windows D: drive, so every cold read goes
+# NTFS -> 9p -> fuse2fs: measured 139 MB/s for the raw image and roughly half
+# that once fuse2fs is on top, against native ext4 for an extracted title. The
+# page cache already makes REPEAT reads free while WSL stays up (measured
+# 2.83 s -> 0.016 s on a 180 MB asset), so the cost that matters is the first
+# boot of a title after a WSL start.
+#
+# The fix is a copy of the image on the WSL disk - but made in the BACKGROUND,
+# after the original is already mounted and the game is already booting. The
+# first run pays nothing; the copy competes with the boot's reads for a while
+# and finishes on its own; every later mount of that card finds the local copy
+# and is native-speed end to end. dd conv=sparse punches holes for the zero
+# blocks, so a 15 GB image lands as only its real data.
+#
+# PAD_CARD_CACHE=0 turns it off. The stamp file records path+size+mtime of the
+# source; any mismatch (new dump of the same title, touched file) invalidates.
+# `rm -rf ~/cardcache` is the whole reclaim story.
+cache_stamp() { stat -c "%n %s %Y" "$1" 2>/dev/null; }
+
+# Prints the path to mount: the cached copy if it is valid, else the original -
+# and in the latter case starts the background copy if one is wanted and not
+# already running.
+cache_pick() {
+    local img="$1" label="$2"
+    local copy="$CACHE/$label.raw" stamp="$CACHE/$label.src"
+    if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then echo "$img"; return; fi
+    if [ -f "$copy" ] && [ -f "$stamp" ] \
+       && [ "$(cat "$stamp")" = "$(cache_stamp "$img")" ]; then
+        echo "[card] using local cache $copy" >&2
+        echo "$copy"; return
+    fi
+    mkdir -p "$CACHE"
+    # One copier at a time per label. The pid file is the lock; a stale one
+    # (machine rebooted mid-copy) is detected by the pid being gone.
+    local pidf="$CACHE/$label.pid"
+    if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+        echo "[card] local cache copy already in progress" >&2
+    else
+        echo "[card] caching $(basename "$img") to the WSL disk in the background" >&2
+        echo "[card]   (first run only; next boot of this card is native speed)" >&2
+        # setsid, for the same reason fuse2fs gets it below: this shell is
+        # frequently a `wsl -e bash -c` child, and when that session ends its
+        # process group goes with it - the first copier died at 0 bytes this
+        # exact way, silently, with its pid file still claiming progress.
+        #
+        # The copier's stdout/stderr MUST also be redirected away from the
+        # caller's: run_game.sh and watch.sh read this script through $(...),
+        # which waits for EOF on the pipe - a background child still holding
+        # it open would stall the whole run until the copy finished, which is
+        # the exact opposite of the point. Progress goes to a log beside the
+        # cache.
+        setsid bash -c '
+            img="$1"; copy="$2"; stamp="$3"; pidf="$4"
+            rm -f "$copy.partial"
+            if dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none; then
+                mv "$copy.partial" "$copy"
+                stat -c "%n %s %Y" "$img" > "$stamp"
+                echo "[card] local cache of $(basename "$img") complete"
+            else
+                rm -f "$copy.partial"
+                echo "[card] local cache copy FAILED (disk full?); runs still work off D:"
+            fi
+            rm -f "$pidf"
+        ' _ "$img" "$copy" "$stamp" "$pidf" \
+            </dev/null >> "$CACHE/$label.log" 2>&1 &
+        echo $! > "$pidf"
+    fi
+    echo "$img"
+}
 
 # fuse2fs and libfuse2, unpacked into a private prefix. Downloaded once; after
 # that this is offline. Ubuntu splits them into two packages and fuse2fs links
@@ -83,20 +156,26 @@ if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null && ! ls "$MNT" >/dev/null 2
 fi
 
 # Already mounted and healthy? Then say so and stop - remounting a live card
-# under a running game is not something to do by accident.
+# under a running game is not something to do by accident. The cache copy is
+# still worth STARTING though: the mount in use stays on whatever it was
+# mounted from, and the next mount picks the local copy up. Without this, a
+# card mounted before the cache feature ever ran would stay slow forever.
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
     T=$(title_dir "$MNT") || die "$MNT is mounted but holds no game"
+    cache_pick "$IMG" "$LABEL" >/dev/null
     echo "[card] already mounted: $MNT"
     echo "$MNT/$T"
     exit 0
 fi
 
 ensure_fuse2fs || die "could not get fuse2fs"
-OFF=$(games_offset "$IMG")
-[ -n "$OFF" ] || die "no third Linux partition in $(basename "$IMG")"
+# Mount the local cache when there is a valid one; start building it when not.
+SRC=$(cache_pick "$IMG" "$LABEL")
+OFF=$(games_offset "$SRC")
+[ -n "$OFF" ] || die "no third Linux partition in $(basename "$SRC")"
 mkdir -p "$MNT" || die "cannot create $MNT"
 
-echo "[card] mounting $(basename "$IMG") p3 at offset $OFF (read only)"
+echo "[card] mounting $(basename "$SRC") p3 at offset $OFF (read only)"
 # setsid, AND THAT IS THE WHOLE POINT OF IT. fuse2fs keeps running for as long
 # as the mount exists, so it must NOT be in the caller's process group:
 # watch.sh tears a run down by killing process groups, and that killed the
@@ -104,12 +183,12 @@ echo "[card] mounting $(basename "$IMG") p3 at offset $OFF (read only)"
 # kind - the game boots, loads a few assets, then sits at "Startup In
 # Progress" forever, because its files stopped existing halfway through. There
 # is no error anywhere; every read simply fails.
-setsid "$FUSE2FS" -o ro,offset="$OFF" "$IMG" "$MNT" >/dev/null 2>&1 \
-    || die "fuse2fs refused $(basename "$IMG")"
+setsid "$FUSE2FS" -o ro,offset="$OFF" "$SRC" "$MNT" >/dev/null 2>&1 \
+    || die "fuse2fs refused $(basename "$SRC")"
 # setsid returns as soon as the daemon has forked, so wait for the mount to
 # actually appear rather than racing the first read of it.
 for _ in $(seq 1 40); do mountpoint -q "$MNT" 2>/dev/null && break; sleep 0.05; done
-mountpoint -q "$MNT" 2>/dev/null || die "fuse2fs did not mount $(basename "$IMG")"
+mountpoint -q "$MNT" 2>/dev/null || die "fuse2fs did not mount $(basename "$SRC")"
 
 T=$(title_dir "$MNT") || {
     fusermount -u "$MNT" 2>/dev/null

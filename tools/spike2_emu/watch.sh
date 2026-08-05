@@ -99,7 +99,7 @@ case "$GAME" in
 esac
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 
-HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""
+HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""
 
 teardown() {
     trap - INT TERM EXIT
@@ -120,10 +120,20 @@ teardown() {
     pkill -9 -f 'padvidhost.py' 2>/dev/null
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
     pkill -9 -f 'autoattract.sh' 2>/dev/null
+    # $EVTPG is the awk at the END of the event pipeline (that is what $! means
+    # for a pipeline); the tail at its head is caught by name. Both matter: an
+    # orphaned tail -F never exits by itself.
+    [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
+    pkill -9 -f 'tail -q -n 0 -F /home/david/padvid[.]log' 2>/dev/null
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
     pkill -9 -f 'playaudio.sh' 2>/dev/null
-    pkill -9 -f 'ffmpeg.*-f pulse' 2>/dev/null
+    pkill -9 -f '^ffmpeg .*audio\.fifo' 2>/dev/null
     rm -f "$AUD_HOST" "$AUD_FMT_HOST"
+    # The LED block is the virtual playfield's liveness signal: it polls the
+    # file and closes itself once a run it has seen is gone (playfield.py,
+    # emu_gone). Removing it here is what makes closing the emulator window
+    # close the playfield too. A new run recreates it before launching one.
+    rm -f "$LED_HOST"
     sleep 0.5
     echo "--- what is still running (all must be 0) ---"
     bash "$S/alive.sh"
@@ -291,6 +301,38 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
+fi
+
+# KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's
+# output into its log pane, and a terminal run shows the same thing - so the
+# one place worth publishing "what is the run doing" is right here. The
+# per-part logs stay complete on disk; this is a filtered live view of the
+# handful of lines that mean something: clips starting and ending, the audio
+# player coming up, bridge failures, and the game's own errors.
+#
+# The awk stays deliberately small: Radium repeats one error tens of times a
+# second when something is wrong (14,837 identical lines in one run), so
+# repeats collapse to the first sighting plus a count every 500th. fflush()
+# after every print matters - awk into a pipe is block-buffered, and a "live"
+# event feed that arrives four kilobytes at a time is not live.
+if [ "${PAD_EVENTS:-1}" != 0 ]; then
+    tail -q -n 0 -F /home/david/padvid.log /home/david/padaudio.log \
+                    /home/david/padglhost.log "$LOG" 2>/dev/null | awk '
+        /Radium Error/ {
+            if (++n[$0] == 1 || n[$0] % 500 == 0)
+                { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }
+            next }
+        /\[padvid / {
+            if ($0 ~ /serving|superseded|did not answer|decode failed|cannot open|guest stopped|ffmpeg ended|unusable/)
+                { print "[event] " $0; fflush() }
+            next }
+        /\[play\]/               { print "[event] " $0; fflush(); next }
+        /\[padglhost\] (window opened|video block|ring |UNKNOWN)/ \
+                                 { print "[event] " $0; fflush(); next }
+        /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
+        /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
+    ' &
+    EVTPG=$!
 fi
 
 echo "[watch] running. CLOSE THE WINDOW to stop (or press Ctrl-C here)."

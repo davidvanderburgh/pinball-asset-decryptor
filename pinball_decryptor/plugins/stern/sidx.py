@@ -102,6 +102,26 @@ def digests(data):
             hashlib.md5(data).digest())
 
 
+def digests_file(path, chunk=1 << 20):
+    """:func:`digests` streamed from a file on disk.
+
+    A size-neutral write already holds its replacement in memory, but a
+    resizing one (Partition Explorer's Replace) hands the file to the ext4
+    driver without ever reading it, and that file can be any size — so its
+    record is hashed off the disk rather than pulled into RAM.
+    """
+    h = hmac.new(SIDX_KEY, digestmod=hashlib.sha1)
+    m = hashlib.md5()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+            m.update(b)
+    return h.digest(), m.digest()
+
+
 def manifest_files(data):
     """``{path: (size, md5_hex)}`` for every record in a ``.sidx``, else ``{}``.
 

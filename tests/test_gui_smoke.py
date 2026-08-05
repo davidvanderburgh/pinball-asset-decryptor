@@ -2502,6 +2502,71 @@ def test_partition_explorer_find_and_replace(app, manufacturers_by_key,
         assert f.read(18) == b"#!/bin/sh\necho HI\n"
 
 
+def test_partition_explorer_replace_different_size(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """Right-click Replace accepts a file that ISN'T the slot's size: the tab
+    warns that the card gets mounted, hands the copy to the ext4 driver, and
+    reports the resize (PAD-31 — a tester wanted to swap sda2's splash
+    screen and boot scripts, which never match byte-for-byte)."""
+    import time
+
+    from pinball_decryptor.core import ext4_grow
+    from tests._ext4_fake import (install_fake_reader, materialize_files,
+                                  write_fake_card)
+
+    w = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    install_fake_reader(monkeypatch)
+    img = write_fake_card(tmp_path / "card.raw")
+    placed = materialize_files(img)
+
+    w.partition_image_var.set(img)
+    w._pex_open_image()
+
+    new = b"#!/bin/sh\n# a longer boot script\n"           # not 18 bytes
+    src = tmp_path / "longer_game.sh"
+    src.write_bytes(new)
+
+    # Stub the platform driver: it needs WSL2/loop devices, and what this test
+    # is about is the GUI wiring around it.
+    def fake_grow(image_path, part_offset, jobs, log=None, **k):
+        for rel, s in jobs:
+            off, _old = placed["/" + rel]
+            with open(image_path, "r+b") as f:
+                f.seek(off)
+                f.write(open(s, "rb").read())
+            if log:
+                log("  grew %s" % rel, "info")
+        return len(jobs)
+    monkeypatch.setattr(ext4_grow, "available", lambda: (True, "stub"))
+    monkeypatch.setattr(ext4_grow, "grow_files", fake_grow)
+
+    asked = []
+    from pinball_decryptor.gui import main_window as mw
+    monkeypatch.setattr(mw.filedialog, "askopenfilename", lambda **k: str(src))
+    monkeypatch.setattr(mw.messagebox, "askyesno",
+                        lambda *a, **k: (asked.append(a), True)[1])
+
+    w._pex_replace_selected("/etc/init.d/game")
+    deadline = time.time() + 10
+    while w._pex_busy and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.02)
+    assert not w._pex_busy
+
+    # The confirmation named the size change and what it costs, BEFORE writing.
+    prompt = " ".join(str(a) for a in asked[0])
+    assert "different size" in prompt and "WSL2" in prompt
+
+    off, _old = placed["/etc/init.d/game"]
+    with open(img, "rb") as f:
+        f.seek(off)
+        assert f.read(len(new)) == new
+    status = str(w._pex_action_status["text"])
+    assert status.startswith("Replaced /etc/init.d/game") and "grown" in status
+
+
 def test_partition_explorer_threaded_extract_and_cancel(
         app, manufacturers_by_key, tmp_path, monkeypatch):
     """The real button path: _pex_run_extract runs on a worker thread, flips

@@ -2,44 +2,44 @@
 # id from the running game (PAD_SW_MAP), position from the device
 # table in the binary, joined on the NAME.
 # id   node bit  name                                 x     y
-47     8     9     LEFT SPINNER                        43   288
-48     8     10    MASER TARGET                        50   359
-49     8     11    POP BUMPER                          37   406
-50     8     12    MECHA EXIT TOP                     251   413
-51     8     13    MECHA EXIT BOTTOM                  282   364
-52     8     14    UP LEFT FLIPPER EOS                263   439
-53     8     15    RIGHT SCOOP                         72   324
-54     8     16    LEFT FLIPPER EOS                   250   359
-55     8     17    LEFT OUTLANE                       120   575
-56     8     18    LEFT RETURN LANE                    29   530
-57     8     19    RIGHT RETURN LANE                   53   505
-58     8     20    RIGHT OUTLANE                      241   505
-59     8     24    RIGHT FLIPPER BUTTON               264   530
-60     8     25    LEFT FLIPPER BUTTON                301   656
+46     8     8     SKILL SHOT                          43   288
+47     8     9     LEFT SPINNER                        50   359
+48     8     10    MASER TARGET                        37   406
+49     8     11    POP BUMPER                         251   413
+50     8     12    MECHA EXIT TOP                     282   364
+51     8     13    MECHA EXIT BOTTOM                  263   439
+52     8     14    UP LEFT FLIPPER EOS                 72   324
+53     8     15    RIGHT SCOOP                        250   359
+54     8     16    LEFT FLIPPER EOS                   120   575
+55     8     17    LEFT OUTLANE                        29   530
+56     8     18    LEFT RETURN LANE                    53   505
+57     8     19    RIGHT RETURN LANE                  241   505
+58     8     20    RIGHT OUTLANE                      264   530
+59     8     24    RIGHT FLIPPER BUTTON               301   656
+60     8     25    LEFT FLIPPER BUTTON                 12   656
 61     8     27    UP LEFT FLIP BUTTON                 12   656
-62     8     28    SHOOTER LANE                        12   656
-63     8     29    RIGHT SLINGSHOT                    283   608
-64     8     30    LEFT SLINGSHOT                     217   503
-65     8     31    RIGHT FLIPPER EOS                   78   503
-66     8     32    TROUGH 6                           169   575
-67     8     33    TROUGH 5                           210   635
-68     8     34    TROUGH 4                           219   630
-69     8     35    TROUGH 3                           228   626
-70     8     36    TROUGH 2                           236   621
-71     8     37    TROUGH 1                           245   617
-72     8     38    TROUGH JAM                         254   612
-73     9     8     L RAMP MADE OPTO                   254   607
-74     9     9     BIG LOOP EXIT                       62    82
-75     9     10    BUILDING EXIT                       90    82
-76     9     11    GODZILLA TARGET                     70   162
-77     9     12    BUILDING HIT OPTO                   72   215
-78     9     13    PWRLINE LEFT TGT                   121   178
-79     9     14    PWRLINE CENTER TGT                 102   206
-80     9     15    PWRLINE RIGHT TGT                  144   202
-81     9     17    R RAMP MADE OPTO                   223   194
-82     9     20    BIG LOOP ENTER                     225    32
-83     9     21    TOP SPINNER                        268    96
-84     9     28    RIGHT SPINNER                      181   141
-85     9     29    SHIELD TARGET LEFT                 227   329
-86     9     31    SHIELD TARGET RIGHT                201   300
-87     9     32    GODZILLA MAGNET FIRED VIRTUAL      202   319
+62     8     28    SHOOTER LANE                       283   608
+63     8     29    RIGHT SLINGSHOT                    217   503
+64     8     30    LEFT SLINGSHOT                      78   503
+65     8     31    RIGHT FLIPPER EOS                  169   575
+66     8     32    TROUGH 6                           210   635
+67     8     33    TROUGH 5                           219   630
+68     8     34    TROUGH 4                           228   626
+69     8     35    TROUGH 3                           236   621
+70     8     36    TROUGH 2                           245   617
+71     8     37    TROUGH 1                           254   612
+72     8     38    TROUGH JAM                         254   607
+73     9     8     L RAMP MADE OPTO                    62    82
+74     9     9     BIG LOOP EXIT                       90    82
+75     9     10    BUILDING EXIT                       70   162
+76     9     11    GODZILLA TARGET                     72   215
+77     9     12    BUILDING HIT OPTO                  121   178
+78     9     13    PWRLINE LEFT TGT                   102   206
+79     9     14    PWRLINE CENTER TGT                 144   202
+80     9     15    PWRLINE RIGHT TGT                  223   194
+81     9     17    R RAMP MADE OPTO                   225    32
+82     9     20    BIG LOOP ENTER                     268    96
+83     9     21    TOP SPINNER                        181   141
+84     9     28    RIGHT SPINNER                      227   329
+85     9     29    SHIELD TARGET LEFT                 201   300
+86     9     31    SHIELD TARGET RIGHT                202   319

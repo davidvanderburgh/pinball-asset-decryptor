@@ -84,7 +84,19 @@ def main():
             rows.append((node, r))
 
     if problems:
-        print("\nJOIN IS NOT CLEAN - do not use this map until it is:", problems)
+        # REFUSE, rather than write a map that says it is untrustworthy in a
+        # comment nobody reads. The usual cause is a log without the boot
+        # enumeration in it: those 6-byte 0x84/0x85 writes only survive with
+        # PAD_NB_LOG raised, and the default 400-line budget drops them, so the
+        # wire simply looks like it has no LEDs.
+        print("\nJOIN IS NOT CLEAN - refusing to write. Missing indices per node:")
+        for node, missing in problems:
+            print("   node %d: %d missing (%s%s)"
+                  % (node, len(missing), missing[:8],
+                     " ..." if len(missing) > 8 else ""))
+        print("Capture again with PAD_NB_LOG=400000 and a run that reaches"
+              " ~25 s, then re-run this.")
+        return 2
 
     lines = ["# Godzilla Pro LED I/O map.",
              "# Position from the device table in the binary; node/index verified",

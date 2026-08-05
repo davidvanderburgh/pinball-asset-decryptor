@@ -41,9 +41,26 @@ five-language name slot inside it, which is why scanning at that stride turns up
     +0x18  char*  connector, e.g. "8b"
     +0x1c  char*  part number, e.g. "part:520-8531-00"
     +0x20  0
-    +0x24  char*  NAME, uppercase, e.g. "FIGHTER RIGHT 1"
+    +0x24  char*  the name of the PREVIOUS device, NOT this one - see NAME_OFF
     +0x28  char*
     +0x2c  char*
+
+**THE NAME AT +0x24 BELONGS TO THE RECORD BEFORE IT.** The 0x30 window is right
+and every field in it parses, but it straddles the logical boundary: the name
+that reads as this record's is the previous device's. `NAME_OFF` is therefore
+-0x0C, not +0x24.
+
+This shipped wrong once and a human caught it on the virtual playfield - LEFT
+FLIPPER BUTTON drawn on the right, LEFT SLINGSHOT on the right, SHOOTER LANE in
+the bottom-left corner. Worth saying how to catch it without eyes on a picture:
+**Godzilla Pro names 31 playfield devices LEFT-something or RIGHT-something.**
+With the shift, 31 of 31 land on the correct side of the centreline; without it,
+10 are wrong. That check runs in main() now and costs nothing.
+
+The earlier "-R/-G/-B of one fixture disagree on position" oddity was this same
+off-by-one seen from another angle, and it was written off as real data. It was
+not - and "the records are perfectly aligned" was true and beside the point,
+because the alignment was never the thing that was broken.
 
 The coordinates land inside 313x710, which is exactly the size of
 `assets/nuk/images/Test/scaled_godzilla_pro_playfield.png`, and they agree with
@@ -60,6 +77,11 @@ GAME = "/home/david/spike2root/games/godzilla_pro/game"
 VA_BIAS = 0x8000
 STRIDE = 0x30
 LO, HI = 0x750000, 0x790000
+
+#: Offset of THIS record's name. Negative: see the header - the pointer at
+#: +0x24 is the previous device's name, so the name for the position at +0x10
+#: lives 0x30 earlier, i.e. at +0x24 - 0x30.
+NAME_OFF = 0x24 - STRIDE
 
 #: The playfield artwork these coordinates are in, and its size.
 PLAYFIELD_PNG = "assets/nuk/images/Test/scaled_godzilla_pro_playfield.png"
@@ -93,7 +115,7 @@ def _one(d, cstr, va):
     img = cstr(struct.unpack_from("<I", d, o)[0])
     if img is None or ("/" not in img and img != "playfield"):
         return None
-    name = cstr(struct.unpack_from("<I", d, o + 0x24)[0])
+    name = cstr(struct.unpack_from("<I", d, o + NAME_OFF)[0])
     if not name:
         return None
     x, y = struct.unpack_from("<hh", d, o + 0x10)
@@ -154,14 +176,22 @@ def main():
     print("# %d playfield records, %d outside the %dx%d artwork"
           % (len(pf), len(out), PF_W, PF_H))
 
-    # NOT a check, because the obvious version of it is WRONG. -R/-G/-B of one
-    # name often carry DIFFERENT positions, and the first version of this called
-    # that a misalignment bug and "found" 119 of 146 broken. The records are
-    # perfectly aligned - dump 0x760af8/0x760b28/0x760b58 with ledrec.py and they
-    # are structurally identical with genuinely different x,y. Drawn with
-    # pfmap.py they all land on real inserts. So these suffixes are not always
-    # three channels of one physical LED; sometimes they are separate
-    # single-colour inserts that share a stem name. Report it, do not "fix" it.
+    # THE CHECK THAT WOULD HAVE CAUGHT THE OFF-BY-ONE, so it runs every time.
+    # 31 playfield devices are named LEFT-something or RIGHT-something, and a
+    # correct table puts every one of them on the correct side of the
+    # centreline. The wrong name offset scored 21/31; the right one scores 31/31.
+    mid, ok, wrong = PF_W / 2.0, 0, []
+    for r in pf:
+        u = r["name"].upper()
+        if u.startswith("LEFT "):
+            ok, wrong = (ok + 1, wrong) if r["x"] < mid else (ok, wrong + [r["name"]])
+        elif u.startswith("RIGHT "):
+            ok, wrong = (ok + 1, wrong) if r["x"] > mid else (ok, wrong + [r["name"]])
+    print("# left/right names on the correct side: %d ok, %d WRONG%s"
+          % (ok, len(wrong), (" - " + ", ".join(wrong[:4])) if wrong else ""))
+
+    # -R/-G/-B of one stem sharing a position is the other consistency signal:
+    # they are three channels of one physical LED, so they should agree.
     stems = {}
     for r in keep:
         if r["name"][-2:-1] == "-":

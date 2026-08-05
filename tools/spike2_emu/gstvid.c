@@ -297,6 +297,17 @@ int pad_vid_prepare(void)
     if (!vshm || !cur_location[0]) return 0;
     if (!buf_layout()) return 0;
 
+    /* RESET THE POSITION HERE, not just in pad_vid_play().
+     *
+     * The game queries position and duration while the pipeline is at PAUSED,
+     * before it ever plays. Leaving cur_pos_ns holding the PREVIOUS clip's
+     * duration meant it compared a stale position against the new clip's
+     * duration, decided the new clip was already finished, and tore the
+     * pipeline down - then built it again, ~25 times a second, so nothing ever
+     * played and the video panel stayed black. In attract mode it is the same
+     * clip over and over, so the stale value happened to be right and the bug
+     * did not show; in a game, where clips differ, it thrashes. */
+    cur_pos_ns = 0;
     str_copy(vshm->path, cur_location, PADVID_PATH_MAX);
     /* PREROLL: tell the host to start decoding NOW, at PAUSED, not at PLAYING.
      *

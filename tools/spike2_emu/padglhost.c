@@ -394,6 +394,11 @@ extern unsigned long XWhitePixel(XDisplay *, int);
 extern unsigned long XLoadFont(XDisplay *, const char *);
 extern int XSetFont(XDisplay *, XGC, unsigned long);
 extern int XMoveWindow(XDisplay *, unsigned long, int, int);
+extern int XGetGeometry(XDisplay *, unsigned long, unsigned long *, int *, int *,
+                        unsigned *, unsigned *, unsigned *, unsigned *);
+extern int XTranslateCoordinates(XDisplay *, unsigned long, unsigned long,
+                                 int, int, int *, int *, unsigned long *);
+
 extern int XPeekEvent(XDisplay *, void *);
 extern unsigned long XLookupKeysym(void *, int);
 extern void *XSetErrorHandler(void *);
@@ -456,6 +461,84 @@ static unsigned char key_latch[NBINDS];     /* toggles currently latched     */
 static unsigned long legend_win;
 static XGC legend_gc;
 static int legend_dirty = 1;
+
+/* ---- WINDOW POSITIONS, REMEMBERED ---------------------------------------
+ *
+ * Both windows come back where they were left. The file is one line per
+ * window in the user's home, not in the rig directory, because it is
+ * per-machine state rather than part of the rig.
+ *
+ * The position has to be read with XTranslateCoordinates against the root
+ * rather than XGetGeometry alone: under a reparenting window manager - and
+ * WSLg is one - XGetGeometry returns coordinates relative to the frame the WM
+ * wrapped around the window, which is 0,0 however far across the screen the
+ * window actually is. */
+#define WINPOS_PATH_MAX 512
+static char winpos_path[WINPOS_PATH_MAX];
+
+static const char *winpos_file(void)
+{
+    const char *home;
+    if (winpos_path[0]) return winpos_path;
+    home = getenv("HOME");
+    snprintf(winpos_path, sizeof winpos_path, "%s/.pad_windows",
+             home && *home ? home : "/tmp");
+    return winpos_path;
+}
+
+static int winpos_get(const char *key, int *x, int *y)
+{
+    char line[160], k[64];
+    FILE *f = fopen(winpos_file(), "r");
+    int gx, gy, hit = 0;
+    if (!f) return 0;
+    while (fgets(line, sizeof line, f))
+        if (sscanf(line, "%63s %d %d", k, &gx, &gy) == 3 && !strcmp(k, key)) {
+            *x = gx; *y = gy; hit = 1;
+        }
+    fclose(f);
+    return hit;
+}
+
+static void winpos_put(const char *key, int x, int y)
+{
+    char line[160], k[64];
+    char keep[8][160];
+    int n = 0, gx, gy, i;
+    FILE *f = fopen(winpos_file(), "r");
+    if (f) {
+        while (n < 8 && fgets(line, sizeof line, f))
+            if (sscanf(line, "%63s %d %d", k, &gx, &gy) == 3 && strcmp(k, key))
+                snprintf(keep[n++], sizeof keep[0], "%s %d %d\n", k, gx, gy);
+        fclose(f);
+    }
+    f = fopen(winpos_file(), "w");
+    if (!f) return;
+    for (i = 0; i < n; i++) fputs(keep[i], f);
+    fprintf(f, "%s %d %d\n", key, x, y);
+    fclose(f);
+}
+
+/* Absolute position of a window on the root, reparenting WM and all. */
+static int winpos_read(unsigned long w, int *x, int *y)
+{
+    unsigned long root_ret, child;
+    int rx, ry;
+    unsigned uw, uh, bw, depth;
+    if (!w) return 0;
+    if (!XGetGeometry(xdpy, w, &root_ret, &rx, &ry, &uw, &uh, &bw, &depth))
+        return 0;
+    if (!XTranslateCoordinates(xdpy, w, root_ret, 0, 0, x, y, &child)) return 0;
+    return 1;
+}
+
+static void winpos_save_all(void)
+{
+    int x, y;
+    if (!xdpy) return;
+    if (xwin && winpos_read(xwin, &x, &y)) winpos_put("game", x, y);
+    if (legend_win && winpos_read(legend_win, &x, &y)) winpos_put("legend", x, y);
+}
 
 /* Recompute held[] from scratch and publish. Rebuilding rather than patching
  * incrementally means two keys bound to the same switch cannot leave it stuck

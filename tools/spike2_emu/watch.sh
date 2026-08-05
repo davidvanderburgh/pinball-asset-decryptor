@@ -187,14 +187,30 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            ./run_gz.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 
-# The virtual playfield runs on WINDOWS, not here: this WSL has no Python GUI
-# toolkit at all (no tkinter, no gi, no Qt) and installing one needs a sudo the
-# rig does not have. Start it yourself alongside this:
+# The virtual playfield: clickable switches, inserts lit from the wire.
 #
-#     python tools\spike2_emu\playfield.py
+# It has to run on WINDOWS - this WSL has no Python GUI toolkit at all (no
+# tkinter, no gi/Gtk, no Qt) and installing one needs a sudo the rig does not
+# have - but WSL can launch a Windows program through interop, so it still comes
+# up by itself rather than being one more thing to remember. PAD_PLAYFIELD=0
+# turns it off; set PAD_PF_PYTHON if python.exe is somewhere unusual.
 #
-# It reads dump/padled over \\wsl.localhost for LED state and shells out to
-# swpoke.py for clicks, so it needs nothing from this script.
+# `cmd.exe /c start` detaches it, so closing the game does not take the window
+# with it and vice versa. It talks to the rig only through dump/padled (read)
+# and swpoke.py (clicks), so it survives the game restarting under it.
+if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -f "$S/switch_xy.txt" ]; then
+    # pythonw.exe, NOT python.exe: the console-attached interpreter leaves a
+    # black terminal window sitting next to the playfield for the whole session.
+    PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
+    PF_WIN='C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu\playfield.py'
+    if command -v cmd.exe >/dev/null 2>&1; then
+        ( cd /mnt/c && cmd.exe /c start "" "$PF_PY" "$PF_WIN" ) >/dev/null 2>&1
+        echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
+    else
+        echo "[watch] no Windows interop; run playfield.py yourself:" >&2
+        echo "[watch]   python tools\\spike2_emu\\playfield.py" >&2
+    fi
+fi
 
 # Wait for the guest to actually EXIST before treating its absence as "it
 # exited". run_gz.sh has to set up a pty, a user/mount/PID namespace and a

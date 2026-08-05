@@ -72,86 +72,93 @@ trap 'kill $HOLD 2>/dev/null; rm -f "$FIFO"' EXIT
 # PAD_AUDIO_SINK=pulse forces the old path back (it is still correct, just
 # fragile); =win forces this one and fails loudly if ffplay is missing; the
 # default picks Windows when ffplay.exe can be found and falls back otherwise.
-find_ffplay() {
-    [ -n "${PAD_FFPLAY:-}" ] && { echo "$PAD_FFPLAY"; return; }
-    # The app passes PAD_FFPLAY (it already resolves ffplay for audio preview).
-    # For a terminal run, look where Windows actually puts it. The WinGet path
-    # carries a package hash, so glob it rather than spelling it out.
+is_wsl() { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; }
+
+# A Windows Python that can actually open a sound device. Both halves matter:
+# an interpreter without sounddevice is no use, and finding that out at startup
+# gives an actionable message instead of a silent run.
+find_winpython() {
     local c
-    for c in /mnt/c/Users/*/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/*/bin/ffplay.exe \
-             /mnt/c/ffmpeg/bin/ffplay.exe \
-             "/mnt/c/Program Files/ffmpeg/bin/ffplay.exe"; do
-        [ -x "$c" ] && { echo "$c"; return; }
+    for c in ${PAD_WINPYTHON:+"$PAD_WINPYTHON"} \
+             /mnt/c/Python3*/python.exe \
+             /mnt/c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe; do
+        [ -x "$c" ] || continue
+        "$c" -c "import sounddevice" >/dev/null 2>&1 && { echo "$c"; return; }
     done
     echo ""
 }
 
-# DEFAULT IS `pulse`, AND THAT IS DELIBERATE ON TWO COUNTS.
+# THE DEFAULT IS `auto`, AND AUTO MEANS "BRIDGE ON WSL, NATIVE EVERYWHERE ELSE".
 #
-# 1. CROSS-PLATFORM. The rig has to run on macOS and Linux as well, where
-#    there is no WSL boundary at all and ffmpeg's pulse/alsa/audiotoolbox
-#    output is simply the native path. The Windows bridge is a Windows-only
-#    workaround for a Windows-only fault, so it cannot be the default.
-# 2. IT IS THE ONE THAT CURRENTLY SOUNDS RIGHT. The bridge fixes the WSLg
-#    crackle for good, but as of 2026-08-05 it STUTTERS, and the cause is
-#    upstream of the player: a pure counter with no audio device attached
-#    receives exactly 90.0% of what the relay sends over the WSL -> Windows
-#    socket, every window, whether over localhost or the VM's own IP. Until
-#    that is understood, pulse is the honest default - it is smooth, and its
-#    known problem (WSLg audio degrading over a session) has a one-click
-#    remedy in the Emulate tab.
+# That is the cross-platform answer, not a Windows-shaped compromise. macOS and
+# Linux have no WSL boundary, so there is nothing to bypass and pulse/alsa/
+# CoreAudio is simply the right path. WSL is the one platform whose audio hop is
+# broken, so it is the one platform that gets bypassed.
 #
-# PAD_AUDIO_SINK=win opts into the bridge for anyone continuing that work.
-SINK=${PAD_AUDIO_SINK:-pulse}
-FFPLAY=$(find_ffplay)
-if [ "$SINK" = auto ]; then
-    [ -n "$FFPLAY" ] && SINK=win || SINK=pulse
+# And the hop really is broken, measured rather than guessed. Playing a known
+# file through it and subtracting the original from a recording of the speakers
+# (see resid.py in the session scratchpad) scores +16 dB of damage - the error
+# is louder than the signal - while Windows playing that same file scores
+# -13.6 dB. Buffer size, sample rate and CPU load all make no difference to it.
+# The bridge over the same measurement scores -14.8 dB, i.e. level with Windows
+# playing the file itself.
+#
+# =pulse forces the old path back, =win forces the bridge and fails loudly.
+SINK=${PAD_AUDIO_SINK:-auto}
+WINPY=""
+if [ "$SINK" != pulse ]; then
+    is_wsl && WINPY=$(find_winpython)
 fi
-if [ "$SINK" = win ] && [ -z "$FFPLAY" ]; then
-    echo "[play] PAD_AUDIO_SINK=win but no ffplay.exe found; set PAD_FFPLAY" >&2
+if [ "$SINK" = auto ]; then
+    [ -n "$WINPY" ] && SINK=win || SINK=pulse
+fi
+if [ "$SINK" = win ] && [ -z "$WINPY" ]; then
+    echo "[play] PAD_AUDIO_SINK=win but no Windows Python with sounddevice." >&2
+    echo "[play] install it once:  py -m pip install sounddevice" >&2
     exit 1
+fi
+# Falling back rather than exiting: a degraded speaker beats a silent one, but
+# say so, because this path is the known-bad one and a quiet downgrade is how
+# it goes unnoticed for weeks.
+if [ "$SINK" = pulse ] && is_wsl && [ "${PAD_AUDIO_SINK:-auto}" = auto ]; then
+    echo "[play] NOTE: no Windows Python with sounddevice, falling back to WSLg" >&2
+    echo "[play] audio, which is measurably damaged. Fix with:" >&2
+    echo "[play]   py -m pip install sounddevice" >&2
 fi
 
 if [ "$SINK" = win ]; then
     PORT=${PAD_AUDIO_PORT:-45997}
-    case "$CH" in 1) LAYOUT=mono ;; *) LAYOUT=stereo ;; esac
-    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> WINDOWS ffplay (tcp/$PORT)"
-    echo "[play] bypassing WSLg audio entirely: $FFPLAY"
+    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> WINDOWS (tcp/$PORT)"
+    echo "[play] bypassing WSLg audio entirely: $WINPY"
 
-    # The FIFO, handed out as raw bytes. This is audiotcp.py and NOT another
-    # ffmpeg, and the reason is load-bearing: ffmpeg opens its INPUT before its
-    # OUTPUT, so `-i $FIFO ... -f s16le tcp://...?listen=1` blocks on a FIFO
-    # that stays empty until the game first makes a sound and NEVER OPENS THE
-    # SOCKET. The player then finds nothing to connect to and the run is
-    # silent. audiotcp.py listens first and opens the FIFO only once a player
-    # has attached.
-    # The cushion the player rides on, in bytes of PCM. See audiotcp.py: a
-    # live stream delivered at exactly real time leaves the player permanently
-    # hungry, and the music skips. PAD_AUDIO_PREBUFFER_MS moves it.
-    PRE_MS=${PAD_AUDIO_PREBUFFER_MS:-200}
-    PRE_BYTES=$(( RATE * CH * 2 * PRE_MS / 1000 ))
-    echo "[play] pre-buffer ${PRE_MS} ms (${PRE_BYTES} bytes)"
-    BPS=$(( RATE * CH * 2 ))
-    python3 "$(dirname "$0")/audiotcp.py" "$FIFO" "$PORT" "$PRE_BYTES" "$BPS" &
+    # The FIFO, handed out as raw bytes by a relay that makes no decisions.
+    # It is padrelay.py and NOT another ffmpeg, and the reason is load-bearing:
+    # ffmpeg opens its INPUT before its OUTPUT, so `-i $FIFO ... -f s16le
+    # tcp://...?listen=1` blocks on a FIFO that stays empty until the game first
+    # makes a sound and NEVER OPENS THE SOCKET. The player then finds nothing to
+    # connect to and the run is silent. padrelay.py listens first and opens the
+    # FIFO only once a player has attached.
+    python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" &
     SRV=$!
 
     # TEARING DOWN A WINDOWS CHILD. The player is a native Windows process
     # reached through interop, so it is invisible to pgrep and to killgame.sh -
     # exactly the orphan class this rig exists to avoid.
     #
-    # The normal path needs no help: `-autoexit` makes ffplay leave when its
-    # input ends, and the socket ends whenever the server goes, INCLUDING on
-    # SIGKILL, because the kernel closes a dead process's sockets. The backstop
-    # below is only for a player that never connected or has wedged.
+    # The normal path needs no help: the player leaves when its input ends, and
+    # the socket ends whenever the server goes, INCLUDING on SIGKILL, because
+    # the kernel closes a dead process's sockets. The backstop below is only for
+    # a player that never connected or has wedged.
     #
-    # It matches on OUR PORT, not on the image name: `taskkill /IM ffplay.exe`
-    # would also kill the audio preview in PAD itself, which is a different
-    # ffplay doing legitimate work for the user.
+    # It matches on OUR PORT, not on the image name. Killing every python.exe
+    # would take out whatever else the user is running, and the old version of
+    # this that matched ffplay.exe would have killed PAD's own audio preview.
     WINPID=""
     win_kill() {
         /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
-            -Command "Get-CimInstance Win32_Process -Filter \"Name='ffplay.exe'\" |
-                      Where-Object { \$_.CommandLine -like '*:$PORT*' } |
+            -Command "Get-CimInstance Win32_Process |
+                      Where-Object { \$_.CommandLine -like '*padplay.py*' -and
+                                     \$_.CommandLine -like '* $PORT *' } |
                       ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
             >/dev/null 2>&1 || true
     }
@@ -159,43 +166,19 @@ if [ "$SINK" = win ]; then
           win_kill; rm -f "$FIFO"' EXIT
 
     # NO READINESS PROBE HERE, deliberately. The obvious one - connect to the
-    # port to see whether it is up yet - IS ITSELF A CLIENT: audiotcp.py
-    # accepts it as the player, opens the FIFO for it and then sees it hang up
-    # ("player connected" / "player went away" in the log for a player that was
-    # never there). The retry loop below covers a listener that is not ready,
-    # which is what the probe was for, so the probe only ever added a fake
-    # connection.
-    #
-    # ffplay 8.x has no -ac; channels come from -ch_layout.
-    #
-    # BUFFERING: the first version ran `-fflags nobuffer -flags low_delay
-    # -probesize 32 -analyzeduration 0` on the theory that a pinball machine
-    # must answer a flipper immediately. It does answer immediately, and it
-    # SKIPS - David: "it sounds like we are dropping frames, I can hear the
-    # music skipping some beats". Measured at the same time: `dropped=0` and
-    # `fifo=0 ms` on the guest side, i.e. every frame left WSL and the relay
-    # was idling, so nothing was lost here - the player simply had no buffer
-    # to ride out the jitter in the game's own output, and each gap became an
-    # underrun. The old pulse path hid that behind a 40 ms buffer.
-    #
-    # So let ffplay buffer by default. PAD_AUDIO_LOWDELAY=1 restores the
-    # aggressive flags for anyone who would rather have the latency back.
-    LOWDELAY=""
-    if [ "${PAD_AUDIO_LOWDELAY:-0}" = 1 ]; then
-        LOWDELAY="-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0"
-        echo "[play] low-delay flags ON (PAD_AUDIO_LOWDELAY=1) - may skip"
-    fi
+    # port to see whether it is up yet - IS ITSELF A CLIENT: the relay accepts
+    # it as the player, opens the FIFO for it and then sees it hang up ("player
+    # connected" / "player went away" in the log for a player that was never
+    # there). The retry loop below covers a listener that is not ready, which is
+    # what the probe was for, so the probe only ever added a fake connection.
     #
     # RESTARTED IF IT DIES, because it is the speaker and a run that quietly
     # loses it is the "audio was silently dead for weeks" failure this rig has
     # already had once. The loop exits with the relay.
     (
         while kill -0 $SRV 2>/dev/null; do
-            # shellcheck disable=SC2086
-            "$FFPLAY" -hide_banner -loglevel error -nodisp -autoexit \
-                $LOWDELAY \
-                -f s16le -ar "$RATE" -ch_layout "$LAYOUT" \
-                -i "tcp://127.0.0.1:$PORT" >/dev/null 2>&1
+            "$WINPY" "$(wslpath -w "$(dirname "$0")/padplay.py")" \
+                127.0.0.1 "$PORT" "$RATE" "$CH"
             kill -0 $SRV 2>/dev/null || break
             echo "[play] Windows player exited; restarting it" >&2
             sleep 1
@@ -204,6 +187,21 @@ if [ "$SINK" = win ]; then
     WINPID=$!
     wait $SRV
     exit 0
+fi
+
+# NATIVE PLAYBACK - macOS and Linux, where there is no boundary to cross.
+#
+# Same player as the WSL bridge, reading the FIFO directly instead of a socket,
+# so all three platforms share one queue, one pre-roll and one underrun policy.
+# PortAudio drives CoreAudio on macOS and ALSA/PulseAudio on Linux. Only the
+# transport differs between platforms, and only because WSL forces it to.
+#
+# Deliberately NOT used on WSL: PortAudio there would reach the speakers through
+# WSLg's PulseAudio, which is the damaged hop this whole arrangement exists to
+# avoid, so the player would be identical and the sound would not.
+if ! is_wsl && python3 -c "import sounddevice" >/dev/null 2>&1; then
+    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> PortAudio (native)"
+    exec python3 "$(dirname "$0")/padplay.py" --fifo "$FIFO" "$RATE" "$CH"
 fi
 
 echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> pulse"

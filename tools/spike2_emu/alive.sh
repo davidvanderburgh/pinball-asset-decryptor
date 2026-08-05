@@ -53,21 +53,22 @@ BUS=$(n -f nodebus.py)
 # without (the fifo), not what it is supposed to do with it (pulse).
 # TWO SHAPES OF AUDIO PLAYER, because the rig has two sinks now.
 #
-#   pulse sink : an ffmpeg draining the fifo into WSLg's PulseAudio.
-#   windows sink (the default): audiotcp.py serving the fifo over TCP to a
-#                NATIVE WINDOWS ffplay.exe.
+#   windows sink (the default on WSL): padrelay.py serving the fifo over TCP to
+#                a NATIVE WINDOWS python running padplay.py.
+#   native sink (macOS, Linux): padplay.py reading the fifo directly.
+#   pulse sink (fallback): an ffmpeg draining the fifo into WSLg's PulseAudio.
 #
 # Matching only the old ffmpeg shape made this print "audio player: 0" while
-# audiotcp.py and a Windows player were both up - the exact blindness this
-# script exists to prevent, reintroduced by the sink change. playaudio.sh is
-# counted too: it is the parent that owns the fifo and the Windows child, and
-# a leaked one keeps both alive.
+# the relay and a Windows player were both up - the exact blindness this script
+# exists to prevent, reintroduced by a sink change. playaudio.sh is counted too:
+# it is the parent that owns the fifo and the Windows child, and a leaked one
+# keeps both alive.
 #
-# The Windows ffplay itself is NOT visible to pgrep at all (it is a Windows
+# The Windows player itself is NOT visible to pgrep at all (it is a Windows
 # process reached through interop), so it cannot be counted here. It exits on
 # EOF when the relay goes, and killgame.sh has a Windows-side backstop.
 AUD=$(n -f '^ffmpeg .*audio\.fifo')
-AUD=$((AUD + $(n -f 'audiotcp\.py') + $(n -f 'playaudio\.sh')))
+AUD=$((AUD + $(n -f 'padrelay\.py') + $(n -f 'padplay\.py') + $(n -f 'playaudio\.sh')))
 TOTAL=$((GAME + QEMU + HOST + BUS + AUD))
 
 printf 'guest (comm=game)      : %s\n' "$GAME"
@@ -81,7 +82,7 @@ printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|audiotcp\.py' \
+    | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py' \
     | grep -v grep | head -10
 fi
 exit 0

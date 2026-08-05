@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""padplay.py [--fifo PATH | <host> <port>] <rate> <channels> - play the PCM.
+
+ONE PLAYER ON ALL THREE PLATFORMS, which is the point of the two source forms.
+The player itself is identical everywhere; only how the bytes reach it differs,
+and that difference is forced by WSL alone:
+
+  --fifo PATH   macOS and Linux. The game and the speakers are on one machine,
+                so the player reads the guest's FIFO directly and PortAudio
+                drives CoreAudio or ALSA. No socket, no relay, no bridge.
+  host port     WSL only. The speakers are on the far side of a boundary whose
+                audio hop is measurably broken, so the player runs as a WINDOWS
+                process and padrelay.py hands it the same bytes over localhost.
+
+Everything that decides how the audio SOUNDS - the queue, the pre-roll, the
+underrun policy, the device clock - is the same code in both cases.
+
+
+WHY THIS REPLACES winplay.py. The first player was a hand-rolled waveOut ring,
+and the relay feeding it invented its own clock: it filled silence against wall
+time and trimmed "surplus" it thought had built up. Two clocks, neither of them
+the one that matters, and the audio skipped. PortAudio already solves this and
+has for twenty years - the sound card pulls, through a callback, at the only
+clock with a vote. So there is no pacing here at all.
+
+CROSS-PLATFORM BY CONSTRUCTION, which is the other reason. The same file plays
+through WASAPI on Windows, CoreAudio on macOS and ALSA/PulseAudio on Linux,
+because that is what PortAudio is for. The rig has to run on all three.
+
+WASAPI IS SELECTED EXPLICITLY on Windows. PortAudio's default host API there is
+MME, which dates to 1991 and carries ~200 ms of latency - the same class of
+interface the hand-rolled player used, and no better. WASAPI measures 3 ms on
+this machine.
+
+The only buffering is a plain byte queue between the socket and the callback,
+pre-filled before the stream opens so the first callback is not starved. If it
+does run dry the callback emits silence for that block and says so; it never
+blocks, because blocking inside an audio callback is how you get a glitch in
+every other application on the machine too.
+"""
+import os
+import socket
+import sys
+import threading
+import time
+
+import sounddevice as sd
+
+
+def pick_device():
+    """Windows: the WASAPI default. Everywhere else: whatever the system says."""
+    if sys.platform != "win32":
+        return None
+    for api in sd.query_hostapis():
+        if "WASAPI" in api["name"] and api["default_output_device"] >= 0:
+            return api["default_output_device"]
+    return None
+
+
+def open_source(argv):
+    """Return (read(n), close(), description). See the two forms in the docstring."""
+    if argv and argv[0] == "--fifo":
+        path = argv[1]
+        rest = argv[2:]
+        # A FIFO open blocks until the guest opens the write end, which is
+        # correct: there is nothing to play until it does.
+        fd = os.open(path, os.O_RDONLY)
+        return (lambda n: os.read(fd, n)), (lambda: os.close(fd)), path, rest
+    host = argv[0] if argv else "127.0.0.1"
+    port = int(argv[1]) if len(argv) > 1 else 45997
+    sock = socket.create_connection((host, port), timeout=30)
+    sock.settimeout(None)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    return sock.recv, sock.close, f"{host}:{port}", argv[2:]
+
+
+def main():
+    read, close, src_desc, rest = open_source(sys.argv[1:])
+    rate = int(rest[0]) if rest else 44100
+    ch = int(rest[1]) if len(rest) > 1 else 2
+
+    frame = 2 * ch
+    bps = rate * frame
+    # The cushion the callback eats from. It only has to cover jitter in the
+    # SOURCE - the guest's writes and the socket - because the device side is
+    # handled by PortAudio's own latency setting.
+    # 350 ms, measured. At 150 the queue dipped to 3 ms in the first seconds and
+    # the startup transient was the only damage left in the recording (-11.2 dB,
+    # worst blocks all inside the first second). At 350 the queue holds ~100 ms
+    # for the whole run with zero underruns and the score is -14.8 dB, which is
+    # slightly BETTER than Windows playing the same file itself.
+    pre_ms = int(os.environ.get("PAD_AUDIO_PREBUFFER_MS", "350"))
+    lat_ms = int(os.environ.get("PAD_AUDIO_LATENCY_MS", "60"))
+    prebuf = bps * pre_ms // 1000
+
+    buf = bytearray()
+    lock = threading.Lock()
+    done = threading.Event()
+    stats = {"under": 0, "fed": 0, "played": 0}
+
+    def reader():
+        try:
+            while not done.is_set():
+                b = read(65536)
+                if not b:
+                    break
+                with lock:
+                    buf.extend(b)
+                    stats["fed"] += len(b)
+        except OSError:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=reader, daemon=True).start()
+
+    # Pre-fill. Give the source a moment to get ahead before the card starts
+    # asking, or the very first callback underruns and every one after it is
+    # chasing.
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 10:
+        with lock:
+            if len(buf) >= prebuf:
+                break
+        if done.is_set():
+            break
+        time.sleep(0.005)
+
+    def callback(outdata, frames, _time, status):
+        need = frames * frame
+        with lock:
+            have = len(buf)
+            n = min(need, have)
+            if n:
+                outdata[:n] = bytes(buf[:n])
+                del buf[:n]
+            stats["played"] += n
+        if n < need:
+            # Silence for what we could not fill. Never block, never sleep.
+            outdata[n:need] = b"\0" * (need - n)
+            stats["under"] += 1
+
+    dev = pick_device()
+    # WASAPI in shared mode only accepts the device's own rate, and this card
+    # runs at 48000 while the game plays 44100 - PortAudio answers "Invalid
+    # sample rate" outright. auto_convert hands that conversion to WASAPI's own
+    # resampler, which is the correct place for it: the mixer has to resample
+    # anyway to share the device with every other application. Doing it here by
+    # hand would be a third wheel to reinvent, and rate conversion is already
+    # ruled out as the source of the damage - 48000 measured no better than
+    # 44100 through pulse.
+    extra = None
+    if sys.platform == "win32" and dev is not None:
+        try:
+            extra = sd.WasapiSettings(auto_convert=True)
+        except TypeError:
+            extra = None            # older binding: fall through and let it fail loudly
+    stream = sd.RawOutputStream(
+        samplerate=rate, channels=ch, dtype="int16",
+        device=dev, latency=lat_ms / 1000.0, callback=callback,
+        extra_settings=extra,
+    )
+    name = sd.query_devices(dev)["name"] if dev is not None else "default"
+    api = sd.query_hostapis(sd.query_devices(dev)["hostapi"])["name"] if dev is not None else "-"
+    print(f"[padplay] {src_desc} -> {rate} Hz x {ch} -> {name} via {api}, "
+          f"prebuffer {pre_ms} ms, device latency {lat_ms} ms", flush=True)
+
+    with stream:
+        last = time.monotonic()
+        while not done.is_set() or len(buf) > 0:
+            time.sleep(0.25)
+            now = time.monotonic()
+            if now - last >= 5:
+                with lock:
+                    depth = len(buf)
+                print(f"[padplay] queue {depth * 1000 // bps:4d} ms  "
+                      f"underruns {stats['under']:4d}  "
+                      f"fed {stats['fed']}  played {stats['played']}", flush=True)
+                stats["under"] = 0
+                last = now
+    close()
+
+
+if __name__ == "__main__":
+    main()

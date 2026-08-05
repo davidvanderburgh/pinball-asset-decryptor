@@ -40,16 +40,20 @@ pkill -9 -f 'playaudio.sh'
 # ^-anchored, and matched on the fifo not on '-f pulse': a severed player
 # command line (see playaudio.sh) had no pulse output yet still held the fifo.
 pkill -9 -f '^ffmpeg .*audio\.fifo'
-# The Windows-sink relay. Killing it also ends the run's audio for the native
-# Windows ffplay, which sees EOF on the socket and leaves on its own (-autoexit)
-# - the kernel closes the socket even when this is a SIGKILL.
-pkill -9 -f 'audiotcp\.py'
-# BACKSTOP for a Windows player that did not take the hint. Matched on the PORT,
-# never on the image name: `taskkill /IM ffplay.exe` would also kill PAD's own
-# audio preview, which is a different ffplay doing legitimate work.
+# The Windows-sink relay, and the native player when there is no bridge.
+# Killing the relay also ends the run's audio for the Windows player, which sees
+# EOF on the socket and leaves on its own - the kernel closes the socket even
+# when this is a SIGKILL.
+pkill -9 -f 'padrelay\.py'
+pkill -9 -f 'padplay\.py'
+# BACKSTOP for a Windows player that did not take the hint. Matched on the
+# SCRIPT AND PORT, never on the image name: killing every python.exe would take
+# out whatever else the user is running, and the version of this that matched
+# ffplay.exe would have killed PAD's own audio preview.
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command \
-  "Get-CimInstance Win32_Process -Filter \"Name='ffplay.exe'\" |
-   Where-Object { \$_.CommandLine -like '*:45997*' } |
+  "Get-CimInstance Win32_Process |
+   Where-Object { \$_.CommandLine -like '*padplay.py*' -and
+                  \$_.CommandLine -like '* 45997 *' } |
    ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.

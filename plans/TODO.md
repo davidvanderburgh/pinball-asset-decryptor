@@ -466,16 +466,39 @@ These have each been violated at least once and each cost a run or a window:
       separate blocking source. CONFOUND to control: his session ran
       PAD_CARD (fuse2fs), the measurement runs are extracted — asset I/O
       cost differs between them.
-      **NOT CONFIRMED: run 3's numbers, and the PICTURE on a fixed build —
-      David's eyes are the oracle for the transition stutter.**
+      **★ DAVID WATCHED RUN 3 LIVE (all three fixes active) AND STILL SEES
+      STUTTER, refined by two answers that redirect the hunt:** (1) **"only
+      the video content"** hitches — overlays/score/LEDs stay smooth — so the
+      game's render loop is exonerated and the residual is gaps in frame
+      DELIVERY to the texture; (2) it is **intermittent and "sometimes looks
+      more like screen tearing"** (his earlier screen recording is the
+      reference). Run 3's own live numbers confirm the fixes work AND the
+      residual is real: absorbs firing, superseded-after-1 down 170 → 33,
+      throttled-4 down to 9, but padglhost dips 60 → 53/49.9 fps in busy
+      stretches.
+      **TWO NAMED CANDIDATES for the residual, neither yet measured:**
+      • **Fragment-cut cold starts.** During events the game chains
+      sub-second clip fragments (live log: `329.asset` cut after 14 frames =
+      0.36 s, `316.asset` after 30 = 0.75 s) and every cut pays ffmpeg spawn
+      + ~35 ms cold start — freeze-gaps peppering exactly the moments David
+      reports. **The census instrument for this is BUILT and arms on the
+      next run** (padvidhost.py: `first frame consumed N ms after serve
+      start` + `guest consume STALLED N ms at frame F`, budgeted).
+      • **Ring-slot reuse race → TEARING.** The guest hands the game a
+      POINTER into the shared ring (no copy), padglhost reads those pixels
+      LATER at its own pace, but the guest frees the slot the moment the
+      handoff returns and the ring is 4 deep — a lagging upload reads a slot
+      ffmpeg is overwriting. Fits "intermittent, worse when things happen,
+      looks like tearing". **Detector designed, not built:** stamp each slot
+      with its frame number host-side, have padglhost verify the stamp at
+      upload time and log mismatches — spans the GL bridge, next pass.
       **A LIVE RUN may be up when this is read** (run 3, watch.sh 14 min +
-      longplay, started ~15:0x 2026-08-06) and **gstvid.c is uncommitted**
-      pending run 3's numbers.
-      **Resume:** harvest run 3 (`item11results2.sh` pattern in the session
-      scratchpad; before-numbers: superseded-after-1 = 170 in run 2, serve
-      pairs everywhere, `superseded while throttled after 4 frames`
-      throughout), commit gstvid.c if clean, then have David watch a game
-      and judge the transitions.
+      longplay). **Uncommitted: gstvid.c** (both state-path fixes; run 3
+      numbers above justify committing) **and padvidhost.py** (the census).
+      **Resume:** when run 3 ends — harvest (`item11results2.sh` pattern in
+      the session scratchpad), commit gstvid.c + padvidhost.py, then run 4
+      WITH the census live and read the gap census against David's report;
+      build the tear detector if the census cannot explain the residual.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

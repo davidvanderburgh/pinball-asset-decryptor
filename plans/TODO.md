@@ -633,12 +633,31 @@ These have each been violated at least once and each cost a run or a window:
       **one late handoff gap per 2 s of 46-223 ms under scene churn**, rate
       27.1-29.9/s against a target of 30. That is now the only trustworthy
       quantitative handle on the fault.
-      **THE INSTRUMENT THIS ITEM STILL NEEDS: a capture-jitter-free screen
-      measurement.** Options, none yet built: decode the tick ALONGSIDE the
-      video content in one capture and only count content repeats where the
-      tick advanced by exactly 1 (throws away the jittered samples instead
-      of believing them); or drive the capture off DwmFlush/present
-      timestamps rather than a free-running 60 fps timer.
+      **★★ BUILT AND MEASURED: `tickcensus.py`, and THE NUMBERS FINALLY
+      RECONCILE.** It decodes the tick beside the content and keeps ONLY the
+      pairs where the tick advanced by exactly 1 - genuinely adjacent swaps,
+      nothing missed, nothing double-sampled (75.1% of pairs were discarded
+      as jitter, which is the size of the hole in the old number).
+      **Baseline is 50%, NOT 0** - video is 30 fps over 60 Hz swaps, so
+      identical content across two adjacent swaps is CORRECT half the time,
+      and reading "repeats are bad" here calls a healthy pipeline 50% broken.
+      **Measured on a scene-driven game: 52.9%, i.e. +2.9 points = 1.76
+      holds/s** - about a third of the contaminated 5.72/s.
+      **AND 1.76/s IS WHAT THE GUEST-SIDE HICCUP PREDICTS** (one late handoff
+      gap per 2 s, 46-223 ms, plus a rate shortfall of 27.1-29.9 against 30).
+      Before this the screen said 5.72/s and the guest said ~0.5-3/s and they
+      did not reconcile, which is what drove two passes downstream. They
+      reconcile now: **there is nothing unexplained after the handoff.**
+      **SO THE WHOLE REMAINING FAULT IS THE GUEST'S LATE HANDOFF UNDER SCENE
+      CHURN**, and the mechanism is narrowed by what is already excluded -
+      not CPU (67% idle), not decode (RING EMPTY = 0), not renderer cost
+      (4.5 ms of 16.7), not presentation (tick: no swap ever lost).
+      **CANDIDATE, unproven:** the handoff itself blocks. It calls the game's
+      callback, which uploads and emits into the padgl ring; a scene change
+      uploads fresh textures, so a momentarily full ring would block the
+      video thread exactly when scenes churn. Test by timing the handoff call
+      in `vid_thread` (wrap `s->handoff(...)` and report the worst) before
+      changing anything - that single number confirms or kills it.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -655,11 +674,12 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** build the tick-gated screen census above, so the screen can
-      be measured without the grabber's 37% double-sampling in the number.
-      Until then the only trustworthy handle is the guest-side late gap, and
-      **no fix should be judged by a screen-capture percentage.** The agent
-      can run the whole
+      **Resume:** time the `s->handoff(...)` call in `vid_thread` and report
+      the worst per window; that confirms or kills the blocking-handoff
+      candidate in one run. **Judge every fix with `tickcensus.py` against
+      its 50% baseline** (needs `PAD_GL_TICK=1`, a 60 fps capture and a scene
+      with real motion) - NEVER with a raw screen-repeat percentage, which
+      carries the grabber's jitter. The agent can run the whole
       loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
       game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
       `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and

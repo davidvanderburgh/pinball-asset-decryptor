@@ -8,13 +8,25 @@ one sitting at 85%, so the queue advances on a broad front instead of grinding
 one item down. **Order on this page is presentation, not priority**; it is only
 the last tie-break, which is what moving lines around is still good for.
 
-The `D1`–`D5` on each open item is its **difficulty, and difficulty is what
-breaks the tie** between items at the same progress — five is hardest. The
-ladder that decides which number an item gets lives in the same place as the
-selection rule, `.claude/commands/next.md`, and is not restated here for the
-same reason. **It is an estimate of what is LEFT**, so it moves as passes learn:
-a cracked mechanism makes an item cheaper even when the percentage barely
-moved, and finding out the fault will not appear on demand makes it dearer.
+The `S1`–`S3` and `D1`–`D5` on each open item are its **severity and
+difficulty, and together they break the tie** between items at the same
+progress: severity first, then difficulty. **Lower is taken sooner in both** —
+S1 is the worst thing, D1 is the cheapest job. Roughly, S1 breaks playing the
+game, S2 costs runs or makes other items more expensive, S3 is friction with a
+workaround. Both ladders live in the same place as the selection rule,
+`.claude/commands/next.md`, and are not restated here for the same reason.
+
+**Severity was added on 2026-08-06 because difficulty alone kept sending the
+next pass at the cheapest item** — three severe faults in a row lost to a
+settings bug, since a settings bug is always cheaper than a video fault. It
+sits BELOW progress on purpose: above it, one S1 item at 90% would be ground
+down while five items sat at zero.
+
+**D is an estimate of what is LEFT**, so it moves as passes learn: a cracked
+mechanism makes an item cheaper even when the percentage barely moved, and
+finding out the fault will not appear on demand makes it dearer. **S moves
+rarely and only on evidence** about the fault itself, never to justify the
+effort an item turned out to need.
 
 Each item's full technical detail lives in
 `plans/spike2_pc_emulation_handoff.md` under **REMAINING item N** — the numbers
@@ -55,7 +67,9 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
-      does not repeat.** `D4` — the "repeat" half is desk work with a known
+      does not repeat.** `S1 D4` — S1 because unreliable input is not a defect
+      you play around, it is the thing you play WITH.
+      D4 because the "repeat" half is desk work with a known
       answer, but confirming the timing half needs an instrument that does not
       exist AND a human at the keyboard (item 7 established key presses cannot
       be injected here), and "sometimes" means a pass can miss it.
@@ -97,9 +111,11 @@ These have each been violated at least once and each cost a run or a window:
       key repeats. Oracle is the guest's own `[sw]` lines against the X event
       times, plus David's hands, since this fault is defined by how it feels.
 
-- [ ] **15. Every clip during gameplay plays the SAME video.** `D3` — needs a
-      run and a real game (`plunge.py game`), but it reproduces on every clip
-      rather than on a rare taunt, and the instruments already exist.
+- [ ] **15. Every clip during gameplay plays the SAME video.** `S1 D3` — S1
+      because it is every video element, in a real game, the whole time. D3
+      because it needs a run and a real game (`plunge.py game`), but it
+      reproduces on every clip rather than on a rare taunt, and the instruments
+      already exist.
       **Observed 2026-08-06, in a game, on the main display:** every video
       element draws the same Godzilla night-city footage over and over. It is
       PLAYING, not frozen on one frame. Screenshot: the `DEFENSE NEO BARRIER
@@ -133,8 +149,10 @@ These have each been violated at least once and each cost a run or a window:
       separately because the acceptance conditions differ and because burying a
       severe gameplay fault inside an item that reads as 90% done would hide it.
 
-- [ ] **16. Log replay mode: re-run a session's switch inputs from its log.** `D4`
-      — the parse and the driver are desk work on a primitive that is already
+- [ ] **16. Log replay mode: re-run a session's switch inputs from its log.**
+      `S2 D4` — S2 because play works without it; what it costs is every other
+      item's runs. D4 because the parse and the driver are desk work on a
+      primitive that is already
       validated, but confirming it takes runs, the log needs a new field first
       (a guest-side change and a rebuild), and the comparator does not exist yet.
       **The want:** point the rig at a previous run's log and have it re-deliver
@@ -174,10 +192,13 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **6. Scene video noise in the TV inset.** `D4` ← IN PROGRESS
-      *(D4 because the mechanism is cracked and the fix is written, but the only
-      acceptance oracle is the taunt, which fired three times in one run and not
-      once in the next — a pass can end having learned nothing.)*
+- [ ] **6. Scene video noise in the TV inset.** `S2 D4` ← IN PROGRESS
+      *(S2, not S1, deliberately: it is one element in one scene drawing wrong,
+      which is not the same order of fault as item 15's every-clip corruption,
+      and S1 is only useful while it stays small. D4 because the mechanism is
+      cracked and the fix is written, but the only acceptance oracle is the
+      taunt, which fired three times in one run and not once in the next — a
+      pass can end having learned nothing.)*
       The inset draws pink/green horizontal noise where character footage should
       be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
       **★★ THE BYTES ARE A 1360-WIDE RASTER. MEASURED, WITH A CONTROL, OFFLINE.**
@@ -328,15 +349,18 @@ These have each been violated at least once and each cost a run or a window:
       as noise. The two items may share a root; do not fix one without checking
       the other.
 
-- [ ] **11. Background video stutters every ~7 seconds.** `D3` — needs a run,
-      but it is visible in plain attract every time, so looking is enough.
+- [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` — S2 because
+      it is a quality defect you can play through, not a malfunction. D3 because
+      it needs a run, but it is visible in plain attract every time, so looking
+      is enough.
       Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is
       the obvious guess and it is wrong: the background is `264.asset/0.asset`,
       1965 frames, re-serving every **65.78 s**. A frame-rate beat between the
       clip and the 60 fps present is the standing candidate.
 
-- [ ] **3. The coil map.** `D3` — one run, `coilread.py` already validated, but
+- [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
+      does not exist yet. D3 — one run, `coilread.py` already validated, but
       the Coil Test menu has not been reached yet so the navigation is unknown.
       `Diagnostics → Coil Test` fires one drive at a time
       and the 10 device-test coils already have names and positions in
@@ -345,7 +369,8 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1d. The a2 / b4 / b5 payload.** `D4` — the capture rate is the problem:
+- [ ] **1d. The a2 / b4 / b5 payload.** `S3 D4` — S3: the lamps already work,
+      this is the last undecoded slice. D4 — the capture rate is the problem:
       ~15 frames in 60 s, and the oracle (`Diagnostics → LED Tests`) needs a run
       it has never been driven through.
       All that is left of the LED wire that
@@ -361,7 +386,9 @@ These have each been violated at least once and each cost a run or a window:
       Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
       is `Diagnostics → LED Tests`.
 
-- [ ] **13. Save and load save states.** `D5` — the only candidate tool is not
+- [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
+      item 16: play works, but every run pays for its absence. D5 — the only
+      candidate tool is not
       installed, the kernel is missing `INET_DIAG_DESTROY`, and the restore
       surface crosses into native Windows. Budget more than one pass.
       Freeze a live game and resume it later
@@ -387,7 +414,8 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
-- [ ] **14. The Emulate tab forgets the card image across a restart.** `D1` — no
+- [ ] **14. The Emulate tab forgets the card image across a restart.** `S3 D1` —
+      S3: it costs a Browse click per launch, nothing more. D1 — no
       run, no rig, no instrument; the acceptance test is written below.
       Start PAD,
       go to Emulate, and **"Card image to run" is always empty** — the path has to
@@ -415,8 +443,9 @@ These have each been violated at least once and each cost a run or a window:
       `tests/test_emulate_tab.py` is part of done. GUI-side change: run the `app`
       smoke tests, not just `py_compile`.
 
-- [ ] **4. Boot buzz — PARKED, deliberately.** `D3` (not in the pool; the number
-      is here for whenever it is reopened.) ~20 Hz stutter in the first ~10 s.
+- [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
+      numbers are here for whenever it is reopened.) ~20 Hz stutter in the
+      first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat

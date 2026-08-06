@@ -251,6 +251,12 @@ SCALARS = [
     ("hard_faults",  r"\Memory\Pages Input/sec"),
     ("run_queue",    r"\System\Processor Queue Length"),
     ("ctx_switches", r"\System\Context Switches/sec"),
+    # A saturated disk feels exactly like a slow machine and shows in no CPU
+    # counter at all. The run reads video clips continuously (an ffmpeg per live
+    # clip), writes several logs, and lives in a VHD on the system SSD, so this
+    # is a real candidate and pass one did not look at it.
+    ("disk_queue",   r"\PhysicalDisk(_Total)\Avg. Disk Queue Length"),
+    ("disk_bytes",   r"\PhysicalDisk(_Total)\Disk Bytes/sec"),
 ]
 
 # Windows-side processes that are ours or are in the rig's path, so they are
@@ -368,7 +374,15 @@ def stats(vals):
     }
 
 
-GPU_INST = re.compile(r"^pid_(\d+)_.*_engtype_(.+)$")
+# GPU engine instances look like
+#   pid_1828_luid_0x00000000_0x00012481_phys_0_eng_0_engtype_3d
+# The LUID identifies the ADAPTER, and this machine has two: an RTX 5090 that
+# drives the 4K120 desktop and an integrated AMD Radeon that drives no display.
+# Mesa's d3d12 picks the AMD one by default, so the emulator renders on the iGPU
+# and the result then has to cross to the NVIDIA adapter to be shown. Splitting
+# GPU time by LUID is what lets an adapter A/B show the work actually MOVING
+# between the two, rather than only showing that the total changed.
+GPU_INST = re.compile(r"^pid_(\d+)_luid_([0-9a-fA-Fx]+_[0-9a-fA-Fx]+)_.*_engtype_(.+)$")
 
 
 def capture(secs, interval, label, outdir, quiet=False):
@@ -413,7 +427,7 @@ def _capture(secs, interval, label, outdir, quiet):
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     series = {name: [] for name, _ in SCALARS}
     procs = {}          # key -> {"name","pid","cpu":[],"ws":[]}
-    gpu_total, gpu_engtype, gpu_pid = [], {}, {}
+    gpu_total, gpu_engtype, gpu_pid, gpu_luid = [], {}, {}, {}
     rows = []
     t_end = time.time() + secs
     n = 0
@@ -450,9 +464,11 @@ def _capture(secs, interval, label, outdir, quiet):
             m = GPU_INST.match(inst)
             if m:
                 p = int(m.group(1))
-                eng = m.group(2)
+                luid = m.group(2)
+                eng = m.group(3)
                 gpu_engtype[eng] = gpu_engtype.get(eng, 0.0) + v
                 gpu_pid[p] = gpu_pid.get(p, 0.0) + v
+                gpu_luid[luid] = gpu_luid.get(luid, 0.0) + v
         gpu_total.append(tot)
         row["gpu_total"] = round(tot, 3)
 
@@ -512,6 +528,8 @@ def _capture(secs, interval, label, outdir, quiet):
             "by_pid": sorted([{"pid": p, "mean": round(v / max(1, len(rows)), 2)}
                               for p, v in gpu_pid.items()],
                              key=lambda d: -d["mean"])[:10],
+            "by_adapter": {k: round(v / max(1, len(rows)), 2)
+                           for k, v in sorted(gpu_luid.items(), key=lambda kv: -kv[1])},
         },
         "resp": {"jitter_ms": stats(jit.samples), "work_ms": stats(wrk.samples),
                  "dwm_frame_ms": stats(dwm.samples),
@@ -575,8 +593,11 @@ def show(s):
     if v:
         print("  WSL VM CPU (hv logical - hv root) : mean %6.2f%%  p95 %6.2f%%  max %6.2f%%"
               % (v["mean"], v["p95"], v["max"]))
-    for k in ("hv_logical", "hv_root", "cpu_root", "dpc_time", "intr_time",
-              "cpu_perf", "avail_mb", "hard_faults", "run_queue", "ctx_switches"):
+    # Driven off SCALARS rather than a second hand-kept list: the disk counters
+    # were added to the capture and to --compare but not to this loop, so they
+    # were collected, written to the JSON, and never shown. Two places defining
+    # one fact is the failure this rig has a standing rule about.
+    for k, _p in SCALARS:
         st = s["scalars"].get(k)
         if st:
             print("  %-33s : mean %8.2f  p95 %8.2f  max %8.2f"
@@ -588,6 +609,9 @@ def show(s):
     if s["gpu"]["by_engtype"]:
         print("  GPU by engine : " + "  ".join("%s=%.1f" % (k, v)
                                                for k, v in list(s["gpu"]["by_engtype"].items())[:6]))
+    if s["gpu"].get("by_adapter"):
+        print("  GPU by adapter (luid): "
+              + "  ".join("%s=%.2f" % (k, v) for k, v in s["gpu"]["by_adapter"].items()))
     print("  --- responsiveness (Windows side) ---")
     for k, label in (("jitter_ms", "8 ms sleep overshoot"), ("work_ms", "fixed work"),
                      ("dwm_frame_ms", "DWM frame interval")):
@@ -636,11 +660,16 @@ def compare(a, b):
 
     line("WSL VM CPU %  (mean)", _get(a, ["wsl_vm_cpu", "mean"]), _get(b, ["wsl_vm_cpu", "mean"]))
     line("WSL VM CPU %  (p95)", _get(a, ["wsl_vm_cpu", "p95"]), _get(b, ["wsl_vm_cpu", "p95"]))
-    for k in ("hv_logical", "hv_root", "cpu_root", "dpc_time", "intr_time",
-              "cpu_perf", "avail_mb", "hard_faults", "run_queue", "ctx_switches"):
+    for k, _p in SCALARS:
         line(k + " (mean)", _get(a, ["scalars", k, "mean"]), _get(b, ["scalars", k, "mean"]))
     line("GPU % (mean)", _get(a, ["gpu", "total", "mean"]), _get(b, ["gpu", "total", "mean"]))
     line("GPU % (p95)", _get(a, ["gpu", "total", "p95"]), _get(b, ["gpu", "total", "p95"]))
+    # Per adapter, because the adapter A/B's whole question is whether the work
+    # MOVED rather than whether the total changed.
+    la = _get(a, ["gpu", "by_adapter"], {}) or {}
+    lb = _get(b, ["gpu", "by_adapter"], {}) or {}
+    for k in sorted(set(la) | set(lb)):
+        line("GPU adapter " + k, la.get(k, 0.0), lb.get(k, 0.0))
     print("  --- responsiveness, which is the answer to \"does it feel slow\" ---")
     for k, nm in (("jitter_ms", "sleep overshoot ms"), ("work_ms", "fixed work ms"),
                   ("dwm_frame_ms", "DWM frame ms")):

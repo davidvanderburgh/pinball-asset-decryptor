@@ -148,6 +148,7 @@ struct stream {
     unsigned prep_streak;
     char prep_path[PADVID_PATH_MAX];
     unsigned seek_absorbed;     /* redundant rewinds swallowed; see pad_vid_seek */
+    unsigned long last_seek_us; /* when the previous seek arrived; 0 = never  */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
     void *buf;                  /* this stream's GstBuffer                   */
@@ -992,41 +993,48 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
      * exactly when one arm finally delivered the full clip - which is the
      * observation this fix turns into policy.
      *
-     * A rewind that arrives while this stream is STILL PLAYING THE SAME FILE
-     * is absorbed outright: answer yes, touch nothing. The one arm in flight
-     * plays the clip to its real end, the thread stands down (playing=0), and
-     * the game's NEXT seek re-arms legitimately - one serve per actual loop,
-     * which is the cadence a real looping pipeline has.
+     * THE DISCRIMINATOR IS SEEK RATE, and it took three predicates to land
+     * here, each killed by a measurement:
      *
-     * THE FIRST VERSION OF THIS GUARD WAS delivered <= 1 AND IT WAS MEASURED
-     * TOO NARROW, on 2026-08-06's confirming run: the game seeks every tick
-     * for the WHOLE scene step, not just until frames flow, so the cycle
-     * became re-arm, absorb 4, re-arm - ~70 engagements, and the HOST's own
-     * storm detector still fired twice with one file served 41 times. The
-     * storm was slowed, not stopped. Playing-same-path is the predicate that
-     * matches the game's actual behaviour.
+     *   delivered <= 1      too NARROW - the game seeks every 33 ms tick for
+     *                       the whole scene step, so the cycle became re-arm,
+     *                       absorb 4, re-arm, and the host storm detector
+     *                       still fired (run 1, 2026-08-06).
+     *   playing+same-path   too WIDE - it swallowed DELIBERATE mid-clip
+     *                       restarts. At a ball change the game seeks its
+     *                       still-playing backgrounds back to 0; this absorb
+     *                       refused a seek at delivered=1780, the game's
+     *                       timeline restarted while the picture played on
+     *                       mid-clip, and David reported the stutter back
+     *                       "very obvious" on ball 2 while every delivery
+     *                       counter read clean.
+     *   burst-only (this)   a storm seeks every 33 ms; a restart is isolated.
+     *                       Only a seek arriving within 3 frame periods of
+     *                       the previous seek on this stream is absorbed, so
+     *                       the FIRST seek of any burst re-arms - which is
+     *                       correct for both cases: a restart is honoured,
+     *                       and a storm pays one re-arm instead of 93.
      *
-     * WHAT THIS CANNOT TOUCH, checked case by case: a normal loop-at-EOS seek
-     * arrives with playing==0 (vid_thread stands down BEFORE posting EOS -
-     * see the comment there), so it re-arms as before; a 1-frame clip looping
-     * is the same shape, playing==0, untouched; a location CHANGE fails the
-     * path check and re-arms as before. The one case genuinely altered is a
-     * deliberate mid-clip restart of a still-playing clip: it is answered
-     * "you are at 0" while the clip carries on from where it was. No such
-     * seek has ever been observed outside the storm - the game loops via EOS
-     * - and the alternative was the freeze this fix exists to remove. If a
-     * scene ever visibly fails to restart an in-flight clip, this line is
-     * where to look. */
-    if (s->playing && str_eq(s->prep_path, s->location)) {
-        s->seek_absorbed++;
-        if (s->seek_absorbed == 1)
-            VLOG("[vid] ch%d rewind while the last rewind is still arming "
-                 "(delivered %u); absorbing it\n", chan_of(s), s->delivered);
-        s->pos_ns = 0;
-        return 1;
+     * A normal loop-at-EOS seek arrives with playing==0 (the thread stands
+     * down BEFORE posting EOS) and re-arms as before; a location change
+     * fails the path check and re-arms as before. */
+    {
+        unsigned long now = vid_us();
+        long since = (long)(now - s->last_seek_us);
+        int burst = s->last_seek_us != 0 && since >= 0 && since < 100000;
+        s->last_seek_us = now;
+        if (burst && s->playing && str_eq(s->prep_path, s->location)) {
+            s->seek_absorbed++;
+            if (s->seek_absorbed == 1)
+                VLOG("[vid] ch%d seek %ld us after the last one (delivered "
+                     "%u); absorbing the burst\n",
+                     chan_of(s), since, s->delivered);
+            s->pos_ns = 0;
+            return 1;
+        }
     }
     if (s->seek_absorbed) {
-        VLOG("[vid] ch%d absorbed %u redundant rewinds while arming\n",
+        VLOG("[vid] ch%d absorbed %u burst seeks\n",
              chan_of(s), s->seek_absorbed);
         s->seek_absorbed = 0;
     }

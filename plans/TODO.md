@@ -530,325 +530,6 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
-- [ ] **18. Windows feels sluggish while a run is up.** `S2 D4` *(**S3 → S2 on
-      2026-08-06, on evidence and not on effort.** It was S3 on "nobody loses a
-      run to it", with the pre-agreed trigger "it becomes S2 the day it stops
-      David leaving a long run going". The trigger fired from a different
-      direction: David's point on item 16 is that a replay is only as good as
-      the emulation's steadiness, so slowdown and stutter now make another
-      item's OUTPUT WRONG rather than merely making the desktop unpleasant.
-      That is the S2 line — it costs runs and makes other items more
-      expensive.)* ← IN PROGRESS
-      *(**D4 STAYS D4, and saying why is the point.** The profiling half got
-      much cheaper — `winprof.py`/`rigprof.py` exist and are validated, the
-      baseline is on disk, the two big consumers are named. But the instrument
-      that can judge the SYMPTOM still does not exist, and "a new instrument
-      that has to be built and validated before it can judge anything" is the
-      D4 line verbatim. Moving it to D3 would be flattering the pass.)*
-      **Observed 2026-08-06, in David's words: "my computer runs a little
-      sluggish when the emulator is going."** Suggested: multi-threading, more
-      memory allocation, or the GPU.
-      **★★ PASS ONE IS DONE: THE PROFILE EXISTS AND THE RUN COSTS THE MACHINE
-      ~5.6x WHAT WSL SAYS IT DOES.** Long form:
-      `spike2_pc_emulation_handoff.md`, REMAINING item 18.
-      Idle 90 s vs a normal attract run 70 s, measured on BOTH sides:
-      **inside WSL the whole rig sums to 0.50 cores** (`game` 14.49%,
-      `padglhost` 12.23%, `ffmpeg` 9.54%, `init` 5.32%, `padvidhost` 3.29%);
-      **off the machine it takes 2.80 cores** (Hyper-V logical 6.10% → 23.61%
-      of 16 cores). The gap is in two places, neither visible from inside WSL:
-      • **vmmemWSL 0.57% → 122.57%** — the VM burns **2.4x what its own
-      processes account for**, and the signature is **103,000 context switches
-      a second, 5.1x idle**;
-      • **msrdc.exe 0.00% → 69.61%** (0.70 cores) — the WSLg RDP client that
-      draws the windows onto the Windows desktop. **Zero at idle**, so the
-      attribution needs no argument. It is CPU, not GPU (its GPU share is
-      1.03%; the top GPU consumer is **dwm at 7.95%**, and GPU overall goes
-      1.35% → 11.32%, 8.4x).
-      So the handoff's "none of it was the renderer" is still true and now also
-      incomplete: the biggest Windows-side cost after the VM is the thing that
-      SHOWS the picture, not the thing that draws it.
-      **★ AND THE HONEST HALF, which is why the box is open: NEITHER
-      RESPONSIVENESS PROBE COULD SEE THE SYMPTOM.** Sleep overshoot p95
-      0.54 → 0.53 ms, fixed work p50 0.83 → 0.72 ms, **processor queue length
-      0.00 in both**. Flat, marginally better during the run. David says it
-      feels sluggish; his experience wins and the instrument is wrong. The
-      profile is delivered and **the symptom is not yet reproduced by
-      anything.**
-      **RULED OUT, with numbers:** • **CPU starvation** — queue length 0.00 in
-      both, and the fixed-work probe is validated to move +57% under a real
-      overload (20 burners, 16 cores, queue 80). • **Memory** — 43.3 GB free of
-      45.5 during the run, so neither "more memory" nor "give WSL less" is the
-      lever. • **Multi-threading** — 1.69 of the 2.80 cores are burned OUTSIDE
-      the VM, in transport and compositing, which no threading change reaches.
-      **A PROBE THAT FAILED ITS OWN VALIDATION, kept deliberately:** the 8 ms
-      sleep-overshoot probe **did not move at all** under a machine pinned at
-      100% with a run queue of 80 (p50 0.50 → 0.50, p95 0.53 → 0.53) — a waking
-      thread gets a priority boost. **A flat jitter reading is not evidence of
-      a responsive machine.** It is kept only because root-partition contention
-      is not the load under test.
-      **A CONFOUNDER THAT ALMOST BECAME A FINDING:** MsMpEng 1.54% → 28.74%
-      looked like "exclude the rig from Defender" and is **wrong** — a
-      scheduled quick scan ran 11:27:05–11:27:54 against a capture of
-      11:26:13–11:27:22. Every number above is recomputed over the scan-free
-      54 samples and none of them moved. **Check `Get-MpComputerStatus` around
-      any capture on this machine.**
-      **AND THE INSTRUMENTS BIT BACK TWICE, both fixed:** `typeperf` expands a
-      wildcard ONCE at startup, so a baseline would never see the processes a
-      run starts — `winprof.py` reads PDH in-process instead, and that it picks
-      up a late process was TESTED (a burner started 9 s into a 24 s capture
-      appeared). And both scripts wrote `started` when the summary was built,
-      i.e. at the FINISH, which made the first read of the Defender overlap
-      70 s wrong in the direction that would have hidden it.
-      **CORRECTED, my own claim:** `winprof.py` said
-      `\Process(vmmemWSL)\% Processor Time` "reads a FLAT ZERO". It does not —
-      it reads 122.57% and agrees with the hypervisor route (1.22 vs 1.12
-      cores) independently. It read 0 because WSL was idle. Docstring fixed.
-      **★★ PASS TWO, 2026-08-06: THE RIG RENDERS ON THE WRONG GPU.** This
-      machine has two: an **RTX 5090 driving the 4K 120 Hz desktop**, and an
-      **integrated AMD Radeon driving no display at all**. Mesa's d3d12 picks
-      the AMD one, so `padglhost.log` has said
-      `D3D12 (AMD Radeon(TM) Graphics)` all along — every frame is rendered on
-      an iGPU that **has no VRAM and takes its bandwidth out of system memory**,
-      then has to cross adapters to be displayed. Memory-bandwidth contention is
-      invisible to every CPU counter, which is exactly the shape of this item's
-      symptom: queue length 0.00, no starvation, and a machine that still feels
-      slow. **Measured with `gpuprobe`, which renders the game's real workload
-      and `glFinish()`es before it stops the clock: 1.096 ms/frame on the AMD
-      against 0.026 ms/frame on the NVIDIA.** (Treat 43x as a ceiling, not a
-      quote: 300 frames of 4 full-screen 1080p quads in 8 ms is ~311 Gpixel/s,
-      at the edge of what a 5090 can do.)
-      **`PAD_GL_ADAPTER` added to `watch.sh`** (a substring of the adapter name
-      → `MESA_D3D12_DEFAULT_ADAPTER_NAME`). **Unset by default, so nothing has
-      changed yet** — it is a lever waiting on an A/B, not a fix. `watch.sh`'s
-      `[watch] cfg` block now logs `GALLIUM_DRIVER` and `MESA_*` beside the
-      `PAD_*` set, because a run log that does not name the adapter cannot be
-      compared against one that used the other.
-      **★ AND THE PROBE PASS ONE WAS MISSING NOW EXISTS AND IS VALIDATED BY
-      CONSTRUCTION.** `DwmFlush()` blocks until the desktop compositor's next
-      present, so timing successive returns measures how regularly frames
-      actually reach the screen — no window, no input injection, no GPU work of
-      its own. On an idle desktop it reads **p50 8.33 ms, which is exactly the
-      120 Hz this display runs at, with 0.00% late frames.** `winprof.py` also
-      gained **`% DPC Time`, `% Interrupt Time` and `% Processor Performance`**
-      (clock against nominal) — DPC/interrupt work is charged to no thread and
-      shows in no queue length, and a package hitting a power limit slows every
-      single-threaded thing at once. All three were absent from pass one.
-      **A TRAP THAT COST A BASELINE, and it is new in kind:** a capture labelled
-      `idle2` came back with vmmemWSL at **79.80%** and **121,604** context
-      switches — *busier than the emulator run it was the control for* — because
-      an audit subagent was running `find /` inside WSL. **Read-only agents are
-      not zero-load on the machine being measured.** `winprof.py` now
-      self-checks and prints `** NOT QUIET` on any capture over 1% WSL VM or
-      45k context switches, and `--compare` refuses to be trusted when the
-      BEFORE capture fails it.
-      **Committed:** `9713bc8` (pass one: `winprof.py` + `rigprof.py` + the
-      profile). Captures in `C:\tmp\spike2_item18\`; the `idle`/`attract` pair
-      is a reusable control that `winprof.py --compare` takes directly.
-      **NOTE the pass-one captures predate the DWM/DPC/frequency counters**, so
-      the A arm has to be re-measured, not reused, for those.
-      **★★ THE A/B WAS RUN AND THE ADAPTER IS NOT THE LEVER. MY HYPOTHESIS WAS
-      WRONG.** Two 90 s attract arms through `abrun.ps1`, adapter confirmed from
-      `padglhost.log` in both, against a clean idle baseline:
-      | | AMD (control) | NVIDIA | |
-      |---|---|---|---|
-      | whole machine `hv_logical` | 22.76% | 22.66% | **nothing** |
-      | vmmemWSL | 114.79% | 115.56% | nothing |
-      | msrdc | 72.07% | 68.74% | −3.3 |
-      | dwm | 5.53% | 12.87% | **NOISE — see the correction below** |
-      | GPU total | 9.78% | 14.02% | **an ACCOUNTING ARTEFACT, not a cost** |
-      | DPC time | 0.75% | 1.16% | worse |
-      | ctx switches | 101,775 | 102,378 | nothing |
-      | DWM late frames | 0.00% | 0.00% | nothing |
-      **★ CORRECTION, 2026-08-06, and it changes the verdict from "slightly
-      worse" to "NO MEASURABLE DIFFERENCE".** This first read the dwm row as
-      the adapter making things worse. It is not a signal. **dwm's CPU across
-      all six captures: 13.03 and 13.11 with NO emulator running at all, and
-      4.36 / 5.53 / 12.87 / 16.31 with one running.** The ranges overlap
-      completely — dwm is dominated by whatever else is on the desktop (a
-      scrolling terminal, Task Manager) and **cannot distinguish any arm**.
-      And the GPU rise is an artefact of where the work is COUNTED: rendering on
-      the NVIDIA part makes the emulator's GPU work appear in that adapter's
-      counters (8.75 → 13.08) where the AMD part's work was never visible to
-      Windows at all. So the adapter is a **null result**, not a regression, and
-      `PAD_GL_ADAPTER` stays UNSET as a neutral knob rather than a rejected one.
-      **WHICH METRICS ARE TRUSTWORTHY HERE, measured over six captures, so no
-      future pass chases noise again:**
-      • **RELIABLE** — vmmemWSL (0.23/0.43 with no run vs 114.8-118.8 with one),
-      msrdc (0.00 vs 68.7-72.1), context switches (19.6k-22.0k vs 101.8k-106.3k),
-      DWM frame interval and late frames. Every one of these separates run from
-      no-run with no overlap.
-      • **NOISE, do not draw conclusions from it** — **dwm CPU**, and any GPU
-      total compared ACROSS adapters.
-      **AND THE MEASUREMENT SAYS WHY, which is the part worth keeping.** The AMD
-      adapter's own GPU time **did not drop when the renderer left it**
-      (0.96% → 0.94%), so that LUID was never the emulator's work: **the guest's
-      GPU work does not appear in Windows' `GPU Engine` counters at all**, it is
-      inside the VM's own accounting. And the bridge only ever issues **2-4 draw
-      calls a frame with kilobytes of vertex data** (handoff, "The GL bridge"),
-      so which GPU draws that is nearly free either way.
-      **`gpuprobe`'s 43x was a FALSE POSITIVE and this is the lesson:** it
-      renders **4 full-screen 1080p quads**, which is not remotely the game's
-      workload, so it measured a difference that does not exist in the real
-      path. Same shape as the tone test that pronounced a broken audio path
-      healthy — **a synthetic signal, believed because the number was big.**
-      **MORE THINGS RULED OUT, with numbers, from the same two runs:**
-      • **CPU downclocking** — `% Processor Performance` goes **87.9% idle →
-      108.4% during a run**. The package boosts UP under load; it is not
-      throttling. • **Disk** — `Avg. Disk Queue Length` is **0.00 in both arms**
-      against 0.00 idle. • **Memory** — 44.2 GB free of 45.8.
-      • **The compositor dropping frames** — **0.00% late frames in every
-      capture**, idle and both arms.
-      **WHAT DOES MOVE, and it is all that is left:** context switches
-      **19,569 → 101,775 (5.2x)**, DPC time **0.32% → 0.75%**, interrupt time
-      **0.18% → 0.77% (4.3x)**, and the DWM frame interval p95
-      **8.77 → 9.66 ms (+10%)** with p99 +0.83 and max +1.07 — measurably
-      slower presentation, but not one dropped frame.
-      **THE HONEST POSITION AFTER TWO PASSES: every instrument says the desktop
-      is fine and David says it is not.** The two constant costs are vmmemWSL
-      (1.15 cores) and msrdc (0.72 cores), and neither is sensitive to anything
-      tried so far.
-      **The gap I most suspect is in the METHOD, not the machine: every capture
-      so far is ATTRACT MODE WITH NOBODY TOUCHING THE COMPUTER.** That is the
-      cheapest possible case for DWM and msrdc — a static scene, no window
-      dragging, no app switching, no typing — and "sluggish" is a word about
-      INTERACTING. David also plays games, which run more video, more audio and
-      more switch traffic than attract does.
-      **★★★ 2026-08-06, AND IT INVALIDATES MY OWN HEADLINE: THIS IS AN 8-CORE
-      MACHINE, NOT A 16-CORE ONE, AND WSL IS GIVEN ALL 16 THREADS.**
-      `Win32_Processor` says **AMD Ryzen 7 9800X3D, 8 physical cores, 16 logical**
-      — and **there is no `C:\Users\david\.wslconfig` at all**, so WSL2 defaults
-      apply and `wsl -e nproc` returns **16**. The VM is handed every logical
-      processor on the machine.
-      **Every "plenty of headroom" claim above was computed against 16 CORES and
-      is wrong.** The run's 2.80 cores is **35% of the physical CPU**, not 17.5%,
-      and — the part that actually matters — **WSL's 16 vCPU threads can be
-      scheduled onto both SMT siblings of whatever physical core an interactive
-      app is using.** SMT siblings share execution resources, so a single-threaded
-      interactive path loses real throughput while **no thread ever waits for a
-      logical CPU**. That is the one mechanism consistent with everything
-      measured: **processor queue length 0.00 in all six captures**, no
-      starvation, no memory or disk or GPU pressure, and yet felt latency.
-      **★ AND DAVID SHARPENED THE SYMPTOM FURTHER: "the biggest thing i notice
-      when the emulator is running is that claude typing input is really
-      sluggish and delayed."** Not the desktop generally — **typing into one
-      Electron app**, whose input-to-paint path is single-threaded. That is
-      exactly what SMT contention degrades and exactly what an aggregate CPU
-      number cannot show.
-      **Checked and NOT the cause: GPU contention between the two.** `claude`
-      renders on LUID `0x00000000_0x00012481`, the RTX 5090, the same adapter
-      dwm composites on; the emulator's own LUIDs (`…1384E`, `…13883`) appear
-      only during a run. No per-app GPU preference overrides are set.
-      **★★★ THE LEVER WORKED. `C:\Users\david\.wslconfig` created 2026-08-06
-      with `[wsl2] processors=6, memory=30GB`; `wsl -e nproc` went 16 → 6.**
-      With a run up and the agent deliberately idle, **David: "now it seems much
-      better. there is no latency in the typing here anymore. seems solved from
-      that perspective."**
-      **AND IT COST THE EMULATOR NOTHING MEASURABLE: 60.0 / 59.9 / 59.8 fps**
-      from `padglhost` at 6 vCPUs, against the 60 fps swap cap it has always
-      held. `memory=30GB` is pinned at the value WSL was already defaulting to,
-      so the file changes one thing, not two. **Revert = delete the file +
-      `wsl --shutdown`** (which kills a running rig; check `alive.sh` first).
-      **THE CONFOUND IS NOT YET FULLY CONTROLLED, and this is the honest part:
-      TWO things changed for that verdict — the vCPU cap AND the agent going
-      quiet.** The reverse arm (agent working hard, run up, David typing) is the
-      free control and is what decides attribution. **Also note that verdict was
-      given in ATTRACT, not in a game** — `longplay` started before the guest
-      existed, said "the guest is not running - nothing to play" and exited — so
-      the reported condition ("mostly during a game") has NOT been retested yet.
-      **A CONFOUND THAT MUST BE CONTROLLED, because it is nearly perfectly
-      correlated:** the Claude app is also rendering this session's tool output,
-      and "the emulator is running" has so far always coincided with "the agent
-      is working". **Test typing with the emulator up and the agent IDLE**
-      before crediting any fix.
-      **DAVID ANSWERED EARLIER, 2026-08-06: the symptom is
-      MOUSE AND TYPING LAG, and it happens MOSTLY DURING A GAME.** Both were
-      things nothing here had measured — every capture up to that point was
-      attract mode with nobody touching the computer, which is the cheapest
-      possible case for the input path.
-      **`CursorProbe` built for it.** `GetCursorPos` polled at 500 Hz, recording
-      the interval between position CHANGES, so while a hand is moving it
-      measures how smoothly the pointer tracks. No injection — SendInput into a
-      WSLg window is UIPI-blocked (items 7 and 12), so it reads what the human's
-      hand produced instead. **The false-clean guard is the important half:** a
-      capture with a still mouse would report zero stutters and read as a pass,
-      so it prints `NOT MEASURED - only 0.0 s of pointer movement seen` and
-      `--compare` refuses unless both arms saw 5 s of movement. **It has already
-      fired once, correctly**, on a control arm David was away for.
-      **★ AND A GAME IS NOT MATERIALLY WORSE THAN ATTRACT.** `abrun.ps1 -Game`
-      (longplay puts a ball in play and keeps it alive), 90 s, against the
-      attract arm: whole machine **22.76% → 23.90%** (+0.18 cores), vmmemWSL
-      114.8 → 118.8, **msrdc 72.1 → 71.5 (down)**, **dwm 5.5 → 4.4 (down)**,
-      ctx switches 101,775 → 106,258, **DWM p95 9.66 → 9.61 and late frames
-      0.00% in both**. The only real move is hard faults (mean 46 → 400, one
-      burst to 25,761) as clips load, and `disk_queue` stays at 0.01. **So
-      "mostly during a game" is NOT explained by the game costing more.**
-      **THE STANDING POSITION: the pointer path is the last thing unmeasured,
-      and it is the only thing David's answer points at.** Everything else has
-      been ruled out with numbers across five captures.
-      **Resume — this needs DAVID'S HANDS and cannot be done without them.**
-      Two arms, mouse moving continuously through both:
-      `abrun.ps1 -Label fidget_idle -NoRun -Secs 90` (control) then
-      `abrun.ps1 -Label fidget_game -Game -Secs 90`, then `--compare` them and
-      read `pointer gap ms` and `pointer stutters / active s`. The control is
-      not optional: moving the mouse changes the numbers by itself.
-      **If it reproduces**, A/B these two, both cheap and both untried:
-      **`PAD_PLAYFIELD=0`** (the virtual playfield is a Tk window on the WINDOWS
-      desktop repainting at 30 fps with `timeBeginPeriod(1)` set — much the most
-      likely thing here to affect how the desktop feels, and it is one env var)
-      and **`PAD_GL_LEGEND=0`** (one fewer RAIL window for msrdc).
-      **★ RULED OUT ALREADY, unattended, so David's time is not spent on it:
-      window SIZE is not the lever.** `PAD_GL_W=680 PAD_GL_H=384` is a QUARTER
-      of the pixels and **msrdc did not move: 72.07% → 70.32%**, inside the
-      68.7-72.1 spread it shows across every other arm. **msrdc's ~0.70 cores is
-      not pixel-rate** — it is the same whatever the resolution, whichever
-      adapter renders, and in attract or in a game. That constancy is itself the
-      clue: it looks like a fixed-rate encode or poll loop rather than work
-      proportional to what is on screen.
-      **If it does NOT reproduce**, say so plainly rather than declaring the
-      item fixed: it would mean the pointer probe cannot see it either, and the
-      next thing to try is capturing while David uses the machine the way he
-      actually does when he notices it, rather than on demand.
-      **ASK DAVID FIRST:** is it the pointer/typing (input latency), windows
-      repainting (compositing), or everything generally slow (throughput)? The
-      third is ruled out above, so his answer picks the probe instead of pass
-      two building both.
-      **★ THE GPU ONE IS ALREADY DONE AND ALREADY RULED OUT AS THE COST.** The
-      renderer runs on the GPU (`GALLIUM_DRIVER=d3d12`, D3D12/AMD Radeon) and is
-      capped at 60 fps by the swap; the handoff's "Why the rig used to burn a
-      whole core" says in terms that **none of it was the renderer**, which is
-      the obvious suspect and was measured not to be. That work took the guest
-      from **113% of a core to 15%** and RSS from 1.5 GB to 995 MB by PACING the
-      SPI and i2c shims (`PAD_SPI_US=640`, `PAD_I2C_US=90`) — i.e. the wins here
-      have come from doing LESS, faithfully, not from more parallelism.
-      **The other two, scored against what is known rather than dismissed:**
-      *multi-threaded* — the expensive half is a real ARM binary under
-      qemu-**user**, so its threading is the game's and not ours; the host side
-      is already four processes (padglhost, padvidhost, padrelay/padplay,
-      nodebus). *More memory* — RSS is ~1.8 GB in attract and WSL holds it back
-      from Windows, so the lever may be giving WSL LESS rather than more.
-      **Numbers to beat, from the item 17 run 2026-08-06** (`ps` %CPU, so
-      lifetime averages, not peaks): guest **20.8%**, padglhost **9.8%**,
-      padvidhost **2.7%** of one core. That is not obviously a sluggish machine,
-      which is itself the finding — the cause may not be CPU at all.
-      **★ THE LESSON THAT MUST SHAPE PASS ONE: every CPU number this rig has
-      ever taken was taken INSIDE WSL, and "my computer is sluggish" is a
-      WINDOWS-side symptom.** That is exactly the shape that cost an afternoon on
-      item 10 — a sine came back mathematically perfect off RDPSink.monitor while
-      the room heard it breaking up. Measure on the far side of the boundary:
-      Windows per-process CPU/RSS, the Vmmem/WSL VM's own footprint, GPU
-      utilisation, and whether it is the WSLg RAIL window path rather than the
-      emulator at all. Two Windows processes are also ours (`playfield.py`,
-      `padplay.py`) and are easy to forget.
-      **Do not confuse this with item 11** (video stutters INSIDE the game). If
-      what feels slow is the game rather than the desktop, that is 11 and this
-      item should be closed as a duplicate.
-      **Acceptance for the PROFILE, which is pass one:** per-process CPU, RSS and
-      GPU on BOTH sides of the boundary during a normal attract run, with the
-      largest consumer named and a Windows-side responsiveness number stated.
-      **Acceptance for the FIX: not yet defined, deliberately** — a target set
-      today would aim pass two at whatever was guessed today, and this queue has
-      been bitten by exactly that.
-
 - [ ] **19. Save and load a replay from the game window itself.** `S3 D4` — S3
       because item 16's command line is the workaround and nobody loses a run to
       typing it; D4 because it cannot start until 16 ships the engine and the
@@ -954,6 +635,66 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **18. Windows feels sluggish while a run is up.** DONE 2026-08-06,
+      `d61b9dc`. **The machine is 8 physical cores, not 16, and WSL2 had been
+      handed all 16 logical threads** — there was no `.wslconfig` at all, so
+      defaults applied and `wsl -e nproc` returned 16. The VM's vCPU threads
+      could therefore be scheduled onto **both SMT siblings of whatever physical
+      core an interactive app was using**, and SMT siblings share execution
+      resources: a single-threaded input-to-paint path loses real throughput
+      **while no thread ever waits for a logical CPU**. That is the only
+      mechanism consistent with the whole measurement history — processor queue
+      length **0.00 in every capture**, no starvation, no memory, disk or GPU
+      pressure, zero dropped compositor frames, and felt latency anyway.
+      **Fix: `C:\Users\david\.wslconfig` with `[wsl2] processors=6,
+      memory=30GB`** (memory pinned at what WSL already defaulted to, so the
+      file changes one thing, not two). `nproc` 16 → 6.
+      **VERIFIED WITH THE CONFOUND CONTROLLED, which is the part that makes it
+      a result rather than a hope.** The Claude app also renders this session's
+      tool output, so "the emulator is running" had always coincided with "the
+      agent is working". David's verdict came in the **worst** condition — **in
+      a game, with the agent committing, editing and running a live 90 s
+      capture**: *"this test is in a game right now and the text typing seems
+      absolutely fine right now."* Both variables back at bad, symptom gone.
+      **It cost the emulator nothing: 60.0 / 59.9 / 59.8 fps**, the same 60 Hz
+      swap cap it has always held.
+      **The profile that got there, and five things it ruled out with numbers:**
+      `winprof.py` (Windows, PDH via ctypes + DwmFlush + cursor probes) and
+      `rigprof.py` (WSL, /proc deltas), driven by `abrun.ps1` so every A/B arm
+      runs identically. **The run costs the machine 2.80 cores while its Linux
+      processes account for 0.50** — vmmemWSL ~1.18 cores and **msrdc.exe ~0.70
+      cores**, the WSLg RDP client, which is invisible from inside WSL and which
+      no measurement in this repo had ever seen. **Ruled out:** CPU starvation
+      (queue 0.00 everywhere), memory (44 GB free of 46), disk (queue 0.01), CPU
+      downclocking (`% Processor Performance` goes **up**, 88 → 108), dropped
+      compositor frames (0.00% late in all seven captures), the **GPU adapter**
+      (a null result), **window size** (a quarter of the pixels moved msrdc
+      72.1 → 70.3), and **a game being heavier than attract** (+0.18 cores).
+      **THREE INSTRUMENT LESSONS, each paid for:**
+      • **`gpuprobe`'s 43x was a FALSE POSITIVE.** It renders 4 full-screen
+      1080p quads; the real bridge issues 2-4 draw calls a frame with kilobytes
+      of data. Same shape as the tone test that once pronounced a broken audio
+      path healthy — a synthetic signal believed because the number was big.
+      Splitting GPU time per adapter LUID caught it, and only because that was
+      added BEFORE the run.
+      • **dwm CPU is NOISE and I reported it as a finding once.** 13.03 and
+      13.11 with no emulator running, 4.36-16.31 with one. Reliable here:
+      vmmemWSL, msrdc, context switches, DWM frame interval and late frames.
+      • **Read-only subagents are not zero-load on the machine being measured.**
+      One running `find /` inside WSL produced a baseline BUSIER than a real
+      run (vmmemWSL 79.8%, 121,604 ctx/s), and later a survey fan-out took the
+      machine to **163,138 ctx/s** — more than the emulator — and correctly made
+      `abrun.ps1` refuse to start a capture David had asked for.
+      **Guards left behind:** `winprof.py` self-checks every capture and prints
+      `** NOT QUIET` on both sides of the boundary; `--compare` disowns an
+      untrustworthy baseline; the cursor probe reports `NOT MEASURED` rather
+      than a clean number when nobody moved the mouse; `killgame.sh` now kills
+      `longplay.sh`, which only `watch.sh`'s own teardown ever did.
+      **What is deliberately NOT claimed:** 6 was a first guess, not a tuned
+      optimum, and the cursor probe has still never had a control arm with
+      movement in BOTH captures, so its absolute numbers (10.7 s of movement,
+      2.25 stutters/active second) cannot yet judge anything.
 
 - [x] **14. The Emulate tab forgets the card image across a restart.** DONE
       2026-08-06, `eb1deec`. The diagnosis in the item was right: the SAVE half

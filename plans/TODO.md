@@ -954,10 +954,64 @@ These have each been violated at least once and each cost a run or a window:
       **The crashes left interop-relay zombies + a ghost game window on
       David's desktop (item 12's shapes); `wsl --shutdown` cleared all
       of it, alive 0 confirmed after.**
-      **Resume:** put David's eyes on the clip-end seam (jump-back +
-      pause) on the current build — his report decides whether the
-      persistent seekable decoder is still worth building, or whether
-      item 11 is done pending item 23's crash fix. Crash logs for 23:
+      **★★ DAVID'S EYES LANDED, 2026-08-06 ~19:39 — two reports off ONE
+      run, logs handed over, no run spent: severe TEARING in the video at
+      the L-ramp opto, and "the logs pause for a significant amount of
+      time, then catch up" on a Godzilla-vs-Ebirah clip. BOTH DIAGNOSED
+      OFF HIS LOG AND BOTH FIXED HOST-SIDE (padvidhost.py only, no shim
+      rebuild).**
+      • **The pause-then-catch-up is a ~3.3 s WEDGE OF THE GAME'S UI
+      THREAD, and the mechanism is THE BLIND SERVE:** serve() re-read
+      req_gen at its own start, a few ms after chan_loop's ack (a Popen
+      and a 1.5 MB alloc sit between), and at every clip end the EOS
+      reflex lands a SECOND request inside that window — state re-arm
+      then rewind, ~1 ms apart. The serve adopted the NEW generation
+      number for the OLD request, its gone() check went blind, the
+      pending request was never acked, and prepare() sat out all 3000
+      spins = 3.26-3.4 s measured. His run: 3 loud `host did not
+      answer`, ~8 gaps of 3.3-3.9 s; recovery is always the NEXT
+      location change finally superseding. The log goes quiet because
+      the UI thread IS the log's main author; the catch-up flood is its
+      queued scene work landing at once. **Fix: chan_loop passes the gen
+      it ACKED into serve(); a mid-window bump now supersedes in ~2 ms.**
+      • **David's theory for it — "our logging is stuttering the video
+      playback" — stays RULED OUT** (the earlier measurement stands: 16
+      of 24 stalls video-churn-only, 0 switch-only). The log line
+      remains the symptom; the pause is the wedge above.
+      • **The TEARING is the ring-slot reuse race this item had already
+      named as a candidate, WIDENED from shimmer to severe by the head
+      cache:** padglhost re-reads the on-screen frame's slot at ~60 Hz
+      (zero-copy by design), every re-serve resets the ring to slot 0,
+      and phase A now slams 4 slots in MICROSECONDS where ffmpeg's
+      ~35 ms cold start used to shield the displayed frame by accident.
+      A steady-state variant also existed: at full depth the throttle
+      lets the very next write land in the slot of the frame JUST
+      handed, inside padglhost's <=16 ms upload lag. **Fix, both
+      variants: serve() throttles at SLOTS-1** (one slot of distance
+      between write head and display; RING EMPTY measured 0, so the
+      depth is spare) **plus a DISPLAY GUARD**: the previous request's
+      last-consumed slot stays unwritten until the guest consumes a
+      frame of the new request, bounded at 0.4 s so a never-playing game
+      degrades to today's behaviour, and frame 0 in the guard slot
+      writes immediately because waiting there would deadlock. Also
+      clamped: a stale read_idx published by the doomed previous thread
+      after chan_loop's zero let a serve slam the whole ring unthrottled
+      over a live picture.
+      • **RESIDUAL, accepted and named: when the on-screen slot IS slot
+      0 (~25% of transitions), frame 0 must overwrite it** — the cut can
+      land one padglhost tick (<=16 ms) before the upload, so a
+      single-frame seam can still show. Erasing it needs ring-phase
+      continuation across serves, which is a GUEST change (vid_thread's
+      `consumed` starts at 0 by design) — fold it into the
+      persistent-seekable-decoder decision rather than patching it
+      alone.
+      **Resume:** David watches a run on this build (the fix is host-side
+      Python, so it takes effect on the NEXT watch.sh run — nothing to
+      rebuild). Expected: zero `host did not answer` freezes, no log
+      pauses, tearing gone at transitions except at most a single-frame
+      seam on ~25% of them. His report decides the persistent seekable
+      decoder as before — which would also erase the residual seam.
+      Crash logs for 23:
       `~/crashlogs/gzpad_item11_run{8,9,10_control}.log`.
       **The deeper route regardless, David's hardware point (2026-08-06):
       the real Spike 2 is an i.MX6 whose VPU seeks cheaply and prerolls in

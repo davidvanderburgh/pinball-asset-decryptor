@@ -479,10 +479,28 @@ def _head_put(key, frames, complete):
         _HEAD_BYTES[0] += total
 
 
-def serve(m, c, path, w, h, native):
+def serve(m, c, path, w, h, native, gen, old_read):
     """Decode `path` into channel c's ring until the guest stops asking or
     ffmpeg ends. `native` is the file's own size; `w`,`h` is what was published
-    to the guest, and they differ only when a test flag is rescaling."""
+    to the guest, and they differ only when a test flag is rescaling.
+
+    `gen` is the request generation chan_loop noticed AND ACKED - it must
+    never be re-read here. This function used to read req_gen fresh at its
+    own start, a few ms after the ack (a Popen and a 1.5 MB alloc sit in
+    between), and at every clip end the game lands a SECOND request exactly
+    in that window - the EOS reflex re-arms the state path and then the
+    rewind, about a millisecond apart. The serve then adopted the NEW
+    generation number while serving the OLD request: its supersede check
+    went blind, the pending request was never noticed and never acked, and
+    the game's UI thread - which drives every pipeline - sat out its full
+    3000-spin prepare timeout. That is the `host did not answer` / ~3.3 s
+    frozen-video, silent-then-catching-up-log stall of David's 2026-08-06
+    evening session: 3 loud sightings, ~8 gaps of 3.3-3.9 s in one run,
+    each ending only when the game's NEXT location change re-bumped
+    req_gen and finally superseded the blind serve.
+
+    `old_read` is the guest's read_idx as it stood when the request was
+    noticed, BEFORE chan_loop reset it - see the display guard below."""
     frame_bytes = w * h * 3 // 2
     ring0 = HDR + c * SLOTS * SLOT_BYTES
     # Rescale whenever the size we published is not the file's own, which is
@@ -512,7 +530,46 @@ def serve(m, c, path, w, h, native):
     buf = bytearray(frame_bytes)
     view = memoryview(buf)
     produced = 0
-    gen = get(m, c, "req_gen")
+
+    # ---- THE DISPLAY GUARD (item 11, the tearing half). ----------------
+    # padglhost uploads video textures straight out of this ring at its own
+    # ~60 Hz pace - that is the zero-copy design - and the game re-uploads
+    # its CURRENT frame's pointer every render tick until a new frame is
+    # handed over. So the previous request's last-consumed slot is still
+    # being read off screen long after read_idx said the host may reuse it.
+    # Overwriting it is the mid-play jump-back, and when the write races an
+    # upload it is literal tearing. The head cache made this SEVERE: phase A
+    # slams 4 slots in microseconds where ffmpeg's ~35 ms cold start used to
+    # accidentally shield the on-screen frame (David, 2026-08-06 evening,
+    # the L-ramp sighting). The guard: the one slot the game was showing is
+    # not written until the guest has consumed a frame of THIS request -
+    # its element has moved off the old picture - or a bounded wait expires
+    # (matching today's behaviour rather than wedging on a game that never
+    # plays). Frame 0 in the guard slot writes immediately: nothing can be
+    # consumed before frame 0 exists, so waiting there would deadlock.
+    guard = (old_read - 1) % SLOTS if old_read else None
+    guard_t0 = time.monotonic()
+
+    def must_wait(p):
+        """Ring throttle + display guard, one predicate for both phases.
+
+        SLOTS-1, not SLOTS: the guest frees a slot the moment its handoff
+        returns, but padglhost only READS the pixels at its next render
+        tick, up to ~16 ms later. At full depth the very next write is
+        allowed to land in the slot of the frame the game was JUST handed -
+        the steady-state intermittent tear. One slot of distance keeps the
+        write head a full frame period behind the display."""
+        r = get(m, c, "read_idx")
+        if r > p:      # stale: the doomed previous thread published one last
+            r = 0      # read_idx after chan_loop zeroed it. Without this
+                       # clamp the throttle goes negative and the serve slams
+                       # the whole ring unthrottled over a live picture.
+        if p - r >= SLOTS - 1:
+            return True
+        if (guard is not None and p and r == 0 and p % SLOTS == guard
+                and time.monotonic() - guard_t0 < 0.4):
+            return True
+        return False
     # ---- THE CONSUME-GAP CENSUS (item 11). David, watching the fixed build
     # live: only the VIDEO content hitches, the rest of the window stays
     # smooth - so the residual fault is gaps in frame DELIVERY, and this is
@@ -575,7 +632,7 @@ def serve(m, c, path, w, h, native):
             log("ch%d head cache: %d frames instant%s"
                 % (c, len(hframes), " (whole clip, no ffmpeg)" if hcomplete else ""))
             for fb in hframes:
-                while produced - get(m, c, "read_idx") >= SLOTS:
+                while must_wait(produced):
                     if gone("while throttled (head)"):
                         return
                     time.sleep(0.002)
@@ -617,7 +674,7 @@ def serve(m, c, path, w, h, native):
             # dropping frames here would show as a stutter with no way to tell
             # it from a decode problem.
             t_stall = time.monotonic()
-            while produced - get(m, c, "read_idx") >= SLOTS:
+            while must_wait(produced):
                 if gone("while throttled"):
                     return
                 time.sleep(0.002)
@@ -735,6 +792,10 @@ def chan_loop(m, c):
         hot_until = time.monotonic() + 0.25
         want = get_path(m, c)
         full = host_path(want)
+        # BEFORE the reset: the last frame the previous request's guest
+        # consumed. Its slot is what the game is still showing on screen,
+        # and serve()'s display guard keeps the new decode off it.
+        old_read = get(m, c, "read_idx")
         put(m, c, "write_idx", 0)
         put(m, c, "read_idx", 0)
         put(m, c, "eos", 0)
@@ -777,7 +838,7 @@ def chan_loop(m, c):
                "  (RESCALED from %dx%d)" % native if (w, h) != native else ""))
         note_serve(c, want)
         try:
-            serve(m, c, full, w, h, native)
+            serve(m, c, full, w, h, native, req, old_read)
         except Exception as exc:                    # noqa: BLE001
             log("ch%d decode failed: %s" % (c, exc))
             put(m, c, "eos", 1)

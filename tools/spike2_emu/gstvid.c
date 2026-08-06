@@ -50,6 +50,7 @@ extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
+extern int clock_gettime(int, unsigned long *);
 
 #define O_RDWR 2
 
@@ -484,6 +485,17 @@ static void vid_dump_decoder(struct stream *s, const char *when)
          *(const unsigned *)(b + 12), b[0x19], b[0x49]);
 }
 
+/* Microseconds, CLOCK_MONOTONIC, for the frame schedule below. 32-bit and it
+ * WRAPS every ~71 minutes - only ever subtract two readings, never compare
+ * absolutes. Same two-long timespec shape pad_ms() in hwshim.c already
+ * proves against this guest's ABI. */
+static unsigned long vid_us(void)
+{
+    unsigned long t[2] = { 0, 0 };
+    clock_gettime(1 /* CLOCK_MONOTONIC */, t);
+    return t[0] * 1000000ul + t[1] / 1000ul;
+}
+
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
@@ -503,6 +515,7 @@ static void *vid_thread(void *arg)
     unsigned my_gen = vshm->ch[chan_of(s)].req_gen;
     unsigned consumed = 0;
     unsigned delay = 33333;
+    unsigned long t_epoch = 0;   /* set at frame 0; the schedule's zero */
     if (c->fps_num && c->fps_den)
         delay = (unsigned)(1000000ull * c->fps_den / c->fps_num);
     VLOG("[vid] ch%d streaming %ux%u at %u/%u fps (%u us/frame)\n",
@@ -605,7 +618,29 @@ static void *vid_thread(void *arg)
             /* Only now may the host reuse this slot. */
             c->read_idx = consumed;
         }
-        usleep(delay);
+        /* ★ ITEM 11's CADENCE FIX: SCHEDULE FRAMES ABSOLUTELY, DO NOT SLEEP
+         * A PERIOD. The old `usleep(delay)` ran AFTER each frame's work, so
+         * the true period was delay + handoff time + the kernel timer's
+         * overshoot - always a little slower than the clip's rate, and the
+         * error ACCUMULATED until the picture slipped one whole frame, over
+         * and over. Measured off the screen itself (screenrec.py), which is
+         * how David sees it: 163 freezes in 90 s of attract and 300 in 90 s
+         * of the in-game freeway loop, every one exactly ONE duplicated
+         * frame, 2-3 per second in beat-frequency bursts - while the game's
+         * own overlays stayed smooth (his observation, and the instrument
+         * agreed). An excess of just 0.5-3 ms per frame predicts 0.5-3
+         * slips/s; 2-3.3/s was measured.
+         *
+         * Frame N now targets t_epoch + N*delay, so per-frame error never
+         * accumulates. A thread that falls behind simply does not sleep
+         * until it has caught up - no spiral, and clips still end at the
+         * same total duration. */
+        if (!t_epoch) t_epoch = vid_us();
+        {
+            unsigned long target = t_epoch + (unsigned long)consumed * delay;
+            long ahead = (long)(target - vid_us());
+            if (ahead > 0) usleep((unsigned)ahead);
+        }
     }
     /* Reaching here means someone else already cleared a flag (stop, or a new
      * run superseding this one). Write NOTHING: clearing c->playing now could

@@ -521,13 +521,16 @@ These have each been violated at least once and each cost a run or a window:
       still-playing backgrounds to 0, a mid-play seek can never be an EOS
       loop (EOS stands the stream down first), and refusing it plays the
       picture mid-clip against a game timeline that thinks it restarted.
-      **Fix built, UNCOMMITTED, needs run 6: the discriminator is SEEK RATE,
-      not delivered-count** — absorb only a seek within 3 frame periods
-      (100 ms) of the previous seek on that stream, so the FIRST seek of any
-      burst re-arms: a restart is honoured, a storm pays one re-arm instead
-      of 93. Three predicates tried, each killed by measurement:
-      `delivered<=1` too narrow (storm survived), `playing+same-path` too
-      wide (ball-2 restarts refused), burst-only is the third.
+      **Fix COMMITTED (`dba987d`): the discriminator is SEEK RATE, not
+      delivered-count** — absorb only a seek within 3 frame periods (100 ms)
+      of the previous seek on that stream, so the FIRST seek of any burst
+      re-arms: a restart is honoured, a storm pays one re-arm instead of 93.
+      Three predicates tried, each killed by measurement: `delivered<=1` too
+      narrow (storm survived), `playing+same-path` too wide (ball-2 restarts
+      refused), burst-only is the third.
+      **RUN 6 IS LIVE on that build as this is written** (watch.sh 30 min,
+      census armed, game started, ~15:35 2026-08-06) — David is playing
+      through a ball change as the acceptance test.
       **Transition cold starts remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap ~1/min).
       Fix candidates unbuilt: host pre-arm at location-set (+30-70 ms of

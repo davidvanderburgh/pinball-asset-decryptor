@@ -149,6 +149,12 @@ struct stream {
     char prep_path[PADVID_PATH_MAX];
     unsigned seek_absorbed;     /* redundant rewinds swallowed; see pad_vid_seek */
     unsigned long handoff_worst, handoff_total;   /* item 11: does it block? */
+    /* item 11's PRE-ARM: the host was told to start decoding this path at
+     * note_location() time, under this generation, and prepare() should
+     * ADOPT it rather than bump a fresh one (which would restart the
+     * decode and throw the head start away). Empty path = not armed. */
+    char armed_path[PADVID_PATH_MAX];
+    unsigned armed_gen;
     unsigned long last_seek_us; /* when the previous seek arrived; 0 = never  */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
@@ -263,6 +269,18 @@ static void str_copy(char *d, const char *s, int n)
  * was created last, which is what shipped before 2026-08-06. It exists so the
  * change below can be A/B'd on ONE build in ONE run - this rig has been fooled
  * by comparing two runs before. */
+/* item 11's transition pre-arm; OFF by default - see the long comment at the
+ * call site for the measurement that disabled it. */
+static int prearm_on(void)
+{
+    static int on = -1;
+    if (on == -1) {
+        const char *e = getenv("PAD_VID_PREARM");
+        on = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return on;
+}
+
 static int src_route(void)
 {
     static int on = -1;
@@ -337,6 +355,63 @@ void pad_vid_note_location(void *src, const char *loc)
             VLOG("[vid] ch%d location -> %s\n", chan_of(s), b);
     }
     str_copy(s->location, loc, sizeof s->location);
+
+    /* ★ ITEM 11'S FIX: PRE-ARM THE HOST HERE, WHERE THE FILENAME ARRIVES.
+     *
+     * The last measured cost in this item is the CLIP TRANSITION: 132-206 ms
+     * with no new frames, 4-6 dropped frames each, which is exactly David's
+     * original report ("the stuttering is most right before the next video
+     * comes in"). It is not a stall - the handoff is 8-11 us, the ring is
+     * never empty, CPU is 67% idle - it is ffmpeg's cold start (34-39 ms)
+     * plus prepare, paid SERIALLY while the picture waits.
+     *
+     * The budget for hiding it was measured before it was spent: the game
+     * sets the location 30-70 ms BEFORE the prepare that blocks on it. So
+     * start the decode now and let it run during that window; prepare() then
+     * adopts this generation and usually finds the ack already there.
+     *
+     * NO WAIT HERE, deliberately. This runs on the game's UI thread inside
+     * g_object_set - blocking it would trade a video gap for an input gap,
+     * which is a worse bug in a pinball machine. Fire and continue.
+     *
+     * Idempotent: re-setting the same filename (a rewind does) re-arms
+     * nothing, so this cannot become the re-arm storm this item already
+     * fixed twice. */
+    /* ★ OFF BY DEFAULT, AND THE MEASUREMENT THAT PUT IT BEHIND A FLAG.
+     *
+     * As written this pre-arm REGRESSES the picture, and the guest-side
+     * numbers hide it - which is the whole reason tickcensus.py exists.
+     * Measured 2026-08-06 on identical scene-driven runs:
+     *     before   tickcensus 52.9%  = 1.76 holds/s
+     *     pre-arm  tickcensus 63.1%  = 7.86 holds/s   <- WORSE
+     * while the guest's own log went to a flawless "late 0, early 0, worst
+     * gap 33 ms" in every window. Both are true: the channel is a SHARED
+     * resource, so arming it for the next clip bumps req_gen under the clip
+     * that is still streaming, the host abandons that decode, and
+     * vid_thread sees the generation move and stands down holding its last
+     * frame. No frame is ever late because none is delivered at all.
+     *
+     * The idea is still right - the 30-70 ms between location-set and
+     * prepare is real budget, and the transition gap is the last measured
+     * cost. What is wrong is arming IN PLACE. It needs a spare channel:
+     * decode the incoming clip on a channel nobody is watching, then have
+     * prepare() adopt that channel instead of re-arming this one.
+     * PADVID_CHANNELS is 8 and a scene uses at most 3, so the room exists.
+     *
+     * PAD_VID_PREARM=1 to re-enable for that work. Judge it with
+     * tickcensus.py against the 50% baseline, never with the guest log. */
+    if (prearm_on() && vid_on() && s->location[0] &&
+        !str_eq(s->armed_path, s->location)) {
+        vid_map();
+        if (vshm) {
+            struct padvid_chan *c = &vshm->ch[chan_of(s)];
+            str_copy(c->path, s->location, PADVID_PATH_MAX);
+            c->playing = 1;
+            s->armed_gen = c->req_gen + 1;
+            c->req_gen = s->armed_gen;
+            str_copy(s->armed_path, s->location, sizeof s->armed_path);
+        }
+    }
 }
 
 void pad_vid_note_pipeline(void *p)
@@ -852,13 +927,33 @@ int pad_vid_prepare(void *pipeline)
      * and the ring is only 4 frames deep, so the host fills it and blocks
      * rather than running away. */
     c->playing = 1;
-    gen = c->req_gen + 1;
-    c->req_gen = gen;
+    /* ADOPT THE PRE-ARM if note_location() already started this exact path
+     * on this channel and nothing has claimed the channel since. Bumping a
+     * fresh generation here would make the host throw away the decode it has
+     * had 30-70 ms to warm up, which is the entire point of the pre-arm. */
+    if (s->armed_gen && str_eq(s->armed_path, s->location) &&
+        c->req_gen == s->armed_gen) {
+        gen = s->armed_gen;
+    } else {
+        gen = c->req_gen + 1;
+        c->req_gen = gen;
+    }
+    s->armed_gen = 0;
+    s->armed_path[0] = 0;
     /* 3 s is generous: a probe measured 0.08 s. It exists so a dead host
      * cannot wedge the game's UI thread, which is what calls this. Nothing
      * else can bump this channel's req_gen - that is the whole point of
      * channels - so the generation we wait for cannot be jumped past. */
-    while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
+    {   /* How much of the cold start the pre-arm actually hid. 0 spins means
+         * the host had already answered before prepare() even asked - the
+         * transition gap paid nothing. Logged sparsely; it is the fix's own
+         * before/after and costs one line per handful of clips. */
+        static unsigned said;
+        while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
+        if ((said++ & 15) == 0)
+            VLOG("[vid] ch%d prepare waited %d ms for the host%s\n",
+                 chan_of(s), spins, spins ? "" : " (pre-armed, no wait)");
+    }
     if (c->ack_gen != gen) { VLOG("[vid] ch%d host did not answer\n", chan_of(s)); return 0; }
     if (c->status != PADVID_OK) return 0;
     s->w = c->width;

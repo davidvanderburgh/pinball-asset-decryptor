@@ -671,13 +671,30 @@ These have each been violated at least once and each cost a run or a window:
       new frames per transition = 4-6 dropped frames each**, which at the
       observed transition rate is the **1.76 holds/s** `tickcensus.py`
       measures. The loop closes; nothing is left over.
-      **THE FIX, and its budget is already measured:** overlap the next
-      clip's decode with the outgoing one instead of serialising them. The
-      location is set **30-70 ms before** the prepare that blocks on it
-      (census), and a cold start is 34-39 ms, so pre-arming at
-      `pad_vid_note_location()` time covers most of the gap without any new
-      machinery. **Judge it with `tickcensus.py` against the 50% baseline**
-      (52.9% = 1.76 holds/s is the before), never a raw repeat percentage.
+      **★ THE PRE-ARM WAS BUILT AND IT REGRESSED THE PICTURE — built, tried,
+      measured, disabled, `PAD_VID_PREARM=1` to revive.** Arming the host at
+      `pad_vid_note_location()` time, in place on the same channel:
+      | | tickcensus (50% = perfect) | implied holds |
+      | before | 52.9% | 1.76/s |
+      | pre-arm in place | **63.1%** | **7.86/s** — WORSE |
+      **AND THE GUEST-SIDE LOG CALLED IT A TRIUMPH**, every window reading a
+      flawless `late 0 early 0 worst gap 33 ms` where before it showed
+      132-206 ms gaps. Both readings are true and the guest's is worthless:
+      **the channel is a SHARED resource**, so arming it for the incoming
+      clip bumps `req_gen` under the clip still streaming, the host abandons
+      that decode, and `vid_thread` sees the generation move and stands down
+      holding its last frame. Nothing is ever LATE because nothing is
+      delivered at all. This is the exact failure mode `tickcensus.py` was
+      built for, one turn after it was built.
+      **THE IDEA IS STILL RIGHT; ARMING IN PLACE IS NOT.** The 30-70 ms
+      between location-set and prepare is real budget and the transition is
+      still the last measured cost. **Next design: pre-arm on a SPARE
+      CHANNEL** — decode the incoming clip where nobody is watching, then
+      have `prepare()` adopt that channel instead of re-arming this one.
+      `PADVID_CHANNELS` is 8 and a scene uses at most 3, so the room exists.
+      **Judge it with `tickcensus.py` against the 50% baseline (before =
+      52.9% = 1.76 holds/s), NEVER with the guest log** — that is now a
+      measured trap, not a caution.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -694,8 +711,9 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** build the transition pre-arm (above) — it is the last
-      unfixed cost and every other candidate is dead. **Judge it with
+      **Resume:** build the SPARE-CHANNEL pre-arm (above). In-place arming is
+      already built, measured, and disabled behind `PAD_VID_PREARM=1`; do not
+      re-try it. **Judge it with
       `tickcensus.py` against its 50% baseline** (needs `PAD_GL_TICK=1`, a
       60 fps capture and a scene with real motion; before = 52.9% = 1.76
       holds/s) — NEVER with a raw screen-repeat percentage, which carries the

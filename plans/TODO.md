@@ -8,6 +8,14 @@ one sitting at 85%, so the queue advances on a broad front instead of grinding
 one item down. **Order on this page is presentation, not priority**; it is only
 the last tie-break, which is what moving lines around is still good for.
 
+The `D1`–`D5` on each open item is its **difficulty, and difficulty is what
+breaks the tie** between items at the same progress — five is hardest. The
+ladder that decides which number an item gets lives in the same place as the
+selection rule, `.claude/commands/next.md`, and is not restated here for the
+same reason. **It is an estimate of what is LEFT**, so it moves as passes learn:
+a cracked mechanism makes an item cheaper even when the percentage barely
+moved, and finding out the fault will not appear on demand makes it dearer.
+
 Each item's full technical detail lives in
 `plans/spike2_pc_emulation_handoff.md` under **REMAINING item N** — the numbers
 here are those numbers, so they stay stable as this list is reordered.
@@ -46,7 +54,10 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **6. Scene video noise in the TV inset.** ← IN PROGRESS
+- [ ] **6. Scene video noise in the TV inset.** `D4` ← IN PROGRESS
+      *(D4 because the mechanism is cracked and the fix is written, but the only
+      acceptance oracle is the taunt, which fired three times in one run and not
+      once in the next — a pass can end having learned nothing.)*
       The inset draws pink/green horizontal noise where character footage should
       be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
       **★★ THE BYTES ARE A 1360-WIDE RASTER. MEASURED, WITH A CONTROL, OFFLINE.**
@@ -192,20 +203,27 @@ These have each been violated at least once and each cost a run or a window:
       `pipeline` is never cleared, so every slot is permanently "occupied" and
       stealing is unavoidable no matter how many channels there are.
 
-- [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
+- [ ] **11. Background video stutters every ~7 seconds.** `D3` — needs a run,
+      but it is visible in plain attract every time, so looking is enough.
+      Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is
       the obvious guess and it is wrong: the background is `264.asset/0.asset`,
       1965 frames, re-serving every **65.78 s**. A frame-rate beat between the
       clip and the 60 fps present is the standing candidate.
 
-- [ ] **3. The coil map.** `Diagnostics → Coil Test` fires one drive at a time
+- [ ] **3. The coil map.** `D3` — one run, `coilread.py` already validated, but
+      the Coil Test menu has not been reached yet so the navigation is unknown.
+      `Diagnostics → Coil Test` fires one drive at a time
       and the 10 device-test coils already have names and positions in
       `device_xy.txt`. Coil Test itself has not been reached yet. Use
       `coilread.py` (run on WINDOWS) to diff nonzero `(node,index,count,lvl)`
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1d. The a2 / b4 / b5 payload.** All that is left of the LED wire that
+- [ ] **1d. The a2 / b4 / b5 payload.** `D4` — the capture rate is the problem:
+      ~15 frames in 60 s, and the oracle (`Diagnostics → LED Tests`) needs a run
+      it has never been driven through.
+      All that is left of the LED wire that
       might carry lamp data: **~0.25 frames a second in attract**, 15 in a
       60 s window. `cmd a2` with a 6-byte body is the bulk of it and its
       SHAPE is known — `(start_lamp, 0x80|end_lamp, then 4 payload bytes)`,
@@ -218,7 +236,10 @@ These have each been violated at least once and each cost a run or a window:
       Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
       is `Diagnostics → LED Tests`.
 
-- [ ] **13. Save and load save states.** Freeze a live game and resume it later
+- [ ] **13. Save and load save states.** `D5` — the only candidate tool is not
+      installed, the kernel is missing `INET_DIAG_DESTROY`, and the restore
+      surface crosses into native Windows. Budget more than one pass.
+      Freeze a live game and resume it later
       at the same ball, score and mode. David picked this reading explicitly
       over the two cheaper ones: it is NOT a boot skip (`autoattract.sh`
       already reaches attract in ~14.5 s) and NOT an NVRAM/card rollback.
@@ -241,7 +262,9 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
-- [ ] **14. The Emulate tab forgets the card image across a restart.** Start PAD,
+- [ ] **14. The Emulate tab forgets the card image across a restart.** `D1` — no
+      run, no rig, no instrument; the acceptance test is written below.
+      Start PAD,
       go to Emulate, and **"Card image to run" is always empty** — the path has to
       be re-browsed every launch. Per-project memory already half-exists and the
       gap is in the RESTORE half, not the save half: `emulate_card` is written to
@@ -267,7 +290,8 @@ These have each been violated at least once and each cost a run or a window:
       `tests/test_emulate_tab.py` is part of done. GUI-side change: run the `app`
       smoke tests, not just `py_compile`.
 
-- [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
+- [ ] **4. Boot buzz — PARKED, deliberately.** `D3` (not in the pool; the number
+      is here for whenever it is reopened.) ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat

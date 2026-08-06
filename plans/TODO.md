@@ -66,6 +66,50 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **23. The game exits by itself mid-play. It is NOT a crash.** `S1 D4`
+      **Observed 2026-08-06 (David), one sighting:** *"emulator just crashed
+      when i clicked out into Claude"* — a game in progress, ~181 s into the
+      run, and the guest process was gone. Logs preserved before the next run
+      could overwrite them: `/home/david/crashlogs/gzpad_crash_1406.log` (7744
+      lines), plus `padglhost_crash_1406.log` and `padvid_crash_1406.log`.
+      **ESTABLISHED, and it changes what to look for: there is NO crash
+      signature anywhere in the log.** Zero `SEGV`, zero `Segmentation`, zero
+      `FATAL`, zero `Radium Error`, zero abort or assert. What the log ends with
+      instead is the game's OWN shutdown: `[thread] #3 RETURNED body=0x4efef0`
+      then `[thread] #2 RETURNED body=0x447440`, and those two were created at
+      log lines 69-81, i.e. at the very start of the boot — the longest-lived
+      threads in the process, returning last. Then `ExchangeData: read failed`
+      (the node bus going away behind them) and the process was gone.
+      **From outside, "the game exited by itself" is what a Spike machine
+      REBOOTING looks like**, and on a real machine something restarts it. Do
+      not go hunting a memory fault; go and find out what asks those threads to
+      return.
+      **The renderer was healthy the whole time and is NOT implicated:**
+      `padglhost` averaged 53.3 fps over 182.9 s, was still drawing at the end,
+      and only stopped when `watch.sh` tore it down after the guest had gone.
+      **NOT ESTABLISHED — that clicking away caused it.** That is one sighting
+      and the only evidence is that the two coincided. Against it: `padglhost`'s
+      log shows nothing at all around the exit, and the last switch edge was at
+      171507 ms, **ten seconds before** the guest went — so no focus-driven
+      switch storm reached the merge. Do not build a focus theory before the
+      instrument below exists.
+      **THE FIRST JOB IS AN INSTRUMENT, WHICH IS WHY THIS IS D4 AND NOT D2.**
+      Nothing anywhere records WHY the process went down — `watch.sh` prints
+      "the game exited" and tails five lines of VPU firmware noise, which is the
+      guest's ordinary complaint about having no hardware decoder and says
+      nothing. The shim should log the exit path: an `atexit` hook, whether
+      `main` returned, and any signal it took. Until that exists a repeat
+      sighting teaches nothing, which is exactly the D4 line.
+      **Acceptance:** state it in two parts. (a) The instrument: any exit of the
+      guest prints a reason line naming the path, demonstrated by provoking one
+      deliberately. (b) Then, and only then, the fault: a game survives
+      clicking away and back repeatedly (state how many times), or the exit
+      reproduces and the reason line names it.
+      — S1 because the game dying mid-ball is the thing you are playing WITH,
+      not something you play around. D4 because the instrument does not exist,
+      and because a single sighting is not a repro — a pass can end having
+      learned nothing, which is the D4 definition.
+
 - [ ] **21. Ball handling, and clear feedback about how many balls are in
       play.** `S2 D4` **★ DAVID, 2026-08-06: "we will need some sophisticated
       ball handling and clear feedback about how many balls are in play. for
@@ -302,14 +346,35 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` ← IN PROGRESS
+- [ ] **11. Background video stutters every ~7 seconds.** `S2 D2` ← IN PROGRESS
       — S2 because you can still play through it, though 60.0 → 17.7 fps is
       nearer a malfunction than a quality defect and S2 is being held only
-      because nobody loses a ball to it. D3 unchanged: the mechanism is now
-      cracked and both instruments exist, which makes it cheaper, and **item 20
-      is CLOSED as of `e1e9cb3`, so a stable game is no longer in the way** — a
-      game started with coin/Start/`plunge.py plunge` was verified to hold Ball
-      1 for a full five minutes without ending itself.
+      because nobody loses a ball to it. **D3 → D2 on 2026-08-06:** the caller
+      is now named (below), so the fix has a location instead of a choice; the
+      storm reproduced twice inside one three-minute game, so it is no longer a
+      fault you have to wait for; and **item 20 is CLOSED as of `e1e9cb3`**, so
+      a stable game is no longer in the way — coin/Start/`plunge.py plunge`
+      held Ball 1 for a full five minutes. What is left is a local change plus
+      one confirming run.
+      **★★ THE OPEN QUESTION IS ANSWERED: `caller=rewind`.** Read off a game
+      David played on the current build 2026-08-06 and handed over as a crash
+      report — **no run was spent on it.** Both storms in that session say the
+      same thing, verbatim:
+      `[vid] ch2 RE-ARM STORM: 8 prepares of ...35.asset/1.asset in a row, each
+      delivering <=1 frame, caller=rewind` and the same for `35.asset/6.asset`;
+      they ran **93 and 56 prepares**. So the runaway is `pad_vid_seek()` — the
+      game's **EOS handler looping the clip** — and NOT
+      `gst_element_set_state(PAUSED)` re-arming a pipeline it already has. Those
+      two wanted opposite fixes (`gstvid.c:182`) and the guess is no longer
+      needed. (The `caller=state` on the *ended* line is not a contradiction:
+      `prepare_why` is one static naming the LAST prepare, so only the START
+      line names the runaway.)
+      **Two more facts from the same log, both free:** the storms were on
+      **ch2, the 520x294 TV inset**, not on the 1360x768 background — the inset
+      took **158 serves against ch0's 55** in three minutes; and the storm fires
+      on the build that already has the ffprobe cache, so **caching the probe
+      did not stop it** and was never going to. It made each prepare cheap; the
+      loop is still there.
       **★ DAVID'S THEORY — "it stutters when LOGS ARE WRITTEN, maybe a separate
       logging thread" — IS RULED OUT, and the measurement that killed it also
       found the real cause.** Of 24 video stalls in his screen recording, **16
@@ -359,18 +424,19 @@ These have each been violated at least once and each cost a run or a window:
       with **`caller=state` vs `caller=rewind`**, which is the one fact the host
       cannot see and the fact that decides the fix. Both stayed silent through
       attract (the negative control).
-      **NOT CONFIRMED, and it is why the box is open: nobody has watched a GAME
-      on the fixed build.** The storms are gameplay-only — in the reported run
-      Start was at 53.6 s and the storms at 95-110 s; attract produced 6 serves
-      and no storm.
-      **Still unknown: WHY the guest re-arms 17 times a second.** The new
-      `caller=` field answers it in one line on the next gameplay run.
-      **Resume:** get into a game and read `caller=` off the first
-      `RE-ARM STORM` line; that names which of the two fixes to build. Judge the
-      picture with the screen-recording differ, not eglshim. **The recipe that
-      reaches a stable game, verified 2026-08-06:** `plunge.py reset`, wait 8 s,
-      `plunge.py coin`, `swpoke.py 36 900`, wait 8 s, `plunge.py plunge` — then
-      the game holds Ball 1 indefinitely.
+      **NOT CONFIRMED, and it is why the box is open: no fix has been built for
+      the rewind path, and nobody has judged the PICTURE on a fixed build.** The
+      storms are gameplay-only; attract produced 6 serves and no storm.
+      **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
+      the host on every EOS, when the previous arm delivered ≤1 frame, is the
+      loop. Then judge the picture with the screen-recording differ, **not
+      eglshim** (it counts the render loop and cannot see a frozen texture).
+      **The recipe that reaches a stable game, verified 2026-08-06:**
+      `plunge.py reset`, wait 8 s, `plunge.py coin`, `swpoke.py 36 900`, wait
+      8 s, `plunge.py plunge` — then the game holds Ball 1 indefinitely.
+      **The crash log that answered `caller=` is kept at
+      `/home/david/crashlogs/gzpad_crash_1406.log`** — it is a gameplay session
+      with two storms in it, so a fix can be checked against a stored before.
       **Related, raised by David 2026-08-06: the playfield LED markers are
       choppy too, "probably all related".** In GAMEPLAY that follows — the game
       publishes LEDs from the same loop that eglshim measured at 17.7 fps, so

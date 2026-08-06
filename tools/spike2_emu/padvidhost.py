@@ -414,6 +414,71 @@ def _alt_size():
 _ALT_N = [0] * CHANNELS
 
 
+# ---- the first-frames cache (item 11) --------------------------------------
+#
+# The LAST cost of a clip change is ffmpeg's ~35 ms cold start to first
+# frame, and it is paid at every transition AND every loop wrap - the game
+# loops a clip by re-asking for the same file, so the wrap seam IS this cold
+# start (census-priced 35-71 ms). The probe is already free (the MP4 parse)
+# and the ack is ~2 ms (the select-gated read), so by run 7 the first frame
+# was the whole remaining seam.
+#
+# So: keep the first HEAD_N decoded frames of every file served, and on a
+# re-serve write them into the ring INSTANTLY while a fresh ffmpeg spools up
+# and discards the frames the cache already covered. HEAD_N=6 buys 200 ms of
+# runway at 30 fps against ~60 ms of spool-and-discard, so the ring never
+# starves behind the cache; a clip that fits entirely in the head never
+# spawns ffmpeg at all. Frames are cached at the size they were SERVED at
+# (the rescale test flags key separately), on the same (path, size, mtime)
+# soundness argument as the probe cache.
+#
+# LRU, budgeted in BYTES: PAD_VID_HEADCACHE_MB, default 192, 0 disables.
+# A 1360x768 head is ~9.4 MB, so the default holds ~20 hot files - the
+# loops and recurring scene clips that pay the wrap seam every few seconds.
+HEAD_N = 6
+_HEAD_CACHE = {}          # key -> [frames(list of bytes), complete, last_hit]
+_HEAD_BYTES = [0]
+_HEAD_LOCK = threading.Lock()
+
+
+def _head_budget():
+    try:
+        mb = int(os.environ.get("PAD_VID_HEADCACHE_MB", "192"))
+    except ValueError:
+        mb = 192
+    return mb * (1 << 20)
+
+
+def _head_get(key):
+    """(frames, complete) or None. `complete` means the list IS the clip."""
+    if key is None:
+        return None
+    with _HEAD_LOCK:
+        e = _HEAD_CACHE.get(key)
+        if e is None:
+            return None
+        e[2] = time.monotonic()
+        return e[0], e[1]
+
+
+def _head_put(key, frames, complete):
+    if key is None or not frames:
+        return
+    total = sum(len(f) for f in frames)
+    budget = _head_budget()
+    if not budget or total > budget:
+        return
+    with _HEAD_LOCK:
+        if key in _HEAD_CACHE:
+            return
+        while _HEAD_BYTES[0] + total > budget and _HEAD_CACHE:
+            victim = min(_HEAD_CACHE, key=lambda k: _HEAD_CACHE[k][2])
+            _HEAD_BYTES[0] -= sum(len(f) for f in _HEAD_CACHE[victim][0])
+            del _HEAD_CACHE[victim]
+        _HEAD_CACHE[key] = [frames, complete, time.monotonic()]
+        _HEAD_BYTES[0] += total
+
+
 def serve(m, c, path, w, h, native):
     """Decode `path` into channel c's ring until the guest stops asking or
     ffmpeg ends. `native` is the file's own size; `w`,`h` is what was published
@@ -426,11 +491,24 @@ def serve(m, c, path, w, h, native):
     scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
     cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
             "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
+    try:
+        st = os.stat(path)
+        hkey = (path, st.st_size, st.st_mtime_ns, w, h)
+    except OSError:
+        hkey = None
+    head = _head_get(hkey)
+    # Collect the head on a MISS; None on a hit so the fill code stays dark.
+    collect = [] if (hkey is not None and head is None) else None
+    eof_total = None          # set at EOF: how many frames the file really had
     # ffmpeg's stderr goes to OUR stderr, i.e. padvid.log. It used to go to
     # DEVNULL, which threw away the one message that could explain a clip
     # ending early - and a clip DID end early, at 240 of 514 frames, and was
     # read as a healthy "EOS clean" for a whole pass.
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
+    # NOT SPAWNED when the cache holds the whole clip - the only serve shape
+    # with no ffmpeg in it at all.
+    proc = None
+    if not (head and head[1]):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
     buf = bytearray(frame_bytes)
     view = memoryview(buf)
     produced = 0
@@ -450,24 +528,97 @@ def serve(m, c, path, w, h, native):
     t_serve = time.monotonic()
     first_consumed = False
     stall_budget = 5
+
+    def gone(where):
+        """One check for both exits; already logged when it answers True."""
+        tag = where + " " if where else ""
+        if get(m, c, "req_gen") != gen:
+            log("ch%d superseded %safter %d frames" % (c, tag, produced))
+            return True
+        if not get(m, c, "playing"):
+            log("ch%d guest stopped %safter %d frames" % (c, tag, produced))
+            return True
+        return False
+
+    def read_frame():
+        """Fill buf with one frame. Returns frame_bytes, a short count at
+        EOF, or -1 when the request is gone (already logged).
+
+        NEVER BLOCK DEAF IN THE READ. The old bare readinto() sat ~35 ms
+        inside ffmpeg's cold start checking nothing, and a request landing
+        in that window waited the whole read out - which is every clip
+        REPLACEMENT, because the game's EOS reflex rewinds the outgoing
+        clip first and the new location arrives during the rewind's cold
+        start. Run 6 (2026-08-06) measured it from both ends: guest adopt
+        waits med 34 ms wall while this process acked 0.1 ms after
+        NOTICING. The 2 ms select keeps supersede latency flat through the
+        cold start; once frames flow the pipe is always ready and the
+        select costs microseconds. Run 7: med 34 -> 2 ms.
+        """
+        got = 0
+        while got < frame_bytes:
+            r = select.select([proc.stdout], [], [], 0.002)[0]
+            if not r:
+                if gone("mid-read"):
+                    return -1
+                continue
+            n = proc.stdout.readinto(view[got:])
+            if not n:
+                break
+            got += n
+        return got
+
     try:
-        while True:
-            if get(m, c, "req_gen") != gen:
-                log("ch%d superseded after %d frames" % (c, produced))
+        # ---- PHASE A: the cached head goes into the ring INSTANTLY. ------
+        if head:
+            hframes, hcomplete = head
+            log("ch%d head cache: %d frames instant%s"
+                % (c, len(hframes), " (whole clip, no ffmpeg)" if hcomplete else ""))
+            for fb in hframes:
+                while produced - get(m, c, "read_idx") >= SLOTS:
+                    if gone("while throttled (head)"):
+                        return
+                    time.sleep(0.002)
+                if gone("(head)"):
+                    return
+                slot = produced % SLOTS
+                off = ring0 + slot * SLOT_BYTES
+                m[off:off + frame_bytes] = fb
+                produced += 1
+                put(m, c, "write_idx", produced)
+            if hcomplete:
+                put(m, c, "eos", 1)
+                log("ch%d whole clip (%d frames) served from head cache"
+                    % (c, produced))
                 return
-            if not get(m, c, "playing"):
-                log("ch%d guest stopped playback after %d frames" % (c, produced))
+            # ---- PHASE B: discard what the cache already covered. The
+            # guest has 200 ms of cached runway; the spool-and-discard is
+            # ~60 ms, so the ring never runs dry behind it. ----------------
+            skip = produced
+            while skip:
+                got = read_frame()
+                if got < 0:
+                    return
+                if got < frame_bytes:
+                    # The file ended inside the region the head covered -
+                    # it shrank since it was cached, or ffmpeg failed. The
+                    # ring already holds the cached frames; end here.
+                    put(m, c, "eos", 1)
+                    log("ch%d ffmpeg ended during head discard (rc=%s)"
+                        % (c, proc.poll()))
+                    return
+                skip -= 1
+
+        # ---- PHASE C: live decode, exactly as before. --------------------
+        while True:
+            if gone(""):
                 return
             # Block while the ring is full. Throttling the DECODER is right:
             # dropping frames here would show as a stutter with no way to tell
             # it from a decode problem.
             t_stall = time.monotonic()
             while produced - get(m, c, "read_idx") >= SLOTS:
-                if get(m, c, "req_gen") != gen:
-                    log("ch%d superseded while throttled after %d frames" % (c, produced))
-                    return
-                if not get(m, c, "playing"):
-                    log("ch%d guest stopped while throttled after %d frames" % (c, produced))
+                if gone("while throttled"):
                     return
                 time.sleep(0.002)
             if not first_consumed and get(m, c, "read_idx") > 0:
@@ -483,60 +634,44 @@ def serve(m, c, path, w, h, native):
                     stall_budget -= 1
                     log("ch%d guest consume STALLED %.0f ms at frame %d"
                         % (c, waited * 1000.0, produced))
-            got = 0
-            while got < frame_bytes:
-                # NEVER BLOCK DEAF IN THE READ. The old bare readinto() sat
-                # ~35 ms inside ffmpeg's cold start checking nothing, and a
-                # request landing in that window waited the whole read out -
-                # which is every clip REPLACEMENT, because the game's EOS
-                # reflex rewinds the outgoing clip first and the new location
-                # arrives during the rewind's cold start. Run 6 (2026-08-06)
-                # measured it from both ends: guest adopt waits med 34 ms
-                # wall while this process acked 0.1 ms after NOTICING. The
-                # 2 ms select keeps supersede latency flat through the cold
-                # start; once frames flow the pipe is always ready and the
-                # select costs microseconds.
-                r = select.select([proc.stdout], [], [], 0.002)[0]
-                if not r:
-                    if get(m, c, "req_gen") != gen:
-                        log("ch%d superseded mid-read after %d frames"
-                            % (c, produced))
-                        return
-                    if not get(m, c, "playing"):
-                        log("ch%d guest stopped mid-read after %d frames"
-                            % (c, produced))
-                        return
-                    continue
-                n = proc.stdout.readinto(view[got:])
-                if not n:
-                    break
-                got += n
+            got = read_frame()
+            if got < 0:
+                return
             if got < frame_bytes:
                 put(m, c, "eos", 1)
-                rc = proc.poll()
+                eof_total = produced
                 log("ch%d ffmpeg ended after %d frames (%d trailing bytes, rc=%s)"
-                    % (c, produced, got, rc))
+                    % (c, produced, got, proc.poll()))
                 return
+            if collect is not None and len(collect) < HEAD_N:
+                collect.append(bytes(buf))
             slot = produced % SLOTS
             off = ring0 + slot * SLOT_BYTES
             m[off:off + frame_bytes] = buf
             produced += 1
             put(m, c, "write_idx", produced)
     finally:
+        # Fill the cache on the way out, whatever the exit. A clean EOF
+        # knows whether the head IS the whole clip; a superseded serve only
+        # contributes a FULL head (a partial one buys less runway than the
+        # spool it would have to hide).
+        if collect is not None:
+            if eof_total is not None:
+                _head_put(hkey, collect, len(collect) == eof_total)
+            elif len(collect) == HEAD_N:
+                _head_put(hkey, collect, False)
         # Kill, but REAP ASYNCHRONOUSLY. This finally runs on every serve
         # exit including supersede and guest-stop, and chan_loop cannot see
         # the NEXT request (often already pending - a transition stands the
         # old clip down and asks for the new one in the same breath) until
-        # it runs. The synchronous wait() cost ~30 ms per re-arm, measured
-        # off run 4's adopt telemetry (2026-08-06): waits sat at a ~35 ms
-        # floor with the probe already free, and the decomposition left
-        # only this reap plus notice latency. A daemon thread reaps the
-        # corpse so nothing zombies, and nobody waits.
-        try:
-            proc.kill()
-            threading.Thread(target=proc.wait, daemon=True).start()
-        except Exception:                           # noqa: BLE001
-            pass
+        # it runs. A synchronous wait() cost ~30 ms per re-arm (run 5). A
+        # daemon thread reaps the corpse so nothing zombies, nobody waits.
+        if proc is not None:
+            try:
+                proc.kill()
+                threading.Thread(target=proc.wait, daemon=True).start()
+            except Exception:                       # noqa: BLE001
+                pass
 
 
 _STORM = [None] * CHANNELS      # per channel: [path, count, first_t, last_t]

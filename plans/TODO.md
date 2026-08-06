@@ -66,7 +66,39 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **23. The game exits by itself mid-play. It is NOT a crash.** `S1 D4`
+- [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
+      2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
+      a signature, a call site, a disassembly, a minutes-scale repro AND a
+      designed fix — see the starred block below. The original signatureless
+      exit remains as described.)*
+      **★★ ESTABLISHED BY ITEM 11'S RUNS (2026-08-06 evening): a
+      REPRODUCIBLE churn-provoked SEGV, distinct from the original clean
+      exit — do not merge them.** Five sightings in one evening (runs 2, 3,
+      8, 9, 10 of item 11's pass), all during `longplay.sh` scene churn,
+      three of them ~15 s in; runs with only 2 min of churn sometimes
+      survive, so it is probabilistic with exposure. **Byte-identical every
+      time: `pc=libpthread+0x8858` = pthread_mutex_lock, `lr=0x4db77c`,
+      `r0=0x48`, `fault=0x0`.** The disassembly at the call site:
+      `4db76c: add sl, r1, #72` → `pthread_mutex_lock(r1+0x48)` **with r1
+      == NULL** — the game locks a queue object's mutex without a null
+      check, something tears the object down under churn.
+      **THE DESIGNED FIX, not yet built: the game CHECKS the lock's return
+      value** (`4db780: bne 4db8fc` — a real error path). The shim is
+      LD_PRELOADed, so interpose `pthread_mutex_lock`: argument below one
+      page ⇒ return EINVAL instead of faulting. The game then takes its own
+      error branch instead of dying. Verify by running the longplay-churn
+      repro to survival, several times.
+      **The instrument half of this item's acceptance is DEMONSTRATED** —
+      the segv handler printed pc/lr/map/stack on every sighting; that is
+      how all of the above was learned. The ORIGINAL sighting had ZERO segv
+      output, so the clean-exit shape (threads asked to return, below) is a
+      DIFFERENT path and still needs its exit-reason hook.
+      **Crash logs preserved:**
+      `~/crashlogs/gzpad_item11_run{8,9,10_control}.log` (run 10 = the
+      control: cache off, same crash).
+      **Repro recipe:** watch.sh 4 + the verified game recipe + longplay
+      2 min; expect the exit within ~15 s of churn about half the time —
+      run twice before calling anything fixed.
       **Observed 2026-08-06 (David), one sighting:** *"emulator just crashed
       when i clicked out into Claude"* — a game in progress, ~181 s into the
       run, and the guest process was gone. Logs preserved before the next run
@@ -879,11 +911,50 @@ These have each been violated at least once and each cost a run or a window:
       and discards what the cache already covered (~50 ms of decode
       hidden behind 133-267 ms of runway). Cheaper, host-only, and it
       erases the loop-wrap seam and the transition seam in one move.
-      **Resume:** David's eyes first — the current build (all fixes
-      live) should be visibly smoother at clip ends; ask whether the
-      jump-back and the pause survive. Then build the first-frames cache
-      unless his answer says otherwise; judge with the ADOPT/gap lines
-      plus his report, and keep runs at 4 minutes.
+      **THE FIRST-FRAMES CACHE IS BUILT, UNCOMMITTED, ON RUN 8 as this
+      is written** (padvidhost.py, host-only): first HEAD_N=6 decoded
+      frames per (path,size,mtime,w,h), LRU budgeted by
+      `PAD_VID_HEADCACHE_MB` (default 192, 0 disables); on a re-serve
+      the head goes into the ring instantly while a fresh ffmpeg spools
+      and discards what the head covered (200 ms runway vs ~60 ms
+      spool); a clip that fits in the head never spawns ffmpeg. Serve
+      is three phases (head → discard → live) sharing one select-gated
+      `read_frame()`; the head is collected on miss and stored in the
+      `finally`, so superseded serves still contribute a full head.
+      **★ RUN 8 (head cache, first run): THE CACHE WORKS — 6 hits, "6
+      frames instant", adopt waits med 2 ms, worst delivery gaps down to
+      55-80 ms (from 84-173), zero storms/wrong-size — AND THE GUEST
+      SEGFAULTED ~2 min in** (17 serves against ~110 typical): NULL
+      deref inside libpthread, called from GAME code (`pc=libpthread
+      +0x8858, lr=0x4db77c` in the game binary, `fault=0x0`). Logs
+      preserved: `~/crashlogs/{gzpad,padvid,padglhost}_item11_run8.log`.
+      **★★ THE CACHE IS EXONERATED, and it took three runs plus a
+      re-audit of the whole series to get the attribution right.** Run 9
+      (cache on) crashed at the same ~80 s, byte-identical segv. Run 10,
+      the CONTROL (`PAD_VID_HEADCACHE_MB=0`), **crashed too — same pc,
+      same lr, same r0** — killing the cache theory. The re-audit then
+      showed the "7 clean runs before" premise was FALSE: **runs 2 and 3
+      (10-minute shape, 6-min longplay, BEFORE the cache/select-gate/reap
+      existed) also ended "the game exited", not their backstops** — I
+      had read their healthy stats as full runs without checking the
+      endings. So the crash is a STANDING, churn-provoked game fault that
+      pre-dates everything this pass built — it is item 23's, upgraded
+      there with today's evidence (site, disassembly, repro, and a
+      designed shim-side fix). The cache's own numbers stand: hits
+      instant, adopt waits med 2 ms, worst gaps 55-80 ms, zero
+      storms/wrong-size across all its runs. COMMITTED.
+      **Also learned, the self-match trap again: a healthy watch log
+      greps 1 for SEGV** — the event-feed awk's own pattern, echoed by
+      teardown's process listing. Judge runs by their ENDING line
+      (`backstop reached` vs `the game exited`), never by that grep.
+      **The crashes left interop-relay zombies + a ghost game window on
+      David's desktop (item 12's shapes); `wsl --shutdown` cleared all
+      of it, alive 0 confirmed after.**
+      **Resume:** put David's eyes on the clip-end seam (jump-back +
+      pause) on the current build — his report decides whether the
+      persistent seekable decoder is still worth building, or whether
+      item 11 is done pending item 23's crash fix. Crash logs for 23:
+      `~/crashlogs/gzpad_item11_run{8,9,10_control}.log`.
       **The deeper route regardless, David's hardware point (2026-08-06):
       the real Spike 2 is an i.MX6 whose VPU seeks cheaply and prerolls in
       ms; a persistent seekable decoder per channel would emulate that

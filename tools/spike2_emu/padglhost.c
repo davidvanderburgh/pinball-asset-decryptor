@@ -174,6 +174,7 @@ static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
 static long vid_last_frame, vid_swaphist[6];
+static int gl_tick;             /* PAD_GL_TICK=1: draw the per-swap counter */
 static double now_s(void);
 static const char *dump_dir;
 static int dump_every = 30, dump_max = 40, dumped;
@@ -1420,6 +1421,36 @@ static void win_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
+    /* ★ ITEM 11's PER-SWAP TICK, PAD_GL_TICK=1.
+     *
+     * THE ONE THING THAT CAN TELL AN UNEVEN PRESENT FROM AN UNEVEN GRABBER.
+     * A 60 fps capture measured 18.4% of frames on screen for ONE refresh and
+     * 33.1% for THREE OR MORE, while this process gave every video frame
+     * exactly two swaps - which says the WSLg/RAIL hop presents unevenly. But
+     * gdigrab is not vsync-locked and could manufacture part of that, so the
+     * conclusion cannot be trusted until the swaps themselves are visible IN
+     * the capture. Eight blocks, black or white, are the low byte of the swap
+     * counter: decode them per captured frame and a missing counter value is a
+     * swap that never reached the desktop, while a value seen twice is the
+     * grabber sampling twice. Neither can be inferred from content alone.
+     *
+     * Scissor+clear rather than a shader: no program, no VAO, no state to
+     * restore beyond the scissor enable, and it runs after the blit so it
+     * cannot disturb the picture the guest drew. Binary blocks rather than a
+     * grey level because mjpeg quantises levels and does not touch black
+     * against white. */
+    if (gl_tick) {
+        unsigned v = (unsigned)frames_done & 0xff;
+        int i;
+        p_glEnable(0x0C11);                     /* GL_SCISSOR_TEST */
+        for (i = 0; i < 8; i++) {
+            float c = (v >> i) & 1 ? 1.f : 0.f;
+            p_glScissor(4 + i * 20, 4, 16, 16);
+            p_glClearColor(c, c, c, 1.f);
+            p_glClear(0x4000);                  /* COLOR_BUFFER_BIT */
+        }
+        p_glDisable(0x0C11);
+    }
     {   /* item 11: how long the swap BLOCKS. At 60 Hz a healthy swap parks
          * here until vsync, so a big number is normal - what matters is the
          * total, against the 16.7 ms budget, next to the convert cost. */
@@ -2053,6 +2084,10 @@ int main(int argc, char **argv)
     if (getenv("PAD_GL_MAX_FRAMES"))  dump_max   = atoi(getenv("PAD_GL_MAX_FRAMES"));
     if (getenv("PAD_VID_BURST"))      vid_burst_frames = atoi(getenv("PAD_VID_BURST"));
     if (getenv("PAD_VID_OFFLOG"))     vid_offlog = atoi(getenv("PAD_VID_OFFLOG"));
+    gl_tick = getenv("PAD_GL_TICK") && getenv("PAD_GL_TICK")[0] != '0';
+    if (gl_tick) fprintf(stderr, "[padglhost] per-swap tick ON (8 blocks, "
+                                 "top-left): the swap counter, for measuring "
+                                 "what reaches the desktop\n");
     vid_nosizeguard = getenv("PAD_VID_NOSIZEGUARD")
                     ? atoi(getenv("PAD_VID_NOSIZEGUARD")) : 0;
     if (vid_nosizeguard)

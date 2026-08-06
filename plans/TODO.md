@@ -610,15 +610,35 @@ These have each been violated at least once and each cost a run or a window:
       rig already solved** - every instrument inside WSL read perfect, the
       room heard breakage, and the answer was to bypass the WSLg hop
       (PortAudio on the Windows side, `13c4410`).
-      **STILL TO PROVE before any architectural change** - that gdigrab is
-      not itself the uneven sampler. The 1x/3x split is the signature of
-      uneven PRESENT, but a non-vsync-locked grabber could in principle
-      manufacture some of it. Cheapest discriminator: an on-screen per-swap
-      tick drawn by padglhost (the instrument designed earlier and skipped),
-      so the captured sequence of counter values shows directly whether a
-      swap ever reached the desktop. THEN, if confirmed, the fix is
-      architectural and mirrors the audio one: present on the Windows side
-      rather than through WSLg.
+      **★★★ RETRACTED THE SAME DAY, BY THE TICK. THE PRESENTATION HOP IS
+      INNOCENT AND THE SCREEN-CAPTURE NUMBERS ABOVE ARE CONTAMINATED.**
+      `PAD_GL_TICK=1` draws the low byte of the swap counter as 8 black/white
+      blocks (padglhost, bottom-left - GL's origin, which cost one decode
+      attempt). Decoded off a 60 fps capture, 256 distinct values seen:
+      **the counter advances 1798 over 1799 captured frames in 30 s = 59.9
+      swaps/s, exactly padglhost's rate. NO SWAP IS EVER LOST.** The deltas
+      spread 36.8% at 0, 32.9% at 1, 30.3% at 2+, netting to exactly 1.0 -
+      **that is the GRABBER sampling unevenly, not the desktop dropping
+      frames.**
+      **SO THE INSTRUMENT HAD A HOLE AND EVERY SCREEN NUMBER IN THIS ITEM
+      INHERITS IT.** `dupcensus.py` compared a CAPTURE against a FILE: the
+      file has no capture jitter and the capture has ~37% double-samples, so
+      the "22.7% excess repeats" measured a real fault PLUS the recorder's
+      own jitter and cannot separate them. The 18.7%, 19.1%, 5.72/s and the
+      60 fps 1x/3x split are all unreliable AS MAGNITUDES. Treat them as
+      "something is wrong", never as a size, and never as a before/after.
+      **WHAT SURVIVES, and it is not nothing:** David sees the stutter with
+      his own eyes, which no sampler artefact explains; and the guest-side
+      hiccup is measured INSIDE the rig where no grabber is involved -
+      **one late handoff gap per 2 s of 46-223 ms under scene churn**, rate
+      27.1-29.9/s against a target of 30. That is now the only trustworthy
+      quantitative handle on the fault.
+      **THE INSTRUMENT THIS ITEM STILL NEEDS: a capture-jitter-free screen
+      measurement.** Options, none yet built: decode the tick ALONGSIDE the
+      video content in one capture and only count content repeats where the
+      tick advanced by exactly 1 (throws away the jittered samples instead
+      of believing them); or drive the capture off DwmFlush/present
+      timestamps rather than a free-running 60 fps timer.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -635,9 +655,11 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** build the per-swap TICK in padglhost and capture it, to
-      prove the uneven present is the hop and not gdigrab's sampling. Only
-      then consider the architectural fix. The agent can now run the whole
+      **Resume:** build the tick-gated screen census above, so the screen can
+      be measured without the grabber's 37% double-sampling in the number.
+      Until then the only trustworthy handle is the guest-side late gap, and
+      **no fix should be judged by a screen-capture percentage.** The agent
+      can run the whole
       loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
       game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
       `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and

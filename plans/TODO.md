@@ -66,45 +66,46 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **20. Plunge does not take a ball out of the trough, so the game ends
-      itself.** `S1 D2` **Observed 2026-08-06:** after a plunge the trough does
-      not show one fewer ball, and a few minutes later the game ends itself
-      believing no ball is in play. David: the last trough switch should be OFF
-      and the other five ON.
-      **THIS IS A REGRESSION, not a new fault.** Item 7 (DONE 2026-08-05,
-      `26c9ebf`) records the identical symptom as fixed: *"`plunge` used to log
-      `-71` then a `+71` nobody asked for 376 ms later (ball back in the trough
-      before the shooter lane had even closed) and now runs its real 450/1200 ms
-      story."* So either it has come back or item 7 fixed a different half.
-      **FIRST STEP IS A LOOK, NOT A THEORY — the two candidates are told apart
-      by reading the trough after one plunge** (`padsw.py` merged values, or the
-      `[sw]` lines which carry a provenance letter since `145e79b`):
-      • **all six still held** → the RELEASE is being lost. Prime suspect is
-      item 17's `sw_owed[]` latch, `hwshim.c:4439`, committed TODAY as
-      `979b940`: `if (!held && id < 256 && sw_owed[id])` **defers a switch going
-      NOT-HELD**, and a ball leaving the trough is exactly that.
-      **`PAD_SW_LATCH=0` turns it off on one build** (`hwshim.c:4179`) — a
-      one-variable bisect that costs one run.
-      • **five held but the wrong one open** → `plunge.py:117` picks
-      `next(s for s in TROUGH if _held(m, s))` over
-      `TROUGH = (71, 70, 69, 68, 67, 66)  # Trough 1..6; 1 is nearest the eject`,
-      so it opens **71, the ball NEAREST the eject**. **SUSPICION, not
-      established:** on a real trough the balls roll down toward the eject, so
-      the switch that opens is the one at the FAR end (66), which is what
-      "the last trough switch" means. If so the fix is one line and the wrong
-      end has been opened since the script was written.
-      **Do not assume it is one or the other before looking** — item 7's fix and
-      item 17's latch touch the same merge, and both could be involved.
-      **Acceptance:** after `plunge.py plunge`, the guest sees exactly five
-      trough switches held and the sixth open (state which switch, do not
-      assume), and a game started with `plunge.py game` survives **5 minutes**
-      without ending itself. Oracle is the guest's own `[sw]` lines plus the
-      game staying up; `longplay.sh` is the unattended way to hold a ball.
-      — S1 because the game ending itself is not something you play around, and
-      it blocks every item that needs a game to be running: 6, 11 and 16.
-      D2 because the diagnosis is a single look at a state the fault produces
-      every time, both candidates are one-line changes, and only the "survives
-      5 minutes" half needs a real run.
+- [ ] **21. Ball handling, and clear feedback about how many balls are in
+      play.** `S2 D4` **★ DAVID, 2026-08-06: "we will need some sophisticated
+      ball handling and clear feedback about how many balls are in play. for
+      example, during multiball, many balls are in play. having clear feedback
+      in the 'controls' or 'virtual playfield' window is very helpful (show
+      images of pinballs loaded in the trough for example)."**
+      — S2 because single-ball play works, so nobody loses a ball to this; what
+      it costs is every run that wants multiball, and it is a capability nothing
+      else can work around. D4 for the item as a whole, but **the two halves are
+      very different prices and the cheap one lands alone** — say which you did.
+      **(a) THE FEEDBACK HALF IS D2 DESK WORK.** Both windows David named
+      already exist and both already have what they need: `playfield.py`
+      (Windows/Tk) reads `mrg[]` over 9p every frame and already draws switch
+      state, and `padglhost.c`'s Controls legend is drawn in X11 beside the
+      switch keys. The trough is ids 71..66 = TROUGH 1..6 and `swshow.py`
+      (`e1e9cb3`) already counts and prints it. Six ball images and a
+      "N balls in play" line is drawing, not discovery.
+      **(b) THE HANDLING HALF IS THE D4, and it needs item 3.** There is no ball
+      MODEL anywhere in this rig — `plunge.py` opens one trough switch and works
+      the shooter lane, and nothing tracks where a ball is, notices a drain, or
+      feeds a second ball when the game asks for one. Multiball is the game
+      firing the trough eject repeatedly and expecting balls to arrive; nothing
+      answers. **Item 3 is upstream:** the fire frame is decoded (`cmd 0x40`,
+      one coil by index) but the trough-eject index is NOT among the five that
+      item 3 confirmed — it identified 2, 3, 4, 7, 8 from a ball search, and the
+      eject is one of the unlabelled 0, 1, 5, 6. Without it the rig cannot tell
+      "the game just asked for a ball" from any other coil, and the auto-feed
+      has to be driven blind on a timer.
+      **What item 20 established that this can build on** (`e1e9cb3`): the
+      trough is a STACK with a known direction — 71 TROUGH 1 is the eject end
+      (it sits at x=254 beside TROUGH JAM), 66 TROUGH 6 is the far end, balls
+      are taken from the far end and a returning ball fills the far end first.
+      So "eject a ball" and "a ball drains" are both one switch on a known end,
+      and the model is a count plus that rule.
+      **Acceptance:** state both halves separately. (a) with a game running, the
+      playfield window shows the six trough positions filling and emptying as
+      the count changes, and says how many balls are in play; screenshot it.
+      (b) a multiball starts with more than one ball genuinely in play — the
+      oracle is the game's own display, not the rig's model of itself, because a
+      model that feeds itself will always agree with itself.
 
 - [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
       does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
@@ -305,8 +306,10 @@ These have each been violated at least once and each cost a run or a window:
       — S2 because you can still play through it, though 60.0 → 17.7 fps is
       nearer a malfunction than a quality defect and S2 is being held only
       because nobody loses a ball to it. D3 unchanged: the mechanism is now
-      cracked and both instruments exist, which makes it cheaper, but the
-      confirming run needs a GAME and **item 20 blocks a stable one**.
+      cracked and both instruments exist, which makes it cheaper, and **item 20
+      is CLOSED as of `e1e9cb3`, so a stable game is no longer in the way** — a
+      game started with coin/Start/`plunge.py plunge` was verified to hold Ball
+      1 for a full five minutes without ending itself.
       **★ DAVID'S THEORY — "it stutters when LOGS ARE WRITTEN, maybe a separate
       logging thread" — IS RULED OUT, and the measurement that killed it also
       found the real cause.** Of 24 video stalls in his screen recording, **16
@@ -362,9 +365,12 @@ These have each been violated at least once and each cost a run or a window:
       and no storm.
       **Still unknown: WHY the guest re-arms 17 times a second.** The new
       `caller=` field answers it in one line on the next gameplay run.
-      **Resume:** get into a game (item 20 first) and read `caller=` off the
-      first `RE-ARM STORM` line; that names which of the two fixes to build.
-      Judge the picture with the screen-recording differ, not eglshim.
+      **Resume:** get into a game and read `caller=` off the first
+      `RE-ARM STORM` line; that names which of the two fixes to build. Judge the
+      picture with the screen-recording differ, not eglshim. **The recipe that
+      reaches a stable game, verified 2026-08-06:** `plunge.py reset`, wait 8 s,
+      `plunge.py coin`, `swpoke.py 36 900`, wait 8 s, `plunge.py plunge` — then
+      the game holds Ball 1 indefinitely.
       **Related, raised by David 2026-08-06: the playfield LED markers are
       choppy too, "probably all related".** In GAMEPLAY that follows — the game
       publishes LEDs from the same loop that eglshim measured at 17.7 fps, so
@@ -554,6 +560,55 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **20. Plunge does not take a ball out of the trough, so the game ends
+      itself.** DONE 2026-08-06, `e1e9cb3`. **It was the wrong END of the
+      trough, and the item's own prime suspect was innocent.**
+      A trough is a ramp: the eject kicks out the ball on Trough 1 and the five
+      behind it roll DOWN one position, so the switch that OPENS is Trough 6 at
+      the far end. `plunge.py` opened Trough 1 — the one place a hole cannot
+      appear — leaving the game with a gap at the eject and a ball still sitting
+      behind it. The game had nothing to eject, so a plunge never really took a
+      ball out of play, and it later ended the game believing none was.
+      One line: `next(s for s in reversed(TROUGH) if _held(m, s))`.
+      **Established from the game's OWN device table, not from a guess about
+      troughs** (`games/godzilla_pro/switch_xy.txt`): TROUGH 1 (id 71) is at
+      x=254 beside TROUGH JAM (id 72) at x=254, and a jam switch is by
+      definition at the eject; TROUGH 6 (id 66) is at x=210. David had described
+      the wanted state independently and in the same terms.
+      **Measured before and after on one run**, from the guest's own `[sw]`
+      stream: `-71l` → the game sees 5 balls at `[70,69,68,67,66]`; `-66l` → 5
+      at `[71,70,69,68,67]`. **Acceptance met with a real oracle:** the
+      screenshot at t+300 s reads **FREE PLAY / BALL 1** with Player 1 active,
+      the trough held at 5 for the whole five minutes, and `alive.sh` printed 0.
+      "The guest process is alive" is NOT the same claim as "a game is in
+      progress", which is why this was screenshotted rather than inferred.
+      **BOTH "the release is being lost" theories are RULED OUT, with numbers.**
+      • **item 17's `sw_owed[]` latch**, which this item named as the prime
+      suspect and proposed a `PAD_SW_LATCH=0` bisect for. It arms only when
+      `!sw_served[n]`, and a trough switch held since window-open has been on
+      the wire as made hundreds of times. `[swlatch]` count for the whole run:
+      **0**. The bisect would have cost a run and found nothing.
+      • **a race in `padsw.take()`** — found while reading the merge, not
+      queued. take() stages a value and bumps `scr_gen`, the caller writes the
+      opposite value microseconds later, and the shim diffs `scr_held` against
+      its own shadow on the ~640 µs paced SPI loop, so a pair landing inside one
+      poll collapses to **no edge at all**. `padsw.h` documents exactly that
+      collapse for PROVENANCE without noticing it would destroy VALUES.
+      Measured rather than argued: the window is **996 µs median, 882 µs
+      minimum over 200 trials**, because `m.flush()` is an msync. Real in
+      principle, cannot fire as written, margin 1.4×. **Do not re-derive it**;
+      if `take()` ever loses its flush, it becomes live.
+      **New instrument: `swshow.py`**, all three regions of the switch block
+      side by side with the three generations. `mrg[]` alone cannot tell "the
+      keyboard still holds it" from "a script edge was dropped" — they are the
+      same three numbers — and `scr_gen` having moved while `mrg_gen` stood
+      still is what separates them.
+      **NOT a regression of item 7, and the item's own regression claim was
+      wrong.** Item 7 fixed WHO writes the array and its `-71` was the right
+      switch by luck of the same wrong ordering; the end has been wrong since
+      `plunge.py` was written. **Follow-on: item 21**, which is the ball MODEL
+      this item shows the rig does not have.
 
 - [x] **6. Scene video noise in the TV inset.** DONE 2026-08-06 — **David
       confirmed it looks fine on screen**, which is the one thing the item was

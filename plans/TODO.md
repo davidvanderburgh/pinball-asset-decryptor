@@ -346,7 +346,7 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **11. Background video stutters every ~7 seconds.** `S2 D2` ← IN PROGRESS
+- [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` ← IN PROGRESS
       — S2 because you can still play through it, though 60.0 → 17.7 fps is
       nearer a malfunction than a quality defect and S2 is being held only
       because nobody loses a ball to it. **D3 → D2 on 2026-08-06:** the caller

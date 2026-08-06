@@ -136,6 +136,29 @@ These have each been violated at least once and each cost a run or a window:
       Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
       is `Diagnostics → LED Tests`.
 
+- [ ] **13. Save and load save states.** Freeze a live game and resume it later
+      at the same ball, score and mode. David picked this reading explicitly
+      over the two cheaper ones: it is NOT a boot skip (`autoattract.sh`
+      already reaches attract in ~14.5 s) and NOT an NVRAM/card rollback.
+      **`savevm`/`loadvm` DO NOT EXIST HERE** — the rig is qemu-**user**
+      (`qemu-arm-static` under binfmt_misc, `run_game.sh:2`), and snapshots are
+      a qemu-**system** + qcow2 feature. Do not spend a pass hunting a monitor.
+      **CRIU is the only standing candidate and it is not installed.** The
+      kernel does not block it (`CONFIG_CHECKPOINT_RESTORE=y`, WSL2
+      6.6.87.2-microsoft-standard) but **`CONFIG_INET_DIAG_DESTROY is not
+      set`**, and a live run holds a TCP connection from `padrelay.py`
+      (`0.0.0.0:<port>`) to a **native Windows** `padplay.py` that is not in the
+      checkpoint at all — so a whole-tree checkpoint/restore is off the table
+      before it is tried. **GUESS, not established:** checkpoint only the guest
+      side (`arm-binfmt` + `game` + its shm rings) and RE-START every host-side
+      helper on restore. The restore surface is everything `alive.sh` counts —
+      13 process shapes plus the `fuse2fs` card mount and the padled/padsw/
+      padgl/padvid rings. Detail in the handoff under **REMAINING item 13**.
+      **Acceptance:** save mid-ball, restore, and the ball number, score and
+      running mode match; play continues 60 s; `alive.sh` prints 0 after.
+      Oracle is `shot.py` before and after. **Name collision:** `save_state` in
+      `playfield.py` is the WINDOW POSITION save — grep will mislead you.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.

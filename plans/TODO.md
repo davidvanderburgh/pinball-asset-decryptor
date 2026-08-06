@@ -186,16 +186,39 @@ These have each been violated at least once and each cost a run or a window:
       never echoes its own configuration**, and `PAD_CARD` appears in zero recent
       run logs. The config gap is real and is a second thing to close, not a
       thing already done.
-      **Uncommitted** (does not build yet, no run made): provenance plumbing —
-      `kbd_src`/`scr_src`/`guest_t0_ms` in `padsw.h` + `hwshim.c` + `padsw.py`,
-      per-writer tags in swpoke/swhold/plunge/coilact/swinit/swladder,
-      `PAD_SW_SRC=a` in autoattract.sh, `=g` in longplay.sh, `=f` in
-      playfield.py, and `[sw]` now prints `+59k -66l`. **`swwidth.py` parses the
-      old format and has NOT been updated — it will break.**
-      **Resume:** update `swwidth.py`'s `[sw]` parser, add a `[watch] cfg` line
-      to watch.sh, then build and commit before writing the driver. Decide the
-      replay clock (transfers, per the star above) before `swreplay.py` exists,
-      not after.
+      **★ THE INSTRUMENT HALF IS DONE AND CONFIRMED ON A LIVE RUN**
+      (`gz_item16.log`, 3 min attract, `alive.sh` 0 after). Every `[sw]` edge now
+      carries the letter of whoever moved it:
+      • `[sw] 21191 ms +28a` — autoattract's Service Back, tagged `a`, which is
+      the exact case the keyboard/script split could NOT resolve;
+      • `[sw] 160692 ms +59r` — a direct writer under `PAD_SW_SRC=r`;
+      • `kbd_src` read `w` live — padglhost's window-open latch, distinct from a
+      key press.
+      **The clock is exact, measured on four edges: asked at guest_ms 105099 →
+      logged 105100 (1 ms), 105251 → 105251, 160692 → 160692, 160844 → 160844
+      (0 ms).** A host script can schedule against the guest's own millisecond
+      with no log to tail.
+      **RULED OUT — the "second gap" this item listed is a non-issue, and it was
+      verified rather than argued.** The window-open latch (`[cabchg] 0 ms
+      ff0f0f...`) produces NO `[sw]` line at all, because `sw_shm_edges()` primes
+      its `prev[]` before the latch lands. A replay driven from `[sw]` therefore
+      cannot re-apply it. Nothing to skip; do not build a skip for it.
+      **AND THE RUN FOUND A BUG THE OFFLINE TESTS COULD NOT.** `PAD_SW_SRC` was
+      only read inside `padsw.set_source()`, so anything importing `padsw`
+      directly — a `python3 -c`, and the replay driver that does not exist yet —
+      was tagged `?` however carefully its caller set the variable. The offline
+      test missed it because it went through `swpoke.py`, which does call
+      `set_source`. Read at import now. Both readings are in the run's log, which
+      is a usable before/after: `moved by [?r]`.
+      **Also shipped:** `[watch] cfg` lines (argv, game, minutes, and every set
+      `PAD_*` — the run above recorded `PAD_NB_SILENT=2`, which changes what the
+      run IS), and `swlayout.sh`, which proves the three hand-kept copies of the
+      switch block agree and was validated by breaking an offset on purpose in
+      both directions.
+      **Committed:** `<hash>` (provenance + clock + cfg + swlayout).
+      **Resume:** write `swreplay.py` and the comparator — but decide the CLOCK
+      first, per the star above, and that decision wants item 18's profile.
+      Everything the driver needs to READ now exists and is confirmed.
       **The want:** point the rig at a previous run's log and have it re-deliver
       that run's switch inputs at the same offsets, so getting back to a fault
       does not mean re-doing coin/start/plunge and a hundred flipper presses by
@@ -615,6 +638,16 @@ These have each been violated at least once and each cost a run or a window:
   game to settle, `swpoke.py 36 900`, and only plunge once a game is on screen.
   A `plunge.py game` that checked for a game before removing the ball would
   close this; see also item 17 on the press duration.
+
+- **`alive.sh`'s watch.sh pattern matches ANY process whose command line
+  contains it, including one that is merely WAITING for the run to end.** Seen
+  2026-08-06: a shell running `until ! pgrep -f "watch.sh 3"; do sleep 5; done`
+  made `alive.sh` print `run scripts (watch.sh) : 1` and `TOTAL STILL RUNNING :
+  1` **with an empty "what is still up" list underneath** — the count and the
+  listing disagreed, which is the one thing this script exists not to do. Same
+  self-match shape as `playaudio.sh`'s `win_kill` two bullets down. Harmless
+  here (the waiter was mine), but a script that greps for a run and a script
+  that waits for one look identical to it.
 
 - **`padrelay.py` accepts in a `while True` loop and never exits**, where the
   `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the

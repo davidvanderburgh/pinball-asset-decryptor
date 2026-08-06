@@ -81,16 +81,26 @@ def merged(m, sw):
 #: says - and a replay that re-delivers autoattract fights the next run's own.
 #: padsw.h has the alphabet and the one case it cannot resolve. `?` is what an
 #: untagged helper gets, which is visible in the log rather than silent.
-_src = ord("?")
+#:
+#: READ AT IMPORT, not only inside set_source(), and that is the fix for a real
+#: hole rather than a tidy-up. PAD_SW_SRC used to be consulted only by
+#: set_source(), so anything that imported this module and drove a switch
+#: directly - a one-off `python3 -c`, a future replay driver - was tagged `?`
+#: however carefully its caller had set the variable. Caught on a live run:
+#: `PAD_SW_SRC=r` produced `[sw] 105100 ms +59?`.
+_src = ord((os.environ.get("PAD_SW_SRC") or "?")[0]) & 0xFF
 
 
 def set_source(tag):
-    """Declare the writer. PAD_SW_SRC overrides, which is how a wrapper retags
-    a helper it shells out to: autoattract.sh exports PAD_SW_SRC=a and keeps
-    calling the ordinary swpoke.py."""
+    """Declare the writer, as a DEFAULT that PAD_SW_SRC still beats.
+
+    The environment winning is how a wrapper retags a helper it shells out to:
+    autoattract.sh exports PAD_SW_SRC=a and keeps calling the ordinary
+    swpoke.py, so the rig's own boot press is distinguishable from a flipper
+    poke without a second copy of swpoke.py existing to drift.
+    """
     global _src
-    tag = os.environ.get("PAD_SW_SRC") or tag
-    _src = ord(tag[0]) & 0xFF
+    _src = ord((os.environ.get("PAD_SW_SRC") or tag)[0]) & 0xFF
 
 
 def guest_ms(m):

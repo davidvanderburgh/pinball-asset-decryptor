@@ -414,11 +414,13 @@ static void *vid_thread(void *arg)
              * The game holds a texture of whatever size it was told when the
              * pipeline was built, and it never asks again. This channel's
              * contents, on the other hand, change whenever the channel is
-             * re-served - which happens constantly, because there are four
-             * channels and the game builds far more pipelines than that, so a
-             * new pipeline takes over the slot of any stream that is not
-             * currently playing. A stream whose clip has just ended is exactly
-             * such a victim, and its decoder may still be on screen.
+             * re-served - which happens constantly, because the game builds far
+             * more pipelines over a run than there are channels and `pipeline`
+             * is never cleared, so a new pipeline takes over the slot of any
+             * stream that is not currently playing. A stream whose clip has
+             * just ended is exactly such a victim, and its decoder may still be
+             * on screen. Raising PADVID_CHANNELS to 8 made that rarer; only
+             * this check makes it harmless.
              *
              * When that happens the old decoder keeps calling Invalidate on a
              * pointer into a ring the host is now filling with somebody else's

@@ -101,6 +101,18 @@ These have each been violated at least once and each cost a run or a window:
       scan period has NOT been measured; measuring it is step one. `win_pump()`
       drains X once per presented frame (`win_present`, `padglhost.c:1300`) and
       again when the ring goes idle, so the drain rate follows the frame rate.
+      **A SCRIPT-SIDE DATA POINT from the item 15 run 2026-08-06, offered with
+      its confound stated.** `plunge.py do_start()` presses Start for **150 ms**.
+      Two 150 ms presses produced NO visible response at all (the machine stayed
+      in attract, on FREE PLAY, with a full trough); two **900 ms** presses both
+      produced one immediately (`LOCATING PINBALLS`, then a game). **The
+      confound:** the trough state was not identical across those four presses,
+      so this is not a controlled comparison and must not be quoted as one. What
+      it does say is that the "hold it longer" effect may not be confined to the
+      X event path — and if it is not, `PAD_SW_KEYSIM` is no longer structurally
+      blind to it and this item gets much cheaper. **Test it properly first:**
+      poke switch 36 at 60/100/150/300/600/900 ms from a full trough in attract
+      and count how many start a game.
       **Instrument to build:** three timestamps per edge — the X event time
       (`ev.ul[7]`, already read as `t` at `padglhost.c:1232`), the `sw_publish`,
       and the guest's `[sw] <ms>` log line — and diff them. Two of the three are
@@ -110,82 +122,6 @@ These have each been violated at least once and each cost a run or a window:
       a held flipper key stays closed as long as it is held; a held menu/service
       key repeats. Oracle is the guest's own `[sw]` lines against the X event
       times, plus David's hands, since this fault is defined by how it feels.
-
-- [ ] **15. Every clip during gameplay plays the SAME video.** `S1 D2` ← IN PROGRESS
-      *(D3 → D2: the mechanism is cracked and the fix is written; what is left
-      is one confirming run against a countable acceptance test.)*
-      **★★ ROOT CAUSE FOUND, OFF AN EXISTING LOG, NO RUN SPENT. The game reuses
-      its pipelines and we attached the filename to the wrong one.**
-      `factory_make` in the 2026-08-06 gameplay run (`gzpad.log`) shows exactly
-      TWO complete video pipelines built in five minutes — one at line 5027
-      (ch0), one at line 6566 (ch1) — and **not one after that**. Every clip
-      change in the rest of the run was `g_object_set(filesrc, "location", ...)`
-      on a pipeline that already existed. But `pad_vid_note_location()` attached
-      the filename to `last_created`, which only moves on `gst_pipeline_new`, so
-      **from the moment the second pipeline existed every filename landed on
-      ch1's stream regardless of which element it was for.**
-      **The numbers, from `padvid.log` of that run:** ch0 was handed a new clip
-      four times, the last at **127.7 s — seven seconds before ch1 was created**
-      — and then served `2.asset/383.asset` **61 times over the next 182 s**,
-      1 distinct clip in 59 requests. ch1 meanwhile caught the strays meant for
-      ch0 (`2.asset/567.asset`, `2.asset/446.asset`, one prepare each) in
-      between its own background loop. On screen: every element playing the same
-      footage, PLAYING not frozen, because the element really is playing — the
-      last file it was ever correctly told about.
-      **This is NOT fallout from item 6's guards, and that halves item 6 too.**
-      It predates them; the guards fired twice in the whole run. It also
-      explains why only a GAME shows it — attract mostly runs one clip at a
-      time, so there is one stream and `last_created` is right by luck.
-      **Fixed (built, not yet run):** `pad_vid_note_location()` now takes the
-      object the property was set on and routes by the **filesrc identity**,
-      binding each source to its stream on first sight (when `last_created` IS
-      still right, because the game builds pipeline → elements → filename). The
-      binding is dropped with the rest of a slot's identity in
-      `pad_vid_note_pipeline`. `PAD_VID_NOSRCROUTE=1` restores the old
-      behaviour so it A/Bs on one build. New guest log line
-      `[vid] chN location -> <path>`, printed only when it CHANGES.
-      **Instrument:** `tools/spike2_emu/vidroute.py <padvid.log> [t]` counts
-      distinct clips per channel and says when each channel last CHANGED clip.
-      Validated against the labelled before-run above.
-      **Resume:** a run is up (see below) — play a game with `longplay.sh` and
-      re-run `vidroute.py`. **Acceptance: ch0's "1 distinct clip in 59
-      requests over 182 s" must become many**, and distinct scenes must draw
-      distinct footage on screen.
-      **LIVE RUN 2026-08-06: `watch.sh 20` with `LOG=/home/david/gz_item15.log`
-      was started by this pass.** It has a 20-minute backstop and stops itself.
-      Original filing below.
-      **Observed 2026-08-06, in a game, on the main display:** every video
-      element draws the same Godzilla night-city footage over and over. It is
-      PLAYING, not frozen on one frame. Screenshot: the `DEFENSE NEO BARRIER
-      ACTIVATED / SHOOT TARGETS TO DISABLE BARRIER` award, which should have its
-      own footage, running that clip underneath.
-      **Suspected fallout from item 6's guards, and there are two readings that
-      send you at different lines of the same file:** (a) the hold-last-frame
-      path in `gstvid.c` (`36d82a1`) is engaging constantly, so elements keep
-      re-serving a channel that is not theirs; (b) the SAME-SIZE takeover that
-      the request-generation check was added to catch is getting through — with
-      size mismatches now guarded, a same-size steal yields a clean wrong clip
-      instead of noise, which is exactly this symptom. **Item 6 predicted this
-      shape:** `pipeline` is never cleared, so every slot is permanently
-      "occupied" and stealing is unavoidable no matter how many channels there
-      are (4 → 8 in `c389572` would then only delay it). That makes releasing a
-      slot on pipeline teardown the standing candidate fix.
-      **UNKNOWN, and the first thing to settle because it halves the search:**
-      whether this predates the guards. Nobody has watched gameplay video
-      closely before — item 6's runs were judged on the inset and on attract.
-      **Do not assume regression.**
-      **No new instrument needed.** `PAD_VID_NOSIZEGUARD=1` A/Bs the host guard
-      on one build; the guest logs `NOT MINE ANY MORE` and the host logs
-      `WRONG-SIZE ... read from chN slotN`. A `NOT MINE` storm during gameplay
-      is reading (a); its absence points at (b). Log which asset path each
-      channel is serving — distinct paths with identical pixels separates a
-      decode fault from a routing fault.
-      **Acceptance:** in a real game, distinct scenes draw distinct footage —
-      the Neo Barrier award shows its own clip — and each active channel is
-      serving its own asset path with no `NOT MINE` storm.
-      **Related to item 6 and possibly the same root; read both.** Filed
-      separately because the acceptance conditions differ and because burying a
-      severe gameplay fault inside an item that reads as 90% done would hide it.
 
 - [ ] **16. Log replay mode: re-run a session's switch inputs from its log.**
       `S2 D4` — S2 because play works without it; what it costs is every other
@@ -369,9 +305,28 @@ These have each been violated at least once and each cost a run or a window:
       repeated wrong-size uploads to **zero**, caught by the guest guard; and an
       in-game 520x294 upload measures **TRUE WIDTH 520 (2.57 vs shuffled 35.37)**
       on `framewidth.py`, against 1360 before.
-      **Resume:** the last acceptance test is whether, with 8 channels, the
-      taunt now PLAYS — `serving 520x294` followed by frames actually consumed
-      and NO `NOT MINE`. Run `watch.sh` then `longplay.sh <log> 13 520x294`.
+      **★★ 2026-08-06: THE TAUNT FIRED AND THE INSTRUMENTED ACCEPTANCE PASSED,
+      on the item 15 run (`44f4bc0`, log `/home/david/gz_item15.log`).** The
+      Planet X Controller taunt served `4e0bf266.../scene.assets/35.asset/0`,
+      `/19` and `/14` at **520x294, 99 serves and 96 guest `streaming` lines on
+      ch3**, alongside 1360x768 on ch0 and the background on ch2 — four channels
+      live at two sizes, which is the condition this item is about. Results:
+      **zero `NOT MINE ANY MORE`, zero `** WRONG-SIZE VIDEO UPLOAD **`, zero
+      dropped frames**, the host logging `video upload 520x294 from ch3 slot2
+      (ch3 serving 520x294)` — the two sides agreeing, which is the whole
+      question — and ch3 reaching EOS after **194 and 196 frames**, i.e. whole
+      clips consumed rather than the "after 0" this item was last left on. The
+      texture's `min_filter` was 0x2601 (LINEAR), not a mipmap mode.
+      **What is NOT confirmed, and it is why the box is still open: nobody has
+      SEEN the inset.** The desktop screenshots caught other scenes; longplay's
+      96 window grabs went through `shotwin.py`, which this item already records
+      as falling back to COPY MODE, and the files were not on disk afterwards.
+      Every instrument says the pixels are now this stream's own; David's eyes
+      have not said so.
+      **Resume:** catch the inset on screen. `PAD_VID_SNAP=520x294` writes the
+      uploaded RGBA to PPM, which needs no window grab at all and is the
+      instrument that should have been used here — run `watch.sh` with it set,
+      then `longplay.sh <log> 13 520x294`, and look at the PPMs.
       **A 15-minute clean run on the 8-channel build did NOT see the taunt at
       all** (zero 520x294 clips, and the game fell back to attract partway), so
       budget more than one run for this — it fired ~223 s into one run and not
@@ -396,6 +351,14 @@ These have each been violated at least once and each cost a run or a window:
       the obvious guess and it is wrong: the background is `264.asset/0.asset`,
       1965 frames, re-serving every **65.78 s**. A frame-rate beat between the
       clip and the 60 fps present is the standing candidate.
+      **LEAD from item 15, and it is a lead not a claim: something else in that
+      run had a ~7 s period.** In the reported gameplay run ch0 was stuck
+      re-preparing `2.asset/383.asset` — **206 frames, 6.87 s** — 61 times in a
+      row, and every re-prepare kills and restarts an ffmpeg. If the stutter was
+      watched during a GAME, that is a better candidate than a frame-rate beat
+      and it is now fixed (`44f4bc0`), so **check whether item 11 still
+      reproduces before spending a pass on the beat theory.** If it was watched
+      in ATTRACT, this is irrelevant — attract never had the fault.
 
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
       does not exist yet. D3 — one run, `coilread.py` already validated, but
@@ -504,6 +467,18 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Loose ends worth a look, not yet worth a queue slot
 
+- **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
+  like the rig is broken.** `game` is coin → start → plunge, and the plunge
+  takes a ball out of the trough whether or not the Start press took. If it did
+  not take, the machine is now a ball short: the next Start gets `LOCATING
+  PINBALLS / PLEASE WAIT...`, the ball search fails and it drops back to
+  attract, forever. `longplay.sh` then plays a full block to an attract screen —
+  the exact failure its own comments warn about, from a different cause.
+  **The recipe that worked 2026-08-06:** `plunge.py reset`, wait ~8 s for the
+  game to settle, `swpoke.py 36 900`, and only plunge once a game is on screen.
+  A `plunge.py game` that checked for a game before removing the ball would
+  close this; see also item 17 on the press duration.
+
 - **`padrelay.py` accepts in a `while True` loop and never exits**, where the
   `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the
   script may now outlive a run instead of returning when the player goes away.
@@ -534,6 +509,36 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **15. Every clip during gameplay plays the SAME video.** DONE 2026-08-06,
+      `44f4bc0`. **In gameplay, ch0 went from 1 distinct clip in 59 serve
+      requests over 182 s to 16 distinct clips in 66 requests over 106 s**, and
+      four channels ran at once each serving its own asset path. Screenshots:
+      the POWERLINE DESTROYED award drawing powerline footage, a loop award
+      drawing maser footage, a Godzilla scene drawing Godzilla footage.
+      **THE GAME DOES NOT BUILD A PIPELINE PER CLIP, and that is the whole
+      bug.** `factory_make` in the reported run shows exactly TWO complete video
+      pipelines in five minutes (`gzpad.log:5027` → ch0, `:6566` → ch1) and none
+      after; every later clip change was `g_object_set(filesrc, "location", ...)`
+      on a pipeline that already existed. `pad_vid_note_location()` attached the
+      filename to `last_created`, which only moves on `gst_pipeline_new` — so
+      from the moment the second pipeline existed, **every filename landed on
+      ch1's stream whichever element it was for.** ch0 was handed a new clip four
+      times, the last at 127.7 s, **seven seconds BEFORE ch1 was created**, then
+      served `2.asset/383.asset` 61 times over the following 182 s while ch1
+      caught the strays (`567.asset`, `446.asset`, one prepare each).
+      Fix: route by the filesrc OBJECT, bound to its stream on first sight.
+      `PAD_VID_NOSRCROUTE=1` restores the old behaviour on the same build.
+      **Ruled out, and it was the queued theory: fallout from item 6's guards.**
+      Both guards fired twice in the whole reported run, far too rarely to
+      explain a continuous fault, and ch0 froze at 127.7 s before either could
+      have been involved. **It was never a regression** — attract mostly runs one
+      clip at a time, so `last_created` is right by luck there, and the fault
+      needs the two live pipelines only a game has.
+      **The lesson is about where to look first:** this was found in twenty
+      minutes from logs that had been sitting on disk since the report, without
+      spending a run. The `serving` line in `padvid.log` already named the file
+      per channel; nobody had counted them. `vidroute.py` does that now.
 
 - [x] **7. Switch input unreliable during keyboard play.** DONE 2026-08-05, `26c9ebf`.
       **A 3000 ms `swpoke` press was reaching the game as 334/465/437/420 ms —

@@ -588,6 +588,44 @@ These have each been violated at least once and each cost a run or a window:
       `shotwin.py`, but the cheap fix is forbidden and the safe one crosses the
       X/Windows boundary.
 
+- [ ] **24. Press-and-hold a switch on the virtual playfield.** `S2 D2`
+      **★ DAVID, 2026-08-06: "we need to be able to press and hold a switch on
+      the virtual playfield to keep it held down (like for shooting the scoop
+      it needs to remain in the scoop while i hold the switch)."**
+      A playfield click today is a fixed-length PULSE: `playfield.py:559` binds
+      `<Button-1>` only — there is no ButtonRelease binding anywhere — and
+      `on_click` (`playfield.py:668`) shells out `swpoke.py <id> PRESS_MS` as a
+      subprocess. A ball device like the scoop needs the switch held for as
+      long as the mouse button is down, which is a different shape: press →
+      close, release → open.
+      **The pieces already exist.** `swhold.py` is the latching writer (the
+      coin door uses it: `swhold.py 33 1`), and item 6's longplay work held the
+      scoop "like a real ball device" through exactly that path. The keyboard
+      half already behaves this way — a held key is a held switch — so this is
+      the playfield's click surface catching up to the keyboard, not new
+      machinery. Bind `<ButtonPress-1>`/`<ButtonRelease-1>`, hold via the
+      swhold path, keep the `f` provenance tag (padsw.h) either way.
+      **Two things to respect, both already written down:** switch input goes
+      through subprocesses ON PURPOSE (`playfield.py:31` — a Windows write into
+      the padsw block would race the guest; do not "optimise" the hold into a
+      direct write), and each event is a WSL interop subprocess spawn, so
+      measure the press-to-close and release-to-open latency and state it —
+      a release that lands hundreds of ms late would feel like a stuck switch.
+      **A tap must stay a tap:** a quick click should still deliver the item
+      17-guaranteed minimum closure, not a 20 ms blip (the `sw_owed[]` latch
+      covers that, but say so in the test rather than assume it).
+      **Acceptance:** hold a playfield switch — the scoop — and `swshow.py`
+      reads its `mrg` at 1 for the whole hold and 0 promptly on release
+      (state the measured latencies); a quick click still registers every
+      time; a held scoop during a game keeps the ball in the scoop the way
+      David described. His hands are the final oracle, since this is a feel
+      item.
+      — S2, armchair: play works today via keyboard and `swhold.py`, so nobody
+      loses a run, but a whole class of shots cannot be played from the
+      playfield at all, which is a capability gap rather than friction. D2,
+      armchair: one script, the fault (a pulse where a hold should be)
+      reproduces on demand every time, and only the feel half needs a run.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

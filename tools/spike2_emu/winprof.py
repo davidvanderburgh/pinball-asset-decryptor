@@ -234,6 +234,19 @@ SCALARS = [
     ("hv_logical",   r"\Hyper-V Hypervisor Logical Processor(_Total)\% Total Run Time"),
     ("hv_root",      r"\Hyper-V Hypervisor Root Virtual Processor(_Total)\% Total Run Time"),
     ("cpu_root",     r"\Processor(_Total)\% Processor Time"),
+    # DPC and interrupt time are here because they are the classic cause of a
+    # machine that FEELS slow while every throughput number says it is idle:
+    # work stolen at raised IRQL that no thread is charged for and no queue
+    # length reflects. A hypervisor with a VM doing 100k context switches a
+    # second and a GPU driver feeding a compositor is exactly the shape that
+    # generates them, and pass one did not measure either.
+    ("dpc_time",     r"\Processor(_Total)\% DPC Time"),
+    ("intr_time",    r"\Processor(_Total)\% Interrupt Time"),
+    # Actual clock against nominal. If a run pushes the package into a power or
+    # thermal limit, EVERY single-threaded thing on the desktop gets slower at
+    # once, with no queue and no starvation - which would read as "a little
+    # sluggish" and would be invisible to every counter pass one had.
+    ("cpu_perf",     r"\Processor Information(_Total)\% Processor Performance"),
     ("avail_mb",     r"\Memory\Available MBytes"),
     ("hard_faults",  r"\Memory\Pages Input/sec"),
     ("run_queue",    r"\System\Processor Queue Length"),
@@ -292,6 +305,48 @@ class WorkProbe(Probe):
             time.sleep(0.1)
 
 
+class DwmProbe(Probe):
+    """THE COMPOSITOR'S OWN CADENCE - the closest thing here to "does the
+    desktop feel smooth", and the probe pass one was missing.
+
+    `DwmFlush()` blocks until the desktop compositor's next present. Timing
+    successive returns therefore measures how regularly DWM is actually putting
+    frames on the screen, which is the thing a human perceives as smooth or
+    stuttery. It needs no window, no input injection and no GPU work of its
+    own, so it does not perturb what it measures.
+
+    Why this rather than the two probes pass one had: both of those asked "can
+    a thread get CPU", and the answer during a run was an emphatic yes -
+    processor queue length 0.00, fixed work slightly FASTER. Neither asks "does
+    a frame reach the screen on time", and a run adds an always-updating
+    1360x768 RAIL window that msrdc encodes and DWM composites. If the cost is
+    presentation rather than throughput, this is the probe that sees it and
+    those two cannot.
+
+    Reported as: the interval percentiles in ms, plus `late_pct`, the share of
+    intervals longer than 1.5x the median. On a healthy desktop every interval
+    is one refresh period and late_pct is ~0."""
+
+    def run(self):
+        try:
+            dwm = ctypes.WinDLL("dwmapi")
+        except OSError:
+            return
+        flush = dwm.DwmFlush
+        flush.restype = ctypes.c_long
+        # Prime once: the first call can return immediately.
+        flush()
+        t0 = time.perf_counter()
+        while not self.stop.is_set():
+            if flush() != 0:        # composition disabled, or it failed
+                time.sleep(0.05)
+                t0 = time.perf_counter()
+                continue
+            t1 = time.perf_counter()
+            self.samples.append((t1 - t0) * 1000.0)
+            t0 = t1
+
+
 def pct(vals, p):
     if not vals:
         return None
@@ -341,8 +396,10 @@ def _capture(secs, interval, label, outdir, quiet):
 
     jit = JitterProbe()
     wrk = WorkProbe()
+    dwm = DwmProbe()
     jit.start()
     wrk.start()
+    dwm.start()
 
     # PDH rate counters need two collects to have a delta at all, so the first
     # one is primed and thrown away.
@@ -410,7 +467,15 @@ def _capture(secs, interval, label, outdir, quiet):
 
     jit.stop.set()
     wrk.stop.set()
+    dwm.stop.set()
     q.close()
+
+    # "Late" is relative to this desktop's own refresh period, taken as the
+    # median interval, rather than to a hard-coded 60 Hz. The monitor's rate is
+    # not ours to assume and a wrong constant would manufacture a fault.
+    dwm_med = pct(dwm.samples, 50) or 0.0
+    dwm_late = (100.0 * sum(1 for v in dwm.samples if v > dwm_med * 1.5)
+                / len(dwm.samples)) if dwm.samples else None
 
     # The WSL VM's own cost, per sample, so it gets percentiles like everything
     # else rather than being derived once from two means.
@@ -448,7 +513,9 @@ def _capture(secs, interval, label, outdir, quiet):
                               for p, v in gpu_pid.items()],
                              key=lambda d: -d["mean"])[:10],
         },
-        "resp": {"jitter_ms": stats(jit.samples), "work_ms": stats(wrk.samples)},
+        "resp": {"jitter_ms": stats(jit.samples), "work_ms": stats(wrk.samples),
+                 "dwm_frame_ms": stats(dwm.samples),
+                 "dwm_late_pct": round(dwm_late, 2) if dwm_late is not None else None},
         "missing_counters": [m[0] for m in q.missing],
     }
 
@@ -468,16 +535,48 @@ def _capture(secs, interval, label, outdir, quiet):
     return summary
 
 
+# A baseline is only worth having if the machine really was quiet, and on
+# 2026-08-06 one was NOT and said nothing about it: vmmemWSL sat at 79.80% and
+# context switches at 121,604 through a capture labelled "idle", because a
+# background agent was running `find /` inside WSL. That baseline read BUSIER
+# than the emulator run it was supposed to be the control for, which would have
+# inverted every conclusion drawn from it.
+#
+# So the capture now checks itself. The thresholds are deliberately loose - this
+# is a "you are about to fool yourself" alarm, not a measurement - and it fires
+# on any capture, not just ones labelled idle, because a RUN capture polluted by
+# something else is just as wrong and much harder to spot.
+QUIET_WSL_VM_PCT = 1.0          # % of the whole machine, hv logical - hv root
+QUIET_CTX_SWITCHES = 45000      # per second, against ~20k on this machine idle
+
+
+def quiet_check(s):
+    """Returns a list of complaints, empty if the capture looks trustworthy as
+    a BASELINE. A run capture is expected to fail these, which is the point."""
+    out = []
+    v = _get(s, ["wsl_vm_cpu", "mean"])
+    if v is not None and v > QUIET_WSL_VM_PCT:
+        out.append("WSL VM was using %.2f%% of the machine (quiet is under %.1f%%)"
+                   % (v, QUIET_WSL_VM_PCT))
+    c = _get(s, ["scalars", "ctx_switches", "mean"])
+    if c is not None and c > QUIET_CTX_SWITCHES:
+        out.append("%.0f context switches/sec (quiet is under %d)"
+                   % (c, QUIET_CTX_SWITCHES))
+    return out
+
+
 def show(s):
     print()
     print("=== winprof %s === %d samples over %ds, %s, %d cores"
           % (s["label"], s["samples"], s["secs"], s.get("host", "?"), s.get("cores", 0)))
+    for c in quiet_check(s):
+        print("  ** NOT QUIET: %s" % c)
     v = s.get("wsl_vm_cpu")
     if v:
         print("  WSL VM CPU (hv logical - hv root) : mean %6.2f%%  p95 %6.2f%%  max %6.2f%%"
               % (v["mean"], v["p95"], v["max"]))
-    for k in ("hv_logical", "hv_root", "cpu_root", "avail_mb", "hard_faults",
-              "run_queue", "ctx_switches"):
+    for k in ("hv_logical", "hv_root", "cpu_root", "dpc_time", "intr_time",
+              "cpu_perf", "avail_mb", "hard_faults", "run_queue", "ctx_switches"):
         st = s["scalars"].get(k)
         if st:
             print("  %-33s : mean %8.2f  p95 %8.2f  max %8.2f"
@@ -490,11 +589,15 @@ def show(s):
         print("  GPU by engine : " + "  ".join("%s=%.1f" % (k, v)
                                                for k, v in list(s["gpu"]["by_engtype"].items())[:6]))
     print("  --- responsiveness (Windows side) ---")
-    for k, label in (("jitter_ms", "8 ms sleep overshoot"), ("work_ms", "fixed work")):
+    for k, label in (("jitter_ms", "8 ms sleep overshoot"), ("work_ms", "fixed work"),
+                     ("dwm_frame_ms", "DWM frame interval")):
         st = s["resp"].get(k)
         if st:
             print("  %-33s : p50 %7.2f  p95 %7.2f  p99 %7.2f  max %8.2f  (n=%d)"
                   % (label, st["p50"], st["p95"], st["p99"], st["max"], st["n"]))
+    if s["resp"].get("dwm_late_pct") is not None:
+        print("  %-33s : %6.2f%% of frames over 1.5x the median interval"
+              % ("DWM late frames", s["resp"]["dwm_late_pct"]))
     print("  --- top Windows processes by CPU (mean over the WHOLE window) ---")
     for p in s["procs"][:12]:
         print("  %-24s pid %-7d cpu mean %6.2f%%  max %6.2f%%  ws %8.1f MB  seen %d/%d"
@@ -516,6 +619,14 @@ def _get(s, path, default=None):
 def compare(a, b):
     print()
     print("=== winprof compare:  %s  ->  %s ===" % (a["label"], b["label"]))
+    # The BEFORE capture is the control, so if it was not quiet the whole
+    # comparison is worthless and must say so before it prints a single number.
+    bad = quiet_check(a)
+    if bad:
+        print("  ** THE BASELINE '%s' WAS NOT QUIET - this comparison is NOT "
+              "trustworthy:" % a["label"])
+        for c in bad:
+            print("  **   %s" % c)
     print("%-36s %12s %12s %12s" % ("", a["label"], b["label"], "delta"))
 
     def line(name, va, vb, fmt="%12.2f"):
@@ -525,15 +636,17 @@ def compare(a, b):
 
     line("WSL VM CPU %  (mean)", _get(a, ["wsl_vm_cpu", "mean"]), _get(b, ["wsl_vm_cpu", "mean"]))
     line("WSL VM CPU %  (p95)", _get(a, ["wsl_vm_cpu", "p95"]), _get(b, ["wsl_vm_cpu", "p95"]))
-    for k in ("hv_logical", "hv_root", "cpu_root", "avail_mb", "hard_faults",
-              "run_queue", "ctx_switches"):
+    for k in ("hv_logical", "hv_root", "cpu_root", "dpc_time", "intr_time",
+              "cpu_perf", "avail_mb", "hard_faults", "run_queue", "ctx_switches"):
         line(k + " (mean)", _get(a, ["scalars", k, "mean"]), _get(b, ["scalars", k, "mean"]))
     line("GPU % (mean)", _get(a, ["gpu", "total", "mean"]), _get(b, ["gpu", "total", "mean"]))
     line("GPU % (p95)", _get(a, ["gpu", "total", "p95"]), _get(b, ["gpu", "total", "p95"]))
     print("  --- responsiveness, which is the answer to \"does it feel slow\" ---")
-    for k, nm in (("jitter_ms", "sleep overshoot ms"), ("work_ms", "fixed work ms")):
+    for k, nm in (("jitter_ms", "sleep overshoot ms"), ("work_ms", "fixed work ms"),
+                  ("dwm_frame_ms", "DWM frame ms")):
         for p in ("p50", "p95", "p99", "max"):
             line("%s %s" % (nm, p), _get(a, ["resp", k, p]), _get(b, ["resp", k, p]))
+    line("DWM late frames %", _get(a, ["resp", "dwm_late_pct"]), _get(b, ["resp", "dwm_late_pct"]))
 
     # Named largest consumer, which the queue item asks for by name.
     pa = {p["name"]: p["cpu_mean"] for p in a["procs"]}

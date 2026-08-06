@@ -603,18 +603,59 @@ These have each been violated at least once and each cost a run or a window:
       `\Process(vmmemWSL)\% Processor Time` "reads a FLAT ZERO". It does not —
       it reads 122.57% and agrees with the hypervisor route (1.22 vs 1.12
       cores) independently. It read 0 because WSL was idle. Docstring fixed.
-      **Committed:** `9713bc8` (`winprof.py` + `rigprof.py` + this profile).
-      Captures kept in `C:\tmp\spike2_item18\`; the idle pair is a reusable
-      control that `winprof.py --compare` takes directly.
-      **Resume:** build a probe that measures UI LATENCY, not CPU availability
-      — input-to-paint or present-to-present through a real window, so the
-      msrdc → DWM path is inside the measurement — and validate it separates an
-      idle desktop from one with a run up before it judges anything. Then ask
-      whether msrdc's 0.70 cores scales with what is on screen (window size,
-      how many WSLg windows, occlusion). **NOT by moving a window from
-      Windows** — `SetWindowPos` on a RAIL window is a standing non-negotiable
-      — but by changing `PAD_GL_W`/`PAD_GL_H` between runs, or by asking David
-      to resize while a capture runs.
+      **★★ PASS TWO, 2026-08-06: THE RIG RENDERS ON THE WRONG GPU.** This
+      machine has two: an **RTX 5090 driving the 4K 120 Hz desktop**, and an
+      **integrated AMD Radeon driving no display at all**. Mesa's d3d12 picks
+      the AMD one, so `padglhost.log` has said
+      `D3D12 (AMD Radeon(TM) Graphics)` all along — every frame is rendered on
+      an iGPU that **has no VRAM and takes its bandwidth out of system memory**,
+      then has to cross adapters to be displayed. Memory-bandwidth contention is
+      invisible to every CPU counter, which is exactly the shape of this item's
+      symptom: queue length 0.00, no starvation, and a machine that still feels
+      slow. **Measured with `gpuprobe`, which renders the game's real workload
+      and `glFinish()`es before it stops the clock: 1.096 ms/frame on the AMD
+      against 0.026 ms/frame on the NVIDIA.** (Treat 43x as a ceiling, not a
+      quote: 300 frames of 4 full-screen 1080p quads in 8 ms is ~311 Gpixel/s,
+      at the edge of what a 5090 can do.)
+      **`PAD_GL_ADAPTER` added to `watch.sh`** (a substring of the adapter name
+      → `MESA_D3D12_DEFAULT_ADAPTER_NAME`). **Unset by default, so nothing has
+      changed yet** — it is a lever waiting on an A/B, not a fix. `watch.sh`'s
+      `[watch] cfg` block now logs `GALLIUM_DRIVER` and `MESA_*` beside the
+      `PAD_*` set, because a run log that does not name the adapter cannot be
+      compared against one that used the other.
+      **★ AND THE PROBE PASS ONE WAS MISSING NOW EXISTS AND IS VALIDATED BY
+      CONSTRUCTION.** `DwmFlush()` blocks until the desktop compositor's next
+      present, so timing successive returns measures how regularly frames
+      actually reach the screen — no window, no input injection, no GPU work of
+      its own. On an idle desktop it reads **p50 8.33 ms, which is exactly the
+      120 Hz this display runs at, with 0.00% late frames.** `winprof.py` also
+      gained **`% DPC Time`, `% Interrupt Time` and `% Processor Performance`**
+      (clock against nominal) — DPC/interrupt work is charged to no thread and
+      shows in no queue length, and a package hitting a power limit slows every
+      single-threaded thing at once. All three were absent from pass one.
+      **A TRAP THAT COST A BASELINE, and it is new in kind:** a capture labelled
+      `idle2` came back with vmmemWSL at **79.80%** and **121,604** context
+      switches — *busier than the emulator run it was the control for* — because
+      an audit subagent was running `find /` inside WSL. **Read-only agents are
+      not zero-load on the machine being measured.** `winprof.py` now
+      self-checks and prints `** NOT QUIET` on any capture over 1% WSL VM or
+      45k context switches, and `--compare` refuses to be trusted when the
+      BEFORE capture fails it.
+      **Committed:** `9713bc8` (pass one: `winprof.py` + `rigprof.py` + the
+      profile). Captures in `C:\tmp\spike2_item18\`; the `idle`/`attract` pair
+      is a reusable control that `winprof.py --compare` takes directly.
+      **NOTE the pass-one captures predate the DWM/DPC/frequency counters**, so
+      the A arm has to be re-measured, not reused, for those.
+      **Resume:** run the A/B, **one variable, two runs, and NOT while any
+      subagent is working** — `watch.sh` as-is (control) then
+      `PAD_GL_ADAPTER=NVIDIA` (treatment), 90 s `winprof.py` capture in attract
+      each, comparing msrdc CPU, GPU%, context switches, DPC time and DWM late
+      frames. Confirm the adapter from `padglhost.log`'s own
+      `[padglhost] D3D12 (...)` line rather than from the env. If NVIDIA wins,
+      make it the default and say what it cost. Then ask whether msrdc's 0.70
+      cores scales with what is on screen (window size, how many WSLg windows,
+      occlusion) — **NOT by moving a window from Windows**, that is a standing
+      non-negotiable, but by changing `PAD_GL_W`/`PAD_GL_H` between runs.
       **ASK DAVID FIRST:** is it the pointer/typing (input latency), windows
       repainting (compositing), or everything generally slow (throughput)? The
       third is ruled out above, so his answer picks the probe instead of pass

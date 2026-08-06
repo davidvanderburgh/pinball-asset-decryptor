@@ -60,6 +60,24 @@ export PAD_GL_W=${PAD_GL_W:-1360}
 export PAD_GL_H=${PAD_GL_H:-768}
 export GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12}   # without this Mesa picks llvmpipe
 
+# WHICH GPU, because this machine has two and Mesa picks the wrong one.
+#
+# Measured 2026-08-06 with gpuprobe, which renders the game's actual workload
+# and glFinish()es before it stops the clock:
+#     default                              D3D12 (AMD Radeon(TM) Graphics)   1.096 ms/frame
+#     MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA  D3D12 (NVIDIA GeForce RTX 5090)  0.026 ms/frame
+# The desktop is a 4K 120 Hz display on the RTX 5090; the AMD part is an
+# integrated Radeon driving no display at all. So the rig was rendering every
+# frame on the iGPU - which has no VRAM and takes its bandwidth out of SYSTEM
+# memory, i.e. out of everything else running on the machine - and the result
+# then had to cross to the NVIDIA adapter to be shown. That is item 18's
+# territory: a cost that no CPU counter can see, which is exactly the shape of
+# a machine that "feels sluggish" while every throughput number says it is idle.
+#
+# A SUBSTRING of the adapter name. Unset leaves Mesa's own choice alone, so
+# this changes nothing until it is asked for.
+[ -n "${PAD_GL_ADAPTER:-}" ] && export MESA_D3D12_DEFAULT_ADAPTER_NAME="$PAD_GL_ADAPTER"
+
 # WHICH TITLE. PAD_GAME picks it; run_game.sh has the full rule and prints what
 # it chose. Everything below that is per-title reads it from here.
 # PAD_CARD runs a title straight off its card image with no extraction; the
@@ -136,7 +154,12 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 echo "[watch] cfg argv=$*"
 echo "[watch] cfg GAME=$GAME"
 echo "[watch] cfg MINS=$MINS"
-for _v in $(set | sed -n 's/^\(PAD_[A-Z0-9_]*\)=.*/\1/p' | sort -u); do
+# GALLIUM_DRIVER and MESA_* are in here beside the PAD_* set because they
+# decide WHICH GPU renders the run, which is as much "what this run IS" as any
+# PAD_ flag - and a log that does not name the adapter cannot be replayed or
+# compared. That is item 16's lesson applied the moment a second such variable
+# appeared, rather than after it had cost a comparison.
+for _v in $(set | sed -n 's/^\(PAD_[A-Z0-9_]*\|MESA_[A-Z0-9_]*\|GALLIUM_DRIVER\)=.*/\1/p' | sort -u); do
     eval "_val=\${$_v:-}"
     [ -n "$_val" ] && echo "[watch] cfg $_v=$_val"
 done

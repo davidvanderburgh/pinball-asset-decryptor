@@ -52,11 +52,15 @@ RE_EDGE = re.compile(r'([+-])(\d+)')
 RE_PEND = re.compile(r'^\[swpend\]\s+(\d+)\s+ms\s+id=(\d+)\b.*?\blvl=(\d+)')
 RE_ASK = re.compile(r'^\[ladder\]\s+\d+/\d+\s+round=(\d+)\s+id=(\d+)\s+ask=(\d+)ms')
 
-#: A closure the game debounces can land in `lvl` a little after the release, so
-#: the window is widened rather than closed at the release edge. 250 ms is well
-#: past any debounce this machine has shown and still far short of the 1 s gap
-#: swladder.py leaves between pokes, so it cannot borrow the next poke's answer.
-TAIL_MS = 250
+#: THE WINDOW RUNS TO THE NEXT CLOSURE, not to a fixed tail, and that matters
+#: more than it looks. The answer can arrive long after the release: with the
+#: one-scan latch in, a closure is held until its node is next scanned, and
+#: those waits were measured at 150-670 ms. A flat 250 ms tail clipped them and
+#: reported the game as never having looked, which read as "the fix does not
+#: work" when what had happened is the tool stopped watching. Ending at the next
+#: press is the honest bound - it is the last moment the answer can still belong
+#: to this closure - with TAIL_MS only as the fallback for the final one.
+TAIL_MS = 1500
 
 
 def parse(path):
@@ -137,8 +141,10 @@ def main():
                     base = lvl
                 else:
                     break
-            window = [(t, lvl) for t, lvl in trace
-                      if t0 - 2 <= t <= t1 + TAIL_MS]
+            end = (ps[i + 1][0] - 2) if i + 1 < len(ps) else (t1 + TAIL_MS)
+            if end > t1 + TAIL_MS:
+                end = t1 + TAIL_MS
+            window = [(t, lvl) for t, lvl in trace if t0 - 2 <= t <= end]
             seen = any(lvl != base for _, lvl in window)
             a = ask[i] if aligned else None
             rows.append((a, t1 - t0, len(window), seen))

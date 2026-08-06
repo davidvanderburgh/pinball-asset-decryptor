@@ -67,122 +67,85 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
-      does not repeat.** `S1 D4` ← IN PROGRESS
-      **★★ MEASURED 2026-08-06, AND THE ITEM'S OWN SUSPICION IS WRONG IN
-      LOCATION THOUGH RIGHT IN EFFECT. THERE IS NO MINIMUM CLOSURE WIDTH AND NO
-      DEBOUNCE PROBLEM — THERE IS A SAMPLING RATE, AND IT IS THE GAME'S.**
+      does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
+      mechanism is cracked, the instrument is built and validated, and the fault
+      now reproduces on demand from a script — so a pass can no longer end
+      having learned nothing. What is left needs a run, not a new instrument.)*
+      **★★ MEASURED AND FIXED 2026-08-06. 35 of 72 closures reached the game
+      before; 72 of 72 after — 4/4 at every duration on both nodes, including
+      10 ms.** Long form: `spike2_pc_emulation_handoff.md`, REMAINING item 17.
+      **The item's own suspicion was right in effect and wrong in location, and
+      the location decides the fix. There is NO minimum closure width and NO
+      debounce problem — there is a SAMPLING RATE, and it is the game's.**
       `swladder.py` poked switch 34 (node 1) and 46 (node 8) at
-      10/20/30/50/80/120/200/400/900 ms, four rounds each, and `swwidth.py` read
-      the result off the game's own `entry[+24]` via `PAD_SW_PEND`. Of 72
-      closures, **every single failure had ZERO samples inside it** — the game
-      had not looked at that node — and **every closure it did look at
-      registered, down to 10 ms, off ONE scan with the switch made.**
-      The `0x11` switch scan is REQUEST-driven (`hwshim.c` node reply site): the
-      game asks per node when its own service loop gets round to it and the shim
-      only answers, so the sample rate is entirely the game's. In attract that
-      leaves long gaps: **400 ms was missed 4/4 on node 8 in the same run where
-      10 ms landed 4/4 on node 1.** That is "hold it longer and it works" —
-      holding longer only buys more chances to be looked at. A lottery with
-      better odds, not a fix.
-      **Fixed (`sw_owed[]` in `hwshim.c`): a closure is now OWED a scan.** When
-      the merged state goes 1→0 having never been placed on the wire as made,
-      the release is deferred and the next scan of that switch's OWN node
-      reports it made once. One scan is enough — that is the measurement, not an
-      assumption. `PAD_SW_MINSCANS` raises it, `PAD_SW_LATCH=0` A/Bs it on one
-      build, and `[swlatch]` says every time it saves a press.
-      **This fixes the keyboard and the scripts with one change**, because both
-      writers land in the same merge. Stated limit: a closure shorter than the
-      merge's own ~640 us poll is still invisible, since both edges land between
-      two reads of the shared block. No keystroke is that short.
-      **Instrument defect found and fixed:** the first ladder used a flat 1.0 s
-      gap and was PHASE-LOCKED to the sampler — that is how 400 ms could lose to
-      10 ms. It jitters now.
-      **NOT YET VERIFIED: the fix is built but has not been run.**
-      **Established this pass, from the code:** `win_pump()` drains X from the
-      IDLE POLL as well as per frame (`padglhost.c:2057`, 200 us for the first
-      16 empty polls then 2 ms), and the measured frame rate on the item 15 run
-      was 50-60 fps for 301 samples. So the X drain granularity is ~2-20 ms and
-      **cannot swallow a 60 ms keystroke** — the "press and release land in one
-      drain" theory this item filed as SUSPECTED is weak, though not yet dead.
-      **Established, and it matters for the "repeat" half:** the GAME already
-      auto-repeats a held cabinet switch — `padsw.h` records it measured on the
-      Main Menu, and the whole `tap_reads` region exists because of it. The X
-      peek keeps `key_down` at 1 for the whole hold, so it does NOT suppress
-      that. Whatever "does not repeat" is about, it is not the peek eating the
-      game's own repeat, and the repeat half must not be built on that guess.
-      **Instrument fixed (committed):** `PAD_SW_PEND` is documented as sampling
-      at 1 ms and was actually hanging off the SPI loop's coarse tick — 32 paced
-      iterations, ~20 ms — which cannot see a 30 ms closure at all. It is now
-      called on every transfer; it self-gates on a cached getenv before
-      `pad_ms()`, so a normal run pays a pointer compare.
-      **New:** `swladder.py` (poke ids at 10/20/30/50/80/120/200/400/900 ms,
-      round-interleaved so a drift cannot masquerade as "shorter fails") and
-      `swwidth.py` (join the shim's `[sw]` edges to the game's `[swpend] lvl=`
-      and report seen/not-seen per asked duration).
-      **Also new:** `[key]` in padglhost — the X event time for every key edge,
-      which is the third of the three timestamps this item asked for and the
-      only one that knows how long David actually held a key. The three clocks
-      are never aligned, only differenced within themselves.
-      **Resume:** run the jittered ladder again on the built fix and require
-      **100% seen at every duration**, with `[swlatch]` lines proving how many
-      closures it saved. `watch.sh` with `PAD_SW_PEND=34,46`, then
-      `swladder.py 34,46`, then
-      `swwidth.py <log> <manifest>`. `PAD_SW_LATCH=0` is the control.
+      10/20/30/50/80/120/200/400/900 ms, four rounds each, read off the game's
+      own `entry[+24]` via `PAD_SW_PEND`. **Every failure had ZERO samples
+      inside it** — the game had never looked at that node — and **every closure
+      it did look at registered, down to 10 ms, off ONE scan with the switch
+      made.** `0x11` is REQUEST-driven: the game asks per node when its service
+      loop gets round to it, so the rate is entirely the game's, and the gap
+      between two scans of one node **ran to 670 ms in attract**. Holding a key
+      longer only buys more chances to be looked at.
+      **Fixed (`sw_owed[]` in `hwshim.c`): a closure is OWED a scan.** Merged
+      state going 1→0 having never been on the wire as made defers the release
+      until the next scan of that switch's own node. One scan is enough —
+      measured, not assumed. `PAD_SW_MINSCANS` raises it, `PAD_SW_LATCH=0` A/Bs
+      it, `[swlatch]` prints the closure width and the wait each time it saves a
+      press (**42 saves in the verification run**). One change fixes the
+      keyboard and the scripts, because both writers land in the same merge.
+      **WHAT IS NOT DONE, and it is why the box is open:**
+      **(a) nobody has played it.** This is the script path; the keyboard shares
+      the merge so the same latch applies, but David's hands are the final
+      oracle and this fault is defined by how it feels. **(b) The "repeat" half
+      is untouched, and its premise is now in doubt** — see the ruled-out list.
+      **(c) The latch makes a press land LATE**, by up to the scan gap, which is
+      strictly better than losing it but is a latency the real machine does not
+      have. `nb_next_node()` already emits the whole node list per cycle, so the
+      shim is not the limit; the service loop is the game's.
+      **RULED OUT, with numbers, so nobody pays twice:**
+      • **the X drain.** `win_pump()` drains from the idle poll as well as per
+      frame (200 us for 16 empty polls then 2 ms) and the frame rate is 50-60
+      fps over 301 samples — ~2-20 ms granularity, which cannot swallow a 60 ms
+      keystroke. The SUSPECTED mechanism this item was filed with is dead.
+      • **the auto-repeat peek eating the game's repeat.** It keeps `key_down`
+      at 1 for the whole hold, and the GAME already auto-repeats a held cabinet
+      switch (`padsw.h`, measured on the Main Menu; the whole `tap_reads` region
+      exists for it). So "does not repeat" is NOT the peek, and the repeat half
+      must not be built on that guess. **Ask David which key and which screen
+      before writing any of it.**
+      • **a flat inter-poke gap.** It phase-locks the ladder to the sampler:
+      the first run had 400 ms missing 4/4 on node 8 while 10 ms landed 4/4 on
+      node 1. `swladder.py` jitters now.
+      **Two instrument faults, both of which cost a reading:** `PAD_SW_PEND`
+      claimed 1 ms sampling and was on the SPI loop's ~20 ms coarse tick (fixed,
+      now per transfer); and `swwidth.py` shipped with **the oracle inverted** —
+      these levels are ACTIVE LOW, MADE is 0 — plus a 250 ms window that closed
+      *before* the latched answer arrived, so the first read of the verification
+      run wrongly said the fix had not worked. Window now runs to the next press.
+      **New tools:** `swladder.py`, `swwidth.py`, and `[key]` in padglhost (the
+      X event time per key edge — the third of this item's three timestamps, and
+      the only one that knows how long a key was really held; the three clocks
+      are never aligned, only differenced within themselves).
+      **Committed:** `979b940` (measurement + latch + instruments).
+      **Resume:** put hands on the keyboard. Play a ball with `[key]` and `[sw]`
+      both on and diff each key edge's X-time width against the closure the
+      guest was handed; a normal keystroke must register every time. Then ask
+      David what "does not repeat" means concretely — which key, which screen —
+      because the obvious answer is ruled out above.
       — S1 because unreliable input is not a defect
       you play around, it is the thing you play WITH.
-      D4 because the "repeat" half is desk work with a known
-      answer, but confirming the timing half needs an instrument that does not
-      exist AND a human at the keyboard (item 7 established key presses cannot
-      be injected here), and "sometimes" means a pass can miss it.
       **Observed 2026-08-06:** a normal-length keystroke sometimes does not
       register; the key has to be held noticeably longer than typing. Wanted:
       immediate like typing, plus hold and repeat.
       **NOT a regression of item 7, and not a duplicate of it.** Item 7 fixed
       WHO writes the switch array (three regions, one writer each, last edge
-      wins) and its measured numbers — 3000 ms asked, 3003 ms delivered — were
-      **script** presses via `swpoke`. Its own entry says the keyboard trigger
-      could not be measured at all, and `PAD_SW_KEYSIM` calls `sw_publish()`
-      directly on a timer, so it **bypasses the X event path and cannot see this
-      fault**. This is the half item 7's instrument was structurally blind to.
-      **RULED OUT BEFORE FILING, by reading the code, so nobody spends a pass on
-      it: X auto-repeat is already handled.** `padglhost.c:1238` peeks for a
-      Release followed by a Press of the same keycode at the same timestamp and
-      swallows both, with the reasoning at `padglhost.c:559`. A held flipper does
-      not flutter.
-      **But that same peek is why "repeat" does not exist** — it swallows every
-      repeat unconditionally, which is right for a flipper and wrong for a menu
-      key. Hold and repeat are in tension under one global rule; per-binding
-      behaviour (flipper = hold, service/menu = repeat) is likely what is wanted.
-      That part is established from the code, not guessed.
-      **SUSPECTED, and marked as a guess: there is no minimum closure width.**
-      A press and a release that both land in one drain flip `key_down` true then
-      false and publish twice (`padglhost.c:1250`), and item 7's merge is
-      last-edge-wins, so the pair nets to nothing if the guest's matrix scan falls
-      outside it — which is exactly "hold it longer and it works". The guest's
-      scan period has NOT been measured; measuring it is step one. `win_pump()`
-      drains X once per presented frame (`win_present`, `padglhost.c:1300`) and
-      again when the ring goes idle, so the drain rate follows the frame rate.
-      **A SCRIPT-SIDE DATA POINT from the item 15 run 2026-08-06, offered with
-      its confound stated.** `plunge.py do_start()` presses Start for **150 ms**.
-      Two 150 ms presses produced NO visible response at all (the machine stayed
-      in attract, on FREE PLAY, with a full trough); two **900 ms** presses both
-      produced one immediately (`LOCATING PINBALLS`, then a game). **The
-      confound:** the trough state was not identical across those four presses,
-      so this is not a controlled comparison and must not be quoted as one. What
-      it does say is that the "hold it longer" effect may not be confined to the
-      X event path — and if it is not, `PAD_SW_KEYSIM` is no longer structurally
-      blind to it and this item gets much cheaper. **Test it properly first:**
-      poke switch 36 at 60/100/150/300/600/900 ms from a full trough in attract
-      and count how many start a game.
-      **Instrument to build:** three timestamps per edge — the X event time
-      (`ev.ul[7]`, already read as `t` at `padglhost.c:1232`), the `sw_publish`,
-      and the guest's `[sw] <ms>` log line — and diff them. Two of the three are
-      already there.
+      wins); this is WHEN the game looks at it.
       **Acceptance:** a tap of ordinary keystroke length registers as a switch
       close in the guest every time (state the length you tested, do not assume);
       a held flipper key stays closed as long as it is held; a held menu/service
       key repeats. Oracle is the guest's own `[sw]` lines against the X event
       times, plus David's hands, since this fault is defined by how it feels.
+      **The script half of that is now met: 10 ms, 72/72.**
 
 - [ ] **16. Log replay mode: re-run a session's switch inputs from its log.**
       `S2 D4` — S2 because play works without it; what it costs is every other

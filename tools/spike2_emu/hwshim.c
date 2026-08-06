@@ -4163,6 +4163,7 @@ static int sw_latch_budget = 400;        /* [swlatch] lines; saturates, see belo
 static unsigned char sw_owed[256];       /* a closure still waiting for a scan */
 static unsigned char sw_served[256];     /* it has been on the wire as made    */
 static unsigned long sw_made_at[256];    /* when it closed, for the log line   */
+static unsigned long sw_shut_at[256];    /* when it opened again               */
 
 static int sw_latch_on(void)
 {
@@ -4213,6 +4214,7 @@ static void sw_shm_merge(void)
                 sw_made_at[n] = pad_ms();
             } else if (!sw_served[n] && sw_latch_on()) {
                 sw_owed[n] = (unsigned char)sw_latch_scans();
+                sw_shut_at[n] = pad_ms();
             }
         }
     }
@@ -4407,11 +4409,19 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
                 if (--sw_owed[id] == 0 && sw_latch_budget > 0) {
                     char m[140];
                     sw_latch_budget--;
+                    /* TWO numbers, because the first version printed one and
+                     * mislabelled it. `closure` is how long the switch was
+                     * really made; `waited` is how long it then sat owed before
+                     * node `nid` was scanned at all - and THAT is the number
+                     * this item is about, since it is the game's sampling gap
+                     * measured directly. Printing press-to-scan as "the
+                     * closure" made a 30 ms poke look like a 593 ms one. */
                     snprintf(m, sizeof m,
-                             "[swlatch] %lu ms id=%u held for %u scan(s) of "
-                             "node %u: the closure (%lu ms) ended before the "
-                             "game looked\n", pad_ms(), id, sw_latch_scans(),
-                             nid, pad_ms() - sw_made_at[id]);
+                             "[swlatch] %lu ms id=%u node=%u closure=%lu ms "
+                             "waited=%lu ms for a scan (held %u)\n",
+                             pad_ms(), id, nid,
+                             sw_shut_at[id] - sw_made_at[id],
+                             pad_ms() - sw_shut_at[id], sw_latch_scans());
                     logmsg(m);
                 }
             } else if (held && id < 256) {

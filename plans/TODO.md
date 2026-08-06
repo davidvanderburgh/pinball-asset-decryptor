@@ -66,6 +66,46 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **20. Plunge does not take a ball out of the trough, so the game ends
+      itself.** `S1 D2` **Observed 2026-08-06:** after a plunge the trough does
+      not show one fewer ball, and a few minutes later the game ends itself
+      believing no ball is in play. David: the last trough switch should be OFF
+      and the other five ON.
+      **THIS IS A REGRESSION, not a new fault.** Item 7 (DONE 2026-08-05,
+      `26c9ebf`) records the identical symptom as fixed: *"`plunge` used to log
+      `-71` then a `+71` nobody asked for 376 ms later (ball back in the trough
+      before the shooter lane had even closed) and now runs its real 450/1200 ms
+      story."* So either it has come back or item 7 fixed a different half.
+      **FIRST STEP IS A LOOK, NOT A THEORY — the two candidates are told apart
+      by reading the trough after one plunge** (`padsw.py` merged values, or the
+      `[sw]` lines which carry a provenance letter since `145e79b`):
+      • **all six still held** → the RELEASE is being lost. Prime suspect is
+      item 17's `sw_owed[]` latch, `hwshim.c:4439`, committed TODAY as
+      `979b940`: `if (!held && id < 256 && sw_owed[id])` **defers a switch going
+      NOT-HELD**, and a ball leaving the trough is exactly that.
+      **`PAD_SW_LATCH=0` turns it off on one build** (`hwshim.c:4179`) — a
+      one-variable bisect that costs one run.
+      • **five held but the wrong one open** → `plunge.py:117` picks
+      `next(s for s in TROUGH if _held(m, s))` over
+      `TROUGH = (71, 70, 69, 68, 67, 66)  # Trough 1..6; 1 is nearest the eject`,
+      so it opens **71, the ball NEAREST the eject**. **SUSPICION, not
+      established:** on a real trough the balls roll down toward the eject, so
+      the switch that opens is the one at the FAR end (66), which is what
+      "the last trough switch" means. If so the fix is one line and the wrong
+      end has been opened since the script was written.
+      **Do not assume it is one or the other before looking** — item 7's fix and
+      item 17's latch touch the same merge, and both could be involved.
+      **Acceptance:** after `plunge.py plunge`, the guest sees exactly five
+      trough switches held and the sixth open (state which switch, do not
+      assume), and a game started with `plunge.py game` survives **5 minutes**
+      without ending itself. Oracle is the guest's own `[sw]` lines plus the
+      game staying up; `longplay.sh` is the unattended way to hold a ball.
+      — S1 because the game ending itself is not something you play around, and
+      it blocks every item that needs a game to be running: 6, 11 and 16.
+      D2 because the diagnosis is a single look at a state the fault produces
+      every time, both candidates are one-line changes, and only the "survives
+      5 minutes" half needs a real run.
+
 - [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
       does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
       mechanism is cracked, the instrument is built and validated, and the fault

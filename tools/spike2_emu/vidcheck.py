@@ -44,11 +44,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 MAGIC = 0x56444150
-VERSION = 2
-CHANNELS, SLOTS = 4, 4
+VERSION = 3
+CHANNELS, SLOTS = 8, 4
 MAX_W, MAX_H = 1920, 1088
 SLOT_BYTES = MAX_W * MAX_H * 3 // 2
-HDR = 4096
+HDR = 8192
 TOTAL = HDR + CHANNELS * SLOTS * SLOT_BYTES
 PATH_MAX = 512
 CH_FIELDS = ["req_gen", "ack_gen", "status",

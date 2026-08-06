@@ -11,6 +11,19 @@
 # memory process and Windows denies access. Kill the guest processes (this
 # script) or shut the whole VM down with `wsl --shutdown` from Windows.
 #
+# ** INSIDE WSL, and this script now enforces it. ** Run from Git Bash on
+# Windows it fails on the first pkill ("command not found") and then prints
+#   killed 0; still running: 0
+# which reads exactly like success, because the "still running" half asks
+# alive.sh, whose pgrep sees only Windows processes there. 2026-08-06 that pair
+# of confident zeros led to a second full run being started on top of a live
+# one. Same /proc test as alive.sh, same reason: refuse rather than reassure.
+if [ ! -d /proc/1 ] || ! grep -qs . /proc/1/comm 2>/dev/null; then
+    echo "killgame.sh: this is not a Linux shell - nothing here can see the rig." >&2
+    echo "  Run it inside WSL:  wsl -e bash \$0" >&2
+    exit 2
+fi
+#
 # THE COUNTING LIVES IN alive.sh, NOT HERE. This script used to keep its own
 # copy of the process list, and the two drifted: alive.sh grew the audio player
 # and this one did not, then BOTH missed the Windows-interop stubs and the card

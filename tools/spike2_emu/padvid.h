@@ -34,11 +34,27 @@
 #define PADVID_H
 
 #define PADVID_MAGIC   0x56444150u      /* 'PADV' */
-#define PADVID_VERSION 2
+/* VERSION 3: EIGHT CHANNELS, and a bigger header to hold them. Bumped rather
+ * than changed quietly because the channel count IS the layout - a padglhost
+ * and a padvidhost that disagree would read each other's rings - and both
+ * sides already refuse a version they do not know, loudly. */
+#define PADVID_VERSION 3
 
-/* Four concurrent streams. The most ever observed alive at once is two (the
- * attract crossfade); four leaves room for a game mode that layers more. */
-#define PADVID_CHANNELS   4
+/* Eight concurrent streams.
+ *
+ * FOUR WAS NOT ENOUGH, and the way it failed was invisible. The note this
+ * replaces said "the most ever observed alive at once is two (the attract
+ * crossfade); four leaves room for a game mode that layers more" - and that was
+ * an honest reading of ATTRACT, which is all anyone had watched. A real game
+ * layers more: the Planet X Controller taunt built THREE pipelines in 130 ms
+ * (measured 2026-08-06, padvid.log at 223.49 / 223.56 / 223.62), and because
+ * `pipeline` is never cleared, every slot was already spoken for and all three
+ * landed on the same channel, each stealing it from the one before.
+ *
+ * That is item 6: the taunt's own 520x294 stream lost its channel to a
+ * 1360x768 clip 0 frames in, and its decoder went on reading the ring. Eight
+ * costs 100 MB of sparse file and nothing else. */
+#define PADVID_CHANNELS   8
 
 /* 1360x768 I420 is 1566720 bytes. Four slots is 6 MB and about 130 ms of
  * buffering at 30 fps - enough to ride out a scheduling hiccup in an emulated
@@ -48,7 +64,10 @@
 #define PADVID_MAX_H      1088
 #define PADVID_SLOT_BYTES ((PADVID_MAX_W) * (PADVID_MAX_H) * 3 / 2)
 
-#define PADVID_HDR        4096
+/* Eight channels of 564 bytes plus three globals is 4524, so the old 4096 no
+ * longer fits. The static assert at the bottom of this file is what caught
+ * that, and it is why it is there. */
+#define PADVID_HDR        8192
 #define PADVID_RING_BYTES ((unsigned)PADVID_CHANNELS * PADVID_SLOTS * PADVID_SLOT_BYTES)
 #define PADVID_BYTES      (PADVID_HDR + PADVID_RING_BYTES)
 

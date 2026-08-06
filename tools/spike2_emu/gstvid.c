@@ -266,6 +266,17 @@ void pad_vid_note_pipeline(void *p)
      * stream's frames. */
     s->told_w = 0; s->told_h = 0;
     s->pos_ns = 0;
+    /* A BRAND NEW STREAM IS THE MOST RECENTLY USED, NOT THE LEAST, and getting
+     * this backwards is worse than not having LRU at all.
+     *
+     * last_use is otherwise bumped only when a frame is DELIVERED, so a stream
+     * that has just been created - or prepared and not yet played - still
+     * carries its previous life's tick, or zero. Under plain LRU that makes the
+     * newest stream the FIRST thing the next pipeline steals. The Planet X
+     * Controller taunt builds three pipelines in 130 ms, so that is not a
+     * theoretical ordering problem: it is the exact sequence that took the
+     * taunt's channel away from it 0 frames in. */
+    s->last_use = ++use_tick;
     last_created = s;
 }
 
@@ -347,6 +358,16 @@ static void *vid_thread(void *arg)
     unsigned char *ring = vring + (unsigned long)chan_of(s)
                                 * PADVID_SLOTS * PADVID_SLOT_BYTES;
     unsigned my_run = s->run_id;
+    /* The request generation this thread's clip was opened under.
+     *
+     * THE SIZE CHECK BELOW CANNOT SEE A SAME-SIZE TAKEOVER, and most of this
+     * game's clips are 1360x768, so most takeovers ARE same-size: the victim
+     * then reads the thief's frames at a geometry that happens to match, which
+     * shows the wrong CLIP rather than stripes and would never be reported as
+     * a video bug. Only this stream's own prepare() bumps req_gen for its own
+     * run, so a generation that has moved under a running thread means some
+     * other pipeline took the channel - whatever size it took it at. */
+    unsigned my_gen = vshm->ch[chan_of(s)].req_gen;
     unsigned consumed = 0;
     unsigned delay = 33333;
     if (c->fps_num && c->fps_den)
@@ -410,6 +431,14 @@ static void *vid_thread(void *arg)
              * be made to re-negotiate - it is not asking - so the choice is a
              * frozen picture or a stream of another clip's bytes rendered as
              * pink and green stripes. */
+            if (c->req_gen != my_gen) {
+                VLOG("[vid] ch%d TAKEN OVER: opened at gen %u, channel is now "
+                     "at gen %u (%ux%u). Holding the last frame after %u.\n",
+                     chan_of(s), my_gen, c->req_gen, c->width, c->height,
+                     consumed);
+                s->playing = 0;
+                return 0;
+            }
             if (s->told_w && (c->width != s->told_w || c->height != s->told_h)) {
                 VLOG("[vid] ch%d NOT MINE ANY MORE: the game holds %ux%u but "
                      "this channel now serves %ux%u. Holding the last frame "
@@ -496,6 +525,11 @@ int pad_vid_prepare(void *pipeline)
     s->w = c->width;
     s->h = c->height;
     s->ready = 1;
+    /* Same reasoning as pad_vid_note_pipeline: a stream that has just been
+     * armed with a file and a size is about to draw, so it is the last thing
+     * that should be recycled. Without this a clip is stealable for the whole
+     * window between PAUSED and PLAYING. */
+    s->last_use = ++use_tick;
     return 1;
 }
 

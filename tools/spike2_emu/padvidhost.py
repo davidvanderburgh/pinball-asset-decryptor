@@ -10,11 +10,15 @@ there is no i.MX6 here. This process decodes with ffmpeg on the WSL side and
 publishes raw I420 frames into a shared ring the guest reads. Same host/guest
 split as the GL bridge and the audio player.
 
-CHANNELS (padvid.h v2). One stream was enough until the attract playlist
-crossfaded: the game keeps TWO pipelines alive across a transition, and two
-prepares racing on one request slot is how "[vid] host did not answer" and a
+CHANNELS (padvid.h v3, EIGHT of them). One stream was enough until the attract
+playlist crossfaded: the game keeps TWO pipelines alive across a transition, and
+two prepares racing on one request slot is how "[vid] host did not answer" and a
 run full of Radium retry errors happened. Each channel is served by its own
 thread with its own ffmpeg; they share nothing but the mmap.
+
+Four channels was then enough for attract and NOT enough for a game: the Planet
+X Controller taunt builds three pipelines in 130 ms, which on four slots meant
+each one stealing the channel of the one before (item 6).
 
 WHY PYTHON AND NOT C, unlike padglhost: ffmpeg does every expensive thing. This
 process only copies finished planes into a ring, which is one memoryview slice
@@ -43,12 +47,12 @@ import threading
 import time
 
 MAGIC = 0x56444150
-VERSION = 2
-CHANNELS = 4
+VERSION = 3
+CHANNELS = 8
 SLOTS = 4
 MAX_W, MAX_H = 1920, 1088
 SLOT_BYTES = MAX_W * MAX_H * 3 // 2
-HDR = 4096
+HDR = 8192
 TOTAL = HDR + CHANNELS * SLOTS * SLOT_BYTES
 PATH_MAX = 512
 

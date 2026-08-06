@@ -1,6 +1,31 @@
 #!/bin/bash
 # alive.sh - say what of the rig is actually still running, CORRECTLY.
 #
+# ** RUN THIS INSIDE WSL. `wsl -e bash .../alive.sh`, never from Git Bash. **
+#
+# 2026-08-06, and this one cost two hours and a whole measurement run. Git Bash
+# on Windows has a `pgrep` that sees only WINDOWS processes, so every pattern
+# below matches nothing and this script prints
+#     TOTAL STILL RUNNING : 0  (clean)
+# over a rig that is entirely live. killgame.sh run the same way fails outright
+# ("pkill: command not found") - which is at least loud - but alive.sh was
+# silently, confidently wrong, and on the strength of it a SECOND full run was
+# started on top of the first: two guests, two padglhosts and two padvidhosts
+# sharing one 96 MB ring. That is the "never run two measurement runs at once"
+# rule broken by the very script that is supposed to enforce it.
+#
+# A wrong answer here is worse than no answer, because the whole rig treats
+# this script as the definition of "clean". So it refuses to answer at all
+# unless it can see /proc, which is the one thing that distinguishes a real
+# WSL shell from Git Bash pretending to be one.
+if [ ! -d /proc/1 ] || ! grep -qs . /proc/1/comm 2>/dev/null; then
+    echo "alive.sh: this is not a Linux shell - /proc is not readable." >&2
+    echo "  Run it inside WSL:  wsl -e bash \$0" >&2
+    echo "  (Git Bash's pgrep sees only Windows processes and would report" >&2
+    echo "   a confident 0 over a fully live rig. That has happened.)" >&2
+    exit 2
+fi
+#
 # THE RULE THIS SCRIPT EXISTS FOR: a process nothing counts is a process that
 # leaks. It has been broken twice by the same mechanism - the rig grew a new
 # part, nobody added it here, and this script then reported "clean" over a leak.

@@ -92,6 +92,10 @@ def _apply_mfr(tmp_path, folder):
         _kick_off_prereq_check=lambda mfr: None,
         _project_folder=lambda: folder,
         _set_loaded_project=lambda p: seen.append(p),
+        # These tests are about the TITLE; the Emulate tab's card restore
+        # rides along in the same method and has its own tests in
+        # test_emulate_tab.py.
+        _restore_emulate_card=lambda folder: None,
         window=SimpleNamespace(apply_manufacturer=lambda mfr: None),
     )
     App._apply_manufacturer(stub, SimpleNamespace(key="stern"))

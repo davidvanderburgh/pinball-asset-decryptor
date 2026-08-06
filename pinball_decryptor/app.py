@@ -377,13 +377,60 @@ class App:
         # manufacturer switch can't keep the previous game's project name.
         from .core import project_file
         folder = self._project_folder()
-        self._set_loaded_project(
-            folder if folder and project_file.has_anchor(folder) else None)
+        is_project = bool(folder) and project_file.has_anchor(folder)
+        self._set_loaded_project(folder if is_project else None)
+        # The Emulate tab's card path comes back the same way the tabs' paths
+        # do.  THIS is the line the field was missing: the quit-time save has
+        # always written it, and _apply_project_folder has always read it, but
+        # that only runs on an explicit Project -> Open — so on an ordinary
+        # startup the path sat in the anchor and was never fetched, and "Card
+        # image to run" was empty every launch.
+        self._restore_emulate_card(folder if is_project else "")
         self.window.apply_manufacturer(mfr)
         # Kick off the runtime-prereq check on a background thread.  The
         # GUI is already showing "[?] name" placeholders; results trickle
         # in via PrereqMsg.
         self._kick_off_prereq_check(mfr)
+
+    def _restore_emulate_card(self, project_folder):
+        """Put the Emulate tab's "Card image to run" back after a restart.
+
+        *project_folder* is the active project, or "" when the restored folder
+        is not one.
+
+        A PROJECT'S VALUE WINS ABSOLUTELY, INCLUDING WHEN IT IS EMPTY, and that
+        is deliberate rather than an oversight: ``_apply_project_folder`` sets
+        the field even for an empty value so the box shows THIS project's state
+        and not the last one's, and falling back to the global here would
+        quietly reintroduce exactly the leak that rule exists to prevent.  Two
+        places deciding one thing differently is the failure this tree keeps
+        paying for.
+
+        The global fallback is therefore only for having no project open at all.
+        It also covers a gap the per-project save cannot: ``_on_close``'s anchor
+        write is skipped when ``has_anchor(folder)`` is false, so a card picked
+        against a plain folder had nowhere to live before this.
+
+        Best-effort throughout — an unreadable or half-written anchor on a NAS
+        must leave the field empty, never fail the startup that asked for it."""
+        card_var = getattr(self.window, "emulate_card_var", None)
+        if card_var is None:
+            return
+        card = ""
+        if project_folder:
+            from .core import project_file
+            try:
+                card = str(project_file.load_anchor(project_folder)
+                           .get("emulate_card") or "")
+            except (OSError, ValueError):
+                card = ""
+        else:
+            card = str(self._settings.get("emulate_card") or "")
+        # Same mapped-drive treatment as every other restored path: a card
+        # saved as "W:\..." in a normal session stops resolving under an
+        # elevated relaunch, so restore its UNC equivalent instead.
+        from .core.admin import resolve_mapped_drive as _rmd
+        card_var.set(_rmd(card) if card else "")
 
     # ------------------------------------------------------------------
     # Prerequisite checking
@@ -3335,6 +3382,19 @@ class App:
         dirs = getattr(self.window, "_last_browse_dirs", None)
         if dirs:
             self._settings["browse_dirs"] = dirs
+        # The Emulate tab's card, globally — the last one used, whatever project
+        # was open.  The per-project copy in the anchor is the authority and is
+        # written by _on_close / _materialize_anchor; this is the fallback for
+        # having no project, which the anchor save cannot cover because it is
+        # skipped outright when the folder has no anchor.  Read defensively:
+        # _save_settings also runs on the way out, and a var read after the
+        # interpreter has gone raises rather than returning "".
+        card_var = getattr(self.window, "emulate_card_var", None)
+        if card_var is not None:
+            try:
+                self._settings["emulate_card"] = card_var.get().strip()
+            except tk.TclError:
+                pass
         # Remember the window size + position for next launch.  Skip odd/tiny
         # geometries (e.g. the 1x1 pre-dialog footprint) so we never persist a
         # window the user can't see.

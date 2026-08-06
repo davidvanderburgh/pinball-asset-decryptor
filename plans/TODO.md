@@ -441,35 +441,6 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
-- [ ] **14. The Emulate tab forgets the card image across a restart.** `S3 D1` —
-      S3: it costs a Browse click per launch, nothing more. D1 — no
-      run, no rig, no instrument; the acceptance test is written below.
-      Start PAD,
-      go to Emulate, and **"Card image to run" is always empty** — the path has to
-      be re-browsed every launch. Per-project memory already half-exists and the
-      gap is in the RESTORE half, not the save half: `emulate_card` is written to
-      the project anchor in `app.py:301` (quit) and `app.py:3416`
-      (`_materialize_anchor`), and read back in exactly one place,
-      `_apply_project_folder` (`app.py:3538`) — which only runs on an **explicit**
-      Project ▾ → Open. Startup goes through `_apply_manufacturer`
-      (`app.py:368`), which restores the manufacturer's paths from `settings.json`
-      and re-marks the folder as the loaded project (`app.py:380`) **without ever
-      reading the anchor**, so the card path is on disk and simply never fetched.
-      Two things to check rather than assume: that the anchor actually holds a
-      path (the quit save is skipped when `has_anchor(folder)` is false), and that
-      `_load_manufacturer_paths` is not clearing the var afterwards.
-      **Assumption, stated because David said "for this project":** per-project is
-      the rule, so switching projects must show the OTHER project's card (or
-      empty), not the last one used — `_apply_project_folder` already sets it even
-      when empty for that reason. With no project open, fall back to a global
-      last-used in `settings.json`.
-      **Acceptance:** pick a card on Emulate with a project open, quit PAD,
-      relaunch — the field shows that path with no clicks; open a second project
-      and it shows that project's own value. **There is no test coverage at all**
-      (`grep emulate_card tests/` is empty), so a regression test in
-      `tests/test_emulate_tab.py` is part of done. GUI-side change: run the `app`
-      smoke tests, not just `py_compile`.
-
 - [ ] **18. Windows feels sluggish while a run is up.** `S3 D4` — S3 because
       nobody loses a run to it and the workaround is not using the machine while
       it runs; **it becomes S2 the day it stops David leaving a long run going**,
@@ -581,6 +552,34 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **14. The Emulate tab forgets the card image across a restart.** DONE
+      2026-08-06, `2a7c8ac`. The diagnosis in the item was right: the SAVE half
+      had always worked — David's own project anchor already held
+      `godzilla_pro-1_15_0_spike2...raw` — and nothing ever read it back on an
+      ordinary launch. `_apply_project_folder` was the only reader and it runs
+      only on an explicit Project ▾ → Open; startup goes through
+      `_apply_manufacturer`, which computed the folder, asked `has_anchor`, set
+      the title and stopped. One call added there, beside the check it was
+      already making.
+      **A project's value wins ABSOLUTELY, including when it is empty**, matching
+      the rule `_apply_project_folder` already follows — falling back there would
+      leak the previous card into a project that never had one. The global
+      `emulate_card` in `settings.json` is only for having no project open, and
+      it also closes a gap the anchor could not: `_on_close`'s anchor write is
+      skipped outright when the folder is not a project, so a card picked against
+      a plain folder previously had nowhere to live at all.
+      **Verified on REAL data with a control, not just on fixtures:** the actual
+      App built against a copy of David's real `settings.json` now shows the card
+      at startup, and the same startup with the new restore neutered — which is
+      exactly what the old code did — shows `''`. Six regression tests in
+      `tests/test_emulate_tab.py` drive `_apply_manufacturer` itself rather than
+      a helper, because the bug was that nothing CALLED the restore and a helper
+      test would have passed against the broken app.
+      **One trap worth keeping:** the first version of those tests hand-rolled
+      the anchor JSON, which `project_file.load()` rejects for having no `kind` —
+      so the tests failed and blamed the app. They use the real `save()` /
+      `update_anchor()` pair now.
 
 - [x] **15. Every clip during gameplay plays the SAME video.** DONE 2026-08-06,
       `44f4bc0`. **In gameplay, ch0 went from 1 distinct clip in 59 serve

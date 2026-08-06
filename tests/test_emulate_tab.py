@@ -13,6 +13,7 @@ skip rather than fail when Tk is unusable.
 """
 
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -129,6 +130,143 @@ def test_default_rig_dir_is_the_copy_in_the_repo():
     assert rig.name == "spike2_emu" and rig.parent.name == "tools"
     assert (rig / "watch.sh").is_file()
     assert (rig / "status.sh").is_file()
+
+
+# --------------------------------------------------------------------------
+# "Card image to run" survives a restart
+#
+# The field was empty on every launch and the path had to be re-browsed.  The
+# save half was never the problem: _on_close and _materialize_anchor have
+# always written `emulate_card` into the project anchor, and
+# _apply_project_folder has always read it back — but that only runs on an
+# EXPLICIT Project -> Open.  An ordinary startup goes through
+# _apply_manufacturer, which restored the manufacturer's paths and re-marked
+# the folder as the loaded project without ever fetching the card.
+#
+# So these drive _apply_manufacturer itself rather than a helper in isolation.
+# A helper test would have passed against the broken app, because the bug was
+# that nothing called it.  Stub pattern borrowed from test_gui_batch27.
+# --------------------------------------------------------------------------
+
+def _anchor(folder, emulate_card=None):
+    """Write a project anchor into *folder* through the REAL writers — save()
+    for the anchor and update_anchor() for the card, which is the pair
+    _materialize_anchor and _on_close actually use.  Hand-rolling the JSON
+    here silently produced a file load() rejects (no "kind"), and the tests
+    then passed the failure off as the app's."""
+    from pinball_decryptor.core import project_file
+    project_file.save(
+        project_file.anchor_path(str(folder)),
+        manufacturer_key="stern",
+        paths={"extract_input": "C:/stock/game.raw",
+               "extract_output": str(folder)},
+        extract_options={},
+        app_version="test")
+    if emulate_card is not None:
+        project_file.update_anchor(str(folder), emulate_card=emulate_card)
+
+
+def _restore(folder, settings=None):
+    """Run _apply_manufacturer over *folder* and return what the card field
+    ends up showing."""
+    from pinball_decryptor.app import App
+
+    class _Var:
+        def __init__(self):
+            self.value = "SENTINEL — never set"
+
+        def set(self, v):
+            self.value = v
+
+    var = _Var()
+    stub = SimpleNamespace(
+        _load_manufacturer_paths=lambda key: None,
+        _kick_off_prereq_check=lambda mfr: None,
+        _project_folder=lambda: str(folder),
+        _set_loaded_project=lambda p: None,
+        _settings=settings if settings is not None else {},
+        window=SimpleNamespace(apply_manufacturer=lambda mfr: None,
+                               emulate_card_var=var),
+    )
+    # Bound by hand rather than stubbed out: BOTH halves have to be the real
+    # code or this stops testing the thing that was broken, which was the call
+    # site and not the restore.
+    stub._restore_emulate_card = (
+        lambda folder: App._restore_emulate_card(stub, folder))
+    App._apply_manufacturer(stub, SimpleNamespace(key="stern"))
+    return var.value
+
+
+def test_startup_restores_the_card_from_the_project(tmp_path):
+    proj = tmp_path / "godzilla"
+    proj.mkdir()
+    _anchor(proj, emulate_card="D:/cards/godzilla.raw")
+    assert _restore(proj) == "D:/cards/godzilla.raw"
+
+
+def test_a_second_project_shows_its_own_card_not_the_first(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(), b.mkdir()
+    _anchor(a, emulate_card="D:/cards/a.raw")
+    _anchor(b, emulate_card="D:/cards/b.raw")
+    assert _restore(a) == "D:/cards/a.raw"
+    assert _restore(b) == "D:/cards/b.raw"
+
+
+def test_a_project_with_no_card_shows_empty_not_the_global(tmp_path):
+    """A project's own value wins even when it is EMPTY.  Falling back here
+    would leak the previously-used card into a project that never had one,
+    which is the exact leak _apply_project_folder already guards against."""
+    proj = tmp_path / "fresh"
+    proj.mkdir()
+    _anchor(proj)
+    assert _restore(proj, {"emulate_card": "D:/cards/other.raw"}) == ""
+
+
+def test_no_project_falls_back_to_the_global_last_used(tmp_path):
+    plain = tmp_path / "just-a-folder"
+    plain.mkdir()
+    assert _restore(plain, {"emulate_card": "D:/cards/last.raw"}) \
+        == "D:/cards/last.raw"
+    assert _restore(plain, {}) == ""
+    assert _restore("", {"emulate_card": "D:/cards/last.raw"}) \
+        == "D:/cards/last.raw"
+
+
+def test_an_unreadable_anchor_leaves_the_field_empty_not_broken(tmp_path):
+    """Anchors live in the project folder, which is often a NAS.  A truncated
+    or half-written one must not take the startup down with it."""
+    proj = tmp_path / "corrupt"
+    proj.mkdir()
+    from pinball_decryptor.core import project_file
+    pathlib.Path(project_file.anchor_path(str(proj))).write_text(
+        "{not json", encoding="utf-8")
+    assert _restore(proj) == ""
+
+
+def test_the_global_is_written_on_every_settings_save(tmp_path, monkeypatch):
+    """Without this the no-project fallback above has nothing to read: the
+    anchor save in _on_close is skipped outright when the folder is not a
+    project, so a card picked against a plain folder had nowhere to live."""
+    from pinball_decryptor import app as app_mod
+    from pinball_decryptor.app import App
+    # _save_settings really writes, so point it somewhere disposable — the
+    # default is the user's live settings.json.
+    monkeypatch.setattr(app_mod, "SETTINGS_FILE",
+                        str(tmp_path / "settings.json"))
+    settings = {}
+    stub = SimpleNamespace(
+        _current_mfr=None,
+        _settings=settings,
+        root=SimpleNamespace(winfo_geometry=lambda: "1x1"),
+        window=SimpleNamespace(
+            _current_theme="dark",
+            _last_browse_dirs=None,
+            emulate_card_var=SimpleNamespace(
+                get=lambda: "  D:/cards/last.raw  ")),
+    )
+    App._save_settings(stub)
+    assert settings["emulate_card"] == "D:/cards/last.raw"
 
 
 # --------------------------------------------------------------------------

@@ -838,6 +838,55 @@ static void sw_publish(void)
     swshm->gen++;
 }
 
+/* [key] - THE FIRST OF THE THREE TIMESTAMPS AN INPUT EDGE HAS.
+ *
+ * REMAINING item 17 (a keystroke sometimes does not register) asked for three
+ * clocks per edge and two of them already existed: the guest's `[sw]` line, and
+ * the shim's own view behind it. The missing one is here - the moment X says the
+ * key moved, which is the only number that knows how long David actually held it.
+ *
+ * The three clocks CANNOT be aligned to each other and do not need to be. X time
+ * is milliseconds since the X server started, `host` is this process's monotonic
+ * clock, and the guest's `[sw]` runs on pad_ms(). Every question this item asks
+ * is a DIFFERENCE within one clock:
+ *
+ *   xt(release) - xt(press)      how long the key was really down
+ *   host(release) - host(press)  what padglhost delivered to the shared block
+ *   [sw] -id  -  [sw] +id        what the guest was handed
+ *
+ * A keystroke that is 90 ms in the first, 90 ms in the second and absent from
+ * the third is a guest-side minimum-width fault; one that is 90/8/8 is this
+ * process serialising the pair; one that is 90 ms and never reaches the second
+ * is the peek above eating it. Those are different bugs and they were previously
+ * indistinguishable.
+ *
+ * On by default, unlike most traces here: key events are rare (a busy minute of
+ * play is a few hundred lines) and this is the ONLY record that a human's hands
+ * were on the machine at all - which is also what item 16 needs to tell a
+ * keyboard edge from a scripted one. PAD_KEY_LOG=0 turns it off. */
+static void key_log(int b, int press, unsigned long xt)
+{
+    static int on = -1;
+    static double t0;
+    int j;
+    char ids[64];
+    int n = 0;
+    if (on == -1) {
+        const char *e = getenv("PAD_KEY_LOG");
+        on = !(e && *e == '0');
+        t0 = now_s();
+    }
+    if (!on) return;
+    ids[0] = 0;
+    for (j = 0; binds[b].ids[j] && n < (int)sizeof ids - 8; j++)
+        n += snprintf(ids + n, sizeof ids - n, "%s%d", j ? "," : "",
+                      binds[b].ids[j]);
+    fprintf(stderr, "[key] xt=%lu host=%.0f %-7s %-20s %s ids=%s\n",
+            xt, (now_s() - t0) * 1000.0, binds[b].key, binds[b].what,
+            binds[b].toggle ? (key_latch[b] ? "LATCH" : "unlatch")
+                            : (press ? "DOWN " : "UP   "), ids);
+}
+
 static void sw_shm_open(void)
 {
     const char *path = getenv("PAD_SW_SHM");
@@ -1246,10 +1295,11 @@ static void win_pump(void)
             b = bind_for(XLookupKeysym(&ev, 0));
             if (b < 0) break;
             if (binds[b].toggle) {
-                if (press) { key_latch[b] = !key_latch[b]; sw_publish(); }
+                if (press) { key_latch[b] = !key_latch[b]; sw_publish(); key_log(b, press, t); }
             } else if (key_down[b] != (unsigned char)press) {
                 key_down[b] = (unsigned char)press;
                 sw_publish();
+                key_log(b, press, t);
             }
             break;
         }

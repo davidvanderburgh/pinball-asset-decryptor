@@ -2193,12 +2193,22 @@ int shim_ioctl(int fd, unsigned long req, ...)
          * traces into useless ones. Scale the mask with the pacing so the
          * wall-clock cadence stays put. */
         if ((spin & (spi_pace_us() > 0 ? 0x1fu : 0xfffu)) == 0) {
-            sw_tap(); sw_changes(); sw_pend_trace();
+            sw_tap(); sw_changes();
             /* Driven from HERE as well as the node bus write path, for the same
              * reason the tap schedule is: node bus traffic dries up once the
              * game settles into a menu, and this loop never stops. */
             audio_maybe_dump();
         }
+        /* PAD_SW_PEND IS OFF THE PERIODIC TICK, on purpose and against the
+         * comment above. That tick is ~32 paced iterations, i.e. ~20 ms, and
+         * this trace's whole job is to say how WIDE a switch closure looked to
+         * the game - so sampling it at 20 ms cannot see a 30 ms press at all,
+         * which is item 17's measurement. It self-gates twice (a cached getenv
+         * that returns before pad_ms() when PAD_SW_PEND is unset, then one line
+         * per millisecond per changed id), so calling it on every transfer costs
+         * a pointer compare in a normal run and gives the 1 ms resolution the
+         * handoff has always claimed for it. */
+        sw_pend_trace();
         /* The keyboard generation is checked on EVERY call, not on the periodic
          * tick: a flipper has to answer the moment the key goes down, and the
          * rebuild itself is still gated behind the comparison. */
@@ -4113,6 +4123,66 @@ static unsigned char sw_kbd_prev[256];
 static unsigned char sw_scr_prev[256];
 static unsigned char sw_mrg[256];
 
+/* ---- THE ONE-SCAN LATCH. REMAINING item 17, and the whole of it. -----------
+ *
+ * MEASURED 2026-08-06, and it is not what the item guessed. A ladder of script
+ * pokes at 10/20/30/50/80/120/200/400/900 ms (swladder.py) was read off the
+ * game's OWN entry[+24] with PAD_SW_PEND, and every single failure had ZERO
+ * samples inside the closure - the game had not looked. Every closure it did
+ * look at registered, down to 10 ms, off ONE scan with the switch made. So:
+ *
+ *   there is NO minimum closure width and NO debounce problem. There is a
+ *   SAMPLING RATE, and it is the game's, not ours.
+ *
+ * The 0x11 switch scan is REQUEST-driven: the game asks per node when its own
+ * service loop gets round to it, and the shim only answers. In attract that can
+ * leave hundreds of milliseconds between two looks at one node - a 400 ms poke
+ * on node 8 was missed 4 times out of 4 in the same run where a 10 ms poke on
+ * node 1 landed 4 times out of 4. That is "hold the key longer and it works",
+ * exactly as reported, and holding longer only helps because it buys more
+ * chances to be looked at. It is a lottery with better odds, not a fix.
+ *
+ * So a closure is OWED a scan: when the merged state goes 1 -> 0 without ever
+ * having been placed on the wire as made, the release is deferred and the next
+ * scan of that switch's node reports it made once. One scan is enough - that is
+ * the measurement above, not an assumption - and PAD_SW_MINSCANS raises it if a
+ * title ever needs more.
+ *
+ * THIS IS NOT THE SAME AS `tap_reads`, and both are worth having. A tap is a
+ * request for a press of a stated length, counted in SPI transfers, aimed at
+ * the cabinet's menu auto-repeat. This is automatic, applies to every writer
+ * including the keyboard, and is counted in scans OF THE SWITCH'S OWN NODE,
+ * which is the only clock that decides whether the game sees anything.
+ *
+ * THE LIMIT, stated because it is the next thing that will be blamed: a closure
+ * shorter than the merge's own poll (~640 us, the paced SPI loop) is invisible
+ * here too, because both edges land between two reads of the shared block and
+ * the merge never moves. No human keystroke is that short; a script could be.
+ * PAD_SW_LATCH=0 turns the whole thing off for an A/B on one build. */
+static int sw_latch_budget = 400;        /* [swlatch] lines; saturates, see below */
+static unsigned char sw_owed[256];       /* a closure still waiting for a scan */
+static unsigned char sw_served[256];     /* it has been on the wire as made    */
+static unsigned long sw_made_at[256];    /* when it closed, for the log line   */
+
+static int sw_latch_on(void)
+{
+    static int on = -1;
+    if (on == -1) { char *q = getenv("PAD_SW_LATCH"); on = !(q && *q == '0'); }
+    return on;
+}
+
+static unsigned sw_latch_scans(void)
+{
+    static unsigned n = (unsigned)-1;
+    if (n == (unsigned)-1) {
+        char *p = getenv("PAD_SW_MINSCANS");
+        unsigned v = 0;
+        while (p && *p >= '0' && *p <= '9') v = v * 10 + (unsigned)(*p++ - '0');
+        n = v ? v : 1;
+    }
+    return n;
+}
+
 static void sw_shm_merge(void)
 {
     static unsigned seen_k = (unsigned)-1, seen_s = (unsigned)-1;
@@ -4131,7 +4201,20 @@ static void sw_shm_merge(void)
         else if (s != sw_scr_prev[n]) want = s;
         sw_kbd_prev[n] = k;
         sw_scr_prev[n] = s;
-        if (want != sw_mrg[n]) { sw_mrg[n] = want; moved = 1; }
+        if (want != sw_mrg[n]) {
+            sw_mrg[n] = want;
+            moved = 1;
+            /* The latch bookkeeping lives HERE because this is the only place
+             * the merged answer moves, and the merged answer is what the game
+             * is handed. Doing it at either input would count a keyboard
+             * rebuild that re-asserted a byte as an edge. */
+            if (want) {
+                sw_served[n] = 0;
+                sw_made_at[n] = pad_ms();
+            } else if (!sw_served[n] && sw_latch_on()) {
+                sw_owed[n] = (unsigned char)sw_latch_scans();
+            }
+        }
     }
     if (!moved) return;
     for (n = 0; n < 256; n++) sw_shm->mrg[n] = sw_mrg[n];
@@ -4309,9 +4392,35 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
         int level;
         if (node != nid || bit >= 64) continue;
         level = sw_inactive_level(cfg);
-        if ((id < sizeof sw_active && sw_active[id]) || sw_shm_held(id) ||
-            (int)id == pad_tap_id || sw_rest_pending(id))
-            level = !level;
+        {
+            int held = (id < sizeof sw_active && sw_active[id]) ||
+                       sw_shm_held(id) || (int)id == pad_tap_id ||
+                       sw_rest_pending(id);
+            /* sw_shm_held() ran the merge, so sw_owed[] is current by the time
+             * it is read - order matters and this is why the call is not
+             * short-circuited away. An OWED closure is one whose release was
+             * deferred because the game had not looked yet; report it made for
+             * this scan and count the scan down. See the long comment on
+             * sw_owed[] - this is item 17's whole fix. */
+            if (!held && id < 256 && sw_owed[id]) {
+                held = 1;
+                if (--sw_owed[id] == 0 && sw_latch_budget > 0) {
+                    char m[140];
+                    sw_latch_budget--;
+                    snprintf(m, sizeof m,
+                             "[swlatch] %lu ms id=%u held for %u scan(s) of "
+                             "node %u: the closure (%lu ms) ended before the "
+                             "game looked\n", pad_ms(), id, sw_latch_scans(),
+                             nid, pad_ms() - sw_made_at[id]);
+                    logmsg(m);
+                }
+            } else if (held && id < 256) {
+                /* On the wire as made, so nothing is owed for this closure. */
+                sw_served[id] = 1;
+                sw_owed[id] = 0;
+            }
+            if (held) level = !level;
+        }
 
         /* ---- THE SELF-CORRECTING RESYNC IS GONE, AND MUST NOT COME BACK ---
          *

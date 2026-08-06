@@ -500,14 +500,42 @@ These have each been violated at least once and each cost a run or a window:
       **A LIVE RUN may be up when this is read: run 4** (watch.sh 20 min,
       census armed, NO longplay — the window is David's to play; started
       ~15:25 2026-08-06). Its padvid.log is the first with the census lines.
-      **Resume:** harvest run 4's census — `first frame consumed N ms after
-      serve start` prices the fragment-cut cold starts, `guest consume
-      STALLED N ms` catches mid-clip delivery stalls — and set them against
-      what David saw while playing. If the census cannot explain the
-      video-only hitching/tearing, build the ring-stamp tear detector
-      (per-slot frame number written host-side, verified by padglhost at
-      upload, mismatches logged) — it spans the GL bridge, so it is a
-      build.sh + buildgl.sh change between runs.
+      **★ THE CADENCE FIX LANDED AND DAVID CONFIRMED IT LIVE** ("the
+      stuttering on this city loop is gone"), `a6d9ce1`: vid_thread now
+      schedules frame N at t_epoch + N*period instead of sleeping a period
+      after each frame's work, so pacing error cannot accumulate. The census
+      agreed: ZERO mid-clip stalls the whole run. **Instrument lessons paid
+      for in the same commit:** a 30-on-30 screen capture is phase-ambiguous
+      and freezedetect on near-static content measures its own threshold
+      (300 "freezes" before AND 306 after the fix — both garbage); a
+      change-detection histogram read 25% of a PRISTINE extract as stalls.
+      Change detection is the wrong class for this footage; David's pure
+      extracts (`OneDrive\Desktop\gz\video`, 659 named clips) enable
+      ground-truth frame MATCHING instead — `framematch.py` in the session
+      scratchpad, designed, unvalidated.
+      **★ THEN THE BALL-2 REGRESSION, David live: "now the stutter is back...
+      on ball 2 this stutter is very obvious" — WHILE EVERY DELIVERY COUNTER
+      READ CLEAN** (padglhost flat 60, zero stalls, healthy serves). The log
+      names the suspect: MY OWN widened rewind absorb swallowed a seek at
+      **delivered=1780** — at a ball change the game deliberately seeks its
+      still-playing backgrounds to 0, a mid-play seek can never be an EOS
+      loop (EOS stands the stream down first), and refusing it plays the
+      picture mid-clip against a game timeline that thinks it restarted.
+      **Fix built, UNCOMMITTED, needs run 6: the discriminator is SEEK RATE,
+      not delivered-count** — absorb only a seek within 3 frame periods
+      (100 ms) of the previous seek on that stream, so the FIRST seek of any
+      burst re-arms: a restart is honoured, a storm pays one re-arm instead
+      of 93. Three predicates tried, each killed by measurement:
+      `delivered<=1` too narrow (storm survived), `playing+same-path` too
+      wide (ball-2 restarts refused), burst-only is the third.
+      **Transition cold starts remain, census-priced:** 35-40 ms (ch0),
+      64-71 ms (the 65 s background, also at every loop wrap ~1/min).
+      Fix candidates unbuilt: host pre-arm at location-set (+30-70 ms of
+      budget available), loop-flash suppression.
+      **Resume:** rebuild with the burst discriminator, run, and have David
+      play through a BALL CHANGE — ball 2's first minute is the acceptance
+      test his eyes defined. Then the transition cold starts; then the
+      ring-stamp tear detector if tearing persists.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

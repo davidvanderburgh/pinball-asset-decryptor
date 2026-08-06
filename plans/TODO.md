@@ -554,7 +554,7 @@ These have each been violated at least once and each cost a run or a window:
 ## Done
 
 - [x] **14. The Emulate tab forgets the card image across a restart.** DONE
-      2026-08-06, `2a7c8ac`. The diagnosis in the item was right: the SAVE half
+      2026-08-06, `eb1deec`. The diagnosis in the item was right: the SAVE half
       had always worked — David's own project anchor already held
       `godzilla_pro-1_15_0_spike2...raw` — and nothing ever read it back on an
       ordinary launch. `_apply_project_folder` was the only reader and it runs

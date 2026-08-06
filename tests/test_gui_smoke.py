@@ -4154,21 +4154,71 @@ def test_video_poster_keeps_looking_when_the_frame_is_black(app):
     pytest.importorskip("PIL")
     pane = _poster_pane(app)
     asked = []
-    pane._render_poster = lambda pos, fallbacks=None: asked.append(pos)
+    pane._render_poster = (lambda pos, fallbacks=None, sampling=False:
+                           asked.append((pos, sampling)))
 
-    # Black frame + somewhere else to look -> try the next spot, silently.
-    pane._show_poster(_png((0, 0, 0)), pane._render_id, (2.5, 7.5))
-    assert asked == [2.5]
+    # Black frame + somewhere else to look -> try the next spot, silently,
+    # still flagged as part of the hunt for a representative frame.
+    pane._show_poster(_png((0, 0, 0)), pane._render_id, (2.5, 7.5),
+                      sampling=True)
+    assert asked == [(2.5, True)]
     assert pane.canvas.find_withtag("note") == ()
 
     # Black everywhere we looked -> a note, not an empty pane.
-    pane._show_poster(_png((0, 0, 0)), pane._render_id, ())
-    assert pane.canvas.find_withtag("note")
+    pane._show_poster(_png((0, 0, 0)), pane._render_id, (), sampling=True)
+    notes = pane.canvas.find_withtag("note")
+    assert notes
+    assert "Every frame sampled is black" in \
+        pane.canvas.itemcget(notes[0], "text")
 
     # A frame with picture in it just draws, no note.
     pane._show_poster(_png((10, 90, 200)), pane._render_id, (2.5,))
     assert pane.canvas.find_withtag("frame")
     assert pane.canvas.find_withtag("note") == ()
+
+
+def test_video_poster_black_scrub_speaks_only_for_that_frame(app):
+    """A scrub asks for ONE frame at a position the user chose.  Landing on a
+    fade-in must not accuse the whole clip of being black: a tester got that
+    verdict on a replacement that had just played fine (batch 29)."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    pane._show_poster(_png((0, 0, 0)), pane._render_id)   # no fallbacks, scrub
+    notes = pane.canvas.find_withtag("note")
+    assert notes
+    text = pane.canvas.itemcget(notes[0], "text")
+    assert "This frame is black" in text
+    assert "Every frame" not in text
+
+
+def test_video_pane_rewind_reposters_a_representative_frame(app):
+    """Stopping (■) and playing a clip to the end both rewind to 0:00, and
+    frame 0 is black on any clip that fades in — which replaced the picture
+    with the all-black note the moment a tester's clip finished playing.  Both
+    paths re-run the same sampling load() does."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    asked = []
+    pane._render_poster = (
+        lambda pos, fallbacks=None, sampling=False:
+        asked.append((pos, tuple(fallbacks or ()), sampling)))
+
+    pane.pos = 6.0
+    pane.stop_to_start()
+    assert pane.pos == 0.0                      # playhead still rewinds
+    pos, fallbacks, sampling = asked[-1]
+    assert pos == pytest.approx(5.0)            # mid-clip, not 0.0
+    assert fallbacks and sampling               # ...more spots to try
+
+    # The end-of-playback path lands in the same place.
+    asked.clear()
+    pane.playing = True
+    pane.dur = 10.0
+    pane.pos = 10.5                             # clock ran past the end
+    pane._tick()
+    assert not pane.playing
+    assert pane.pos == 0.0
+    assert asked[-1][0] == pytest.approx(5.0)
 
 
 def test_video_poster_explains_a_frame_it_cannot_show(app):

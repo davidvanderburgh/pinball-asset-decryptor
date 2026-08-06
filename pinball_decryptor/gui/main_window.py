@@ -661,16 +661,7 @@ class _VideoPreviewPane:
         self.dur = dur or 0.0
         self.pos = 0.0
         self._compute_disp_size(info)
-        # Poster a representative frame, not the frame at 0.0 -- many clips
-        # open on a black leader frame, which looked like a broken/empty
-        # preview.  Grab mid-clip when the duration is known, else a small
-        # offset in, and keep looking if that frame is black too.  The
-        # playhead stays at 0.0; this only changes the still.
-        if self.dur > 0.2:
-            spots = [self.dur * f for f in self.POSTER_FRACTIONS]
-        else:
-            spots = [0.5]
-        self._render_poster(spots[0], fallbacks=spots[1:])
+        self._render_representative_poster()
         self._update_time()
         if autoplay:
             self.start_playback(0.0)
@@ -724,12 +715,28 @@ class _VideoPreviewPane:
         self._disp_w = dw - (dw % 2)
         self._disp_h = dh - (dh % 2)
 
-    def _render_poster(self, pos, fallbacks=None):
+    def _render_representative_poster(self):
+        """Poster a representative frame, not the frame at 0.0 -- many clips
+        open on a black leader frame or a fade-in, which looked like a
+        broken/empty preview.  Grab mid-clip when the duration is known, else
+        a small offset in, and keep looking if that frame is black too.  The
+        playhead is left where the caller put it; this only changes the
+        still."""
+        if self.dur > 0.2:
+            spots = [self.dur * f for f in self.POSTER_FRACTIONS]
+        else:
+            spots = [0.5]
+        self._render_poster(spots[0], fallbacks=spots[1:], sampling=True)
+
+    def _render_poster(self, pos, fallbacks=None, sampling=False):
         """Decode a single frame at *pos* on a worker thread, then show it.
         Stale renders (clip/seek changed) are dropped via a counter.
 
         *fallbacks* are further positions to try if the frame at *pos* comes
-        back solid black (see :data:`POSTER_FRACTIONS`)."""
+        back solid black (see :data:`POSTER_FRACTIONS`).  *sampling* marks
+        this render as part of that hunt for a representative frame, so only
+        the hunt can conclude the whole clip is black — a one-off render (a
+        scrub) that lands on a black frame speaks for that frame alone."""
         canvas = self.canvas
         path = self.path
         self._render_id += 1
@@ -756,11 +763,11 @@ class _VideoPreviewPane:
             if self._render_id != rid:
                 return
             self._win._tk_root().after(0, self._show_poster, png, rid,
-                                       fallbacks)
+                                       fallbacks, sampling)
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def _show_poster(self, png, rid, fallbacks=None):
+    def _show_poster(self, png, rid, fallbacks=None, sampling=False):
         if self._render_id != rid:
             return
         canvas = self.canvas
@@ -782,14 +789,24 @@ class _VideoPreviewPane:
             # than leaving a bare black rectangle.
             if img.getbbox() is None:
                 if fallbacks:
-                    self._render_poster(fallbacks[0], fallbacks[1:])
+                    self._render_poster(fallbacks[0], fallbacks[1:],
+                                        sampling=True)
                     return
                 canvas.delete("all")
                 self._frame_img = None
-                self._draw_canvas_note(
-                    "Every frame sampled is black — this clip may be an "
-                    "overlay that only shows over the scene behind it. "
-                    "Press ▶ to play it through.")
+                if sampling:
+                    self._draw_canvas_note(
+                        "Every frame sampled is black — this clip may be an "
+                        "overlay that only shows over the scene behind it. "
+                        "Press ▶ to play it through.")
+                else:
+                    # One frame, asked for by position (a scrub).  Saying
+                    # "every frame" here read as a verdict on the whole clip,
+                    # and a tester whose replacement plays perfectly well got
+                    # it just for landing on the fade at 0:00.
+                    self._draw_canvas_note(
+                        "This frame is black. Drag the bar or press ▶ to see "
+                        "the rest of the clip.")
                 self._draw_playhead()
                 return
             canvas.delete("all")
@@ -870,7 +887,11 @@ class _VideoPreviewPane:
         self.pos = 0.0
         self._draw_playhead()
         if self.path:
-            self._render_poster(0.0)
+            # Back to the still the pane opened with, NOT the frame at 0.0:
+            # rewinding a clip that fades in from black used to swap the
+            # picture for the "every frame sampled is black" note (a tester,
+            # whose replacement had played fine seconds earlier).
+            self._render_representative_poster()
 
     def _set_play_btn(self, playing):
         self._win._draw_audio_icon(self.play_canvas,
@@ -1017,7 +1038,7 @@ class _VideoPreviewPane:
             self.pos = 0.0  # so ▶ replays from the start
             self._draw_playhead()
             if self.path:
-                self._render_poster(0.0)
+                self._render_representative_poster()  # same as ■; see above
             return
 
         self._draw_playhead()

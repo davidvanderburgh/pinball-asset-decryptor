@@ -424,9 +424,29 @@ These have each been violated at least once and each cost a run or a window:
       with **`caller=state` vs `caller=rewind`**, which is the one fact the host
       cannot see and the fact that decides the fix. Both stayed silent through
       attract (the negative control).
-      **NOT CONFIRMED, and it is why the box is open: no fix has been built for
-      the rewind path, and nobody has judged the PICTURE on a fixed build.** The
-      storms are gameplay-only; attract produced 6 serves and no storm.
+      **★ DAVID, 2026-08-06, watching live: "the video stuttering [is] most
+      right before the next video comes in. like the last 500ms - 1 second of a
+      video stutters before the next one loads in." THE LOG AGREES AND NAMES
+      THE MECHANISM — marked CANDIDATE until a fixed build is watched:** at a
+      transition the game re-arms the OUTGOING pipeline (`caller=state`
+      prepare, same file) before setting the new location, and prepare()
+      always restarts ffmpeg from frame 0 because the host cannot seek — so
+      the outgoing clip visibly JUMPS BACK to its own start and replays while
+      the UI thread eats blocking prepares. His crash log, 110.0 s: ch0 was
+      283 frames into `2.asset/290.asset`, got re-armed and re-served the
+      SAME file from 0, and the real next clip only arrived at 111.3 s —
+      1.3 s of churn, matching the reported 0.5-1 s. This also re-frames the
+      original "~7 s" attract stutter: the attract clip is 8.00 s, one
+      transition per 8 s, and the stutter IS the transition.
+      **Fix shape: extend the rewind absorb to the STATE path** — a same-file
+      re-arm on a stream still mid-play resumes instead of restarting, which
+      is what real PAUSED semantics do. Oracle: mid-play same-file re-serves
+      in padvid.log drop to zero at transitions, plus David's eyes.
+      **NOT CONFIRMED, and it is why the box is open: the state-path half is
+      unbuilt, and nobody has judged the PICTURE on a fixed build.** The
+      rewind-path absorb is built and its second confirming run is LIVE as
+      this is written. The gameplay storms are rewind-path; attract's
+      transition churn is state-path; the two halves are now distinct.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

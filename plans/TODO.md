@@ -738,10 +738,23 @@ These have each been violated at least once and each cost a run or a window:
       renders on LUID `0x00000000_0x00012481`, the RTX 5090, the same adapter
       dwm composites on; the emulator's own LUIDs (`…1384E`, `…13883`) appear
       only during a run. No per-app GPU preference overrides are set.
-      **THE LEVER, one line, untested:** create `C:\Users\david\.wslconfig` with
-      `[wsl2]` + `processors=6` (or 4) so the VM cannot occupy every physical
-      core. **It needs `wsl --shutdown` to take effect, which kills any running
-      rig — never mid-run.**
+      **★★★ THE LEVER WORKED. `C:\Users\david\.wslconfig` created 2026-08-06
+      with `[wsl2] processors=6, memory=30GB`; `wsl -e nproc` went 16 → 6.**
+      With a run up and the agent deliberately idle, **David: "now it seems much
+      better. there is no latency in the typing here anymore. seems solved from
+      that perspective."**
+      **AND IT COST THE EMULATOR NOTHING MEASURABLE: 60.0 / 59.9 / 59.8 fps**
+      from `padglhost` at 6 vCPUs, against the 60 fps swap cap it has always
+      held. `memory=30GB` is pinned at the value WSL was already defaulting to,
+      so the file changes one thing, not two. **Revert = delete the file +
+      `wsl --shutdown`** (which kills a running rig; check `alive.sh` first).
+      **THE CONFOUND IS NOT YET FULLY CONTROLLED, and this is the honest part:
+      TWO things changed for that verdict — the vCPU cap AND the agent going
+      quiet.** The reverse arm (agent working hard, run up, David typing) is the
+      free control and is what decides attribution. **Also note that verdict was
+      given in ATTRACT, not in a game** — `longplay` started before the guest
+      existed, said "the guest is not running - nothing to play" and exited — so
+      the reported condition ("mostly during a game") has NOT been retested yet.
       **A CONFOUND THAT MUST BE CONTROLLED, because it is nearly perfectly
       correlated:** the Claude app is also rendering this session's tool output,
       and "the emulator is running" has so far always coincided with "the agent

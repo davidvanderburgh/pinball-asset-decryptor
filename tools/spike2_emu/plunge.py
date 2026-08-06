@@ -14,7 +14,9 @@ plunge tells:
   start   pulse the Start button (36). The game then fires the trough eject
           itself, so run `plunge` a moment later to give it the ball. On its
           own this does NOT start a game unless there are credits.
-  plunge  the three steps above, on the lowest-numbered trough ball still held.
+  plunge  the three steps above. The switch it OPENS is the one at the FAR end
+          of the trough, not the eject end - see do_plunge() for why, and for
+          what opening the wrong end did to the game.
   reset   put six balls back in the trough and shut the coin door - the
           machine-at-rest set, same as swinit.py.
 
@@ -114,7 +116,29 @@ def do_start(m):
 
 def do_plunge(m):
     padsw.take(m, TROUGH + (SHOOTER,))
-    ball = next((s for s in TROUGH if _held(m, s)), None)
+    # THE BALL THAT LEAVES IS AT THE EJECT END; THE SWITCH THAT OPENS IS AT THE
+    # FAR END. Those are different switches, and this script had it backwards
+    # from the day it was written - it opened TROUGH 1, the ball nearest the
+    # eject, which is the one place a hole cannot appear.
+    #
+    # A trough is a ramp. The eject kicks out the ball sitting on Trough 1, and
+    # the five behind it ROLL DOWN one position - so afterwards Trough 1..5 are
+    # still made and Trough 6, the far end, is the one that opens. Every ball
+    # taken out opens the next switch back up the ramp, and a returning ball
+    # fills the same end first, which is why `reversed` is right for both.
+    #
+    # Established 2026-08-06 from the game's OWN device table rather than from
+    # a guess about the mechanism (games/godzilla_pro/switch_xy.txt): TROUGH 1
+    # (71) sits at x=254 beside TROUGH JAM (72) at x=254, and a jam switch is by
+    # definition at the eject; TROUGH 6 (66) is at x=210, the far end. David
+    # reported the wanted state independently and in the same terms - "the last
+    # trough switch should be OFF and the other five ON".
+    #
+    # WHAT THE OLD ORDER DID TO THE GAME, which is item 20: it presented a hole
+    # at the eject with a ball still behind it. The game has nothing to eject,
+    # so a plunge never really took a ball out of play, and a few minutes later
+    # it ended the game believing no ball was in play.
+    ball = next((s for s in reversed(TROUGH) if _held(m, s)), None)
     if ball is None:
         print("no ball in the trough - run `plunge.py reset` first")
         return 1

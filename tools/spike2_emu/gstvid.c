@@ -102,6 +102,14 @@ static void vid_map(void)
 
 struct stream {
     void *pipeline;             /* identity; 0 = free slot                   */
+    void *filesrc;              /* the object the game sets "location" on.
+                                 *
+                                 * ITEM 15 IS THIS FIELD. The game does NOT
+                                 * build a pipeline per clip - it builds TWO
+                                 * for the whole run and changes the FILENAME
+                                 * on them, so "the pipeline created last" is
+                                 * not the pipeline being re-pointed. See
+                                 * pad_vid_note_location() for the numbers. */
     void *fakesink;             /* the object that got signal-handoffs       */
     void *sinkpad;              /* its real "sink" pad - the handoff callback
                                  * is handed this, and a consumer that asks
@@ -202,10 +210,84 @@ static void str_copy(char *d, const char *s, int n)
     d[i] = 0;
 }
 
-void pad_vid_note_location(const char *loc)
+/* PAD_VID_NOSRCROUTE=1 goes back to attaching the filename to whatever pipeline
+ * was created last, which is what shipped before 2026-08-06. It exists so the
+ * change below can be A/B'd on ONE build in ONE run - this rig has been fooled
+ * by comparing two runs before. */
+static int src_route(void)
 {
-    if (!last_created) return;
-    str_copy(last_created->location, loc, sizeof last_created->location);
+    static int on = -1;
+    if (on == -1) {
+        const char *e = getenv("PAD_VID_NOSRCROUTE");
+        on = (e && *e && *e != '0') ? 0 : 1;
+    }
+    return on;
+}
+
+/* WHICH STREAM DOES THIS FILENAME BELONG TO?
+ *
+ * ★ ITEM 15, AND IT WAS MEASURED OFF AN EXISTING LOG, NOT GUESSED. In the
+ * gameplay run of 2026-08-06 the game created exactly TWO video pipelines in
+ * five minutes - one complete factory_make set at gzpad.log:5027 (ch0) and one
+ * at :6566 (ch1), and NOT ONE after that. Every clip change in the rest of the
+ * run was g_object_set(filesrc, "location", ...) on a pipeline that already
+ * existed. The game reuses its pipelines; it does not rebuild them.
+ *
+ * That is fatal to `last_created`, which only moves on gst_pipeline_new. From
+ * the moment the second pipeline was built, EVERY filename the game set landed
+ * on the second stream, whichever element it was actually meant for. padvid.log
+ * says it in one line: ch0 was handed a new clip four times, the last at
+ * 127.7 s - 7 SECONDS BEFORE ch1 WAS CREATED - and then served
+ * 2.asset/383.asset SIXTY-ONE TIMES over the following 182 seconds, while ch1
+ * caught the strays meant for ch0 (2.asset/567.asset and 2.asset/446.asset,
+ * one prepare each, in between its own background loop).
+ *
+ * On screen that is item 15 exactly: every video element in the game drawing
+ * the same footage, PLAYING rather than frozen, because the element really is
+ * playing - it is playing the last file it was ever correctly told about.
+ *
+ * It also explains why attract mode always looked fine and only a GAME showed
+ * it: attract mostly runs one clip at a time, so there is only one stream and
+ * `last_created` is right by luck. The bug needs two live pipelines, which is
+ * what a game has.
+ *
+ * So route by the SOURCE OBJECT the property was set on. The binding is made
+ * the first time we see a source, when `last_created` IS still the right
+ * answer (the game builds pipeline, then elements, then sets the filename),
+ * and after that the object's identity carries it - no ordering assumption
+ * survives past construction. */
+void pad_vid_note_location(void *src, const char *loc)
+{
+    struct stream *s = 0;
+    int i;
+    if (src && src_route()) {
+        for (i = 0; i < PADVID_CHANNELS; i++)
+            if (streams[i].filesrc == src) { s = &streams[i]; break; }
+        if (!s && last_created) {
+            /* First sighting of this source. Bind it to the stream under
+             * construction, and take it off any other stream first: a freed
+             * element can come back at the same heap address, and two streams
+             * claiming one source would put us back where we started. */
+            for (i = 0; i < PADVID_CHANNELS; i++)
+                if (streams[i].filesrc == src) streams[i].filesrc = 0;
+            s = last_created;
+            s->filesrc = src;
+            VLOG("[vid] ch%d owns source %p\n", chan_of(s), src);
+        }
+    }
+    if (!s) s = last_created;
+    if (!s) return;
+    /* Only when it CHANGES. A rewind re-sets the same filename, and a line per
+     * rewind would bury the one event this log is here to show. */
+    {
+        const char *a = s->location, *b = loc ? loc : "";
+        int same = 1, j = 0;
+        for (; a[j] || b[j]; j++)
+            if (a[j] != b[j]) { same = 0; break; }
+        if (!same)
+            VLOG("[vid] ch%d location -> %s\n", chan_of(s), b);
+    }
+    str_copy(s->location, loc, sizeof s->location);
 }
 
 void pad_vid_note_pipeline(void *p)
@@ -258,6 +340,11 @@ void pad_vid_note_pipeline(void *p)
     if (vshm) vshm->ch[chan_of(s)].playing = 0;
     s->pipeline = p;
     s->fakesink = 0; s->sinkpad = 0; s->decoder = 0;
+    /* Drop the old pipeline's source binding with the rest of its identity. The
+     * elements are about to be rebuilt, and keeping the pointer would let a
+     * dead filesrc keep steering this channel - or, if the allocator hands the
+     * same address to somebody else, steer it wrongly. */
+    s->filesrc = 0;
     s->handoff = 0; s->handoff_data = 0;
     s->location[0] = 0;
     s->ready = 0;

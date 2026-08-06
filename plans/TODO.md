@@ -111,11 +111,49 @@ These have each been violated at least once and each cost a run or a window:
       key repeats. Oracle is the guest's own `[sw]` lines against the X event
       times, plus David's hands, since this fault is defined by how it feels.
 
-- [ ] **15. Every clip during gameplay plays the SAME video.** `S1 D3` — S1
-      because it is every video element, in a real game, the whole time. D3
-      because it needs a run and a real game (`plunge.py game`), but it
-      reproduces on every clip rather than on a rare taunt, and the instruments
-      already exist.
+- [ ] **15. Every clip during gameplay plays the SAME video.** `S1 D2` ← IN PROGRESS
+      *(D3 → D2: the mechanism is cracked and the fix is written; what is left
+      is one confirming run against a countable acceptance test.)*
+      **★★ ROOT CAUSE FOUND, OFF AN EXISTING LOG, NO RUN SPENT. The game reuses
+      its pipelines and we attached the filename to the wrong one.**
+      `factory_make` in the 2026-08-06 gameplay run (`gzpad.log`) shows exactly
+      TWO complete video pipelines built in five minutes — one at line 5027
+      (ch0), one at line 6566 (ch1) — and **not one after that**. Every clip
+      change in the rest of the run was `g_object_set(filesrc, "location", ...)`
+      on a pipeline that already existed. But `pad_vid_note_location()` attached
+      the filename to `last_created`, which only moves on `gst_pipeline_new`, so
+      **from the moment the second pipeline existed every filename landed on
+      ch1's stream regardless of which element it was for.**
+      **The numbers, from `padvid.log` of that run:** ch0 was handed a new clip
+      four times, the last at **127.7 s — seven seconds before ch1 was created**
+      — and then served `2.asset/383.asset` **61 times over the next 182 s**,
+      1 distinct clip in 59 requests. ch1 meanwhile caught the strays meant for
+      ch0 (`2.asset/567.asset`, `2.asset/446.asset`, one prepare each) in
+      between its own background loop. On screen: every element playing the same
+      footage, PLAYING not frozen, because the element really is playing — the
+      last file it was ever correctly told about.
+      **This is NOT fallout from item 6's guards, and that halves item 6 too.**
+      It predates them; the guards fired twice in the whole run. It also
+      explains why only a GAME shows it — attract mostly runs one clip at a
+      time, so there is one stream and `last_created` is right by luck.
+      **Fixed (built, not yet run):** `pad_vid_note_location()` now takes the
+      object the property was set on and routes by the **filesrc identity**,
+      binding each source to its stream on first sight (when `last_created` IS
+      still right, because the game builds pipeline → elements → filename). The
+      binding is dropped with the rest of a slot's identity in
+      `pad_vid_note_pipeline`. `PAD_VID_NOSRCROUTE=1` restores the old
+      behaviour so it A/Bs on one build. New guest log line
+      `[vid] chN location -> <path>`, printed only when it CHANGES.
+      **Instrument:** `tools/spike2_emu/vidroute.py <padvid.log> [t]` counts
+      distinct clips per channel and says when each channel last CHANGED clip.
+      Validated against the labelled before-run above.
+      **Resume:** a run is up (see below) — play a game with `longplay.sh` and
+      re-run `vidroute.py`. **Acceptance: ch0's "1 distinct clip in 59
+      requests over 182 s" must become many**, and distinct scenes must draw
+      distinct footage on screen.
+      **LIVE RUN 2026-08-06: `watch.sh 20` with `LOG=/home/david/gz_item15.log`
+      was started by this pass.** It has a 20-minute backstop and stops itself.
+      Original filing below.
       **Observed 2026-08-06, in a game, on the main display:** every video
       element draws the same Godzilla night-city footage over and over. It is
       PLAYING, not frozen on one frame. Screenshot: the `DEFENSE NEO BARRIER

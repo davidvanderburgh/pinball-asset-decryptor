@@ -44,7 +44,7 @@ extern void pad_say(const char *);          /* hwshim.c's timestamped logger */
  * pad for caps, the caps/structure pointer for reads - because since the
  * multi-stream rework there can be several clips alive at once and the
  * pipeline IS the stream's identity. */
-extern void pad_vid_note_location(const char *);
+extern void pad_vid_note_location(void *, const char *);
 extern void pad_vid_note_pipeline(void *);
 extern void pad_vid_note_handoff(void *, void *, void *);
 extern int  pad_vid_prepare(void *);
@@ -133,7 +133,12 @@ void g_object_set(void *obj, const char *first, ...)
         va_copy(peek, ap);
         if (str_eq(first, "location")) {
             const char *v = va_arg(peek, const char *);
-            pad_vid_note_location(v);
+            /* `obj` matters, and it is item 15. The game keeps two pipelines
+             * for a whole run and re-points them by filename, so the object
+             * being set is the ONLY thing that says which stream this clip is
+             * for - "the pipeline built most recently" stopped being the
+             * answer the moment a second one existed. */
+            pad_vid_note_location(obj, v);
             GSTLOG("[gst] set %p location=\"%s\"\n", obj, v ? v : "(null)");
         } else if (str_eq(first, "output-format") || str_eq(first, "frame-plus") ||
                    str_eq(first, "sync") || str_eq(first, "signal-handoffs")) {

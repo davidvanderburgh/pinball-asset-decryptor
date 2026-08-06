@@ -1,9 +1,16 @@
 # Spike 2 PC emulator — task queue
 
-**`/next` takes the first unchecked box below.** Each item's full technical
-detail lives in `plans/spike2_pc_emulation_handoff.md` under **REMAINING item
-N** — the numbers here are those numbers, so they stay stable as this list is
-reordered. Reorder by moving lines; the queue is the order on the page.
+**`/next` takes the OPEN item with the LEAST PROGRESS**, tie-broken on which is
+easiest — the full rule lives in `.claude/commands/next.md` under "Which item
+to take" and is not restated here, because two places defining one fact is how
+this rig has been bitten before. An item nobody has touched is 0% and outranks
+one sitting at 85%, so the queue advances on a broad front instead of grinding
+one item down. **Order on this page is presentation, not priority**; it is only
+the last tie-break, which is what moving lines around is still good for.
+
+Each item's full technical detail lives in
+`plans/spike2_pc_emulation_handoff.md` under **REMAINING item N** — the numbers
+here are those numbers, so they stay stable as this list is reordered.
 
 ## Non-negotiables for any work in this rig
 

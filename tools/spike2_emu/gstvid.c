@@ -148,6 +148,7 @@ struct stream {
     unsigned prep_streak;
     char prep_path[PADVID_PATH_MAX];
     unsigned seek_absorbed;     /* redundant rewinds swallowed; see pad_vid_seek */
+    unsigned long handoff_worst, handoff_total;   /* item 11: does it block? */
     unsigned long last_seek_us; /* when the previous seek arrived; 0 = never  */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
@@ -633,8 +634,25 @@ static void *vid_thread(void *arg)
                 ts[0] = (unsigned long long)consumed * delay * 1000ull;
                 ts[1] = (unsigned long long)delay * 1000ull;
             }
-            if (s->handoff)
+            /* ★ THE LAST CANDIDATE, TIMED. Everything else is excluded with
+             * numbers - CPU 67% idle, RING EMPTY 0, renderer 4.5 ms of 16.7,
+             * and the per-swap tick loses no swap - so the only way left for
+             * the guest to be late is for THIS call to block. It runs the
+             * game's callback, which uploads the texture and emits into the
+             * padgl ring; a scene change uploads fresh textures, so a full
+             * ring would stall the video thread exactly when scenes churn,
+             * which is when the lateness appears. If the worst handoff is
+             * tens of ms, that is the fault; if it stays near zero, the
+             * lateness is somewhere nobody has looked yet and this candidate
+             * dies too. */
+            if (s->handoff) {
+                unsigned long h0 = vid_us();
+                unsigned long hd;
                 s->handoff(s->fakesink, s->buf, s->sinkpad, s->handoff_data);
+                hd = vid_us() - h0;
+                if (hd > s->handoff_worst) s->handoff_worst = hd;
+                s->handoff_total += hd;
+            }
             /* ITEM 11's OTHER STAGE COUNTER, paired with padglhost's
              * "vid N NEW/s". This is the moment the GAME is handed a frame;
              * that one is the moment the frame reaches the renderer. Two
@@ -675,11 +693,15 @@ static void *vid_thread(void *arg)
                     snprintf(m, sizeof m,
                              "[vid] ch%d handed the game %u frames in %lu ms"
                              " (%lu.%lu/s)  late %u  early %u  worst gap"
-                             " %lu ms\n", ch, said_n[ch], el / 1000,
+                             " %lu ms  handoff avg %lu us worst %lu us\n",
+                             ch, said_n[ch], el / 1000,
                              (unsigned long)(said_n[ch] * 1000000ul / el),
                              (unsigned long)(said_n[ch] * 10000000ul / el) % 10,
-                             late_n[ch], early_n[ch], worst[ch] / 1000);
+                             late_n[ch], early_n[ch], worst[ch] / 1000,
+                             said_n[ch] ? s->handoff_total / said_n[ch] : 0,
+                             s->handoff_worst);
                     pad_say(m);
+                    s->handoff_worst = s->handoff_total = 0;
                     said_at[ch] = nowu;
                     said_n[ch] = 0;
                     late_n[ch] = early_n[ch] = 0;

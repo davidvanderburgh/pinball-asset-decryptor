@@ -652,12 +652,32 @@ These have each been violated at least once and each cost a run or a window:
       CHURN**, and the mechanism is narrowed by what is already excluded -
       not CPU (67% idle), not decode (RING EMPTY = 0), not renderer cost
       (4.5 ms of 16.7), not presentation (tick: no swap ever lost).
-      **CANDIDATE, unproven:** the handoff itself blocks. It calls the game's
-      callback, which uploads and emits into the padgl ring; a scene change
-      uploads fresh textures, so a momentarily full ring would block the
-      video thread exactly when scenes churn. Test by timing the handoff call
-      in `vid_thread` (wrap `s->handoff(...)` and report the worst) before
-      changing anything - that single number confirms or kills it.
+      **★★★ SETTLED, run 14. THE HANDOFF DOES NOT BLOCK, AND THE "LATE
+      HANDOFF" WAS THE CLIP TRANSITION ALL ALONG.**
+      Timed: `handoff avg 8-11 us, worst 10-32 us` — including in the very
+      windows reporting a 206 ms gap. It is never the cost. Candidate dead.
+      **What the same lines say instead is the answer:** every window with
+      `late 0` has `worst gap` of **exactly 33 ms** — textbook — and every
+      window with a late gap shows **132-206 ms**, at about the rate
+      `longplay` changes scenes. `RING EMPTY` stayed **0** and the host
+      census shows `first frame consumed 34-39 ms after serve start`. So the
+      thread is never stalled and never starved: the gap IS the cost of
+      changing clips (ffmpeg cold start + prepare), measured end to end.
+      **AND THAT IS EXACTLY WHAT DAVID SAID ON DAY ONE** — *"the stuttering
+      [is] most right before the next video comes in"* and *"activating
+      another video shows stutter in that video when it transitions."* Every
+      other candidate has now been excluded with a number, so his original
+      report is the whole remaining fault, quantified: **~150-200 ms of no
+      new frames per transition = 4-6 dropped frames each**, which at the
+      observed transition rate is the **1.76 holds/s** `tickcensus.py`
+      measures. The loop closes; nothing is left over.
+      **THE FIX, and its budget is already measured:** overlap the next
+      clip's decode with the outgoing one instead of serialising them. The
+      location is set **30-70 ms before** the prepare that blocks on it
+      (census), and a cold start is 34-39 ms, so pre-arming at
+      `pad_vid_note_location()` time covers most of the gap without any new
+      machinery. **Judge it with `tickcensus.py` against the 50% baseline**
+      (52.9% = 1.76 holds/s is the before), never a raw repeat percentage.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -674,12 +694,12 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** time the `s->handoff(...)` call in `vid_thread` and report
-      the worst per window; that confirms or kills the blocking-handoff
-      candidate in one run. **Judge every fix with `tickcensus.py` against
-      its 50% baseline** (needs `PAD_GL_TICK=1`, a 60 fps capture and a scene
-      with real motion) - NEVER with a raw screen-repeat percentage, which
-      carries the grabber's jitter. The agent can run the whole
+      **Resume:** build the transition pre-arm (above) — it is the last
+      unfixed cost and every other candidate is dead. **Judge it with
+      `tickcensus.py` against its 50% baseline** (needs `PAD_GL_TICK=1`, a
+      60 fps capture and a scene with real motion; before = 52.9% = 1.76
+      holds/s) — NEVER with a raw screen-repeat percentage, which carries the
+      grabber's jitter. The agent can run the whole
       loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
       game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
       `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and

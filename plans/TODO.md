@@ -31,12 +31,41 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **6. Scene video noise in the TV inset.** The inset draws pink/green
-      horizontal noise where character footage should be — NOISE, not black, so
-      the frames arrive and are drawn but interpreted wrongly. The log points at
-      SIZE: the inset clips are the only **520x294** streams
-      (`4e0bf266…/35.asset/0.asset` and `14.asset`). Suspect stride/pitch
-      handling for a width that is not a tidy multiple.
+- [ ] **6. Scene video noise in the TV inset.** ← IN PROGRESS
+      The inset draws pink/green horizontal noise where character footage should
+      be — NOISE, not black, so the frames arrive and are drawn but interpreted
+      wrongly.
+      **Established:** it REPRODUCES FROM SCRIPTS, no human — `plunge.py start`,
+      `plunge.py plunge`, then `swpoke.py 81 150` (R Ramp Made Opto) plus
+      50/57/57/81 about 1.5 s apart. Fired on the 2nd of ~6 attempts, so it
+      needs the right mode as well as the switch. Screenshots and the
+      reproduction recipe: `C:\tmp\spike2_item6\`.
+      The noise is **texture-sized (520x294 at ~1:1), fine horizontal lines,
+      each row nearly flat, and it CHANGES frame to frame** — so it tracks the
+      stream and is not a static garbage buffer.
+      **Ruled out — the SIZE theory this item was built on, both halves.**
+      (a) The host converter is bit-exact at 520x294: `vidcheck.py` pulls a real
+      frame through the real `padvidhost.py` ring and runs the SHIPPING
+      converter (`i420.h`, included by both padglhost.c and i420check.c) — mean
+      0.000 / max 0 against a BT.601 reference, max 3 against ffmpeg's own rgba,
+      and the same on a known-good 1360x768 clip.
+      (b) The size negotiated is RIGHT end to end: the caps question matched its
+      own pad and answered 520x294 (no fallback), and padglhost's new geometry
+      census logged uploads at `520x294 fmt=0x8fc5`. Also: a wrong width SHEARS
+      the picture and leaves it recognisable (vidcheck.py renders that on
+      purpose) — this has no structure at all, so it is not a stride error.
+      **Committed:** `vidcheck.py`, `i420check.c`, `i420.h`, the caps-fallback
+      log, the geometry census, `PAD_VID_SNAP=<w>x<h>`.
+      **Resume:** run with `PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp` and
+      reach the scene. That snapshot is the cut that decides the whole item —
+      if the PPM is a clean picture the pixels are fine and the fault is in the
+      DRAW (shader/texcoords/binding, `PADGL_DEBUG=3` next); if the PPM is
+      already noise the fault is the ring pointer the guest names. Nothing else
+      separates those two. Free first step if a run is expensive: correlate the
+      captured inset's per-row means against the true clip's frames — if the
+      rows correlate, the rows are in the right place and only the horizontal
+      arrangement is broken.
+      **No live run left behind** — `alive.sh` is 0.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is

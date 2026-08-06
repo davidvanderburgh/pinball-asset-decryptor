@@ -11,7 +11,7 @@ R=/home/david/spike2root
 S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
 # padvid.h is on this list because padglhost.c now opens the VIDEO block too:
 # the guest sends an offset into it rather than 1.5 MB of pixels per frame.
-cp $S/glbridge.c $S/eglshim.c $S/padgl.h $S/padsw.h $S/padvid.h $S/padglhost.c /home/david/emusrc/
+cp $S/glbridge.c $S/eglshim.c $S/padgl.h $S/padsw.h $S/padvid.h $S/i420.h $S/padglhost.c /home/david/emusrc/
 
 CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall -I/home/david/emusrc"
 

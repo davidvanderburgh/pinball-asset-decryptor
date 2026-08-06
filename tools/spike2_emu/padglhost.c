@@ -189,6 +189,76 @@ static unsigned char min_filter_set[MAXNAME];
 static const unsigned char *vid_ring;
 static long vid_texdirect, vid_dropped;
 
+/* Every distinct size the game has asked to upload, and how often. Eight is
+ * more than a run has ever needed: Godzilla uses two (1360x768 and the
+ * 520x294 TV inset) and Jaws adds its RGBA surfaces. */
+static struct { unsigned w, h, fmt; long n; } vid_geom[8];
+static int vid_geom_n;
+
+static void vid_geom_note(unsigned w, unsigned h, unsigned fmt)
+{
+    int i;
+    for (i = 0; i < vid_geom_n; i++)
+        if (vid_geom[i].w == w && vid_geom[i].h == h && vid_geom[i].fmt == fmt) {
+            vid_geom[i].n++;
+            return;
+        }
+    if (vid_geom_n == (int)(sizeof vid_geom / sizeof vid_geom[0])) return;
+    vid_geom[vid_geom_n].w = w; vid_geom[vid_geom_n].h = h;
+    vid_geom[vid_geom_n].fmt = fmt; vid_geom[vid_geom_n].n = 1;
+    fprintf(stderr, "[padglhost] first video frame at %ux%u fmt=0x%x\n", w, h, fmt);
+    vid_geom_n++;
+}
+
+/* PAD_VID_SNAP=<w>x<h> (or "all") writes the first few RGBA frames of that size
+ * to PPM, into PAD_VID_SNAP_DIR or /tmp.
+ *
+ * THIS IS THE CUT THAT SPLITS ITEM 6 IN HALF. The TV inset draws pink/green
+ * stripes; the census above proves the size is right and vidcheck.py proves the
+ * converter is right, which leaves two possibilities that look identical on
+ * screen - the pixels handed to GL are already wrong, or they are right and the
+ * DRAW is wrong. One snapshot decides it, and nothing else does: a screenshot
+ * of the window shows the end of the chain, and the ring holds I420 rather than
+ * what was uploaded. Off unless set, and capped, because this writes 600 KB a
+ * frame from inside the command loop. */
+static int vid_snap_w, vid_snap_h, vid_snap_all, vid_snap_max = 4, vid_snapped;
+static const char *vid_snap_dir;
+
+static void vid_snap(const unsigned char *rgba, unsigned w, unsigned h)
+{
+    char path[512];
+    FILE *f;
+    unsigned x, y;
+    if (!vid_snap_all && ((int)w != vid_snap_w || (int)h != vid_snap_h)) return;
+    if (vid_snapped >= vid_snap_max) return;
+    snprintf(path, sizeof path, "%s/vid_%ux%u_%d.ppm",
+             vid_snap_dir ? vid_snap_dir : "/tmp", w, h, vid_snapped);
+    f = fopen(path, "wb");
+    if (!f) return;
+    vid_snapped++;
+    fprintf(f, "P6\n%u %u\n255\n", w, h);
+    for (y = 0; y < h; y++) {
+        const unsigned char *p = rgba + (unsigned long)y * w * 4;
+        for (x = 0; x < w; x++) fwrite(p + x * 4, 1, 3, f);
+    }
+    fclose(f);
+    fprintf(stderr, "[padglhost] wrote %s\n", path);
+}
+
+/* THE GEOMETRY CENSUS. `uploaded` climbing says frames are MOVING; it does not
+ * say they are being read at the size they were decoded at, and that is the
+ * whole of item 6 - a frame read at the wrong width is drawn, is counted as
+ * uploaded, and looks like pink/green stripes on screen. Pairing this list
+ * with padvid.log's "serving WxH" lines is the check: every size the host
+ * DECODED should appear here, and nothing else should. */
+static void vid_geom_dump(void)
+{
+    int i;
+    for (i = 0; i < vid_geom_n; i++)
+        fprintf(stderr, "[padglhost] video geometry %ux%u fmt=0x%x: %ld frames\n",
+                vid_geom[i].w, vid_geom[i].h, vid_geom[i].fmt, vid_geom[i].n);
+}
+
 static void vid_open(void)
 {
     static int tried;
@@ -220,59 +290,10 @@ static void vid_open(void)
     fprintf(stderr, "[padglhost] video block attached: %s\n", path);
 }
 
-/* I420 -> RGBA, BT.601 limited range, which is what the Vivante texture unit
- * does for GL_VIV_I420 on the real machine. Integer, 8-bit fixed point; the Y
- * term is a table because it is the only one indexed by every pixel. */
-static unsigned char *rgba_buf;
-static unsigned long rgba_cap;
-static short yclamp[256];
-static unsigned char sat[1024];          /* sat[x] clamps x-384 into 0..255 */
-
-static void conv_init(void)
-{
-    int i;
-    if (sat[0] || sat[1023]) return;
-    for (i = 0; i < 256; i++) yclamp[i] = (short)((298 * (i - 16) + 128) >> 8);
-    for (i = 0; i < 1024; i++) {
-        int v = i - 384;
-        sat[i] = (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
-    }
-}
-
-#define SAT(v) sat[(unsigned)((v) + 384) < 1024u ? (unsigned)((v) + 384) : ((v) < 0 ? 0u : 1023u)]
-
-static const unsigned char *i420_to_rgba(const unsigned char *src, unsigned w, unsigned h)
-{
-    const unsigned char *Y = src, *U = src + (unsigned long)w * h;
-    const unsigned char *V = U + (unsigned long)(w / 2) * (h / 2);
-    unsigned long need = (unsigned long)w * h * 4;
-    unsigned x, y;
-    conv_init();
-    if (need > rgba_cap) {
-        unsigned char *n = realloc(rgba_buf, need);
-        if (!n) return 0;
-        rgba_buf = n; rgba_cap = need;
-    }
-    for (y = 0; y < h; y++) {
-        const unsigned char *yp = Y + (unsigned long)y * w;
-        const unsigned char *up = U + (unsigned long)(y / 2) * (w / 2);
-        const unsigned char *vp = V + (unsigned long)(y / 2) * (w / 2);
-        unsigned char *o = rgba_buf + (unsigned long)y * w * 4;
-        for (x = 0; x < w; x += 2) {
-            int u = up[x / 2] - 128, v = vp[x / 2] - 128;
-            int rd = (409 * v + 128) >> 8;
-            int gd = -((100 * u + 208 * v + 128) >> 8);
-            int bd = (516 * u + 128) >> 8;
-            int k;
-            for (k = 0; k < 2 && x + (unsigned)k < w; k++) {
-                int c = yclamp[yp[x + k]];
-                o[0] = SAT(c + rd); o[1] = SAT(c + gd); o[2] = SAT(c + bd); o[3] = 255;
-                o += 4;
-            }
-        }
-    }
-    return rgba_buf;
-}
+/* The I420 -> RGBA converter is in i420.h so that i420check.c can run THE SAME
+ * CODE outside a live emulator, against a clip ffmpeg can also decode. A test
+ * that runs a duplicate of it would prove nothing about the one that ships. */
+#include "i420.h"
 
 static void on_signal(int s) { (void)s; stop_now = 1; }
 static double now_s(void)
@@ -1331,6 +1352,7 @@ static void dump_op_histogram(void)
     if (vid_texdirect || vid_dropped)
         fprintf(stderr, "[padglhost] video frames uploaded=%ld dropped=%ld\n",
                 vid_texdirect, vid_dropped);
+    vid_geom_dump();
 }
 
 static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
@@ -1496,6 +1518,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         if (!rgba) { vid_dropped++; break; }
         vid_texdirect++;
+        vid_geom_note(w, h, fmt);
+        if (vid_snap_all || vid_snap_w) vid_snap(rgba, w, h);
         if (dbg) {
             static int shown;
             if (shown < 6) {
@@ -1713,6 +1737,14 @@ int main(int argc, char **argv)
     if (dump_dir && !dump_dir[0]) dump_dir = 0;   /* empty means unset, not "/" */
     if (getenv("PAD_GL_FRAME_EVERY")) dump_every = atoi(getenv("PAD_GL_FRAME_EVERY"));
     if (getenv("PAD_GL_MAX_FRAMES"))  dump_max   = atoi(getenv("PAD_GL_MAX_FRAMES"));
+    if (getenv("PAD_VID_SNAP") && getenv("PAD_VID_SNAP")[0]) {
+        const char *s = getenv("PAD_VID_SNAP");
+        if (!strcmp(s, "all")) vid_snap_all = 1;
+        else if (sscanf(s, "%dx%d", &vid_snap_w, &vid_snap_h) != 2) vid_snap_w = 0;
+        vid_snap_dir = getenv("PAD_VID_SNAP_DIR");
+        if (vid_snap_dir && !vid_snap_dir[0]) vid_snap_dir = 0;
+        if (getenv("PAD_VID_SNAP_MAX")) vid_snap_max = atoi(getenv("PAD_VID_SNAP_MAX"));
+    }
     if (getenv("PAD_GL_RING_MB"))     ring_mb    = strtoul(getenv("PAD_GL_RING_MB"), 0, 10);
     dbg = getenv("PADGL_DEBUG") ? atoi(getenv("PADGL_DEBUG")) : 0;
     if (getenv("PADGL_SEQ_FROM")) seq_from = atol(getenv("PADGL_SEQ_FROM"));
@@ -1830,6 +1862,10 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "[padglhost] stopped after %ld frames in %.1f s (%.1f fps avg)\n",
             frames_done, now_s() - t0, frames_done / (now_s() - t0));
+    /* Always, not only under PADGL_DEBUG: this is the run's answer to "were
+     * the video frames read at the size they were decoded at", and a run that
+     * has to be repeated with a debug flag to find that out is a run wasted. */
+    vid_geom_dump();
 
     /* TAKE THE WINDOWS DOWN OURSELVES rather than letting process exit do it.
      *

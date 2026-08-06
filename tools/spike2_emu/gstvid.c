@@ -494,18 +494,55 @@ void pad_vid_announce(void *pipeline, int oldst, int newst)
 
 /* The caps question arrives on a PAD, not a pipeline: the game asks the
  * fakesink's sink pad what got negotiated. Streams remember their pad. A pad
- * that is no stream's pad but SOME stream is ready falls back to the newest
- * ready stream - the game has only ever been seen asking about the pad it
- * connected the handoff to, but a NULL here is precisely the error state this
- * whole file exists to prevent. */
+ * that is no stream's pad but SOME stream is ready falls back - the game has
+ * only ever been seen asking about the pad it connected the handoff to, but a
+ * NULL here is precisely the error state this whole file exists to prevent.
+ *
+ * THE FALLBACK IS LOGGED, LOUDLY AND ALWAYS, because it is the one place in
+ * this file where a wrong answer is indistinguishable from a right one. With
+ * a single live stream any fallback is correct by luck; the moment two streams
+ * of DIFFERENT sizes are alive - a 520x294 TV inset over a 1360x768
+ * background - the same lucky guess hands the game the wrong width, and the
+ * wrong width is exactly what pink/green stripes are (item 6). So it says so,
+ * with both sizes, rather than being silently right until it is not.
+ *
+ * The fallback is `last_created`, not "any ready stream". The game builds one
+ * pipeline at a time on its UI thread and asks for caps immediately after
+ * PAUSED, so the stream under construction is the one being asked about; the
+ * old code took whichever ready stream came last in the ARRAY, which is an
+ * arbitrary channel number. */
 void *pad_vid_caps_for_pad(void *pad)
 {
-    int i;
+    int i, ready = 0;
     struct stream *fb = 0;
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
-        if (pad && streams[i].sinkpad == pad) return (void *)streams[i].fake_caps;
-        fb = &streams[i];
+        ready++;
+        if (pad && streams[i].sinkpad == pad) {
+            /* Say it once per channel per size: "the pad matched" is the
+             * healthy answer and a log that only prints the sick one cannot
+             * tell "never happened" from "logging is off". */
+            static unsigned said_w[PADVID_CHANNELS], said_h[PADVID_CHANNELS];
+            if (said_w[i] != streams[i].w || said_h[i] != streams[i].h) {
+                said_w[i] = streams[i].w; said_h[i] = streams[i].h;
+                VLOG("[vid] ch%d caps %ux%u -> its own pad %p\n",
+                     i, streams[i].w, streams[i].h, pad);
+            }
+            return (void *)streams[i].fake_caps;
+        }
+        if (!fb) fb = &streams[i];
+    }
+    if (last_created && last_created->ready) fb = last_created;
+    if (fb) {
+        static int said;
+        static unsigned last_w, last_h;
+        if (said < 8 || fb->w != last_w || fb->h != last_h) {
+            said++;
+            last_w = fb->w; last_h = fb->h;
+            VLOG("[vid] caps asked for pad %p, which no stream owns - "
+                 "answering ch%d %ux%u (%d streams ready)\n",
+                 pad, chan_of(fb), fb->w, fb->h, ready);
+        }
     }
     return fb ? (void *)fb->fake_caps : 0;
 }

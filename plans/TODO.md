@@ -174,10 +174,16 @@ These have each been violated at least once and each cost a run or a window:
       on `framewidth.py`, against 1360 before.
       **Resume:** the last acceptance test is whether, with 8 channels, the
       taunt now PLAYS — `serving 520x294` followed by frames actually consumed
-      and NO `NOT MINE`. Run `watch.sh` then `longplay.sh <log> 13 520x294`;
-      the taunt fired ~223 s in last time. If it still gets stolen, the next
-      lever is not more channels but releasing a stream's slot when its
-      pipeline is torn down.
+      and NO `NOT MINE`. Run `watch.sh` then `longplay.sh <log> 13 520x294`.
+      **A 15-minute clean run on the 8-channel build did NOT see the taunt at
+      all** (zero 520x294 clips, and the game fell back to attract partway), so
+      budget more than one run for this — it fired ~223 s into one run and not
+      once in another. Nothing was learned about the fix from that run beyond
+      "attract still healthy, zero guard trips".
+      If it still gets stolen when it does fire, the next lever is not more
+      channels but releasing a stream's slot when its pipeline is torn down —
+      `pipeline` is never cleared, so every slot is permanently "occupied" and
+      stealing is unavoidable no matter how many channels there are.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is

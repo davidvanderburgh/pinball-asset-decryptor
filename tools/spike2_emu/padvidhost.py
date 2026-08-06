@@ -174,8 +174,153 @@ def probe(path):
     return info
 
 
+# ---- the native MP4 header parse, and why it exists (item 11) --------------
+#
+# The probe CACHE above only helps a REPEAT serve. A first-sight probe still
+# spawned ffprobe - 23-39 ms, synchronous, before the ack the game's UI thread
+# is spinning on - and a clip TRANSITION is by definition first-sight, so
+# every transition paid it. Run 3 (2026-08-06) measured it end to end: 97
+# pre-armed transitions adopted with waits of min 29 / median 60 / max 86 ms,
+# and the decomposition is ffprobe (25-40) plus supersede/kill overhead. The
+# geometry the guest needs is five integers sitting in the moov box; reading
+# them directly costs microseconds and no process spawn.
+#
+# ffprobe stays as the fallback for anything this parser declines, and the
+# parser declines LOUDLY (one log line per file) so a format drift shows up
+# as a slow serve rather than a wrong answer. Validated against ffprobe over
+# the full godzilla_pro scene.assets corpus before first use - same five
+# numbers or the parser refuses.
+
+def _mp4_boxes(buf, start, end):
+    """Yield (type, body_start, body_end) for boxes in buf[start:end]."""
+    off = start
+    while off + 8 <= end:
+        size = int.from_bytes(buf[off:off + 4], "big")
+        typ = buf[off + 4:off + 8]
+        body = off + 8
+        if size == 1:
+            if off + 16 > end:
+                return
+            size = int.from_bytes(buf[off + 8:off + 16], "big")
+            body = off + 16
+        elif size == 0:
+            size = end - off
+        if size < 8 or off + size > end:
+            return
+        yield typ, body, off + size
+        off += size
+
+
+def _mp4_child(buf, start, end, want):
+    for typ, b, e in _mp4_boxes(buf, start, end):
+        if typ == want:
+            return b, e
+    return None
+
+
+def _parse_mp4(path):
+    """(width, height, nframes, fps_num, fps_den) or None, from the moov box.
+
+    Only the shapes Stern actually ships are accepted: one video trak with an
+    avc1/hvc1-family sample entry, an mdhd timescale, and an stts table. Any
+    surprise returns None and the caller falls back to ffprobe."""
+    try:
+        with open(path, "rb") as f:
+            # Walk top-level boxes reading only headers, so a 60 MB mdat costs
+            # one seek. moov is usually tens of KB; read it whole.
+            moov = None
+            while True:
+                hdr = f.read(8)
+                if len(hdr) < 8:
+                    break
+                size = int.from_bytes(hdr[:4], "big")
+                typ = hdr[4:8]
+                skip = size - 8
+                if size == 1:
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        break
+                    size = int.from_bytes(ext, "big")
+                    skip = size - 16
+                elif size == 0:
+                    if typ == b"moov":
+                        moov = f.read()
+                    break
+                if skip < 0:
+                    break
+                if typ == b"moov":
+                    moov = f.read(skip)
+                    break
+                f.seek(skip, 1)
+        if not moov:
+            return None
+        n = len(moov)
+        for typ, tb, te in _mp4_boxes(moov, 0, n):
+            if typ != b"trak":
+                continue
+            mdia = _mp4_child(moov, tb, te, b"mdia")
+            if not mdia:
+                continue
+            hdlr = _mp4_child(moov, mdia[0], mdia[1], b"hdlr")
+            if not hdlr or moov[hdlr[0] + 8:hdlr[0] + 12] != b"vide":
+                continue
+            mdhd = _mp4_child(moov, mdia[0], mdia[1], b"mdhd")
+            minf = _mp4_child(moov, mdia[0], mdia[1], b"minf")
+            if not mdhd or not minf:
+                return None
+            ver = moov[mdhd[0]]
+            timescale = int.from_bytes(
+                moov[mdhd[0] + (20 if ver == 1 else 12):
+                     mdhd[0] + (24 if ver == 1 else 16)], "big")
+            stbl = _mp4_child(moov, minf[0], minf[1], b"stbl")
+            if not stbl:
+                return None
+            stsd = _mp4_child(moov, stbl[0], stbl[1], b"stsd")
+            stts = _mp4_child(moov, stbl[0], stbl[1], b"stts")
+            if not stsd or not stts:
+                return None
+            # stsd: version/flags(4) entry_count(4), then the sample entry:
+            # size(4) format(4) reserved(6) data_ref_index(2) pre_defined(16)
+            # width(2) height(2) ...
+            se = stsd[0] + 8
+            if se + 36 > stsd[1]:
+                return None
+            w = int.from_bytes(moov[se + 32:se + 34], "big")
+            h = int.from_bytes(moov[se + 34:se + 36], "big")
+            # stts: version/flags(4) entry_count(4), then (count, delta) pairs.
+            cnt = int.from_bytes(moov[stts[0] + 4:stts[0] + 8], "big")
+            if stts[0] + 8 + cnt * 8 > stts[1]:
+                return None
+            nframes = 0
+            deltas = {}
+            for i in range(cnt):
+                p = stts[0] + 8 + i * 8
+                sc = int.from_bytes(moov[p:p + 4], "big")
+                sd = int.from_bytes(moov[p + 4:p + 8], "big")
+                nframes += sc
+                deltas[sd] = deltas.get(sd, 0) + sc
+            if not nframes or not timescale or not deltas:
+                return None
+            # The rate the guest paces on is the DOMINANT sample delta; a
+            # last-sample runt (common in encoders) must not change it.
+            delta = max(deltas, key=deltas.get)
+            if not delta:
+                return None
+            if not w or not h or w > MAX_W or h > MAX_H:
+                return None
+            return w, h, nframes, timescale, delta
+        return None
+    except OSError:
+        return None
+
+
 def _probe_uncached(path):
     """(width, height, nframes, fps_num, fps_den) or None."""
+    if os.environ.get("PAD_VID_NO_MP4PARSE", "") != "1":
+        info = _parse_mp4(path)
+        if info is not None:
+            return info
+        log("mp4 parse declined %s; falling back to ffprobe" % path)
     try:
         out = subprocess.run(
             ["ffprobe", "-hide_banner", "-v", "error",

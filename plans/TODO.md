@@ -646,16 +646,64 @@ These have each been violated at least once and each cost a run or a window:
       is a reusable control that `winprof.py --compare` takes directly.
       **NOTE the pass-one captures predate the DWM/DPC/frequency counters**, so
       the A arm has to be re-measured, not reused, for those.
-      **Resume:** run the A/B, **one variable, two runs, and NOT while any
-      subagent is working** — `watch.sh` as-is (control) then
-      `PAD_GL_ADAPTER=NVIDIA` (treatment), 90 s `winprof.py` capture in attract
-      each, comparing msrdc CPU, GPU%, context switches, DPC time and DWM late
-      frames. Confirm the adapter from `padglhost.log`'s own
-      `[padglhost] D3D12 (...)` line rather than from the env. If NVIDIA wins,
-      make it the default and say what it cost. Then ask whether msrdc's 0.70
-      cores scales with what is on screen (window size, how many WSLg windows,
-      occlusion) — **NOT by moving a window from Windows**, that is a standing
-      non-negotiable, but by changing `PAD_GL_W`/`PAD_GL_H` between runs.
+      **★★ THE A/B WAS RUN AND THE ADAPTER IS NOT THE LEVER. MY HYPOTHESIS WAS
+      WRONG.** Two 90 s attract arms through `abrun.ps1`, adapter confirmed from
+      `padglhost.log` in both, against a clean idle baseline:
+      | | AMD (control) | NVIDIA | |
+      |---|---|---|---|
+      | whole machine `hv_logical` | 22.76% | 22.66% | **nothing** |
+      | vmmemWSL | 114.79% | 115.56% | nothing |
+      | msrdc | 72.07% | 68.74% | −3.3 |
+      | **dwm** | **5.53%** | **12.87%** | **+7.3 WORSE** |
+      | **GPU total** | **9.78%** | **14.02%** | **+4.2 WORSE** |
+      | DPC time | 0.75% | 1.16% | worse |
+      | ctx switches | 101,775 | 102,378 | nothing |
+      | DWM late frames | 0.00% | 0.00% | nothing |
+      **Net: slightly worse.** `PAD_GL_ADAPTER` stays UNSET, which is what it
+      already was, so nothing needs reverting — the knob is kept because it is
+      how this was measured and how it would be re-measured.
+      **AND THE MEASUREMENT SAYS WHY, which is the part worth keeping.** The AMD
+      adapter's own GPU time **did not drop when the renderer left it**
+      (0.96% → 0.94%), so that LUID was never the emulator's work: **the guest's
+      GPU work does not appear in Windows' `GPU Engine` counters at all**, it is
+      inside the VM's own accounting. And the bridge only ever issues **2-4 draw
+      calls a frame with kilobytes of vertex data** (handoff, "The GL bridge"),
+      so which GPU draws that is nearly free either way.
+      **`gpuprobe`'s 43x was a FALSE POSITIVE and this is the lesson:** it
+      renders **4 full-screen 1080p quads**, which is not remotely the game's
+      workload, so it measured a difference that does not exist in the real
+      path. Same shape as the tone test that pronounced a broken audio path
+      healthy — **a synthetic signal, believed because the number was big.**
+      **MORE THINGS RULED OUT, with numbers, from the same two runs:**
+      • **CPU downclocking** — `% Processor Performance` goes **87.9% idle →
+      108.4% during a run**. The package boosts UP under load; it is not
+      throttling. • **Disk** — `Avg. Disk Queue Length` is **0.00 in both arms**
+      against 0.00 idle. • **Memory** — 44.2 GB free of 45.8.
+      • **The compositor dropping frames** — **0.00% late frames in every
+      capture**, idle and both arms.
+      **WHAT DOES MOVE, and it is all that is left:** context switches
+      **19,569 → 101,775 (5.2x)**, DPC time **0.32% → 0.75%**, interrupt time
+      **0.18% → 0.77% (4.3x)**, and the DWM frame interval p95
+      **8.77 → 9.66 ms (+10%)** with p99 +0.83 and max +1.07 — measurably
+      slower presentation, but not one dropped frame.
+      **THE HONEST POSITION AFTER TWO PASSES: every instrument says the desktop
+      is fine and David says it is not.** The two constant costs are vmmemWSL
+      (1.15 cores) and msrdc (0.72 cores), and neither is sensitive to anything
+      tried so far.
+      **The gap I most suspect is in the METHOD, not the machine: every capture
+      so far is ATTRACT MODE WITH NOBODY TOUCHING THE COMPUTER.** That is the
+      cheapest possible case for DWM and msrdc — a static scene, no window
+      dragging, no app switching, no typing — and "sluggish" is a word about
+      INTERACTING. David also plays games, which run more video, more audio and
+      more switch traffic than attract does.
+      **Resume: ASK DAVID FIRST (see below), then capture while the machine is
+      being USED.** `winprof.py` with the DWM probe already measures what a
+      human sees, so the run is: start `watch.sh`, have David drag windows /
+      switch apps / type for 90 s, and read `DWM frame ms` and `late frames`
+      against the same activity with no run up. That control matters — the
+      activity itself moves the numbers, so a no-run arm with the same fidgeting
+      is required, not optional. Only after that is it worth testing whether
+      msrdc scales with `PAD_GL_W`/`PAD_GL_H` or with `PAD_GL_LEGEND=0`.
       **ASK DAVID FIRST:** is it the pointer/typing (input latency), windows
       repainting (compositing), or everything generally slow (throughput)? The
       third is ruled out above, so his answer picks the probe instead of pass

@@ -564,8 +564,18 @@ def _capture(secs, interval, label, outdir, quiet):
 # is a "you are about to fool yourself" alarm, not a measurement - and it fires
 # on any capture, not just ones labelled idle, because a RUN capture polluted by
 # something else is just as wrong and much harder to spot.
+# THE CHECK MUST COVER BOTH SIDES, and the first version did not. It watched
+# only the WSL VM and the context-switch rate, so it passed a baseline cleanly
+# while an orphaned `grep -rl` from a stopped subagent ran at up to 101% of a
+# core on the WINDOWS side, pulling 4.4 GB/s off the disk and dragging Defender
+# to 110% behind it. A quiet-check that only looks at one side of the boundary
+# is the same mistake this whole item is about, reproduced inside the
+# instrument that exists to catch it.
 QUIET_WSL_VM_PCT = 1.0          # % of the whole machine, hv logical - hv root
 QUIET_CTX_SWITCHES = 45000      # per second, against ~20k on this machine idle
+QUIET_MACHINE_PCT = 12.0        # hv logical: the WHOLE machine, both partitions
+QUIET_DISK_QUEUE = 0.5          # sustained queue means something is grinding
+QUIET_TOP_PROC_PCT = 25.0       # any one process this busy is not "background"
 
 
 def quiet_check(s):
@@ -580,6 +590,20 @@ def quiet_check(s):
     if c is not None and c > QUIET_CTX_SWITCHES:
         out.append("%.0f context switches/sec (quiet is under %d)"
                    % (c, QUIET_CTX_SWITCHES))
+    m = _get(s, ["scalars", "hv_logical", "mean"])
+    if m is not None and m > QUIET_MACHINE_PCT:
+        out.append("the whole machine was %.1f%% busy (quiet is under %.0f%%)"
+                   % (m, QUIET_MACHINE_PCT))
+    d = _get(s, ["scalars", "disk_queue", "mean"])
+    if d is not None and d > QUIET_DISK_QUEUE:
+        out.append("disk queue averaged %.2f (quiet is under %.1f) - something "
+                   "is grinding the disk" % (d, QUIET_DISK_QUEUE))
+    # Name the culprit rather than just complaining, since the whole point is to
+    # let someone go and stop it. Our own probes are never this busy.
+    for p in (s.get("procs") or [])[:5]:
+        if p["cpu_mean"] > QUIET_TOP_PROC_PCT:
+            out.append("%s (pid %d) averaged %.1f%% of a core"
+                       % (p["name"], p["pid"], p["cpu_mean"]))
     return out
 
 

@@ -64,16 +64,27 @@ if ($alive -ne "0") {
 if (-not $SkipQuietCheck) {
     Say "checking the machine is quiet enough to measure on (12 s)"
     & py -3 $WINPROF --secs 12 --label "_preflight" --out $env:TEMP --quiet | Out-Null
+    # The thresholds live in winprof.py's quiet_check(), which is also what
+    # --compare uses to disown an untrustworthy baseline. Asking it rather than
+    # re-testing here keeps one definition of "quiet", which is the rule this
+    # rig has been bitten by twice.
     $pf = Get-Content (Join-Path $env:TEMP "winprof__preflight.json") -Raw | ConvertFrom-Json
-    $vm = [double]$pf.wsl_vm_cpu.mean
-    $cx = [double]$pf.scalars.ctx_switches.mean
-    if ($vm -gt 1.0 -or $cx -gt 45000) {
-        Say ("REFUSING TO START: the machine is not quiet (WSL VM {0:N2}%, {1:N0} ctx/s)." -f $vm, $cx)
-        Say "Something else is using the machine. Wait for it, or pass -SkipQuietCheck"
-        Say "and expect the numbers to be worth less than the run cost."
+    $complaints = & py -3 -c @"
+import json, sys
+sys.path.insert(0, r'$EMU_WIN')
+import winprof
+print('\n'.join(winprof.quiet_check(json.load(open(sys.argv[1])))))
+"@ (Join-Path $env:TEMP "winprof__preflight.json")
+    if ($complaints) {
+        Say "REFUSING TO START: the machine is not quiet enough to measure on."
+        $complaints | ForEach-Object { if ($_) { Say "  $_" } }
+        Say "Stop whatever that is and try again, or pass -SkipQuietCheck and"
+        Say "expect the numbers to be worth less than the run cost."
         exit 1
     }
-    Say ("quiet: WSL VM {0:N2}%, {1:N0} ctx/s" -f $vm, $cx)
+    Say ("quiet: WSL VM {0:N2}%, {1:N0} ctx/s, machine {2:N1}%" -f `
+         [double]$pf.wsl_vm_cpu.mean, [double]$pf.scalars.ctx_switches.mean, `
+         [double]$pf.scalars.hv_logical.mean)
 }
 
 # --- 3. the baseline arm needs no emulator at all -----------------------------

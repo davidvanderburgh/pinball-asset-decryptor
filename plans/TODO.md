@@ -54,6 +54,42 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **15. Every clip during gameplay plays the SAME video.** `D3` — needs a
+      run and a real game (`plunge.py game`), but it reproduces on every clip
+      rather than on a rare taunt, and the instruments already exist.
+      **Observed 2026-08-06, in a game, on the main display:** every video
+      element draws the same Godzilla night-city footage over and over. It is
+      PLAYING, not frozen on one frame. Screenshot: the `DEFENSE NEO BARRIER
+      ACTIVATED / SHOOT TARGETS TO DISABLE BARRIER` award, which should have its
+      own footage, running that clip underneath.
+      **Suspected fallout from item 6's guards, and there are two readings that
+      send you at different lines of the same file:** (a) the hold-last-frame
+      path in `gstvid.c` (`36d82a1`) is engaging constantly, so elements keep
+      re-serving a channel that is not theirs; (b) the SAME-SIZE takeover that
+      the request-generation check was added to catch is getting through — with
+      size mismatches now guarded, a same-size steal yields a clean wrong clip
+      instead of noise, which is exactly this symptom. **Item 6 predicted this
+      shape:** `pipeline` is never cleared, so every slot is permanently
+      "occupied" and stealing is unavoidable no matter how many channels there
+      are (4 → 8 in `c389572` would then only delay it). That makes releasing a
+      slot on pipeline teardown the standing candidate fix.
+      **UNKNOWN, and the first thing to settle because it halves the search:**
+      whether this predates the guards. Nobody has watched gameplay video
+      closely before — item 6's runs were judged on the inset and on attract.
+      **Do not assume regression.**
+      **No new instrument needed.** `PAD_VID_NOSIZEGUARD=1` A/Bs the host guard
+      on one build; the guest logs `NOT MINE ANY MORE` and the host logs
+      `WRONG-SIZE ... read from chN slotN`. A `NOT MINE` storm during gameplay
+      is reading (a); its absence points at (b). Log which asset path each
+      channel is serving — distinct paths with identical pixels separates a
+      decode fault from a routing fault.
+      **Acceptance:** in a real game, distinct scenes draw distinct footage —
+      the Neo Barrier award shows its own clip — and each active channel is
+      serving its own asset path with no `NOT MINE` storm.
+      **Related to item 6 and possibly the same root; read both.** Filed
+      separately because the acceptance conditions differ and because burying a
+      severe gameplay fault inside an item that reads as 90% done would hide it.
+
 - [ ] **6. Scene video noise in the TV inset.** `D4` ← IN PROGRESS
       *(D4 because the mechanism is cracked and the fix is written, but the only
       acceptance oracle is the taunt, which fired three times in one run and not
@@ -202,6 +238,11 @@ These have each been violated at least once and each cost a run or a window:
       channels but releasing a stream's slot when its pipeline is torn down —
       `pipeline` is never cleared, so every slot is permanently "occupied" and
       stealing is unavoidable no matter how many channels there are.
+      **2026-08-06: item 15 is evidence for exactly that lever** — every clip in
+      gameplay now draws the same video, which is what permanent occupancy plus
+      a same-size steal would look like once the size guard stops it showing up
+      as noise. The two items may share a root; do not fix one without checking
+      the other.
 
 - [ ] **11. Background video stutters every ~7 seconds.** `D3` — needs a run,
       but it is visible in plain attract every time, so looking is enough.

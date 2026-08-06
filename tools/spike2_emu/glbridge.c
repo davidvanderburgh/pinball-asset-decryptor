@@ -299,8 +299,14 @@ int glGenBuffers(int n, unsigned int *ids)
     ids[i] = (unsigned int)next_of(&id_buf, 4096); U(ids[i]); } return 0; }
 int glDeleteBuffers(int n, const unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELBUF; U(ids[i]); } return 0; }
+/* Which buffer is bound to GL_ARRAY_BUFFER, guest-side. Only glVertexAttribPointer
+ * needs it, and only to tell an OFFSET from a POINTER - see below. */
+static unsigned array_buffer_bound;
+
 int glBindBuffer(unsigned int t, unsigned int id)
-{ const unsigned int op_ = PADGL_BINDBUF; U(t,id); return 0; }
+{ const unsigned int op_ = PADGL_BINDBUF;
+  if (t == 0x8892 /* GL_ARRAY_BUFFER */) array_buffer_bound = id;
+  U(t,id); return 0; }
 
 int glBufferData(unsigned int target, long size, const void *data, unsigned int usage)
 {
@@ -325,10 +331,33 @@ int glDeleteVertexArrays(int n, const unsigned int *ids) { (void)n; (void)ids; r
 int glBindVertexArray(unsigned int id)
 { const unsigned int op_ = PADGL_BINDVAO; U(id); return 0; }
 
+/* CLIENT-SIDE VERTEX ARRAYS ARE NOT SUPPORTED, AND USED TO BE SILENT ABOUT IT.
+ *
+ * `ptr` means two different things in GLES2. With a buffer bound to
+ * GL_ARRAY_BUFFER it is a byte OFFSET into that buffer, which is what the host
+ * replays it as. With NO buffer bound it is a real POINTER into guest memory -
+ * memory the host cannot read and would not know the length of - and replaying
+ * it as an offset feeds the draw whatever happens to sit at that offset in
+ * whichever buffer is bound. Arbitrary vertex attributes, arbitrary UVs.
+ *
+ * The whole game renders correctly, so it plainly uses buffers for everything
+ * seen so far. This says so out loud the first time that stops being true,
+ * because "a quad whose texture coordinates collapsed in one axis" is exactly
+ * what item 6's TV inset looks like (adjacent columns differ by 0.53/255) and
+ * a silent unsupported path is the worst place to go looking for it. */
 int glVertexAttribPointer(unsigned int idx, int size, unsigned int type,
                           unsigned char norm, int stride, const void *ptr)
 {
     const unsigned int op_ = PADGL_VERTEXATTRIB;
+    if (!array_buffer_bound && ptr) {
+        static int moaned;
+        if (!moaned) {
+            moaned = 1;
+            say("[bridge] glVertexAttribPointer with NO array buffer bound - "
+                "that is a CLIENT-SIDE array and this bridge cannot send it; "
+                "the draw will read whatever is at that offset instead\n");
+        }
+    }
     U(idx, (unsigned)size, type, (unsigned)norm, (unsigned)stride, (unsigned long)ptr);
     return 0;
 }

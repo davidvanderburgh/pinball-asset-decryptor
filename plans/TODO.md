@@ -77,6 +77,15 @@ These have each been violated at least once and each cost a run or a window:
       Godzilla never asks for one, so it changes nothing here — but the source
       comment claiming "the game never sets a filter on this texture at all"
       was simply wrong, and is corrected.
+      **Second silent gap found and armed, also not yet this bug:** the bridge
+      does not support **client-side vertex arrays**. `glVertexAttribPointer`
+      sends `ptr` and the host replays it as a VBO offset, which is only right
+      when a buffer is bound; with none bound it is a guest pointer and the
+      draw reads whatever sits at that offset. That would give a quad arbitrary
+      UVs — the exact shape of "columns differ by 0.53/255". glbridge.c now
+      says so loudly the first time it happens. **Attract is clean**: every
+      attribute the game uses is buffer-backed, so this is armed for the scene
+      rather than confirmed.
       **The trigger is REAL but rare.** `plunge.py start`, `plunge.py plunge`,
       then `swpoke.py 81 150` (R Ramp Made Opto) plus 50/57/57/81 about 1.5 s
       apart fired it **once in about 25 scripted attempts across 5 runs**.

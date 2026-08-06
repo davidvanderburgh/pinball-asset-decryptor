@@ -8,8 +8,12 @@ plunge tells:
   it arrives in the shooter lane  Shooter Lane CLOSES            (62)
   the player plunges              Shooter Lane OPENS             (62)
 
+  coin    drop a coin in the left chute (39). A machine with no credits
+          IGNORES the Start button, silently - see do_coin().
+  game    coin, start, plunge, in the order that actually works. Use this.
   start   pulse the Start button (36). The game then fires the trough eject
-          itself, so run `plunge` a moment later to give it the ball.
+          itself, so run `plunge` a moment later to give it the ball. On its
+          own this does NOT start a game unless there are credits.
   plunge  the three steps above, on the lowest-numbered trough ball still held.
   reset   put six balls back in the trough and shut the coin door - the
           machine-at-rest set, same as swinit.py.
@@ -44,6 +48,7 @@ MAGIC = padsw.MAGIC
 OFF_GEN, OFF_HELD, OFF_MRG = padsw.OFF_SCR_GEN, padsw.OFF_SCR_HELD, padsw.OFF_MRG
 
 START, SHOOTER, TROUGH_JAM = 36, 62, 72
+COIN = 39                                # Left Coin, the "5" key in the legend
 TROUGH = (71, 70, 69, 68, 67, 66)        # Trough 1..6; 1 is nearest the eject
 REST = (33,) + TROUGH                    # coin door shut, six balls loaded
 
@@ -66,12 +71,42 @@ def _held(m, sw):
     return padsw.merged(m, sw)
 
 
+def do_coin(m, n=1):
+    """Drop `n` coins in the left chute.
+
+    THIS IS THE STEP THAT WAS MISSING, AND IT COST ITEM 6 FIVE RUNS. Pressing
+    Start on a machine with no credits does exactly nothing, and it does it
+    SILENTLY: the switch reaches the game (the shim logs `+36` and `-36` at the
+    asked-for duration), the game simply declines to start. Every instrument
+    the rig had said the press was delivered, so "the press worked" and "a game
+    started" looked like the same claim - and a whole run of scripted switch
+    pokes then lands on ATTRACT MODE, scoring nothing and reaching no scene,
+    while the log fills with switch events that all look correct.
+
+    Measured 2026-08-05: three Start presses over ten minutes left the game in
+    attract (screenshot-confirmed, and only video channel 0 ever streamed).
+    Coins in, and a game came up shortly after - 4 players, a real score, and
+    the TV-inset scene fired three times in the next fifteen minutes after
+    about twenty-five scripted attempts had produced one sighting in total.
+    """
+    padsw.take(m, (COIN,))
+    for _ in range(n):
+        _set(m, COIN, 1)
+        time.sleep(0.12)
+        _set(m, COIN, 0)
+        time.sleep(0.7)
+    print("%d coin(s) in the left chute" % n)
+
+
 def do_start(m):
     padsw.take(m, (START,))
     _set(m, START, 1)
     time.sleep(0.15)
     _set(m, START, 0)
     print("Start pressed")
+    if not _held(m, COIN):
+        print("  NOTE: a game needs CREDITS. If the game stays in attract, run"
+              " `plunge.py coin` first - see do_coin().")
 
 
 def do_plunge(m):
@@ -120,6 +155,15 @@ def main():
     rc = 0
     if what == "start":
         do_start(m)
+    elif what == "coin":
+        do_coin(m, int(sys.argv[2]) if len(sys.argv) > 2 else 1)
+    elif what == "game":
+        # The whole "put a ball into play" story, in the order that works.
+        do_coin(m)
+        time.sleep(1.5)
+        do_start(m)
+        time.sleep(5)
+        rc = do_plunge(m)
     elif what == "reset":
         do_reset(m)
     else:

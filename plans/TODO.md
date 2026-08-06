@@ -33,136 +33,67 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **6. Scene video noise in the TV inset.** ← IN PROGRESS
       The inset draws pink/green horizontal noise where character footage should
-      be — NOISE, not black, so the frames arrive and are drawn but interpreted
-      wrongly.
-      **THE WHOLE SIZE PREMISE IS DEAD. Do not propose a stride or pitch fix.**
-      Three independent measurements, each covering a different stage:
-      (a) the converter is bit-exact at 520x294 — `vidcheck.py` pulls a real
-      frame through the real `padvidhost.py` ring and runs the SHIPPING
-      converter (`i420.h`, included by padglhost.c and i420check.c), mean 0.000
-      / max 0 against a BT.601 reference, and the same on a 1360x768 clip;
-      (b) the size negotiated is right — the caps question matched its own pad
-      and answered 520x294 (the fallback is never even reached), and
-      padglhost's geometry census logged uploads at `520x294 fmt=0x8fc5`;
-      (c) **the DRAW is fine at 520x294 too** — `PAD_VID_FORCE_SIZE=520x294`
-      rescales EVERY clip, so the attract background runs the whole chain at
-      the inset's resolution on the game's own full-screen video quad, and it
-      draws **perfectly clean**.
-      **The scene is identified:** `4e0bf266` is the **Planet X Controller
-      taunt** (`video.in_game_videos`; the 26 clips in `35.asset` are
-      `AttentionInhabitantOfEarth_VO6`, `GreetingFromPlanetX_VO2`,
-      `ThisIsTheController_VO5`, …). So the fault is in that element, not in
-      the resolution.
-      **The noise is a MAPPING fingerprint, not damaged pixels, and the
-      strongest fact in the whole item is HOW LITTLE it varies horizontally:
-      adjacent columns differ by 0.53 out of 255.** The inset is essentially a
-      function of y alone — a vertical strip stretched across 520 pixels. On
-      top of that, both axes show a 2x pairing (rows: 26.2 within a pair vs
-      39.8 across; columns: 0.53 vs 0.98), the per-row magenta-green signal
-      autocorrelates **0.94 at lag 10**, and it changes frame to frame.
-      **★ CONFIRMED AGAINST A CONTROL 2026-08-05: THE INSET IS NOT SAMPLING OUR
-      VIDEO TEXTURE.** This was a suspicion; it is now measured. For every one
-      of the 294 noise rows, search the real source frame for its closest row:
-      mean best-match cost **186.7**. Against a SHUFFLED source frame:
-      **186.7** — identical to one decimal place, and the search collapses onto
-      **3 unique target rows out of 294**. If the quad were sampling our
-      texture with wrong UVs, every noise row would still BE some row of the
-      frame and the real mapping would beat the shuffle. It does not beat it at
-      all. (The older reading, "the row profile swings ±80 between adjacent
-      source rows and no column of real footage does that", pointed the same
-      way but had no control.) The prime remaining suspect is therefore the
-      scene renderer's render-target/FBO path, then client-side vertex arrays.
-      **The noise DOES change frame to frame — measured, not eyeballed:** the
-      two captures 6 s apart correlate **+0.694** by row profile and differ by
-      **39.5/255** mean absolute. It tracks something live.
-      **Ruled out as an OFFLINE test: correlating the inset against the rest of
-      the screen to test the FBO theory.** It has no power on the evidence that
-      exists — the two captures' surrounds correlate **+1.000** by row profile
-      (the background barely moves between them), so "inset A vs surround A"
-      and "inset A vs surround B" cannot be told apart and neither number means
-      anything. Do not re-run it on these two images; it needs a live run with
-      deliberately different backgrounds.
-      **Ruled out — the mipmap theory, and it was a good one.** Paired rows are
-      exactly what sampling an un-uploaded mip level 1 (260x147) would give.
-      But the game **does** set a MIN_FILTER on the video texture and it is
-      **GL_LINEAR (0x2601)**, not a mipmap mode (`min_filter=0x%x` is now on
-      padglhost's "first video frame" line), and forcing the texture to be
-      MINIFIED (`PAD_VID_FORCE_SIZE=1920x1080` on the 1360x768 quad, with
-      `PAD_VID_NOMIPFIX=1` so nothing is corrected) still draws perfectly
-      clean. LOD is not the mechanism.
-      **Latent fault fixed in passing, NOT this bug:** a mipmap MIN_FILTER on a
-      texture that only ever gets level 0 is now demoted to LINEAR and logged.
-      Godzilla never asks for one, so it changes nothing here — but the source
-      comment claiming "the game never sets a filter on this texture at all"
-      was simply wrong, and is corrected.
-      **Second silent gap found and armed, also not yet this bug:** the bridge
-      does not support **client-side vertex arrays**. `glVertexAttribPointer`
-      sends `ptr` and the host replays it as a VBO offset, which is only right
-      when a buffer is bound; with none bound it is a guest pointer and the
-      draw reads whatever sits at that offset. That would give a quad arbitrary
-      UVs — the exact shape of "columns differ by 0.53/255". glbridge.c now
-      says so loudly the first time it happens. **Attract is clean**: every
-      attribute the game uses is buffer-backed, so this is armed for the scene
-      rather than confirmed.
-      **The trigger is REAL but rare.** `plunge.py start`, `plunge.py plunge`,
-      then `swpoke.py 81 150` (R Ramp Made Opto) plus 50/57/57/81 about 1.5 s
-      apart fired it **once in about 25 scripted attempts across 5 runs**.
-      Everything else tried and failed: full sweeps of switches 46-86, the
-      right scoop HELD like a real ball device (not pulsed), Planet X shield
-      targets 85/86, the maser 48, spinners, the action button 34, cadences
-      from 0.3 s to 1.6 s, and simulated ball-path play for minutes at a time.
-      Screenshots and the recipe: `C:\tmp\spike2_item6\`.
-      **Established 2026-08-05: the offline video census, and it narrows the
-      suspect to ONE element.** Exactly **7 of the 103 scenes** declare a video
-      element (`grep video\.` over every `scene.radium`), and every clip in six
-      of them is **1360x768**; only `4e0bf266/35.asset` is **520x294**. Two
-      scenes declare `VideoSurface` — `4e0bf266` and `60ed7e50`
-      (`2.asset`, 598 `Advance_Tanks*` clips at 1360x768). The attract
-      background that draws CLEAN is `34856963/264.asset` (1965 frames), and it
-      is one of the seven — so **video inside a scene is not the fault**; the
-      broken one is the only SMALL video, on the only SMALL quad.
-      **Committed:** `vidcheck.py`, `i420check.c`, `i420.h`, the caps-fallback
-      log, the geometry census, `PAD_VID_SNAP`, `PAD_VID_FORCE_SIZE`,
-      `PAD_VID_TESTPAT`, a frame-dump BURST that fires automatically when a new
-      video size first appears, and `longplay.sh` (`355e0bd`).
-      **The switch hunt is abandoned, deliberately.** Five runs and ~25
-      attempts hunting a trigger switch produced one fire. A taunt is not a
-      shot award, so `longplay.sh` plays instead: there is no physics here, so
-      a ball drains only if something pokes a drain switch — never poke the
-      outlanes (55/58), the trough (66-72) or tilt (38/45) and one ball stays
-      in play for half an hour while varied ramp/loop/target shots accumulate
-      progress.
-      **★ A LIVE RUN IS UP RIGHT NOW** (started 2026-08-05 by this pass, ~32 min
-      cap): `watch.sh 32` with `LOG=/home/david/gz6.log
-      PAD_GL_DUMP=/home/david/glshots PAD_VID_TESTPAT=520x294
-      PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp/vidsnap`, plus `longplay.sh`
-      beside it. **It is NOT David playing** — it is safe to `killgame.sh`. It
-      caps itself; confirm with `alive.sh`.
-      **The driver works — verified on the far side, in the GAME's own switch
-      log, not in the script's.** `+36/-36` (Start), `-71` (ball leaves the
-      trough), `+62` then `-62` (shooter lane closes, then plunged) is a
-      textbook plunge, and 957 `[sw]` events later the ball is still in play
-      with every poke landing at its asked-for duration (a 150 ms ramp opto
-      arrives as 152 ms). Item 7's fix is holding.
-      **Two capture traps found, both cost nothing only because they were
-      caught:** (1) `shotwin.py` falls back to **COPY MODE** on these RAIL
-      windows and grabs whatever is on top — it returned the *Controls* window
-      while reporting it had found the game window, so it cannot be trusted for
-      the game screen; use `PAD_GL_DUMP` frames. (2) `PAD_GL_DUMP`'s
-      `dump_max=40` is **spent in the first 20 s**, so any frame read late in a
-      run is stale (a 20-second-old Tech Alerts screen read as "the game is
-      stuck"). The new-video-size burst is SAFE regardless — its `goto do_dump`
-      jumps past the `dump_max` check — but nothing else dumps after 20 s.
-      **Resume:** read `/tmp/longplay/` (window grabs), `/home/david/glshots`
-      (the automatic 20-frame burst) and `/tmp/vidsnap` (the uploaded RGBA).
-      The inset draws a pattern whose red channel IS its x coordinate and green
-      channel IS its y, with a white grid every 32 texels: a clean pattern
-      means the pixels were wrong and the draw is fine, a distorted one can be
-      read off directly, and no pattern at all means the quad samples a
-      different texture. The instrument is validated — the 1360x768 background
-      renders it perfectly. If `longplay.sh` finds nothing in 30 minutes, that
-      is itself a result: the taunt is not time-based either, and the next
-      lever is forcing the scene from the game side.
+      be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
+      **★ THE DRAW IS FINE. CONFIRMED LIVE 2026-08-05 ON THE REAL INSET.** With
+      `PAD_VID_TESTPAT=520x294`, the TV monitor in the Planet X Controller scene
+      rendered the pattern **perfectly**: square white grid every 32 texels, red
+      rising left-to-right, green rising top-to-bottom, no shear, no doubling.
+      That is this item's own decision table, and it says **the pixels were
+      wrong and the draw is fine.** Screenshot: `C:\tmp\spike2_item6\HIT_screen.png`.
+      **So these are now CLOSED, not merely unlikely:** the quad's UVs, the
+      render-target/FBO path, client-side vertex arrays, mipmap/LOD, and every
+      remaining form of the size/stride theory. The pattern is injected AFTER
+      conversion (padglhost.c says so), so a clean pattern exonerates the draw
+      and upload and deliberately tells you nothing about the data — which is
+      exactly the half that is left.
+      **★ AND THE REASON IT TOOK FIVE RUNS WAS NOT THE TRIGGER. IT WAS CREDITS.**
+      A machine with no credits ignores the Start button *silently*: the switch
+      reaches the game (`+36`/`-36` logged at the asked-for duration) and no game
+      starts. Every instrument said the press was delivered, so "the press
+      worked" and "a game started" looked like one claim. Three Start presses
+      over ten minutes left this run in **attract mode** — screenshot-confirmed,
+      and only video channel 0 ever streamed. Coins in (`plunge.py coin`, switch
+      39) and a game came up: 4 players, a real score, GODZILLA POWERUP LEVEL 1.
+      **The taunt then fired three times in fifteen minutes**, against one
+      sighting in ~25 attempts across five previous runs. It was never rare. The
+      game was never in a game. Use **`plunge.py game`** (coin, start, plunge).
+      **★ THE NEW PRIME SUSPECT: the inset arrives on a SHARED, RESIZED ring
+      channel.** It streamed on **ch3**, and ch3 carried **63 clips at 1360x768
+      and 3 at 520x294**, switching size back and forth within seconds, while
+      ch0 streamed 1360x768 concurrently. Every measurement that ever declared
+      this chain healthy used **one channel at one size**: `vidcheck.py`
+      offline, the attract background, and `PAD_VID_FORCE_SIZE=520x294` on
+      attract. **The variable was never the size — it was how many channels are
+      live and whether one is being reused at a new size.** Next: re-run with
+      `PAD_VID_TESTPAT` OFF and `PAD_VID_SNAP=520x294`, and compare the uploaded
+      RGBA against what `padvidhost` decoded for that channel and generation.
+      **Ruled out with a control:** the noise rows are not rows of our source
+      frame. Best-match cost **186.7** real vs **186.7** against a SHUFFLED
+      source, collapsing onto 3 unique target rows of 294. Consistent with the
+      test-pattern result: the texture is sampled correctly, the data in it is
+      not ours.
+      **Ruled out as an offline test:** correlating the inset against the rest
+      of the screen to test the FBO theory. The two existing captures' surrounds
+      correlate **+1.000**, so the control has no power. Do not re-run it.
+      **Instrument fixes this pass, both from being bitten:** the new-video-size
+      burst was **20 frames — one third of a second** — and all 20 missed the
+      inset, because the clip starts seconds before the element draws; it is now
+      600 frames (`PAD_VID_BURST`). And `PAD_GL_DUMP`'s `dump_max=40` is spent in
+      the first 20 s, so any frame read later in a run is stale — a 20-second-old
+      Tech Alerts screen read as "the game is stuck" until the log said otherwise.
+      `shotwin.py` also falls back to **COPY MODE** on these RAIL windows and
+      grabs whatever is on top: it returned the *Controls* window while reporting
+      it had found the game window. A plain desktop `CopyFromScreen` is what
+      worked.
+      **Committed:** `longplay.sh` (`355e0bd`), the control-tested findings
+      (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (this pass).
+      **Resume:** rebuild (`buildgl.sh`), then run with **`PAD_VID_TESTPAT`
+      unset**, `PAD_VID_SNAP=520x294`, `PAD_VID_BURST=600`, and drive it with
+      `plunge.py game` + `longplay.sh`. Read the uploaded PPMs against
+      `padvidhost`'s own decode for ch3 at that moment. The question is now
+      narrow: **which channel's, and which generation's, bytes reached the
+      520x294 upload.**
+      **No live run left behind** — `alive.sh` is 0.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is

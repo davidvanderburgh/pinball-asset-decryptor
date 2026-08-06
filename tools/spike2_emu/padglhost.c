@@ -207,8 +207,22 @@ static int vid_geom_n;
  * by comparing two runs before. */
 static int vid_nomipfix;
 
-/* Frames still owed to the "a new video size just appeared" burst. */
+/* Frames still owed to the "a new video size just appeared" burst.
+ *
+ * HOW LONG THE BURST HAS TO BE, learned the expensive way 2026-08-05. It was
+ * 20 frames, which sounds generous and is ONE THIRD OF A SECOND at 60 fps. The
+ * first run that ever reproduced item 6's inset on demand fired the burst
+ * correctly, wrote its 20 frames, and NOT ONE OF THEM CONTAINED THE INSET: the
+ * stream starts several seconds before the scene puts the monitor on screen,
+ * so the whole burst was spent on the frames before it appeared. The reproduction
+ * was only caught at all because a desktop screenshot happened to be taken by
+ * hand at the right moment.
+ *
+ * The burst exists precisely because this window is expensive to reach, so it
+ * must outlast the gap between "the clip starts" and "the element draws". Ten
+ * seconds, tunable, and the cost is bounded by the size of that one window. */
 static int vid_burst;
+static int vid_burst_frames = 600;      /* PAD_VID_BURST, in frames (~10 s) */
 
 static void vid_geom_note(unsigned w, unsigned h, unsigned fmt, unsigned mf)
 {
@@ -228,7 +242,7 @@ static void vid_geom_note(unsigned w, unsigned h, unsigned fmt, unsigned mf)
     fprintf(stderr, "[padglhost] first video frame at %ux%u fmt=0x%x "
             "min_filter=0x%x\n", w, h, fmt, mf);
     vid_geom_n++;
-    if (vid_geom_n > 1) vid_burst = 20;   /* not the first size - something new */
+    if (vid_geom_n > 1) vid_burst = vid_burst_frames;  /* a size never seen before */
 }
 
 /* PAD_VID_SNAP=<w>x<h> (or "all") writes the first few RGBA frames of that size
@@ -1850,6 +1864,7 @@ int main(int argc, char **argv)
     if (dump_dir && !dump_dir[0]) dump_dir = 0;   /* empty means unset, not "/" */
     if (getenv("PAD_GL_FRAME_EVERY")) dump_every = atoi(getenv("PAD_GL_FRAME_EVERY"));
     if (getenv("PAD_GL_MAX_FRAMES"))  dump_max   = atoi(getenv("PAD_GL_MAX_FRAMES"));
+    if (getenv("PAD_VID_BURST"))      vid_burst_frames = atoi(getenv("PAD_VID_BURST"));
     if (getenv("PAD_VID_SNAP") && getenv("PAD_VID_SNAP")[0]) {
         const char *s = getenv("PAD_VID_SNAP");
         if (!strcmp(s, "all")) vid_snap_all = 1;

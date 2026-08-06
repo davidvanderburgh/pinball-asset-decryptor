@@ -479,6 +479,49 @@ These have each been violated at least once and each cost a run or a window:
       matches the saved one within item 16's stated tolerance. Both keys appear
       in the Controls legend.
 
+- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D3`
+      **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
+      Emulate tab should bring **all** the emulator windows out over the PAD
+      application. The **game window comes up behind the app**, while the
+      **Controls window comes up above it**. A run opens three top-level
+      Windows windows, and `shotwin.py` sees all three by title:
+      `godzilla_pro - Stern Spike 2 emulator (Ubuntu)` and
+      `Controls - Spike 2 emulator` (both X11 out of `padglhost.c`, RAIL-proxied
+      by msrdc.exe) and `godzilla_pro - virtual playfield` (`playfield.py`, an
+      ordinary Windows Tk process started through interop by `watch.sh`).
+      **The asymmetry is the clue and it is worth keeping as observed rather
+      than diagnosed:** the two that disagree come from the SAME process and are
+      mapped the same way, `XMapWindow` at `padglhost.c:989` (legend) and in
+      `win_open()` at `:1048`, with `legend_open(scr)` called from `:1121`.
+      **GUESS, not established:** they are mapped at different TIMES — the game
+      window waits for the guest's first frame, ~15 s into the boot, by which
+      point the app has been clicked and holds the top, while the legend is
+      created inside the same `win_open()` path. Nobody has read the actual
+      z-order, so this is a hunch and must not be treated as a finding.
+      **★ THE OBVIOUS FIX IS BANNED HERE, and this is why the item says so up
+      front. `SetWindowPos` on an emulator window is a standing non-negotiable**
+      (top of this file): it froze David's windows once, and the handoff records
+      a programmatic `SetWindowPos` growing the frame while the picture stayed
+      1360x768 in the corner, because a RAIL proxy and the X client then
+      disagree about the window. `SetForegroundWindow` is the same shape.
+      So the raise has to come **from inside X** (`XRaiseWindow` on padglhost's
+      own two windows, the same rule item 5 landed on for MOVING them), and the
+      playfield is our own Tk process so Tk's own `lift()` is native there and
+      is not the RAIL trap. **A third option needs no window manipulation at
+      all and may be the right one:** have the APP stop holding the top after
+      the button press, rather than having three other windows fight it.
+      **Acceptance:** press Start Emulator and, once the game window appears,
+      all three emulator windows are above the app with no clicking — verified
+      by reading the real z-order, not by eye. `shotwin.py` already enumerates
+      the windows by title; `EnumWindows` returns them IN z-order, so the
+      instrument is a few lines on top of what exists. State whether dragging
+      and the window-position restore (item 5, `19e1b85`) still work afterwards,
+      because that is exactly what the banned fix broke.
+      — S3: nothing is broken and the workaround is one click. D3: it needs a
+      run and it should show every time, the instrument is a small extension of
+      `shotwin.py`, but the cheap fix is forbidden and the safe one crosses the
+      X/Windows boundary.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

@@ -438,15 +438,44 @@ These have each been violated at least once and each cost a run or a window:
       1.3 s of churn, matching the reported 0.5-1 s. This also re-frames the
       original "~7 s" attract stutter: the attract clip is 8.00 s, one
       transition per 8 s, and the stutter IS the transition.
-      **Fix shape: extend the rewind absorb to the STATE path** — a same-file
-      re-arm on a stream still mid-play resumes instead of restarting, which
-      is what real PAUSED semantics do. Oracle: mid-play same-file re-serves
-      in padvid.log drop to zero at transitions, plus David's eyes.
-      **NOT CONFIRMED, and it is why the box is open: the state-path half is
-      unbuilt, and nobody has judged the PICTURE on a fixed build.** The
-      rewind-path absorb is built and its second confirming run is LIVE as
-      this is written. The gameplay storms are rewind-path; attract's
-      transition churn is state-path; the two halves are now distinct.
+      **★ THE REWIND-PATH STORM IS FIXED AND CONFIRMED (run 2, uncommitted):
+      host STORM lines 2 → 0, ch2 serves 158 (crash run) → 75 (narrow absorb)
+      → 13 (widened), max 3 serves per file, clips playing to real ends
+      (162/200/242/168 frames), one burst absorbing 148 redundant rewinds.
+      The absorb predicate is `playing && same path` — the first version
+      (`delivered <= 1`) was MEASURED TOO NARROW: the game seeks every 33 ms
+      tick for the whole scene step, not just until frames flow, so the
+      narrow guard only slowed the storm (re-arm, absorb 4, re-arm; host
+      storms still fired twice).**
+      **THE STATE PATH TURNED OUT TO CARRY TWO DEFECTS, both now built and
+      on run 3 as this is written:** (a) the same-file mid-play re-arm
+      restarting ffmpeg from 0 — absorbed by the same predicate in
+      `pad_vid_prepare`; (b) **the armed-but-unplayed stall**: after a real
+      re-arm, `pad_vid_play` declined while the DOOMED old thread's
+      `s->playing` was still 1 (it wakes up to 33 ms later), so the new arm
+      filled a 4-slot ring nobody drained — that is the ubiquitous
+      `superseded while throttled after 4 frames` line and the serve-PAIRS at
+      every transition; fixed by clearing `s->playing` in the committed
+      re-arm path so play-after-prepare always starts the thread.
+      **★ DAVID, same session: "the stutter might be lining up with queued
+      sound effects too. it seems whenever something happens, there is
+      stuttering."** Consistent with everything above — "something happens" is
+      when the UI thread does event work (prepares are PROVEN blocking; sfx
+      asset loads are a CANDIDATE, unmeasured). If stutter still tracks
+      sound effects after the video fixes are judged, that residual is a
+      separate blocking source. CONFOUND to control: his session ran
+      PAD_CARD (fuse2fs), the measurement runs are extracted — asset I/O
+      cost differs between them.
+      **NOT CONFIRMED: run 3's numbers, and the PICTURE on a fixed build —
+      David's eyes are the oracle for the transition stutter.**
+      **A LIVE RUN may be up when this is read** (run 3, watch.sh 14 min +
+      longplay, started ~15:0x 2026-08-06) and **gstvid.c is uncommitted**
+      pending run 3's numbers.
+      **Resume:** harvest run 3 (`item11results2.sh` pattern in the session
+      scratchpad; before-numbers: superseded-after-1 = 170 in run 2, serve
+      pairs everywhere, `superseded while throttled after 4 frames`
+      throughout), commit gstvid.c if clean, then have David watch a game
+      and judge the transitions.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

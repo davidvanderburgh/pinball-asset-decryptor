@@ -194,7 +194,67 @@ static unsigned short min_filter_val[MAXNAME];
  * inline form exists only as a fallback for a pointer that is not in the ring.
  */
 static const unsigned char *vid_ring;
+static const struct padvid_shm *vid_hdr;
 static long vid_texdirect, vid_dropped;
+
+/* ---- WHOSE FRAME DID WE JUST UPLOAD? -------------------------------------
+ *
+ * Item 6, settled offline 2026-08-06: the pink/green TV inset uploads 229,320
+ * bytes that `framewidth.py` shows to be a 1360-WIDE raster (score 2.02 against
+ * a shuffled control of 23.84; the 520 it was read at scores 22.34 against
+ * 23.80, i.e. nothing). So the draw, the caps and the converter are all fine and
+ * the inset is simply pointed at another stream's pixels.
+ *
+ * The offset the guest sends names the frame completely, so this side can say
+ * which CHANNEL and which SLOT it landed in, and can compare the byte count the
+ * guest asked to upload against what that channel says one of its frames is.
+ * A mismatch there is the bug, stated in one line, instead of a picture to
+ * argue about. Free per frame (two divides), so it is on unless turned off. */
+static int vid_offlog = 1;
+static struct { unsigned ch, w, h; } vid_off_said[16];
+static int vid_off_said_n;
+
+static void vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h)
+{
+    unsigned chan_span = (unsigned)PADVID_SLOTS * PADVID_SLOT_BYTES;
+    unsigned ch = off / chan_span;
+    unsigned rem = off % chan_span;
+    unsigned slot = rem / PADVID_SLOT_BYTES;
+    const struct padvid_chan *c;
+    int i;
+    if (!vid_offlog || !vid_hdr || ch >= PADVID_CHANNELS) return;
+    c = &vid_hdr->ch[ch];
+    /* The loud half: the guest is uploading a frame of one size out of a
+     * channel that is serving another. This is item 6's whole fault if it
+     * fires, so it is not rate-limited by anything but the pair being new. */
+    if (c->frame_bytes && c->frame_bytes != bytes) {
+        static unsigned said_ch[PADVID_CHANNELS], said_fb[PADVID_CHANNELS];
+        if (said_ch[ch] != bytes || said_fb[ch] != c->frame_bytes) {
+            said_ch[ch] = bytes; said_fb[ch] = c->frame_bytes;
+            fprintf(stderr, "[padglhost] ** WRONG-SIZE VIDEO UPLOAD ** %ux%u "
+                    "(%u bytes) read from ch%u slot%u, but ch%u is serving "
+                    "%ux%u (%u bytes). The pixels belong to another stream.\n",
+                    w, h, bytes, ch, slot, ch, c->width, c->height,
+                    c->frame_bytes);
+        }
+        return;
+    }
+    /* The quiet half, once per (channel, size): "ch3 520x294 slot0" printed
+     * beside padvid.log's own "ch3 serving 520x294" is the check that the two
+     * sides agree, and a log that only prints the sick case cannot tell "never
+     * happened" from "logging is off". */
+    for (i = 0; i < vid_off_said_n; i++)
+        if (vid_off_said[i].ch == ch && vid_off_said[i].w == w &&
+            vid_off_said[i].h == h) return;
+    if (vid_off_said_n == (int)(sizeof vid_off_said / sizeof vid_off_said[0])) return;
+    vid_off_said[vid_off_said_n].ch = ch;
+    vid_off_said[vid_off_said_n].w = w;
+    vid_off_said[vid_off_said_n].h = h;
+    vid_off_said_n++;
+    fprintf(stderr, "[padglhost] video upload %ux%u from ch%u slot%u "
+            "(ch%u serving %ux%u, write_idx=%u)\n",
+            w, h, ch, slot, ch, c->width, c->height, c->write_idx);
+}
 
 /* Every distinct size the game has asked to upload, and how often. Eight is
  * more than a run has ever needed: Godzilla uses two (1360x768 and the
@@ -368,6 +428,7 @@ static void vid_open(void)
         munmap(p, PADVID_BYTES);
         return;
     }
+    vid_hdr = (const struct padvid_shm *)p;
     vid_ring = (const unsigned char *)p + PADVID_HDR;
     fprintf(stderr, "[padglhost] video block attached: %s\n", path);
 }
@@ -1585,8 +1646,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             /* The offset spans ALL channels' rings - the guest names a frame
              * by its distance from the ring base, whichever channel it is in. */
             if (vid_ring && (unsigned long)u[4] + u[5] <=
-                    (unsigned long)PADVID_RING_BYTES)
+                    (unsigned long)PADVID_RING_BYTES) {
                 yuv = vid_ring + u[4];
+                vid_note_offset(u[4], u[5], w, h);
+            }
         } else if (len >= 24 + u[5]) {
             yuv = pl + 24;
         }
@@ -1865,6 +1928,7 @@ int main(int argc, char **argv)
     if (getenv("PAD_GL_FRAME_EVERY")) dump_every = atoi(getenv("PAD_GL_FRAME_EVERY"));
     if (getenv("PAD_GL_MAX_FRAMES"))  dump_max   = atoi(getenv("PAD_GL_MAX_FRAMES"));
     if (getenv("PAD_VID_BURST"))      vid_burst_frames = atoi(getenv("PAD_VID_BURST"));
+    if (getenv("PAD_VID_OFFLOG"))     vid_offlog = atoi(getenv("PAD_VID_OFFLOG"));
     if (getenv("PAD_VID_SNAP") && getenv("PAD_VID_SNAP")[0]) {
         const char *s = getenv("PAD_VID_SNAP");
         if (!strcmp(s, "all")) vid_snap_all = 1;

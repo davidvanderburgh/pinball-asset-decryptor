@@ -193,12 +193,45 @@ def _forced_size():
     return (w, h) if w > 1 and h > 1 and not (w % 2 or h % 2) else None
 
 
-def serve(m, c, path, w, h):
+# PAD_VID_ALT_SIZE=<w>x<h> serves every OTHER request at that size instead of
+# the clip's own, per channel.
+#
+# THIS IS ITEM 6'S REPRODUCTION, AND IT EXISTS BECAUSE THE REAL ONE CANNOT BE
+# DRIVEN. The pink/green inset needs TWO SIZES LIVE AT ONCE - it is the only
+# 520x294 stream in the game and it plays over a 1360x768 background - and the
+# only way anyone has ever reached that state is the Planet X Controller taunt,
+# which fired once in about twenty-five scripted attempts across five runs.
+# PAD_VID_FORCE_SIZE could not help: it rescales EVERY clip, so the chain still
+# only ever sees one size, which is exactly why it kept reporting healthy.
+#
+# Attract mode serves clips continuously and crossfades them, so alternating the
+# size per request puts a channel through "1360x768, then 520x294, then
+# 1360x768" within seconds, with a second channel live across the fade. That is
+# the condition, without a game, without a ramp shot, every run.
+def _alt_size():
+    s = os.environ.get("PAD_VID_ALT_SIZE", "")
+    if "x" not in s:
+        return None
+    try:
+        w, h = (int(v) for v in s.split("x", 1))
+    except ValueError:
+        return None
+    return (w, h) if w > 1 and h > 1 and not (w % 2 or h % 2) else None
+
+
+_ALT_N = [0] * CHANNELS
+
+
+def serve(m, c, path, w, h, native):
     """Decode `path` into channel c's ring until the guest stops asking or
-    ffmpeg ends."""
+    ffmpeg ends. `native` is the file's own size; `w`,`h` is what was published
+    to the guest, and they differ only when a test flag is rescaling."""
     frame_bytes = w * h * 3 // 2
     ring0 = HDR + c * SLOTS * SLOT_BYTES
-    scale = ["-vf", "scale=%d:%d" % (w, h)] if _forced_size() else []
+    # Rescale whenever the size we published is not the file's own, which is
+    # true for BOTH test flags. Asking _forced_size() alone would have served
+    # native frames under a rescaled header the moment a second flag existed.
+    scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
     cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
             "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
     # ffmpeg's stderr goes to OUR stderr, i.e. padvid.log. It used to go to
@@ -277,9 +310,15 @@ def chan_loop(m, c):
             put(m, c, "ack_gen", req)
             continue
         w, h, n, num, den = info
+        native = (w, h)
         forced = _forced_size()
+        alt = _alt_size()
         if forced:
             w, h = forced
+        elif alt:
+            _ALT_N[c] += 1
+            if _ALT_N[c] % 2 == 0:
+                w, h = alt
         put(m, c, "width", w)
         put(m, c, "height", h)
         put(m, c, "nframes", n)
@@ -294,9 +333,11 @@ def chan_loop(m, c):
         # Log what was actually ASKED FOR. The basename of the parent directory
         # is "2.asset" for every video in the game, so the old form made two
         # different clips look like the same clip served twice.
-        log("ch%d serving %dx%d %d frames %s" % (c, w, h, n, want))
+        log("ch%d serving %dx%d %d frames %s%s"
+            % (c, w, h, n, want,
+               "  (RESCALED from %dx%d)" % native if (w, h) != native else ""))
         try:
-            serve(m, c, full, w, h)
+            serve(m, c, full, w, h, native)
         except Exception as exc:                    # noqa: BLE001
             log("ch%d decode failed: %s" % (c, exc))
             put(m, c, "eos", 1)

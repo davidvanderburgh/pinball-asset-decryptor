@@ -34,6 +34,26 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **6. Scene video noise in the TV inset.** ← IN PROGRESS
       The inset draws pink/green horizontal noise where character footage should
       be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
+      **★★ THE BYTES ARE A 1360-WIDE RASTER. MEASURED, WITH A CONTROL, OFFLINE.**
+      `tools/spike2_emu/framewidth.py` inverts the converter and re-folds the
+      recovered Y at every width, scoring vertical smoothness. On the known-good
+      frame it returns **520 (2.66 against a shuffled control of 34.31)** — that
+      is the labelled example it had to agree with first. On the noise capture it
+      returns **1360 (2.02 against 23.84)**, a sharp minimum (1356→2.42,
+      1440→7.79), and the width it was actually READ at, 520, scores **22.34
+      against a control of 23.80 — no better than noise.** Refolded at 1360 the
+      capture comes back as a coherent picture with smooth gradients and a
+      vertical edge (`C:\tmp\spike2_item6\refold_1360.png`).
+      **So the inset uploads 229,320 bytes taken from the START of a 1360x768
+      I420 frame** and converts them as 520x294: its Y is that frame's top ~112
+      rows, and its U and V are two further slices of that frame's Y plane, which
+      is why the result is chroma-dominated and why the tint is just how bright
+      the big frame happened to be there. The item's own "big frame read as
+      small" control render has the identical stripe structure.
+      **This closes the item's central question — the pixels are another
+      stream's — and it re-opens ONE thing an earlier pass closed too broadly:**
+      "the size theory is dead" is true of the converter, the negotiated caps and
+      the draw, and FALSE of which bytes reach the converter.
       **★ THE DRAW IS FINE. CONFIRMED LIVE 2026-08-05 ON THE REAL INSET.** With
       `PAD_VID_TESTPAT=520x294`, the TV monitor in the Planet X Controller scene
       rendered the pattern **perfectly**: square white grid every 32 texels, red
@@ -86,13 +106,16 @@ These have each been violated at least once and each cost a run or a window:
       it had found the game window. A plain desktop `CopyFromScreen` is what
       worked.
       **Committed:** `longplay.sh` (`355e0bd`), the control-tested findings
-      (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (this pass).
-      **Resume:** rebuild (`buildgl.sh`), then run with **`PAD_VID_TESTPAT`
-      unset**, `PAD_VID_SNAP=520x294`, `PAD_VID_BURST=600`, and drive it with
-      `plunge.py game` + `longplay.sh`. Read the uploaded PPMs against
-      `padvidhost`'s own decode for ch3 at that moment. The question is now
-      narrow: **which channel's, and which generation's, bytes reached the
-      520x294 upload.**
+      (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (`4dab1ad`),
+      `framewidth.py` + the 1360 finding (this pass).
+      **Resume:** the question left is only **whose 1360x768 frame, and how the
+      inset came to hold a pointer at it.** Two instruments for that, both built
+      this pass: `PAD_VID_OFFLOG` in padglhost decodes every upload's ring offset
+      into (channel, slot) and shouts when the uploaded byte count disagrees with
+      that channel's own `frame_bytes`; `PAD_VID_ALT_SIZE=<w>x<h>` in padvidhost
+      alternates the served size per request so ATTRACT has two sizes live at
+      once — the condition that was only ever met by a taunt nobody could
+      provoke.
       **No live run left behind** — `alive.sh` is 0.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,

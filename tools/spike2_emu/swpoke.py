@@ -25,6 +25,9 @@ import time
 
 import padsw
 
+padsw.set_source('p')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 PATH = padsw.PATH
 MAGIC = padsw.MAGIC
 

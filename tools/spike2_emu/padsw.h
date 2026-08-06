@@ -92,6 +92,47 @@ struct padsw_shm {
      * nothing in the input path may ever read it back. */
     unsigned mrg_gen;
     unsigned char mrg[PADSW_MAX_ID];
+
+    /* ---- PROVENANCE AND THE CLOCK. Both exist for REMAINING item 16, replaying
+     * a session's switch inputs from its log, and both answer a question the
+     * `[sw]` line could not.
+     *
+     * WHY THE REGION IS NOT ENOUGH, which is the whole reason these are here.
+     * "Keyboard or script" falls straight out of which array moved, and it is
+     * the wrong split: autoattract.sh presses Service Back through swpoke.py,
+     * so the rig's own boot press is a SCRIPT edge, indistinguishable from a
+     * flipper poke. A replay that re-delivers it doubles up with the
+     * autoattract of the new run. The other half is the same shape from the
+     * other side - padglhost latches the coin door and six trough balls when
+     * its window opens, and that lands in the KEYBOARD array looking exactly
+     * like David pressing C and B.
+     *
+     * So each writer says who it is, in the byte below its own region, BEFORE
+     * it bumps its generation. The shim reads the tag in the same pass that
+     * observes the change and attributes it to every id that moved. One letter:
+     *
+     *   k  a real key event          w  padglhost's window-open latch
+     *   K  PAD_SW_KEYSIM             a  autoattract.sh's Service Back
+     *   p  swpoke.py                 h  swhold.py
+     *   l  plunge.py                 c  coilact.py
+     *   i  swinit.py                 f  a virtual-playfield click
+     *   g  longplay.sh's gameplay    r  swreplay.py re-delivering a log
+     *   ?  nobody said
+     *
+     * THE ONE HONEST LIMIT: the shim attributes per MERGE, not per write. Two
+     * scripts that both write and bump between two merges collapse into one
+     * tag, and the later one wins. In practice autoattract has exited before
+     * longplay starts and the playfield is a human clicking, so this has no
+     * overlap to lose - but it is an approximation and not a receipt.
+     *
+     * `guest_t0_ms` is the shim's pad_ms() origin: CLOCK_MONOTONIC in ms, the
+     * same clock and the same truncation. A host-side script that reads it can
+     * compute the guest's own millisecond WITHOUT tailing a log and without
+     * drifting, because qemu-user runs on this same host clock - the two are
+     * not merely close, they are the same counter with a different zero. */
+    unsigned kbd_src;                    /* padglhost's tag for its last publish */
+    unsigned scr_src;                    /* the scripts' tag for theirs          */
+    unsigned guest_t0_ms;                /* the shim writes; everyone else reads */
 };
 
 #endif

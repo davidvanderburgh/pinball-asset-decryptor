@@ -32,6 +32,11 @@ sys.path.insert(0, HERE)
 import padsw
 import plunge
 
+# AFTER `import plunge`, and that is not cosmetic: plunge.py calls set_source
+# at import and would otherwise leave this process claiming to be plunge.py.
+padsw.set_source('c')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 #: coil name -> (kind, switch id, human sentence). `kind` is how the click is
 #: played: "pulse" a momentary switch, "ball" hand off to plunge.py, "lane" the
 #: shooter-lane launch below.

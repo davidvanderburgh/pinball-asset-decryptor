@@ -31,6 +31,7 @@ a real edge. Use it before changing anything the keyboard might also hold.
 import mmap
 import os
 import struct
+import time
 
 #: PAD_SW_FILE points the helpers at a block that is not a running game's, which
 #: is the only way to check any of this without one. The rig never sets it.
@@ -49,7 +50,10 @@ OFF_SCR_GEN = OFF_TAP_READS + 4      # 276  script generation (WE write)
 OFF_SCR_HELD = OFF_SCR_GEN + 4       # 280  script array      (WE write)
 OFF_MRG_GEN = OFF_SCR_HELD + MAX_ID  # 536  merged generation (the shim writes)
 OFF_MRG = OFF_MRG_GEN + 4            # 540  merged array      (the shim writes)
-SIZE = OFF_MRG + MAX_ID              # 796, in a 4096-byte block
+OFF_KBD_SRC = OFF_MRG + MAX_ID       # 796  who padglhost was  (it writes)
+OFF_SCR_SRC = OFF_KBD_SRC + 4        # 800  who WE are         (WE write)
+OFF_GUEST_T0 = OFF_SCR_SRC + 4       # 804  the guest's clock  (the shim writes)
+SIZE = OFF_GUEST_T0 + 4              # 808, in a 4096-byte block
 
 
 def open_block(path=PATH):
@@ -72,8 +76,43 @@ def merged(m, sw):
     return m[OFF_MRG + sw]
 
 
+#: SAY WHO YOU ARE. Every write from this side lands in one array, so the log
+#: cannot tell autoattract's Service Back from a flipper poke unless the writer
+#: says - and a replay that re-delivers autoattract fights the next run's own.
+#: padsw.h has the alphabet and the one case it cannot resolve. `?` is what an
+#: untagged helper gets, which is visible in the log rather than silent.
+_src = ord("?")
+
+
+def set_source(tag):
+    """Declare the writer. PAD_SW_SRC overrides, which is how a wrapper retags
+    a helper it shells out to: autoattract.sh exports PAD_SW_SRC=a and keeps
+    calling the ordinary swpoke.py."""
+    global _src
+    tag = os.environ.get("PAD_SW_SRC") or tag
+    _src = ord(tag[0]) & 0xFF
+
+
+def guest_ms(m):
+    """The guest's own millisecond - the number every `[sw]` line is stamped
+    with - computed here rather than read from a log.
+
+    The shim publishes its pad_ms() origin, and qemu-user runs on this same
+    host, so the guest clock and CLOCK_MONOTONIC here are the SAME counter with
+    a different zero. Truncated to 32 bits exactly as the shim's own arithmetic
+    is, so the two agree even across the wrap. Returns None before the shim has
+    published (the block exists from the moment padglhost opens it, which is
+    ahead of the guest's first SPI transfer).
+    """
+    t0 = struct.unpack_from("<I", m, OFF_GUEST_T0)[0]
+    if not t0:
+        return None
+    return ((time.monotonic_ns() // 1000000) - t0) & 0xFFFFFFFF
+
+
 def bump(m):
-    struct.pack_into("<I", m, OFF_SCR_GEN,
+    struct.pack_into("<I", m, OFF_SCR_SRC, _src)   # before the gen, so the
+    struct.pack_into("<I", m, OFF_SCR_GEN,         # shim's read order works
                      struct.unpack_from("<I", m, OFF_SCR_GEN)[0] + 1)
     m.flush()
 

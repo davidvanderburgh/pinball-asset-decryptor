@@ -40,6 +40,9 @@ import time
 
 import padsw
 
+padsw.set_source('d')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 DEF_MS = (10, 20, 30, 50, 80, 120, 200, 400, 900)
 
 

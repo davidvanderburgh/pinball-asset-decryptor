@@ -40,6 +40,9 @@ import time
 
 import padsw
 
+padsw.set_source('l')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 PATH = padsw.PATH
 MAGIC = padsw.MAGIC
 #: Reads answer "where is the ball as far as the GAME is concerned", so they

@@ -61,7 +61,10 @@ RETURNS=(56 57 46 50 51)             # return lanes, skill shot, mecha exits
 
 pick() { local -n arr=$1; echo "${arr[$((RANDOM % ${#arr[@]}))]}"; }
 
-poke() { python3 "$S/swpoke.py" "$1" "${2:-90}" >/dev/null 2>&1; }
+# PAD_SW_SRC=g tags every shot this script makes as UNATTENDED GAMEPLAY in the
+# guest's [sw] log, so a replay can tell it from a human at the keyboard and
+# from the rig's own boot press. See padsw.h; swreplay.py --list groups by it.
+poke() { PAD_SW_SRC=g python3 "$S/swpoke.py" "$1" "${2:-90}" >/dev/null 2>&1; }
 
 guest_up() { pgrep -f arm-binfmt >/dev/null 2>&1; }
 

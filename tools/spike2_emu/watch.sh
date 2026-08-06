@@ -117,6 +117,31 @@ case "$GAME" in
 esac
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 
+# ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
+#
+# REMAINING item 16 (replay a session from its log) was filed believing this
+# already existed - "the launch line is logged verbatim with PAD_CARD=". It did
+# not: nothing here has ever echoed its own configuration, and PAD_CARD appears
+# in zero of the run logs on this disk. So a log recorded the INPUTS and not the
+# machine they were delivered to, and replaying one meant remembering by hand
+# which card and which flags produced it. The flags are half the experiment in
+# this rig - PAD_VID_ALT_SIZE, PAD_SW_LATCH, PAD_NB_SILENT and PAD_COIL_PROBE
+# each change what the run IS - and a run log that does not name them cannot be
+# reproduced from, only read.
+#
+# Every PAD_* that is set, one per line so it greps and parses, plus the two
+# things that are not environment variables. Values are printed raw: the only
+# PAD_* that is ever a path is a card image, which is exactly what a replay
+# needs to find again.
+echo "[watch] cfg argv=$*"
+echo "[watch] cfg GAME=$GAME"
+echo "[watch] cfg MINS=$MINS"
+for _v in $(set | sed -n 's/^\(PAD_[A-Z0-9_]*\)=.*/\1/p' | sort -u); do
+    eval "_val=\${$_v:-}"
+    [ -n "$_val" ] && echo "[watch] cfg $_v=$_val"
+done
+unset _v _val
+
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""
 # NOTE: CARD_MNT is deliberately NOT reset here - it is set above, and this is
 # below that. See the comment on its declaration.

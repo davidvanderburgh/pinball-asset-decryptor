@@ -104,7 +104,12 @@ booted()  { gs_booted "$LOG"; }
 past()    { gs_past_alerts "$LOG"; }
 probes()  { count 'ExchangeData: read failed'; }
 up()      { pgrep -x game >/dev/null 2>&1; }
-press()   { python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
+# PAD_SW_SRC=a marks the press as THE RIG'S OWN, not a human's, in the guest's
+# [sw] log. It matters for replay (REMAINING item 16): every run does this for
+# itself, so a replay that re-delivers it fights the new run's own autoattract
+# and can walk the game into the service menu - which is exactly what an extra
+# press does, as the header above records. Same swpoke.py, retagged.
+press()   { PAD_SW_SRC=a python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
 
 echo "[auto] waiting for the game to reach its boot screen"
 

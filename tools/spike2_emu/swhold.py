@@ -18,6 +18,9 @@ import sys
 
 import padsw
 
+padsw.set_source('h')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 sw = int(sys.argv[1])
 val = int(sys.argv[2])
 m = padsw.open_block()

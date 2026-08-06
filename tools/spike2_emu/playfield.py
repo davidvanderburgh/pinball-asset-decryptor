@@ -650,8 +650,14 @@ class Field:
                                  daemon=True).start()
 
     def _wsl(self, script, *args):
+        # `env PAD_SW_SRC=f` rather than passing it in the environment: this is
+        # a Windows process calling into WSL, and a Windows variable does not
+        # cross that boundary without WSLENV. The tag is what makes a click here
+        # distinguishable from a keyboard press in the guest's [sw] log, which
+        # is what a replay needs (REMAINING item 16; padsw.h has the letters).
         try:
-            return subprocess.run(["wsl.exe", "-e", "python3",
+            return subprocess.run(["wsl.exe", "-e", "env", "PAD_SW_SRC=f",
+                                   "python3",
                                    "%s/%s" % (WSL_DIR, script)] + list(args),
                                   capture_output=True, timeout=30,
                                   creationflags=_CREATE_NO_WINDOW)
@@ -1034,7 +1040,7 @@ class Schematic:
 
     def _press(self, sw, item):
         try:
-            subprocess.run(["wsl.exe", "-e", "python3",
+            subprocess.run(["wsl.exe", "-e", "env", "PAD_SW_SRC=f", "python3",
                             "%s/swpoke.py" % WSL_DIR, str(sw["id"]),
                             str(PRESS_MS)],
                            capture_output=True, timeout=30,

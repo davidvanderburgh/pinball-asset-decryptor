@@ -1982,6 +1982,12 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8]);
 static int sw_scan_enabled(void);
 static void sw_prime(unsigned nid, const unsigned char bits[8]);
 static unsigned long pad_ms(void);
+/* pad_ms()'s CLOCK_MONOTONIC origin, at file scope rather than a static inside
+ * it so the switch block can publish it. A host-side script that knows this
+ * origin can compute the same millisecond every `[sw]` line is stamped with,
+ * off its own CLOCK_MONOTONIC, with no log to tail - see guest_t0_ms in
+ * padsw.h, and swreplay.py, which schedules a whole session against it. */
+static unsigned long pad_ms_base;
 static void sw_tap(void);
 static void sw_changes(void);
 static void sw_pend_trace(void);
@@ -2004,6 +2010,7 @@ struct padsw_shm {
     unsigned tap_gen; unsigned tap_id; unsigned tap_reads;
     unsigned scr_gen; unsigned char scr_held[256];
     unsigned mrg_gen; unsigned char mrg[256];
+    unsigned kbd_src; unsigned scr_src; unsigned guest_t0_ms;
 };
 #define PADSW_MAGIC 0x53444150u
 
@@ -4161,6 +4168,7 @@ static unsigned char sw_mrg[256];
  * PAD_SW_LATCH=0 turns the whole thing off for an A/B on one build. */
 static int sw_latch_budget = 400;        /* [swlatch] lines; saturates, see below */
 static unsigned char sw_owed[256];       /* a closure still waiting for a scan */
+static unsigned char sw_src[256];        /* who moved it last; see padsw.h     */
 static unsigned char sw_served[256];     /* it has been on the wire as made    */
 static unsigned long sw_made_at[256];    /* when it closed, for the log line   */
 static unsigned long sw_shut_at[256];    /* when it opened again               */
@@ -4187,23 +4195,31 @@ static unsigned sw_latch_scans(void)
 static void sw_shm_merge(void)
 {
     static unsigned seen_k = (unsigned)-1, seen_s = (unsigned)-1;
-    unsigned kg, sg;
+    unsigned kg, sg, ktag, stag;
     int n, moved = 0;
     if (!sw_shm || sw_shm->magic != PADSW_MAGIC) return;
     kg = sw_shm->gen;
     sg = sw_shm->scr_gen;
     if (kg == seen_k && sg == seen_s) return;
     seen_k = kg; seen_s = sg;
+    /* WHO SAID SO. Read here, once, alongside the generations that brought us
+     * in - not per id, which would let a writer's tag change halfway down the
+     * array and split one press across two names. padsw.h has the letters and
+     * the one case this cannot resolve (two scripts inside one merge). */
+    ktag = sw_shm->kbd_src ? sw_shm->kbd_src : '?';
+    stag = sw_shm->scr_src ? sw_shm->scr_src : '?';
     for (n = 0; n < 256; n++) {
         unsigned char k = sw_shm->held[n] ? 1 : 0;
         unsigned char s = sw_shm->scr_held[n] ? 1 : 0;
         unsigned char want = sw_mrg[n];
-        if (k != sw_kbd_prev[n])      want = k;
-        else if (s != sw_scr_prev[n]) want = s;
+        unsigned char src = 0;
+        if (k != sw_kbd_prev[n])      { want = k; src = (unsigned char)ktag; }
+        else if (s != sw_scr_prev[n]) { want = s; src = (unsigned char)stag; }
         sw_kbd_prev[n] = k;
         sw_scr_prev[n] = s;
         if (want != sw_mrg[n]) {
             sw_mrg[n] = want;
+            sw_src[n] = src ? src : '?';
             moved = 1;
             /* The latch bookkeeping lives HERE because this is the only place
              * the merged answer moves, and the merged answer is what the game
@@ -4284,7 +4300,15 @@ static int sw_shm_held(unsigned id)
  * event instead of 3000 ms later, and plunge.py's `-66` was followed by a `+66`
  * nobody asked for.
  *
- * One line per generation bump that changed anything: "[sw] 12345 ms +59 -66".
+ * One line per generation bump that changed anything, and each edge carries the
+ * LETTER OF WHOEVER MOVED IT: "[sw] 12345 ms +59k -66l" is a key press and a
+ * plunge. padsw.h owns the alphabet. That letter is what makes the line
+ * REPLAYABLE rather than merely readable - without it a replay cannot tell
+ * David's flipper from autoattract's Service Back, and re-delivering the second
+ * one fights the next run's own autoattract. `?` means nobody said, which is
+ * either a writer that has not been taught to tag itself or an edge the merge
+ * saw between two tags.
+ *
  * PAD_SW_LOG=0 turns it off; the budget stops a runaway (a stuck writer
  * bumping gen forever) from flooding the log. watch.sh forwards these to its
  * [event] stream. */
@@ -4297,7 +4321,14 @@ static void sw_shm_edges(void)
     char line[160];
     int n, len, count = 0;
     if (on == -1) { char *q = getenv("PAD_SW_LOG"); on = !(q && *q == '0'); }
-    if (!on || budget <= 0 || !sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    if (!sw_shm || sw_shm->magic != PADSW_MAGIC) return;
+    /* The clock goes out even with the log off, because it is not part of the
+     * log: swreplay.py needs the guest's millisecond to schedule against, and a
+     * replay run has every reason to want PAD_SW_LOG on but no reason to
+     * REQUIRE it. pad_ms() first, because the base is armed lazily. */
+    (void)pad_ms();
+    sw_shm->guest_t0_ms = (unsigned)pad_ms_base;
+    if (!on || budget <= 0) return;
     sw_shm_merge();
     if (!primed) {
         for (n = 0; n < 256; n++) prev[n] = sw_mrg[n];
@@ -4309,9 +4340,10 @@ static void sw_shm_edges(void)
         unsigned char cur = sw_mrg[n];
         if (cur == prev[n]) continue;
         prev[n] = cur;
-        if (len < (int)sizeof line - 8)
-            len += snprintf(line + len, sizeof line - len, " %c%d",
-                            cur ? '+' : '-', n);
+        if (len < (int)sizeof line - 10)
+            len += snprintf(line + len, sizeof line - len, " %c%d%c",
+                            cur ? '+' : '-', n,
+                            sw_src[n] ? sw_src[n] : '?');
         count++;
     }
     if (!count) return;
@@ -4516,15 +4548,14 @@ static void sw_watch(void)
 static unsigned long pad_ms(void)
 {
     static int (*cg)(int, void *);
-    static unsigned long base;
     unsigned long t[2] = { 0, 0 };
     unsigned long ms;
     if (!cg) cg = dlsym(RTLD_NEXT, "clock_gettime");
     if (!cg) return 0;
     cg(1 /* CLOCK_MONOTONIC */, t);
     ms = t[0] * 1000ul + t[1] / 1000000ul;
-    if (!base) base = ms;
-    return ms - base;
+    if (!pad_ms_base) pad_ms_base = ms;
+    return ms - pad_ms_base;
 }
 
 /* ---- PAD_AUDIO_DUMP=<seconds> : the audio subsystem, without a crash --------

@@ -48,7 +48,12 @@ import sys
 from collections import defaultdict
 
 RE_SW = re.compile(r'^\[sw\]\s+(\d+)\s+ms\s+(.*)$')
-RE_EDGE = re.compile(r'([+-])(\d+)')
+#: The trailing letter is WHO MOVED IT (padsw.h has the alphabet); it arrived
+#: with the log-replay work and is optional here so this still reads every log
+#: written before it. Captured rather than skipped because "the ladder script
+#: pressed it" and "David pressed it" are different claims about the same
+#: closure, and this tool exists to judge closures.
+RE_EDGE = re.compile(r'([+-])(\d+)([A-Za-z?])?')
 RE_PEND = re.compile(r'^\[swpend\]\s+(\d+)\s+ms\s+id=(\d+)\b.*?\blvl=(\d+)')
 RE_ASK = re.compile(r'^\[ladder\]\s+\d+/\d+\s+round=(\d+)\s+id=(\d+)\s+ask=(\d+)ms')
 
@@ -66,18 +71,21 @@ TAIL_MS = 1500
 def parse(path):
     edges = defaultdict(list)          # id -> [(ms, +1/0)]
     pend = defaultdict(list)           # id -> [(ms, lvl)]
+    srcs = defaultdict(set)            # id -> {the letters that moved it}
     with open(path, 'r', errors='replace') as fh:
         for line in fh:
             m = RE_SW.match(line)
             if m:
                 t = int(m.group(1))
-                for sign, sw in RE_EDGE.findall(m.group(2)):
+                for sign, sw, src in RE_EDGE.findall(m.group(2)):
                     edges[int(sw)].append((t, 1 if sign == '+' else 0))
+                    if src:
+                        srcs[int(sw)].add(src)
                 continue
             m = RE_PEND.match(line)
             if m:
                 pend[int(m.group(2))].append((int(m.group(1)), int(m.group(3))))
-    return edges, pend
+    return edges, pend, srcs
 
 
 def pairs(seq):
@@ -96,7 +104,7 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
-    edges, pend = parse(sys.argv[1])
+    edges, pend, srcs = parse(sys.argv[1])
     asks = defaultdict(list)
     if len(sys.argv) > 2:
         with open(sys.argv[2], 'r', errors='replace') as fh:
@@ -120,8 +128,10 @@ def main():
         ask = asks.get(sw, [])
         aligned = len(ask) == len(ps)
         print()
-        print('=== switch %d: %d closure(s) delivered, %d asked for%s'
+        who = ''.join(sorted(srcs.get(sw, ())))
+        print('=== switch %d: %d closure(s) delivered, %d asked for%s%s'
               % (sw, len(ps), len(ask),
+                 '  moved by [%s]' % who if who else '',
                  '' if aligned or not ask else '  *** MIS-ALIGNED ***'))
         if ask and not aligned:
             print('    The manifest and the log disagree on how many pokes '

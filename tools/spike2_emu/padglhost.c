@@ -820,7 +820,17 @@ static int save_pending;                 /* a ConfigureNotify awaits saving   */
  * there (REMAINING item 7). The scripts have their own array now - see the
  * three-region comment in padsw.h - and the guest merges the two by last edge
  * wins, so this function re-asserting a byte that has not moved is a no-op
- * downstream instead of a stomp. Do not "simplify" it back into one array. */
+ * downstream instead of a stomp. Do not "simplify" it back into one array.
+ *
+ * IT ALSO SAYS WHICH OF ITS THREE SELVES IT IS, in kbd_src, for the log replay
+ * of REMAINING item 16. All three land in held[] and are identical there, and a
+ * replay has to treat them completely differently: a key press is the thing
+ * worth re-delivering, the window-open latch is state the NEXT run will latch
+ * for itself, and PAD_SW_KEYSIM is a diagnostic that should never be replayed
+ * at all. Set sw_src_tag before calling; it is not sticky by accident, the
+ * callers below put it back. */
+static unsigned sw_src_tag = 'k';
+
 static void sw_publish(void)
 {
     unsigned char h[PADSW_MAX_ID];
@@ -834,6 +844,8 @@ static void sw_publish(void)
             if (binds[i].ids[j] < PADSW_MAX_ID) h[binds[i].ids[j]] = 1;
     }
     memcpy(swshm->held, h, sizeof h);
+    swshm->kbd_src = sw_src_tag;         /* BEFORE the bump: the shim reads the
+                                            generation first, then the rest */
     __sync_synchronize();
     swshm->gen++;
 }
@@ -948,7 +960,9 @@ static void sw_keysim(void)
     t = now_s();
     if (t < next_s) return;
     next_s = t + ms / 1000.0;
+    sw_src_tag = 'K';                    /* uppercase: simulated, never replay */
     sw_publish();
+    sw_src_tag = 'k';
 }
 
 static void legend_open(int scr)
@@ -1100,7 +1114,9 @@ static int win_open(void)
         int i;
         for (i = 0; i < NBINDS; i++) if (binds[i].toggle) key_latch[i] = 1;
     }
+    sw_src_tag = 'w';                    /* not a key press - see sw_publish() */
     sw_publish();
+    sw_src_tag = 'k';
     if (getenv("PAD_GL_LEGEND") == 0 || getenv("PAD_GL_LEGEND")[0] != '0')
         legend_open(scr);
     /* Both windows are mapped by here; the delayed restore counts from now. */

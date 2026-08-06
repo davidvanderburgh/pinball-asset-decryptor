@@ -19,6 +19,9 @@ import struct
 
 import padsw
 
+padsw.set_source('i')   # who the [sw] log says moved a switch;
+                        # PAD_SW_SRC overrides. See padsw.h.
+
 REST = [33, 66, 67, 68, 69, 70, 71]
 
 buf = bytearray(4096)

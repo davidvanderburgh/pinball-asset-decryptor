@@ -15,7 +15,15 @@ These have each been violated at least once and each cost a run or a window:
   guest can kill it. `build.sh` / `buildbridge.sh` only between runs.
 - **NEVER wrap a run in `timeout`.** It leaks 140%-CPU processes forever. Use
   `runlim.sh` / `killgame.sh`.
-- **`alive.sh` must print 0 after every run.** Confirm it, do not assume it.
+- **`alive.sh` must print 0 after every run.** Confirm it, do not assume it —
+  **and confirm it FROM INSIDE WSL.** `wsl -e bash .../alive.sh`, never from
+  Git Bash: Git Bash's `pgrep` sees only Windows processes, so every pattern
+  misses and it prints `TOTAL STILL RUNNING : 0  (clean)` over a fully live
+  rig. `killgame.sh` the same way prints `killed 0; still running: 0`, which
+  reads like success. On 2026-08-06 that pair of confident zeros led to a
+  SECOND full run being started on top of a live one — two guests, two
+  padglhosts, two padvidhosts on one ring. Both scripts now test for a
+  readable `/proc` and **refuse with exit 2** rather than reassure.
 - **Never let two scripts define the same fact.** `alive.sh` vs `killgame.sh`
   disagreed about what a running rig is; `autoattract.sh` vs `status.sh`
   disagreed about what "past Tech Alerts" means, so the app showed "Waiting at
@@ -132,17 +140,44 @@ These have each been violated at least once and each cost a run or a window:
       good frame instead; channel stealing is now least-recently-used rather than
       first-in-array; and `padglhost` drops a mismatched upload outright
       (`PAD_VID_NOSIZEGUARD=1` to A/B it on one build).
+      **★★ CONFIRMED ON THE REAL TAUNT, IN A REAL GAME.** The 520x294 clips
+      served were `4e0bf266.../scene.assets/35.asset/0.asset` and `1.asset` —
+      the Planet X Controller taunt itself — and both guards fired on it:
+      `[vid] ch2 NOT MINE ANY MORE: the game holds 520x294 but this channel now
+      serves 1360x768. Holding the last frame after 0.` plus the host's
+      `WRONG-SIZE ... read from ch2 slot2`. So the route IS channel takeover,
+      not merely something that produces the same disagreement.
+      **"After 0" is the sting:** the taunt lost its channel before it played a
+      single frame, so the corruption is gone but the inset was blank rather
+      than playing. The cause is a burst — the scene builds THREE pipelines in
+      130 ms (padvid at 223.49/223.56/223.62) — against only four channels.
+      Hence `PADVID_CHANNELS` 4 → 8 (padvid.h **v3**, header 4096 → 8192 because
+      eight 564-byte structs no longer fit; the static assert caught it).
+      **Fixed:** `gstvid.c` records the size the GAME was told (`told_w/told_h`,
+      set in `pad_vid_get_int` — NOT at prepare(), which re-runs on every rewind
+      and would keep the field uselessly in step with the channel) and refuses
+      to hand over a frame once the channel serves something else; a **request-
+      generation check** beside it catches a SAME-SIZE takeover, which the size
+      check cannot see and which most of this game's clips would be; stealing is
+      least-recently-used **with fresh streams protected** (bumping `last_use` on
+      create and prepare — without that, LRU picks the NEWEST stream, which was
+      my own regression and the exact wrong end for a 130 ms burst); and
+      `padglhost` drops a mismatched upload outright (`PAD_VID_NOSIZEGUARD=1`).
       **Committed:** `longplay.sh` (`355e0bd`), the control-tested findings
       (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (`4dab1ad`),
-      `framewidth.py` + the 1360 finding (`ccce594`), the fix (this pass).
-      **Resume:** normal attract is verified unbroken with the fix in (video
-      plays, no warnings, `fix_normal_1.png`). What is left is the ALT_SIZE
-      re-run that must show `NOT MINE ANY MORE` firing and no wrong-size upload
-      surviving it. **The one thing still not proven** is that the real taunt
-      reaches the fault by this exact route rather than some other way into the
-      same disagreement; the fix does not depend on that, because it checks the
-      disagreement itself.
-      **No live run left behind** — `alive.sh` is 0.
+      `framewidth.py` + the 1360 finding (`ccce594`), the guards (`36d82a1`),
+      8 channels + the alive.sh safety fix (`c389572`).
+      **Verified so far:** normal attract unbroken (12 streams, video playing,
+      zero guard trips, `fix_normal_1.png`); ALT_SIZE reproduction goes from
+      repeated wrong-size uploads to **zero**, caught by the guest guard; and an
+      in-game 520x294 upload measures **TRUE WIDTH 520 (2.57 vs shuffled 35.37)**
+      on `framewidth.py`, against 1360 before.
+      **Resume:** the last acceptance test is whether, with 8 channels, the
+      taunt now PLAYS — `serving 520x294` followed by frames actually consumed
+      and NO `NOT MINE`. Run `watch.sh` then `longplay.sh <log> 13 520x294`;
+      the taunt fired ~223 s in last time. If it still gets stolen, the next
+      lever is not more channels but releasing a stream's slot when its
+      pipeline is torn down.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is

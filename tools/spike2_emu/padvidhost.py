@@ -500,9 +500,18 @@ def serve(m, c, path, w, h, native):
             produced += 1
             put(m, c, "write_idx", produced)
     finally:
+        # Kill, but REAP ASYNCHRONOUSLY. This finally runs on every serve
+        # exit including supersede and guest-stop, and chan_loop cannot see
+        # the NEXT request (often already pending - a transition stands the
+        # old clip down and asks for the new one in the same breath) until
+        # it runs. The synchronous wait() cost ~30 ms per re-arm, measured
+        # off run 4's adopt telemetry (2026-08-06): waits sat at a ~35 ms
+        # floor with the probe already free, and the decomposition left
+        # only this reap plus notice latency. A daemon thread reaps the
+        # corpse so nothing zombies, and nobody waits.
         try:
             proc.kill()
-            proc.wait(timeout=5)
+            threading.Thread(target=proc.wait, daemon=True).start()
         except Exception:                           # noqa: BLE001
             pass
 

@@ -773,22 +773,91 @@ These have each been violated at least once and each cost a run or a window:
       52.9/63.1 inherit that as MAGNITUDES (the in-place regression stays
       real — its mechanism was proven, delivery stood down). Judging this
       fix needs multi-window medians or the adopt-wait lines themselves.
-      **A LIVE RUN may be up when this is read: RUN 3** (watch.sh 10 min,
-      PREARM=1 TICK=1, adopt telemetry build, game + 6 min longplay,
-      started ~18:50 2026-08-06; two 60 s 60 fps captures fire at ~2.5 and
-      ~4.5 min into the session scratchpad as `tick60_run3_a/b.mkv`).
-      **Resume:** read run 3's `[vid] chN ADOPT ... waited N ms` lines —
-      the adoption rate across the 98-ish transitions and the wait
-      distribution (0 ms = the cold start fully hidden) ARE the verdict.
-      Then: high adoption + near-zero waits ⇒ flip `prearm_on()` default
-      ON, commit, push. Low adoption or real waits ⇒ leave opt-in and take
-      the deeper route David pointed at (2026-08-06): make the HOST decoder
-      seekable — a persistent decoder per channel instead of one ffmpeg per
-      request — emulating what the i.MX6 VPU actually provides (cheap seek,
-      fast preroll). That route also erases the LOOP-WRAP seam (35-71 ms at
-      every clip loop), which the pre-arm cannot touch by design (no
-      location change to arm on) and which longplay's gap lines say is the
-      bulk of the remaining holds.
+      **★★ RUN 3 (adopt telemetry): 97 location changes → 97 arms → 97
+      ADOPTS, 0 wasted — adoption is 100% and the machinery is flawless —
+      AND THE PRE-ARM HIDES ALMOST NOTHING: adopt waits min 29 / med 60 /
+      max 86 ms, the SAME distribution as ordinary prepares.** Two facts
+      fall out, and they redirect the fix:
+      • **The "30-70 ms location→prepare budget" this design was built on
+      DOES NOT HOLD on this path** — the game's prepare follows the
+      location-set within a couple of ms, so the armed decode has no window
+      to warm up in.
+      • **The wait decomposes as the HOST'S FIRST-SIGHT FFPROBE (25-40 ms,
+      spawned synchronously before the ack the game's UI thread spins on)
+      plus supersede/kill overhead.** The probe CACHE (`(path,size,mtime)`)
+      only ever helped repeat serves; a transition is by definition
+      first-sight, so every transition paid the spawn. THAT is the
+      transition cost, not ffmpeg's decode cold start.
+      **THE FIX THAT FOLLOWS: a native MP4 header parse in padvidhost.py's
+      probe path** — width/height from the stsd sample entry, nframes and
+      the rate from stts against the mdhd timescale, microseconds instead
+      of a 25-40 ms spawn, ffprobe kept as a loud fallback
+      (`PAD_VID_NO_MP4PARSE=1` reverts). Helps EVERY serve: transitions,
+      loop wraps, event fragments. Host-side Python only, no guest rebuild
+      — watch.sh runs padvidhost.py straight from the repo.
+      **VALIDATED AND COMMITTED, `76363db`: 658 video clips, five numbers
+      IDENTICAL to ffprobe on every one, zero declines; 897 non-video
+      assets refused by both sides; 0.4 s total against ffprobe's 42.8 s.**
+      ffprobe stays as the loud fallback; `PAD_VID_NO_MP4PARSE=1` reverts.
+      Host-side only — no shim rebuild.
+      **★ RUN 4 (parser live): adopt waits med 60 → 35 ms, max 86 → 61,
+      mean 56.5 → 35.6, over 102/102 adoptions with ZERO parse declines**
+      — the parser removed exactly the probe's share. **The ~35 ms floor
+      that remains was then decomposed off the same telemetry: serve()'s
+      `finally` did `proc.kill(); proc.wait()` SYNCHRONOUSLY, so
+      chan_loop could not even SEE a pending arm until the dead ffmpeg
+      was reaped (~30 ms), on every re-arm — transitions, loop wraps,
+      everything.** Fixed: kill, reap on a daemon thread, nobody waits
+      (padvidhost.py, host-only). Run 5 verifies it.
+      **Run 4 also logged ONE `WRONG-SIZE` upload — examined, NOT a
+      refactor fault:** a stale game element re-uploaded its old
+      1360x768 pointer from a ring channel that had moved on to 520x294;
+      the size guard REFUSED it, which is its job, and the element keeps
+      its last-good texture. Same hazard class the LRU steal always had;
+      channel moves make it slightly more frequent; the guard makes it
+      harmless. NOTE the guard's log dedups per (channel, size) — a count
+      of 1 line is not a count of 1 event.
+      **RUN SHAPE, per David 2026-08-06: runs are now 4 MINUTES** —
+      watch.sh 4, ~45 s boot, recipe, 2 min longplay. The 10-minute shape
+      existed for tickcensus captures; the adopt-wait telemetry needs
+      only a few dozen transitions and 2 min of churn provides them. Do
+      not run long by default.
+      **★ RUN 5 (async reap, first 4-minute run): adopt waits med 31 /
+      mean 32.2 / max 54 — the reap bought ~3 ms, NOT the ~30 predicted,
+      so that theory is mostly DEAD.** (The change stays: it is strictly
+      correct and free.) 45/45 adoptions, 0 wasted, 0 declines, 0
+      wrong-size, rig clean. **A ~30 ms ack floor remains, and it is
+      UNDECOMPOSED: either the host's notice→ack path is slower than its
+      code reads, or the guest's `usleep(1000)` spin iterations cost more
+      than 1 ms under qemu and the printed "ms" over-counts.** The two
+      are told apart by ONE cheap instrument: a host-side log of
+      request-noticed→ack-published per serve, diffed against the guest's
+      spin count on the same serves.
+      **PAD_VID_PREARM STAYS OPT-IN, decided on measurement:** with the
+      probe free, an armed prepare's edge over an ordinary one is only
+      the 2-5 ms arm→prepare head start — within noise of the ~30 ms
+      floor. The machinery is committed, safe (100% adoption, 0 wasted
+      across three runs), and worth keeping for the day the floor drops.
+      The PARSER was the real win of the pass: every serve's UI-thread
+      block lost the 25-40 ms probe — transitions, loop wraps, fragments.
+      **What a transition still costs, fully priced:** ~30 ms ack floor
+      (above, undecomposed) + ~35 ms ffmpeg cold start to first frame
+      (census: 32-40 ms, unchanged). Worst delivery gaps under churn now
+      80-173 ms against 132-206 before the pass.
+      **Resume:** build the notice→ack instrument (one log line in
+      chan_loop where it flips from waiting to processing, one at ack;
+      host-only, no rebuild) and run 4 minutes. If the host is fast and
+      the guest's spin over-counts, the floor is an accounting artifact
+      and the REAL gap is nearer 35-40 ms — re-price before building
+      more. If the host is slow, find where. THEN the persistent seekable
+      decoder (below) for the ffmpeg cold start, which is the last
+      structural cost and also erases the loop-wrap seam.
+      **The deeper route regardless, David's hardware point (2026-08-06):
+      the real Spike 2 is an i.MX6 whose VPU seeks cheaply and prerolls in
+      ms; a persistent seekable decoder per channel would emulate that
+      instead of compensating for it, and would also erase the loop-wrap
+      seam the pre-arm cannot touch by design (no location change to arm
+      on).**
       *(A much older "Resume: fix the REWIND path" instruction stood here —
       DONE long since, `cef2627`; the live Resume is the one above.)*
       **The recipe that reaches a stable game, verified 2026-08-06:**

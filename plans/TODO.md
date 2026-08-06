@@ -573,14 +573,30 @@ These have each been violated at least once and each cost a run or a window:
         gameplay run. The host decoder is never behind.
       • **The recorder perturbing it.** The dips are identical with no
         capture running (one window fell to 14.3/s).
-      **WHAT IS LEFT, and it is the only thing left: GL-BRIDGE BACK
-      PRESSURE.** The guest's video handoff calls the game, which uploads and
-      emits TEXDIRECT into the padgl ring; if padglhost's per-frame work
-      overruns a 16.7 ms vsync, the ring backs up and the guest's video
-      thread is held late — which is exactly the observed lockstep of 54 fps
-      with 27/s. **CANDIDATE, not established:** the I420→RGB conversion and
-      upload in padglhost is the per-frame cost to measure first. Time the
-      TEXDIRECT branch and the swap separately before changing anything.
+      **★ GL BACK PRESSURE IS ALSO RULED OUT — runs 9-10 timed it.**
+      padglhost's per-frame cost is **conv 0.70-0.85 ms + swap 3.70-3.83 ms
+      against a 16.7 ms budget**, flat in the bad seconds as well as the
+      good. It is never the bottleneck; when its fps reads 55-57 it is
+      WAITING for guest commands, so **padglhost's fps is a readout of the
+      GUEST's render rate, not of the renderer.** Do not re-time it.
+      **GUEST HANDOFF SPACING IS NOW MEASURED, and it splits by condition:**
+      • idle game: **worst gap 33 ms, 0 late, 0 early** — textbook.
+      • under scene churn (longplay): **exactly ONE late gap per 2 s, of
+        46-223 ms**, rate 27.1-29.9/s.
+      So the guest contributes a real but INTERMITTENT hiccup, roughly
+      0.5-3 frames/s, and the screen shows **5.6 holds/s**. Those do not
+      reconcile, so **something after the handoff is still unaccounted for**
+      and it is the last unmeasured link.
+      **THE LAST UNMEASURED LINK, and the next measurement: SWAPS PER VIDEO
+      FRAME at padglhost.** It renders 60/s and video arrives 30/s, so every
+      video frame should occupy exactly TWO swaps; a frame occupying 3-4 is
+      an on-screen hold, measured at the point of display rather than
+      inferred. Count the distribution in padglhost (swaps since the last
+      TEXDIRECT with a new ring offset) and report it beside conv/swap. That
+      number is directly comparable with `dupcensus.py`'s holds/s, which is
+      what makes it the right next step: if they agree, the hold is born in
+      the renderer's timing relative to arrivals; if the swap distribution
+      is clean while the screen still holds, only presentation is left.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -597,9 +613,9 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** time padglhost's per-frame work — TEXDIRECT (I420→RGB
-      convert + upload) against the rest of the swap — and find what pushes
-      it past 16.7 ms in the bad seconds. The agent can now run the whole
+      **Resume:** count SWAPS PER VIDEO FRAME in padglhost (see above) and
+      compare it with `dupcensus.py`'s holds/s on the same run. The agent can
+      now run the whole
       loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
       game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
       `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and

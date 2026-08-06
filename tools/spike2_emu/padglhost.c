@@ -171,6 +171,9 @@ static long frames_done;
 /* item 11: video frames uploaded, and how many carried a NEW ring offset. */
 static long vid_uploads, vid_distinct;
 static unsigned vid_last_off = 0xffffffffu;
+/* item 11: where padglhost's per-frame time goes. */
+static double conv_us, swap_us;
+static double now_s(void);
 static const char *dump_dir;
 static int dump_every = 30, dump_max = 40, dumped;
 static long unknown_ops;
@@ -1416,7 +1419,13 @@ static void win_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
-    eglSwapBuffers(egl_dpy, egl_surf);
+    {   /* item 11: how long the swap BLOCKS. At 60 Hz a healthy swap parks
+         * here until vsync, so a big number is normal - what matters is the
+         * total, against the 16.7 ms budget, next to the convert cost. */
+        double t = now_s();
+        eglSwapBuffers(egl_dpy, egl_surf);
+        swap_us += (now_s() - t) * 1e6;
+    }
 
     p_glBindTexture(0x0DE1, (unsigned)tex0);
     p_glActiveTexture((unsigned)act);
@@ -1760,7 +1769,9 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         if (fmt == 0x1908u) {                        /* GL_RGBA */
             rgba = yuv;
         } else if (fmt == PADGL_VIV_I420) {
-            rgba = i420_to_rgba(yuv, w, h);
+            {   double t = now_s();
+                rgba = i420_to_rgba(yuv, w, h);
+                conv_us += (now_s() - t) * 1e6; }
         } else {
             static int moaned;
             if (!moaned) { moaned = 1;
@@ -2159,12 +2170,17 @@ int main(int argc, char **argv)
             if (now_s() - last_report >= 2.0) {
                 double dt = now_s() - last_report;
                 static long last_up, last_dist;
+                long nf = frames_done - last_frames;
                 fprintf(stderr, "[padglhost] %.1f fps (%ld frames total)"
-                        "  vid %.1f uploads/s %.1f NEW/s\n",
-                        (frames_done - last_frames) / dt, frames_done,
+                        "  vid %.1f uploads/s %.1f NEW/s"
+                        "  conv %.2f ms/f  swap %.2f ms/f\n",
+                        nf / dt, frames_done,
                         (vid_uploads - last_up) / dt,
-                        (vid_distinct - last_dist) / dt);
+                        (vid_distinct - last_dist) / dt,
+                        nf ? conv_us / nf / 1000.0 : 0.0,
+                        nf ? swap_us / nf / 1000.0 : 0.0);
                 last_up = vid_uploads; last_dist = vid_distinct;
+                conv_us = swap_us = 0;
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();
             }

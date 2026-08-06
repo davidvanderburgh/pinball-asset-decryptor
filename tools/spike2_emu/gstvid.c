@@ -646,21 +646,44 @@ static void *vid_thread(void *arg)
             {
                 static unsigned long said_at[PADVID_CHANNELS];
                 static unsigned said_n[PADVID_CHANNELS];
+                static unsigned long prev_hand[PADVID_CHANNELS];
+                static unsigned late_n[PADVID_CHANNELS];
+                static unsigned early_n[PADVID_CHANNELS];
+                static unsigned long worst[PADVID_CHANNELS];
                 int ch = chan_of(s);
                 unsigned long nowu = vid_us();
                 said_n[ch]++;
+                /* ★ SPACING, NOT RATE. The rate can average a healthy 30/s
+                 * while the SPACING alternates short/long, and the screen
+                 * then shows one frame for a single refresh and the next for
+                 * three - which reads exactly as the stutter David sees. The
+                 * rate alone said 28-30/s, far too few missing frames to
+                 * explain 5.6 repeats a second on screen, so the spacing is
+                 * the remaining suspect. A frame is LATE past 1.4 periods
+                 * and EARLY under 0.6. */
+                if (prev_hand[ch]) {
+                    unsigned long gap = nowu - prev_hand[ch];
+                    if (gap > (unsigned long)delay * 14 / 10) late_n[ch]++;
+                    else if (gap < (unsigned long)delay * 6 / 10) early_n[ch]++;
+                    if (gap > worst[ch]) worst[ch] = gap;
+                }
+                prev_hand[ch] = nowu;
                 if (!said_at[ch]) said_at[ch] = nowu;
                 else if ((long)(nowu - said_at[ch]) >= 2000000) {
-                    char m[96];
+                    char m[152];
                     unsigned long el = nowu - said_at[ch];
                     snprintf(m, sizeof m,
                              "[vid] ch%d handed the game %u frames in %lu ms"
-                             " (%lu.%lu/s)\n", ch, said_n[ch], el / 1000,
+                             " (%lu.%lu/s)  late %u  early %u  worst gap"
+                             " %lu ms\n", ch, said_n[ch], el / 1000,
                              (unsigned long)(said_n[ch] * 1000000ul / el),
-                             (unsigned long)(said_n[ch] * 10000000ul / el) % 10);
+                             (unsigned long)(said_n[ch] * 10000000ul / el) % 10,
+                             late_n[ch], early_n[ch], worst[ch] / 1000);
                     pad_say(m);
                     said_at[ch] = nowu;
                     said_n[ch] = 0;
+                    late_n[ch] = early_n[ch] = 0;
+                    worst[ch] = 0;
                 }
             }
             s->last_use = ++use_tick;

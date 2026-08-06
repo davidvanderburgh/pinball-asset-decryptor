@@ -146,6 +146,7 @@ struct stream {
     unsigned delivered;
     unsigned prep_streak;
     char prep_path[PADVID_PATH_MAX];
+    unsigned seek_absorbed;     /* redundant rewinds swallowed; see pad_vid_seek */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
     void *buf;                  /* this stream's GstBuffer                   */
@@ -628,6 +629,40 @@ int pad_vid_prepare(void *pipeline)
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[chan_of(s)];
 
+    /* ★ ITEM 11, THE STATE-PATH HALF: A RE-ARM OF A CLIP THAT IS STILL
+     * PLAYING THE SAME FILE IS ABSORBED, exactly like the rewind absorb in
+     * pad_vid_seek() and for the same reason seen from the other caller.
+     *
+     * At a clip-to-clip transition the game re-arms the OUTGOING pipeline
+     * (set_state(PAUSED), no stop first - gststub.c) BEFORE it sets the new
+     * location. A real pipeline answers PAUSED by holding position; this
+     * host cannot seek, so prepare() restarts ffmpeg from frame 0 and the
+     * outgoing clip visibly jumps back to its own start. David watched it
+     * live 2026-08-06 - "the last 500ms - 1 second of a video stutters
+     * before the next one loads in" - and his session log shows ch0 283
+     * frames into 2.asset/290.asset being re-served the same file from 0,
+     * with the real next clip arriving 1.3 s later. Keeping the in-flight
+     * serve IS the PAUSED-holds-position semantics, to within the frames the
+     * thread keeps delivering.
+     *
+     * A location CHANGE fails the path check and re-arms; a stopped stream
+     * (playing==0, i.e. after EOS or a real stop) re-arms. What is lost is a
+     * true freeze - a game that sets PAUSED and STAYS paused would see the
+     * clip keep advancing - but this game's churn goes straight back to
+     * PLAYING, and the alternative was the jump-back. */
+    if (s->playing && str_eq(s->prep_path, s->location)) {
+        s->seek_absorbed++;
+        if (s->seek_absorbed == 1)
+            VLOG("[vid] ch%d state re-arm of the clip it is already playing "
+                 "(delivered %u); absorbing it\n", chan_of(s), s->delivered);
+        return 1;
+    }
+    if (s->seek_absorbed) {
+        VLOG("[vid] ch%d absorbed %u redundant re-arms while it played\n",
+             chan_of(s), s->seek_absorbed);
+        s->seek_absorbed = 0;
+    }
+
     /* item 11's runaway detector - see "WHY a channel is being re-armed". */
     if (str_eq(s->prep_path, s->location) && s->delivered <= 1) {
         s->prep_streak++;
@@ -643,6 +678,23 @@ int pad_vid_prepare(void *pipeline)
         s->prep_streak = 0;
         str_copy(s->prep_path, s->location, sizeof s->prep_path);
     }
+
+    /* ★ ITEM 11's SECOND STATE-PATH DEFECT: THE ARMED-BUT-UNPLAYED STALL.
+     *
+     * From here down this call is committed to re-arming the channel, which
+     * dooms any thread still running - it will stand down on the req_gen
+     * check the moment it wakes. But "the moment it wakes" is up to 33 ms
+     * away, and the game's set_state(PLAYING) arrives well inside that -
+     * and pad_vid_play() declines while s->playing is still 1. The new arm
+     * was then served by the host into a 4-slot ring that NOBODY drained:
+     * that is the `superseded while throttled after 4 frames` line all over
+     * every run log, a stalled picture until the game's SECOND
+     * PAUSED->PLAYING cycle landed, and the serve-pairs at every transition.
+     * Clearing the flag here makes the play() that follows a prepare always
+     * start the thread; a repeated PLAYING with no prepare in between is
+     * still declined, which is what the flag was for. The orphaned thread
+     * exits on run_id/req_gen and touches nothing on its way out. */
+    s->playing = 0;
 
     /* RESET THE POSITION HERE, not just in pad_vid_play().
      *
@@ -893,6 +945,56 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
     if (pos_ns != 0)
         VLOG("[vid] ch%d seek to %u ms requested; only rewind is supported, "
              "restarting from 0\n", chan_of(s), (unsigned)(pos_ns / 1000000ll));
+
+    /* ★ ITEM 11'S FIX: A REDUNDANT REWIND IS ABSORBED, NOT SERVED.
+     *
+     * The 2026-08-06 gameplay log answered the caller= question: both storms
+     * were caller=rewind, 93 and 56 prepares, one seek per ~33 ms - the game's
+     * own 30 fps tick. Each seek killed the host's ffmpeg MID-COLD-START
+     * (~35 ms to first frame, measured) and re-armed it, so no arm ever got
+     * past frame 0: the picture froze on the clip's first frame for the whole
+     * storm and the UI thread ate a blocking prepare per tick. The storm ended
+     * exactly when one arm finally delivered the full clip - which is the
+     * observation this fix turns into policy.
+     *
+     * A rewind that arrives while this stream is STILL PLAYING THE SAME FILE
+     * is absorbed outright: answer yes, touch nothing. The one arm in flight
+     * plays the clip to its real end, the thread stands down (playing=0), and
+     * the game's NEXT seek re-arms legitimately - one serve per actual loop,
+     * which is the cadence a real looping pipeline has.
+     *
+     * THE FIRST VERSION OF THIS GUARD WAS delivered <= 1 AND IT WAS MEASURED
+     * TOO NARROW, on 2026-08-06's confirming run: the game seeks every tick
+     * for the WHOLE scene step, not just until frames flow, so the cycle
+     * became re-arm, absorb 4, re-arm - ~70 engagements, and the HOST's own
+     * storm detector still fired twice with one file served 41 times. The
+     * storm was slowed, not stopped. Playing-same-path is the predicate that
+     * matches the game's actual behaviour.
+     *
+     * WHAT THIS CANNOT TOUCH, checked case by case: a normal loop-at-EOS seek
+     * arrives with playing==0 (vid_thread stands down BEFORE posting EOS -
+     * see the comment there), so it re-arms as before; a 1-frame clip looping
+     * is the same shape, playing==0, untouched; a location CHANGE fails the
+     * path check and re-arms as before. The one case genuinely altered is a
+     * deliberate mid-clip restart of a still-playing clip: it is answered
+     * "you are at 0" while the clip carries on from where it was. No such
+     * seek has ever been observed outside the storm - the game loops via EOS
+     * - and the alternative was the freeze this fix exists to remove. If a
+     * scene ever visibly fails to restart an in-flight clip, this line is
+     * where to look. */
+    if (s->playing && str_eq(s->prep_path, s->location)) {
+        s->seek_absorbed++;
+        if (s->seek_absorbed == 1)
+            VLOG("[vid] ch%d rewind while the last rewind is still arming "
+                 "(delivered %u); absorbing it\n", chan_of(s), s->delivered);
+        s->pos_ns = 0;
+        return 1;
+    }
+    if (s->seek_absorbed) {
+        VLOG("[vid] ch%d absorbed %u redundant rewinds while arming\n",
+             chan_of(s), s->seek_absorbed);
+        s->seek_absorbed = 0;
+    }
     pad_vid_stop(pipeline);
     /* Name the caller for the re-arm storm line. The two callers of prepare()
      * want opposite fixes - a game re-arming a pipeline it already has is not

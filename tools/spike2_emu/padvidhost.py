@@ -289,6 +289,21 @@ def serve(m, c, path, w, h, native):
     view = memoryview(buf)
     produced = 0
     gen = get(m, c, "req_gen")
+    # ---- THE CONSUME-GAP CENSUS (item 11). David, watching the fixed build
+    # live: only the VIDEO content hitches, the rest of the window stays
+    # smooth - so the residual fault is gaps in frame DELIVERY, and this is
+    # the cheap side of the boundary to measure them from. Two numbers:
+    #   * serve start -> the guest consuming its first frame, which prices the
+    #     cold start (spawn + container parse + first decode + guest wake) that
+    #     every clip-fragment CUT pays - the game chains sub-second fragments
+    #     during events, so this gap peppers exactly the moments David reports;
+    #   * a mid-clip consume stall: the ring full, the guest not draining for
+    #     longer than several frame periods. That is the guest's delivery
+    #     thread or the game's handoff blocked, which no host number could
+    #     otherwise see. Budgeted per serve so a wedged guest cannot flood.
+    t_serve = time.monotonic()
+    first_consumed = False
+    stall_budget = 5
     try:
         while True:
             if get(m, c, "req_gen") != gen:
@@ -300,6 +315,7 @@ def serve(m, c, path, w, h, native):
             # Block while the ring is full. Throttling the DECODER is right:
             # dropping frames here would show as a stutter with no way to tell
             # it from a decode problem.
+            t_stall = time.monotonic()
             while produced - get(m, c, "read_idx") >= SLOTS:
                 if get(m, c, "req_gen") != gen:
                     log("ch%d superseded while throttled after %d frames" % (c, produced))
@@ -308,6 +324,19 @@ def serve(m, c, path, w, h, native):
                     log("ch%d guest stopped while throttled after %d frames" % (c, produced))
                     return
                 time.sleep(0.002)
+            if not first_consumed and get(m, c, "read_idx") > 0:
+                first_consumed = True
+                log("ch%d first frame consumed %.0f ms after serve start"
+                    % (c, (time.monotonic() - t_serve) * 1000.0))
+            else:
+                # The ring holds SLOTS frames, so a healthy guest drains one
+                # per frame period and a full ring clears in ~33 ms. Waiting
+                # several periods means the guest stopped consuming mid-clip.
+                waited = time.monotonic() - t_stall
+                if waited > 0.150 and stall_budget > 0:
+                    stall_budget -= 1
+                    log("ch%d guest consume STALLED %.0f ms at frame %d"
+                        % (c, waited * 1000.0, produced))
             got = 0
             while got < frame_bytes:
                 n = proc.stdout.readinto(view[got:])

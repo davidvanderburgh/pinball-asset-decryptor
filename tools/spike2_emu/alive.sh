@@ -82,10 +82,25 @@ AUD=$((AUD + $(n -f 'padrelay\.py') + $(n -f 'padplay\.py') + $(n -f 'playaudio\
 # this script never counted it - a leaked one holds an ffmpeg per clip.
 VID=$(n -f 'padvidhost\.py')
 
-# The two helpers a watch.sh run starts and kills: the Tech-Alerts advancer,
-# and the `tail -F | awk` event feed. An orphaned `tail -F` never exits by
-# itself, which is exactly the shape that hides here forever.
-HELP=$(( $(n -f 'autoattract\.sh') + $(n -f '^tail -q -n 0 -F /home/david/padvid\.log') ))
+# The helpers a watch.sh run starts and kills: the Tech-Alerts advancer, and
+# the `tail -F | awk` event feed. An orphaned `tail -F` never exits by itself,
+# which is exactly the shape that hides here forever.
+#
+# longplay.sh is counted here too even though watch.sh does not start it. It is
+# started BESIDE a run, it pokes switches on a timer, and a leaked one would go
+# on pressing ramp optos into the NEXT run - a fault that would look like the
+# game doing something by itself. It exits when the guest goes away, so a
+# nonzero count here means that check failed.
+#
+# `^bash [^ ]*longplay\.sh` and NOT `longplay\.sh`, and this script's own header
+# says why: the loose pattern matched the interactive shell that merely had the
+# name on its command line, and alive.sh then reported 1 with the machine
+# genuinely clean. A false positive is as corrosive as a false negative here -
+# "alive.sh must print 0 after every run" is worthless if it cannot. The
+# character class is what rejects a wrapper (`bash -lc '... bash longplay.sh'`)
+# while still matching the real `bash /path/to/longplay.sh`.
+HELP=$(( $(n -f 'autoattract\.sh') + $(n -f '^tail -q -n 0 -F /home/david/padvid\.log') \
+         + $(n -f '^bash [^ ]*longplay\.sh') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
 #
@@ -158,7 +173,7 @@ printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|playfield\.py|watch\.sh|fuse2fs' \
+    | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|watch\.sh|fuse2fs' \
     | grep -v grep | head -12
   mountpoint -q /home/david/card 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'

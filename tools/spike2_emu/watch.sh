@@ -154,6 +154,13 @@ teardown() {
     pkill -9 -f 'padvidhost.py' 2>/dev/null
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
     pkill -9 -f 'autoattract.sh' 2>/dev/null
+    # longplay.sh is started BESIDE a run rather than by it, so it has no pgid
+    # here - but a leaked one keeps poking ramp optos, and it would do that
+    # into the NEXT run. It watches the guest and exits on its own; this is the
+    # backstop for when that check is the thing that broke.
+    # Anchored the same way alive.sh counts it: an unanchored 'longplay.sh'
+    # matches any shell with the name on its command line, and this one KILLS.
+    pkill -9 -f '^bash [^ ]*longplay\.sh' 2>/dev/null
     # $EVTPG is the awk at the END of the event pipeline (that is what $! means
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.

@@ -90,6 +90,47 @@ These have each been violated at least once and each cost a run or a window:
       separately because the acceptance conditions differ and because burying a
       severe gameplay fault inside an item that reads as 90% done would hide it.
 
+- [ ] **16. Log replay mode: re-run a session's switch inputs from its log.** `D4`
+      — the parse and the driver are desk work on a primitive that is already
+      validated, but confirming it takes runs, the log needs a new field first
+      (a guest-side change and a rebuild), and the comparator does not exist yet.
+      **The want:** point the rig at a previous run's log and have it re-deliver
+      that run's switch inputs at the same offsets, so getting back to a fault
+      does not mean re-doing coin/start/plunge and a hundred flipper presses by
+      hand. **The sample log is already MOSTLY enough**, which is the useful
+      finding: `[sw] 24141 ms +28` / `-28` is the whole input stream (signed
+      switch id on the guest ms clock), the launch line is logged verbatim with
+      `PAD_CARD=` and the `watch.sh 120` backstop so the configuration replays
+      too, and the zero point is derivable (run start 08:21:25 wall against
+      `[sw] 24141 ms` at 08:21:49).
+      **The one gap worth enriching is PROVENANCE.** `[sw]` does not say whether
+      an edge came from the keyboard, from a script (`swpoke.py` / `swhold.py` /
+      `plunge.py`), or from the rig pressing Service Back itself under
+      `PAD_AUTO_ATTRACT`. Replaying all of them re-injects what the next run will
+      generate again, so auto-advance would be doubled. **Item 7 already built
+      the structure that knows the answer** — padsw has three regions with one
+      writer each (keyboard / scripts / merged) — so emitting the region in the
+      `[sw]` line closes it. Emitter is `sw_shm_edges()` in
+      `tools/spike2_emu/hwshim.c` (item 8).
+      **Second gap:** the window-open latch. `[cabchg] 3016 ms ff0f0f0000000000
+      (was 0000000000000000)` is padglhost latching the coin door and six trough
+      balls when the window opens; a replay must not re-apply those.
+      **Injection is solved and measured:** item 7 got a 3000 ms ask delivered as
+      3003 ms, so the driver is "parse the log, call the existing pokers".
+      **Be honest about "exactly", because the acceptance test depends on it:
+      input replay is not run replay.** The guest is a real ARM binary under
+      qemu-user, and this rig's two open video items both turn on timing — item 6
+      on a three-pipeline burst inside 130 ms, item 15 on channel assignment
+      order. The same inputs will NOT give the same run, and a replay cannot make
+      a rare taunt fire. What it buys is the manual labour, not determinism.
+      **Acceptance:** a captured log replays with no keyboard use; the new run's
+      own `[sw]` lines diffed against the source log show every edge re-delivered
+      within a stated tolerance (measure it and state it, do not assume); and the
+      run reaches a game where the source log reached one.
+      **Related: item 13** is the checkpoint/restore route to a nearby goal and
+      is blocked on CRIU; this is the input-replay route and needs no checkpoint.
+      They may partly substitute for each other — do not build both blind.
+
 - [ ] **6. Scene video noise in the TV inset.** `D4` ← IN PROGRESS
       *(D4 because the mechanism is cracked and the fix is written, but the only
       acceptance oracle is the taunt, which fired three times in one run and not

@@ -54,6 +54,49 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
+      does not repeat.** `D4` — the "repeat" half is desk work with a known
+      answer, but confirming the timing half needs an instrument that does not
+      exist AND a human at the keyboard (item 7 established key presses cannot
+      be injected here), and "sometimes" means a pass can miss it.
+      **Observed 2026-08-06:** a normal-length keystroke sometimes does not
+      register; the key has to be held noticeably longer than typing. Wanted:
+      immediate like typing, plus hold and repeat.
+      **NOT a regression of item 7, and not a duplicate of it.** Item 7 fixed
+      WHO writes the switch array (three regions, one writer each, last edge
+      wins) and its measured numbers — 3000 ms asked, 3003 ms delivered — were
+      **script** presses via `swpoke`. Its own entry says the keyboard trigger
+      could not be measured at all, and `PAD_SW_KEYSIM` calls `sw_publish()`
+      directly on a timer, so it **bypasses the X event path and cannot see this
+      fault**. This is the half item 7's instrument was structurally blind to.
+      **RULED OUT BEFORE FILING, by reading the code, so nobody spends a pass on
+      it: X auto-repeat is already handled.** `padglhost.c:1238` peeks for a
+      Release followed by a Press of the same keycode at the same timestamp and
+      swallows both, with the reasoning at `padglhost.c:559`. A held flipper does
+      not flutter.
+      **But that same peek is why "repeat" does not exist** — it swallows every
+      repeat unconditionally, which is right for a flipper and wrong for a menu
+      key. Hold and repeat are in tension under one global rule; per-binding
+      behaviour (flipper = hold, service/menu = repeat) is likely what is wanted.
+      That part is established from the code, not guessed.
+      **SUSPECTED, and marked as a guess: there is no minimum closure width.**
+      A press and a release that both land in one drain flip `key_down` true then
+      false and publish twice (`padglhost.c:1250`), and item 7's merge is
+      last-edge-wins, so the pair nets to nothing if the guest's matrix scan falls
+      outside it — which is exactly "hold it longer and it works". The guest's
+      scan period has NOT been measured; measuring it is step one. `win_pump()`
+      drains X once per presented frame (`win_present`, `padglhost.c:1300`) and
+      again when the ring goes idle, so the drain rate follows the frame rate.
+      **Instrument to build:** three timestamps per edge — the X event time
+      (`ev.ul[7]`, already read as `t` at `padglhost.c:1232`), the `sw_publish`,
+      and the guest's `[sw] <ms>` log line — and diff them. Two of the three are
+      already there.
+      **Acceptance:** a tap of ordinary keystroke length registers as a switch
+      close in the guest every time (state the length you tested, do not assume);
+      a held flipper key stays closed as long as it is held; a held menu/service
+      key repeats. Oracle is the guest's own `[sw]` lines against the X event
+      times, plus David's hands, since this fault is defined by how it feels.
+
 - [ ] **15. Every clip during gameplay plays the SAME video.** `D3` — needs a
       run and a real game (`plunge.py game`), but it reproduces on every clip
       rather than on a rare taunt, and the instruments already exist.

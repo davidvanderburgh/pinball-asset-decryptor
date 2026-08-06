@@ -1062,16 +1062,25 @@ int pad_vid_prepare(void *pipeline)
          * the host had already answered before prepare() even asked - the
          * transition gap paid nothing. Every ADOPT logs, with the wait - it
          * is the fix's own before/after, at most one line per transition -
-         * while ordinary re-arms stay sampled 1-in-16. */
+         * while ordinary re-arms stay sampled 1-in-16.
+         *
+         * TWO numbers, deliberately: `spins` COUNTS usleep(1000) iterations
+         * and the wall clock TIMES them, because under qemu a 1 ms usleep is
+         * not 1 ms - run 5 left a ~30 ms "floor" that could be the host
+         * being slow or this loop over-counting, and only printing both,
+         * beside the host's own noticed->ack stamp, can tell those apart. */
         static unsigned said;
+        unsigned long w0 = vid_us();
+        unsigned long wall;
         while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
+        wall = (vid_us() - w0) / 1000ul;
         if (adopted)
-            VLOG("[vid] ch%d ADOPT %s hw ch%d, waited %d ms%s\n",
+            VLOG("[vid] ch%d ADOPT %s hw ch%d, waited %d spins = %lu ms wall%s\n",
                  chan_of(s), adopted == 1 ? "moved to" : "in place on",
-                 hw_of(s), spins, spins ? "" : " (no wait)");
+                 hw_of(s), spins, wall, spins ? "" : " (no wait)");
         else if ((said++ & 15) == 0)
-            VLOG("[vid] ch%d prepare waited %d ms for the host%s\n",
-                 chan_of(s), spins, spins ? "" : " (pre-armed, no wait)");
+            VLOG("[vid] ch%d prepare waited %d spins = %lu ms wall for the host%s\n",
+                 chan_of(s), spins, wall, spins ? "" : " (pre-armed, no wait)");
     }
     if (c->ack_gen != gen) { VLOG("[vid] ch%d host did not answer\n", chan_of(s)); return 0; }
     if (c->status != PADVID_OK) return 0;

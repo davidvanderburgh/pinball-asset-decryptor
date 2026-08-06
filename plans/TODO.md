@@ -844,14 +844,46 @@ These have each been violated at least once and each cost a run or a window:
       (above, undecomposed) + ~35 ms ffmpeg cold start to first frame
       (census: 32-40 ms, unchanged). Worst delivery gaps under churn now
       80-173 ms against 132-206 before the pass.
-      **Resume:** build the notice→ack instrument (one log line in
-      chan_loop where it flips from waiting to processing, one at ack;
-      host-only, no rebuild) and run 4 minutes. If the host is fast and
-      the guest's spin over-counts, the floor is an accounting artifact
-      and the REAL gap is nearer 35-40 ms — re-price before building
-      more. If the host is slow, find where. THEN the persistent seekable
-      decoder (below) for the ffmpeg cold start, which is the last
-      structural cost and also erases the loop-wrap seam.
+      **★★ RUN 6 DECOMPOSED THE FLOOR, and both suspects were innocent:
+      host noticed→ack = 0.1 ms median over 110 serves (the parser made
+      the host instant), and the guest's spin loop counts honestly (31
+      spins = 34 ms wall). The ~30 ms is WRITE→NOTICE, and there is
+      exactly one place the host can be deaf that long: `serve()` sat
+      BLOCKED in a bare `readinto()` for ffmpeg's ~35 ms cold start,
+      checking nothing.** And that blind read happens at exactly the
+      wrong moment, which is ALSO the mechanism of David's live sighting
+      (2026-08-06 evening): *"a single frame jump at the end of the clip
+      — jumping backwards and pausing just before going to the next
+      clip."* At clip end the game's EOS reflex REWINDS the outgoing clip
+      (the backwards frame = its frame 0 flashing — authentic game
+      behaviour, instant on the real VPU), ffmpeg cold-starts for that
+      spurious restart, the REPLACEMENT clip's request lands during the
+      blind read and waits it out (~30 ms), then pays its own ~35 ms cold
+      start: jump, pause, next clip.
+      **★★ RUN 7 KILLED THE FLOOR: adopt waits med 34 → 2 ms, p90 42 →
+      2, max 54 → 9, over 40/40 adoptions, health clean.** The read is
+      select()-gated at 2 ms (padvidhost.py); a supersede now lands
+      mid-cold-start, so the spurious EOS rewind usually dies BEFORE its
+      frame 0 renders — the backwards flash David reported should mostly
+      be gone, not just shorter. The prepare-blocking cost of a
+      transition went ~60 ms → ~2 ms across this pass (probe 25-40 +
+      blind read ~30, both eliminated).
+      **What remains of a transition, the LAST structural cost: ffmpeg's
+      ~35 ms cold start to first frame, once per real clip change** (and
+      at every loop wrap). Two designs on the table:
+      • **persistent seekable decoder** per channel — emulates the real
+      VPU (David's hardware point), biggest but cleanest;
+      • **first-frames cache** — keep the first ~4-8 decoded frames per
+      file (LRU, ~6-12 MB per 1360x768 file, cap it), serve them into
+      the ring INSTANTLY on any re-serve while a fresh ffmpeg spools up
+      and discards what the cache already covered (~50 ms of decode
+      hidden behind 133-267 ms of runway). Cheaper, host-only, and it
+      erases the loop-wrap seam and the transition seam in one move.
+      **Resume:** David's eyes first — the current build (all fixes
+      live) should be visibly smoother at clip ends; ask whether the
+      jump-back and the pause survive. Then build the first-frames cache
+      unless his answer says otherwise; judge with the ADOPT/gap lines
+      plus his report, and keep runs at 4 minutes.
       **The deeper route regardless, David's hardware point (2026-08-06):
       the real Spike 2 is an i.MX6 whose VPU seeks cheaply and prerolls in
       ms; a persistent seekable decoder per channel would emulate that

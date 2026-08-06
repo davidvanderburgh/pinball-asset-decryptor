@@ -40,6 +40,7 @@ PERFORMANCE, deliberately:
 """
 import mmap
 import os
+import select
 import struct
 import subprocess
 import sys
@@ -484,6 +485,28 @@ def serve(m, c, path, w, h, native):
                         % (c, waited * 1000.0, produced))
             got = 0
             while got < frame_bytes:
+                # NEVER BLOCK DEAF IN THE READ. The old bare readinto() sat
+                # ~35 ms inside ffmpeg's cold start checking nothing, and a
+                # request landing in that window waited the whole read out -
+                # which is every clip REPLACEMENT, because the game's EOS
+                # reflex rewinds the outgoing clip first and the new location
+                # arrives during the rewind's cold start. Run 6 (2026-08-06)
+                # measured it from both ends: guest adopt waits med 34 ms
+                # wall while this process acked 0.1 ms after NOTICING. The
+                # 2 ms select keeps supersede latency flat through the cold
+                # start; once frames flow the pipe is always ready and the
+                # select costs microseconds.
+                r = select.select([proc.stdout], [], [], 0.002)[0]
+                if not r:
+                    if get(m, c, "req_gen") != gen:
+                        log("ch%d superseded mid-read after %d frames"
+                            % (c, produced))
+                        return
+                    if not get(m, c, "playing"):
+                        log("ch%d guest stopped mid-read after %d frames"
+                            % (c, produced))
+                        return
+                    continue
                 n = proc.stdout.readinto(view[got:])
                 if not n:
                     break
@@ -568,6 +591,12 @@ def chan_loop(m, c):
             # the window is open.
             time.sleep(0.001 if time.monotonic() < hot_until else 0.01)
             continue
+        # The moment the request was NOTICED, for the noticed->ack stamp on
+        # the serving line. The guest's adopt telemetry times its whole spin
+        # (write -> ack seen); this half names how much of that was THIS
+        # process working, so the difference is poll latency plus the
+        # guest's own spin-loop error - the two suspects run 5 left standing.
+        t_notice = time.monotonic()
         hot_until = time.monotonic() + 0.25
         want = get_path(m, c)
         full = host_path(want)
@@ -608,8 +637,8 @@ def chan_loop(m, c):
         # Log what was actually ASKED FOR. The basename of the parent directory
         # is "2.asset" for every video in the game, so the old form made two
         # different clips look like the same clip served twice.
-        log("ch%d serving %dx%d %d frames %s%s"
-            % (c, w, h, n, want,
+        log("ch%d serving %dx%d %d frames (acked %.1f ms after notice) %s%s"
+            % (c, w, h, n, (time.monotonic() - t_notice) * 1000.0, want,
                "  (RESCALED from %dx%d)" % native if (w, h) != native else ""))
         note_serve(c, want)
         try:

@@ -603,7 +603,9 @@ These have each been violated at least once and each cost a run or a window:
       `\Process(vmmemWSL)\% Processor Time` "reads a FLAT ZERO". It does not —
       it reads 122.57% and agrees with the hypervisor route (1.22 vs 1.12
       cores) independently. It read 0 because WSL was idle. Docstring fixed.
-      **Committed:** `winprof.py` + `rigprof.py` + this profile.
+      **Committed:** `9713bc8` (`winprof.py` + `rigprof.py` + this profile).
+      Captures kept in `C:\tmp\spike2_item18\`; the idle pair is a reusable
+      control that `winprof.py --compare` takes directly.
       **Resume:** build a probe that measures UI LATENCY, not CPU availability
       — input-to-paint or present-to-present through a real window, so the
       msrdc → DWM path is inside the measurement — and validate it separates an

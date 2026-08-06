@@ -139,6 +139,13 @@ struct stream {
      * what is in the ring", and that is the only question that matters before
      * handing over a pointer. */
     unsigned told_w, told_h;
+    /* item 11's runaway detector. `delivered` is what the last streaming run
+     * actually handed the game before it was superseded; `prep_streak` counts
+     * consecutive re-arms of `prep_path` that each delivered at most one
+     * frame. See "WHY a channel is being re-armed" above. */
+    unsigned delivered;
+    unsigned prep_streak;
+    char prep_path[PADVID_PATH_MAX];
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
     void *buf;                  /* this stream's GstBuffer                   */
@@ -161,6 +168,44 @@ static unsigned use_tick;
  * location, then the handoff connect - so "the stream created last" is the
  * right home for each of those calls, none of which carries the pipeline. */
 static struct stream *last_created;
+
+/* ---- item 11: WHY a channel is being re-armed ---------------------------
+ *
+ * A serve is expensive on the GUEST'S side, not just the host's:
+ * pad_vid_prepare() blocks the game's own UI thread until the host acks. The
+ * 2026-08-06 recording caught one channel being re-served the SAME file 17
+ * times a second, and eglshim's counter fell from 60.0 fps to 17.7 in exactly
+ * those windows - two independent instruments, one inside the guest and one a
+ * screen capture outside WSL, agreeing on the same seconds.
+ *
+ * The host can see the storm - it logs one - but it cannot see the CALLER, and
+ * the caller is what decides the fix. There are only two:
+ *   "state"  - gst_element_set_state(PAUSED), i.e. the game re-arming a
+ *              pipeline it already has;
+ *   "rewind" - pad_vid_seek(), the game's EOS handler looping the clip.
+ * Those want opposite fixes, so nobody should guess between them.
+ *
+ * RATE LIMITED ON PURPOSE: one line when a runaway is recognised and one when
+ * it ends, not one per prepare. A per-prepare line would be 17 lines a second
+ * describing the thing it is measuring.
+ *
+ * NO CLOCK. The obvious definition is "N prepares within M milliseconds", and
+ * this file has no clock - it declares its own externs and pulls in no libc
+ * headers, so struct timespec would have to be hand-written for the emulated
+ * ARM ABI to get a number the host already logs. The pathology has a better
+ * definition that needs no time at all: a re-arm of the SAME path whose
+ * previous run delivered at most one frame. That is precisely what the host
+ * reports as "superseded after 1 frames" - 116 of that run's 140 serves - seen
+ * from the other end, and it cannot be fooled by a slow machine. */
+static const char *prepare_why = "state";
+
+#define PREPARE_STORM_N 8
+
+static int str_eq(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
 
 static int chan_of(const struct stream *s) { return (int)(s - streams); }
 
@@ -552,6 +597,9 @@ static void *vid_thread(void *arg)
                 s->handoff(s->fakesink, s->buf, s->sinkpad, s->handoff_data);
             s->last_use = ++use_tick;
             consumed++;
+            /* Updated per frame rather than on each of the five exit paths:
+             * a return that forgot to record it would read as a runaway. */
+            s->delivered = consumed;
             s->pos_ns = (long long)consumed * delay * 1000ll;
             /* Only now may the host reuse this slot. */
             c->read_idx = consumed;
@@ -579,6 +627,22 @@ int pad_vid_prepare(void *pipeline)
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[chan_of(s)];
+
+    /* item 11's runaway detector - see "WHY a channel is being re-armed". */
+    if (str_eq(s->prep_path, s->location) && s->delivered <= 1) {
+        s->prep_streak++;
+        if (s->prep_streak == PREPARE_STORM_N)
+            VLOG("[vid] ch%d RE-ARM STORM: %u prepares of %s in a row, each "
+                 "delivering <=1 frame, caller=%s. Every one blocks this "
+                 "thread until the host acks.\n",
+                 chan_of(s), s->prep_streak, s->location, prepare_why);
+    } else {
+        if (s->prep_streak >= PREPARE_STORM_N)
+            VLOG("[vid] ch%d re-arm storm ended after %u prepares (caller=%s)\n",
+                 chan_of(s), s->prep_streak, prepare_why);
+        s->prep_streak = 0;
+        str_copy(s->prep_path, s->location, sizeof s->prep_path);
+    }
 
     /* RESET THE POSITION HERE, not just in pad_vid_play().
      *
@@ -790,6 +854,11 @@ void pad_vid_play(void *pipeline)
     unsigned long th;
     if (!s || !s->ready || s->playing || !vshm) return;
     s->pos_ns = 0;
+    /* Cleared HERE and not at the top of vid_thread: prepare() reads it to
+     * decide whether the previous run got anywhere, and the thread starts
+     * after prepare() has already run. Clearing it in the thread would race
+     * that read and make a healthy clip look like a runaway. */
+    s->delivered = 0;
     s->run_id++;                /* orphan any thread from a previous run */
     s->playing = 1;
     vshm->ch[chan_of(s)].playing = 1;
@@ -825,10 +894,17 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
         VLOG("[vid] ch%d seek to %u ms requested; only rewind is supported, "
              "restarting from 0\n", chan_of(s), (unsigned)(pos_ns / 1000000ll));
     pad_vid_stop(pipeline);
+    /* Name the caller for the re-arm storm line. The two callers of prepare()
+     * want opposite fixes - a game re-arming a pipeline it already has is not
+     * the same fault as a clip looping too fast - and the host, which is where
+     * the storm is visible as a cost, cannot see which one this is. */
+    prepare_why = "rewind";
     if (!pad_vid_prepare(pipeline)) {
+        prepare_why = "state";
         VLOG("[vid] ch%d rewind failed to re-arm the host\n", chan_of(s));
         return 0;
     }
+    prepare_why = "state";
     pad_vid_play(pipeline);
     return 1;
 }

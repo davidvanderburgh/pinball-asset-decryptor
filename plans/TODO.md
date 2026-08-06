@@ -301,23 +301,76 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` — S2 because
-      it is a quality defect you can play through, not a malfunction. D3 because
-      it needs a run, but it is visible in plain attract every time, so looking
-      is enough.
-      Regular, periodic,
-      visible on the main game screen. **NOT the clip loop boundary** — that is
-      the obvious guess and it is wrong: the background is `264.asset/0.asset`,
-      1965 frames, re-serving every **65.78 s**. A frame-rate beat between the
-      clip and the 60 fps present is the standing candidate.
-      **LEAD from item 15, and it is a lead not a claim: something else in that
-      run had a ~7 s period.** In the reported gameplay run ch0 was stuck
-      re-preparing `2.asset/383.asset` — **206 frames, 6.87 s** — 61 times in a
-      row, and every re-prepare kills and restarts an ffmpeg. If the stutter was
-      watched during a GAME, that is a better candidate than a frame-rate beat
-      and it is now fixed (`44f4bc0`), so **check whether item 11 still
-      reproduces before spending a pass on the beat theory.** If it was watched
-      in ATTRACT, this is irrelevant — attract never had the fault.
+- [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` ← IN PROGRESS
+      — S2 because you can still play through it, though 60.0 → 17.7 fps is
+      nearer a malfunction than a quality defect and S2 is being held only
+      because nobody loses a ball to it. D3 unchanged: the mechanism is now
+      cracked and both instruments exist, which makes it cheaper, but the
+      confirming run needs a GAME and **item 20 blocks a stable one**.
+      **★ DAVID'S THEORY — "it stutters when LOGS ARE WRITTEN, maybe a separate
+      logging thread" — IS RULED OUT, and the measurement that killed it also
+      found the real cause.** Of 24 video stalls in his screen recording, **16
+      are surrounded ONLY by video-pipeline churn and 0 are switch-only**; the
+      single `[sw]`-only log burst in the whole recording was **smooth (8/9
+      advances)**. The log line is the symptom. **Do not build a logging
+      thread.**
+      **Established, from two independent instruments that agree:**
+      • **Every `serving` line is one `pad_vid_prepare`, and prepare BLOCKS THE
+      GAME'S OWN UI THREAD** on `ack_gen` (`gstvid.c`), while the host did a
+      full **ffprobe spawn before acking** — measured on this machine, idle:
+      **23.4 ms** at 149 KB, 27.5 ms at 16 MB, **38.6 ms** at 60 MB.
+      • In gameplay one channel re-served **the same file 17 times a second**;
+      **116 of that run's 140 serves died after exactly ONE frame**.
+      • **Screen recording** (outside WSL): 19 of 24 stalls within ±33 ms of a
+      log write against a 16.7% chance rate; 19 two-second buckets with zero
+      serves averaged **26.0 fps**, 5 buckets with ≥10 serves **20.0 fps**.
+      • **eglshim, inside the guest**: 61 zero-serve buckets **58.7 fps**
+      (mostly exactly 60.0), 4 busy buckets **31.1 fps**, worst **17.7**.
+      corr(serves, guest fps) = **−0.622**.
+      **★ THE ITEM'S OWN "NOT the clip loop boundary" RULING WAS WRONG, and it
+      was wrong because it measured the WRONG CLIP.** It timed the background
+      `264.asset/0.asset` (1965 frames, 65.78 s). The clip actually on screen in
+      attract is **`2.asset/55.asset`, 240 frames = 8.00 s**, and it re-serves
+      every 8 s — which fits David's "~7 seconds" far better than 65.78 s does.
+      Confirmed on a 3 min attract run this pass: 14 loops, all of that one clip.
+      **RULED OUT, with numbers, so nobody pays twice:**
+      • **a separate logging thread** (above).
+      • **`ffmpeg ended` → `serving` as the hole.** It measures 140 ms and looks
+      damning, but the ring is `SLOTS`=4 deep and the guest is still playing
+      those frames out at 33.3 ms each — **4 × 33.3 = 133 ms**. The picture is
+      moving through all of it. The real hole is the other side of the re-arm:
+      **ffmpeg cold start to first frame = 35 ms** (min 33, max 38).
+      • **eglshim as the instrument for ATTRACT.** It counts the GAME'S RENDER
+      LOOP, so it sees a blocked guest (the gameplay storm, 17.7 fps) and
+      **cannot see a frozen video texture** — the game happily redraws a stale
+      frame at 60 fps. Across 178 s of attract it held **60.1 fps median with
+      one dip**, which is not evidence attract is smooth. Attract needs the
+      screen-recording differ, not eglshim.
+      **Shipped this pass:** the ffprobe is **cached per (path, size, mtime)** —
+      a repeat serve now costs ~1 µs instead of 23-39 ms of blocked UI thread,
+      verified on the real storm asset including that an mtime change
+      re-probes; the host's idle poll goes **10 ms → 1 ms while a channel is
+      hot**, which was up to 10 ms per serve of pure latency on the game's
+      critical path; and both ends grew a **runaway detector** — the host logs
+      `chN STORM` after 8 serves of one file, the guest logs `chN RE-ARM STORM`
+      with **`caller=state` vs `caller=rewind`**, which is the one fact the host
+      cannot see and the fact that decides the fix. Both stayed silent through
+      attract (the negative control).
+      **NOT CONFIRMED, and it is why the box is open: nobody has watched a GAME
+      on the fixed build.** The storms are gameplay-only — in the reported run
+      Start was at 53.6 s and the storms at 95-110 s; attract produced 6 serves
+      and no storm.
+      **Still unknown: WHY the guest re-arms 17 times a second.** The new
+      `caller=` field answers it in one line on the next gameplay run.
+      **Resume:** get into a game (item 20 first) and read `caller=` off the
+      first `RE-ARM STORM` line; that names which of the two fixes to build.
+      Judge the picture with the screen-recording differ, not eglshim.
+      **Related, raised by David 2026-08-06: the playfield LED markers are
+      choppy too, "probably all related".** In GAMEPLAY that follows — the game
+      publishes LEDs from the same loop that eglshim measured at 17.7 fps, so
+      they must go choppy with it. In ATTRACT it does NOT follow, because that
+      same loop held 60.1 fps, so attract's LED choppiness is a separate thing
+      and is undiagnosed. Do not fold the two together.
 
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
       is half confirmed. D3 — one run; the instrument exists and is validated,

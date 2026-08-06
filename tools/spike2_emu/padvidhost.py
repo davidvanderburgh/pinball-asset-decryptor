@@ -132,7 +132,49 @@ def host_path(p):
     return full if os.path.isfile(full) else None
 
 
+# The probe cache, and it is a LATENCY fix rather than a throughput one.
+#
+# chan_loop publishes ack_gen only AFTER probe() returns, and the guest blocks
+# the GAME'S OWN UI THREAD in pad_vid_prepare() until that ack lands
+# (gstvid.c: `while (c->ack_gen != gen && spins++ < 3000) usleep(1000)`). So
+# every ffprobe spawn is time the game is not running. Measured on this machine,
+# idle: 23.4 ms for a 149 KB clip, 27.5 ms at 16 MB, 38.6 ms at 60 MB.
+#
+# That would be tolerable if a serve were rare. It is not: in the 2026-08-06
+# recording the game re-requested THE SAME PATH on one channel 17 times a
+# second for seconds at a time, and 116 of that run's 140 serves were superseded
+# after exactly ONE frame. The guest's own eglshim counter fell from 60.0 fps to
+# 17.7 in those windows.
+#
+# A video file's geometry cannot change unless the file does, so (size, mtime)
+# is a sound key and not merely a fast one. os.stat() costs ~1 us against
+# ffprobe's ~25 ms.
+_PROBE_CACHE = {}
+_PROBE_LOCK = threading.Lock()
+_PROBE_HITS = [0]
+
+
 def probe(path):
+    """(width, height, nframes, fps_num, fps_den) or None, cached per file."""
+    key = None
+    try:
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime_ns)
+        with _PROBE_LOCK:
+            hit = _PROBE_CACHE.get(key)
+        if hit is not None:
+            _PROBE_HITS[0] += 1
+            return hit
+    except OSError:
+        pass                       # fall through and let ffprobe report it
+    info = _probe_uncached(path)
+    if key is not None and info is not None:
+        with _PROBE_LOCK:
+            _PROBE_CACHE[key] = info
+    return info
+
+
+def _probe_uncached(path):
     """(width, height, nframes, fps_num, fps_den) or None."""
     try:
         out = subprocess.run(
@@ -291,13 +333,59 @@ def serve(m, c, path, w, h, native):
             pass
 
 
+_STORM = [None] * CHANNELS      # per channel: [path, count, first_t, last_t]
+
+# A channel asked for the SAME file this many times inside STORM_WINDOW is not
+# doing anything a playlist explains, and it is worth one loud line.
+STORM_N = 8
+STORM_WINDOW = 2.0
+
+
+def note_serve(c, want):
+    """Say so, once, when a channel is being re-served one file in a runaway.
+
+    Every individual `serving` line is still printed - vidroute.py counts them
+    and collapsing them would silently change what it reports. This is an EXTRA
+    line that names the pattern, because 17 identical lines a second read as
+    noise and the thing they describe is the fault.
+    """
+    now = time.monotonic() - _T0
+    st = _STORM[c]
+    if st is None or st[0] != want or now - st[3] > STORM_WINDOW:
+        if st is not None and st[1] >= STORM_N:
+            log("ch%d STORM ENDED: %d serves of one file in %.2f s (%.1f/s)"
+                % (c, st[1], st[3] - st[2], st[1] / max(1e-3, st[3] - st[2])))
+        _STORM[c] = [want, 1, now, now]
+        return
+    st[1] += 1
+    st[3] = now
+    if st[1] == STORM_N:
+        log("ch%d STORM: %d serves of %s in %.2f s. Each one blocks the game's "
+            "UI thread in pad_vid_prepare until this process acks."
+            % (c, st[1], want, now - st[2]))
+
+
 def chan_loop(m, c):
     """One channel, forever. Nothing here touches any other channel."""
+    hot_until = 0.0
     while True:
         req = get(m, c, "req_gen")
         if req == get(m, c, "ack_gen"):
-            time.sleep(0.01)                 # idle: cost nothing
+            # ADAPTIVE POLL, and the 10 ms it replaces was on the GAME'S
+            # CRITICAL PATH. The guest blocks its UI thread in
+            # pad_vid_prepare() from the moment it bumps req_gen until this
+            # loop publishes ack_gen, so a flat 10 ms sleep spent an average of
+            # 5 ms per serve doing nothing before the work even started. With
+            # the probe now cached that latency was the whole remaining cost.
+            #
+            # Only a channel that has been asked for something recently polls
+            # fast, so an idle emulator still pays nothing - which is the
+            # property the docstring above promises and the reason this is a
+            # window rather than a smaller constant. A storm is exactly when
+            # the window is open.
+            time.sleep(0.001 if time.monotonic() < hot_until else 0.01)
             continue
+        hot_until = time.monotonic() + 0.25
         want = get_path(m, c)
         full = host_path(want)
         put(m, c, "write_idx", 0)
@@ -340,6 +428,7 @@ def chan_loop(m, c):
         log("ch%d serving %dx%d %d frames %s%s"
             % (c, w, h, n, want,
                "  (RESCALED from %dx%d)" % native if (w, h) != native else ""))
+        note_serve(c, want)
         try:
             serve(m, c, full, w, h, native)
         except Exception as exc:                    # noqa: BLE001

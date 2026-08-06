@@ -692,6 +692,30 @@ These have each been violated at least once and each cost a run or a window:
       CHANNEL** — decode the incoming clip where nobody is watching, then
       have `prepare()` adopt that channel instead of re-arming this one.
       `PADVID_CHANNELS` is 8 and a scene uses at most 3, so the room exists.
+      **★ THE STRUCTURAL BLOCKER, scoped 2026-08-06 and NOT yet started —
+      this is why it is D3 and not a one-liner.** `chan_of(s)` is
+      `s - streams`: **the padvid channel IS the stream's array index**, so a
+      stream cannot currently use any channel but its own and "adopt a spare"
+      is not expressible. The work, in order:
+      **(1)** add `unsigned hwchan` to `struct stream`, defaulting to the
+      index, and a `hw_of(s)` accessor; replace the **9 sites that index the
+      shared block or the ring** — `gstvid.c` lines 407, 464, 579-580, 592,
+      839, 1145, 1148, 1158, 1256 — leaving the ~22 logging uses of
+      `chan_of()` alone so log lines keep naming the STREAM.
+      **(2)** pick a spare: a channel no live stream currently has as its
+      `hwchan`, searched from the top so it rarely collides with a stream
+      index that later goes live.
+      **(3)** arm it at `note_location()` (the code for that already exists
+      behind `PAD_VID_PREARM=1`, it just writes the wrong channel), and in
+      `prepare()` adopt by setting `s->hwchan` to the armed channel instead
+      of bumping `req_gen` on the current one.
+      **The outgoing clip must keep streaming from its old channel while
+      this happens** — that is the entire point, and it is the exact thing
+      the in-place version broke.
+      **Do step 1 as its own commit with NO behaviour change** and confirm a
+      run is unchanged before building 2 and 3 on top; it touches every read
+      of the shared block and a mistake there looks like item 6's wrong-size
+      frames, not like a transition bug.
       **Judge it with `tickcensus.py` against the 50% baseline (before =
       52.9% = 1.76 holds/s), NEVER with the guest log** — that is now a
       measured trap, not a caution.

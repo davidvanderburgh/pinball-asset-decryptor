@@ -35,36 +35,51 @@ These have each been violated at least once and each cost a run or a window:
       The inset draws pink/green horizontal noise where character footage should
       be — NOISE, not black, so the frames arrive and are drawn but interpreted
       wrongly.
-      **Established:** it REPRODUCES FROM SCRIPTS, no human — `plunge.py start`,
-      `plunge.py plunge`, then `swpoke.py 81 150` (R Ramp Made Opto) plus
-      50/57/57/81 about 1.5 s apart. Fired on the 2nd of ~6 attempts, so it
-      needs the right mode as well as the switch. Screenshots and the
-      reproduction recipe: `C:\tmp\spike2_item6\`.
-      The noise is **texture-sized (520x294 at ~1:1), fine horizontal lines,
-      each row nearly flat, and it CHANGES frame to frame** — so it tracks the
-      stream and is not a static garbage buffer.
-      **Ruled out — the SIZE theory this item was built on, both halves.**
-      (a) The host converter is bit-exact at 520x294: `vidcheck.py` pulls a real
+      **THE WHOLE SIZE PREMISE IS DEAD. Do not propose a stride or pitch fix.**
+      Three independent measurements, each covering a different stage:
+      (a) the converter is bit-exact at 520x294 — `vidcheck.py` pulls a real
       frame through the real `padvidhost.py` ring and runs the SHIPPING
-      converter (`i420.h`, included by both padglhost.c and i420check.c) — mean
-      0.000 / max 0 against a BT.601 reference, max 3 against ffmpeg's own rgba,
-      and the same on a known-good 1360x768 clip.
-      (b) The size negotiated is RIGHT end to end: the caps question matched its
-      own pad and answered 520x294 (no fallback), and padglhost's new geometry
-      census logged uploads at `520x294 fmt=0x8fc5`. Also: a wrong width SHEARS
-      the picture and leaves it recognisable (vidcheck.py renders that on
-      purpose) — this has no structure at all, so it is not a stride error.
+      converter (`i420.h`, included by padglhost.c and i420check.c), mean 0.000
+      / max 0 against a BT.601 reference, and the same on a 1360x768 clip;
+      (b) the size negotiated is right — the caps question matched its own pad
+      and answered 520x294 (the fallback is never even reached), and
+      padglhost's geometry census logged uploads at `520x294 fmt=0x8fc5`;
+      (c) **the DRAW is fine at 520x294 too** — `PAD_VID_FORCE_SIZE=520x294`
+      rescales EVERY clip, so the attract background runs the whole chain at
+      the inset's resolution on the game's own full-screen video quad, and it
+      draws **perfectly clean**.
+      **The scene is identified:** `4e0bf266` is the **Planet X Controller
+      taunt** (`video.in_game_videos`; the 26 clips in `35.asset` are
+      `AttentionInhabitantOfEarth_VO6`, `GreetingFromPlanetX_VO2`,
+      `ThisIsTheController_VO5`, …). So the fault is in that element, not in
+      the resolution.
+      **The noise is a MAPPING fingerprint, not damaged pixels:** rows repeat in
+      EXACT pairs (2x vertical), the per-row magenta-green signal
+      autocorrelates **0.94 at lag 10**, and variation between columns (4.88)
+      is a quarter of the variation between rows (22.79). It also changes frame
+      to frame, so it tracks the stream.
+      **The trigger is REAL but rare.** `plunge.py start`, `plunge.py plunge`,
+      then `swpoke.py 81 150` (R Ramp Made Opto) plus 50/57/57/81 about 1.5 s
+      apart fired it **once in about 25 scripted attempts across 5 runs**.
+      Everything else tried and failed: full sweeps of switches 46-86, the
+      right scoop HELD like a real ball device (not pulsed), Planet X shield
+      targets 85/86, the maser 48, spinners, the action button 34, cadences
+      from 0.3 s to 1.6 s, and simulated ball-path play for minutes at a time.
+      Screenshots and the recipe: `C:\tmp\spike2_item6\`.
       **Committed:** `vidcheck.py`, `i420check.c`, `i420.h`, the caps-fallback
-      log, the geometry census, `PAD_VID_SNAP=<w>x<h>`.
-      **Resume:** run with `PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp` and
-      reach the scene. That snapshot is the cut that decides the whole item —
-      if the PPM is a clean picture the pixels are fine and the fault is in the
-      DRAW (shader/texcoords/binding, `PADGL_DEBUG=3` next); if the PPM is
-      already noise the fault is the ring pointer the guest names. Nothing else
-      separates those two. Free first step if a run is expensive: correlate the
-      captured inset's per-row means against the true clip's frames — if the
-      rows correlate, the rows are in the right place and only the horizontal
-      arrangement is broken.
+      log, the geometry census, `PAD_VID_SNAP`, `PAD_VID_FORCE_SIZE`,
+      `PAD_VID_TESTPAT`, and a frame-dump BURST that fires automatically when a
+      new video size first appears, so the screenshot can no longer be missed.
+      **Resume — one ramp shot away, and everything is armed.** Run:
+      `LOG=/home/david/gz6.log PAD_GL_DUMP=/home/david/glshots
+      PAD_VID_TESTPAT=520x294 PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp
+      watch.sh 15`, play a game, make a ramp shot. The inset will draw a
+      pattern whose red channel IS its x coordinate and green channel IS its y,
+      with a white grid every 32 texels, so the drawn inset states the mapping
+      outright: a clean pattern means the pixels were wrong and the draw is
+      fine, a distorted one can be read off directly, and a pattern that is not
+      there at all means the quad samples a different texture. The instrument
+      is validated — the 1360x768 background renders it perfectly.
       **No live run left behind** — `alive.sh` is 0.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,

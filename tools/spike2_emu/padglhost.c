@@ -194,6 +194,8 @@ static long vid_texdirect, vid_dropped;
  * 520x294 TV inset) and Jaws adds its RGBA surfaces. */
 static struct { unsigned w, h, fmt; long n; } vid_geom[8];
 static int vid_geom_n;
+/* Frames still owed to the "a new video size just appeared" burst. */
+static int vid_burst;
 
 static void vid_geom_note(unsigned w, unsigned h, unsigned fmt)
 {
@@ -208,6 +210,7 @@ static void vid_geom_note(unsigned w, unsigned h, unsigned fmt)
     vid_geom[vid_geom_n].fmt = fmt; vid_geom[vid_geom_n].n = 1;
     fprintf(stderr, "[padglhost] first video frame at %ux%u fmt=0x%x\n", w, h, fmt);
     vid_geom_n++;
+    if (vid_geom_n > 1) vid_burst = 20;   /* not the first size - something new */
 }
 
 /* PAD_VID_SNAP=<w>x<h> (or "all") writes the first few RGBA frames of that size
@@ -1344,8 +1347,17 @@ static void present(void)
         }
     }
     if (!dump_dir) return;
+    /* A NEW VIDEO SIZE FORCES A BURST OF FRAMES, whatever the schedule says.
+     *
+     * Item 6's TV inset is up for a few seconds, once, in a scene that took
+     * about twenty scripted attempts to reach. A dump every N frames can miss
+     * that window entirely, and missing it costs a whole run - so the moment a
+     * size the run has never seen starts uploading, grab the next few screens
+     * unconditionally. It costs nothing on a run where no new size appears. */
+    if (vid_burst > 0) { vid_burst--; goto do_dump; }
     if (frames_done % dump_every) return;
     if (dumped >= dump_max) return;
+do_dump:;
     dumped++;
     {
         unsigned char *px = malloc((size_t)fb_w * fb_h * 4);

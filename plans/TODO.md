@@ -53,11 +53,30 @@ These have each been violated at least once and each cost a run or a window:
       `AttentionInhabitantOfEarth_VO6`, `GreetingFromPlanetX_VO2`,
       `ThisIsTheController_VO5`, …). So the fault is in that element, not in
       the resolution.
-      **The noise is a MAPPING fingerprint, not damaged pixels:** rows repeat in
-      EXACT pairs (2x vertical), the per-row magenta-green signal
-      autocorrelates **0.94 at lag 10**, and variation between columns (4.88)
-      is a quarter of the variation between rows (22.79). It also changes frame
-      to frame, so it tracks the stream.
+      **The noise is a MAPPING fingerprint, not damaged pixels, and the
+      strongest fact in the whole item is HOW LITTLE it varies horizontally:
+      adjacent columns differ by 0.53 out of 255.** The inset is essentially a
+      function of y alone — a vertical strip stretched across 520 pixels. On
+      top of that, both axes show a 2x pairing (rows: 26.2 within a pair vs
+      39.8 across; columns: 0.53 vs 0.98), the per-row magenta-green signal
+      autocorrelates **0.94 at lag 10**, and it changes frame to frame.
+      **It is NOT a column of the video:** the row profile swings ±80 between
+      adjacent source rows, and no column of real footage does that. So the
+      inset is very likely not sampling our video texture at all — the prime
+      remaining suspect is the scene renderer's render-target/FBO path.
+      **Ruled out — the mipmap theory, and it was a good one.** Paired rows are
+      exactly what sampling an un-uploaded mip level 1 (260x147) would give.
+      But the game **does** set a MIN_FILTER on the video texture and it is
+      **GL_LINEAR (0x2601)**, not a mipmap mode (`min_filter=0x%x` is now on
+      padglhost's "first video frame" line), and forcing the texture to be
+      MINIFIED (`PAD_VID_FORCE_SIZE=1920x1080` on the 1360x768 quad, with
+      `PAD_VID_NOMIPFIX=1` so nothing is corrected) still draws perfectly
+      clean. LOD is not the mechanism.
+      **Latent fault fixed in passing, NOT this bug:** a mipmap MIN_FILTER on a
+      texture that only ever gets level 0 is now demoted to LINEAR and logged.
+      Godzilla never asks for one, so it changes nothing here — but the source
+      comment claiming "the game never sets a filter on this texture at all"
+      was simply wrong, and is corrected.
       **The trigger is REAL but rare.** `plunge.py start`, `plunge.py plunge`,
       then `swpoke.py 81 150` (R Ramp Made Opto) plus 50/57/57/81 about 1.5 s
       apart fired it **once in about 25 scripted attempts across 5 runs**.

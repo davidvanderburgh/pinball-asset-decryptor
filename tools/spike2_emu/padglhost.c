@@ -177,7 +177,14 @@ static int  dbg;
  * so the window has to be movable to compare the two. */
 static long seq_from = 60, seq_to = 62;
 static unsigned cur_tex_unit_binding;
-static unsigned char min_filter_set[MAXNAME];
+/* The MIN_FILTER the GAME set on each texture, 0 when it never set one.
+ *
+ * It used to be a bare "did the game set one" flag, which cannot tell LINEAR
+ * from LINEAR_MIPMAP_LINEAR - and for the video path that distinction is the
+ * whole ballgame. We upload level 0 and nothing else, so a MIPMAP filter can
+ * never be satisfied here, while on the machine a Vivante DIRECT texture is
+ * complete by construction and the same call is harmless. */
+static unsigned short min_filter_val[MAXNAME];
 
 /* ---- video: the other half of PADGL_TEXDIRECT ---------------------------
  *
@@ -194,10 +201,16 @@ static long vid_texdirect, vid_dropped;
  * 520x294 TV inset) and Jaws adds its RGBA surfaces. */
 static struct { unsigned w, h, fmt; long n; } vid_geom[8];
 static int vid_geom_n;
+/* PAD_VID_NOMIPFIX=1 leaves a mipmap MIN_FILTER on the video texture alone.
+ * It exists so the demotion can be measured as a BEFORE and an AFTER on one
+ * build, on one run, instead of against a rebuild - this rig has been fooled
+ * by comparing two runs before. */
+static int vid_nomipfix;
+
 /* Frames still owed to the "a new video size just appeared" burst. */
 static int vid_burst;
 
-static void vid_geom_note(unsigned w, unsigned h, unsigned fmt)
+static void vid_geom_note(unsigned w, unsigned h, unsigned fmt, unsigned mf)
 {
     int i;
     for (i = 0; i < vid_geom_n; i++)
@@ -208,7 +221,12 @@ static void vid_geom_note(unsigned w, unsigned h, unsigned fmt)
     if (vid_geom_n == (int)(sizeof vid_geom / sizeof vid_geom[0])) return;
     vid_geom[vid_geom_n].w = w; vid_geom[vid_geom_n].h = h;
     vid_geom[vid_geom_n].fmt = fmt; vid_geom[vid_geom_n].n = 1;
-    fprintf(stderr, "[padglhost] first video frame at %ux%u fmt=0x%x\n", w, h, fmt);
+    /* The MIN_FILTER is on this line because it is the difference between a
+     * video texture that samples level 0 and one that asks for a mip chain
+     * nothing ever uploads - see the TEXDIRECT filter block for what that
+     * looks like. 0 means the game set none and we supply the defaults. */
+    fprintf(stderr, "[padglhost] first video frame at %ux%u fmt=0x%x "
+            "min_filter=0x%x\n", w, h, fmt, mf);
     vid_geom_n++;
     if (vid_geom_n > 1) vid_burst = 20;   /* not the first size - something new */
 }
@@ -1507,7 +1525,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         break;
     case PADGL_ACTIVETEX:       p_glActiveTexture(u[0]); break;
     case PADGL_TEXPARAM:
-        if (u[1] == 0x2801) min_filter_set[cur_tex_unit_binding & (MAXNAME-1)] = 1;
+        if (u[1] == 0x2801)
+            min_filter_val[cur_tex_unit_binding & (MAXNAME-1)] = (unsigned short)u[2];
         if (dbg) { static int shown; if (shown < 6) { shown++;
             fprintf(stderr, "[padglhost] texparam target=0x%x pname=0x%x val=0x%x\n",
                     u[0], u[1], u[2]); } }
@@ -1535,7 +1554,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * software rasteriser ignored filters entirely, so this only shows up
          * here. Supply a non-mipmap default; any TEXPARAM the game sends later
          * arrives after this in the stream and still wins. */
-        if (u[0] == 0 && !min_filter_set[cur_tex_unit_binding & (MAXNAME-1)]) {
+        if (u[0] == 0 && !min_filter_val[cur_tex_unit_binding & (MAXNAME-1)]) {
             p_glTexParameteri(0x0DE1, 0x2801, 0x2601);   /* MIN_FILTER LINEAR */
             p_glTexParameteri(0x0DE1, 0x2800, 0x2601);   /* MAG_FILTER LINEAR */
             p_glTexParameteri(0x0DE1, 0x2802, 0x812F);   /* WRAP_S CLAMP_TO_EDGE */
@@ -1577,7 +1596,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         if (!rgba) { vid_dropped++; break; }
         vid_texdirect++;
-        vid_geom_note(w, h, fmt);
+        vid_geom_note(w, h, fmt, min_filter_val[cur_tex_unit_binding & (MAXNAME-1)]);
         if (vid_pat_all || vid_pat_w) rgba = vid_testpat(rgba, w, h);
         if (vid_snap_all || vid_snap_w) vid_snap(rgba, w, h);
         if (dbg) {
@@ -1593,15 +1612,49 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         p_glTexImage2D(0x0DE1, 0, 0x1908 /*RGBA*/, (int)w, (int)h, 0,
                        0x1908, 0x1401 /*UNSIGNED_BYTE*/, rgba);
-        /* Same completeness trap as PADGL_TEXIMAGE, and worse here: the game
-         * never sets a filter on this texture at all, because on the machine
-         * the Vivante driver gives a direct texture usable defaults. Without
-         * these the video samples black and everything above looks correct. */
-        if (!min_filter_set[cur_tex_unit_binding & (MAXNAME-1)]) {
-            p_glTexParameteri(0x0DE1, 0x2801, 0x2601);   /* MIN_FILTER LINEAR    */
-            p_glTexParameteri(0x0DE1, 0x2800, 0x2601);   /* MAG_FILTER LINEAR    */
-            p_glTexParameteri(0x0DE1, 0x2802, 0x812F);   /* WRAP_S CLAMP_TO_EDGE */
-            p_glTexParameteri(0x0DE1, 0x2803, 0x812F);   /* WRAP_T CLAMP_TO_EDGE */
+        /* Same completeness trap as PADGL_TEXIMAGE, and worse here, in TWO
+         * ways that both end in the same place: a texture that only ever gets
+         * level 0 while the sampler wants a mip chain.
+         *
+         * 1. The game usually sets NO filter at all on a direct texture,
+         *    because on the machine the Vivante driver gives it usable
+         *    defaults. Left alone, GLES's own default is
+         *    NEAREST_MIPMAP_LINEAR and the video samples BLACK.
+         *
+         * 2. And when the game DOES set one, it can set a MIPMAP mode - which
+         *    is free on the machine and unsatisfiable here. What that looks
+         *    like is not black: a minified quad picks an LOD above 0 and
+         *    samples a level that was never uploaded. For a 520x294 video
+         *    that level is 260x147, so every texel covers 2x2 output pixels
+         *    and the drawn rows come out IN EXACT PAIRS - which is precisely
+         *    the fingerprint measured on the pink/green TV inset (item 6),
+         *    together with a magenta-green row signal autocorrelating 0.94 at
+         *    lag 10 and columns varying a quarter as much as rows.
+         *    It also explains why the full-screen background video is fine at
+         *    the very same 520x294: stretched UP to 1360x768 it is
+         *    MAGNIFIED, LOD stays at or below 0, and the missing levels are
+         *    never touched.
+         *
+         * So: supply the defaults when the game set nothing, and DEMOTE a
+         * mipmap filter to LINEAR when it set one. Only mipmap modes are
+         * touched - a deliberate NEAREST or LINEAR is left exactly as asked. */
+        {
+            unsigned mf = min_filter_val[cur_tex_unit_binding & (MAXNAME-1)];
+            if (!mf) {
+                p_glTexParameteri(0x0DE1, 0x2801, 0x2601);   /* MIN LINEAR       */
+                p_glTexParameteri(0x0DE1, 0x2800, 0x2601);   /* MAG LINEAR       */
+                p_glTexParameteri(0x0DE1, 0x2802, 0x812F);   /* WRAP_S CLAMP     */
+                p_glTexParameteri(0x0DE1, 0x2803, 0x812F);   /* WRAP_T CLAMP     */
+            } else if (mf >= 0x2700 && mf <= 0x2703 && !vid_nomipfix) {
+                static unsigned said;
+                p_glTexParameteri(0x0DE1, 0x2801, 0x2601);
+                if (said != mf) {
+                    said = mf;
+                    fprintf(stderr, "[padglhost] video texture asked for "
+                            "MIN_FILTER 0x%x (a mipmap mode) but only level 0 "
+                            "exists - demoted to LINEAR\n", mf);
+                }
+            }
         }
         break;
     }
@@ -1805,6 +1858,10 @@ int main(int argc, char **argv)
         if (vid_snap_dir && !vid_snap_dir[0]) vid_snap_dir = 0;
         if (getenv("PAD_VID_SNAP_MAX")) vid_snap_max = atoi(getenv("PAD_VID_SNAP_MAX"));
     }
+    vid_nomipfix = getenv("PAD_VID_NOMIPFIX") ? atoi(getenv("PAD_VID_NOMIPFIX")) : 0;
+    if (vid_nomipfix)
+        fprintf(stderr, "[padglhost] PAD_VID_NOMIPFIX: a mipmap MIN_FILTER on a "
+                "video texture will be left as the game asked\n");
     if (getenv("PAD_VID_TESTPAT") && getenv("PAD_VID_TESTPAT")[0]) {
         const char *s = getenv("PAD_VID_TESTPAT");
         if (!strcmp(s, "all")) vid_pat_all = 1;

@@ -155,6 +155,14 @@ struct stream {
      * decode and throw the head start away). Empty path = not armed. */
     char armed_path[PADVID_PATH_MAX];
     unsigned armed_gen;
+    /* item 11: which padvid CHANNEL this stream's shm traffic uses, PLUS
+     * ONE - 0 means "default", the stream's own index, so a zero-initialised
+     * stream keeps the identity mapping with no init pass. The indirection
+     * exists for the spare-channel pre-arm: adopting a channel other than
+     * your own is not expressible while the channel IS the array index.
+     * Only hw_of() may index vshm->ch[] or the ring; chan_of() stays the
+     * STREAM number and keeps naming log lines. */
+    unsigned hwchan1;
     unsigned long last_seek_us; /* when the previous seek arrived; 0 = never  */
     unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
@@ -218,6 +226,15 @@ static int str_eq(const char *a, const char *b)
 }
 
 static int chan_of(const struct stream *s) { return (int)(s - streams); }
+
+/* The channel this stream's shm traffic actually uses (see hwchan1 above).
+ * Every read or write of vshm->ch[] and every ring address must come through
+ * here; a site that indexes by chan_of() instead reads another stream's
+ * channel the moment any stream adopts a spare. */
+static int hw_of(const struct stream *s)
+{
+    return s->hwchan1 ? (int)(s->hwchan1 - 1) : (int)(s - streams);
+}
 
 static struct stream *find_pipeline(void *p)
 {
@@ -404,7 +421,7 @@ void pad_vid_note_location(void *src, const char *loc)
         !str_eq(s->armed_path, s->location)) {
         vid_map();
         if (vshm) {
-            struct padvid_chan *c = &vshm->ch[chan_of(s)];
+            struct padvid_chan *c = &vshm->ch[hw_of(s)];
             str_copy(c->path, s->location, PADVID_PATH_MAX);
             c->playing = 1;
             s->armed_gen = c->req_gen + 1;
@@ -461,7 +478,7 @@ void pad_vid_note_pipeline(void *p)
         }
     }
     s->playing = 0;
-    if (vshm) vshm->ch[chan_of(s)].playing = 0;
+    if (vshm) vshm->ch[hw_of(s)].playing = 0;
     s->pipeline = p;
     s->fakesink = 0; s->sinkpad = 0; s->decoder = 0;
     /* Drop the old pipeline's source binding with the rest of its identity. The
@@ -576,8 +593,8 @@ static unsigned long vid_us(void)
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
-    struct padvid_chan *c = &vshm->ch[chan_of(s)];
-    unsigned char *ring = vring + (unsigned long)chan_of(s)
+    struct padvid_chan *c = &vshm->ch[hw_of(s)];
+    unsigned char *ring = vring + (unsigned long)hw_of(s)
                                 * PADVID_SLOTS * PADVID_SLOT_BYTES;
     unsigned my_run = s->run_id;
     /* The request generation this thread's clip was opened under.
@@ -589,7 +606,7 @@ static void *vid_thread(void *arg)
      * a video bug. Only this stream's own prepare() bumps req_gen for its own
      * run, so a generation that has moved under a running thread means some
      * other pipeline took the channel - whatever size it took it at. */
-    unsigned my_gen = vshm->ch[chan_of(s)].req_gen;
+    unsigned my_gen = vshm->ch[hw_of(s)].req_gen;
     unsigned consumed = 0;
     unsigned delay = 33333;
     unsigned long t_epoch = 0;   /* set at frame 0; the schedule's zero */
@@ -836,7 +853,7 @@ int pad_vid_prepare(void *pipeline)
     vid_map();
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
-    c = &vshm->ch[chan_of(s)];
+    c = &vshm->ch[hw_of(s)];
 
     /* ★ ITEM 11, THE STATE-PATH HALF: A RE-ARM OF A CLIP THAT IS STILL
      * PLAYING THE SAME FILE IS ABSORBED, exactly like the rewind absorb in
@@ -1142,10 +1159,10 @@ void pad_vid_play(void *pipeline)
     s->delivered = 0;
     s->run_id++;                /* orphan any thread from a previous run */
     s->playing = 1;
-    vshm->ch[chan_of(s)].playing = 1;
+    vshm->ch[hw_of(s)].playing = 1;
     if (pthread_create(&th, 0, vid_thread, s) != 0) {
         s->playing = 0;
-        vshm->ch[chan_of(s)].playing = 0;
+        vshm->ch[hw_of(s)].playing = 0;
         VLOG("[vid] ch%d could not start the streaming thread\n", chan_of(s));
     }
 }
@@ -1155,7 +1172,7 @@ void pad_vid_stop(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     if (!s) return;
     s->playing = 0;
-    if (vshm) vshm->ch[chan_of(s)].playing = 0;
+    if (vshm) vshm->ch[hw_of(s)].playing = 0;
 }
 
 /* LOOPING. The game does not rebuild a pipeline per repeat: its bus handler
@@ -1253,7 +1270,7 @@ long long pad_vid_duration_ns(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     struct padvid_chan *c;
     if (!s || !vshm) return 0;
-    c = &vshm->ch[chan_of(s)];
+    c = &vshm->ch[hw_of(s)];
     if (!c->nframes || !c->fps_num) return 0;
     return (long long)c->nframes * 1000000000ll * c->fps_den / c->fps_num;
 }

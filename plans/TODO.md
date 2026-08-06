@@ -538,12 +538,85 @@ These have each been violated at least once and each cost a run or a window:
       the emulation's steadiness, so slowdown and stutter now make another
       item's OUTPUT WRONG rather than merely making the desktop unpleasant.
       That is the S2 line — it costs runs and makes other items more
-      expensive.)* D4 — every run reproduces it, so a
-      pass cannot end having learned nothing, but the instrument does NOT exist
-      and the fix is unknown until it does.
+      expensive.)* ← IN PROGRESS
+      *(**D4 STAYS D4, and saying why is the point.** The profiling half got
+      much cheaper — `winprof.py`/`rigprof.py` exist and are validated, the
+      baseline is on disk, the two big consumers are named. But the instrument
+      that can judge the SYMPTOM still does not exist, and "a new instrument
+      that has to be built and validated before it can judge anything" is the
+      D4 line verbatim. Moving it to D3 would be flattering the pass.)*
       **Observed 2026-08-06, in David's words: "my computer runs a little
       sluggish when the emulator is going."** Suggested: multi-threading, more
       memory allocation, or the GPU.
+      **★★ PASS ONE IS DONE: THE PROFILE EXISTS AND THE RUN COSTS THE MACHINE
+      ~5.6x WHAT WSL SAYS IT DOES.** Long form:
+      `spike2_pc_emulation_handoff.md`, REMAINING item 18.
+      Idle 90 s vs a normal attract run 70 s, measured on BOTH sides:
+      **inside WSL the whole rig sums to 0.50 cores** (`game` 14.49%,
+      `padglhost` 12.23%, `ffmpeg` 9.54%, `init` 5.32%, `padvidhost` 3.29%);
+      **off the machine it takes 2.80 cores** (Hyper-V logical 6.10% → 23.61%
+      of 16 cores). The gap is in two places, neither visible from inside WSL:
+      • **vmmemWSL 0.57% → 122.57%** — the VM burns **2.4x what its own
+      processes account for**, and the signature is **103,000 context switches
+      a second, 5.1x idle**;
+      • **msrdc.exe 0.00% → 69.61%** (0.70 cores) — the WSLg RDP client that
+      draws the windows onto the Windows desktop. **Zero at idle**, so the
+      attribution needs no argument. It is CPU, not GPU (its GPU share is
+      1.03%; the top GPU consumer is **dwm at 7.95%**, and GPU overall goes
+      1.35% → 11.32%, 8.4x).
+      So the handoff's "none of it was the renderer" is still true and now also
+      incomplete: the biggest Windows-side cost after the VM is the thing that
+      SHOWS the picture, not the thing that draws it.
+      **★ AND THE HONEST HALF, which is why the box is open: NEITHER
+      RESPONSIVENESS PROBE COULD SEE THE SYMPTOM.** Sleep overshoot p95
+      0.54 → 0.53 ms, fixed work p50 0.83 → 0.72 ms, **processor queue length
+      0.00 in both**. Flat, marginally better during the run. David says it
+      feels sluggish; his experience wins and the instrument is wrong. The
+      profile is delivered and **the symptom is not yet reproduced by
+      anything.**
+      **RULED OUT, with numbers:** • **CPU starvation** — queue length 0.00 in
+      both, and the fixed-work probe is validated to move +57% under a real
+      overload (20 burners, 16 cores, queue 80). • **Memory** — 43.3 GB free of
+      45.5 during the run, so neither "more memory" nor "give WSL less" is the
+      lever. • **Multi-threading** — 1.69 of the 2.80 cores are burned OUTSIDE
+      the VM, in transport and compositing, which no threading change reaches.
+      **A PROBE THAT FAILED ITS OWN VALIDATION, kept deliberately:** the 8 ms
+      sleep-overshoot probe **did not move at all** under a machine pinned at
+      100% with a run queue of 80 (p50 0.50 → 0.50, p95 0.53 → 0.53) — a waking
+      thread gets a priority boost. **A flat jitter reading is not evidence of
+      a responsive machine.** It is kept only because root-partition contention
+      is not the load under test.
+      **A CONFOUNDER THAT ALMOST BECAME A FINDING:** MsMpEng 1.54% → 28.74%
+      looked like "exclude the rig from Defender" and is **wrong** — a
+      scheduled quick scan ran 11:27:05–11:27:54 against a capture of
+      11:26:13–11:27:22. Every number above is recomputed over the scan-free
+      54 samples and none of them moved. **Check `Get-MpComputerStatus` around
+      any capture on this machine.**
+      **AND THE INSTRUMENTS BIT BACK TWICE, both fixed:** `typeperf` expands a
+      wildcard ONCE at startup, so a baseline would never see the processes a
+      run starts — `winprof.py` reads PDH in-process instead, and that it picks
+      up a late process was TESTED (a burner started 9 s into a 24 s capture
+      appeared). And both scripts wrote `started` when the summary was built,
+      i.e. at the FINISH, which made the first read of the Defender overlap
+      70 s wrong in the direction that would have hidden it.
+      **CORRECTED, my own claim:** `winprof.py` said
+      `\Process(vmmemWSL)\% Processor Time` "reads a FLAT ZERO". It does not —
+      it reads 122.57% and agrees with the hypervisor route (1.22 vs 1.12
+      cores) independently. It read 0 because WSL was idle. Docstring fixed.
+      **Committed:** `winprof.py` + `rigprof.py` + this profile.
+      **Resume:** build a probe that measures UI LATENCY, not CPU availability
+      — input-to-paint or present-to-present through a real window, so the
+      msrdc → DWM path is inside the measurement — and validate it separates an
+      idle desktop from one with a run up before it judges anything. Then ask
+      whether msrdc's 0.70 cores scales with what is on screen (window size,
+      how many WSLg windows, occlusion). **NOT by moving a window from
+      Windows** — `SetWindowPos` on a RAIL window is a standing non-negotiable
+      — but by changing `PAD_GL_W`/`PAD_GL_H` between runs, or by asking David
+      to resize while a capture runs.
+      **ASK DAVID FIRST:** is it the pointer/typing (input latency), windows
+      repainting (compositing), or everything generally slow (throughput)? The
+      third is ruled out above, so his answer picks the probe instead of pass
+      two building both.
       **★ THE GPU ONE IS ALREADY DONE AND ALREADY RULED OUT AS THE COST.** The
       renderer runs on the GPU (`GALLIUM_DRIVER=d3d12`, D3D12/AMD Radeon) and is
       capped at 60 fps by the swap; the handoff's "Why the rig used to burn a
@@ -623,6 +696,12 @@ These have each been violated at least once and each cost a run or a window:
   `fullplay.sh`, which drives the real `playaudio.sh` end to end, and `feed.py`,
   which paces a WAV into a FIFO at exactly the right byte rate (`ffmpeg -re`
   runs ~3.6% slow and starves the player, which then scores as damage).
+- **`C:\tmp\spike2_item18\`** — item 18's captures, both sides of the boundary:
+  `winprof_idle` / `winprof_attract` (Windows) and `rigprof_idle` /
+  `rigprof_attract` (WSL), as .json and .csv. **The idle pair is a reusable
+  CONTROL** — `winprof.py --compare` takes it directly, so pass two does not
+  have to spend 90 s re-measuring a quiet desktop. It is machine-specific, so
+  it lives here rather than in the repo.
 - **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
   this machine. The deep detail behind every numbered item above.
 

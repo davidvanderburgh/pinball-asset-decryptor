@@ -120,6 +120,18 @@ struct stream {
                                  * had just re-armed it, and the host read
                                  * that as "guest stopped playback".         */
     unsigned w, h;
+    /* The size the GAME was actually told, which is NOT the same as w/h.
+     *
+     * ITEM 6 IS THIS FIELD. The game asks for caps ONCE per pipeline, builds a
+     * texture that size, and then loops the clip by SEEKING - measured, 2026-08-06:
+     * one "caps ... -> its own pad" line and then nine "streaming" lines, with
+     * the size changing under it and no second question ever asked. w/h follow
+     * the channel because pad_vid_prepare() refreshes them; the game's texture
+     * does not follow anything. So w/h cannot answer "does the game agree with
+     * what is in the ring", and that is the only question that matters before
+     * handing over a pointer. */
+    unsigned told_w, told_h;
+    unsigned last_use;          /* bumped per frame; picks the stealing victim */
     long long pos_ns;
     void *buf;                  /* this stream's GstBuffer                   */
     /* Our own caps/structure objects. Never handed to real GStreamer - every
@@ -130,6 +142,11 @@ struct stream {
 };
 
 static struct stream streams[PADVID_CHANNELS];
+
+/* A monotonic tick, bumped once per delivered frame, so "least recently used"
+ * is a real ordering rather than array position. Wrapping after 4 billion
+ * frames would only cost one bad steal, which the size check then catches. */
+static unsigned use_tick;
 
 /* Where construction-time facts attach. The game builds one pipeline at a
  * time on its UI thread: pipeline_new, then the elements, then the filesrc
@@ -202,15 +219,39 @@ void pad_vid_note_pipeline(void *p)
     if (!s) {
         for (i = 0; i < PADVID_CHANNELS && !s; i++)
             if (!streams[i].pipeline) s = &streams[i];
-        for (i = 0; i < PADVID_CHANNELS && !s; i++)
-            if (!streams[i].playing) s = &streams[i];
+        /* STEAL THE LEAST RECENTLY USED, not the first one found.
+         *
+         * `pipeline` is never cleared - there is no reliable teardown signal to
+         * clear it on, since the game sets NULL and then sometimes plays the
+         * same pipeline object again - so after the first four clips EVERY new
+         * pipeline is a steal, and the victim is whichever non-playing stream
+         * comes first in the array. That put the freshest corpse first: a clip
+         * that has just hit EOS has playing == 0 while its decoder is very
+         * probably still on screen, and taking its channel is how item 6's TV
+         * inset ended up reading a 1360x768 background frame.
+         *
+         * Least-recently-used takes the stream that has gone longest without a
+         * frame instead, which is the one least likely to still be drawn.
+         * vid_thread's size check is what makes a wrong guess HARMLESS; this
+         * only makes a wrong guess RARE. */
+        if (!s) {
+            struct stream *lru = 0;
+            for (i = 0; i < PADVID_CHANNELS; i++) {
+                if (streams[i].playing) continue;
+                if (!lru || streams[i].last_use < lru->last_use) lru = &streams[i];
+            }
+            s = lru;
+        }
         if (!s) {
             /* Every slot is playing. Steal the oldest; a fifth simultaneous
              * clip is beyond anything the game has shown, and stealing is
              * still strictly better than the old behaviour, which stole slot
              * ONE of one on every new clip. */
             s = &streams[0];
-            VLOG("[vid] all %u channels busy, stealing channel 0\n", PADVID_CHANNELS);
+            for (i = 1; i < PADVID_CHANNELS; i++)
+                if (streams[i].last_use < s->last_use) s = &streams[i];
+            VLOG("[vid] all %u channels busy, stealing ch%d (least recently used)\n",
+                 PADVID_CHANNELS, chan_of(s));
         }
     }
     s->playing = 0;
@@ -220,6 +261,10 @@ void pad_vid_note_pipeline(void *p)
     s->handoff = 0; s->handoff_data = 0;
     s->location[0] = 0;
     s->ready = 0;
+    /* The new pipeline has been told nothing yet, and the old one's answer must
+     * not be inherited - it would let a stale decoder's geometry validate this
+     * stream's frames. */
+    s->told_w = 0; s->told_h = 0;
     s->pos_ns = 0;
     last_created = s;
 }
@@ -342,6 +387,37 @@ static void *vid_thread(void *arg)
             unsigned slot = consumed % PADVID_SLOTS;
             unsigned char *px = ring + (unsigned long)slot * PADVID_SLOT_BYTES;
             if (s->run_id != my_run) return 0;       /* superseded mid-wake */
+            /* ---- ITEM 6'S FIX: NEVER HAND OVER PIXELS THE GAME WILL READ AT
+             * THE WRONG GEOMETRY.
+             *
+             * The game holds a texture of whatever size it was told when the
+             * pipeline was built, and it never asks again. This channel's
+             * contents, on the other hand, change whenever the channel is
+             * re-served - which happens constantly, because there are four
+             * channels and the game builds far more pipelines than that, so a
+             * new pipeline takes over the slot of any stream that is not
+             * currently playing. A stream whose clip has just ended is exactly
+             * such a victim, and its decoder may still be on screen.
+             *
+             * When that happens the old decoder keeps calling Invalidate on a
+             * pointer into a ring the host is now filling with somebody else's
+             * frames, at somebody else's size. That is item 6: the TV inset's
+             * 229,320-byte read landing on a 1360x768 frame, which framewidth.py
+             * measured off the capture (1360 at 2.02 against a shuffled control
+             * of 23.84, while the 520 it was read at scored 22.34 against 23.80).
+             *
+             * Holding the last good frame is the honest answer. The game cannot
+             * be made to re-negotiate - it is not asking - so the choice is a
+             * frozen picture or a stream of another clip's bytes rendered as
+             * pink and green stripes. */
+            if (s->told_w && (c->width != s->told_w || c->height != s->told_h)) {
+                VLOG("[vid] ch%d NOT MINE ANY MORE: the game holds %ux%u but "
+                     "this channel now serves %ux%u. Holding the last frame "
+                     "after %u.\n", chan_of(s), s->told_w, s->told_h,
+                     c->width, c->height, consumed);
+                s->playing = 0;
+                return 0;
+            }
             /* POINT the buffer at the ring. No copy. */
             *(unsigned long *)((char *)s->buf + off_data) = (unsigned long)px;
             *(unsigned *)((char *)s->buf + off_size) = c->frame_bytes;
@@ -356,6 +432,7 @@ static void *vid_thread(void *arg)
             }
             if (s->handoff)
                 s->handoff(s->fakesink, s->buf, s->sinkpad, s->handoff_data);
+            s->last_use = ++use_tick;
             consumed++;
             s->pos_ns = (long long)consumed * delay * 1000ll;
             /* Only now may the host reuse this slot. */
@@ -556,14 +633,29 @@ void *pad_vid_structure_for(void *caps)
     return 0;
 }
 
+/* This is the moment the game LEARNS a size, and therefore the moment its
+ * texture is fixed. Recording it here rather than at prepare() is the whole
+ * point: prepare() runs again on every rewind and would keep told_* in step
+ * with the channel, which is exactly the disagreement vid_thread has to be
+ * able to see. */
 int pad_vid_get_int(void *strct, const char *field, int *value)
 {
     int i;
     if (!value || !field) return 0;
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (strct != (void *)streams[i].fake_struct) continue;
-        if (field[0] == 'w') { *value = (int)streams[i].w; return 1; }
-        if (field[0] == 'h') { *value = (int)streams[i].h; return 1; }
+        if (field[0] == 'w') {
+            *value = (int)streams[i].w;
+            streams[i].told_w = streams[i].w;
+            streams[i].told_h = streams[i].h;
+            return 1;
+        }
+        if (field[0] == 'h') {
+            *value = (int)streams[i].h;
+            streams[i].told_w = streams[i].w;
+            streams[i].told_h = streams[i].h;
+            return 1;
+        }
         return 0;
     }
     return 0;

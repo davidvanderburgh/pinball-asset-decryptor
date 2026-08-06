@@ -211,10 +211,16 @@ static long vid_texdirect, vid_dropped;
  * A mismatch there is the bug, stated in one line, instead of a picture to
  * argue about. Free per frame (two divides), so it is on unless turned off. */
 static int vid_offlog = 1;
+/* PAD_VID_NOSIZEGUARD=1 converts and uploads a mismatched frame anyway, so the
+ * fix can be A/B'd on ONE build in ONE run. This rig has been fooled by
+ * comparing two runs before, which is why every guard here gets an off switch
+ * rather than a rebuild. */
+static int vid_nosizeguard;
 static struct { unsigned ch, w, h; } vid_off_said[16];
 static int vid_off_said_n;
 
-static void vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h)
+/* Returns 0 when the frame at `off` is NOT the frame the guest thinks it is. */
+static int vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h)
 {
     unsigned chan_span = (unsigned)PADVID_SLOTS * PADVID_SLOT_BYTES;
     unsigned ch = off / chan_span;
@@ -222,7 +228,7 @@ static void vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h
     unsigned slot = rem / PADVID_SLOT_BYTES;
     const struct padvid_chan *c;
     int i;
-    if (!vid_offlog || !vid_hdr || ch >= PADVID_CHANNELS) return;
+    if (!vid_hdr || ch >= PADVID_CHANNELS) return 1;
     c = &vid_hdr->ch[ch];
     /* The loud half: the guest is uploading a frame of one size out of a
      * channel that is serving another. This is item 6's whole fault if it
@@ -237,16 +243,17 @@ static void vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h
                     w, h, bytes, ch, slot, ch, c->width, c->height,
                     c->frame_bytes);
         }
-        return;
+        return 0;
     }
+    if (!vid_offlog) return 1;
     /* The quiet half, once per (channel, size): "ch3 520x294 slot0" printed
      * beside padvid.log's own "ch3 serving 520x294" is the check that the two
      * sides agree, and a log that only prints the sick case cannot tell "never
      * happened" from "logging is off". */
     for (i = 0; i < vid_off_said_n; i++)
         if (vid_off_said[i].ch == ch && vid_off_said[i].w == w &&
-            vid_off_said[i].h == h) return;
-    if (vid_off_said_n == (int)(sizeof vid_off_said / sizeof vid_off_said[0])) return;
+            vid_off_said[i].h == h) return 1;
+    if (vid_off_said_n == (int)(sizeof vid_off_said / sizeof vid_off_said[0])) return 1;
     vid_off_said[vid_off_said_n].ch = ch;
     vid_off_said[vid_off_said_n].w = w;
     vid_off_said[vid_off_said_n].h = h;
@@ -254,6 +261,7 @@ static void vid_note_offset(unsigned off, unsigned bytes, unsigned w, unsigned h
     fprintf(stderr, "[padglhost] video upload %ux%u from ch%u slot%u "
             "(ch%u serving %ux%u, write_idx=%u)\n",
             w, h, ch, slot, ch, c->width, c->height, c->write_idx);
+    return 1;
 }
 
 /* Every distinct size the game has asked to upload, and how often. Eight is
@@ -1648,7 +1656,16 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             if (vid_ring && (unsigned long)u[4] + u[5] <=
                     (unsigned long)PADVID_RING_BYTES) {
                 yuv = vid_ring + u[4];
-                vid_note_offset(u[4], u[5], w, h);
+                /* The host is the only side that can see BOTH the geometry the
+                 * guest is uploading at and what the channel is actually
+                 * serving, so it is the right place for the last check. The
+                 * guest's own check in gstvid.c should mean this never fires;
+                 * it fires anyway if the game holds a pointer we never handed
+                 * it. Dropping shows the previous frame, which beats stripes. */
+                if (!vid_note_offset(u[4], u[5], w, h) && !vid_nosizeguard) {
+                    vid_dropped++;
+                    break;
+                }
             }
         } else if (len >= 24 + u[5]) {
             yuv = pl + 24;
@@ -1929,6 +1946,11 @@ int main(int argc, char **argv)
     if (getenv("PAD_GL_MAX_FRAMES"))  dump_max   = atoi(getenv("PAD_GL_MAX_FRAMES"));
     if (getenv("PAD_VID_BURST"))      vid_burst_frames = atoi(getenv("PAD_VID_BURST"));
     if (getenv("PAD_VID_OFFLOG"))     vid_offlog = atoi(getenv("PAD_VID_OFFLOG"));
+    vid_nosizeguard = getenv("PAD_VID_NOSIZEGUARD")
+                    ? atoi(getenv("PAD_VID_NOSIZEGUARD")) : 0;
+    if (vid_nosizeguard)
+        fprintf(stderr, "[padglhost] PAD_VID_NOSIZEGUARD: a video frame whose "
+                "size disagrees with its channel will be uploaded anyway\n");
     if (getenv("PAD_VID_SNAP") && getenv("PAD_VID_SNAP")[0]) {
         const char *s = getenv("PAD_VID_SNAP");
         if (!strcmp(s, "all")) vid_snap_all = 1;

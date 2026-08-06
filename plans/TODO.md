@@ -105,17 +105,43 @@ These have each been violated at least once and each cost a run or a window:
       grabs whatever is on top: it returned the *Controls* window while reporting
       it had found the game window. A plain desktop `CopyFromScreen` is what
       worked.
+      **★★ AND THE MECHANISM IS CHANNEL TAKEOVER, measured live 2026-08-06.**
+      Two facts, both from the log rather than from reading code: **the game asks
+      for caps ONCE per pipeline and never again** (one `caps 1360x768 -> its own
+      pad` line, then NINE `streaming` lines with the size changing underneath
+      it — it loops by SEEKING, so its texture geometry is frozen for the life of
+      the pipeline), and **every new pipeline steals a channel** (four channels,
+      `pipeline` is never cleared, so after four clips every new one takes the
+      slot of a stream that is not currently `playing` — which a clip that just
+      hit EOS is, while its decoder is still on screen). The inset negotiates
+      520x294, its clip ends, its channel is handed to a 1360x768 background
+      clip, and its decoder keeps uploading from a ring now full of someone
+      else's frames. That is why ch3 carried 63 big clips and 3 small ones.
+      **★★ AND IT NOW REPRODUCES IN ATTRACT, EVERY RUN, WITHOUT A GAME.**
+      `PAD_VID_ALT_SIZE=520x294` printed the fault in its exact real-world
+      direction: `** WRONG-SIZE VIDEO UPLOAD ** 520x294 (229320 bytes) read from
+      ch0 slot0, but ch0 is serving 1360x768 (1566720 bytes)`. Same 229,320-byte
+      read landing on a 1360x768 frame that `framewidth.py` measured off the real
+      capture. **The taunt is no longer needed to work on this item.** Be honest
+      about the flag's limit: it changes size under a LIVE pipeline, which real
+      playback never does, so it reproduces the fault but not the route to it.
+      **Fixed:** `gstvid.c` records the size the GAME was told (`told_w/told_h`,
+      set in `pad_vid_get_int` — NOT at prepare(), which re-runs on every rewind
+      and would keep the field uselessly in step with the channel) and refuses to
+      hand over a frame once the channel serves something else, holding the last
+      good frame instead; channel stealing is now least-recently-used rather than
+      first-in-array; and `padglhost` drops a mismatched upload outright
+      (`PAD_VID_NOSIZEGUARD=1` to A/B it on one build).
       **Committed:** `longplay.sh` (`355e0bd`), the control-tested findings
       (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (`4dab1ad`),
-      `framewidth.py` + the 1360 finding (this pass).
-      **Resume:** the question left is only **whose 1360x768 frame, and how the
-      inset came to hold a pointer at it.** Two instruments for that, both built
-      this pass: `PAD_VID_OFFLOG` in padglhost decodes every upload's ring offset
-      into (channel, slot) and shouts when the uploaded byte count disagrees with
-      that channel's own `frame_bytes`; `PAD_VID_ALT_SIZE=<w>x<h>` in padvidhost
-      alternates the served size per request so ATTRACT has two sizes live at
-      once — the condition that was only ever met by a taunt nobody could
-      provoke.
+      `framewidth.py` + the 1360 finding (`ccce594`), the fix (this pass).
+      **Resume:** normal attract is verified unbroken with the fix in (video
+      plays, no warnings, `fix_normal_1.png`). What is left is the ALT_SIZE
+      re-run that must show `NOT MINE ANY MORE` firing and no wrong-size upload
+      surviving it. **The one thing still not proven** is that the real taunt
+      reaches the fault by this exact route rather than some other way into the
+      same disagreement; the fix does not depend on that, because it checks the
+      disagreement itself.
       **No live run left behind** — `alive.sh` is 0.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,

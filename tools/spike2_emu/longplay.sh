@@ -67,10 +67,19 @@ guest_up() { pgrep -f arm-binfmt >/dev/null 2>&1; }
 
 # One ball into play. plunge.py takes the lowest trough ball still held, so a
 # `reset` first is what makes this repeatable across blocks.
+#
+# `game` AND NOT `start`, AND THIS IS THE WHOLE REASON THIS SCRIPT USED TO PLAY
+# TO AN EMPTY ROOM. A machine with no credits ignores the Start button
+# SILENTLY: the switch genuinely reaches the game (+36/-36 logged at the
+# asked-for duration) and no game begins. Every instrument the rig owns reports
+# the press as delivered, so "the press worked" and "a game started" look like
+# one claim. Three Start presses over ten minutes once left a run in attract
+# mode while ~1300 scripted switch pokes landed on an attract screen, and the
+# scene this script exists to provoke cannot appear when there is no game.
+# `plunge.py game` puts a coin in first.
 newball() {
-    python3 "$S/plunge.py" reset  >/dev/null 2>&1; sleep 1
-    python3 "$S/plunge.py" start  >/dev/null 2>&1; sleep 4
-    python3 "$S/plunge.py" plunge >/dev/null 2>&1; sleep 2
+    python3 "$S/plunge.py" reset >/dev/null 2>&1; sleep 1
+    python3 "$S/plunge.py" game  >/dev/null 2>&1; sleep 2
 }
 
 # COUNT the sightings, never test for presence. The line stays in the log for

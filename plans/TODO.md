@@ -713,7 +713,41 @@ These have each been violated at least once and each cost a run or a window:
       dragging, no app switching, no typing — and "sluggish" is a word about
       INTERACTING. David also plays games, which run more video, more audio and
       more switch traffic than attract does.
-      **★★ DAVID ANSWERED, 2026-08-06, AND IT REFRAMES THE ITEM: the symptom is
+      **★★★ 2026-08-06, AND IT INVALIDATES MY OWN HEADLINE: THIS IS AN 8-CORE
+      MACHINE, NOT A 16-CORE ONE, AND WSL IS GIVEN ALL 16 THREADS.**
+      `Win32_Processor` says **AMD Ryzen 7 9800X3D, 8 physical cores, 16 logical**
+      — and **there is no `C:\Users\david\.wslconfig` at all**, so WSL2 defaults
+      apply and `wsl -e nproc` returns **16**. The VM is handed every logical
+      processor on the machine.
+      **Every "plenty of headroom" claim above was computed against 16 CORES and
+      is wrong.** The run's 2.80 cores is **35% of the physical CPU**, not 17.5%,
+      and — the part that actually matters — **WSL's 16 vCPU threads can be
+      scheduled onto both SMT siblings of whatever physical core an interactive
+      app is using.** SMT siblings share execution resources, so a single-threaded
+      interactive path loses real throughput while **no thread ever waits for a
+      logical CPU**. That is the one mechanism consistent with everything
+      measured: **processor queue length 0.00 in all six captures**, no
+      starvation, no memory or disk or GPU pressure, and yet felt latency.
+      **★ AND DAVID SHARPENED THE SYMPTOM FURTHER: "the biggest thing i notice
+      when the emulator is running is that claude typing input is really
+      sluggish and delayed."** Not the desktop generally — **typing into one
+      Electron app**, whose input-to-paint path is single-threaded. That is
+      exactly what SMT contention degrades and exactly what an aggregate CPU
+      number cannot show.
+      **Checked and NOT the cause: GPU contention between the two.** `claude`
+      renders on LUID `0x00000000_0x00012481`, the RTX 5090, the same adapter
+      dwm composites on; the emulator's own LUIDs (`…1384E`, `…13883`) appear
+      only during a run. No per-app GPU preference overrides are set.
+      **THE LEVER, one line, untested:** create `C:\Users\david\.wslconfig` with
+      `[wsl2]` + `processors=6` (or 4) so the VM cannot occupy every physical
+      core. **It needs `wsl --shutdown` to take effect, which kills any running
+      rig — never mid-run.**
+      **A CONFOUND THAT MUST BE CONTROLLED, because it is nearly perfectly
+      correlated:** the Claude app is also rendering this session's tool output,
+      and "the emulator is running" has so far always coincided with "the agent
+      is working". **Test typing with the emulator up and the agent IDLE**
+      before crediting any fix.
+      **DAVID ANSWERED EARLIER, 2026-08-06: the symptom is
       MOUSE AND TYPING LAG, and it happens MOSTLY DURING A GAME.** Both were
       things nothing here had measured — every capture up to that point was
       attract mode with nobody touching the computer, which is the cheapest

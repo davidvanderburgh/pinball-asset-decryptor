@@ -99,7 +99,11 @@ print('\n'.join(winprof.quiet_check(json.load(open(sys.argv[1])))))
 # --- 3. the baseline arm needs no emulator at all -----------------------------
 if ($NoRun) {
     Say "baseline arm: profiling $Secs s of desktop with no run"
-    & py -3 $WINPROF --secs $Secs --label $Label --out $Out
+    Say "(progress prints every 10 s; it is NOT stuck if it pauses briefly)"
+    # -u for unbuffered. Without it Python block-buffers stdout whenever it is
+    # not attached to a console, so nothing appears for the whole capture and it
+    # looks like a hang.
+    & py -3 -u $WINPROF --secs $Secs --label $Label --out $Out
     exit 0
 }
 
@@ -169,11 +173,11 @@ $adapter = (wsl -e grep -am1 "D3D12" /home/david/padglhost.log)
 Say "renderer says: $adapter"
 
 # --- 7. profile both sides of the boundary, in the same window ---------------
-Say "profiling $Secs s"
+Say "profiling $Secs s (progress every 10 s; it is NOT stuck if it pauses)"
 $rig = Start-Process wsl -ArgumentList "-e", "python3", "$EMU_WSL/rigprof.py", `
                          "--secs", "$Secs", "--label", $Label, "--out", "/home/david" `
                      -PassThru -WindowStyle Hidden
-& py -3 $WINPROF --secs $Secs --label $Label --out $Out
+& py -3 -u $WINPROF --secs $Secs --label $Label --out $Out
 $rig.WaitForExit()
 
 # --- 8. teardown, then VERIFY it, because "it stops itself" has been wrong ---

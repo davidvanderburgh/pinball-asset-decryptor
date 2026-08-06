@@ -536,8 +536,12 @@ def _capture(secs, interval, label, outdir, quiet):
         if not quiet and n % 10 == 0:
             hv = (series["hv_logical"][-1] - series["hv_root"][-1]
                   if series.get("hv_logical") and series.get("hv_root") else 0.0)
+            # flush=True, because without it Python block-buffers stdout the
+            # moment it is not a console - which is every way this gets run from
+            # a script - so a 90 s capture prints NOTHING until it finishes and
+            # looks exactly like a hang. David reported one as "stuck".
             print("[winprof] %3ds  wsl_vm %5.1f%%  gpu %5.1f%%  jitter p95 %5.1f ms"
-                  % (n, hv, tot, pct(jit.samples[-2000:], 95) or 0.0))
+                  % (n, hv, tot, pct(jit.samples[-2000:], 95) or 0.0), flush=True)
         time.sleep(max(0.0, interval - 0.05))
 
     jit.stop.set()

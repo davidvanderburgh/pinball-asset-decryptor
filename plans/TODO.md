@@ -654,14 +654,31 @@ These have each been violated at least once and each cost a run or a window:
       | whole machine `hv_logical` | 22.76% | 22.66% | **nothing** |
       | vmmemWSL | 114.79% | 115.56% | nothing |
       | msrdc | 72.07% | 68.74% | −3.3 |
-      | **dwm** | **5.53%** | **12.87%** | **+7.3 WORSE** |
-      | **GPU total** | **9.78%** | **14.02%** | **+4.2 WORSE** |
+      | dwm | 5.53% | 12.87% | **NOISE — see the correction below** |
+      | GPU total | 9.78% | 14.02% | **an ACCOUNTING ARTEFACT, not a cost** |
       | DPC time | 0.75% | 1.16% | worse |
       | ctx switches | 101,775 | 102,378 | nothing |
       | DWM late frames | 0.00% | 0.00% | nothing |
-      **Net: slightly worse.** `PAD_GL_ADAPTER` stays UNSET, which is what it
-      already was, so nothing needs reverting — the knob is kept because it is
-      how this was measured and how it would be re-measured.
+      **★ CORRECTION, 2026-08-06, and it changes the verdict from "slightly
+      worse" to "NO MEASURABLE DIFFERENCE".** This first read the dwm row as
+      the adapter making things worse. It is not a signal. **dwm's CPU across
+      all six captures: 13.03 and 13.11 with NO emulator running at all, and
+      4.36 / 5.53 / 12.87 / 16.31 with one running.** The ranges overlap
+      completely — dwm is dominated by whatever else is on the desktop (a
+      scrolling terminal, Task Manager) and **cannot distinguish any arm**.
+      And the GPU rise is an artefact of where the work is COUNTED: rendering on
+      the NVIDIA part makes the emulator's GPU work appear in that adapter's
+      counters (8.75 → 13.08) where the AMD part's work was never visible to
+      Windows at all. So the adapter is a **null result**, not a regression, and
+      `PAD_GL_ADAPTER` stays UNSET as a neutral knob rather than a rejected one.
+      **WHICH METRICS ARE TRUSTWORTHY HERE, measured over six captures, so no
+      future pass chases noise again:**
+      • **RELIABLE** — vmmemWSL (0.23/0.43 with no run vs 114.8-118.8 with one),
+      msrdc (0.00 vs 68.7-72.1), context switches (19.6k-22.0k vs 101.8k-106.3k),
+      DWM frame interval and late frames. Every one of these separates run from
+      no-run with no overlap.
+      • **NOISE, do not draw conclusions from it** — **dwm CPU**, and any GPU
+      total compared ACROSS adapters.
       **AND THE MEASUREMENT SAYS WHY, which is the part worth keeping.** The AMD
       adapter's own GPU time **did not drop when the renderer left it**
       (0.96% → 0.94%), so that LUID was never the emulator's work: **the guest's
@@ -727,14 +744,19 @@ These have each been violated at least once and each cost a run or a window:
       `abrun.ps1 -Label fidget_game -Game -Secs 90`, then `--compare` them and
       read `pointer gap ms` and `pointer stutters / active s`. The control is
       not optional: moving the mouse changes the numbers by itself.
-      **If it reproduces**, A/B these three in order, they are all cheap and all
-      untried: **`PAD_PLAYFIELD=0`** (the virtual playfield is a Tk window on
-      the WINDOWS desktop repainting at 30 fps with `timeBeginPeriod(1)` set —
-      much the most likely thing here to affect how the desktop feels, and it is
-      one env var), **`PAD_GL_LEGEND=0`** (one fewer RAIL window for msrdc), and
-      **`PAD_GL_W`/`PAD_GL_H` halved** (does msrdc's 0.70 cores scale with
-      resolution). **NOT by moving a window from Windows** — standing
-      non-negotiable.
+      **If it reproduces**, A/B these two, both cheap and both untried:
+      **`PAD_PLAYFIELD=0`** (the virtual playfield is a Tk window on the WINDOWS
+      desktop repainting at 30 fps with `timeBeginPeriod(1)` set — much the most
+      likely thing here to affect how the desktop feels, and it is one env var)
+      and **`PAD_GL_LEGEND=0`** (one fewer RAIL window for msrdc).
+      **★ RULED OUT ALREADY, unattended, so David's time is not spent on it:
+      window SIZE is not the lever.** `PAD_GL_W=680 PAD_GL_H=384` is a QUARTER
+      of the pixels and **msrdc did not move: 72.07% → 70.32%**, inside the
+      68.7-72.1 spread it shows across every other arm. **msrdc's ~0.70 cores is
+      not pixel-rate** — it is the same whatever the resolution, whichever
+      adapter renders, and in attract or in a game. That constancy is itself the
+      clue: it looks like a fixed-rate encode or poll loop rather than work
+      proportional to what is on screen.
       **If it does NOT reproduce**, say so plainly rather than declaring the
       item fixed: it would mean the pointer probe cannot see it either, and the
       next thing to try is capturing while David uses the machine the way he

@@ -215,7 +215,7 @@ These have each been violated at least once and each cost a run or a window:
       run IS), and `swlayout.sh`, which proves the three hand-kept copies of the
       switch block agree and was validated by breaking an offset on purpose in
       both directions.
-      **Committed:** `13a5aca` (provenance + clock + cfg + swlayout),
+      **Committed:** `145e79b` (provenance + clock + cfg + swlayout),
       `52e3703` (the live confirmation and the PAD_SW_SRC fix).
       **Resume:** write `swreplay.py` and the comparator — but decide the CLOCK
       first, per the star above, and that decision wants item 18's profile.

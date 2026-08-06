@@ -148,11 +148,54 @@ These have each been violated at least once and each cost a run or a window:
       **The script half of that is now met: 10 ms, 72/72.**
 
 - [ ] **16. Log replay mode: re-run a session's switch inputs from its log.**
-      `S2 D4` — S2 because play works without it; what it costs is every other
-      item's runs. D4 because the parse and the driver are desk work on a
-      primitive that is already
+      `S2 D4` ← IN PROGRESS — S2 because play works without it; what it costs is
+      every other item's runs. D4 because the parse and the driver are desk work
+      on a primitive that is already
       validated, but confirming it takes runs, the log needs a new field first
       (a guest-side change and a rebuild), and the comparator does not exist yet.
+      **★ DAVID, 2026-08-06: "in order for the replay to be effective we need the
+      performance issue worked out completely... if there is any slowdown or
+      stutter or lag then the replay will not work effectively." He is right,
+      and it decides the CLOCK the replay runs on.**
+      This rig has already proven the point in miniature: `padsw.h` records that
+      a menu press expressed in MILLISECONDS is a lottery — on the Main Menu
+      120 ms and 200 ms moved the cursor 0 rows, 250 ms moved 1 or 2, 300 ms
+      moved 3 — because what decides it is how many SPI transfers land inside the
+      hold. That is why `tap_reads` counts TRANSFERS. **A replay scheduled in ms
+      inherits that lottery for every edge, not just the menu ones.**
+      **And the guest clock does NOT fix it, which is the trap worth writing
+      down before someone builds on it.** `pad_ms()` is CLOCK_MONOTONIC, so the
+      guest's millisecond is wall time; `guest_t0_ms` removes drift between the
+      driver and the guest as two PROCESSES, and does nothing about the guest
+      falling behind the wall. The lag-tolerant unit is the same one item 17
+      already found: **the guest's own SPI transfer count**, which advances with
+      the game rather than with the clock. Offer both, default to transfers, and
+      state which was used in the diff.
+      **So items 18 and 11 are upstream of this one**, and 18 is S2 from today
+      for that reason.
+      **Established this pass, offline, from logs already on disk:**
+      • `gz_item15.log` is 1611 edges over 591 s and is **almost entirely
+      scripted** — 4 edges are autoattract's switch 28, the rest are longplay.sh
+      pokes at ~90 ms plus plunge.py's coin/start/plunge. A replay of it replays
+      a random walk, which makes it a fine test vehicle and a poor demo.
+      • the two-way keyboard/script split does NOT give provenance:
+      **autoattract.sh presses Service Back through `swpoke.py`**, so the rig's
+      own boot press is a script edge like any other.
+      **RULED OUT / CORRECTED — this item's own text was wrong:** it claimed
+      "the launch line is logged verbatim with `PAD_CARD=`". It is not. **watch.sh
+      never echoes its own configuration**, and `PAD_CARD` appears in zero recent
+      run logs. The config gap is real and is a second thing to close, not a
+      thing already done.
+      **Uncommitted** (does not build yet, no run made): provenance plumbing —
+      `kbd_src`/`scr_src`/`guest_t0_ms` in `padsw.h` + `hwshim.c` + `padsw.py`,
+      per-writer tags in swpoke/swhold/plunge/coilact/swinit/swladder,
+      `PAD_SW_SRC=a` in autoattract.sh, `=g` in longplay.sh, `=f` in
+      playfield.py, and `[sw]` now prints `+59k -66l`. **`swwidth.py` parses the
+      old format and has NOT been updated — it will break.**
+      **Resume:** update `swwidth.py`'s `[sw]` parser, add a `[watch] cfg` line
+      to watch.sh, then build and commit before writing the driver. Decide the
+      replay clock (transfers, per the star above) before `swreplay.py` exists,
+      not after.
       **The want:** point the rig at a previous run's log and have it re-deliver
       that run's switch inputs at the same offsets, so getting back to a fault
       does not mean re-doing coin/start/plunge and a hundred flipper presses by
@@ -387,12 +430,34 @@ These have each been violated at least once and each cost a run or a window:
       in ATTRACT, this is irrelevant — attract never had the fault.
 
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
-      does not exist yet. D3 — one run, `coilread.py` already validated, but
-      the Coil Test menu has not been reached yet so the navigation is unknown.
-      `Diagnostics → Coil Test` fires one drive at a time
-      and the 10 device-test coils already have names and positions in
-      `device_xy.txt`. Coil Test itself has not been reached yet. Use
-      `coilread.py` (run on WINDOWS) to diff nonzero `(node,index,count,lvl)`
+      is half confirmed. D3 — one run; the instrument exists and is validated,
+      but the Coil Test menu has not been reached yet so the navigation is
+      unknown.
+      **★ THIS ENTRY WAS STALE UNTIL 2026-08-06 AND SAID "a map that does not
+      exist yet". Half of it exists and is confirmed by a labelled experiment.**
+      `313bb53` (2026-08-04) decoded the fire frame: `cmd 0x40` on nodes 8/9
+      addresses ONE coil by index, the index is the device table's own (node 8
+      carries 0..8, node 9 carries 6 — exactly the ten playfield coils
+      `device_xy.txt` lists under groups 6 and 7), and byte 4 is drive strength
+      on the same scale as the menu's "Trough Eject Power 225 (88%)".
+      `coil_publish()` in `hwshim.c` is the decoder, `coildecode.py` its Python
+      twin, `PAD_COIL_PROBE=1` the instrument (use it, NOT `PAD_NB_LOG`, which
+      at 1.5M lines makes the boot take 4+ minutes).
+      **How five of the ten were confirmed WITHOUT the menu, which is why this
+      is not a guess:** door closed, trough emptied, Start pressed → the game put
+      up LOCATING PINBALLS and ran a ball search, and the frames that appeared
+      carried indices 2, 3, 4, 7 and 8 = right slingshot, left slingshot, auto
+      plunger, pop bumper, right scoop. Precisely the coils a ball search fires
+      and precisely not the three flippers or the trough eject. The game
+      labelled its own experiment.
+      **WHAT IS LEFT, and it is the whole reason the box is open:**
+      **(a) byte 7 is NOT decoded** — 0xff for the slingshots and pop bumper,
+      0x00 for the plunger and scoop, 0x32 for the magnet; on/off, hold power and
+      board-self-fire all still fit. **(b) the other five coils** (three
+      flippers, trough eject, coin enable, magnet) have no labelled experiment.
+      **(c) `Diagnostics → Coil Test` has still never been reached**, and it is
+      the one-at-a-time oracle that would close (b) by name.
+      `coilread.py` (run on WINDOWS) diffs nonzero `(node,index,count,lvl)`
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
@@ -441,10 +506,15 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
-- [ ] **18. Windows feels sluggish while a run is up.** `S3 D4` — S3 because
-      nobody loses a run to it and the workaround is not using the machine while
-      it runs; **it becomes S2 the day it stops David leaving a long run going**,
-      since items 6 and 17 both need those. D4 — every run reproduces it, so a
+- [ ] **18. Windows feels sluggish while a run is up.** `S2 D4` *(**S3 → S2 on
+      2026-08-06, on evidence and not on effort.** It was S3 on "nobody loses a
+      run to it", with the pre-agreed trigger "it becomes S2 the day it stops
+      David leaving a long run going". The trigger fired from a different
+      direction: David's point on item 16 is that a replay is only as good as
+      the emulation's steadiness, so slowdown and stutter now make another
+      item's OUTPUT WRONG rather than merely making the desktop unpleasant.
+      That is the S2 line — it costs runs and makes other items more
+      expensive.)* D4 — every run reproduces it, so a
       pass cannot end having learned nothing, but the instrument does NOT exist
       and the fix is unknown until it does.
       **Observed 2026-08-06, in David's words: "my computer runs a little
@@ -486,6 +556,30 @@ These have each been violated at least once and each cost a run or a window:
       **Acceptance for the FIX: not yet defined, deliberately** — a target set
       today would aim pass two at whatever was guessed today, and this queue has
       been bitten by exactly that.
+
+- [ ] **19. Save and load a replay from the game window itself.** `S3 D4` — S3
+      because item 16's command line is the workaround and nobody loses a run to
+      typing it; D4 because it cannot start until 16 ships the engine and the
+      file format, and because its trigger is a KEY PRESS in the WSLg window,
+      which this rig has recorded twice as un-injectable (SendInput is
+      UIPI-blocked — items 7 and 12), so confirming it needs David's hands or a
+      keysim rather than a script.
+      **David picked the game window and its Controls legend** (`padglhost.c`,
+      C/X11), asked and answered 2026-08-06, over the virtual playfield and the
+      app's Emulate tab. One key saves the session's replay, one key loads and
+      plays one back, both listed in the legend beside the switch keys.
+      **The structural thing in the way:** `binds[]` (`padglhost.c:646`) has no
+      concept of a key that is not a switch — every row carries an `ids[]` and
+      goes through `sw_publish()`. A replay key is the first binding that does
+      something else, so the table and `legend_open`'s drawing of it grow a new
+      kind of row. No function key is bound today, so F9/F10 are free.
+      **Depends on item 16, and must not invent a second format:** whatever
+      16's driver reads is what this writes.
+      **Acceptance:** with no shell and no helper scripts, a key in the game
+      window writes a replay of the session so far and says so in the log; a
+      second key plays one back on a fresh run; the replayed run's `[sw]` stream
+      matches the saved one within item 16's stated tolerance. Both keys appear
+      in the Controls legend.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the

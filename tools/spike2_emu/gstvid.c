@@ -548,6 +548,31 @@ static void *vid_thread(void *arg)
                 post_eos(s->pipeline);
                 return 0;
             }
+            /* ★ ITEM 11: THE RING WAS EMPTY WHEN A FRAME WAS DUE. The census
+             * on the host side only ever logged the ring being FULL (the
+             * guest not draining); this is the opposite and untested case -
+             * the DECODER not keeping up, which starves the schedule and
+             * makes the handoff late. Measured 2026-08-06: the guest handed
+             * the game 14.3-28/s during gameplay instead of 30 while the
+             * machine was 67% IDLE, so it is not CPU starvation and this is
+             * the remaining candidate. Counts waits that outlast the frame
+             * they were due for, budgeted so a stall cannot flood. */
+            {
+                static unsigned long waited_us[PADVID_CHANNELS];
+                static unsigned budget = 60;
+                int ch = chan_of(s);
+                waited_us[ch] += 1000;
+                if (waited_us[ch] == delay && budget) {
+                    char m[112];
+                    budget--;
+                    snprintf(m, sizeof m,
+                             "[vid] ch%d RING EMPTY for a whole frame period"
+                             " at frame %u - the decoder is behind\n",
+                             ch, consumed);
+                    pad_say(m);
+                }
+                if (waited_us[ch] > delay * 8) waited_us[ch] = 0;
+            }
             usleep(1000);
             continue;
         }
@@ -610,6 +635,34 @@ static void *vid_thread(void *arg)
             }
             if (s->handoff)
                 s->handoff(s->fakesink, s->buf, s->sinkpad, s->handoff_data);
+            /* ITEM 11's OTHER STAGE COUNTER, paired with padglhost's
+             * "vid N NEW/s". This is the moment the GAME is handed a frame;
+             * that one is the moment the frame reaches the renderer. Two
+             * numbers on the same seconds are what separate "the guest was
+             * late" from "the game did not upload what it was given" - and
+             * David's recording proved neither could be read off the
+             * healthy-looking per-serve logs. Rate-limited to one line per
+             * ~2 s per stream. */
+            {
+                static unsigned long said_at[PADVID_CHANNELS];
+                static unsigned said_n[PADVID_CHANNELS];
+                int ch = chan_of(s);
+                unsigned long nowu = vid_us();
+                said_n[ch]++;
+                if (!said_at[ch]) said_at[ch] = nowu;
+                else if ((long)(nowu - said_at[ch]) >= 2000000) {
+                    char m[96];
+                    unsigned long el = nowu - said_at[ch];
+                    snprintf(m, sizeof m,
+                             "[vid] ch%d handed the game %u frames in %lu ms"
+                             " (%lu.%lu/s)\n", ch, said_n[ch], el / 1000,
+                             (unsigned long)(said_n[ch] * 1000000ul / el),
+                             (unsigned long)(said_n[ch] * 10000000ul / el) % 10);
+                    pad_say(m);
+                    said_at[ch] = nowu;
+                    said_n[ch] = 0;
+                }
+            }
             s->last_use = ++use_tick;
             consumed++;
             /* Updated per frame rather than on each of the five exit paths:

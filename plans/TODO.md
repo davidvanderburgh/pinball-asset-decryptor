@@ -550,13 +550,37 @@ These have each been violated at least once and each cost a run or a window:
       shape as the audio fault this rig already solved: every instrument
       inside WSL read perfect while the room heard breakage, and the answer
       was the WSLg→Windows hop.
-      **THE NEXT INSTRUMENT, designed, unbuilt — a PER-SWAP TICK.** Have
-      padglhost draw a small changing marker (frame counter as a few pixel
-      blocks) every swap, screen-record, count distinct markers per second.
-      60 distinct/s ⇒ WSLg delivers everything and the loss is upstream (the
-      game's upload cadence); fewer ⇒ the RAIL/RDP hop is dropping, which is
-      item 18's territory and a different fix entirely. This is the only
-      measurement that splits those two, and nothing cheaper does.
+      **★★ REPRODUCED WITHOUT DAVID AND LOCALISED, 2026-08-06 (runs 7-8).**
+      Agent-driven capture of its own gameplay: **18.7% repeated frames, 306
+      held events, 5.6/s** — matching David's 22.1% / 6.6/s, so it is the
+      same fault and it no longer needs his hands to study.
+      **STAGE COUNTERS NOW EXIST AT BOTH ENDS OF THE BOUNDARY** (`[vid] chN
+      handed the game N frames ... /s` in gstvid.c, `vid N uploads/s N NEW/s`
+      beside padglhost's fps line) and they name the mechanism:
+      • healthy seconds: guest 30.0/s → padglhost 30.0 uploads/s, all NEW,
+        60.0 fps.
+      • bad seconds: guest **27.4/s** → padglhost **25.5 uploads/s** at
+        **54.0 fps**. **The guest handoff and the renderer dip in the SAME
+        seconds.**
+      **FOUR CANDIDATES RULED OUT BY MEASUREMENT, so nobody pays twice:**
+      • **WSLg/RDP presentation.** David: only the VIDEO hitches while scene
+        art and overlays stay smooth — one window, one swap, so a dropping
+        RAIL hop would take everything with it. The per-swap tick was
+        designed for this and is NOT needed.
+      • **CPU starvation.** 67% idle, load 0.99 on 6 vCPUs, during the dips.
+      • **Decode starvation.** New `RING EMPTY` counter (gstvid.c, fires when
+        a frame is due and the ring has none): **0 events** across a whole
+        gameplay run. The host decoder is never behind.
+      • **The recorder perturbing it.** The dips are identical with no
+        capture running (one window fell to 14.3/s).
+      **WHAT IS LEFT, and it is the only thing left: GL-BRIDGE BACK
+      PRESSURE.** The guest's video handoff calls the game, which uploads and
+      emits TEXDIRECT into the padgl ring; if padglhost's per-frame work
+      overruns a 16.7 ms vsync, the ring backs up and the guest's video
+      thread is held late — which is exactly the observed lockstep of 54 fps
+      with 27/s. **CANDIDATE, not established:** the I420→RGB conversion and
+      upload in padglhost is the per-frame cost to measure first. Time the
+      TEXDIRECT branch and the swap separately before changing anything.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -573,9 +597,15 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** build the per-swap tick in padglhost, record it, and split
-      WSLg-drop from upload-cadence. That decides which of two completely
-      different fixes to write, so do not guess between them.
+      **Resume:** time padglhost's per-frame work — TEXDIRECT (I420→RGB
+      convert + upload) against the rest of the swap — and find what pushes
+      it past 16.7 ms in the bad seconds. The agent can now run the whole
+      loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
+      game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
+      `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and
+      only on scenes with real motion** — it refuses low-motion content on
+      purpose, and the idle city loop is one of those (it reads 1.8% true
+      repeats and is NOT a valid test bed).
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

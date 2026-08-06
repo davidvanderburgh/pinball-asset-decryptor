@@ -168,6 +168,9 @@ static int fb_w = 1920, fb_h = 1080;
 static unsigned fbo_screen, tex_screen;
 static volatile int stop_now;
 static long frames_done;
+/* item 11: video frames uploaded, and how many carried a NEW ring offset. */
+static long vid_uploads, vid_distinct;
+static unsigned vid_last_off = 0xffffffffu;
 static const char *dump_dir;
 static int dump_every = 30, dump_max = 40, dumped;
 static long unknown_ops;
@@ -1714,6 +1717,18 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         /* u[0..5] = w, h, fmt, src, arg, len */
         unsigned w = u[0], h = u[1], fmt = u[2], src = u[3];
         const unsigned char *yuv = 0, *rgba;
+        /* ITEM 11's STAGE COUNTER. David's screen recording measured 22.7%
+         * repeated frames against a 0.0% pristine control while every guest
+         * and host counter read clean, so the question is WHICH STAGE stops
+         * advancing. This counts uploads that carry a DISTINCT ring offset -
+         * the game re-uploading the same frame is the game not having a new
+         * one, which is a different fault from the host not producing one.
+         * Reported per second beside the fps line. */
+        vid_uploads++;
+        if (src == PADGL_SRC_VIDSHM && u[4] != vid_last_off) {
+            vid_last_off = u[4];
+            vid_distinct++;
+        }
         if (len < 24 || !w || !h) { vid_dropped++; break; }
         if (src == PADGL_SRC_VIDSHM) {
             vid_open();
@@ -2143,8 +2158,13 @@ int main(int argc, char **argv)
 
             if (now_s() - last_report >= 2.0) {
                 double dt = now_s() - last_report;
-                fprintf(stderr, "[padglhost] %.1f fps (%ld frames total)\n",
-                        (frames_done - last_frames) / dt, frames_done);
+                static long last_up, last_dist;
+                fprintf(stderr, "[padglhost] %.1f fps (%ld frames total)"
+                        "  vid %.1f uploads/s %.1f NEW/s\n",
+                        (frames_done - last_frames) / dt, frames_done,
+                        (vid_uploads - last_up) / dt,
+                        (vid_distinct - last_dist) / dt);
+                last_up = vid_uploads; last_dist = vid_distinct;
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();
             }

@@ -42,7 +42,19 @@ import sys
 import numpy as np
 
 PROBE_N = 400
-EPS = 0.35          # mean abs delta below this = the same picture
+# A REPEATED frame differs only by codec noise, so its delta is ~0 - NOT
+# "small". 0.35 was a guess and it was wrong: on a low-motion clip the real
+# motion itself sits at 0.19, so the guess swallowed the entire distribution
+# and reported 96.7% repeats for a capture whose true rate was 1.8%. Read off
+# the measured distributions instead: a genuinely repeated frame lands under
+# 0.10 with a clear GAP above it (David's capture: 22.4% under 0.10, next
+# mode at 1.8), and this threshold gives the same answer anywhere from 0.1 to
+# 1.0 on content that has a gap at all.
+EPS = 0.10
+# If the deltas are NOT bimodal there is no repeat/motion boundary to find,
+# and any number here would be the threshold talking rather than the video.
+# Say so instead of printing it.
+GAP_MIN = 4.0       # motion mode must be this many x the repeat threshold
 
 
 def probe_size(path):
@@ -110,6 +122,15 @@ def census(path):
     dur = n / fps
     print("%-46s %5d frames @ %.0f fps, moving region %dx%d"
           % (path.split("\\")[-1][:46], n + 1, fps, crop[0], crop[1]))
+    moving = d[~dup]
+    med_motion = float(np.median(moving)) if len(moving) else 0.0
+    if med_motion < EPS * GAP_MIN:
+        print("      ** NOT JUDGED: the deltas are not bimodal (motion median"
+              " %.2f vs repeat threshold %.2f)." % (med_motion, EPS))
+        print("      ** This clip barely moves, so 'repeat' and 'slight"
+              " change' are the same number here. Point it at a scene with"
+              " real motion, or the answer is the threshold talking.")
+        return -1.0
     print("      repeated frames: %5d of %d pairs = %5.1f%%   (%.2f per second)"
           % (int(dup.sum()), n, 100.0 * dup.sum() / n, dup.sum() / dur))
     if runs:

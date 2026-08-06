@@ -173,6 +173,7 @@ static long vid_uploads, vid_distinct;
 static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
+static long vid_last_frame, vid_swaphist[6];
 static double now_s(void);
 static const char *dump_dir;
 static int dump_every = 30, dump_max = 40, dumped;
@@ -1735,6 +1736,20 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * Reported per second beside the fps line. */
         vid_uploads++;
         if (src == PADGL_SRC_VIDSHM && u[4] != vid_last_off) {
+            /* ★ SWAPS PER VIDEO FRAME - the hold, measured where it is SEEN.
+             * The renderer swaps 60/s and video arrives 30/s, so every video
+             * frame should occupy exactly TWO swaps. Three or four IS the
+             * on-screen hold, counted rather than inferred, and directly
+             * comparable with dupcensus.py's holds/s off a screen capture.
+             * Everything upstream of here has now been measured clean, so if
+             * this is clean too then only presentation is left. */
+            long sw = frames_done - vid_last_frame;
+            vid_last_frame = frames_done;
+            if (vid_distinct) {          /* skip the first, it has no gap */
+                if (sw < 1) sw = 1;
+                if (sw > 5) sw = 5;
+                vid_swaphist[sw]++;
+            }
             vid_last_off = u[4];
             vid_distinct++;
         }
@@ -2181,6 +2196,15 @@ int main(int argc, char **argv)
                         nf ? swap_us / nf / 1000.0 : 0.0);
                 last_up = vid_uploads; last_dist = vid_distinct;
                 conv_us = swap_us = 0;
+                if (vid_swaphist[1] + vid_swaphist[2] + vid_swaphist[3] +
+                    vid_swaphist[4] + vid_swaphist[5]) {
+                    long h = vid_swaphist[3] + vid_swaphist[4] + vid_swaphist[5];
+                    fprintf(stderr, "[padglhost] swaps/video frame: 1x%ld "
+                            "2x%ld 3x%ld 4x%ld 5+x%ld   HOLDS %.1f/s\n",
+                            vid_swaphist[1], vid_swaphist[2], vid_swaphist[3],
+                            vid_swaphist[4], vid_swaphist[5], h / dt);
+                    memset(vid_swaphist, 0, sizeof vid_swaphist);
+                }
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();
             }

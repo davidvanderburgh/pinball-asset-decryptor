@@ -587,16 +587,38 @@ These have each been violated at least once and each cost a run or a window:
       0.5-3 frames/s, and the screen shows **5.6 holds/s**. Those do not
       reconcile, so **something after the handoff is still unaccounted for**
       and it is the last unmeasured link.
-      **THE LAST UNMEASURED LINK, and the next measurement: SWAPS PER VIDEO
-      FRAME at padglhost.** It renders 60/s and video arrives 30/s, so every
-      video frame should occupy exactly TWO swaps; a frame occupying 3-4 is
-      an on-screen hold, measured at the point of display rather than
-      inferred. Count the distribution in padglhost (swaps since the last
-      TEXDIRECT with a new ring offset) and report it beside conv/swap. That
-      number is directly comparable with `dupcensus.py`'s holds/s, which is
-      what makes it the right next step: if they agree, the hold is born in
-      the renderer's timing relative to arrivals; if the swap distribution
-      is clean while the screen still holds, only presentation is left.
+      **★★ MEASURED, run 11, AND IT IS THE PRESENTATION HOP — every stage
+      inside the rig is now proven clean and the screen still is not.**
+      padglhost's swaps-per-video-frame histogram is essentially PERFECT:
+      `2x` on 53-60 frames per 2 s window, **HOLDS 0.0-1.0/s**. Over the same
+      seconds the screen showed **5.72 holds/s**.
+      **A 60 fps capture makes it unambiguous** (perfect 30-on-60 delivery
+      MUST read exactly 2 refreshes per frame):
+      | 1 refresh (too short) | **18.4%** |
+      | 2 refreshes (perfect) | **48.4%** |
+      | 3+ refreshes (a hold) | **33.1% = 8.50 holds/s**, longest 250 ms |
+      So padglhost gives each frame exactly two SWAPS while the desktop shows
+      it for one or three REFRESHES. The swaps are right; their PRESENTATION
+      is uneven. The loss is after `eglSwapBuffers`, in the WSLg/RAIL/RDP hop
+      to Windows.
+      **★ AND THIS OVERTURNS THIS ITEM'S OWN EARLIER RULING, which was mine
+      and was wrong.** Presentation was "ruled out" from David's report that
+      only the video hitches while scene art and overlays stay smooth. That
+      inference does not hold: static or slow overlays CANNOT reveal an
+      uneven present, only 30 fps motion can. The observation was right and
+      the deduction from it was not. **The same shape as the audio fault this
+      rig already solved** - every instrument inside WSL read perfect, the
+      room heard breakage, and the answer was to bypass the WSLg hop
+      (PortAudio on the Windows side, `13c4410`).
+      **STILL TO PROVE before any architectural change** - that gdigrab is
+      not itself the uneven sampler. The 1x/3x split is the signature of
+      uneven PRESENT, but a non-vsync-locked grabber could in principle
+      manufacture some of it. Cheapest discriminator: an on-screen per-swap
+      tick drawn by padglhost (the instrument designed earlier and skipped),
+      so the captured sequence of counter values shows directly whether a
+      swap ever reached the desktop. THEN, if confirmed, the fix is
+      architectural and mirrors the audio one: present on the Windows side
+      rather than through WSLg.
       **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
       matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
       consecutive-frame repeats over the moving region, needs no alignment,
@@ -613,9 +635,9 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** count SWAPS PER VIDEO FRAME in padglhost (see above) and
-      compare it with `dupcensus.py`'s holds/s on the same run. The agent can
-      now run the whole
+      **Resume:** build the per-swap TICK in padglhost and capture it, to
+      prove the uneven present is the hop and not gdigrab's sampling. Only
+      then consider the architectural fix. The agent can now run the whole
       loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
       game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
       `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and

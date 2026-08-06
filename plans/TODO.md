@@ -531,14 +531,51 @@ These have each been violated at least once and each cost a run or a window:
       **RUN 6 IS LIVE on that build as this is written** (watch.sh 30 min,
       census armed, game started, ~15:35 2026-08-06) — David is playing
       through a ball change as the acceptance test.
-      **Transition cold starts remain, census-priced:** 35-40 ms (ch0),
-      64-71 ms (the 65 s background, also at every loop wrap ~1/min).
-      Fix candidates unbuilt: host pre-arm at location-set (+30-70 ms of
-      budget available), loop-flash suppression.
-      **Resume:** rebuild with the burst discriminator, run, and have David
-      play through a BALL CHANGE — ball 2's first minute is the acceptance
-      test his eyes defined. Then the transition cold starts; then the
-      ring-stamp tear detector if tearing persists.
+      **★★ MEASURED AT LAST, OFF DAVID'S OWN SCREEN RECORDING, AGAINST A
+      PRISTINE CONTROL — and it relocates the fault out of everything fixed
+      so far.** `Recording 2026-08-06 154107.mp4` (Ball 2, MechaGodzilla
+      barrier, 21.8 s) against its extract `gz\video\MechaGodzilla_Loop.mp4`:
+      | | repeated frames | held events | longest |
+      | capture | **22.7%** (148/653) | 97 | **1500 ms** |
+      | pristine control | **0.0%** (0/1995) | — | — |
+      The control is what makes it real: that clip NEVER repeats a frame, so
+      all 22.7% is the emulator. **TWO DISTINCT FAULTS, told apart by their
+      time distribution:** (a) a STEADY ~4.5 single-frame holds per second,
+      uniform across every 2 s bucket (9-11 holds, ~1 frame each) — a rate
+      loss, NOT event-driven; (b) ONE 1500 ms freeze at 10.03 s.
+      **AND THE RUN'S OWN LOGS WERE CLEAN THROUGHOUT** (run 6, same minutes:
+      0 storms, 0 consume stalls, 57 healthy serves, padglhost 59.4 fps avg).
+      **So the loss is DOWNSTREAM of decode and of guest delivery** — between
+      the guest handing a frame over and pixels reaching the screen. Same
+      shape as the audio fault this rig already solved: every instrument
+      inside WSL read perfect while the room heard breakage, and the answer
+      was the WSLg→Windows hop.
+      **THE NEXT INSTRUMENT, designed, unbuilt — a PER-SWAP TICK.** Have
+      padglhost draw a small changing marker (frame counter as a few pixel
+      blocks) every swap, screen-record, count distinct markers per second.
+      60 distinct/s ⇒ WSLg delivers everything and the loss is upstream (the
+      game's upload cadence); fewer ⇒ the RAIL/RDP hop is dropping, which is
+      item 18's territory and a different fix entirely. This is the only
+      measurement that splits those two, and nothing cheaper does.
+      **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
+      matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
+      consecutive-frame repeats over the moving region, needs no alignment,
+      calibrated at 0.0% on a pristine extract); `screenrec.py` (capture is
+      fine, its freezedetect analysis is phase-ambiguous at 30-on-30 — it
+      read 300 freezes before a fix and 306 after); `framematch.py`
+      (ground-truth matching, correct in principle, FAILED in practice — the
+      game bakes overlays into the picture so capture and extract have
+      differently-shaped moving regions, margin collapsed to 0.05 and it
+      claimed 40 loop wraps inside 21.8 s of a 66 s clip; do not revive
+      without solving alignment); a change-interval histogram (read 25% of a
+      PRISTINE extract as stalls — change detection is the wrong class for
+      this footage).
+      **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
+      64-71 ms (the 65 s background, also at every loop wrap). Fix
+      candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
+      **Resume:** build the per-swap tick in padglhost, record it, and split
+      WSLg-drop from upload-cadence. That decides which of two completely
+      different fixes to write, so do not guess between them.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

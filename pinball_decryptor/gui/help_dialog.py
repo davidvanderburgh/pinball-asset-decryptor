@@ -706,18 +706,22 @@ HELP_CONTENT = {
          "splash, then its own boot sequence, then attract mode or the "
          "operator menu. Stop kills every part of it and then verifies "
          "nothing survived."),
-        ("It does not emulate the image on the other tabs",
-         "This is the one tab that ignores the Input box. It runs a prepared "
-         "Spike 2 root filesystem that lives outside the app, so what you see "
-         "is that build of the game, not the card you happen to have loaded. "
-         "Replacing an asset on the Replace tabs does not change what the "
-         "emulator plays."),
+        ("It runs the card you pick here, not the Input box",
+         "This is the one tab that ignores the Input box: point it at a card "
+         "image of its own. That image is mounted READ ONLY and run in place — "
+         "nothing is extracted and nothing can write to it — so a stock card "
+         "and your own build both work, and replacing an asset on the Replace "
+         "tabs does not change what the emulator plays until you build a card "
+         "and pick it here. The path is remembered per project, so it comes "
+         "back on the next launch without another Browse."),
         ("Waiting at Tech Alerts is not a fault",
          "The game boots to its Tech Alerts screen and waits there for an "
          "operator, exactly like the real machine. Press a switch in the game "
          "window — Enter is Service Select — and it carries on. The status "
          "line says \"Waiting at Tech Alerts\" rather than pretending "
-         "something is wrong."),
+         "something is wrong. \"Stuck at Tech Alerts\" is the different one: "
+         "it means the skip-to-attract helper pressed several times and the "
+         "screen never changed, and its hint says what to try."),
         ("Skip to attract mode",
          "Ticked by default. It waits until the node bus has finished bringing "
          "up — that is the point at which the game will actually accept an "
@@ -732,11 +736,12 @@ HELP_CONTENT = {
          "boot chime usually means it is still waiting at Tech Alerts. The "
          "status line shows frames played and frames dropped — dropped should "
          "stay at zero."),
-        ("Video does not play yet",
-         "The game's video decoder is an i.MX6 hardware block that this PC "
-         "does not have, and the card carries no software decoder to fall "
-         "back on, so clips stay black. Everything else — scenes, text, "
-         "lamps, switches, sound — works."),
+        ("Video",
+         "Clips play. The game's own decoder is an i.MX6 hardware block this "
+         "PC does not have and the card carries no software fallback, so the "
+         "host decodes each clip with ffmpeg and publishes the frames into a "
+         "shared ring the game draws from. Scenes, text, lamps, switches and "
+         "sound all work too."),
         ("What it costs",
          "About 15% of one CPU core while waiting and roughly a third of a "
          "core once it is running, plus 1–2 GB of memory. The status line "

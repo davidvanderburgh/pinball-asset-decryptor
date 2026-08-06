@@ -705,9 +705,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    surface, not a second copy of the emulator: it shows the state,
    process count, CPU and memory live, stops by killing every part and
    then *verifying* nothing survived, and caps a forgotten session at
-   two hours. Video clips stay black — the Spike 2 video decoder is an
-   i.MX6 hardware block a PC doesn't have — but scenes, text, lamps,
-   switches and sound all work. Requires WSL2 and the rig under
+   two hours. Video plays as well now: the Spike 2 decoder is an i.MX6
+   hardware block a PC doesn't have, so the host decodes each clip with
+   ffmpeg and publishes the frames into a shared ring the game draws
+   from. Scenes, text, lamps, switches and sound all work.
+   Requires WSL2 and the rig under
    `tools/spike2_emu`, which the packaged installers don't carry; the
    tab says so rather than disappearing when it isn't there.
 10. **< Back** in the top bar returns to the picker. Each manufacturer

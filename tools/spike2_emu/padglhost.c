@@ -245,6 +245,53 @@ static void vid_snap(const unsigned char *rgba, unsigned w, unsigned h)
     fprintf(stderr, "[padglhost] wrote %s\n", path);
 }
 
+/* PAD_VID_TESTPAT=<w>x<h> (or "all") REPLACES the decoded frame with a pattern
+ * that encodes its own coordinates: red = x, green = y, plus a white grid every
+ * 32 texels and a white row 0 / column 0 so orientation cannot be misread.
+ *
+ * WHY A PATTERN AND NOT ANOTHER SCREENSHOT. Item 6's inset is noise whose
+ * content depends almost entirely on Y - rows repeat in exact pairs, columns
+ * barely differ - which is a MAPPING fingerprint, not damaged pixels. Video
+ * frames are hopeless for reading a mapping off: every guess about which texel
+ * landed where is unfalsifiable against a picture of a man in a room. With
+ * red=x and green=y, the drawn inset states the mapping directly - each pixel
+ * says which texel it came from - so "the quad samples our texture wrongly",
+ * "the quad samples a DIFFERENT texture" and "the pixels were already wrong"
+ * stop looking alike.
+ *
+ * The frame is replaced AFTER conversion, so it also proves the upload path
+ * itself: whatever the pattern does on screen, it went into glTexImage2D
+ * exactly as written here. */
+static int vid_pat_w, vid_pat_h, vid_pat_all;
+static unsigned char *vid_pat_buf;
+static unsigned long vid_pat_cap;
+
+static const unsigned char *vid_testpat(const unsigned char *rgba, unsigned w, unsigned h)
+{
+    unsigned long need = (unsigned long)w * h * 4;
+    unsigned x, y;
+    if (!vid_pat_all && ((int)w != vid_pat_w || (int)h != vid_pat_h)) return rgba;
+    if (need > vid_pat_cap) {
+        unsigned char *n = realloc(vid_pat_buf, need);
+        if (!n) return rgba;
+        vid_pat_buf = n; vid_pat_cap = need;
+    }
+    for (y = 0; y < h; y++) {
+        unsigned char *o = vid_pat_buf + (unsigned long)y * w * 4;
+        for (x = 0; x < w; x++, o += 4) {
+            int grid = (x % 32 == 0) || (y % 32 == 0);
+            int edge = (x < 2) || (y < 2);
+            o[0] = (unsigned char)(w > 1 ? x * 255 / (w - 1) : 0);
+            o[1] = (unsigned char)(h > 1 ? y * 255 / (h - 1) : 0);
+            o[2] = 0;
+            if (grid) { o[0] = 255; o[1] = 255; o[2] = 255; }
+            if (edge) { o[0] = 255; o[1] = 0; o[2] = 255; }
+            o[3] = 255;
+        }
+    }
+    return vid_pat_buf;
+}
+
 /* THE GEOMETRY CENSUS. `uploaded` climbing says frames are MOVING; it does not
  * say they are being read at the size they were decoded at, and that is the
  * whole of item 6 - a frame read at the wrong width is drawn, is counted as
@@ -1519,6 +1566,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         if (!rgba) { vid_dropped++; break; }
         vid_texdirect++;
         vid_geom_note(w, h, fmt);
+        if (vid_pat_all || vid_pat_w) rgba = vid_testpat(rgba, w, h);
         if (vid_snap_all || vid_snap_w) vid_snap(rgba, w, h);
         if (dbg) {
             static int shown;
@@ -1744,6 +1792,13 @@ int main(int argc, char **argv)
         vid_snap_dir = getenv("PAD_VID_SNAP_DIR");
         if (vid_snap_dir && !vid_snap_dir[0]) vid_snap_dir = 0;
         if (getenv("PAD_VID_SNAP_MAX")) vid_snap_max = atoi(getenv("PAD_VID_SNAP_MAX"));
+    }
+    if (getenv("PAD_VID_TESTPAT") && getenv("PAD_VID_TESTPAT")[0]) {
+        const char *s = getenv("PAD_VID_TESTPAT");
+        if (!strcmp(s, "all")) vid_pat_all = 1;
+        else if (sscanf(s, "%dx%d", &vid_pat_w, &vid_pat_h) != 2) vid_pat_w = 0;
+        fprintf(stderr, "[padglhost] video TEST PATTERN on for %s "
+                "(red=x, green=y, white grid every 32)\n", s);
     }
     if (getenv("PAD_GL_RING_MB"))     ring_mb    = strtoul(getenv("PAD_GL_RING_MB"), 0, 10);
     dbg = getenv("PADGL_DEBUG") ? atoi(getenv("PADGL_DEBUG")) : 0;

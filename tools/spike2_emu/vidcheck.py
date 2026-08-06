@@ -87,9 +87,32 @@ def build_checker():
 
 
 def already_running():
-    r = subprocess.run(["pgrep", "-fa", "padvidhost.py"],
+    """Any REAL padvidhost process, and nothing else.
+
+    `pgrep -f padvidhost.py` matches this script's own command line the moment
+    the string appears in it - the same self-match that makes playaudio.sh's
+    win_kill able to shoot itself. So check argv properly: argv[0] must be a
+    python and argv[1] must be the script. Our own pid is excluded too, since a
+    shell wrapper can carry the name into argv as well.
+    """
+    r = subprocess.run(["pgrep", "-f", "padvidhost.py"],
                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    return r.stdout.decode().strip()
+    hits = []
+    for pid in r.stdout.decode().split():
+        if pid == str(os.getpid()):
+            continue
+        try:
+            with open("/proc/%s/cmdline" % pid, "rb") as f:
+                argv = f.read().split(b"\0")
+        except OSError:
+            continue
+        if len(argv) < 2:
+            continue
+        if b"python" not in os.path.basename(argv[0]) or \
+                not argv[1].endswith(b"padvidhost.py"):
+            continue
+        hits.append("%s %s" % (pid, b" ".join(argv[:2]).decode("utf-8", "replace")))
+    return "\n".join(hits)
 
 
 def pull_frame(clip, want_frame):

@@ -169,13 +169,38 @@ def probe(path):
     return w, h, n, num, den
 
 
+# PAD_VID_FORCE_SIZE=<w>x<h> rescales EVERY clip to that size and reports that
+# size to the guest, so the whole chain runs at a resolution of our choosing.
+#
+# THIS EXISTS TO MAKE ITEM 6 TESTABLE. The pink/green TV inset is the only
+# 520x294 stream in the game and it appears only in one in-game scene reached by
+# a ramp shot, which fired once in about ten scripted attempts - an intermittent
+# reproduction is not an instrument. Forcing the ATTRACT background to 520x294
+# turns "is it the size?" into a question attract mode can answer in a minute,
+# every time. If the background survives 520x294 then the size is innocent (as
+# the converter and the geometry census already say) and the fault belongs to
+# that scene's element; if it breaks, the reproduction stops needing a game.
+def _forced_size():
+    s = os.environ.get("PAD_VID_FORCE_SIZE", "")
+    if "x" not in s:
+        return None
+    try:
+        w, h = (int(v) for v in s.split("x", 1))
+    except ValueError:
+        return None
+    # Odd dimensions have no valid I420 chroma plane; refuse rather than
+    # produce a frame size nothing downstream agrees on.
+    return (w, h) if w > 1 and h > 1 and not (w % 2 or h % 2) else None
+
+
 def serve(m, c, path, w, h):
     """Decode `path` into channel c's ring until the guest stops asking or
     ffmpeg ends."""
     frame_bytes = w * h * 3 // 2
     ring0 = HDR + c * SLOTS * SLOT_BYTES
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
-           "-i", path, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]
+    scale = ["-vf", "scale=%d:%d" % (w, h)] if _forced_size() else []
+    cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
+            "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
     # ffmpeg's stderr goes to OUR stderr, i.e. padvid.log. It used to go to
     # DEVNULL, which threw away the one message that could explain a clip
     # ending early - and a clip DID end early, at 240 of 514 frames, and was
@@ -252,6 +277,9 @@ def chan_loop(m, c):
             put(m, c, "ack_gen", req)
             continue
         w, h, n, num, den = info
+        forced = _forced_size()
+        if forced:
+            w, h = forced
         put(m, c, "width", w)
         put(m, c, "height", h)
         put(m, c, "nframes", n)

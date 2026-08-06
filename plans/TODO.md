@@ -60,10 +60,28 @@ These have each been violated at least once and each cost a run or a window:
       top of that, both axes show a 2x pairing (rows: 26.2 within a pair vs
       39.8 across; columns: 0.53 vs 0.98), the per-row magenta-green signal
       autocorrelates **0.94 at lag 10**, and it changes frame to frame.
-      **It is NOT a column of the video:** the row profile swings ±80 between
-      adjacent source rows, and no column of real footage does that. So the
-      inset is very likely not sampling our video texture at all — the prime
-      remaining suspect is the scene renderer's render-target/FBO path.
+      **★ CONFIRMED AGAINST A CONTROL 2026-08-05: THE INSET IS NOT SAMPLING OUR
+      VIDEO TEXTURE.** This was a suspicion; it is now measured. For every one
+      of the 294 noise rows, search the real source frame for its closest row:
+      mean best-match cost **186.7**. Against a SHUFFLED source frame:
+      **186.7** — identical to one decimal place, and the search collapses onto
+      **3 unique target rows out of 294**. If the quad were sampling our
+      texture with wrong UVs, every noise row would still BE some row of the
+      frame and the real mapping would beat the shuffle. It does not beat it at
+      all. (The older reading, "the row profile swings ±80 between adjacent
+      source rows and no column of real footage does that", pointed the same
+      way but had no control.) The prime remaining suspect is therefore the
+      scene renderer's render-target/FBO path, then client-side vertex arrays.
+      **The noise DOES change frame to frame — measured, not eyeballed:** the
+      two captures 6 s apart correlate **+0.694** by row profile and differ by
+      **39.5/255** mean absolute. It tracks something live.
+      **Ruled out as an OFFLINE test: correlating the inset against the rest of
+      the screen to test the FBO theory.** It has no power on the evidence that
+      exists — the two captures' surrounds correlate **+1.000** by row profile
+      (the background barely moves between them), so "inset A vs surround A"
+      and "inset A vs surround B" cannot be told apart and neither number means
+      anything. Do not re-run it on these two images; it needs a live run with
+      deliberately different backgrounds.
       **Ruled out — the mipmap theory, and it was a good one.** Paired rows are
       exactly what sampling an un-uploaded mip level 1 (260x147) would give.
       But the game **does** set a MIN_FILTER on the video texture and it is
@@ -94,21 +112,57 @@ These have each been violated at least once and each cost a run or a window:
       targets 85/86, the maser 48, spinners, the action button 34, cadences
       from 0.3 s to 1.6 s, and simulated ball-path play for minutes at a time.
       Screenshots and the recipe: `C:\tmp\spike2_item6\`.
+      **Established 2026-08-05: the offline video census, and it narrows the
+      suspect to ONE element.** Exactly **7 of the 103 scenes** declare a video
+      element (`grep video\.` over every `scene.radium`), and every clip in six
+      of them is **1360x768**; only `4e0bf266/35.asset` is **520x294**. Two
+      scenes declare `VideoSurface` — `4e0bf266` and `60ed7e50`
+      (`2.asset`, 598 `Advance_Tanks*` clips at 1360x768). The attract
+      background that draws CLEAN is `34856963/264.asset` (1965 frames), and it
+      is one of the seven — so **video inside a scene is not the fault**; the
+      broken one is the only SMALL video, on the only SMALL quad.
       **Committed:** `vidcheck.py`, `i420check.c`, `i420.h`, the caps-fallback
       log, the geometry census, `PAD_VID_SNAP`, `PAD_VID_FORCE_SIZE`,
-      `PAD_VID_TESTPAT`, and a frame-dump BURST that fires automatically when a
-      new video size first appears, so the screenshot can no longer be missed.
-      **Resume — one ramp shot away, and everything is armed.** Run:
-      `LOG=/home/david/gz6.log PAD_GL_DUMP=/home/david/glshots
-      PAD_VID_TESTPAT=520x294 PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp
-      watch.sh 15`, play a game, make a ramp shot. The inset will draw a
-      pattern whose red channel IS its x coordinate and green channel IS its y,
-      with a white grid every 32 texels, so the drawn inset states the mapping
-      outright: a clean pattern means the pixels were wrong and the draw is
-      fine, a distorted one can be read off directly, and a pattern that is not
-      there at all means the quad samples a different texture. The instrument
-      is validated — the 1360x768 background renders it perfectly.
-      **No live run left behind** — `alive.sh` is 0.
+      `PAD_VID_TESTPAT`, a frame-dump BURST that fires automatically when a new
+      video size first appears, and `longplay.sh` (`355e0bd`).
+      **The switch hunt is abandoned, deliberately.** Five runs and ~25
+      attempts hunting a trigger switch produced one fire. A taunt is not a
+      shot award, so `longplay.sh` plays instead: there is no physics here, so
+      a ball drains only if something pokes a drain switch — never poke the
+      outlanes (55/58), the trough (66-72) or tilt (38/45) and one ball stays
+      in play for half an hour while varied ramp/loop/target shots accumulate
+      progress.
+      **★ A LIVE RUN IS UP RIGHT NOW** (started 2026-08-05 by this pass, ~32 min
+      cap): `watch.sh 32` with `LOG=/home/david/gz6.log
+      PAD_GL_DUMP=/home/david/glshots PAD_VID_TESTPAT=520x294
+      PAD_VID_SNAP=520x294 PAD_VID_SNAP_DIR=/tmp/vidsnap`, plus `longplay.sh`
+      beside it. **It is NOT David playing** — it is safe to `killgame.sh`. It
+      caps itself; confirm with `alive.sh`.
+      **The driver works — verified on the far side, in the GAME's own switch
+      log, not in the script's.** `+36/-36` (Start), `-71` (ball leaves the
+      trough), `+62` then `-62` (shooter lane closes, then plunged) is a
+      textbook plunge, and 957 `[sw]` events later the ball is still in play
+      with every poke landing at its asked-for duration (a 150 ms ramp opto
+      arrives as 152 ms). Item 7's fix is holding.
+      **Two capture traps found, both cost nothing only because they were
+      caught:** (1) `shotwin.py` falls back to **COPY MODE** on these RAIL
+      windows and grabs whatever is on top — it returned the *Controls* window
+      while reporting it had found the game window, so it cannot be trusted for
+      the game screen; use `PAD_GL_DUMP` frames. (2) `PAD_GL_DUMP`'s
+      `dump_max=40` is **spent in the first 20 s**, so any frame read late in a
+      run is stale (a 20-second-old Tech Alerts screen read as "the game is
+      stuck"). The new-video-size burst is SAFE regardless — its `goto do_dump`
+      jumps past the `dump_max` check — but nothing else dumps after 20 s.
+      **Resume:** read `/tmp/longplay/` (window grabs), `/home/david/glshots`
+      (the automatic 20-frame burst) and `/tmp/vidsnap` (the uploaded RGBA).
+      The inset draws a pattern whose red channel IS its x coordinate and green
+      channel IS its y, with a white grid every 32 texels: a clean pattern
+      means the pixels were wrong and the draw is fine, a distorted one can be
+      read off directly, and no pattern at all means the quad samples a
+      different texture. The instrument is validated — the 1360x768 background
+      renders it perfectly. If `longplay.sh` finds nothing in 30 minutes, that
+      is itself a result: the taunt is not time-based either, and the next
+      lever is forcing the scene from the game side.
 
 - [ ] **11. Background video stutters every ~7 seconds.** Regular, periodic,
       visible on the main game screen. **NOT the clip loop boundary** — that is

@@ -30,6 +30,15 @@ param(
     [int]$Backstop = 12,      # minutes; watch.sh's own wall-clock cap
     [int]$AttractWaitSecs = 240,
     [switch]$NoRun,           # baseline: profile the desktop with no emulator
+    # Profile an actual GAME rather than attract. Asked on 2026-08-06 when the
+    # sluggishness shows up, David said "mostly during a game" - and every
+    # capture before that had been attract mode, which runs less video, less
+    # audio and almost no switch traffic. longplay.sh is what puts a ball in
+    # play and keeps it alive; it is started BESIDE the run, never by it, so
+    # that "never run two measurement runs at once" stays checkable by looking
+    # at one thing.
+    [switch]$Game,
+    [int]$GameSettleSecs = 45,
     [switch]$SkipQuietCheck,
     [string]$Out = "C:\tmp\spike2_item18"
 )
@@ -128,6 +137,28 @@ while (((Get-Date) - $t0).TotalSeconds -lt $AttractWaitSecs) {
     }
 }
 if (-not $reached) { Say "WARNING: never reached attract; profiling anyway, say so in the report" }
+
+# --- 5b. put a ball in play, if this arm is about a GAME ----------------------
+# 1x1 as the "watch for this clip size" argument is deliberate: it can never
+# match, which suppresses longplay's window-grab side effect. shotwin.py falls
+# back to COPY MODE on RAIL windows and grabs whatever is on top, so those grabs
+# are both useless here and a source of variance in the middle of a measurement.
+if ($Game) {
+    Say "starting longplay to put a ball in play and keep it alive"
+    $lp = Join-Path $Out "longplay_$Label.log"
+    Start-Process wsl -ArgumentList "-e", "bash", "$EMU_WSL/longplay.sh", `
+                      "/home/david/gzwatch.log", "$Backstop", "1x1" `
+                  -PassThru -WindowStyle Hidden -RedirectStandardOutput $lp | Out-Null
+    Say "letting the game settle for $GameSettleSecs s before profiling"
+    Start-Sleep -Seconds $GameSettleSecs
+    # There is NO reliable "a game has started" test in this rig - gamestate.sh
+    # says so in terms, and deliberately does not try to tell attract from a
+    # ball in play. So report what longplay itself claims and let the human
+    # judge, rather than inventing a detector here. Inventing one is exactly how
+    # the discredited factory_make test got written.
+    $blocks = (Select-String -Path $lp -Pattern "new ball" -ErrorAction SilentlyContinue).Count
+    Say "longplay reports $blocks ball(s) started (it cannot prove a game is on screen)"
+}
 
 # --- 6. which adapter did it ACTUALLY use ------------------------------------
 # Read it back from the renderer's own log rather than trusting the environment

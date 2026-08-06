@@ -64,6 +64,15 @@ pkill -9 -f 'padplay\.py'
 #
 # The run scripts go before the wait so nothing restarts under us.
 pkill -9 -f '^bash .*(watch|runbridge|nbrun)\.sh'
+# longplay.sh is started BESIDE a run rather than by one, so it is not in the
+# group above - and watch.sh's own teardown was the only thing that ever killed
+# it. Anything that stops a run through THIS script (abrun.ps1 does) would
+# otherwise leave it poking ramp optos into the next run. alive.sh already
+# counts it, so the leak was visible, but visible is not the same as fixed.
+# Anchored exactly as watch.sh and alive.sh anchor it: an unanchored
+# 'longplay.sh' matches any shell with the name on its command line, and this
+# one KILLS.
+pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
 rm -f /home/david/spike2root/dump/padled

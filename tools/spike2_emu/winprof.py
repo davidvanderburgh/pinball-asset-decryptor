@@ -353,6 +353,63 @@ class DwmProbe(Probe):
             t0 = t1
 
 
+class CursorProbe(Probe):
+    """POINTER STUTTER - the symptom David actually reports.
+
+    Asked on 2026-08-06 what "sluggish" feels like, the answer was **mouse and
+    typing lag**, during **a game**. Every probe before this one measured
+    something else: whether a thread could get CPU (it always could), and
+    whether the compositor was presenting on time (it always was). Neither can
+    see the input path, and the input path is what was being complained about.
+
+    METHOD, and why it needs no input injection. `GetCursorPos` returns the
+    position Windows' input stack has settled on, so polling it at 500 Hz and
+    recording the interval between consecutive CHANGES measures how smoothly
+    the pointer is actually moving. A mouse reports at 125-1000 Hz and this
+    display refreshes at 120 Hz, so while the user is moving, the position
+    should change every few milliseconds. A gap of tens of milliseconds is a
+    freeze, and a freeze is exactly what "the pointer lags" means.
+
+    Injection was never an option anyway: SendInput into a WSLg window is
+    UIPI-blocked, which items 7 and 12 both recorded the hard way. This probe
+    sidesteps that entirely - it reads what the human's own hand produced.
+
+    THE FALSE-CLEAN GUARD MATTERS MORE THAN THE METRIC. A capture where nobody
+    touched the mouse would otherwise report zero stutters and look like a pass.
+    So `active_s` accumulates only observed movement, and a capture with too
+    little of it must be reported as NOT MEASURED rather than as clean. That is
+    the same trap as a click-counter scoring a silent file as flawless.
+
+    Intervals longer than STOP_MS are dropped as "the user stopped moving"
+    rather than counted as an infinite stall. That cutoff is a judgement call:
+    too low and real freezes get discarded as pauses, too high and every pause
+    becomes a fake stutter. 200 ms is far above any freeze that would still
+    feel like lag rather than a hang."""
+    POLL_S = 0.002          # 500 Hz, comfortably finer than a 120 Hz display
+    STOP_MS = 200.0         # longer than this and the hand stopped, not the PC
+    FELT_MS = 25.0          # a gap this long is visible as a stutter
+
+    def run(self):
+        user32 = ctypes.WinDLL("user32")
+        pt = wintypes.POINT()
+        last = None
+        last_change = time.perf_counter()
+        self.active_s = 0.0
+        while not self.stop.is_set():
+            user32.GetCursorPos(ctypes.byref(pt))
+            now = time.perf_counter()
+            cur = (pt.x, pt.y)
+            if cur != last:
+                if last is not None:
+                    gap = (now - last_change) * 1000.0
+                    if gap <= self.STOP_MS:
+                        self.samples.append(gap)
+                        self.active_s += gap / 1000.0
+                last = cur
+                last_change = now
+            time.sleep(self.POLL_S)
+
+
 def pct(vals, p):
     if not vals:
         return None
@@ -411,9 +468,11 @@ def _capture(secs, interval, label, outdir, quiet):
     jit = JitterProbe()
     wrk = WorkProbe()
     dwm = DwmProbe()
+    cur = CursorProbe()
     jit.start()
     wrk.start()
     dwm.start()
+    cur.start()
 
     # PDH rate counters need two collects to have a delta at all, so the first
     # one is primed and thrown away.
@@ -484,6 +543,7 @@ def _capture(secs, interval, label, outdir, quiet):
     jit.stop.set()
     wrk.stop.set()
     dwm.stop.set()
+    cur.stop.set()
     q.close()
 
     # "Late" is relative to this desktop's own refresh period, taken as the
@@ -533,7 +593,17 @@ def _capture(secs, interval, label, outdir, quiet):
         },
         "resp": {"jitter_ms": stats(jit.samples), "work_ms": stats(wrk.samples),
                  "dwm_frame_ms": stats(dwm.samples),
-                 "dwm_late_pct": round(dwm_late, 2) if dwm_late is not None else None},
+                 "dwm_late_pct": round(dwm_late, 2) if dwm_late is not None else None,
+                 "cursor_gap_ms": stats(cur.samples),
+                 # Seconds of ACTUAL pointer movement seen. Without this, a
+                 # capture where nobody touched the mouse reports zero stutters
+                 # and reads as a pass.
+                 "cursor_active_s": round(getattr(cur, "active_s", 0.0), 1),
+                 "cursor_stutters": sum(1 for v in cur.samples if v > CursorProbe.FELT_MS),
+                 "cursor_stutters_per_active_s": (
+                     round(sum(1 for v in cur.samples if v > CursorProbe.FELT_MS)
+                           / cur.active_s, 2)
+                     if getattr(cur, "active_s", 0.0) > 0.5 else None)},
         "missing_counters": [m[0] for m in q.missing],
     }
 
@@ -646,6 +716,20 @@ def show(s):
     if s["resp"].get("dwm_late_pct") is not None:
         print("  %-33s : %6.2f%% of frames over 1.5x the median interval"
               % ("DWM late frames", s["resp"]["dwm_late_pct"]))
+    st = s["resp"].get("cursor_gap_ms")
+    act = s["resp"].get("cursor_active_s", 0.0)
+    if st and act >= 5.0:
+        print("  %-33s : p50 %7.2f  p95 %7.2f  p99 %7.2f  max %8.2f  (n=%d)"
+              % ("pointer gap between moves", st["p50"], st["p95"], st["p99"],
+                 st["max"], st["n"]))
+        print("  %-33s : %d over %.0f ms, %.2f per active second, %.1f s of movement seen"
+              % ("pointer stutters", s["resp"]["cursor_stutters"], CursorProbe.FELT_MS,
+                 s["resp"]["cursor_stutters_per_active_s"] or 0.0, act))
+    else:
+        print("  %-33s : NOT MEASURED - only %.1f s of pointer movement seen."
+              % ("pointer stutters", act))
+        print("  %-33s   Move the mouse during the capture or this proves NOTHING."
+              % "")
     print("  --- top Windows processes by CPU (mean over the WHOLE window) ---")
     for p in s["procs"][:12]:
         print("  %-24s pid %-7d cpu mean %6.2f%%  max %6.2f%%  ws %8.1f MB  seen %d/%d"
@@ -696,10 +780,21 @@ def compare(a, b):
         line("GPU adapter " + k, la.get(k, 0.0), lb.get(k, 0.0))
     print("  --- responsiveness, which is the answer to \"does it feel slow\" ---")
     for k, nm in (("jitter_ms", "sleep overshoot ms"), ("work_ms", "fixed work ms"),
-                  ("dwm_frame_ms", "DWM frame ms")):
+                  ("dwm_frame_ms", "DWM frame ms"), ("cursor_gap_ms", "pointer gap ms")):
         for p in ("p50", "p95", "p99", "max"):
             line("%s %s" % (nm, p), _get(a, ["resp", k, p]), _get(b, ["resp", k, p]))
     line("DWM late frames %", _get(a, ["resp", "dwm_late_pct"]), _get(b, ["resp", "dwm_late_pct"]))
+    line("pointer stutters / active s",
+         _get(a, ["resp", "cursor_stutters_per_active_s"]),
+         _get(b, ["resp", "cursor_stutters_per_active_s"]))
+    # The pointer numbers are only worth anything if the hand was moving in
+    # BOTH captures, so say how much movement each one actually saw rather than
+    # letting a still mouse read as a clean result.
+    aa = _get(a, ["resp", "cursor_active_s"], 0.0) or 0.0
+    ab = _get(b, ["resp", "cursor_active_s"], 0.0) or 0.0
+    print("  pointer movement observed: %s %.1f s, %s %.1f s%s"
+          % (a["label"], aa, b["label"], ab,
+             "   ** TOO LITTLE TO COMPARE **" if min(aa, ab) < 5.0 else ""))
 
     # Named largest consumer, which the queue item asks for by name.
     pa = {p["name"]: p["cpu_mean"] for p in a["procs"]}

@@ -241,6 +241,32 @@ These have each been violated at least once and each cost a run or a window:
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in
       `playfield.py` is the WINDOW POSITION save — grep will mislead you.
 
+- [ ] **14. The Emulate tab forgets the card image across a restart.** Start PAD,
+      go to Emulate, and **"Card image to run" is always empty** — the path has to
+      be re-browsed every launch. Per-project memory already half-exists and the
+      gap is in the RESTORE half, not the save half: `emulate_card` is written to
+      the project anchor in `app.py:301` (quit) and `app.py:3416`
+      (`_materialize_anchor`), and read back in exactly one place,
+      `_apply_project_folder` (`app.py:3538`) — which only runs on an **explicit**
+      Project ▾ → Open. Startup goes through `_apply_manufacturer`
+      (`app.py:368`), which restores the manufacturer's paths from `settings.json`
+      and re-marks the folder as the loaded project (`app.py:380`) **without ever
+      reading the anchor**, so the card path is on disk and simply never fetched.
+      Two things to check rather than assume: that the anchor actually holds a
+      path (the quit save is skipped when `has_anchor(folder)` is false), and that
+      `_load_manufacturer_paths` is not clearing the var afterwards.
+      **Assumption, stated because David said "for this project":** per-project is
+      the rule, so switching projects must show the OTHER project's card (or
+      empty), not the last one used — `_apply_project_folder` already sets it even
+      when empty for that reason. With no project open, fall back to a global
+      last-used in `settings.json`.
+      **Acceptance:** pick a card on Emulate with a project open, quit PAD,
+      relaunch — the field shows that path with no clicks; open a second project
+      and it shows that project's own value. **There is no test coverage at all**
+      (`grep emulate_card tests/` is empty), so a regression test in
+      `tests/test_emulate_tab.py` is part of done. GUI-side change: run the `app`
+      smoke tests, not just `py_compile`.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.

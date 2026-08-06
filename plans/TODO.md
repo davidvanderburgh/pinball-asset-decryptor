@@ -166,13 +166,15 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **6. Scene video noise in the TV inset.** `S2 D4` ← IN PROGRESS
+- [ ] **6. Scene video noise in the TV inset.** `S2 D3` ← IN PROGRESS
       *(S2, not S1, deliberately: it is one element in one scene drawing wrong,
       which is not the same order of fault as item 15's every-clip corruption,
-      and S1 is only useful while it stays small. D4 because the mechanism is
-      cracked and the fix is written, but the only acceptance oracle is the
-      taunt, which fired three times in one run and not once in the next — a
-      pass can end having learned nothing.)*
+      and S1 is only useful while it stays small. **D4 → D3 on 2026-08-06:** the
+      taunt is no longer the coin toss it was. It fired inside one 20-minute run
+      once a game was actually reachable, and the reason earlier runs missed it
+      is now known — `plunge.py game` had been leaving the machine unable to
+      start at all (see Loose ends). With `PAD_VID_SNAP=520x294` needing no
+      window grab, this is now one run where looking is enough.)*
       The inset draws pink/green horizontal noise where character footage should
       be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
       **★★ THE BYTES ARE A 1360-WIDE RASTER. MEASURED, WITH A CONTROL, OFFLINE.**

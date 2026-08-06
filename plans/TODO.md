@@ -492,13 +492,22 @@ These have each been violated at least once and each cost a run or a window:
       looks like tearing". **Detector designed, not built:** stamp each slot
       with its frame number host-side, have padglhost verify the stamp at
       upload time and log mismatches — spans the GL bridge, next pass.
-      **A LIVE RUN may be up when this is read** (run 3, watch.sh 14 min +
-      longplay). **Uncommitted: gstvid.c** (both state-path fixes; run 3
-      numbers above justify committing) **and padvidhost.py** (the census).
-      **Resume:** when run 3 ends — harvest (`item11results2.sh` pattern in
-      the session scratchpad), commit gstvid.c + padvidhost.py, then run 4
-      WITH the census live and read the gap census against David's report;
-      build the tear detector if the census cannot explain the residual.
+      **RUN 3 FINAL, and the three fixes are COMMITTED (`cef2627`):** storms
+      0/0 on both detectors, state-absorb 72 bursts, rewind-absorb 5,
+      superseded-after-1 185 → 108 (what remains is the game's own
+      loop-then-advance at clip ends), throttled-4 everywhere → 29, 75 full
+      plays, rig clean after.
+      **A LIVE RUN may be up when this is read: run 4** (watch.sh 20 min,
+      census armed, NO longplay — the window is David's to play; started
+      ~15:25 2026-08-06). Its padvid.log is the first with the census lines.
+      **Resume:** harvest run 4's census — `first frame consumed N ms after
+      serve start` prices the fragment-cut cold starts, `guest consume
+      STALLED N ms` catches mid-clip delivery stalls — and set them against
+      what David saw while playing. If the census cannot explain the
+      video-only hitching/tearing, build the ring-stamp tear detector
+      (per-slot frame number written host-side, verified by padglhost at
+      upload, mismatches logged) — it spans the GL bridge, so it is a
+      build.sh + buildgl.sh change between runs.
       **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
       the host on every EOS, when the previous arm delivered ≤1 frame, is the
       loop. Then judge the picture with the screen-recording differ, **not

@@ -285,10 +285,14 @@ These have each been violated at least once and each cost a run or a window:
       3003 ms, so the driver is "parse the log, call the existing pokers".
       **Be honest about "exactly", because the acceptance test depends on it:
       input replay is not run replay.** The guest is a real ARM binary under
-      qemu-user, and this rig's two open video items both turn on timing — item 6
-      on a three-pipeline burst inside 130 ms, item 15 on channel assignment
-      order. The same inputs will NOT give the same run, and a replay cannot make
-      a rare taunt fire. What it buys is the manual labour, not determinism.
+      qemu-user, and the two video faults this rig has already fixed both turned
+      on timing — item 6 (now DONE) on a three-pipeline burst inside 130 ms,
+      item 15 (now DONE) on channel assignment order. The same inputs will NOT
+      give the same run, and a replay cannot make a rare taunt fire. What it buys
+      is the manual labour, not determinism. **That both are closed does not
+      weaken the point** — they are cited as proof that this guest's behaviour
+      depends on timing the replay cannot reproduce, and being fixed does not
+      make them less timing-dependent.
       **Acceptance:** a captured log replays with no keyboard use; the new run's
       own `[sw]` lines diffed against the source log show every edge re-delivered
       within a stated tolerance (measure it and state it, do not assume); and the
@@ -296,184 +300,6 @@ These have each been violated at least once and each cost a run or a window:
       **Related: item 13** is the checkpoint/restore route to a nearby goal and
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
-
-- [ ] **6. Scene video noise in the TV inset.** `S2 D3` ← IN PROGRESS
-      *(S2, not S1, deliberately: it is one element in one scene drawing wrong,
-      which is not the same order of fault as item 15's every-clip corruption,
-      and S1 is only useful while it stays small. **D4 → D3 on 2026-08-06:** the
-      taunt is no longer the coin toss it was. It fired inside one 20-minute run
-      once a game was actually reachable, and the reason earlier runs missed it
-      is now known — `plunge.py game` had been leaving the machine unable to
-      start at all (see Loose ends). With `PAD_VID_SNAP=520x294` needing no
-      window grab, this is now one run where looking is enough.)*
-      The inset draws pink/green horizontal noise where character footage should
-      be. Long form: `spike2_pc_emulation_handoff.md`, item 6.
-      **★★ THE BYTES ARE A 1360-WIDE RASTER. MEASURED, WITH A CONTROL, OFFLINE.**
-      `tools/spike2_emu/framewidth.py` inverts the converter and re-folds the
-      recovered Y at every width, scoring vertical smoothness. On the known-good
-      frame it returns **520 (2.66 against a shuffled control of 34.31)** — that
-      is the labelled example it had to agree with first. On the noise capture it
-      returns **1360 (2.02 against 23.84)**, a sharp minimum (1356→2.42,
-      1440→7.79), and the width it was actually READ at, 520, scores **22.34
-      against a control of 23.80 — no better than noise.** Refolded at 1360 the
-      capture comes back as a coherent picture with smooth gradients and a
-      vertical edge (`C:\tmp\spike2_item6\refold_1360.png`).
-      **So the inset uploads 229,320 bytes taken from the START of a 1360x768
-      I420 frame** and converts them as 520x294: its Y is that frame's top ~112
-      rows, and its U and V are two further slices of that frame's Y plane, which
-      is why the result is chroma-dominated and why the tint is just how bright
-      the big frame happened to be there. The item's own "big frame read as
-      small" control render has the identical stripe structure.
-      **This closes the item's central question — the pixels are another
-      stream's — and it re-opens ONE thing an earlier pass closed too broadly:**
-      "the size theory is dead" is true of the converter, the negotiated caps and
-      the draw, and FALSE of which bytes reach the converter.
-      **★ THE DRAW IS FINE. CONFIRMED LIVE 2026-08-05 ON THE REAL INSET.** With
-      `PAD_VID_TESTPAT=520x294`, the TV monitor in the Planet X Controller scene
-      rendered the pattern **perfectly**: square white grid every 32 texels, red
-      rising left-to-right, green rising top-to-bottom, no shear, no doubling.
-      That is this item's own decision table, and it says **the pixels were
-      wrong and the draw is fine.** Screenshot: `C:\tmp\spike2_item6\HIT_screen.png`.
-      **So these are now CLOSED, not merely unlikely:** the quad's UVs, the
-      render-target/FBO path, client-side vertex arrays, mipmap/LOD, and every
-      remaining form of the size/stride theory. The pattern is injected AFTER
-      conversion (padglhost.c says so), so a clean pattern exonerates the draw
-      and upload and deliberately tells you nothing about the data — which is
-      exactly the half that is left.
-      **★ AND THE REASON IT TOOK FIVE RUNS WAS NOT THE TRIGGER. IT WAS CREDITS.**
-      A machine with no credits ignores the Start button *silently*: the switch
-      reaches the game (`+36`/`-36` logged at the asked-for duration) and no game
-      starts. Every instrument said the press was delivered, so "the press
-      worked" and "a game started" looked like one claim. Three Start presses
-      over ten minutes left this run in **attract mode** — screenshot-confirmed,
-      and only video channel 0 ever streamed. Coins in (`plunge.py coin`, switch
-      39) and a game came up: 4 players, a real score, GODZILLA POWERUP LEVEL 1.
-      **The taunt then fired three times in fifteen minutes**, against one
-      sighting in ~25 attempts across five previous runs. It was never rare. The
-      game was never in a game. Use **`plunge.py game`** (coin, start, plunge).
-      **★ THE NEW PRIME SUSPECT: the inset arrives on a SHARED, RESIZED ring
-      channel.** It streamed on **ch3**, and ch3 carried **63 clips at 1360x768
-      and 3 at 520x294**, switching size back and forth within seconds, while
-      ch0 streamed 1360x768 concurrently. Every measurement that ever declared
-      this chain healthy used **one channel at one size**: `vidcheck.py`
-      offline, the attract background, and `PAD_VID_FORCE_SIZE=520x294` on
-      attract. **The variable was never the size — it was how many channels are
-      live and whether one is being reused at a new size.** Next: re-run with
-      `PAD_VID_TESTPAT` OFF and `PAD_VID_SNAP=520x294`, and compare the uploaded
-      RGBA against what `padvidhost` decoded for that channel and generation.
-      **Ruled out with a control:** the noise rows are not rows of our source
-      frame. Best-match cost **186.7** real vs **186.7** against a SHUFFLED
-      source, collapsing onto 3 unique target rows of 294. Consistent with the
-      test-pattern result: the texture is sampled correctly, the data in it is
-      not ours.
-      **Ruled out as an offline test:** correlating the inset against the rest
-      of the screen to test the FBO theory. The two existing captures' surrounds
-      correlate **+1.000**, so the control has no power. Do not re-run it.
-      **Instrument fixes this pass, both from being bitten:** the new-video-size
-      burst was **20 frames — one third of a second** — and all 20 missed the
-      inset, because the clip starts seconds before the element draws; it is now
-      600 frames (`PAD_VID_BURST`). And `PAD_GL_DUMP`'s `dump_max=40` is spent in
-      the first 20 s, so any frame read later in a run is stale — a 20-second-old
-      Tech Alerts screen read as "the game is stuck" until the log said otherwise.
-      `shotwin.py` also falls back to **COPY MODE** on these RAIL windows and
-      grabs whatever is on top: it returned the *Controls* window while reporting
-      it had found the game window. A plain desktop `CopyFromScreen` is what
-      worked.
-      **★★ AND THE MECHANISM IS CHANNEL TAKEOVER, measured live 2026-08-06.**
-      Two facts, both from the log rather than from reading code: **the game asks
-      for caps ONCE per pipeline and never again** (one `caps 1360x768 -> its own
-      pad` line, then NINE `streaming` lines with the size changing underneath
-      it — it loops by SEEKING, so its texture geometry is frozen for the life of
-      the pipeline), and **every new pipeline steals a channel** (four channels,
-      `pipeline` is never cleared, so after four clips every new one takes the
-      slot of a stream that is not currently `playing` — which a clip that just
-      hit EOS is, while its decoder is still on screen). The inset negotiates
-      520x294, its clip ends, its channel is handed to a 1360x768 background
-      clip, and its decoder keeps uploading from a ring now full of someone
-      else's frames. That is why ch3 carried 63 big clips and 3 small ones.
-      **★★ AND IT NOW REPRODUCES IN ATTRACT, EVERY RUN, WITHOUT A GAME.**
-      `PAD_VID_ALT_SIZE=520x294` printed the fault in its exact real-world
-      direction: `** WRONG-SIZE VIDEO UPLOAD ** 520x294 (229320 bytes) read from
-      ch0 slot0, but ch0 is serving 1360x768 (1566720 bytes)`. Same 229,320-byte
-      read landing on a 1360x768 frame that `framewidth.py` measured off the real
-      capture. **The taunt is no longer needed to work on this item.** Be honest
-      about the flag's limit: it changes size under a LIVE pipeline, which real
-      playback never does, so it reproduces the fault but not the route to it.
-      **Fixed:** `gstvid.c` records the size the GAME was told (`told_w/told_h`,
-      set in `pad_vid_get_int` — NOT at prepare(), which re-runs on every rewind
-      and would keep the field uselessly in step with the channel) and refuses to
-      hand over a frame once the channel serves something else, holding the last
-      good frame instead; channel stealing is now least-recently-used rather than
-      first-in-array; and `padglhost` drops a mismatched upload outright
-      (`PAD_VID_NOSIZEGUARD=1` to A/B it on one build).
-      **★★ CONFIRMED ON THE REAL TAUNT, IN A REAL GAME.** The 520x294 clips
-      served were `4e0bf266.../scene.assets/35.asset/0.asset` and `1.asset` —
-      the Planet X Controller taunt itself — and both guards fired on it:
-      `[vid] ch2 NOT MINE ANY MORE: the game holds 520x294 but this channel now
-      serves 1360x768. Holding the last frame after 0.` plus the host's
-      `WRONG-SIZE ... read from ch2 slot2`. So the route IS channel takeover,
-      not merely something that produces the same disagreement.
-      **"After 0" is the sting:** the taunt lost its channel before it played a
-      single frame, so the corruption is gone but the inset was blank rather
-      than playing. The cause is a burst — the scene builds THREE pipelines in
-      130 ms (padvid at 223.49/223.56/223.62) — against only four channels.
-      Hence `PADVID_CHANNELS` 4 → 8 (padvid.h **v3**, header 4096 → 8192 because
-      eight 564-byte structs no longer fit; the static assert caught it).
-      **Fixed:** `gstvid.c` records the size the GAME was told (`told_w/told_h`,
-      set in `pad_vid_get_int` — NOT at prepare(), which re-runs on every rewind
-      and would keep the field uselessly in step with the channel) and refuses
-      to hand over a frame once the channel serves something else; a **request-
-      generation check** beside it catches a SAME-SIZE takeover, which the size
-      check cannot see and which most of this game's clips would be; stealing is
-      least-recently-used **with fresh streams protected** (bumping `last_use` on
-      create and prepare — without that, LRU picks the NEWEST stream, which was
-      my own regression and the exact wrong end for a 130 ms burst); and
-      `padglhost` drops a mismatched upload outright (`PAD_VID_NOSIZEGUARD=1`).
-      **Committed:** `longplay.sh` (`355e0bd`), the control-tested findings
-      (`11a8b44`), `PAD_VID_BURST` + `plunge.py coin`/`game` (`4dab1ad`),
-      `framewidth.py` + the 1360 finding (`ccce594`), the guards (`36d82a1`),
-      8 channels + the alive.sh safety fix (`c389572`).
-      **Verified so far:** normal attract unbroken (12 streams, video playing,
-      zero guard trips, `fix_normal_1.png`); ALT_SIZE reproduction goes from
-      repeated wrong-size uploads to **zero**, caught by the guest guard; and an
-      in-game 520x294 upload measures **TRUE WIDTH 520 (2.57 vs shuffled 35.37)**
-      on `framewidth.py`, against 1360 before.
-      **★★ 2026-08-06: THE TAUNT FIRED AND THE INSTRUMENTED ACCEPTANCE PASSED,
-      on the item 15 run (`44f4bc0`, log `/home/david/gz_item15.log`).** The
-      Planet X Controller taunt served `4e0bf266.../scene.assets/35.asset/0`,
-      `/19` and `/14` at **520x294, 99 serves and 96 guest `streaming` lines on
-      ch3**, alongside 1360x768 on ch0 and the background on ch2 — four channels
-      live at two sizes, which is the condition this item is about. Results:
-      **zero `NOT MINE ANY MORE`, zero `** WRONG-SIZE VIDEO UPLOAD **`, zero
-      dropped frames**, the host logging `video upload 520x294 from ch3 slot2
-      (ch3 serving 520x294)` — the two sides agreeing, which is the whole
-      question — and ch3 reaching EOS after **194 and 196 frames**, i.e. whole
-      clips consumed rather than the "after 0" this item was last left on. The
-      texture's `min_filter` was 0x2601 (LINEAR), not a mipmap mode.
-      **What is NOT confirmed, and it is why the box is still open: nobody has
-      SEEN the inset.** The desktop screenshots caught other scenes; longplay's
-      96 window grabs went through `shotwin.py`, which this item already records
-      as falling back to COPY MODE, and the files were not on disk afterwards.
-      Every instrument says the pixels are now this stream's own; David's eyes
-      have not said so.
-      **Resume:** catch the inset on screen. `PAD_VID_SNAP=520x294` writes the
-      uploaded RGBA to PPM, which needs no window grab at all and is the
-      instrument that should have been used here — run `watch.sh` with it set,
-      then `longplay.sh <log> 13 520x294`, and look at the PPMs.
-      **A 15-minute clean run on the 8-channel build did NOT see the taunt at
-      all** (zero 520x294 clips, and the game fell back to attract partway), so
-      budget more than one run for this — it fired ~223 s into one run and not
-      once in another. Nothing was learned about the fix from that run beyond
-      "attract still healthy, zero guard trips".
-      If it still gets stolen when it does fire, the next lever is not more
-      channels but releasing a stream's slot when its pipeline is torn down —
-      `pipeline` is never cleared, so every slot is permanently "occupied" and
-      stealing is unavoidable no matter how many channels there are.
-      **2026-08-06: item 15 is evidence for exactly that lever** — every clip in
-      gameplay now draws the same video, which is what permanent occupancy plus
-      a same-size steal would look like once the size guard stops it showing up
-      as noise. The two items may share a root; do not fix one without checking
-      the other.
 
 - [ ] **11. Background video stutters every ~7 seconds.** `S2 D3` — S2 because
       it is a quality defect you can play through, not a malfunction. D3 because
@@ -675,6 +501,51 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **6. Scene video noise in the TV inset.** DONE 2026-08-06 — **David
+      confirmed it looks fine on screen**, which is the one thing the item was
+      still open for. Every instrument had already agreed the pixels were the
+      inset's own; the entry said in terms *"nobody has SEEN the inset"*, and
+      that has now been closed by the only oracle that could close it.
+      **The mechanism was CHANNEL TAKEOVER, and it took a control to find.**
+      The game asks for caps **once per pipeline and never again** (it loops by
+      SEEKING, so its texture geometry is frozen for the pipeline's life), and
+      every new pipeline **steals a channel** — with four channels and
+      `pipeline` never cleared, a clip that has just hit EOS is still on screen
+      when its slot is taken. The 520x294 inset negotiated its size, lost its
+      channel to a 1360x768 background clip, and kept uploading from a ring full
+      of someone else's frames.
+      **How that was proven rather than guessed:** `framewidth.py` inverted the
+      converter and re-folded the recovered Y at every width. The known-good
+      frame scored **520 (2.66 against a shuffled control of 34.31)** — the
+      labelled example it had to agree with first — and the noise capture scored
+      **1360 (2.02 vs 23.84)** while the width it was actually read at, 520,
+      scored **22.34 against a control of 23.80, i.e. no better than noise.**
+      So the bytes were another stream's, measured with a control on both sides.
+      **Fixed:** `gstvid.c` records the size the GAME was told (`told_w/told_h`,
+      set in `pad_vid_get_int`, NOT at prepare() which re-runs on every rewind)
+      and refuses to hand over a frame once the channel serves something else; a
+      **request-generation check** beside it catches a SAME-SIZE takeover, which
+      the size check cannot see; stealing is least-recently-used **with fresh
+      streams protected** (without that, LRU picks the NEWEST stream — my own
+      regression, and the exact wrong end for a burst); `padglhost` drops a
+      mismatched upload outright; and `PADVID_CHANNELS` went 4 → 8 because the
+      scene builds **three pipelines in 130 ms**.
+      **Instrumented acceptance passed on the real taunt** (`44f4bc0` run): 99
+      serves at 520x294 on ch3 alongside 1360x768 on ch0, **zero `NOT MINE ANY
+      MORE`, zero wrong-size uploads, zero dropped frames**, clips reaching EOS
+      after 194 and 196 frames rather than the "after 0" it was last left on.
+      **Committed:** `355e0bd`, `11a8b44`, `4dab1ad`, `ccce594`, `36d82a1`,
+      `c389572`.
+      **The two lessons worth keeping.** **(1)** `PAD_VID_TESTPAT` rendered
+      perfectly in the real inset, which exonerated the draw and upload and
+      deliberately said nothing about the data — splitting the problem in half
+      with one flag is what made the rest cheap. **(2)** The reason it took five
+      runs to see was **not the trigger, it was CREDITS**: a machine with no
+      credits ignores Start *silently*, every instrument reported the press as
+      delivered, and "the press worked" and "a game started" looked like one
+      claim. `plunge.py game` exists because of that. **See item 20** — the
+      trough half of that same path has since regressed.
 
 - [x] **18. Windows feels sluggish while a run is up.** DONE 2026-08-06,
       `d61b9dc`. **The machine is 8 physical cores, not 16, and WSL2 had been

@@ -497,9 +497,8 @@ These have each been violated at least once and each cost a run or a window:
       superseded-after-1 185 → 108 (what remains is the game's own
       loop-then-advance at clip ends), throttled-4 everywhere → 29, 75 full
       plays, rig clean after.
-      **A LIVE RUN may be up when this is read: run 4** (watch.sh 20 min,
-      census armed, NO longplay — the window is David's to play; started
-      ~15:25 2026-08-06). Its padvid.log is the first with the census lines.
+      *(run 4, watch.sh 20 min with the census armed, ended long ago — its
+      padvid.log was the first with the census lines.)*
       **★ THE CADENCE FIX LANDED AND DAVID CONFIRMED IT LIVE** ("the
       stuttering on this city loop is gone"), `a6d9ce1`: vid_thread now
       schedules frame N at t_epoch + N*period instead of sleeping a period
@@ -692,8 +691,13 @@ These have each been violated at least once and each cost a run or a window:
       CHANNEL** — decode the incoming clip where nobody is watching, then
       have `prepare()` adopt that channel instead of re-arming this one.
       `PADVID_CHANNELS` is 8 and a scene uses at most 3, so the room exists.
-      **★ THE STRUCTURAL BLOCKER, scoped 2026-08-06 and NOT yet started —
-      this is why it is D3 and not a one-liner.** `chan_of(s)` is
+      **★ THE STRUCTURAL BLOCKER — CLEARED, `d1a7b8d` (2026-08-06). Step 1's
+      hwchan indirection is committed, pushed, and CONFIRMED UNCHANGED on its
+      own run:** 0 WRONG-SIZE uploads (the refactor's specific risk), 0
+      storms, 0 RING EMPTY/TAKEN OVER/NOT MINE, 226 serves, 42 absorbs, 54
+      clean EOS loops, ~30/s delivery, renderer 58-60 fps, alive 0. The only
+      late gaps were the known 104-206 ms transitions — the thing steps 2-3
+      exist to remove. Original scoping, kept for the record: `chan_of(s)` is
       `s - streams`: **the padvid channel IS the stream's array index**, so a
       stream cannot currently use any channel but its own and "adopt a spare"
       is not expressible. The work, in order:
@@ -735,23 +739,58 @@ These have each been violated at least once and each cost a run or a window:
       **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
       64-71 ms (the 65 s background, also at every loop wrap). Fix
       candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **Resume:** build the SPARE-CHANNEL pre-arm (above). In-place arming is
-      already built, measured, and disabled behind `PAD_VID_PREARM=1`; do not
-      re-try it. **Judge it with
-      `tickcensus.py` against its 50% baseline** (needs `PAD_GL_TICK=1`, a
-      60 fps capture and a scene with real motion; before = 52.9% = 1.76
-      holds/s) — NEVER with a raw screen-repeat percentage, which carries the
-      grabber's jitter. The agent can run the whole
-      loop unattended: `watch.sh`, `run5game.sh` (scratchpad) to start a
-      game, `longplay.sh` to drive scenes, gdigrab at 30 fps over
-      `1492x914+0+0`, then `dupcensus.py`. **Judge with `dupcensus.py`, and
-      only on scenes with real motion** — it refuses low-motion content on
-      purpose, and the idle city loop is one of those (it reads 1.8% true
-      repeats and is NOT a valid test bed).
-      **Resume:** fix the REWIND path in `gstvid.c` — `pad_vid_seek()` re-arming
-      the host on every EOS, when the previous arm delivered ≤1 frame, is the
-      loop. Then judge the picture with the screen-recording differ, **not
-      eglshim** (it counts the render loop and cannot see a frozen texture).
+      **★ STEPS 2+3 ARE BUILT AND ON A VERIFICATION RUN AS THIS IS WRITTEN
+      (2026-08-06 ~18:26), UNCOMMITTED in gstvid.c.** The design as built:
+      `spare_chan()` searches from the top, excluding host-serving channels
+      (`c->playing`, which also covers other streams' pending arms) and
+      guest-playing owners; the arm at `note_location()` is gated on the
+      location CHANGING (a rewind re-sets the same filename, and after an
+      adopt cleared `armed_path` that re-set would arm a spare for the clip
+      already playing); `prepare()` adopts via `s->hwchan1` with an ownership
+      SWAP so hwchan stays a permutation of 0..7 — two streams can never
+      drive one channel — and every race on the spare falls back through the
+      `req_gen` check to today's cold start, never to something new. Still
+      gated behind `PAD_VID_PREARM=1`; the default flips only on a tickcensus
+      win.
+      **★ RUN 2 (PREARM=1, ~18:30): THE MACHINERY HOLDS UNDER REAL CHANNEL
+      MOVES.** All 261 serves ran on hw 5/6/7 — the three live streams
+      adopted their spares early and STAYED there — with 0 WRONG-SIZE, 0
+      storms, 0 wasted arms, delivery 26-30/s, alive 0. **98 location
+      changes produced 98 arms: the arm fires on every real transition.**
+      The `superseded after 1` churn (~165 of 261) MATCHES the no-prearm
+      step-1 run (166 of 226), so it is the game's own loop-then-advance,
+      not a new storm.
+      **TWO LESSONS PAID FOR IN RUN 2, both instrument lessons:**
+      • **My adopt log line sat inside `if (moved)`, so IN-PLACE adopts —
+      the common case, arming your own channel while it idles at a clip
+      boundary — were SILENT SUCCESSES.** The run read as "98 arms, 5
+      adopts, 93 vanished" for an hour of analysis before the miscount
+      surfaced. Fixed: every ADOPT now logs, moved or in place, WITH the
+      measured ack wait (its own before/after). One line per transition.
+      • **tickcensus.py cannot judge a per-transition fix: two windows of
+      the SAME run, same build, read 59.9% and 67.5%** — window-content
+      variance far exceeds the effect size. Yesterday's single-window
+      52.9/63.1 inherit that as MAGNITUDES (the in-place regression stays
+      real — its mechanism was proven, delivery stood down). Judging this
+      fix needs multi-window medians or the adopt-wait lines themselves.
+      **A LIVE RUN may be up when this is read: RUN 3** (watch.sh 10 min,
+      PREARM=1 TICK=1, adopt telemetry build, game + 6 min longplay,
+      started ~18:50 2026-08-06; two 60 s 60 fps captures fire at ~2.5 and
+      ~4.5 min into the session scratchpad as `tick60_run3_a/b.mkv`).
+      **Resume:** read run 3's `[vid] chN ADOPT ... waited N ms` lines —
+      the adoption rate across the 98-ish transitions and the wait
+      distribution (0 ms = the cold start fully hidden) ARE the verdict.
+      Then: high adoption + near-zero waits ⇒ flip `prearm_on()` default
+      ON, commit, push. Low adoption or real waits ⇒ leave opt-in and take
+      the deeper route David pointed at (2026-08-06): make the HOST decoder
+      seekable — a persistent decoder per channel instead of one ffmpeg per
+      request — emulating what the i.MX6 VPU actually provides (cheap seek,
+      fast preroll). That route also erases the LOOP-WRAP seam (35-71 ms at
+      every clip loop), which the pre-arm cannot touch by design (no
+      location change to arm on) and which longplay's gap lines say is the
+      bulk of the remaining holds.
+      *(A much older "Resume: fix the REWIND path" instruction stood here —
+      DONE long since, `cef2627`; the live Resume is the one above.)*
       **The recipe that reaches a stable game, verified 2026-08-06:**
       `plunge.py reset`, wait 8 s, `plunge.py coin`, `swpoke.py 36 900`, wait
       8 s, `plunge.py plunge` — then the game holds Ball 1 indefinitely.

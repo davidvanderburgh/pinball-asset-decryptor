@@ -152,9 +152,14 @@ struct stream {
     /* item 11's PRE-ARM: the host was told to start decoding this path at
      * note_location() time, under this generation, and prepare() should
      * ADOPT it rather than bump a fresh one (which would restart the
-     * decode and throw the head start away). Empty path = not armed. */
+     * decode and throw the head start away). Empty path = not armed.
+     * armed_chan1 is the SPARE channel the arm went to, PLUS ONE (0 = not
+     * armed) - arming IN PLACE was built first and REGRESSED the picture
+     * (tickcensus 52.9% -> 63.1%), because it bumped req_gen under the
+     * clip still streaming on this stream's own channel. */
     char armed_path[PADVID_PATH_MAX];
     unsigned armed_gen;
+    unsigned armed_chan1;
     /* item 11: which padvid CHANNEL this stream's shm traffic uses, PLUS
      * ONE - 0 means "default", the stream's own index, so a zero-initialised
      * stream keeps the identity mapping with no init pass. The indirection
@@ -234,6 +239,40 @@ static int chan_of(const struct stream *s) { return (int)(s - streams); }
 static int hw_of(const struct stream *s)
 {
     return s->hwchan1 ? (int)(s->hwchan1 - 1) : (int)(s - streams);
+}
+
+/* item 11: pick a channel the pre-arm may decode the incoming clip on.
+ *
+ * A channel is OFF LIMITS while the host is serving it (c->playing - that
+ * includes every other stream's pending pre-arm, which keeps it), or while
+ * the guest side still counts it as a live clip (t->playing covers the
+ * stand-down window where the thread has not yet noticed). A channel whose
+ * owner is merely READY - last frame on screen, thread gone - is fair game:
+ * the pixels the game is showing were uploaded long ago, and overwriting
+ * ring slots nobody will read again is free. Note this stream's OWN channel
+ * qualifies when it is idle, which makes the first clip on a fresh stream
+ * pre-arm in place harmlessly - the regression was arming under a clip
+ * still STREAMING, and s->playing excludes exactly that.
+ *
+ * Searched from the TOP so it rarely collides with a stream index about to
+ * go live - streams fill from 0 up. Returns -1 when everything is spoken
+ * for; the pre-arm then does not happen and the transition pays the cold
+ * start, which is today's behaviour, not a new failure. */
+static int spare_chan(struct stream *s)
+{
+    int ch, i, busy;
+    if (s->armed_chan1) return (int)(s->armed_chan1 - 1);   /* re-aim ours */
+    for (ch = PADVID_CHANNELS - 1; ch >= 0; ch--) {
+        if (vshm->ch[ch].playing) continue;
+        busy = 0;
+        for (i = 0; i < PADVID_CHANNELS && !busy; i++) {
+            struct stream *t = &streams[i];
+            if (t->armed_chan1 == (unsigned)ch + 1) busy = 1;
+            else if (hw_of(t) == ch && t->playing) busy = 1;
+        }
+        if (!busy) return ch;
+    }
+    return -1;
 }
 
 static struct stream *find_pipeline(void *p)
@@ -344,6 +383,7 @@ void pad_vid_note_location(void *src, const char *loc)
 {
     struct stream *s = 0;
     int i;
+    int changed = 0;
     if (src && src_route()) {
         for (i = 0; i < PADVID_CHANNELS; i++)
             if (streams[i].filesrc == src) { s = &streams[i]; break; }
@@ -362,13 +402,17 @@ void pad_vid_note_location(void *src, const char *loc)
     if (!s) s = last_created;
     if (!s) return;
     /* Only when it CHANGES. A rewind re-sets the same filename, and a line per
-     * rewind would bury the one event this log is here to show. */
+     * rewind would bury the one event this log is here to show. The same test
+     * gates the pre-arm below: a re-set of the file already playing is not a
+     * transition, and arming a spare for it would decode a clip nobody is
+     * going to adopt. */
     {
         const char *a = s->location, *b = loc ? loc : "";
-        int same = 1, j = 0;
+        int j = 0;
+        changed = 0;
         for (; a[j] || b[j]; j++)
-            if (a[j] != b[j]) { same = 0; break; }
-        if (!same)
+            if (a[j] != b[j]) { changed = 1; break; }
+        if (changed)
             VLOG("[vid] ch%d location -> %s\n", chan_of(s), b);
     }
     str_copy(s->location, loc, sizeof s->location);
@@ -394,39 +438,44 @@ void pad_vid_note_location(void *src, const char *loc)
      * Idempotent: re-setting the same filename (a rewind does) re-arms
      * nothing, so this cannot become the re-arm storm this item already
      * fixed twice. */
-    /* ★ OFF BY DEFAULT, AND THE MEASUREMENT THAT PUT IT BEHIND A FLAG.
-     *
-     * As written this pre-arm REGRESSES the picture, and the guest-side
-     * numbers hide it - which is the whole reason tickcensus.py exists.
+    /* ★ ON A SPARE CHANNEL, NEVER IN PLACE - the first version armed this
+     * stream's OWN channel and REGRESSED the picture, and the guest-side
+     * numbers hid it, which is the whole reason tickcensus.py exists.
      * Measured 2026-08-06 on identical scene-driven runs:
-     *     before   tickcensus 52.9%  = 1.76 holds/s
-     *     pre-arm  tickcensus 63.1%  = 7.86 holds/s   <- WORSE
+     *     before        tickcensus 52.9%  = 1.76 holds/s
+     *     in-place arm  tickcensus 63.1%  = 7.86 holds/s   <- WORSE
      * while the guest's own log went to a flawless "late 0, early 0, worst
-     * gap 33 ms" in every window. Both are true: the channel is a SHARED
-     * resource, so arming it for the next clip bumps req_gen under the clip
-     * that is still streaming, the host abandons that decode, and
-     * vid_thread sees the generation move and stands down holding its last
-     * frame. No frame is ever late because none is delivered at all.
+     * gap 33 ms" in every window. Both were true: the channel is a SHARED
+     * resource, so arming it for the next clip bumped req_gen under the
+     * clip still streaming, the host abandoned that decode, and vid_thread
+     * saw the generation move and stood down holding its last frame. No
+     * frame was ever late because none was delivered at all.
      *
-     * The idea is still right - the 30-70 ms between location-set and
-     * prepare is real budget, and the transition gap is the last measured
-     * cost. What is wrong is arming IN PLACE. It needs a spare channel:
-     * decode the incoming clip on a channel nobody is watching, then have
-     * prepare() adopt that channel instead of re-arming this one.
-     * PADVID_CHANNELS is 8 and a scene uses at most 3, so the room exists.
+     * So the incoming clip decodes on a channel NOBODY IS WATCHING
+     * (spare_chan above; PADVID_CHANNELS is 8 and a scene uses at most 3,
+     * so the room exists) while the outgoing clip keeps streaming from its
+     * own channel untouched - that is the entire point. prepare() then
+     * ADOPTS the spare via s->hwchan1 and hands the old channel to the
+     * spare's previous owner. No spare = no pre-arm = today's cold start.
      *
-     * PAD_VID_PREARM=1 to re-enable for that work. Judge it with
-     * tickcensus.py against the 50% baseline, never with the guest log. */
-    if (prearm_on() && vid_on() && s->location[0] &&
+     * Judge any change here with tickcensus.py against the 50% baseline,
+     * never with the guest log - that is a measured trap, see above. */
+    if (prearm_on() && vid_on() && changed && s->location[0] &&
         !str_eq(s->armed_path, s->location)) {
         vid_map();
         if (vshm) {
-            struct padvid_chan *c = &vshm->ch[hw_of(s)];
-            str_copy(c->path, s->location, PADVID_PATH_MAX);
-            c->playing = 1;
-            s->armed_gen = c->req_gen + 1;
-            c->req_gen = s->armed_gen;
-            str_copy(s->armed_path, s->location, sizeof s->armed_path);
+            int sp = spare_chan(s);
+            if (sp >= 0) {
+                struct padvid_chan *c = &vshm->ch[sp];
+                str_copy(c->path, s->location, PADVID_PATH_MAX);
+                c->playing = 1;
+                s->armed_gen = c->req_gen + 1;
+                c->req_gen = s->armed_gen;
+                s->armed_chan1 = (unsigned)sp + 1;
+                str_copy(s->armed_path, s->location, sizeof s->armed_path);
+                VLOG("[vid] ch%d pre-arming hw ch%d: %s\n",
+                     chan_of(s), sp, s->location);
+            }
         }
     }
 }
@@ -479,6 +528,15 @@ void pad_vid_note_pipeline(void *p)
     }
     s->playing = 0;
     if (vshm) vshm->ch[hw_of(s)].playing = 0;
+    /* A pre-arm this stream never adopted would keep the host decoding on a
+     * held spare channel forever; stand it down with the rest of the old
+     * pipeline's identity. */
+    if (s->armed_chan1) {
+        if (vshm) vshm->ch[s->armed_chan1 - 1].playing = 0;
+        s->armed_chan1 = 0;
+        s->armed_gen = 0;
+        s->armed_path[0] = 0;
+    }
     s->pipeline = p;
     s->fakesink = 0; s->sinkpad = 0; s->decoder = 0;
     /* Drop the old pipeline's source binding with the rest of its identity. The
@@ -849,6 +907,7 @@ int pad_vid_prepare(void *pipeline)
     struct padvid_chan *c;
     unsigned gen;
     int spins = 0;
+    int adopted = 0;
     if (!s || !vid_on()) return 0;
     vid_map();
     if (!vshm || !s->location[0]) return 0;
@@ -931,43 +990,86 @@ int pad_vid_prepare(void *pipeline)
      * pipeline down - then built it again, ~25 times a second, so nothing ever
      * played and the video panel stayed black. */
     s->pos_ns = 0;
-    str_copy(c->path, s->location, PADVID_PATH_MAX);
-    /* PREROLL: tell the host to start decoding NOW, at PAUSED, not at PLAYING.
-     *
-     * This was a real race and it produced a perfectly healthy-looking bridge
-     * that decoded nothing: the host acked the probe and immediately checked
-     * `playing`, which the guest only set later at PLAYING, so it returned at
-     * once and then sat idle - status OK, width and height correct, write_idx
-     * stuck at 0 forever.
-     *
-     * Starting here is also what a real pipeline does. PAUSED means preroll,
-     * and the ring is only 4 frames deep, so the host fills it and blocks
-     * rather than running away. */
-    c->playing = 1;
-    /* ADOPT THE PRE-ARM if note_location() already started this exact path
-     * on this channel and nothing has claimed the channel since. Bumping a
-     * fresh generation here would make the host throw away the decode it has
-     * had 30-70 ms to warm up, which is the entire point of the pre-arm. */
-    if (s->armed_gen && str_eq(s->armed_path, s->location) &&
-        c->req_gen == s->armed_gen) {
+    /* ADOPT THE PRE-ARM. note_location() started this path decoding on a
+     * SPARE channel; if nothing has claimed that channel since (its req_gen
+     * is still ours), this stream MOVES to it and its old channel goes to
+     * the spare's previous owner - hwchan stays a permutation of 0..N, so
+     * two streams can never drive one channel. Bumping a fresh generation
+     * instead would throw away the 30-70 ms head start the host has had,
+     * which is the entire point of the pre-arm. */
+    if (s->armed_chan1 && s->armed_gen &&
+        str_eq(s->armed_path, s->location) &&
+        vshm->ch[s->armed_chan1 - 1].req_gen == s->armed_gen) {
+        int old = hw_of(s);
+        int neu = (int)(s->armed_chan1 - 1);
+        if (neu != old) {
+            int i;
+            for (i = 0; i < PADVID_CHANNELS; i++)
+                if (&streams[i] != s && hw_of(&streams[i]) == neu) {
+                    streams[i].hwchan1 = (unsigned)old + 1;
+                    break;
+                }
+            /* The outgoing clip's decode is over: the game has moved this
+             * pipeline to the new location. Its thread stands down on
+             * s->playing (cleared above); this stands the HOST down. */
+            c->playing = 0;
+            s->hwchan1 = (unsigned)neu + 1;
+            c = &vshm->ch[neu];
+        }
+        /* adopted=1 (moved) / 2 (in place). The first version only logged
+         * the MOVE and read its own in-place successes as arms that died -
+         * a whole run was mis-accounted off that line. Logged after the
+         * ack spin below, with the wait, so the line carries the fix's own
+         * before/after. */
+        adopted = (neu != old) ? 1 : 2;
+        c->playing = 1;
         gen = s->armed_gen;
     } else {
+        if (s->armed_chan1) {
+            /* Armed, but the location moved on or somebody claimed the
+             * spare: stand the orphan decode down and pay the cold start. */
+            vshm->ch[s->armed_chan1 - 1].playing = 0;
+            VLOG("[vid] ch%d pre-arm on hw ch%d wasted (%s)\n",
+                 chan_of(s), (int)(s->armed_chan1 - 1),
+                 str_eq(s->armed_path, s->location) ? "spare was claimed"
+                                                    : "location changed");
+        }
+        str_copy(c->path, s->location, PADVID_PATH_MAX);
+        /* PREROLL: tell the host to start decoding NOW, at PAUSED, not at
+         * PLAYING.
+         *
+         * This was a real race and it produced a perfectly healthy-looking
+         * bridge that decoded nothing: the host acked the probe and
+         * immediately checked `playing`, which the guest only set later at
+         * PLAYING, so it returned at once and then sat idle - status OK,
+         * width and height correct, write_idx stuck at 0 forever.
+         *
+         * Starting here is also what a real pipeline does. PAUSED means
+         * preroll, and the ring is only 4 frames deep, so the host fills it
+         * and blocks rather than running away. */
+        c->playing = 1;
         gen = c->req_gen + 1;
         c->req_gen = gen;
     }
     s->armed_gen = 0;
     s->armed_path[0] = 0;
+    s->armed_chan1 = 0;
     /* 3 s is generous: a probe measured 0.08 s. It exists so a dead host
      * cannot wedge the game's UI thread, which is what calls this. Nothing
      * else can bump this channel's req_gen - that is the whole point of
      * channels - so the generation we wait for cannot be jumped past. */
     {   /* How much of the cold start the pre-arm actually hid. 0 spins means
          * the host had already answered before prepare() even asked - the
-         * transition gap paid nothing. Logged sparsely; it is the fix's own
-         * before/after and costs one line per handful of clips. */
+         * transition gap paid nothing. Every ADOPT logs, with the wait - it
+         * is the fix's own before/after, at most one line per transition -
+         * while ordinary re-arms stay sampled 1-in-16. */
         static unsigned said;
         while (c->ack_gen != gen && spins++ < 3000) usleep(1000);
-        if ((said++ & 15) == 0)
+        if (adopted)
+            VLOG("[vid] ch%d ADOPT %s hw ch%d, waited %d ms%s\n",
+                 chan_of(s), adopted == 1 ? "moved to" : "in place on",
+                 hw_of(s), spins, spins ? "" : " (no wait)");
+        else if ((said++ & 15) == 0)
             VLOG("[vid] ch%d prepare waited %d ms for the host%s\n",
                  chan_of(s), spins, spins ? "" : " (pre-armed, no wait)");
     }

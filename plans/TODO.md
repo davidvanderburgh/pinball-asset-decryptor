@@ -696,14 +696,49 @@ These have each been violated at least once and each cost a run or a window:
       dragging, no app switching, no typing — and "sluggish" is a word about
       INTERACTING. David also plays games, which run more video, more audio and
       more switch traffic than attract does.
-      **Resume: ASK DAVID FIRST (see below), then capture while the machine is
-      being USED.** `winprof.py` with the DWM probe already measures what a
-      human sees, so the run is: start `watch.sh`, have David drag windows /
-      switch apps / type for 90 s, and read `DWM frame ms` and `late frames`
-      against the same activity with no run up. That control matters — the
-      activity itself moves the numbers, so a no-run arm with the same fidgeting
-      is required, not optional. Only after that is it worth testing whether
-      msrdc scales with `PAD_GL_W`/`PAD_GL_H` or with `PAD_GL_LEGEND=0`.
+      **★★ DAVID ANSWERED, 2026-08-06, AND IT REFRAMES THE ITEM: the symptom is
+      MOUSE AND TYPING LAG, and it happens MOSTLY DURING A GAME.** Both were
+      things nothing here had measured — every capture up to that point was
+      attract mode with nobody touching the computer, which is the cheapest
+      possible case for the input path.
+      **`CursorProbe` built for it.** `GetCursorPos` polled at 500 Hz, recording
+      the interval between position CHANGES, so while a hand is moving it
+      measures how smoothly the pointer tracks. No injection — SendInput into a
+      WSLg window is UIPI-blocked (items 7 and 12), so it reads what the human's
+      hand produced instead. **The false-clean guard is the important half:** a
+      capture with a still mouse would report zero stutters and read as a pass,
+      so it prints `NOT MEASURED - only 0.0 s of pointer movement seen` and
+      `--compare` refuses unless both arms saw 5 s of movement. **It has already
+      fired once, correctly**, on a control arm David was away for.
+      **★ AND A GAME IS NOT MATERIALLY WORSE THAN ATTRACT.** `abrun.ps1 -Game`
+      (longplay puts a ball in play and keeps it alive), 90 s, against the
+      attract arm: whole machine **22.76% → 23.90%** (+0.18 cores), vmmemWSL
+      114.8 → 118.8, **msrdc 72.1 → 71.5 (down)**, **dwm 5.5 → 4.4 (down)**,
+      ctx switches 101,775 → 106,258, **DWM p95 9.66 → 9.61 and late frames
+      0.00% in both**. The only real move is hard faults (mean 46 → 400, one
+      burst to 25,761) as clips load, and `disk_queue` stays at 0.01. **So
+      "mostly during a game" is NOT explained by the game costing more.**
+      **THE STANDING POSITION: the pointer path is the last thing unmeasured,
+      and it is the only thing David's answer points at.** Everything else has
+      been ruled out with numbers across five captures.
+      **Resume — this needs DAVID'S HANDS and cannot be done without them.**
+      Two arms, mouse moving continuously through both:
+      `abrun.ps1 -Label fidget_idle -NoRun -Secs 90` (control) then
+      `abrun.ps1 -Label fidget_game -Game -Secs 90`, then `--compare` them and
+      read `pointer gap ms` and `pointer stutters / active s`. The control is
+      not optional: moving the mouse changes the numbers by itself.
+      **If it reproduces**, A/B these three in order, they are all cheap and all
+      untried: **`PAD_PLAYFIELD=0`** (the virtual playfield is a Tk window on
+      the WINDOWS desktop repainting at 30 fps with `timeBeginPeriod(1)` set —
+      much the most likely thing here to affect how the desktop feels, and it is
+      one env var), **`PAD_GL_LEGEND=0`** (one fewer RAIL window for msrdc), and
+      **`PAD_GL_W`/`PAD_GL_H` halved** (does msrdc's 0.70 cores scale with
+      resolution). **NOT by moving a window from Windows** — standing
+      non-negotiable.
+      **If it does NOT reproduce**, say so plainly rather than declaring the
+      item fixed: it would mean the pointer probe cannot see it either, and the
+      next thing to try is capturing while David uses the machine the way he
+      actually does when he notices it, rather than on demand.
       **ASK DAVID FIRST:** is it the pointer/typing (input latency), windows
       repainting (compositing), or everything generally slow (throughput)? The
       third is ruled out above, so his answer picks the probe instead of pass

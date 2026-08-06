@@ -470,6 +470,52 @@ These have each been violated at least once and each cost a run or a window:
       `tests/test_emulate_tab.py` is part of done. GUI-side change: run the `app`
       smoke tests, not just `py_compile`.
 
+- [ ] **18. Windows feels sluggish while a run is up.** `S3 D4` — S3 because
+      nobody loses a run to it and the workaround is not using the machine while
+      it runs; **it becomes S2 the day it stops David leaving a long run going**,
+      since items 6 and 17 both need those. D4 — every run reproduces it, so a
+      pass cannot end having learned nothing, but the instrument does NOT exist
+      and the fix is unknown until it does.
+      **Observed 2026-08-06, in David's words: "my computer runs a little
+      sluggish when the emulator is going."** Suggested: multi-threading, more
+      memory allocation, or the GPU.
+      **★ THE GPU ONE IS ALREADY DONE AND ALREADY RULED OUT AS THE COST.** The
+      renderer runs on the GPU (`GALLIUM_DRIVER=d3d12`, D3D12/AMD Radeon) and is
+      capped at 60 fps by the swap; the handoff's "Why the rig used to burn a
+      whole core" says in terms that **none of it was the renderer**, which is
+      the obvious suspect and was measured not to be. That work took the guest
+      from **113% of a core to 15%** and RSS from 1.5 GB to 995 MB by PACING the
+      SPI and i2c shims (`PAD_SPI_US=640`, `PAD_I2C_US=90`) — i.e. the wins here
+      have come from doing LESS, faithfully, not from more parallelism.
+      **The other two, scored against what is known rather than dismissed:**
+      *multi-threaded* — the expensive half is a real ARM binary under
+      qemu-**user**, so its threading is the game's and not ours; the host side
+      is already four processes (padglhost, padvidhost, padrelay/padplay,
+      nodebus). *More memory* — RSS is ~1.8 GB in attract and WSL holds it back
+      from Windows, so the lever may be giving WSL LESS rather than more.
+      **Numbers to beat, from the item 17 run 2026-08-06** (`ps` %CPU, so
+      lifetime averages, not peaks): guest **20.8%**, padglhost **9.8%**,
+      padvidhost **2.7%** of one core. That is not obviously a sluggish machine,
+      which is itself the finding — the cause may not be CPU at all.
+      **★ THE LESSON THAT MUST SHAPE PASS ONE: every CPU number this rig has
+      ever taken was taken INSIDE WSL, and "my computer is sluggish" is a
+      WINDOWS-side symptom.** That is exactly the shape that cost an afternoon on
+      item 10 — a sine came back mathematically perfect off RDPSink.monitor while
+      the room heard it breaking up. Measure on the far side of the boundary:
+      Windows per-process CPU/RSS, the Vmmem/WSL VM's own footprint, GPU
+      utilisation, and whether it is the WSLg RAIL window path rather than the
+      emulator at all. Two Windows processes are also ours (`playfield.py`,
+      `padplay.py`) and are easy to forget.
+      **Do not confuse this with item 11** (video stutters INSIDE the game). If
+      what feels slow is the game rather than the desktop, that is 11 and this
+      item should be closed as a duplicate.
+      **Acceptance for the PROFILE, which is pass one:** per-process CPU, RSS and
+      GPU on BOTH sides of the boundary during a normal attract run, with the
+      largest consumer named and a Windows-side responsiveness number stated.
+      **Acceptance for the FIX: not yet defined, deliberately** — a target set
+      today would aim pass two at whatever was guessed today, and this queue has
+      been bitten by exactly that.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

@@ -1024,7 +1024,46 @@ These have each been violated at least once and each cost a run or a window:
       trap - the unknown is which host it belongs to, not how to see it.
 
 - [ ] **31. The playfield claims "30 fps" while the LEDs actually move 2.6
-      times a second, in bursts and freezes.** `S2 D3`
+      times a second, in bursts and freezes.** `S2 D3` ← IN PROGRESS
+      **★★ HALF (a) IS SHIPPED AND THE OPEN QUESTION IS ANSWERED, 2026-08-07,
+      `a77eb56`. No run spent yet.**
+      **Established:** re-differed David's recording with a saturation gate (so
+      the line art and the mouse cursor cannot score): **30 of 275 transitions
+      change a coloured pixel = 3.3 visual updates/s**, freezes of **1.67 s and
+      1.63 s**. **THE SUBTRACTION: the window's own "LED writes decoded"
+      counter changes on 34 of the same 275 transitions, and inside BOTH
+      freezes it changes ZERO times** — artwork and counter freeze on the same
+      frames and recover on the same frames. 354 writes in 34 observable bursts
+      = ~10 lamps a burst = one node-bus LED frame. `led_publish()` is called
+      per node-bus write and bumps `gen` once per FRAME, `decoded` once per
+      lamp, which fits exactly.
+      **Ruled out:** all three candidates this item listed (values already
+      drawn / undrawn fixtures / collapsing inside one 33 ms poll) as the MAIN
+      cause — every one of them requires the counter to keep climbing through a
+      frozen picture, and it does not. Also ruled out: a recorder stall faking
+      the freezes (frames 189-193 change ~6000 px of chrome with zero artwork
+      and zero counter change, so the capture was alive).
+      **Shipped:** status bar now reads `LED 3.3 Hz (1523 writes) … poll 30 fps`
+      — two rates, each labelled, net SHORTER than the old bar (94 chars vs
+      100, and it has been clipped off a window before). When data outruns the
+      picture it says `LED 3.3 Hz of 12.0 Hz data` in place. `PAD_PF_LOG` gains
+      `LED n.n Hz  data n.n Hz  worst gap n.nn s`, the gap a MAXIMUM since the
+      last line — that is acceptance (b) measurable from inside the window with
+      no recording. `ledrate.py` reads the same block from INSIDE WSL at 200 Hz
+      (gen and decoded counted apart). `ledratetest.py` validates both offline
+      in ~20 s: PACED 5 Hz with a 2 s hole → window 4.0 Hz, ledrate 3.88 Hz,
+      gap 2.20 s, poll 30 fps; **CHURN, the labelled negative control** — 30 Hz
+      of writes carrying values already on screen → LED **0.0 Hz**, data
+      29.7 Hz, split field shown, where the OLD bar would have said "30 fps".
+      **NOT ESTABLISHED, and it is the whole of what is left: whether the guest
+      publishes at ~3.7 Hz or the crossing to Windows serves a stale block.**
+      Every number above is Windows-side. `ledrate.py` inside WSL against the
+      window's own new numbers, over the same stretch of one run, settles it.
+      **Resume:** one run of godzilla_pro with `PAD_PF_LOG` set; run
+      `python3 ledrate.py 60` inside WSL during attract; compare its `gen` Hz
+      with the window's `LED Hz`/`data Hz`. Equal ⇒ the game really does drive
+      lamps in bursts and the window is honest; WSL much faster ⇒ the crossing
+      is dropping updates.
       **★ DAVID, 2026-08-07: "we are claiming '30fps' on the virtual playfield.
       but look at this video recording on my desktop. the LEDs are very
       jumpy."**

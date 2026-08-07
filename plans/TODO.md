@@ -176,9 +176,19 @@ These have each been violated at least once and each cost a run or a window:
       very different prices and the cheap one lands alone** — say which you did.
       **(a) THE FEEDBACK HALF IS D2 DESK WORK.** Both windows David named
       already exist and both already have what they need: `playfield.py`
-      (Windows/Tk) reads `mrg[]` over 9p every frame and already draws switch
-      state, and `padglhost.c`'s Controls legend is drawn in X11 beside the
-      switch keys. The trough is ids 71..66 = TROUGH 1..6 and `swshow.py`
+      (Windows/Tk) reads `mrg[]` over 9p and `padglhost.c`'s Controls legend is
+      drawn in X11 beside the switch keys.
+      **CORRECTED 2026-08-06 by item 24: this entry said playfield.py "reads
+      `mrg[]` every frame and already draws switch state". It does not.** It
+      reads mrg for the COIN DOOR ALONE and every 8th tick at that
+      (`DOOR_EVERY`); no switch marker is drawn from live state, and `tick()`
+      touches only inserts and coils. So the trough display is a new reader and
+      a new drawing path, not a re-colour of something already on screen.
+      **Also from item 24, and it will bite this item: THE COIL MARKER SITS ON
+      TOP OF THE SWITCH MARKER.** `_hit()` at the centre of RIGHT SCOOP returns
+      the coil — the switch oval is not even in `find_overlapping` there,
+      because it is drawn as an unfilled outline. Any per-switch drawing or
+      interaction this item adds must not assume a click lands on the switch. The trough is ids 71..66 = TROUGH 1..6 and `swshow.py`
       (`e1e9cb3`) already counts and prints it. Six ball images and a
       "N balls in play" line is drawing, not discovery.
       **(b) THE HANDLING HALF IS THE D4, and it needs item 3.** There is no ball
@@ -581,15 +591,32 @@ These have each been violated at least once and each cost a run or a window:
       over twenty pending actions — a metric satisfiable BEFORE the work starts
       — and it now waits on the queue; and the harness passed its switch id as
       `sys.argv[1]`, which `playfield.py` reads as the GAME name.
-      **WHAT IS NOT DONE, and it is why the box is open:** everything above
-      measures `scr_held[]`, this window's own half. **The item's acceptance
-      names `mrg[]`** — what the game is handed — and mrg never moves offline
-      because the merge is the guest shim's write and there is no guest.
-      `swholdtest.py --live` runs the identical test against a running game's
-      block with mrg as the oracle. And David's hands are the final oracle.
-      **Committed:** see below.
-      **Resume:** start a run, `py tools\spike2_emu\swholdtest.py --live 53
-      3000`, confirm mrg follows and state the latency; `alive.sh` 0 after.
+      **★★ CONFIRMED ON A LIVE RUN, against `mrg[]` — the array the GAME IS
+      HANDED, which is what this item's acceptance names.** `swholdtest.py
+      --live`, one 4-minute run, `alive.sh` 0 after:
+      • **press → mrg closed in 74.5 ms; 231 of 231 samples of mrg closed
+      across a 2 s hold; release → mrg open in 82.0 ms.**
+      • three quick clicks all reached mrg, 78-96 ms wide. **The item asked for
+      this to be said rather than assumed:** an 80 ms closure is safe because
+      of item 17's `sw_owed[]` latch, which OWES every closure a scan and was
+      measured 72/72 down to 10 ms. This run did not re-prove that; it relies
+      on it.
+      • 20 fast actions strictly alternating, ends open.
+      • **the merge itself is visible in the log:** `swhold` prints its
+      before-value from mrg, and live it reads `was 1 -> 0` on every release
+      where the offline pass could only ever read `was 0 -> 0`.
+      **WHAT IS LEFT, and it is the only reason the box is open: DAVID'S
+      HANDS.** The item says so itself — "his hands are the final oracle, since
+      this is a feel item" — and nothing here has put a real mouse on a real
+      scoop during a real game. This pass ran in attract. Two things a
+      measurement cannot settle: whether the ~80 ms onset feels immediate, and
+      whether a held scoop actually retains a ball once the game's own ball
+      logic is involved.
+      **Committed:** `68a18c5` (the fix and the offline instrument).
+      **Resume:** nothing to build. Play a ball, hold the scoop, say whether it
+      stays in. If it does, check the box; if it does not, the numbers above say
+      the switch is genuinely made, so the next suspect is the game's ball
+      handling and that is item 21, not this.
       **★ DAVID, 2026-08-06: "we need to be able to press and hold a switch on
       the virtual playfield to keep it held down (like for shooting the scoop
       it needs to remain in the scoop while i hold the switch)."**

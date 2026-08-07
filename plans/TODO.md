@@ -188,9 +188,32 @@ These have each been violated at least once and each cost a run or a window:
       TOP OF THE SWITCH MARKER.** `_hit()` at the centre of RIGHT SCOOP returns
       the coil — the switch oval is not even in `find_overlapping` there,
       because it is drawn as an unfilled outline. Any per-switch drawing or
-      interaction this item adds must not assume a click lands on the switch. The trough is ids 71..66 = TROUGH 1..6 and `swshow.py`
-      (`e1e9cb3`) already counts and prints it. Six ball images and a
-      "N balls in play" line is drawing, not discovery.
+      interaction this item adds must not assume a click lands on the switch.
+      The trough is ids 71..66 = TROUGH 1..6 and `swshow.py` (`e1e9cb3`)
+      already counts and prints it. Six ball images and a "N balls in play"
+      line is drawing, not discovery.
+      **★ DAVID, 2026-08-06, and it SHARPENS (a) rather than adding to it:
+      "i want to see visual indication of trough switches being correctly
+      closed or open (probably part of our todo item that shows balls in play
+      feedback)."** He is right that it belongs here. What it changes is the
+      acceptance: a COUNT is not enough. Each of the six must read closed or
+      open individually, **drawn in trough order — 71 TROUGH 1 the eject end
+      through 66 TROUGH 6 the far end** — because the question he is asking is
+      whether the state is CORRECT, and correctness for a trough is about
+      WHICH position is empty, not how many are.
+      **Why that ordering is the whole point, from this queue's own history:**
+      item 20 was exactly a wrong-end bug — `plunge.py` opened TROUGH 1, the
+      eject end, where a ball leaving can only ever open TROUGH 6 — and it took
+      reading the guest's `[sw]` stream to see it (`-71l` gave the game
+      `[70,69,68,67,66]`, `-66l` gave `[71,70,69,68,67]`). Six markers in
+      trough order would have shown that by eye in one glance. This display is
+      therefore a diagnostic for the ball model in (b), not only a comfort.
+      **Read `mrg[]`, not `scr_held[]`** — what the GAME IS HANDED, per
+      padsw.py's own rule, and confirmed as the right oracle by item 24.
+      **Generalisation worth taking, but say if you do:** mrg is ONE read for
+      all 256 ids, so drawing live state on every switch marker costs the same
+      transport as drawing it on six. The trough is what David asked for; doing
+      all of them is nearly free and makes the whole window honest.
       **(b) THE HANDLING HALF IS THE D4, and it needs item 3.** There is no ball
       MODEL anywhere in this rig — `plunge.py` opens one trough switch and works
       the shooter lane, and nothing tracks where a ball is, notices a drain, or
@@ -209,8 +232,12 @@ These have each been violated at least once and each cost a run or a window:
       So "eject a ball" and "a ball drains" are both one switch on a known end,
       and the model is a count plus that rule.
       **Acceptance:** state both halves separately. (a) with a game running, the
-      playfield window shows the six trough positions filling and emptying as
-      the count changes, and says how many balls are in play; screenshot it.
+      playfield window shows the six trough positions **individually closed or
+      open, in trough order**, filling and emptying as the count changes, and
+      says how many balls are in play; screenshot it, and include a shot with a
+      ball REMOVED so the empty position is visibly at the far end and not the
+      eject end. The cross-check is `swshow.py` on the same moment: the picture
+      and the `mrg` row must agree.
       (b) a multiball starts with more than one ball genuinely in play — the
       oracle is the game's own display, not the rig's model of itself, because a
       model that feeds itself will always agree with itself.

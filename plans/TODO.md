@@ -624,8 +624,23 @@ These have each been violated at least once and each cost a run or a window:
       wire — David's own diagnosis, and it is correct. Everything known about
       the attack surface is in the assessment below; it is a fresh Stern
       firmware-crypto crack.
-      **(b) The header-prefixed b4/b5 long forms** (~7 per run), still skipped.
-      Small, and independent of (a).
+      **(b) The header-prefixed long forms**, still skipped — 51 unique bodies
+      in 25 (cmd, blen) groups across the whole capture, so smaller than it
+      looks and independent of (a). `ledcensus.py` (committed with this) scores
+      any capture against all six known forms and prints exactly these.
+      **★ LEAD, noticed 2026-08-07 while validating that tool, NOT established:
+      the long a2 bodies it cannot claim carry FORM A's OWN SIGNATURE.** e.g.
+      `…0f0f00000f0f0f00000f | faf1f1f1a6aea0a0a0e9` — a `0f/00` FROM region
+      followed by a TO region with value TRIPLES (`f1f1f1`, `a0a0a0`,
+      `676767`, `e3e3e3`), which is the RGB-fixture tell that identified form A
+      in the first place. So these are probably form A behind a HEADER, and the
+      only question is the header's length. **The arithmetic both supports and
+      complicates it, which is why it is a lead and not a finding:** a 3-byte
+      header (`8f 19 f8 …`, the same opener `a6` uses) makes blen 27, 30, 33
+      and 36 land exactly on 3N — but 29, 37 and 43 do not, so the header is
+      not a fixed 3. Solve the header length per frame the way the a6 mask
+      length was solved: scan it upward and take the first value that makes the
+      rest consistent.
       **What is NOT left: the rendering.** The window already animates
       envelopes per channel, expires them onto the base, and reports its own
       picture rate honestly. When the curves are known they replace a linear
@@ -1169,6 +1184,14 @@ These have each been violated at least once and each cost a run or a window:
   CONTROL** — `winprof.py --compare` takes it directly, so pass two does not
   have to spend 90 s re-measuring a quiet desktop. It is machine-specific, so
   it lives here rather than in the repo.
+- **`/var/tmp/led_trace_1d.log`** (inside WSL) — item 1d's evidence: 44581
+  lines of `PAD_NB_TRACE=1` with guest-ms timestamps plus 656 `[ledskip]`
+  bodies, from a 2026-08-07 godzilla_pro attract run. It is what all three
+  lamp-frame decodes were scored on, and `ledcensus.py` defaults to
+  `/var/tmp/led_trace*.log` for that reason. Machine-local rather than
+  committed because it is 3.5 MB of one machine's run; **re-capture with
+  `PAD_NB_TRACE=1 PAD_LED_SKIP_LOG=3000 watch.sh N` if it is ever lost**, and
+  note `/var/tmp` and not `/tmp`, which this WSL wipes on restart.
 - **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
   this machine. The deep detail behind every numbered item above.
 

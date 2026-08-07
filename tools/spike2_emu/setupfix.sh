@@ -50,13 +50,9 @@ facts=$(_facts)
 
 # ---- 1. the packages ------------------------------------------------------
 #
-# Tool -> package, and the tool is what is probed because that is the fact;
-# the package name is only how this distro spells it.
-pkgs=""
-[ "$(_get "$facts" qemu)" = 0 ]    && pkgs="$pkgs qemu-user-static"
-[ "$(_get "$facts" armgcc)" = 0 ]  && pkgs="$pkgs gcc-arm-linux-gnueabihf"
-[ "$(_get "$facts" debugfs)" = 0 ] && pkgs="$pkgs e2fsprogs"
-[ "$(_get "$facts" fuse)" = 0 ]    && pkgs="$pkgs fuse3"
+# WHICH packages is setupcheck.sh's answer, not a second list here: it probes
+# the TOOLS, which is the fact, and knows how apt spells each one.
+pkgs=$(_get "$facts" need)
 
 #: Run a command, show its output indented, and RETURN ITS STATUS - which a
 #: bare `cmd | sed` does not: the status of a pipeline is the status of its
@@ -69,17 +65,108 @@ _run() {
     return $rc
 }
 
+#: Turn Ubuntu's `universe` component on. THE ONLY REASON THIS IS HERE: a
+#: tester's WSL Ubuntu had it off, so qemu-user-static - which lives there -
+#: had no version for apt to install, while gcc-arm-linux-gnueabihf beside it
+#: in `main` was fine. Nothing else the emulator needs comes from universe, so
+#: this runs only when setupcheck has said that is what is wrong.
+#:
+#: add-apt-repository is the official way and inherits the mirror, the suite
+#: names and the signing key from what is already configured - all three of
+#: which a hand-written source line would have to guess, and would get wrong
+#: on ports.ubuntu.com or a country mirror. It lives in
+#: software-properties-common, which a slim WSL image often does not have, so
+#: there is a fallback that edits the distro's OWN sources in place.
+#:
+#: ONLY those two files. A PPA or a vendor repo under sources.list.d has no
+#: universe component, and appending one turns a working repository into a 404
+#: on every apt-get update from then on.
+_add_universe() {
+    local f touched=0
+    if command -v add-apt-repository >/dev/null 2>&1 &&
+       _run add-apt-repository -y universe; then
+        return 0
+    fi
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+        [ -f "$f" ] || continue
+        # -n: keep the FIRST backup. A second run must not overwrite the
+        # pristine copy with one this script has already edited.
+        cp -n "$f" "$f.pad-backup" 2>/dev/null
+        case $f in
+        *.sources)
+            # deb822: one `Components:` line per stanza.
+            sed -i '/^Components:/{/universe/!s/$/ universe/}' "$f"
+            grep -qs '^Components:.*universe' "$f" && touched=1 ;;
+        *)
+            # One-line format, components last. Narrow on purpose: an
+            # UBUNTU.COM archive line that already carries `main`. A PPA line
+            # looks almost identical - `deb https://ppa.launchpadcontent.net/
+            # x/y/ubuntu noble main` - and has no universe component, so
+            # appending one to it 404s every apt-get update from then on.
+            # Someone whose sources are a private mirror gets no repair here
+            # and is told so, which is the right way round.
+            sed -i '/^deb.*ubuntu\.com\/.*[[:space:]]main\([[:space:]]\|$\)/{/universe/!s/$/ universe/}' "$f"
+            # ...and prove it on a DIRECTIVE line: Ubuntu's own sources file
+            # carries a paragraph of comments explaining what universe is, so
+            # a bare grep for the word always succeeds and proves nothing.
+            grep -qs '^deb.*universe' "$f" && touched=1 ;;
+        esac
+    done
+    [ "$touched" = 1 ]
+}
+
 if [ -n "$pkgs" ]; then
-    echo "installing:$pkgs"
+    echo "installing: $pkgs"
     export DEBIAN_FRONTEND=noninteractive
     # `update` first: a WSL image that has sat unused for months has an index
     # too old to resolve anything, and the failure that produces ("Unable to
     # locate package") reads like the package does not exist. Not fatal on its
     # own - the install below is what decides.
     _run apt-get update -qq
-    if ! _run apt-get install -y -qq $pkgs; then
-        echo "apt-get failed - see above"
-        echo "result=aptfailed"
+
+    # Ask again with a fresh index before installing: "apt has no version of
+    # this" is a different fault from "the download failed", it is knowable
+    # BEFORE the attempt, and on Ubuntu it has a repair.
+    facts=$(_facts)
+    if [ -n "$(_get "$facts" nocand)" ] && [ "$(_get "$facts" universe)" = 0 ]
+    then
+        echo "apt has no version of $(_get "$facts" nocand) to install:"
+        echo "Ubuntu keeps it in the 'universe' component and this distro has"
+        echo "that switched off. Turning it on."
+        if _add_universe; then
+            _run apt-get update -qq
+            facts=$(_facts)
+        else
+            echo "could not turn universe on"
+        fi
+    fi
+
+    # ONE AT A TIME, and this is not tidiness. `apt-get install a b` is all or
+    # nothing: the tester's run named two packages, apt could not resolve one
+    # of them, and so it installed NEITHER - he was left with none of the four
+    # he was missing and a log that mentioned only one of them.
+    failed=
+    for pkg in $pkgs; do
+        _run apt-get install -y -qq "$pkg" || failed="$failed $pkg"
+    done
+
+    if [ -n "$failed" ]; then
+        facts=$(_facts)
+        nocand=$(_get "$facts" nocand)
+        echo "could not install:$failed"
+        if [ -n "$nocand" ]; then
+            # Not a failed download. The package sources this Linux is
+            # configured with do not offer the package at all, which no amount
+            # of retrying changes - so say which, and say what would.
+            echo "apt has no version of $nocand to install from the package"
+            echo "sources this Linux is set up with. A WSL distro that is out"
+            echo "of support, or one whose sources have been trimmed, does"
+            echo "this; installing a current Ubuntu in WSL is the way back."
+            echo "result=nocandidate"
+        else
+            echo "apt-get failed - see above"
+            echo "result=aptfailed"
+        fi
         exit 1
     fi
     facts=$(_facts)

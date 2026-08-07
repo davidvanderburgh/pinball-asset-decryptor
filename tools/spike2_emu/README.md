@@ -190,6 +190,14 @@ registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `e2fsprogs`,
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
 ```
 
+On **Ubuntu**, `qemu-user-static` is published in the `universe` component and
+the other three are in `main`. A distro with universe switched off therefore
+answers `E: Package 'qemu-user-static' has no installation candidate` — apt
+knows the name and has no version — and, because `apt-get install a b` is all
+or nothing, installs none of the others either. `setupcheck.sh` reports that as
+`nocand` and `universe=0` rather than only as "missing", and `setupfix.sh`
+turns universe on before it installs anything.
+
 That is the whole of it: the ARM hardware shim and the GL backend are compiled
 by the first run that needs them. They used to be two more steps printed as
 advice, which is how a user reached `env: './padglhost': No such file or

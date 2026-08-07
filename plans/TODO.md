@@ -71,6 +71,50 @@ These have each been violated at least once and each cost a run or a window:
       a signature, a call site, a disassembly, a minutes-scale repro AND a
       designed fix — see the starred block below. The original signatureless
       exit remains as described.)*
+      **★★★ THE ORIGINAL SIGNATURELESS EXIT NOW HAS A NAMED PRECURSOR, and
+      this entry's claim that "nothing anywhere records WHY the process went
+      down" is CORRECTED. David's log, 2026-08-06 21:33, godzilla_pro,
+      727 s (~12 min) into a run he was playing** (keyboard `k` and playfield
+      `f` edges throughout). The last three video lines before the exit:
+      ```
+      [padvid 727.43] ch0 serving 1360x768 457 frames ... 2.asset/102.asset
+      [vid] ch0 could not start the streaming thread
+      [padvid 727.43] ch0 guest stopped mid-read after 0 frames
+      ```
+      then `[watch] the game exited` 10 s later, with **NO segv block** — the
+      tail is the usual VPU firmware noise. So this is the FIRST shape (the
+      clean exit), not the pthread churn segv and not the game-code NULL
+      deref, and it now has a line naming a guest-side resource failure.
+      **ESTABLISHED AT THE DESK, from the source, not guessed:** that message
+      is `gstvid.c:1277`, printed when the `pthread_create` at `gstvid.c:1274`
+      FAILS — the guest shim could not make a thread. And **`gstvid.c`
+      contains no `pthread_detach` and no `pthread_join` anywhere** (grep: one
+      `pthread_create`, zero of either). Every `vid_thread` is therefore
+      created JOINABLE and never reaped, so each one holds its descriptor and
+      its stack for the life of the process, and `pad_vid_play` makes one per
+      clip serve.
+      **ARITHMETIC, NOT A MEASUREMENT, so treat it as the reason to go and
+      look rather than as a result:** a 32-bit ARM guest has ~3 GB of user
+      address space and the default thread stack reserves 8 MB, so a few
+      hundred leaked threads exhaust it. This one 727 s run shows well over a
+      hundred serve/play cycles. That fits an exit that arrives after minutes
+      of play and never at boot.
+      **The candidate fix is one line** — detach the thread (or create it
+      detached) at `gstvid.c:1274`. It is a shim change, so it needs a rebuild
+      and no run may be live. **Do NOT let it stand as proven by the absence
+      of a repeat:** the acceptance below wants a stated number of minutes.
+      **NOT ESTABLISHED: that thread exhaustion is what ended THIS process.**
+      The failure line and the exit are 10 s apart and nothing links them yet;
+      `pad_vid_play` LOGS the failure and returns, so the shim itself does not
+      die of it. What to measure first, and it needs no run: count live
+      threads in the guest over a long session (`/proc/<pid>/status` Threads),
+      and confirm it climbs with clip serves rather than sitting flat.
+      **THIS EXPLAINS ONE SHAPE ONLY.** It cannot be the pthread NULL-mutex
+      churn segv (that one faults, this one exits clean) and it cannot be the
+      game-code NULL deref. Report against the signature, never against "the
+      crash".
+      **The renderer was healthy to the last line again:** 60.0 / 59.9 /
+      60.4 fps with 30.0 NEW/s, and `alive.sh` printed 0 after teardown.
       **★★ ESTABLISHED BY ITEM 11'S RUNS (2026-08-06 evening): a
       REPRODUCIBLE churn-provoked SEGV, distinct from the original clean
       exit — do not merge them.** Five sightings in one evening (runs 2, 3,

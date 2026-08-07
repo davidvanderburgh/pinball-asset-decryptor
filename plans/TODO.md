@@ -818,6 +818,41 @@ These have each been violated at least once and each cost a run or a window:
       `[sw]`/`[swmap]` dump (`hwshim.c:3543,4851`), so the id→name join cannot be
       done from the binary. Cache it per title so only the FIRST run of a title
       pays.
+      **★★ SHIPPED 2026-08-06, `5d895c8`. The desk half is done and MEASURED
+      against the tables it replaces; what is left is one run.**
+      `padpath.py`/`padpath.sh` are now the only files that know a path;
+      `mktables.py` builds all five tables from the title; `run_game.sh`
+      publishes `dump/title`; `rootfs.sh` + `parts.py` build the rootfs from any
+      card with no root and no hard-coded offsets. Checked-in tables deleted.
+      **The derivation reproduces the hand-made tables exactly, which is the
+      only thing that made it safe to delete them:** `device_xy.txt`
+      **byte-identical** (66642 bytes); `switch_xy.txt` **41/41 positions
+      identical** (fed only the id/name half a run supplies, every coordinate
+      re-derived from the ELF); `led_io.txt` identical but for a header that no
+      longer claims a wire verification that never ran; and the WINDOW draws
+      **132 markers at coordinates identical to HEAD's**, A/B'd through a git
+      worktree at HEAD. `mktables` on Godzilla reproduces the documented numbers
+      cold: 575 records, coil=10 led=506 switch=59, 164 playfield records 0
+      outside 313x710, left/right 31/31.
+      **A REAL BUG FELL OUT OF TESTING A SECOND TITLE, and it is the kind that
+      passes every self-check:** `devicexy.build()` ignored the title it was
+      asked for and loaded whichever was ACTIVE, so `turtles_pro` came back with
+      Godzilla's 575 records, Godzilla's 313x710 artwork size, a clean 31/31
+      left-right score — and **18 of TMNT's switch names collided with
+      Godzilla's** well enough to place markers on a playfield TMNT does not
+      have. Fixed, and it has a regression test. TMNT correctly reports no
+      device table now.
+      **New fast tests:** `tests/test_spike2_emu_paths.py`, 21 tests in 0.19 s,
+      synthetic fixtures only — no WSL, no card, no ELF.
+      **NOT DONE, and it is the whole acceptance below: nobody has started a
+      run.** In particular the first-run switch path — watch.sh waiting up to
+      `PAD_PF_WAIT` (25 s) for the shim's `[sw]` dump and building `switch_xy`
+      from it — has been exercised only from old logs, never live. The seeded
+      Godzilla `switch_xy.txt` was deliberately REMOVED after testing so the
+      next run exercises it for real.
+      **Two known prose-only hits** on the grep below: this repo's README
+      describing the fix, and `playaudio.sh`'s `/mnt/c/Users/*/AppData/...`
+      glob, which is already a wildcard across users.
       **Acceptance:** with `PAD_ROOT` and `PAD_TABLES` pointed somewhere that is
       not this machine's defaults, and with `games/` empty and no table committed,
       `PAD_CARD=<godzilla image> watch.sh` opens the virtual playfield with the

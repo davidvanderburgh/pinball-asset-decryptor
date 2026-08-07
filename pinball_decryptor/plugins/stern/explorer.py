@@ -30,7 +30,9 @@ the engine's Write path.
 a lightweight fake filesystem.
 """
 
+import functools
 import os
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -39,6 +41,20 @@ from .ext4 import S_IFDIR, S_IFMT, S_IFREG, Ext4Reader
 
 # ext4 mode bits the reader doesn't export.
 S_IFLNK = 0xA000
+
+
+def _serialised(method):
+    """Run *method* holding the card's read lock (see ``CardImage.__init__``).
+
+    Applied to the short, interactive reads only — a decorator rather than an
+    indented ``with`` block so the diff stays on the locking and not on
+    re-indenting bodies that didn't otherwise change.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *a, **kw):
+        with self._lock:
+            return method(self, *a, **kw)
+    return wrapper
 
 # MBR partition-type buckets (the type byte at entry+4).
 _EXT_TYPE = 0x83
@@ -105,6 +121,15 @@ class CardImage:
             self._owns = True
             self._source_path = source
         self._readers = {}                 # partition index -> Ext4Reader
+        # Every read seeks the ONE shared handle, so two at once interleave
+        # their seeks and the loser gets nonsense — a bogus FileNotFoundError
+        # or a short struct unpack for a file that is plainly there.  The GUI
+        # renders image/font previews on a worker thread now, so arrowing down
+        # a folder of PNGs overlaps a read with the next one (and with the Tk
+        # thread's own directory fills).  This serialises the short,
+        # interactive reads; the streaming extract paths are deliberately
+        # outside it so a multi-GB dump can't freeze the browsing UI behind it.
+        self._lock = threading.RLock()
         try:
             self._parts = self._scan_partitions()
         except Exception:
@@ -175,6 +200,7 @@ class CardImage:
             ino, node = child, reader.read_inode(child)
         return ino, node
 
+    @_serialised
     def list_dir(self, part_index, path="/"):
         """Directory children of *path*, directories first then case-folded by
         name.  Symlinks carry their (fast-symlink) target for display."""
@@ -205,6 +231,7 @@ class CardImage:
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
+    @_serialised
     def preview(self, part_index, path, cap=None):
         """The bytes of a regular file up to *cap*, or ``None`` when it's a
         directory or bigger than that (extract it instead).
@@ -295,6 +322,7 @@ class CardImage:
                 progress(n_files, n_bytes, rel_path)
         return n_files, n_bytes
 
+    @_serialised
     def file_size(self, part_index, path):
         """Byte size of the regular file at *path*.
 
@@ -311,6 +339,7 @@ class CardImage:
             raise IsADirectoryError(path)
         return node["size"]
 
+    @_serialised
     def dir_stats(self, part_index, path, max_depth=64):
         """``(n_files, n_bytes)`` of every regular file at/under directory
         *path* — recursive folder sizes for the Properties view."""

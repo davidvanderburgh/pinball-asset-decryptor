@@ -272,35 +272,86 @@ def s_pex_partition():
 
 @step(3000)
 def s_pex_expand():
+    """Walk down to an on-card image so the shot shows the Preview pane
+    doing its job.  The tree lazy-loads, so each folder has to be opened
+    and filled before its own children exist to open next."""
     tree = win._pex_tree
-    pick = None
+    top = None
     for iid in tree.get_children(""):
         name = str(tree.item(iid, "text")).lower()
         if iid in win._pex_dirs and "lost+found" not in name:
-            if pick is None or "game" in name:
-                pick = iid
+            if top is None or "game" in name:
+                top = iid
             if "game" in name:
                 break
-    if pick:
-        tree.item(pick, open=True)
-        win._pex_fill_open_dirs()
-        globals()["_pex_pick"] = pick
+    if not top:
+        return
+    tree.item(top, open=True)
+    win._pex_fill_open_dirs()
+    globals()["_pex_pick"] = top
+
+    # Breadth-first, and each folder is opened when it is POPPED rather than
+    # when it is queued — open-on-queue let one folder of 77 sub-folders eat
+    # the whole budget before the sibling holding the art was ever reached.
+    # Bounded both ways so a card without an image can't turn the capture
+    # into a full tree walk.
+    hit, opened, queue = None, 0, [(top, 1, True)]
+    while queue and hit is None and opened < 40:
+        parent, depth, filled = queue.pop(0)
+        if not filled:
+            tree.item(parent, open=True)
+            win._pex_fill_open_dirs()
+            opened += 1
+        kids = tree.get_children(parent)
+        for iid in kids:
+            if iid not in win._pex_dirs and iid.lower().endswith(".png"):
+                hit = iid
+                break
+        if hit or depth >= 5:
+            continue
+        for iid in kids:
+            if iid in win._pex_dirs:
+                queue.append((iid, depth + 1, False))
+    if not hit:
+        log("no previewable image found — leaving the folder shot as-is")
+        return
+    log("preview target: %s" % hit)
+    globals()["_pex_image"] = hit
+
+    # Collapse everything the search opened except the path down to the hit,
+    # or the shot is a wall of unrelated expanded folders.
+    keep = set()
+    part = hit
+    while "/" in part.rstrip("/"):
+        part = part.rsplit("/", 1)[0]
+        if not part:
+            break
+        keep.add(part)
+    for iid in win._pex_dirs:
+        try:
+            tree.item(iid, open=(iid in keep))
+        except Exception:
+            pass
 
 
 @step(2000)
 def s_pex_select():
     tree = win._pex_tree
-    pick = globals().get("_pex_pick")
-    kids = tree.get_children(pick) if pick else ()
-    if kids:
-        target = kids[0]
+    target = globals().get("_pex_image")
+    if not target:
+        pick = globals().get("_pex_pick")
+        kids = tree.get_children(pick) if pick else ()
+        target = kids[0] if kids else None
+    if target:
         tree.see(target)
         tree.focus(target)
         tree.selection_set(target)
 
 
-@step(2000)
+@step(4000)
 def s_pex_snap():
+    # The preview renders on a worker thread; the extra delay above is it
+    # landing before the shutter.
     snap("partition-explorer.png")
 
 

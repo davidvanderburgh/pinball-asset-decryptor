@@ -6,6 +6,8 @@ tiny in-memory fake filesystem (tests/_ext4_fake.py) covers the explorer's
 composition logic (partition classification, path resolution, listing/sort,
 preview cap, extract layout) without a multi-GB card fixture."""
 
+import time
+
 import pytest
 
 from pinball_decryptor.plugins.stern import explorer
@@ -100,3 +102,62 @@ def test_extract_tree_top_name_override(card, tmp_path):
     assert n_files == 5
     assert (tmp_path / "all" / "Partition 1" / "readme.txt").exists()
     assert not (tmp_path / "all" / "root").exists()
+
+
+def test_interactive_reads_are_serialised(card, monkeypatch):
+    """Two reads at once must not interleave their seeks on the one shared
+    file handle.
+
+    The GUI renders image/font previews on a worker thread, so arrowing down
+    a folder of PNGs overlaps the next read with the one still running (and
+    with the Tk thread's own directory fills).  Unserialised, the loser came
+    back with a bogus FileNotFoundError — or a short struct unpack — for a
+    file that is plainly on the card.
+    """
+    import threading
+
+    depth = 0
+    overlapped = False
+    guard = threading.Lock()
+    real_resolve = CardImage._resolve
+
+    def tracking_resolve(self, reader, path):
+        nonlocal depth, overlapped
+        with guard:
+            depth += 1
+            if depth > 1:
+                overlapped = True
+        try:
+            time.sleep(0.002)      # widen the window a real read would have
+            return real_resolve(self, reader, path)
+        finally:
+            with guard:
+                depth -= 1
+
+    monkeypatch.setattr(CardImage, "_resolve", tracking_resolve)
+
+    errors = []
+    sizes = []
+
+    def read_it():
+        try:
+            sizes.append(card.preview(1, "/readme.txt"))
+        except Exception as exc:                        # pragma: no cover
+            errors.append(exc)
+
+    def list_it():
+        try:
+            card.list_dir(1, "/")
+        except Exception as exc:                        # pragma: no cover
+            errors.append(exc)
+
+    threads = ([threading.Thread(target=read_it) for _ in range(6)]
+               + [threading.Thread(target=list_it) for _ in range(4)])
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    assert not overlapped
+    assert sizes == [b"hello world"] * 6

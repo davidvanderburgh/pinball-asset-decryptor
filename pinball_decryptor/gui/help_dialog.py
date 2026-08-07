@@ -492,7 +492,10 @@ HELP_CONTENT = {
          "can't be mistaken for the stock file. \"Change…\" is one Save-As "
          "picker for both the folder and the name — handy when a "
          "NAS-hosted project should build to a local drive; the required "
-         "extension is applied automatically."),
+         "extension is applied automatically. A folder you typed that "
+         "doesn't exist yet is created when the build starts — and if it "
+         "can't be, you're told which folder and why before any work "
+         "happens, not a minute into the build."),
         ("Undo",
          "\"Revert all changes…\" restores every changed asset back to its "
          "extract original (the build inputs, not any card)."),
@@ -571,8 +574,26 @@ HELP_CONTENT = {
         ("Browse + preview",
          "Expand folders in the tree to walk the filesystem — children load as "
          "you open each folder, so even a full card opens instantly. Selecting "
-         "a small text file shows it in the Preview pane; larger or binary "
-         "files say to extract them instead."),
+         "a file shows it in the Preview pane: text as text, and images and "
+         "fonts drawn as a picture with their format and real pixel size. "
+         "Anything too big to draw, or of a kind that doesn't render, says to "
+         "extract it instead."),
+        ("The Changed column",
+         "\"Changed\" marks the files you have replaced on THIS card image, "
+         "with the date of the last swap, and the mark survives closing the "
+         "app. It is PAD's own record of what PAD did — an edit made outside "
+         "PAD leaves nothing to find, and if the image is swapped or rebuilt "
+         "underneath the marks they're dropped rather than shown against a "
+         "card they no longer describe. \"Show:\" filters the tree to All, "
+         "Changed (just those files, already expanded) or Unchanged "
+         "(everything else). Find searches the whole partition either way — "
+         "it clears the filter first so a hit can't stay hidden behind it."),
+        ("Properties",
+         "Right-click any file → \"Properties…\" for its full on-card path "
+         "(the path it has when the partition is mounted, for lining PAD's "
+         "edits up with a hand-mount workflow), its partition, size and type "
+         "— and, for a file you've replaced, every swap PAD made to it on "
+         "this image with the file each one came from."),
         ("Extract",
          "\"Extract Selected\" saves the highlighted file, or the highlighted "
          "folder's whole subtree, to a location you pick. \"Extract Whole "

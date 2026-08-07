@@ -205,14 +205,21 @@ class CardImage:
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
-    def preview(self, part_index, path, cap=PREVIEW_CAP):
+    def preview(self, part_index, path, cap=None):
         """The bytes of a regular file up to *cap*, or ``None`` when it's a
         directory or bigger than that (extract it instead).
 
         *cap* defaults to :data:`PREVIEW_CAP`, which is sized for the text
         preview; the GUI raises it for the file types it can actually render
         (a card's PNGs run past 256 KB) and reads those off the Tk thread.
+        Late-bound (``None`` -> the global) rather than a def-time default:
+        ``cap=PREVIEW_CAP`` froze the value at import, which quietly ignored
+        anything that changes the global afterwards - the test suite does,
+        and its cap test failed on every platform the moment the parameter
+        appeared.
         """
+        if cap is None:
+            cap = PREVIEW_CAP
         reader = self._reader(part_index)
         res = self._resolve(reader, path)
         if res is None:

@@ -5263,6 +5263,22 @@ static unsigned char led_count[16];
 
 static int led_insert_node(unsigned node) { return node == 1 || node == 8 || node == 9; }
 
+/* DECLARED, because GCC 14 STOPPED GUESSING. `open` and `close` were called
+ * here with no declaration in sight, which every compiler up to GCC 13 assumed
+ * meant `int open()` and warned about. GCC 14 made that an ERROR by default,
+ * and a user on a newer distro got a shim that would not build - reported as
+ * eight lines of harmless -Wformat-truncation notes, because those were the
+ * tail and the three errors were not (see _pad_build in ensurebuild.sh).
+ *
+ * They are the SHIM'S OWN open/close, and that is not a mistake: this library
+ * is LD_PRELOADed, so `open` from inside it binds to shim_open() above, which
+ * hands straight to real_open. Declaring what was already being called keeps
+ * that exactly as it was - the alternative, real_open/real_close, would be a
+ * behaviour change on the LED path for no reason, and real_close is a
+ * different pointer here than it is inside shim_close. */
+extern int open(const char *, int, int);
+extern int close(int);
+
 static void led_map(void)
 {
     static int tried;
@@ -5333,6 +5349,8 @@ static void coil_publish(const unsigned char *p, int n)
     led_shm->coil_decoded++;
     led_shm->coil_gen++;
 }
+
+extern int atoi(const char *);           /* same GCC 14 reason as open/close */
 
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run
  * decodes thousands of these; the point is a SAMPLE to compare against the

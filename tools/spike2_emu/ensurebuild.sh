@@ -84,15 +84,55 @@ _pad_stale() {           # <binary> <stamp> <want-digest> <src>...
 
 #: Run one of the rig's build scripts and republish what it said, indented.
 #: Returns what the build returned; says nothing about what to do with that.
+#:
+#: A FAILED BUILD IS REPORTED BY ITS ERRORS, NOT BY ITS LAST EIGHT LINES.
+#:
+#: `tail -8` was the whole report, and it reached a user on 2026-08-07 as a bug
+#: report that nobody - them, or us - could act on:
+#:
+#:     [build] the hardware shim is not built yet; building it
+#:     [build]   476 |   VLOG("[vid] ch%d pre-arming hw ch%d: %s\n",
+#:     [build]       |                                        ^~
+#:     ... five more lines of the same -Wformat-truncation note ...
+#:     [build]   build FAILED, and the game has no hardware without it.
+#:
+#: Every line of that is a WARNING about code that compiled perfectly, and those
+#: eight lines are byte for byte the tail of a SUCCESSFUL build here. The three
+#: `implicit declaration of function` errors that actually stopped it were never
+#: printed at all.
+#:
+#: THAT IS STRUCTURAL, not bad luck. gcc is handed every source at once and
+#: compiles ALL of them before it gives up, so the errors sit wherever the
+#: broken file happened to be on the command line while the tail belongs to
+#: whichever file came last - here gstvid.c, which has warned about the same
+#: harmless snprintf for months. The one arrangement `tail` can never show is
+#: the common one: an error early, noise after it.
+#:
+#: So the ERROR LINES are what is republished, first ones first - the first
+#: error is the cause and the rest are usually its cascade - and the tail is
+#: kept only as the fallback for a failure that matches none of these words.
+#: The FULL output goes to a file that is NAMED, because the next fault will be
+#: one this pattern does not know, and a user who can send that file is a user
+#: whose problem can be read instead of guessed at.
 _pad_build() {           # <script> [args...]
-    local script=$1 out rc
+    local script=$1 out rc errs log
     shift
     out=$(bash "$RIG/$script" "$@" 2>&1); rc=$?
     if [ $rc = 0 ]; then
         printf '%s\n' "$out" | sed 's/^/[build]   /'
-    else
-        printf '%s\n' "$out" | tail -8 | sed 's/^/[build]   /' >&2
+        return 0
     fi
+    log=${TMPDIR:-/tmp}/pad-${script%.sh}.log
+    printf '%s\n' "$out" > "$log" 2>/dev/null
+    # gcc and ld say "error:"; ld's own failures ("cannot find -l:libc.so.6",
+    # "undefined reference to") do not, and neither does the shell when the
+    # build dies on a missing file, a full disk or the OOM killer.
+    errs=$(printf '%s\n' "$out" | grep -E \
+        'error:|undefined reference|cannot find|No such file|command not found|Permission denied|No space left|Killed|Segmentation fault' \
+        | head -8)
+    [ -n "$errs" ] || errs=$(printf '%s\n' "$out" | tail -8)
+    printf '%s\n' "$errs" | sed 's/^/[build]   /' >&2
+    [ -s "$log" ] && echo "[build]   full build output: $log" >&2
     return $rc
 }
 

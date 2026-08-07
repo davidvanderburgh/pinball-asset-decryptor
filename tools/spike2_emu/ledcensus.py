@@ -93,9 +93,29 @@ The forms, and what each one was established on (all 2026-08-07, item 1d):
       identical value triple in the `to` region - an RGB fixture fading to
       one colour. No rate byte; the reader's nominal rate applies.
 
-STILL UNDECODED: the header-prefixed long b4/b5 bodies (`8f1af678fe...`),
-~7 per run. They open with a byte pair that is not a lamp reference, which is
-why every form above rejects them.
+STILL UNDECODED: the header-prefixed long bodies (`8f1af678fe...`). They open
+with bytes that are not lamp references, which is why every form above
+rejects them.
+
+RULED OUT for those, 2026-08-07, and it is the worked example of why this file
+insists on a control. The shape looked excellent: `[3 header][mask][FROM x
+popcount][TO x popcount]` - the a6 bitmap layout carrying TWO value regions
+instead of one, i.e. a bitmap FADE. The first frame tried fitted exactly
+(3 + 6 mask + 10 + 10 = 29), the FROM regions came out of the 0f/00 level
+alphabet, and the TO regions carried form A's RGB value triples. Every
+qualitative sign was right.
+
+It is still wrong. Scoring it over all 152 long lamp-command bodies:
+
+    real bodies                                  38 fit  (25%)
+    random bodies, same lengths, 20 trials       20 fit  (13%)
+    RGB triple tell on the fits                  26/42   (62%)
+
+A form that is real fits essentially everything (a2 blen=6: 93/93; b4/b5
+blen=3: 66/66) and its tell is near-perfect (form A: ~100%). Scanning the mask
+length gives the hypothesis a free parameter, and a free parameter buys 13% of
+random noise before it has explained anything. Do not re-try this shape
+without beating that control.
 """
 
 

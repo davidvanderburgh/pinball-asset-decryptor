@@ -633,14 +633,22 @@ These have each been violated at least once and each cost a run or a window:
       `…0f0f00000f0f0f00000f | faf1f1f1a6aea0a0a0e9` — a `0f/00` FROM region
       followed by a TO region with value TRIPLES (`f1f1f1`, `a0a0a0`,
       `676767`, `e3e3e3`), which is the RGB-fixture tell that identified form A
-      in the first place. So these are probably form A behind a HEADER, and the
-      only question is the header's length. **The arithmetic both supports and
-      complicates it, which is why it is a lead and not a finding:** a 3-byte
-      header (`8f 19 f8 …`, the same opener `a6` uses) makes blen 27, 30, 33
-      and 36 land exactly on 3N — but 29, 37 and 43 do not, so the header is
-      not a fixed 3. Solve the header length per frame the way the a6 mask
-      length was solved: scan it upward and take the first value that makes the
-      rest consistent.
+      in the first place. **The value triples are real; the layout is not yet
+      known, and the two obvious readings are now both DEAD.**
+      **Ruled out (i): a fixed 3-byte header + form A.** `8f 19 f8 …` (the same
+      opener `a6` uses) makes blen 27/30/33/36 land on 3N — but 29, 37 and 43
+      do not.
+      **Ruled out (ii), WITH A CONTROL, 2026-08-07: `[3 header][mask][FROM ×
+      popcount][TO × popcount]`** — the a6 bitmap layout carrying two value
+      regions, i.e. a bitmap FADE. Every qualitative sign was right (the first
+      frame fitted exactly at 3+6+10+10=29, FROM came out of the 0f/00 level
+      alphabet, TO carried the triples) **and it is still wrong: 38 of 152 real
+      bodies fit (25%) against 20 of 152 for RANDOM bodies of the same lengths
+      (13%), and the RGB tell scored 62% where form A scored ~100%.** Scanning
+      the mask length is a free parameter, and a free parameter buys 13% of
+      noise before explaining anything. The numbers and the reasoning are in
+      `ledcensus.py`'s header as the worked example of why a control is
+      mandatory here. **Whatever is tried next must beat that 13% floor.**
       **What is NOT left: the rendering.** The window already animates
       envelopes per channel, expires them onto the base, and reports its own
       picture rate honestly. When the curves are known they replace a linear

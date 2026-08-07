@@ -498,6 +498,10 @@ def load_leds():
 #: the room the way a real one is.
 LED_R, LED_GLOW_R = 5.5, 11
 
+#: How often an open window looks for a switch table it did not have when it
+#: opened. See Field._pick_up_switches() for why it can appear mid-run.
+SWITCH_POLL_S = 2.0
+
 
 def split_channel(name):
     """('SHIELD LEFT', 'R') for 'SHIELD LEFT-R'; (name, 'W') for a plain insert."""
@@ -747,11 +751,10 @@ class Field:
             self.coil_items[(C["node"], C["index"])] = i
             self.info[i] = dict(kind="coil", d=C)
 
-        for S in self.switches:
-            x, y, r = S["x"] * self.scale, S["y"] * self.scale, 6
-            i = self.cv.create_oval(x - r, y - r, x + r, y + r,
-                                    outline="#2a8cff", width=2)
-            self.info[i] = dict(kind="switch", d=S)
+        self._add_switches(self.switches)
+        # When to look for a switch table that did not exist when this window
+        # opened. See _pick_up_switches().
+        self._sw_next = time.monotonic() + SWITCH_POLL_S
 
         self._place_actions(w, h)
 
@@ -767,6 +770,36 @@ class Field:
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
+
+    def _add_switches(self, rows):
+        """Draw a clickable marker for each switch, above everything else."""
+        for S in rows:
+            x, y, r = S["x"] * self.scale, S["y"] * self.scale, 6
+            i = self.cv.create_oval(x - r, y - r, x + r, y + r,
+                                    outline="#2a8cff", width=2)
+            self.info[i] = dict(kind="switch", d=S)
+
+    def _pick_up_switches(self):
+        """Take the switch table if it arrives while this window is open.
+
+        THE SWITCH TABLE IS THE ONE PART THAT NEEDS A RUN - the game builds it
+        on the heap, so it reaches the outside world only as the shim's dump
+        about a minute in, and mktables.py is behind this window waiting for
+        exactly that. Loading the tables once at build time therefore meant the
+        first run of a title ALWAYS showed a playfield with no switches on it,
+        and the fix was to close the window and run the title again, which is a
+        strange thing to have to know. The window is already polling at 30 fps;
+        this is one os.path.exists a couple of seconds while a table is missing,
+        and nothing at all once it is there.
+        """
+        if self.switches or time.monotonic() < self._sw_next:
+            return
+        self._sw_next = time.monotonic() + SWITCH_POLL_S
+        rows = load_switches()
+        if not rows:
+            return
+        self.switches = rows
+        self._add_switches(rows)
 
     def _sample(self, x, y):
         """The artwork's colour under a marker, averaged over its footprint.
@@ -1088,6 +1121,7 @@ class Field:
             dt = t0 - self._t_last
             self.fps = 1.0 / dt if not self.fps else self.fps * 0.9 + 0.1 / dt
         self._t_last = t0
+        self._pick_up_switches()
 
         t_read = time.perf_counter()
         d = self.read_leds()

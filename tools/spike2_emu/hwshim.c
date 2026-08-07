@@ -3531,12 +3531,36 @@ static int sw_configured_ok(void)
     return sw_run_len(st + 32, 64) >= 8;
 }
 
+/* THE TABLE IS PUBLISHED EITHER WAY, and it was not: this used to accept the
+ * configured address and return in silence, so the dump below - the ONLY route
+ * the switch list has out of the guest - ran for a title that had to be
+ * searched for and never for one that did not.
+ *
+ * That inverted exactly the wrong way round. Godzilla Pro 1.15.0 is the title
+ * every address in this file was read out of, so it is the one title that takes
+ * this branch, and it was therefore the one title whose virtual playfield could
+ * never gain a clickable switch: mktables.py builds switch_list.txt from
+ * `[sw] --- switches:` in the run log, that line never appeared, and the window
+ * said "clickable switches will appear on the next run" on every run forever.
+ * Six titles on this disk had a switch table cached; Godzilla, the one the rig
+ * was built on, did not.
+ *
+ * Dumping here costs one pass over the table, once per run. */
 static void sw_find_maybe(void)
 {
     static unsigned tick;
     if (sw_find_done) return;
     if (tick++ % 256) return;
-    if (sw_configured_ok()) { sw_find_done = 1; return; }   /* the known title */
+    if (sw_configured_ok()) {                               /* the known title */
+        char m[160];
+        sw_find_done = 1;
+        snprintf(m, sizeof m,
+                 "[swfind] the configured switch table checks out: entry[] at "
+                 "0x%08x, %u switches\n", tread(SW_STRUCT), tread(SW_COUNT));
+        logmsg(m);
+        sw_dump();      /* publish it, exactly as a found table is published */
+        return;
+    }
     if (sw_find_table()) sw_find_done = 1;
 }
 

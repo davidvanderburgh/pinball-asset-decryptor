@@ -761,6 +761,23 @@ HELP_CONTENT = {
          "core once it is running, plus 1–2 GB of memory. The status line "
          "shows both live. There is a two-hour cap: it stops by itself so a "
          "forgotten window cannot run all night."),
+        ("The virtual playfield",
+         "A second window opens beside the game showing the machine's own "
+         "playfield drawing, with every insert lit live from the wire and "
+         "every switch clickable — click one and the game reacts as if the "
+         "ball had rolled over it. It builds itself from the title you are "
+         "running, so any Spike 2 game gets one. The switches are the one "
+         "part that needs the game to be up: it publishes its switch list a "
+         "minute or so into a run, and they appear on the playfield as soon "
+         "as it does, without restarting anything."),
+        ("Install Docker… (macOS only)",
+         "The emulator is a Linux program, and a container is how a Mac runs "
+         "one — so Docker is to macOS what WSL is to Windows here. This "
+         "button appears only when Docker is missing or not running, and does "
+         "whichever is needed: it starts Docker Desktop, or installs it (via "
+         "Homebrew in Terminal if you have Homebrew, otherwise it opens the "
+         "download page). It disappears once Docker is ready. Windows and "
+         "Linux never see it and never need Docker to emulate."),
         ("Restart WSL…",
          "For the two faults that are not the emulator's to fix: a game "
          "window left on screen that will not close (its X does nothing "

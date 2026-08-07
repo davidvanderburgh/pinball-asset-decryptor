@@ -367,3 +367,72 @@ def test_ledio_reports_a_wire_disagreement(rig):
                  image="playfield")]
     _rows, problems, _r = ledio.build(recs, {8: {9}})
     assert problems == [(8, [4])]
+
+
+# --------------------------------------------------------------------------
+# The shim is rebuilt when its source moves on
+#
+# hwshim.so was compiled once, at rig setup, and never looked at again.  That
+# was harmless while the rig and its sources were one working copy and stopped
+# being harmless when the emulator started shipping with the app: an update
+# delivers new C to Program Files while the .so that actually runs stays
+# whatever was built months ago, so a fix installs, is believed, and does not
+# run.  These are lints rather than runs - the real proof needs WSL, a cross
+# compiler and a card - and they catch the shapes that made it wrong.
+# --------------------------------------------------------------------------
+
+def _rig_text(name):
+    with open(os.path.join(RIG, name), encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def test_one_list_of_shim_sources_not_two():
+    """build.sh's own comment records alsastub.c being on the compile line and
+    missing from the copy list, so an edit was never built and the build still
+    said "built ok".  watch.sh now decides whether to rebuild from the same
+    list, which is a third place for that to happen - so there is one list."""
+    padpath = _rig_text("padpath.sh")
+    assert "PAD_SHIM_SRCS=" in padpath
+    for f in ("hwshim.c", "alsastub.c", "gststub.c", "gstvid.c"):
+        assert f in padpath, f
+    build, watch = _rig_text("build.sh"), _rig_text("watch.sh")
+    assert "$PAD_SHIM_SRCS" in build and "$PAD_SHIM_SRCS" in watch
+    # Neither may carry its own copy of the list.
+    for name, text in (("build.sh", build), ("watch.sh", watch)):
+        body = "\n".join(ln for ln in text.splitlines()
+                         if not ln.lstrip().startswith("#"))
+        assert body.count("alsastub.c") == 0, name
+
+
+def test_the_rebuild_decision_is_a_digest_not_a_file_time():
+    """Timestamps answer wrongly in both directions once the rig exists in more
+    than one copy: installing an OLDER release over a locally built shim leaves
+    every source older than the .so, so nothing rebuilds and the release only
+    appears to be under test."""
+    assert "pad_shim_hash" in _rig_text("padpath.sh")
+    assert "sha256sum" in _rig_text("padpath.sh")
+    build = _rig_text("build.sh")
+    # Stamped by the build, so what it compiled is recorded beside the output.
+    assert "pad_shim_hash" in build and "$PAD_SHIM_STAMP" in build
+    watch = _rig_text("watch.sh")
+    assert "pad_shim_hash" in watch and "$PAD_SHIM_STAMP" in watch
+
+
+def test_the_shim_is_never_rebuilt_under_a_running_guest():
+    """The linker truncates and rewrites hwshim.so in place and a live guest
+    has it mapped, so a rebuild underneath one is a SIGBUS in a process that
+    has nothing to do with this start.  alive.sh is the rig's single definition
+    of what is running; a second copy of that logic here is the bug alive.sh's
+    own header is about."""
+    watch = _rig_text("watch.sh")
+    assert "alive.sh" in watch and "--total" in watch
+    body = "\n".join(ln for ln in watch.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "pgrep" not in body.split("teardown()")[0]
+
+
+def test_the_run_log_names_which_copy_of_the_rig_it_came_from():
+    """A development machine has at least two - the installed one and the repo
+    - and they can differ.  A log that does not name the one it ran from cannot
+    answer "was that the release, or my working copy?"."""
+    assert "cfg RIG=$RIG" in _rig_text("watch.sh")

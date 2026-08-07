@@ -55,6 +55,45 @@ pad_is_wsl() {
     [ -n "${WSL_DISTRO_NAME:-}" ] && return 0
     grep -qi microsoft /proc/version 2>/dev/null
 }
+
+# ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
+#
+# build.sh compiles this list and stamps its digest beside the .so; watch.sh
+# compares the same digest and rebuilds when it differs. ONE LIST, for the
+# reason build.sh already records in its own comment: alsastub.c was on the
+# compile line and missing from the copy list, an edit was silently never
+# built, and the build still said "built ok".
+PAD_SHIM_SRCS="hwshim.c alsastub.c gststub.c gstvid.c padvid.h padsw.h"
+export PAD_SHIM_SRCS
+
+#: Where build.sh records what it compiled.
+PAD_SHIM_STAMP=$ROOT/lib/hwshim.srcs
+export PAD_SHIM_STAMP
+
+# CONTENT, NOT TIMESTAMPS, and the difference is the whole point.
+#
+# The obvious test is "is hwshim.c newer than hwshim.so", and it is wrong in
+# both directions the moment the rig exists in more than one copy - which it
+# now does, because the emulator SHIPS WITH THE APP and a developer has the
+# repo as well:
+#
+#   * installing an OLDER release over a locally built shim leaves every
+#     source older than the .so, so nothing rebuilds and the release appears
+#     to be under test while the local shim is what runs. That is precisely
+#     "test what we are about to release" failing silently.
+#   * switching between the two copies flips the answer back and forth on
+#     file times that say nothing about what the bytes are.
+#
+# A digest is the same answer in every direction: different bytes, rebuild.
+# Empty when nothing is there, so a caller can tell "no sources" from "these
+# sources", and eol=lf is pinned for this directory (see .gitattributes), so
+# the repo copy and the installed copy hash identically.
+pad_shim_hash() {
+    local d=${1:-$RIG} f
+    for f in $PAD_SHIM_SRCS; do
+        [ -f "$d/$f" ] && cat "$d/$f"
+    done | sha256sum | cut -d' ' -f1
+}
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # WSLENV is how any of this reaches a Windows process, and it is the only way:

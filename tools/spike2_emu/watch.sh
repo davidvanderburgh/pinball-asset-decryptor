@@ -27,6 +27,75 @@ set -u
 . "$(dirname "$0")/padpath.sh"
 cd "$HOME"
 
+# ---- THE SHIM IS REBUILT WHEN ITS SOURCE MOVES ON --------------------------
+#
+# hwshim.so is compiled by build.sh into $ROOT/lib, ONCE, when the rig is first
+# set up - and nothing ever looked at it again. That was harmless while the rig
+# and its sources were the same working copy on one developer's disk, and it
+# stopped being harmless the moment the emulator started SHIPPING WITH THE APP:
+# an app update now delivers a new hwshim.c to Program Files while the .so that
+# actually runs stays whatever was built months ago. A fix to the shim would
+# have been installed, believed, and silently not running.
+#
+# This is build.sh's own lesson one level up. Its comment records alsastub.c
+# being absent from the copy list while still on the compile line, so an edit
+# was never built AND THE BUILD STILL SAID "built ok"; the same shape here is a
+# whole release that says it fixed something it did not.
+#
+# Only when a source is genuinely NEWER, so a machine that is up to date pays a
+# stat per file and nothing else. A failure is reported and not fatal: the shim
+# that is already there still runs the game, and refusing to start because a
+# cross compiler is missing would take the emulator away from someone whose only
+# problem is that they cannot rebuild it.
+_shim_stale() {
+    _so=$ROOT/lib/hwshim.so
+    [ -f "$_so" ] || return 1        # not built at all: rootfs.sh's job, not this
+    # THE DIGEST WINS WHENEVER THERE IS ONE. It is the only test that answers
+    # the same way in both directions, which matters because THE RIG NOW EXISTS
+    # IN MORE THAN ONE COPY - the installed one and, on a development machine,
+    # the repo - and "am I running what we are about to release?" is a question
+    # about bytes, not about file times. See pad_shim_hash() in padpath.sh.
+    if [ -f "$PAD_SHIM_STAMP" ]; then
+        [ "$(pad_shim_hash "$RIG")" = "$(cat "$PAD_SHIM_STAMP")" ] && return 1
+        return 0
+    fi
+    # No stamp: a rig built before build.sh started writing one. Timestamps are
+    # what is left, and they are right in the common case of an edit followed by
+    # a run. The first rebuild lays a stamp down and this branch is never taken
+    # again on that machine.
+    for _src in $PAD_SHIM_SRCS; do
+        [ -f "$RIG/$_src" ] || continue
+        [ "$RIG/$_src" -nt "$_so" ] && return 0
+    done
+    return 1
+}
+if _shim_stale; then
+    # NEVER UNDER A LIVE GUEST. The linker truncates and rewrites hwshim.so in
+    # place and a running guest has it MAPPED, so rebuilding here would SIGBUS a
+    # process that has nothing to do with this start. Two copies of the rig on
+    # one machine is exactly how that arises: start from the repo, then start
+    # again from the installed app, and the second start would rewrite the shim
+    # under the first. `alive.sh --total` is the rig's own definition of what is
+    # running - killgame.sh asks it the same way rather than keeping a second
+    # list, and this does too.
+    if [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ]; then
+        echo "[watch] the hardware shim is older than its source, but a run is" >&2
+        echo "[watch] still up and the shim cannot be rewritten underneath it." >&2
+        echo "[watch] Stop it (killgame.sh) and start again to pick up the fix." >&2
+    elif command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
+        echo "[watch] the hardware shim is older than its source; rebuilding"
+        if _BUILD_OUT=$(bash "$RIG/build.sh" 2>&1); then
+            printf '%s\n' "$_BUILD_OUT" | sed 's/^/[watch]   /'
+        else
+            echo "[watch]   rebuild FAILED; running the shim already built" >&2
+            printf '%s\n' "$_BUILD_OUT" | tail -5 | sed 's/^/[watch]   /' >&2
+        fi
+    else
+        echo "[watch] the hardware shim is older than its source, but there is no" >&2
+        echo "[watch] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
+    fi
+fi
+
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
 HOSTLOG=$HOME/padglhost.log
@@ -155,6 +224,12 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 echo "[watch] cfg argv=$*"
 echo "[watch] cfg GAME=$GAME"
 echo "[watch] cfg MINS=$MINS"
+# WHICH COPY OF THE RIG IS RUNNING. Not a detail any more: the emulator ships
+# with the app, so a development machine has at least two - the installed one
+# under Program Files and the repo - and they can differ. A log that does not
+# name the one it came from cannot answer "was that the release or my working
+# copy?", which is the same lesson as PAD_CARD one line down.
+echo "[watch] cfg RIG=$RIG"
 # GALLIUM_DRIVER and MESA_* are in here beside the PAD_* set because they
 # decide WHICH GPU renders the run, which is as much "what this run IS" as any
 # PAD_ flag - and a log that does not name the adapter cannot be replayed or

@@ -8,19 +8,24 @@ R=$ROOT
 # other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
 # to matter over a few thousand lines of C.
 mkdir -p "$HOME/emusrc"
-# Sync EVERY source this build compiles. alsastub.c used to be missing from this
-# list while still being on the compile line below, so an edit to the Windows
-# copy was silently never built - and the build still said "built ok". It only
-# surfaced as `undefined symbol` at guest start, one full run later.
-cp "$RIG/hwshim.c"    "$HOME/emusrc/hwshim.c"
-cp "$RIG/alsastub.c"  "$HOME/emusrc/alsastub.c"
-cp "$RIG/gststub.c"    "$HOME/emusrc/gststub.c"
-cp "$RIG/gstvid.c"     "$HOME/emusrc/gstvid.c"
-cp "$RIG/padvid.h"     "$HOME/emusrc/padvid.h"
-cp "$RIG/padsw.h"     "$HOME/emusrc/padsw.h"
+# Sync EVERY source this build compiles, and COMPILE THE SAME LIST. alsastub.c
+# used to be missing from the copy list while still being on the compile line,
+# so an edit to the Windows copy was silently never built - and the build still
+# said "built ok". It only surfaced as `undefined symbol` at guest start, one
+# full run later. Both halves now come from PAD_SHIM_SRCS (padpath.sh), so the
+# two cannot disagree again, and watch.sh's staleness check reads the same list.
+CC_SRCS=()
+for f in $PAD_SHIM_SRCS; do
+    cp "$RIG/$f" "$HOME/emusrc/$f"
+    case $f in *.c) CC_SRCS+=("$HOME/emusrc/$f") ;; esac
+done
 arm-linux-gnueabihf-gcc -fno-stack-protector -shared -fPIC -O2 -nostdlib \
   -Wl,-soname,hwshim.so -o "$R/lib/hwshim.so" \
-  "$HOME/emusrc/hwshim.c" "$HOME/emusrc/alsastub.c" \
-  "$HOME/emusrc/gststub.c" "$HOME/emusrc/gstvid.c" \
+  "${CC_SRCS[@]}" \
   -L"$R/lib" -l:libdl.so.2 -l:libc.so.6
+# WHAT WAS COMPILED, recorded beside what came out of it. This is the whole
+# input to watch.sh's decision to rebuild; see pad_shim_hash() for why it is a
+# digest of the bytes and not a comparison of file times. Written only after a
+# successful compile (set -e), so a failed build never claims to be current.
+pad_shim_hash "$RIG" > "$PAD_SHIM_STAMP"
 echo "built ok: $(ls -l "$R/lib/hwshim.so" | awk '{print $5}') bytes"

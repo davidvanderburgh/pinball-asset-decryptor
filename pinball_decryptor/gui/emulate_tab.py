@@ -109,6 +109,52 @@ def rig_available():
                for f in ("watch.sh", "killgame.sh", "status.sh"))
 
 
+#: Where Docker Desktop comes from when there is no Homebrew to ask.
+DOCKER_URL = "https://www.docker.com/products/docker-desktop/"
+
+#: How long to give the Docker CLI.  ``docker info`` with no daemon behind it
+#: answers in about a second; the timeout is only so a wedged socket cannot
+#: hang a background probe forever.
+_DOCKER_PROBE_S = 12
+
+
+def docker_state():
+    """``ok`` / ``stopped`` / ``absent`` - macOS's answer to "can we emulate?".
+
+    THE EMULATOR NEEDS LINUX, and macOS reaches it through a container (see
+    ``rig_cmd``), so Docker is as much a prerequisite there as WSL is on
+    Windows.  It was not treated like one: nothing on this tab checked for it,
+    the manufacturer's prerequisite list does not carry it, and the only place
+    it was ever named was the "rig not found" hint - which a Mac user never
+    sees, because the rig SHIPS WITH THE APP and is therefore always found.  So
+    the whole of "you need Docker" arrived as one line of padbox.sh's stderr,
+    part way down the log pane, after Start appeared to work.
+
+    Three answers rather than two, because the remedies are different: nothing
+    installed is a download, and installed-but-not-running is one click.
+    """
+    try:
+        out = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             timeout=_DOCKER_PROBE_S,
+                             creationflags=_CREATE_FLAGS)
+        return "ok" if out.returncode == 0 else "stopped"
+    except FileNotFoundError:
+        return "absent"
+    except Exception:                                   # noqa: BLE001
+        # A timeout is Docker Desktop still waking up, not an absent one.
+        return "stopped"
+
+
+def homebrew():
+    """The `brew` binary, or None.  Homebrew installs itself in two places and
+    is famously not on a GUI app's inherited PATH, so both are named."""
+    for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def parse_status(text):
     """Parse ``status.sh``'s ``key=value`` output into a dict.
 
@@ -233,6 +279,12 @@ class EmulatePanel:
         self._poll_job = None
         self._stopped = False
         self._logfile = "/home/david/gzpad.log"
+        #: Last answer from docker_state(), macOS only.  None until the first
+        #: probe comes back, which is why nothing is claimed before then.
+        self._docker = None
+        self._docker_busy = False
+        self._docker_ticks = 0
+        self._docker_result = None
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -317,6 +369,16 @@ class EmulatePanel:
         if sys.platform == "win32":
             self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
 
+        # MACOS ONLY, for exactly the reason "Restart WSL…" is Windows only:
+        # Docker is that platform's WSL.  The emulator is a Linux program, macOS
+        # has no Linux, and a container is how it gets one - so a Mac without
+        # Docker cannot emulate at all, and the app had nowhere on this tab that
+        # said so or offered to help.  It packs and unpacks itself from
+        # _docker_apply(): a ready machine should not carry a button about a
+        # dependency it already satisfies.
+        self._docker_btn = ttk.Button(btns, text="Install Docker…",
+                                      command=self._docker_fix, width=17)
+
         # BOTH tickboxes are read ONCE, when Start builds the environment for
         # watch.sh, so they are start-time options and not live controls.  They
         # are therefore disabled while the emulator is up: leaving them
@@ -357,6 +419,13 @@ class EmulatePanel:
         self._hint = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                foreground="#888", text="")
         self._hint.pack(anchor=tk.W, **pad)
+
+        # ITS OWN LABEL, not _hint.  _hint belongs to the status poll and is
+        # rewritten every two seconds from the rig's own state word, so a
+        # prerequisite message put there would blink out again immediately.
+        self._docker_msg = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
+                                     foreground="#c07000", text="")
+        self._docker_pad = pad
 
         # The key list that used to be here is gone. The rig opens its own
         # Controls window listing every binding, and it is generated from the
@@ -405,7 +474,135 @@ class EmulatePanel:
         # Tk raise "can't delete Tcl command" during teardown - it showed up
         # immediately as an error in the GUI smoke test.
         frame.bind("<Destroy>", self._on_destroy, add="+")
+        if sys.platform == "darwin":
+            self._docker_check()
         self._schedule_poll()
+
+    # ------------------------------------------------------------------
+    # Docker, which on macOS is what WSL is on Windows
+    # ------------------------------------------------------------------
+
+    def _docker_check(self):
+        """Probe Docker off the main loop and show the answer.
+
+        Never blocking: ``docker info`` against a daemon that is starting can
+        take seconds, and one of the callers is tab BUILD time.
+
+        THE WORKER TOUCHES NO WIDGET AND SCHEDULES NOTHING, which is a stronger
+        rule than the one the status poll follows and it is build time that
+        forces it: ``after`` from another thread needs a running mainloop, and
+        at build time there is not one yet, so the answer would have been
+        dropped in silence and the notice would not appear until the first
+        re-check ten seconds later.  The worker leaves its answer in a field
+        and _docker_drain(), which is main-loop code from the first call,
+        collects it.
+        """
+        if self._docker_busy or sys.platform != "darwin":
+            return
+        self._docker_busy = True
+
+        def run():
+            try:
+                self._docker_result = docker_state()
+            finally:
+                self._docker_busy = False
+
+        threading.Thread(target=run, daemon=True).start()
+        self._docker_drain()
+
+    def _docker_drain(self):
+        """Main-loop side of _docker_check: show the answer once it lands."""
+        if self._stopped:
+            return
+        if self._docker_busy:
+            try:
+                self._timer().after(250, self._docker_drain)
+            except tk.TclError:
+                self._stopped = True
+            return
+        if self._docker_result is not None:
+            self._docker_apply(self._docker_result)
+            self._docker_result = None
+
+    def _docker_apply(self, state):
+        """Put the Docker answer on the tab, or take it away when it is fine."""
+        self._docker = state
+        try:
+            if state == "ok":
+                self._docker_btn.pack_forget()
+                self._docker_msg.pack_forget()
+                return
+            if state == "stopped":
+                self._docker_btn.configure(text="Start Docker")
+                self._docker_msg.configure(
+                    text=("Docker is installed but not running, and the "
+                          "emulator runs inside it. Click “Start Docker”, or "
+                          "open Docker Desktop yourself and wait for its whale "
+                          "to stop animating."))
+            else:
+                self._docker_btn.configure(
+                    text="Install Docker…" if homebrew() else "Get Docker…")
+                self._docker_msg.configure(
+                    text=("Docker Desktop is required to emulate on macOS: the "
+                          "game is a Linux program and the container is how "
+                          "this Mac runs one. It is a one-time install."
+                          + ("\nHomebrew is here, so the button below runs "
+                             "`brew install --cask docker` in Terminal."
+                             if homebrew() else
+                             "\nThe button below opens the download page.")))
+            self._docker_btn.pack(side=tk.LEFT, padx=(6, 0))
+            self._docker_msg.pack(anchor=tk.W,
+                                  **getattr(self, "_docker_pad", {}))
+        except (tk.TclError, AttributeError):
+            pass            # the tab was never built, or is being torn down
+
+    def _docker_fix(self):
+        """Install it, or start it - whichever this machine needs.
+
+        NEITHER IS DONE SILENTLY. Installing Docker Desktop wants an admin
+        password, and a GUI app that appears to hang while an invisible
+        installer waits for one is worse than no button at all - so the brew
+        path runs in Terminal, where the user can see it and answer it.
+        """
+        if self._docker == "stopped":
+            try:
+                subprocess.Popen(["open", "-a", "Docker"])
+                self._log("[emulate] starting Docker Desktop; it takes a "
+                          "moment to come up")
+            except Exception as exc:                    # noqa: BLE001
+                self._log("[emulate] could not start Docker Desktop: %s" % exc)
+            self._timer().after(4000, self._docker_check)
+            return
+
+        brew = homebrew()
+        if not brew:
+            import webbrowser
+            webbrowser.open(DOCKER_URL)
+            self._log("[emulate] opened %s - install it, then click Start "
+                      "emulator again" % DOCKER_URL)
+            return
+        if not messagebox.askyesno(
+                "Install Docker Desktop",
+                "Run this in Terminal?\n\n"
+                "    brew install --cask docker\n\n"
+                "It downloads Docker Desktop (a few hundred MB) and will ask "
+                "for your password. When it finishes, open Docker Desktop "
+                "once, then come back here."):
+            return
+        # osascript rather than Popen(["brew", ...]): the point is that the
+        # user SEES it. A cask install asks for a password, and a progress bar
+        # nobody can see is a hang.
+        script = ('tell application "Terminal" to do script '
+                  '"%s install --cask docker"' % brew)
+        try:
+            subprocess.Popen(["osascript", "-e", script,
+                              "-e", 'tell application "Terminal" to activate'])
+            self._log("[emulate] running `brew install --cask docker` in "
+                      "Terminal")
+        except Exception as exc:                        # noqa: BLE001
+            self._log("[emulate] could not open Terminal: %s" % exc)
+            import webbrowser
+            webbrowser.open(DOCKER_URL)
 
     def _build_source(self, frame, pad):
         """The card image to run.  One box and a Browse button.
@@ -532,6 +729,32 @@ class EmulatePanel:
         self._log("[emulate] %s" % " ".join(cmd))
 
         def run():
+            # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
+            # freeze the tab - and it is checked on every Start rather than
+            # trusted from build time, because the user may have installed or
+            # started it in the meantime.  Without this the whole of "you need
+            # Docker" was one line of padbox.sh's stderr in the log pane, after
+            # the button had already said "Starting…".
+            if sys.platform == "darwin":
+                state = docker_state()
+                if state != "ok":
+                    self._log("[emulate] Docker is %s. The emulator runs in a "
+                              "container on macOS, so it cannot start without "
+                              "it." % ("not installed" if state == "absent"
+                                       else "not running"))
+                    # QUEUED BEFORE the flag is cleared, so anything waiting on
+                    # "no longer starting" can be sure the tab has already been
+                    # told why.
+                    try:
+                        self._timer().after(
+                            0, lambda: (self._docker_apply(state),
+                                        self._set("state", "Not running"),
+                                        self._run_label(False, False)))
+                    except (tk.TclError, RuntimeError):
+                        pass
+                    finally:
+                        self._starting = False
+                    return
             try:
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -713,6 +936,23 @@ class EmulatePanel:
         self._poll_job = None
         if self._stopped:
             return
+        # RE-ASKED ONLY WHILE THE ANSWER IS BAD, every ~10 s.  A user who
+        # installs Docker Desktop with this tab open should see the notice go
+        # away, and a machine that already has it should not pay for a `docker
+        # info` every two seconds to be told what it was told at build time.
+        if sys.platform == "darwin" and self._docker != "ok":
+            self._docker_ticks += 1
+            if self._docker_ticks % 5 == 1:
+                self._docker_check()
+            # AND DO NOT POLL THROUGH IT.  status.sh reaches the rig via
+            # padbox.sh, so on macOS every poll is a `docker` invocation - and
+            # with no Docker to invoke that is a process spawned every two
+            # seconds to fail in exactly the same way.  `None` is "the first
+            # probe has not answered yet", which is not the same as "no", so it
+            # still polls.
+            if self._docker is not None:
+                self._schedule_poll()
+                return
         if not rig_available():
             self._schedule_poll()
             return

@@ -534,9 +534,12 @@ class App:
             messagebox.showinfo(
                 "Install Prerequisites",
                 "The auto-installer is Windows/Linux-only.\n\n"
-                "On macOS, Spooky/JJP Clonezilla flows use Docker Desktop "
+                "On macOS, Spooky/JJP Clonezilla flows and the Spike 2 "
+                "emulator use Docker Desktop "
                 "(install from https://www.docker.com/products/docker-desktop/) "
-                "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).")
+                "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).\n\n"
+                "Docker is a macOS-only requirement: emulation runs through "
+                "WSL on Windows and natively on Linux.")
             return
 
         if sys.platform.startswith("linux"):

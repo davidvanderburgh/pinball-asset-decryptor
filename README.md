@@ -533,8 +533,12 @@ fully drop the extended attribute.)
 For **Spooky** and **JJP** Clonezilla extraction you'll also need
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) —
 the app builds and uses an ephemeral container for partclone / debugfs
-on those flows.  The other manufacturers (PB, BOF, CGC, Williams) run
-without Docker.
+on those flows.  The **Stern Emulate** tab needs it too on macOS, for a
+different reason: the game is a Linux program, and a container is how a
+Mac runs one.  The Emulate tab checks for Docker itself and offers to
+install or start it.  The other manufacturers (PB, BOF, CGC, Williams)
+run without Docker.  Docker is a macOS requirement only — emulation
+goes through WSL on Windows and runs natively on Linux.
 
 ### Linux
 

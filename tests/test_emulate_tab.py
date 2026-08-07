@@ -423,3 +423,130 @@ def test_the_container_entry_point_ships_with_the_rig():
         pytest.skip("rig not present")
     for p in (box, dockerfile, entry):
         assert p.is_file(), "missing %s" % p
+
+
+# --------------------------------------------------------------------------
+# Docker, which is macOS's WSL
+# --------------------------------------------------------------------------
+
+def _fake_run(rc=0, raises=None):
+    def run(*a, **kw):
+        if raises is not None:
+            raise raises
+        return SimpleNamespace(returncode=rc)
+    return run
+
+
+def test_docker_state_tells_absent_from_stopped(monkeypatch):
+    """Two different faults with two different remedies: nothing installed is a
+    download, installed-but-down is one click.  Collapsing them into "no
+    Docker" sends someone to the website who already has it."""
+    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=0))
+    assert emulate_tab.docker_state() == "ok"
+    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
+    assert emulate_tab.docker_state() == "stopped"
+    monkeypatch.setattr(emulate_tab.subprocess, "run",
+                        _fake_run(raises=FileNotFoundError()))
+    assert emulate_tab.docker_state() == "absent"
+
+
+def test_a_slow_docker_is_starting_not_missing(monkeypatch):
+    """`docker info` against a daemon that is waking up can time out, and
+    reporting that as "not installed" would send the user to reinstall
+    something they already have."""
+    import subprocess as sp
+    monkeypatch.setattr(emulate_tab.subprocess, "run",
+                        _fake_run(raises=sp.TimeoutExpired("docker", 12)))
+    assert emulate_tab.docker_state() == "stopped"
+
+
+def test_the_docker_button_is_macos_only(tmp_path):
+    """Windows reaches Linux through WSL and Linux is already Linux, so a
+    Docker button there is a control that cannot do anything."""
+    root, panel = _panel(tmp_path)
+    try:
+        import sys
+        if sys.platform != "darwin":
+            assert not panel._docker_btn.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_a_ready_docker_leaves_no_notice_behind(tmp_path):
+    """The button and the message pack themselves only when there is something
+    to say.  A Mac with Docker running should look like every other machine."""
+    root, panel = _panel(tmp_path)
+    try:
+        panel._docker_apply("absent")
+        root.update()
+        assert panel._docker_btn.winfo_ismapped()
+        assert "required" in panel._docker_msg.cget("text")
+        panel._docker_apply("stopped")
+        root.update()
+        assert "not running" in panel._docker_msg.cget("text")
+        assert panel._docker_btn.cget("text") == "Start Docker"
+        panel._docker_apply("ok")
+        root.update()
+        assert not panel._docker_btn.winfo_ismapped()
+        assert not panel._docker_msg.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_start_on_a_mac_without_docker_launches_nothing(tmp_path, monkeypatch):
+    """It used to launch, say "Starting…", and report the real reason as one
+    line of the container script's stderr part way down the log pane."""
+    import time
+    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
+    img.write_bytes(bytes(16))
+    root, panel = _panel(tmp_path)
+    # The status poll goes through the container too, so silence it: this test
+    # is about what Start does, and a poll firing into a faked Popen is noise
+    # from a thread nobody is waiting on.
+    panel._on_destroy(None)
+    launched = []
+    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "absent")
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
+                        lambda *a, **kw: launched.append(a) or SimpleNamespace())
+    try:
+        panel._src_path.set(str(img))
+        panel.start()
+        deadline = time.time() + 5
+        while panel._starting and time.time() < deadline:
+            time.sleep(0.01)
+        root.update()
+        # Only watch.sh: subprocess.run() goes through Popen too, so the status
+        # poll lands in the same list.
+        watch = [c for c in launched if any("watch.sh" in str(a) for a in c)]
+        assert not watch, "watch.sh was started with no Docker to run it in"
+        # What lands ON THE TAB is checked by _docker_apply's own test instead:
+        # the worker hands its answer back through `after`, and `after` from a
+        # non-main thread needs a running mainloop, which this fixture has not
+        # got.  Asserting it here would test the fixture, not the panel.
+        assert not panel._starting
+    finally:
+        root.destroy()
+
+
+def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
+                                                          monkeypatch):
+    """The first probe runs at tab BUILD time, before root.mainloop().  A
+    worker calling `after` then raises "main thread is not in main loop" and
+    the answer vanishes, so the worker leaves it in a field and the main loop
+    collects it."""
+    import time
+    root, panel = _panel(tmp_path)
+    try:
+        monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
+        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "stopped")
+        panel._docker_check()
+        deadline = time.time() + 5
+        while panel._docker != "stopped" and time.time() < deadline:
+            root.update()               # stands in for the mainloop
+            time.sleep(0.01)
+        assert panel._docker == "stopped"
+        assert panel._docker_btn.cget("text") == "Start Docker"
+    finally:
+        root.destroy()

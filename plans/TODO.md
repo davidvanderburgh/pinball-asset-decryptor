@@ -604,34 +604,52 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1d. The a2 / b4 / b5 payload.** `S3 D4` — S3: the lamps already work,
-      this is the last undecoded slice. D4 — the capture rate is the problem:
-      ~15 frames in 60 s, and the oracle (`Diagnostics → LED Tests`) needs a run
-      it has never been driven through.
-      All that is left of the LED wire that
-      might carry lamp data: **~0.25 frames a second in attract**, 15 in a
-      60 s window. `cmd a2` with a 6-byte body is the bulk of it and its
-      SHAPE is known — `(start_lamp, 0x80|end_lamp, then 4 payload bytes)`,
-      the same range prefix as the 2-byte frames, verified 45/45 on both
-      positions. The four payload bytes are NOT understood: patterns like
-      `00 ff 0a 00` and `ff 00 00 0a` look like (from, to, rate, ...) but
-      nobody has shown it, so nothing is decoded. The longer a2 bodies and
-      `b4`/`b5` are a different shape again — **ruled out: the a6 bitmap
-      layout at payload width 1, 2, 3 and 4** (a2 fits at best 7 of 40).
-      Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
-      is `Diagnostics → LED Tests`.
-      **New stake from item 31 (2026-08-07): these frames are now the ONLY
-      lamp traffic the rig discards**, and in David's recording every drop
-      coincided with a still playfield. If a2 really is a range-fade, each
-      dropped frame is a missing multi-second ANIMATION, not one missing
-      update — decoding it is the remaining smoothness the playfield window
-      can gain, and the window's new `LED Hz`/`worst gap` fields are a free
-      before/after for it. **The RENDERING half is already built** (`a955b10`):
-      the window tweens every fixture between states — David asked for
-      CSS-like transitions, 2026-08-07 — at a placeholder `PAD_PF_FADE_MS`
-      (200 ms). So this item's decode has a socket waiting: (from, to, rate)
-      per fade replaces that constant per fixture, and nothing else needs
-      building on the window side.
+- [ ] **1d. The a2 / b4 / b5 payload.** `S3 D3` ← IN PROGRESS *(**D4 → D3,
+      2026-08-07:** the main shape is cracked at the desk and the pipeline is
+      built end to end; what is left needs a run, and the faults show when you
+      look.)*
+      **★★ THE blen=6 SLICE IS DECODED AND SHIPPED, 2026-08-07, `2520d44` —
+      NOT yet live-verified; the shim is unbuilt (a run was live all session)
+      and ensurebuild rebuilds it at the next start.**
+      **Established, from 93 captured frames across every c:/tmp capture:**
+      `[start][0x80|end][FROM][TO][RISE][FALL]` — a ONE-SHOT PULSE ENVELOPE
+      over the range: FROM→TO at the rate slot for the direction, back to
+      FROM on the other slot, 0 = instant. 93/93 fit (86 fit the naive
+      directional split; all 7 exceptions are one frame, `00ff0002` = flash
+      with a decay tail). **Ruled out: chaining** (0 of 23 successive fades on
+      a range join end-to-start — each command restarts its sweep, ×8 repeats
+      = re-triggered blinks). **Ruled out: the pulses move the base level**
+      (later base writes agree with TO only 57/651 — they are an OVERLAY, so
+      the shim does not touch `val[]`). **The semantic confirmation:** joined
+      against `led_io.txt`, the mid-level payloads land on the BUILDING FIRE
+      banks — 72..86 -R gets `11→0f fall 6d` (ember) and `0f→ee rise 92`
+      (flare), the -G bank fades out. The fire got fire commands.
+      **Shipped:** padled version 3 fade ring (head @2076, 96×12B entries);
+      `playfield.py` runs the envelopes per channel on top of the base
+      picture; envelope frames do not count as picture updates so `LED Hz`
+      stays honest; base-step smoothing dropped 200→80 ms (the "laggy" half
+      of David's report). Offline: `ledratetest.py` ENVELOPE case — one
+      12-byte command sweeps a fixture up and back and lands at base, 31
+      distinct paints. **Also ruled out this pass, with numbers: David's
+      throughput theory.** The bus idles at 150-200 transfers/s; the lamp
+      slice is 2-39 writes/s by phase. Bandwidth was never the fault.
+      **WHAT IS LEFT:** **(a) live confirmation** — next watch.sh start
+      rebuilds the shim; attract should show swells, blinks, building-fire
+      flicker. **(b) The rate UNIT is a guess** — `PAD_PF_FADE_UNIT_MS`
+      (default 12, reader-side, tunes live). Oracle: `Diagnostics → LED
+      Tests`, or David's eyes against the real machine. **(c) The longer a2
+      bodies and `b4`/`b5`** — still undecoded, still counted skipped;
+      the long-a2 tails carry value-triple runs (`c7c7c7`, `e1e1e1`) and
+      index runs (`4c 4d 4e`), suggesting multi-lamp fade programs — **ruled
+      out already: the a6 bitmap layout at payload width 1, 2, 3 and 4** (a2
+      fits at best 7 of 40). Capture more with `PAD_LED_SKIP_LOG=N` during
+      the FLASHY attract phases (the rate is ~14× higher there than in quiet
+      attract: 1.1/s vs 0.08/s).
+      **Resume:** run a fresh watch.sh (the rebuild is automatic), watch
+      attract with eyes + the window's `LED Hz`, and tune
+      `PAD_PF_FADE_UNIT_MS` against the real machine's tempo. Then capture
+      the long a2/b4/b5 during flashy attract and crack them with the same
+      census tools (scratchpad a2fade.py/a2chain.py patterns).
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only

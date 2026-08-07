@@ -472,10 +472,25 @@ def test_the_docker_button_is_macos_only(tmp_path):
         root.destroy()
 
 
+def _quiesce(panel):
+    """Stop the panel's own background probing before driving it by hand.
+
+    ON MACOS THE TAB PROBES DOCKER FOR REAL at build time, and its drain
+    callback runs inside any root.update() — so a test that sets a state and
+    then pumps the event loop has its state overwritten by the live answer.
+    That is not hypothetical: it passed on Windows and Linux, where the darwin
+    branch never runs, and failed only on the macOS CI runner.
+    """
+    panel._on_destroy(None)          # sets _stopped; drain and poll return early
+    panel._docker_busy = False
+    panel._docker_result = None
+
+
 def test_a_ready_docker_leaves_no_notice_behind(tmp_path):
     """The button and the message pack themselves only when there is something
     to say.  A Mac with Docker running should look like every other machine."""
     root, panel = _panel(tmp_path)
+    _quiesce(panel)
     try:
         panel._docker_apply("absent")
         root.update()
@@ -537,11 +552,14 @@ def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
     the answer vanishes, so the worker leaves it in a field and the main loop
     collects it."""
     import time
+    # Patched BEFORE the panel is built, so the build-time probe IS the fake
+    # one.  Patching afterwards left the real probe in flight: its answer and
+    # the test's raced, and on a runner with no Docker the real one won.  This
+    # way every platform exercises the darwin path instead of only macOS CI.
+    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "stopped")
     root, panel = _panel(tmp_path)
     try:
-        monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
-        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "stopped")
-        panel._docker_check()
         deadline = time.time() + 5
         while panel._docker != "stopped" and time.time() < deadline:
             root.update()               # stands in for the mainloop

@@ -815,6 +815,23 @@ HELP_CONTENT = {
          "Homebrew in Terminal if you have Homebrew, otherwise it opens the "
          "download page). It disappears once Docker is ready. Windows and "
          "Linux never see it and never need Docker to emulate."),
+        ("Set up emulator… (Windows only)",
+         "The tab asks this PC what the emulator still needs before you press "
+         "anything, so a run does not stop on a missing tool a minute after "
+         "Start. A machine that is ready shows nothing at all. One that is not "
+         "gets an amber notice naming the fault and each missing package with "
+         "what it is for, and this button to fix it: it installs those "
+         "packages inside WSL, registers the kernel's handler for 32-bit ARM "
+         "programs — which is what the game is — and turns on systemd in "
+         "/etc/wsl.conf so that registration is still there after WSL "
+         "restarts. It lists every package and file it will change before it "
+         "touches one, and a No leaves the machine exactly as it was. No "
+         "password is needed and nothing on the Windows side is altered. "
+         "Linux sees the notice but no button, because there the same work "
+         "needs a sudo password this app has nowhere to ask for — the notice "
+         "prints the command for that machine instead. macOS sees neither: "
+         "its container already carries all four, so Docker is the "
+         "prerequisite there."),
         ("Restart WSL…",
          "For the two faults that are not the emulator's to fix: a game "
          "window left on screen that will not close (its X does nothing "

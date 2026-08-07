@@ -736,7 +736,19 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler,
-   `e2fsprogs`, `fuse3`, `python3-tk`). There is no setup step: pick a
+   `e2fsprogs`, `fuse3`, `python3-tk`). The tab checks for those before
+   you press anything, instead of leaving the run to hit them one
+   failure at a time: on a machine that already has them there is
+   nothing to see, and on one that doesn't an amber notice names the
+   fault and each missing package with what it's for. On Windows a **Set
+   up emulator…** button repairs it — it installs the missing packages
+   into WSL, registers the kernel's handler for 32-bit ARM programs, and
+   turns on systemd in `/etc/wsl.conf` so that registration survives a
+   WSL restart. It lists every package and file it will touch before it
+   changes one, and needs no password (`wsl -u root` is already root).
+   On Linux there's no button — sudo would want a password a GUI app has
+   nowhere to ask for — and the notice prints the exact command for that
+   machine instead. Otherwise there is no setup step: pick a
    card image and press Start. The first run builds the guest filesystem
    the game runs inside out of that card (a few minutes, once, no root
    needed) and compiles the hardware shim and the GL renderer, and every
@@ -752,7 +764,8 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    line, `chroot: failed to run command '/bin/sh': No such file or
    directory`, and nothing else to go on. Three of the four are now
    repaired for you out of the card you are already running; the fourth
-   is the only one that needs root, so it is named instead, with the
+   is the one that needs root — on Windows the **Set up emulator…**
+   button above has it, on Linux it is named instead, with the
    command that fits this machine. It is a Linux program
    throughout: the Windows-looking parts are workarounds for what WSL
    lacks (no Tk for the playfield window, a degraded audio hop), and the

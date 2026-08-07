@@ -140,6 +140,25 @@ if [ "$SINK" = pulse ] && is_wsl && [ "${PAD_AUDIO_SINK:-auto}" = auto ]; then
     echo "[play]   py -m pip install sounddevice" >&2
 fi
 
+# ---- relay sink: the macOS CONTAINER ---------------------------------------
+# There is no audio server inside the box and VNC carries no sound, so the
+# PCM leaves the same way it leaves WSL: raw bytes over loopback TCP. Only the
+# LISTENER runs here - padbox.sh publishes the port, polls the guest's fmt
+# file for the rate (docker exec), and runs the Mac-side speaker; when this
+# script dies the kernel closes the socket and takes that player with it.
+# Same padrelay.py as the win sink below, for the same load-bearing reason:
+# it listens FIRST and opens the FIFO only once a player attaches, where an
+# ffmpeg would block on the silent FIFO and never open the socket at all.
+if [ "$SINK" = relay ]; then
+    PORT=${PAD_AUDIO_PORT:-45997}
+    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> host player (tcp/$PORT)"
+    python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" &
+    SRV=$!
+    trap 'kill $HOLD $SRV 2>/dev/null; rm -f "$FIFO"' EXIT
+    wait $SRV
+    exit 0
+fi
+
 if [ "$SINK" = win ]; then
     PORT=${PAD_AUDIO_PORT:-45997}
     echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> WINDOWS (tcp/$PORT)"

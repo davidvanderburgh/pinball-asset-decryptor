@@ -18,7 +18,7 @@ set -u
 
 SELF=$(cd "$(dirname "$0")" && pwd)
 RIG=$(cd "$SELF/.." && pwd)
-IMAGE=${PAD_BOX_IMAGE:-pad-spike2-emu}
+IMAGE=${PAD_BOX_IMAGE:-}     # defaulted below, AFTER the rig's location is final
 NAME=${PAD_BOX_NAME:-pad-spike2}
 PORT=${PAD_VNC_PORT:-5900}
 # A PASSWORD IS NOT OPTIONAL HERE, and not for security (the port is loopback
@@ -108,6 +108,17 @@ if [ "$(uname -s)" = Darwin ] && ! pad_docker_can_share "$RIG"; then
     SELF=$STAGE/docker
 fi
 
+# THE IMAGE FOLLOWS ITS SOURCES. "Build if missing" alone stranded every
+# installed Mac on whatever image its first run built: a shipped fix to the
+# Dockerfile or entrypoint.sh never arrived, because the image was never
+# missing again. The tag carries a checksum of the build context, so a changed
+# context is a new tag, which IS missing, and so builds. Superseded
+# generations are pruned after the build (see below).
+if [ -z "$IMAGE" ]; then
+    DKSUM=$(cat "$SELF/Dockerfile" "$SELF/entrypoint.sh" 2>/dev/null | cksum | cut -d' ' -f1)
+    IMAGE=pad-spike2-emu:c$DKSUM
+fi
+
 build() {
     echo "[box] building $IMAGE (first time takes a few minutes)"
     docker build -t "$IMAGE" "$SELF"
@@ -119,6 +130,12 @@ esac
 
 # Build on demand rather than making the user remember a separate step.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || build || exit 1
+# Prune the generations this one supersedes. rmi refuses an image a live
+# container still uses, which is the correct answer, so failures are ignored.
+docker images pad-spike2-emu --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | grep -vx "$IMAGE" | while read -r old; do
+        docker rmi "$old" >/dev/null 2>&1 || true
+    done
 
 # WHERE THE CARDS ARE. The rig is handed a path inside the container, so the
 # directory holding the image has to be mounted. PAD_CARD_DIR overrides; the
@@ -156,6 +173,13 @@ RUN_ARGS=(
 )
 [ -n "${PAD_VNC_PASSWD:-}" ] && RUN_ARGS+=(-e "PAD_VNC_PASSWD=$PAD_VNC_PASSWD")
 
+# SOUND LEAVES OVER TCP. No audio server exists inside the box and VNC carries
+# no sound, so the guest's PCM is served raw on a loopback port (playaudio.sh's
+# relay sink) and played out here on the Mac by host_player(), below.
+AUDIO_PORT=${PAD_AUDIO_PORT:-45997}
+RUN_ARGS+=(-p "127.0.0.1:$AUDIO_PORT:$AUDIO_PORT"
+           -e "PAD_AUDIO_SINK=relay" -e "PAD_AUDIO_PORT=$AUDIO_PORT")
+
 # A card path on the HOST has to become one inside the box. Only the directory
 # is mounted, so this is a prefix swap and not a guess.
 if [ -n "${PAD_CARD:-}" ]; then
@@ -174,6 +198,41 @@ case "${1:-}" in
     --shell) exec docker run -it "${RUN_ARGS[@]}" "$IMAGE" bash ;;
 esac
 
+# THE SPEAKER, on the Mac itself. Waits for the guest to report its PCM format
+# (rate + channels land in a file docker exec can read - guessing the rate
+# plays every title ~9% sharp, see playaudio.sh), then plays the relay port.
+# ffplay is the deliberate first choice: it ships with the ffmpeg this app
+# already requires on macOS, whereas probing `python3 -c "import sounddevice"`
+# on a Mac without the developer tools pops Apple's install dialog mid-run.
+# The poll is long (10 min) because a FIRST run builds the guest rootfs out of
+# the card before the game ever configures audio.
+host_player() {
+    [ "${PAD_AUDIO:-1}" = 0 ] && return 0
+    fmt=""
+    for _ in $(seq 1 1200); do
+        fmt=$(docker exec "$NAME" cat /pad/rootfs/dump/audio.fmt 2>/dev/null) && [ -n "$fmt" ] && break
+        fmt=""; sleep 0.5
+    done
+    [ -n "$fmt" ] || { echo "[box] the guest never reported a PCM format; this run is silent" >&2; return 0; }
+    set -- $fmt
+    rate=${1:-48000}; ch=${2:-2}
+    if command -v ffplay >/dev/null 2>&1; then
+        echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch from tcp/$AUDIO_PORT"
+        exec ffplay -hide_banner -loglevel error -nodisp -autoexit \
+             -fflags nobuffer -flags low_delay \
+             -f s16le -ar "$rate" -ac "$ch" "tcp://127.0.0.1:$AUDIO_PORT"
+    fi
+    echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
+    echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2
+}
+
 echo "[box] starting; the picture appears at vnc://:$PAD_VNC_PASSWD@localhost:$PORT"
 echo "[box] on macOS: open 'vnc://:$PAD_VNC_PASSWD@localhost:$PORT'   (Screen Sharing; VNC password: $PAD_VNC_PASSWD)"
-exec docker run "${RUN_ARGS[@]}" "$IMAGE" "$@"
+# NOT exec'd any more: the run has a Mac-side child now, and something has to
+# be here afterwards to take it down when the box exits.
+host_player & HOSTAUD=$!
+docker run "${RUN_ARGS[@]}" "$IMAGE" "$@"
+RC=$?
+kill "$HOSTAUD" 2>/dev/null
+wait "$HOSTAUD" 2>/dev/null
+exit "$RC"

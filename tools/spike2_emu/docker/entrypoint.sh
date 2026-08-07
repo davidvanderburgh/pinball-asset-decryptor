@@ -13,7 +13,12 @@ set -u
 
 RIG=${PAD_RIG:-/pad/rig}
 XDISPLAY=${DISPLAY:-:99}
-GEOM=${PAD_VNC_GEOMETRY:-1360x768x24}
+# 1920x1080, NOT the game window's 1360x768: the run opens THREE windows (the
+# game, the virtual playfield, the Controls list) on this one desktop, and a
+# screen the exact size of the first leaves the other two nowhere to be except
+# on top of it. Screen Sharing scales the desktop to its own window, so a
+# bigger screen costs nothing on the Mac side.
+GEOM=${PAD_VNC_GEOMETRY:-1920x1080x24}
 PORT=${PAD_VNC_PORT:-5900}
 
 [ -x "$RIG/watch.sh" ] || {
@@ -38,6 +43,16 @@ for _ in $(seq 1 40); do
 done
 xdpyinfo -display "$XDISPLAY" >/dev/null 2>&1 || {
     echo "[box] Xvfb did not come up:" >&2; cat /tmp/xvfb.log >&2; exit 1; }
+
+# A WINDOW MANAGER, and it is load-bearing: with none, X focus stays at
+# PointerRoot, so the keyboard follows the mouse - hover the playfield and the
+# game stops hearing keys, which read as "inputs register inconsistently" on
+# the first Mac run. openbox gives click-to-focus (click the game window once,
+# keys stay with it) and title bars, so the three windows can be dragged into
+# an arrangement instead of landing in a pile.
+if command -v openbox >/dev/null 2>&1; then
+    openbox >/tmp/openbox.log 2>&1 &
+fi
 
 # -forever   the viewer may disconnect and come back without ending the run
 # -shared    more than one viewer at a time, which is how you show someone

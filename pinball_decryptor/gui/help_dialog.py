@@ -721,8 +721,11 @@ HELP_CONTENT = {
          "splash, then its own boot sequence, then attract mode or the "
          "operator menu. On macOS the window is Screen Sharing — the picture "
          "renders inside the container, and the app opens the viewer by "
-         "itself once the game is up (the VNC password is pinball). Stop "
-         "kills every part of it and then verifies nothing survived."),
+         "itself once the game is up (the VNC password is pinball). All of "
+         "the emulator's windows live inside that one Screen Sharing desktop: "
+         "click a window once to give it the keyboard, and drag windows by "
+         "their title bars to arrange them. Stop kills every part of it and "
+         "then verifies nothing survived."),
         ("It runs the card you pick here, not the Input box",
          "This is the one tab that ignores the Input box: point it at a card "
          "image of its own. That image is mounted READ ONLY and run in place — "
@@ -748,7 +751,9 @@ HELP_CONTENT = {
          "machine remembers, and the emulator's NVRAM already persists between "
          "runs. Untick it to drive the boot yourself."),
         ("Sound",
-         "The game's audio is played out to your speakers through WSL. It "
+         "The game's audio is played out to your speakers — through WSL on "
+         "Windows, and on macOS over a local stream played by ffplay, which "
+         "ships with the ffmpeg the prerequisites already install. It "
          "only makes sound while it is actually running, so silence after the "
          "boot chime usually means it is still waiting at Tech Alerts. The "
          "status line shows frames played and frames dropped — dropped should "

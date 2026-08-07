@@ -50,7 +50,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         `# "could not get fuse2fs" on a box that could simply have had it.` \
         e2fsprogs fuse2fs fuse3 \
         python3 python3-tk python3-pil python3-pil.imagetk \
-        xvfb x11vnc x11-utils \
+        `# openbox is NOT decoration. Bare Xvfb leaves X focus at PointerRoot,` \
+        `# so keystrokes go to whichever window the mouse happens to hover -` \
+        `# three overlapping windows made the keyboard look broken on the first` \
+        `# Mac run - and undecorated windows cannot even be dragged apart. A` \
+        `# window manager gives click-to-focus and title bars for megabytes.` \
+        xvfb x11vnc x11-utils openbox \
         libegl1 libgl1-mesa-dri libx11-6 libgles2 \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*

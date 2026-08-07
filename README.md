@@ -760,6 +760,10 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Docker Desktop and shows its picture over VNC: the app opens it in
    macOS Screen Sharing by itself once the game is up, with nothing to
    install (the VNC password, should Screen Sharing ask, is `pinball`).
+   Every emulator window lives inside that one Screen Sharing desktop —
+   click a window to give it the keyboard, drag title bars to arrange —
+   and sound comes out of the container over a local stream played by
+   ffplay, part of the ffmpeg the prerequisites already require.
    Nothing has to be added to
    Docker's file-sharing list: the app copies the rig into your home
    directory, which Docker already shares, and mounts the copy.

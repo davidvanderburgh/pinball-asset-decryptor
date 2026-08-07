@@ -208,6 +208,23 @@ It does **not** extract a title. `PAD_CARD=<image> watch.sh` runs one straight
 off the card in about a second; `rootfs.sh --game <title>` is there for a title
 you run constantly.
 
+Every run then checks that the guest can actually **start a program** — a user
+namespace, a chroot, `/bin/sh`, about 25 ms — before it starts one. A rootfs
+that exists is not a rootfs that runs, and all four ways it can fail (an
+extraction that stopped part way, a missing ARM loader, no `qemu-arm`
+registration, a registration without the **F** flag) produce the same single
+line and no other clue:
+
+```
+chroot: failed to run command '/bin/sh': No such file or directory
+```
+
+The first two are rebuilt from the card you are already running; the last is
+repaired by putting a copy of the interpreter inside the guest, which needs no
+root. Only registering `qemu-arm` needs root, and that one is named with the
+command for your machine — WSL loses the registration on every restart unless
+the distro boots `systemd`.
+
 ### WSL and Linux are not two ports
 
 This is a Linux program. `run_game.sh`, `cardmount.sh`, `padglhost.c` and

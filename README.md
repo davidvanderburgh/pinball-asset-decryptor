@@ -709,6 +709,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    hardware block a PC doesn't have, so the host decodes each clip with
    ffmpeg and publishes the frames into a shared ring the game draws
    from. Scenes, text, lamps, switches and sound all work.
+   A **virtual playfield** window opens beside the game: the title's own
+   artwork with every switch, coil and insert drawn on it, inserts lit
+   live off the node bus, and switches you can click or press and hold
+   the way a ball would. All of it is read out of the card when the
+   title first runs — the artwork out of the game's assets, the
+   positions out of the game binary's own device table — so any title
+   works without anything being added to this repository first. A title
+   that ships no playfield drawing (many don't) gets a clickable
+   schematic of its switch list instead.
    Requires WSL2 and the rig under
    `tools/spike2_emu`, which the packaged installers don't carry; the
    tab says so rather than disappearing when it isn't there.

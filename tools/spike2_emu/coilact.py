@@ -62,6 +62,26 @@ def describe(name):
     return a[2] if a else None
 
 
+def hold_switch(name):
+    """The switch a press-and-hold on this coil should CLOSE, or None.
+
+    THE TWO HALVES OF THE TABLE ABOVE PART COMPANY HERE. Where the switch
+    CAUSES the coil, the switch is a thing a human can hold: a scoop keeps its
+    ball for as long as it is made, and that is exactly what REMAINING item 24
+    is about. Where the coil MOVES the ball, the click is a SEQUENCE - a trough
+    eject, a shooter-lane arrival and launch - and there is nothing to hold, so
+    those stay clicks and go on running through fire().
+
+    THIS IS THE FUNCTION THE SCOOP ACTUALLY NEEDS, which is not obvious and cost
+    a diagnosis to find: on the artwork the coil marker sits on top of the
+    switch marker, so pressing the middle of RIGHT SCOOP hits the COIL. A hold
+    wired only to the switch markers would have left the item's own worked
+    example behaving exactly as before.
+    """
+    a = ACTIONS.get(name.upper())
+    return a[1] if a and a[0] == "pulse" else None
+
+
 def _lane(m):
     """The auto plunger. If a ball is already waiting in the shooter lane it
     just leaves; otherwise play the whole arrival-and-launch so the click does

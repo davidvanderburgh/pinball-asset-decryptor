@@ -28,13 +28,20 @@ HOW IT REACHES THE GAME, and both halves are deliberate:
     that reached 188, the held handle read 0 for the entire test and never
     moved. It would have frozen the playfield while looking like a 3000x
     speedup.
-  * SWITCH INPUT GOES THROUGH swpoke.py / plunge.py, as subprocesses. Writing
-    the padsw block from Windows would be a shared-memory write racing a guest
-    mmap across a 9p boundary, which is exactly the kind of thing that works in
-    testing and fails later. ~200 ms of `wsl.exe` per action buys a path that is
-    already proven, and none of these are timing-critical.
+  * SWITCH INPUT GOES THROUGH swhold.py / swpoke.py / plunge.py, as
+    subprocesses. Writing the padsw block from Windows would be a shared-memory
+    write racing a guest mmap across a 9p boundary, which is exactly the kind of
+    thing that works in testing and fails later. ~200 ms of `wsl.exe` per action
+    buys a path that is already proven, and none of these are timing-critical -
+    a HOLD's length is set by the mouse button, not by the spawn.
 
-WHAT THE COLOURS MEAN, honestly. Blue rings are switches, click to close one.
+A SWITCH IS HELD FOR AS LONG AS THE MOUSE BUTTON IS DOWN, which is the whole
+point for a ball device: a scoop keeps its ball while the switch is made, so a
+fixed-length pulse could never play one (REMAINING item 24). Press closes,
+release opens, and SwitchDriver serialises the two so a fast click cannot
+deliver them out of order and latch a switch on for good.
+
+WHAT THE COLOURS MEAN, honestly. Blue rings are switches, hold one to close it.
 Red squares are coils, which flash when the game fires them and play their
 switch when clicked (see coilact.py for why a click cannot be a real fire).
 Dots are inserts, lit from the wire - an RGB insert is ONE dot in the colour
@@ -68,6 +75,7 @@ fixtures: 13 RGB, 6 red+green (the BUILDING FIRE pairs), 62 single. All covered.
 """
 import json
 import os
+import queue
 import struct
 import subprocess
 import sys
@@ -105,6 +113,10 @@ LED_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padled"
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
 #: Unset in normal use; this is the instrument the 30 fps claim rests on.
 PF_LOG = os.environ.get("PAD_PF_LOG")
+
+#: PAD_PF_SWDEBUG=1 echoes every switch action this window takes, with the
+#: helper's own reply. See SwitchDriver._run.
+SW_DEBUG = bool(os.environ.get("PAD_PF_SWDEBUG"))
 
 
 def fine_timers():
@@ -184,6 +196,9 @@ PADLED_READ = COIL_GEN_OFF + 8
 #: slingshot hits 150 ms apart now read as two flashes rather than one long one.
 COIL_FLASH_MS = 130
 
+#: The pulse length for SwitchDriver.pulse(), which a mouse click no longer
+#: uses - a click is now a real press and release (REMAINING item 24), so its
+#: length comes from the mouse. Kept for callers that genuinely want an event.
 PRESS_MS = 150
 
 #: THE TARGET, and it is David's acceptance test: "at least 30 fps feedback on
@@ -225,6 +240,144 @@ def emu_gone(view, readable):
     return view._gone >= GONE_POLLS
 
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+
+class SwitchDriver:
+    """The ONE way this window drives a switch, and it is SERIAL on purpose.
+
+    A click here used to be a fixed-length PULSE, which cannot play a ball
+    device: holding the scoop needs the switch closed for as long as the mouse
+    button is down (REMAINING item 24). So a press and a release are two
+    separate actions now, and that is what makes the ordering matter.
+
+    THE FAILURE THIS EXISTS TO PREVENT IS A STUCK SWITCH. Every action is a
+    `wsl.exe` interop spawn costing ~200 ms, so a quick click queues the release
+    while the press is still starting; on two threads the release can WIN, and
+    the switch is then latched closed with nothing left to open it - a machine
+    that looks broken and stays broken until the window is closed. One worker
+    thread draining one FIFO makes press-before-release a property of the queue
+    rather than of the scheduler. It also serialises DIFFERENT switches, which
+    is a small cost (nobody holds two playfield switches with one mouse) for not
+    having to reason about per-switch workers.
+
+    A RELEASE IS NEVER DROPPED. It retries, and `release_all()` runs on window
+    close, because the one outcome worse than a late release is none at all.
+
+    THE SUBPROCESS IS DELIBERATE - see the module docstring. Writing padsw from
+    Windows would race the guest mmap across the 9p boundary; ~200 ms of
+    `wsl.exe` buys a path that is already proven, and a hold's LENGTH is set by
+    the mouse, not by the latency. `PAD_SW_SRC=f` tags every edge as this window
+    in the guest's `[sw]` log (padsw.h), which is what a replay needs.
+    """
+
+    def __init__(self):
+        self.q = queue.Queue()
+        self.held = set()                  # ids we have latched ON
+        self.last_ms = None                # last action's round trip, measured
+        self._lock = threading.Lock()
+        self._t = threading.Thread(target=self._run, daemon=True)
+        self._t.start()
+
+    # ---- what the views call ---------------------------------------------
+    def press(self, sw_id):
+        with self._lock:
+            self.held.add(sw_id)
+        self.q.put((sw_id, 1))
+
+    def release(self, sw_id):
+        with self._lock:
+            self.held.discard(sw_id)
+        self.q.put((sw_id, 0))
+
+    def release_all(self):
+        """Open everything we still hold, and WAIT for it.
+
+        On window close this is the last chance: a daemon worker dies with the
+        process, so an unqueued release would simply never happen and the game
+        would keep seeing a made switch until the next run rebuilt the block.
+        """
+        with self._lock:
+            ids = sorted(self.held)
+            self.held.clear()
+        for sw_id in ids:
+            self.q.put((sw_id, 0))
+        if ids:
+            self.q.join()
+
+    def pulse(self, sw_id, ms=None):
+        """A press and a release `ms` apart, for callers that want an event.
+
+        Kept because a coil's switch and the plunge helper are events, not
+        holds. Runs on the same queue so it cannot interleave with a hold.
+        """
+        self.q.put((sw_id, PRESS_MS if ms is None else ms))
+
+    def run_script(self, script, *args):
+        """A helper that is not a switch edge (plunge.py, coilact.py).
+
+        Off the queue and on its own thread: these take seconds, and a hold's
+        release must not wait behind one.
+        """
+        threading.Thread(target=wsl_run, args=(script,) + args,
+                         daemon=True).start()
+
+    # ---- the worker -------------------------------------------------------
+    def _run(self):
+        while True:
+            sw_id, what = self.q.get()
+            try:
+                t0 = time.monotonic()
+                if what in (0, 1):
+                    ok = wsl_run("swhold.py", str(sw_id), str(what))
+                    # A dropped RELEASE is a stuck switch; a dropped press is
+                    # only a missed click. So retry the one that matters, once.
+                    if ok is None and what == 0:
+                        ok = wsl_run("swhold.py", str(sw_id), "0")
+                else:
+                    ok = wsl_run("swpoke.py", str(sw_id), str(what))
+                self.last_ms = (time.monotonic() - t0) * 1000.0
+                # PAD_PF_SWDEBUG=1 echoes every action WITH THE HELPER'S OWN
+                # REPLY. swhold prints `id=53 was 0 -> 1`, which is the only
+                # place the before-value is visible; a disagreement between
+                # what this window asked for and what the block ended up
+                # holding is otherwise invisible from either side.
+                if SW_DEBUG:
+                    out = (ok.stdout or b"").decode("utf8", "replace").strip()
+                    print("[swdrv] %8.1f ms  id=%d -> %s   %s"
+                          % (self.last_ms, sw_id, what,
+                             out.replace("\n", " | ") if ok else "DID NOT RUN"),
+                          flush=True)
+            except Exception:                               # noqa: BLE001
+                pass
+            finally:
+                self.q.task_done()
+
+
+def wsl_run(script, *args):
+    """Run one of the rig's switch helpers in WSL. None if it did not run.
+
+    `env PAD_SW_SRC=f` rather than passing it in the environment: this is a
+    Windows process calling into WSL, and a Windows variable does not cross that
+    boundary without WSLENV. The tag is what makes a click here distinguishable
+    from a keyboard press in the guest's `[sw]` log, which is what a replay needs
+    (REMAINING item 16; padsw.h has the letters).
+
+    PAD_SW_FILE is forwarded WHEN IT IS SET, and only then. padsw.py says the rig
+    never sets it and that it is the only way to check any of this without a
+    running game - which is exactly how this window's hold path was measured.
+    """
+    env = ["PAD_SW_SRC=f"]
+    if os.environ.get("PAD_SW_FILE"):
+        env.append("PAD_SW_FILE=%s" % os.environ["PAD_SW_FILE"])
+    try:
+        r = subprocess.run(["wsl.exe", "-e", "env"] + env +
+                           ["python3", "%s/%s" % (WSL_DIR, script)] +
+                           list(args),
+                           capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
+    except Exception:                                       # noqa: BLE001
+        return None
+    return r
 
 
 def pick_scale(root, img_h, chrome=170):
@@ -556,7 +709,14 @@ class Field:
             self.info[i] = dict(kind="switch", d=S)
 
         self.tip = Tip(root)
-        self.cv.bind("<Button-1>", self.on_click)
+        self.drv = SwitchDriver()
+        self.holding = None            # (canvas item, switch id) while held
+        # PRESS and RELEASE, not <Button-1>: a switch is closed for as long as
+        # the mouse is down. Tk's implicit grab delivers the release to this
+        # canvas even if the pointer has left it, so a drag off the marker still
+        # opens the switch.
+        self.cv.bind("<ButtonPress-1>", self.on_press)
+        self.cv.bind("<ButtonRelease-1>", self.on_release)
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
@@ -598,7 +758,8 @@ class Field:
         e = self.info[i]
         d = e["d"]
         if e["kind"] == "switch":
-            return ("SWITCH  %s\nid %d   node %d  bit %d\nclick to close it"
+            return ("SWITCH  %s\nid %d   node %d  bit %d\n"
+                    "hold to keep it closed"
                     % (d["name"], d["id"], d["node"], d["bit"]))
         if e["kind"] == "coil":
             where = ("node %d index %d" % (d["node"], d["index"])
@@ -610,8 +771,11 @@ class Field:
                     % (fires, "" if fires == 1 else "s", lvl)
                     if fires is not None else "\nno coil data")
             act = coilact.describe(d["name"])
-            return "COIL  %s\n%s%s\nclick: %s" % (
-                d["name"], where, live, act or "nothing wired")
+            # "hold" where it now holds and "click" where it still pulses, so
+            # the tooltip never promises the gesture the marker does not take.
+            how = "hold" if coilact.hold_switch(d["name"]) is not None else "click"
+            return "COIL  %s\n%s%s\n%s: %s" % (
+                d["name"], where, live, how, act or "nothing wired")
         vals = self._chan_vals(d, self.last)
         fmt = lambda v: "%d" % v if v is not None else "no data"
         if "W" in d["channels"]:
@@ -634,44 +798,43 @@ class Field:
         self.tip.show(self._describe(i), ev.x_root, ev.y_root)
 
     # ---- actions ---------------------------------------------------------
-    def on_click(self, ev):
+    def on_press(self, ev):
         i = self._hit(ev)
         if i is None:
             return
         e = self.info[i]
         if e["kind"] == "switch":
-            self.cv.itemconfig(i, outline="#ffd400", width=3)
-            threading.Thread(target=self._press, args=(e["d"], i),
-                             daemon=True).start()
+            self._hold(i, e["d"]["id"], "#2a8cff")
         elif e["kind"] == "coil":
-            if coilact.describe(e["d"]["name"]):
-                threading.Thread(target=self._wsl,
-                                 args=("coilact.py", e["d"]["name"]),
-                                 daemon=True).start()
+            # A COIL MARKER IS THE ONE THE SCOOP ACTUALLY GETS. It is drawn over
+            # the switch marker, so the middle of RIGHT SCOOP hit-tests to the
+            # coil - measured, not assumed. Where the coil follows a switch,
+            # hold that switch; where it MOVES a ball (trough eject, auto
+            # plunger) there is nothing to hold and it stays a click.
+            sw = coilact.hold_switch(e["d"]["name"])
+            if sw is not None:
+                self._hold(i, sw, "#ff4040")
+            elif coilact.describe(e["d"]["name"]):
+                self.drv.run_script("coilact.py", e["d"]["name"])
 
-    def _wsl(self, script, *args):
-        # `env PAD_SW_SRC=f` rather than passing it in the environment: this is
-        # a Windows process calling into WSL, and a Windows variable does not
-        # cross that boundary without WSLENV. The tag is what makes a click here
-        # distinguishable from a keyboard press in the guest's [sw] log, which
-        # is what a replay needs (REMAINING item 16; padsw.h has the letters).
-        try:
-            return subprocess.run(["wsl.exe", "-e", "env", "PAD_SW_SRC=f",
-                                   "python3",
-                                   "%s/%s" % (WSL_DIR, script)] + list(args),
-                                  capture_output=True, timeout=30,
-                                  creationflags=_CREATE_NO_WINDOW)
-        except Exception:
-            return None
+    def _hold(self, item, sw_id, restore):
+        self.cv.itemconfig(item, outline="#ffd400", width=3)
+        self.holding = (item, sw_id, restore)
+        self.drv.press(sw_id)
 
-    def _press(self, S, item):
-        self._wsl("swpoke.py", str(S["id"]), str(PRESS_MS))
-        self.root.after(0, lambda: self.cv.itemconfig(item, outline="#2a8cff",
-                                                      width=2))
+    def on_release(self, ev):
+        """Open whatever the press closed - by what we HELD, not by what is
+        under the cursor now. A drag off the marker before letting go would
+        otherwise hit-test to nothing and leave the switch made."""
+        if self.holding is None:
+            return
+        item, sw_id, restore = self.holding
+        self.holding = None
+        self.drv.release(sw_id)
+        self.cv.itemconfig(item, outline=restore, width=2)
 
     def run_plunge(self, what):
-        threading.Thread(target=self._wsl, args=("plunge.py", what),
-                         daemon=True).start()
+        self.drv.run_script("plunge.py", what)
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
@@ -1006,7 +1169,10 @@ class Schematic:
                                font=("Consolas", 9))
         self.status.pack(fill="x")
         self.tip = Tip(root)
-        self.cv.bind("<Button-1>", self.on_click)
+        self.drv = SwitchDriver()
+        self.holding = None
+        self.cv.bind("<ButtonPress-1>", self.on_press)
+        self.cv.bind("<ButtonRelease-1>", self.on_release)
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
@@ -1026,28 +1192,26 @@ class Schematic:
         d = self.info[i]["d"]
         self.tip.show("SWITCH  %s\n"
                       "id %d   num %d   node %d  bit %d\n"
-                      "click to close it"
+                      "hold to keep it closed"
                       % (d["name"], d["id"], d["num"], d["node"], d["bit"]),
                       ev.x_root, ev.y_root)
 
-    def on_click(self, ev):
+    def on_press(self, ev):
         i = self._hit(ev)
         if i is None:
             return
         d = self.info[i]["d"]
         self.cv.itemconfig(i, fill="#ffd400")
-        threading.Thread(target=self._press, args=(d, i), daemon=True).start()
+        self.holding = (i, d["id"])
+        self.drv.press(d["id"])
 
-    def _press(self, sw, item):
-        try:
-            subprocess.run(["wsl.exe", "-e", "env", "PAD_SW_SRC=f", "python3",
-                            "%s/swpoke.py" % WSL_DIR, str(sw["id"]),
-                            str(PRESS_MS)],
-                           capture_output=True, timeout=30,
-                           creationflags=_CREATE_NO_WINDOW)
-        except Exception:
-            pass
-        self.root.after(0, lambda: self.cv.itemconfig(item, fill="#d8d8d8"))
+    def on_release(self, ev):
+        if self.holding is None:
+            return
+        item, sw_id = self.holding
+        self.holding = None
+        self.drv.release(sw_id)
+        self.cv.itemconfig(item, fill="#d8d8d8")
 
     def tick(self):
         """The LED block still says whether the emulator is up, which is the one
@@ -1106,8 +1270,9 @@ def main():
     # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
     # real answers; which one applies is a property of the game, not of this
     # window. See load_switch_list() for why most titles are the second case.
+    view = None
     if PF_PNG and os.path.exists(PF_PNG) and load_switches():
-        Field(root)
+        view = Field(root)
     else:
         rows = load_switch_list()
         if not rows:
@@ -1118,12 +1283,18 @@ def main():
                            "Switch list: swtable.py <run.log> %s")
                      % (GAME, GAME)).pack()
         else:
-            Schematic(root, rows)
+            view = Schematic(root, rows)
     pos = load_state().get("playfield_pos")
     if pos and _onscreen(root, *pos):
         root.geometry("+%d+%d" % (pos[0], pos[1]))
 
     def bye():
+        # OPEN ANYTHING STILL HELD BEFORE THE PROCESS GOES. Closing the window
+        # mid-hold otherwise leaves scr_held[] made, and nothing on this side
+        # exists any more to clear it - the game would see a stuck switch for
+        # the rest of the run.
+        if view is not None:
+            view.drv.release_all()
         save_state(root)
         root.destroy()
 

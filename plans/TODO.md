@@ -545,6 +545,51 @@ These have each been violated at least once and each cost a run or a window:
       X/Windows boundary.
 
 - [ ] **24. Press-and-hold a switch on the virtual playfield.** `S2 D2`
+      ← IN PROGRESS
+      **★★ BUILT AND MEASURED OFFLINE 2026-08-06, no run spent. A hold is a
+      hold: 201/201 samples closed across a 1.5 s hold, press→closed 80.8 ms,
+      release→open 78.3 ms.** Before: the same test on the same switch read
+      **182 of 198 samples OPEN**, because the gesture was a 120 ms pulse.
+      **★ THE ITEM'S OWN DIAGNOSIS WAS RIGHT ABOUT THE BINDING AND WRONG ABOUT
+      THE PATH, and fixing only what it named would have left David's own
+      worked example behaving exactly as before.** Pressing the middle of RIGHT
+      SCOOP does NOT hit the switch marker — `_hit()` resolves it to the COIL
+      marker drawn over it (measured: at canvas 447,642 the switch oval is not
+      even in `find_overlapping`, only the coil is), and a coil click went to
+      `coilact.py`, whose `RIGHT SCOOP` action is a hard-coded `PULSE_MS = 120`
+      poke of switch 53. That 120 ms pulse is the fault David described.
+      **Fixed in two places, and the split is deliberate:** `<ButtonPress-1>` /
+      `<ButtonRelease-1>` on both canvases drive a hold, and `coilact.py` grew
+      `hold_switch()` so a coil that FOLLOWS a switch (scoop, slingshots, pop,
+      flippers, magnet) holds it, while a coil that MOVES a ball (trough eject,
+      auto plunger) stays a click — there is nothing to hold in a sequence.
+      **`SwitchDriver` is ONE serialised worker, and that is the whole safety
+      story.** Every action is a ~80 ms `wsl.exe` spawn, so a fast click queues
+      the release while the press is still starting; on two threads the release
+      can WIN and the switch is latched closed with nothing left to open it.
+      Measured: 10 fast clicks = 20 actions, strictly alternating 1,0,1,0,
+      drained in 1632 ms, ends OPEN. Plus `release_all()` on window close.
+      **New instrument, and it needs NO run: `swholdtest.py`.** It builds the
+      real `Field` and synthesises the button events on its canvas, so the hit
+      test, the hold bookkeeping and the queue are all shipping code;
+      `PAD_SW_FILE` (which padsw.py provides for exactly this) points the
+      helpers at a fake block. **It is validated on a labelled example:**
+      `--pulse` drives the pre-fix gesture and the test must FAIL, and does.
+      `PAD_PF_SWDEBUG=1` echoes every action with the helper's own reply.
+      **Two instrument faults caught, both of which had produced a wrong
+      reading:** the ORDER check polled for "switch is open" and passed in 3 ms
+      over twenty pending actions — a metric satisfiable BEFORE the work starts
+      — and it now waits on the queue; and the harness passed its switch id as
+      `sys.argv[1]`, which `playfield.py` reads as the GAME name.
+      **WHAT IS NOT DONE, and it is why the box is open:** everything above
+      measures `scr_held[]`, this window's own half. **The item's acceptance
+      names `mrg[]`** — what the game is handed — and mrg never moves offline
+      because the merge is the guest shim's write and there is no guest.
+      `swholdtest.py --live` runs the identical test against a running game's
+      block with mrg as the oracle. And David's hands are the final oracle.
+      **Committed:** see below.
+      **Resume:** start a run, `py tools\spike2_emu\swholdtest.py --live 53
+      3000`, confirm mrg follows and state the latency; `alive.sh` 0 after.
       **★ DAVID, 2026-08-06: "we need to be able to press and hold a switch on
       the virtual playfield to keep it held down (like for shooting the scoop
       it needs to remain in the scoop while i hold the switch)."**

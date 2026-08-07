@@ -620,6 +620,13 @@ These have each been violated at least once and each cost a run or a window:
       layout at payload width 1, 2, 3 and 4** (a2 fits at best 7 of 40).
       Capture with `PAD_LED_SKIP_LOG=N`; the oracle for confirming any of it
       is `Diagnostics → LED Tests`.
+      **New stake from item 31 (2026-08-07): these frames are now the ONLY
+      lamp traffic the rig discards**, and in David's recording every drop
+      coincided with a still playfield. If a2 really is a range-fade, each
+      dropped frame is a missing multi-second ANIMATION, not one missing
+      update — decoding it is the remaining smoothness the playfield window
+      can gain, and the window's new `LED Hz`/`worst gap` fields are a free
+      before/after for it.
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only
@@ -1023,108 +1030,6 @@ These have each been violated at least once and each cost a run or a window:
       needs a run, it reproduces every time, and the instrument is a one-line
       trap - the unknown is which host it belongs to, not how to see it.
 
-- [ ] **31. The playfield claims "30 fps" while the LEDs actually move 2.6
-      times a second, in bursts and freezes.** `S2 D3` ← IN PROGRESS
-      **★★ HALF (a) IS SHIPPED AND THE OPEN QUESTION IS ANSWERED, 2026-08-07,
-      `a77eb56`. No run spent yet.**
-      **Established:** re-differed David's recording with a saturation gate (so
-      the line art and the mouse cursor cannot score): **30 of 275 transitions
-      change a coloured pixel = 3.3 visual updates/s**, freezes of **1.67 s and
-      1.63 s**. **THE SUBTRACTION: the window's own "LED writes decoded"
-      counter changes on 34 of the same 275 transitions, and inside BOTH
-      freezes it changes ZERO times** — artwork and counter freeze on the same
-      frames and recover on the same frames. 354 writes in 34 observable bursts
-      = ~10 lamps a burst = one node-bus LED frame. `led_publish()` is called
-      per node-bus write and bumps `gen` once per FRAME, `decoded` once per
-      lamp, which fits exactly.
-      **Ruled out:** all three candidates this item listed (values already
-      drawn / undrawn fixtures / collapsing inside one 33 ms poll) as the MAIN
-      cause — every one of them requires the counter to keep climbing through a
-      frozen picture, and it does not. Also ruled out: a recorder stall faking
-      the freezes (frames 189-193 change ~6000 px of chrome with zero artwork
-      and zero counter change, so the capture was alive).
-      **Shipped:** status bar now reads `LED 3.3 Hz (1523 writes) … poll 30 fps`
-      — two rates, each labelled, net SHORTER than the old bar (94 chars vs
-      100, and it has been clipped off a window before). When data outruns the
-      picture it says `LED 3.3 Hz of 12.0 Hz data` in place. `PAD_PF_LOG` gains
-      `LED n.n Hz  data n.n Hz  worst gap n.nn s`, the gap a MAXIMUM since the
-      last line — that is acceptance (b) measurable from inside the window with
-      no recording. `ledrate.py` reads the same block from INSIDE WSL at 200 Hz
-      (gen and decoded counted apart). `ledratetest.py` validates both offline
-      in ~20 s: PACED 5 Hz with a 2 s hole → window 4.0 Hz, ledrate 3.88 Hz,
-      gap 2.20 s, poll 30 fps; **CHURN, the labelled negative control** — 30 Hz
-      of writes carrying values already on screen → LED **0.0 Hz**, data
-      29.7 Hz, split field shown, where the OLD bar would have said "30 fps".
-      **NOT ESTABLISHED, and it is the whole of what is left: whether the guest
-      publishes at ~3.7 Hz or the crossing to Windows serves a stale block.**
-      Every number above is Windows-side. `ledrate.py` inside WSL against the
-      window's own new numbers, over the same stretch of one run, settles it.
-      **Resume:** one run of godzilla_pro with `PAD_PF_LOG` set; run
-      `python3 ledrate.py 60` inside WSL during attract; compare its `gen` Hz
-      with the window's `LED Hz`/`data Hz`. Equal ⇒ the game really does drive
-      lamps in bursts and the window is honest; WSL much faster ⇒ the crossing
-      is dropping updates.
-      **★ DAVID, 2026-08-07: "we are claiming '30fps' on the virtual playfield.
-      but look at this video recording on my desktop. the LEDs are very
-      jumpy."**
-      **MEASURED OFF HIS OWN RECORDING, NO RUN SPENT** —
-      `C:\Users\david\OneDrive\Desktop\Recording 2026-08-07 093210.mp4`, 9.2 s
-      of the `godzilla_pro` playfield window, 276 frames at 30 fps. Extract the
-      frames, crop to the artwork, count the frame-to-frame transitions whose
-      pixels differ: **24 of 275 change anything at all = 2.6 visual updates a
-      second**, while the status bar reads a rock-steady `30 fps` in every one
-      of the 276 frames.
-      **AND IT IS NOT A LOW RATE, IT IS BURSTS AND FREEZES — which is exactly
-      the word "jumpy".** Median gap between updates 100 ms, but **one gap of
-      2.83 s and another of 1.83 s**, and inside a burst it changes on 15 of 41
-      consecutive frames (~11/s). The 2.6/s mean is the average of a stall and
-      a scramble, so do not chase it as a uniform rate.
-      **ESTABLISHED, from `playfield.py:1115-1123`: the number on screen is the
-      POLL rate, not the picture rate.** `self.fps` is measured tick-START to
-      tick-START of the Tk `after` loop, so a loop that reads `dump/padled`
-      perfectly on time and finds nothing new reports 30 fps forever. The
-      docstring at `playfield.py:63` — *"THE RATE IS 30 fps AND IT IS MEASURED,
-      not assumed"* — is true about the loop and says nothing about what a human
-      sees. **The drawing is not the fault: `draw_fixtures` is correctly
-      change-gated** (`F["drawn"] != want`, `:1090`), so a still picture means
-      the DECODED STATE is still, not that a redraw was skipped.
-      **RULED OUT WITH A NUMBER, so nobody spends a pass on item 1d: undecoded
-      frames are NOT the cause.** The bar's own drop counter went 62 → 72 across
-      the recording — **10 drops in 9.2 s, ~1.1/s** — which cannot turn 30
-      updates/s into 2.6. It is consistent, though, and worth keeping: all 8
-      frames where the drop counter ticked had ZERO change on the playfield, and
-      none of the 24 redraws coincided with a drop.
-      **THE OPEN QUESTION IS ONE SUBTRACTION.** The `LED writes decoded` counter
-      went **1523 → 1877 = 354 writes in 9.17 s ≈ 39/s**, so data IS arriving at
-      better than 30 Hz while the picture changes 2.6 times a second. Three
-      candidates, none tested: most writes carry values already on screen; they
-      address fixtures this window does not draw; or many land inside one 33 ms
-      poll and collapse. `led_publish()` (`hwshim.c:5345`) is called from the
-      node-bus request path (`:6222`), so the block is EVENT-driven and never
-      clocked — the window can only ever see the last value before its poll.
-      **NOT ESTABLISHED: whether this is attract-specific.** The recording is
-      the playfield window alone, `0 coils addressed`, so the game's state is
-      not visible in it. The promoted loose end above claims gameplay was
-      covered by item 11 and attract was not; that split has never been tested
-      against a measurement. State which state you measured.
-      **Acceptance, and state both halves separately.** (a) The claim stops
-      being wrong: the status bar reports a rate a human can check — the redraw
-      rate alongside the poll rate, or the poll rate labelled as such — so
-      "30 fps" never again describes a frozen picture. (b) The fault: re-run the
-      frame diff on a fresh recording and state the achieved visual updates a
-      second and the longest freeze, in both attract and a game.
-      — S2: the game plays and the window is still usable, so nobody is blocked
-      and this is not S1. What it costs is that the rig's main feedback surface
-      is misleading about itself, and that **item 21's trough display reads the
-      same block through the same poll** — six ball markers at 2.6 updates/s
-      with 2.8 s freezes would be built broken from the start. Arguable as S3 if
-      you read a feedback window as pure comfort. D3: it needs a run to confirm
-      a fix, the fault showed up on David's first recording and is visible the
-      moment you look, and every instrument exists already (`PAD_PF_LOG`, the
-      two on-screen counters, and the frame diff, which scores a recording with
-      no run at all) — the unknown is which of the three mechanisms, not how to
-      see it.
-
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.
@@ -1235,6 +1140,54 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **31. The playfield claims "30 fps" while the LEDs actually move 2.6
+      times a second, in bursts and freezes.** DONE 2026-08-07, `a77eb56` (the
+      fix and the instruments) + this commit (the run's numbers). Two runs,
+      `alive.sh` 0 after both.
+      **(a) The claim is fixed and verified live:** the bar now reads
+      `LED 1.3 Hz (…writes, …dropped) … poll 30 fps` — the picture rate and the
+      poll rate, each labelled, and when data outruns the picture it says so in
+      place: screenshotted DURING the fault, `LED 0.3 Hz of 2.3 Hz data
+      (941 writes, 3 dropped)  11 coils addressed  poll 30 fps`. Counted over a
+      3 s sliding window, never smoothed. `PAD_PF_LOG` carries
+      `LED/data/worst gap` per second, the gap a maximum not a mean.
+      Validated offline by `ledratetest.py` (~20 s, no emulator): drives the
+      real `Field` against a fake padled it paces itself — 5 Hz with a 2 s hole
+      reads 4.0 Hz / gap 2.20 s, and the labelled NEGATIVE control (30 Hz of
+      churn writing values already on screen) reads LED 0.0 Hz where the old
+      bar said 30 fps.
+      **(b) The fault is DIAGNOSED AND IT IS NOT THE RIG'S: the wire really is
+      bursts and freezes.** The subtraction ran on both sides of the VM
+      boundary over the same minute of the same run. ATTRACT: `ledrate.py`
+      inside WSL (200 Hz sampler) read **1.97 Hz of LED frames, max gap
+      4.59 s**; the window read **1.98 Hz data, worst gap 4.57 s** — identical,
+      so the `\\wsl.localhost` crossing drops nothing and holds nothing stale.
+      Steady-state attract picture: ~1.3 Hz typical with stretches to 6.5 s,
+      and one 11.9 s stillness mid-attract with the poll pinned at 30.2 fps
+      through all of it. GAMEPLAY (coin/start/plunge, FREE PLAY BALL 1
+      screenshot-confirmed, idle ball): the DATA is steady — 4.18 Hz of frames,
+      **no gap over 0.97 s** — but the picture moved 0.22 Hz because in-game
+      writes mostly rewrite already-drawn values. So the loose end's split is
+      now measured: in a game the lamp stream is continuous; the multi-second
+      holes are attract's own drive.
+      **What remains visually is item 1d's, not this item's:** the only lamp
+      traffic the rig discards is the undecoded a2/b4/b5 slice (measured here:
+      5 frames/60 s attract, 0 in the game minute; ~1.1/s in the recording's
+      attract phase, every one coinciding with zero picture change). If a2 is
+      the suspected range-fade, each dropped frame is a missing ANIMATION, so
+      decoding it is the one further smoothness this window can gain.
+      **Instrument notes for whoever reuses these:** `ledrate.py` runs inside
+      WSL and polls at 200 Hz because a sampler at the rate it measures cannot
+      tell a burst from a stream; the offline harness must pin `PAD_TABLES`
+      before moving `PAD_ROOT` (or the window opens tableless and measures
+      nothing) and must call `fine_timers()` like the real main (or Tk rounds
+      to 15.6 ms and the loop reads 25 fps). Item 21 should build its trough
+      markers on `mrg[]`, not this block — but its "the display updates
+      2.6 times/s" worry is now answered: switch data is not the LED stream,
+      and the LED stream itself is honest at every rate it actually has.
+      Logs kept: `/var/tmp/pf31_attract.log`, `/var/tmp/pf31_game_kept.log`,
+      `/var/tmp/ledrate31_attract.csv`, `/var/tmp/ledrate31_game.csv`.
 
 - [x] **24. Press-and-hold a switch on the virtual playfield.** DONE
       2026-08-06, `68a18c5`. **David, on the shipped build: "item 24 looks good

@@ -633,23 +633,43 @@ These have each been violated at least once and each cost a run or a window:
       distinct paints. **Also ruled out this pass, with numbers: David's
       throughput theory.** The bus idles at 150-200 transfers/s; the lamp
       slice is 2-39 writes/s by phase. Bandwidth was never the fault.
-      **WHAT IS LEFT:** **(a) live confirmation** — next watch.sh start
-      rebuilds the shim; attract should show swells, blinks, building-fire
-      flicker. **(b) The rate UNIT is a guess** — `PAD_PF_FADE_UNIT_MS`
-      (default 12, reader-side, tunes live). Oracle: `Diagnostics → LED
-      Tests`, or David's eyes against the real machine. **(c) The longer a2
-      bodies and `b4`/`b5`** — still undecoded, still counted skipped;
-      the long-a2 tails carry value-triple runs (`c7c7c7`, `e1e1e1`) and
-      index runs (`4c 4d 4e`), suggesting multi-lamp fade programs — **ruled
-      out already: the a6 bitmap layout at payload width 1, 2, 3 and 4** (a2
-      fits at best 7 of 40). Capture more with `PAD_LED_SKIP_LOG=N` during
-      the FLASHY attract phases (the rate is ~14× higher there than in quiet
-      attract: 1.1/s vs 0.08/s).
-      **Resume:** run a fresh watch.sh (the rebuild is automatic), watch
-      attract with eyes + the window's `LED Hz`, and tune
-      `PAD_PF_FADE_UNIT_MS` against the real machine's tempo. Then capture
-      the long a2/b4/b5 during flashy attract and crack them with the same
-      census tools (scratchpad a2fade.py/a2chain.py patterns).
+      **★★★ SECOND DECODE SAME DAY, `d145083`, LIVE-VERIFIED: b4/b5 blen=3/4
+      are RANGE FADES (b4 up, b5 down, `[start][0x80|end][rate]`) and the
+      indexed decoder had been eating them as ONE DIM DOT per bank sweep —
+      rate bytes written as brightness.** Census 44/44 + 22/22, zero with the
+      0x0f gap byte genuine single writes carry (97: 71/80); the 2N+1 shape
+      now REQUIRES that gap byte at cnt=1, which also stops the a4/a5 pair
+      frames (`3637bb`) becoming garbage lamp values. b4/b5 move the BASE:
+      the shim writes the target into val[] and the ring envelope expires
+      onto it — zero new window code. **Live, two runs, alive 0 after both:
+      skip log shows ZERO a2-6/b4/b5-3/4 escaping; the window read LED
+      4-6.7 Hz, worst gaps ≤0.91 s, 200-390 repaints/s of fade animation**
+      (morning baseline: 2.6/s with 2.83 s freezes). David's 13:54 recording
+      predates b4/b5 — a2 pulses visibly animate in it (runs of 9-11
+      consecutive changed frames), freezes 1.2-3.6 s between.
+      **Trace preserved: `/var/tmp/led_trace_1d.log`** — 44581 lines, full
+      `PAD_NB_TRACE` with timestamps, plus 656 ledskip bodies. **Two
+      instrument traps recorded in `d145083`'s message so nobody repays
+      them: the guest log is `$LOG` = `gzwatch.log` NOT `gzpad.log`, and a
+      UNC path quadruple-backslashed through bash reaches Python with ONE
+      backslash — both ring-watchers polled a ghost file and read as "the
+      ring never fills" while the window was animating the whole time.**
+      **WHAT IS LEFT:** **(a) The rate UNIT is a guess** —
+      `PAD_PF_FADE_UNIT_MS` (default 12, reader-side, tunes live). Ruled
+      out: calibrating it from re-trigger periods (they cluster on the
+      SHOW's schedule — 7.5 s and 115 s = the attract cycle — not the fade).
+      Oracle: `Diagnostics → LED Tests`, or David's eyes vs the real
+      machine. **(b) The longer a2/b4/b5 bodies** — still skipped, now
+      CAPTURED with timestamps in the preserved trace; tails carry
+      value-triple runs (`c7c7c7`) and index runs (`4c 4d 4e`) = multi-lamp
+      fade programs. **Ruled out: the a6 bitmap layout at payload width
+      1-4** (a2 fits at best 7 of 40). Note the strip boards (nodes 12/14)
+      also carry b4/b5 in a DIFFERENT layout (`c00b000a`, bit7 on byte 0) —
+      the insert-node gate keeps them out of the decoder, correctly.
+      **Resume:** David judges the current build by eye and tunes
+      `PAD_PF_FADE_UNIT_MS`; then crack the long bodies from
+      `/var/tmp/led_trace_1d.log` with the census pattern (scratchpad
+      a2fade.py / a2chain.py).
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only

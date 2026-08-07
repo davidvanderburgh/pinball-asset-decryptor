@@ -66,6 +66,61 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **27. Any Spike 2 title should load, show a switch layout, and start a
+      game. Today only Godzilla does.** `S1 D3`
+      **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
+      getting the virtual switch playfield at all. and starting a game doesn't
+      seem to work. it got past the initial service screen, but said node 2
+      wasn't registered... i should be able to load and play any spike 2 game
+      and see a switch layout."** Log: `jaws_le-1_02_0.Release.16G.sdcard.raw`,
+      21:36, boots fine, video runs a clean 30 fps for minutes.
+      **BOTH HALVES ARE THE SAME SHAPE — a per-title table with only Godzilla
+      filled in — and both were found at the desk from the source, not guessed.**
+      **(a) THE PLAYFIELD IS SKIPPED, SILENTLY.** `watch.sh:446` gates the
+      window on `[ -d "$S/games/$GAME" ]`, and `games/` holds exactly
+      `godzilla_pro` and `turtles_pro`. `jaws_le` is not there, so the window
+      never starts and **the log says nothing at all** — the Godzilla run
+      prints `[watch] virtual playfield window opening`, the Jaws run has no
+      such line. The silence is its own small bug: a skip nobody is told about.
+      **THE DATA TO FIX IT IS ALREADY IN DAVID'S PASTED LOG.** The shim dumped
+      the whole table — `[sw] --- switches: count=109 entry[]=0x00a2a1b8` and
+      108 rows of `id/num/node/bit/flags` — and `swtable.py <run.log> <title>`
+      turns exactly those lines into `games/<title>/switch_list.txt`, which is
+      what `playfield.py`'s Schematic view draws when a title has no artwork.
+      So half (a) is desk work on a log that already exists.
+      **(b) NODE 2, AND THE RIG PREDICTED THIS EXACT OUTCOME.** `watch.sh:132`
+      is a `case "$GAME"` setting `NB_SILENT_DEFAULT=2` for
+      `godzilla_pro|godzilla_le` and `""` for everything else, and the Jaws
+      cfg block has no `PAD_NB_SILENT` line where Godzilla's has one. Its own
+      comment says: *"A title not listed here silences NOTHING, which is the
+      safe direction: an extra board answering is a Tech Alert you can see and
+      then add here."* That Tech Alert is what David saw.
+      **The mechanism is fully written down at `hwshim.c:5776-5801`** — the
+      shim answers for all 64 addresses, so an absent board looks present;
+      slot 2 is the one board whose registered bit is `board[+144] != 0`, so a
+      manufactured node 2 can never be suppressed.
+      **THE TRAP, and it is why this is not a one-line guess:** the same
+      comment warns that *silencing a board that IS populated loses its devices
+      with no message at all*. The authoritative test is the game's own config
+      table (`board[+144]` = `max(entry[+30])+1` over `*(0x700b2c)`), NOT the
+      switch dump. **Weak supporting evidence only:** Jaws's 108 switches sit
+      on nodes 0, 1, 4, 8 and 9 and none on node 2 — suggestive, but switches
+      are not the only devices, so do not set the variable off that alone.
+      **Acceptance, and state both halves separately.** (a) starting Jaws opens
+      a playfield window showing its switch layout, and a title with no table
+      says so in the log instead of skipping in silence. (b) Jaws clears Tech
+      Alerts without a node complaint and a game actually starts — the oracle
+      is the game's own screen, and say which nodes you silenced and what
+      evidence chose them. Then repeat on one further title to show the fix is
+      per-title data and not a second special case.
+      — S1, and it is arguable: Godzilla plays fine, so nobody is blocked
+      outright, but on the title David actually loaded he cannot start a game,
+      and "I cannot play" is the S1 line. Knock it to S2 if you read the
+      working Godzilla as meaning play is not broken. D3: needs a run to
+      confirm, the fault shows every time, and the instruments (the shim's
+      switch dump, `swtable.py`, the Tech Alert screen) all exist — half (a) is
+      nearly D1 and can land alone.
+
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
       a signature, a call site, a disassembly, a minutes-scale repro AND a

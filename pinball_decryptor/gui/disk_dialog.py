@@ -26,6 +26,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..core import host_temp, wsl_disk
+from .placement import centered_over
 from .theme import THEMES, dark_titlebar, platform_font
 
 _LOC_WSL = "wsl"
@@ -216,18 +217,13 @@ class DiskManagerDialog:
 
     def _center(self):
         dlg = self._dlg
-        self._parent.update_idletasks()
         dlg.update_idletasks()
         dw = max(dlg.winfo_reqwidth(), 680)
         dh = max(dlg.winfo_reqheight(), 620)
-        pw, ph = self._parent.winfo_width(), self._parent.winfo_height()
-        if pw <= 1 or ph <= 1:
-            sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
-            x, y = (sw - dw) // 2, (sh - dh) // 2
-        else:
-            x = self._parent.winfo_rootx() + (pw - dw) // 2
-            y = self._parent.winfo_rooty() + (ph - dh) // 2
-        dlg.geometry("%dx%d+%d+%d" % (dw, dh, max(0, x), max(0, y)))
+        # See placement.centered_over: the max(0, ...) this replaces was a
+        # single-screen assumption, not a safety net.
+        x, y = centered_over(self._parent, dw, dh)
+        dlg.geometry("%dx%d+%d+%d" % (dw, dh, x, y))
 
     # ------------------------------------------------------------------
     # Usage bars

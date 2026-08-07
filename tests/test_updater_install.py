@@ -7,8 +7,10 @@ it silently from the already-elevated app (no UAC), and the installer
 relaunches the app (/RELAUNCH=1).  These tests pin the pieces:
 
   * asset picking — Windows gets the *_Windows.exe asset (+ sha256 from
-    the API's digest field) and Linux gets its own-arch .AppImage;
-    macOS gets None and keeps the browser flow.
+    the API's digest field), Linux gets its own-arch .AppImage, and macOS
+    gets its own-arch .dmg.  macOS used to get None; the browser handoff
+    was what set com.apple.quarantine and so produced the "can't be
+    verified" wall and the password, once per release.
   * download — streamed with progress, cancellable, digest-verified,
     and NEVER leaves a partial/corrupt exe behind on any failure (the
     caller runs the destination file elevated).
@@ -87,11 +89,29 @@ def test_pick_installer_asset_linux_wont_hand_over_a_foreign_arch():
                                          machine="aarch64") is None
 
 
-def test_pick_installer_asset_macos_gets_none():
-    # macOS keeps the browser-download flow: `open` isn't affected by the
-    # bundle environment, and a .dmg still has to be mounted and dragged
-    # by hand, so fetching it for the user saves nothing.
-    assert updater._pick_installer_asset(ASSETS, platform="darwin") is None
+def test_pick_installer_asset_macos_gets_its_own_arch_dmg():
+    """macOS USED TO GET None, on the reasoning that a .dmg has to be mounted
+    and dragged by hand so downloading it saved nothing.  What it saves is the
+    quarantine flag: ``com.apple.quarantine`` is set by whatever downloads a
+    file, so the browser handoff is what produced "can't be opened because
+    Apple cannot check it", the Privacy & Security trip and the password, on
+    every single release.  urlopen sets no such flag."""
+    arm = updater._pick_installer_asset(ASSETS, platform="darwin",
+                                        machine="arm64")
+    assert arm == {"name": "Pinball_Asset_Decryptor_v9.0.0_macOS_AppleSilicon.dmg",
+                   "url": "https://example.com/mac_arm.dmg",
+                   "size": 1, "sha256": None, "kind": "macos-dmg"}
+    intel = updater._pick_installer_asset(ASSETS, platform="darwin",
+                                          machine="x86_64")
+    assert intel["url"] == "https://example.com/mac_intel.dmg"
+
+
+def test_pick_installer_asset_macos_without_its_dmg():
+    """An Intel Mac must not be handed the Apple Silicon image just because
+    it is the only one that uploaded yet."""
+    arm_only = [a for a in ASSETS if "AppleSilicon" in a["name"]]
+    assert updater._pick_installer_asset(arm_only, platform="darwin",
+                                         machine="x86_64") is None
 
 
 def test_pick_installer_asset_no_windows_asset():
@@ -105,7 +125,11 @@ def test_pick_installer_asset_no_windows_asset():
 @pytest.mark.parametrize("platform,expected_url", [
     ("win32", "win.exe"),
     ("linux", "https://example.com/linux"),
-    ("darwin", None),
+    # Which of the two Mac images depends on the RUNNER's arch, since
+    # check_for_update takes no machine override — so this asserts only that
+    # a disk image was chosen.  Naming one would reintroduce exactly the
+    # host-dependence this test's docstring is about.
+    ("darwin", ".dmg"),
 ])
 def test_check_for_update_carries_installer(monkeypatch, platform,
                                             expected_url):
@@ -433,3 +457,120 @@ def test_a_failed_recheck_does_not_block_the_install(monkeypatch):
     _patch_check(monkeypatch, OSError("no route to host"))
     assert app._freshest_update("0.81.0", STALE) == ("0.81.0", STALE)
     assert any("Couldn't re-check" in m for m in app.window.lines)
+
+
+# ---------------------------------------------------------------------------
+# macOS: replacing the bundle in place, with no Gatekeeper prompt
+# ---------------------------------------------------------------------------
+
+class _FakeRun:
+    """Records argv and answers with a chosen return code."""
+
+    def __init__(self, fail_on=None, mount_dir=None, app_name="Test.app"):
+        self.calls = []
+        self._fail_on = fail_on
+        self._mount = mount_dir
+        self._app = app_name
+
+    def __call__(self, argv, **kw):
+        self.calls.append(list(argv))
+        rc = 1 if (self._fail_on and argv[0] == self._fail_on) else 0
+        if argv[0] == "hdiutil" and argv[1] == "attach" and rc == 0:
+            # A real mount makes the bundle appear at the mountpoint.
+            import os as _os
+            _os.makedirs(_os.path.join(argv[-2], self._app), exist_ok=True)
+        if argv[0] == "ditto" and rc == 0:
+            import os as _os
+            _os.makedirs(argv[2], exist_ok=True)
+        return _platform_result(rc)
+
+    def argv_for(self, tool):
+        return [c for c in self.calls if c and c[0] == tool]
+
+
+def _platform_result(rc):
+    class R:
+        returncode = rc
+        stderr = "boom" if rc else ""
+        stdout = ""
+    return R()
+
+
+def _bundle(tmp_path):
+    b = tmp_path / "Applications" / "Pinball Asset Decryptor.app"
+    b.mkdir(parents=True)
+    return b
+
+
+def test_macos_app_bundle_walks_up_from_the_executable(tmp_path):
+    """Never guesses /Applications: the user may keep the bundle anywhere,
+    and replacing the wrong copy is worse than declining to update."""
+    exe = tmp_path / "My App.app" / "Contents" / "MacOS" / "app"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert updater.macos_app_bundle(str(exe)) == str(tmp_path / "My App.app")
+    assert updater.macos_app_bundle(str(tmp_path / "plain" / "x")) is None
+
+
+def test_macos_install_mounts_copies_and_hands_over_the_swap(tmp_path):
+    b = _bundle(tmp_path)
+    run = _FakeRun()
+    started = []
+    ok, err = updater.install_update_macos(
+        tmp_path / "new.dmg", bundle=str(b), run=run,
+        popen=lambda argv, **kw: started.append(list(argv)), pid=4321)
+    assert ok and err == ""
+    assert run.argv_for("hdiutil")[0][1] == "attach"
+    assert run.argv_for("ditto"), "the bundle was never copied out"
+    # Detached, always — a mounted image left behind is a stuck volume.
+    assert any(c[1] == "detach" for c in run.argv_for("hdiutil"))
+    # The quarantine strip is belt and braces for an image that arrived some
+    # other way; a self-downloaded one was never flagged.
+    assert run.argv_for("xattr") and "com.apple.quarantine" in run.argv_for("xattr")[0]
+    assert started and started[0][0] == "/bin/sh"
+    script = Path(started[0][1]).read_text()
+    assert "kill -0 4321" in script          # waits for THIS process to go
+    assert "open " in script                 # and restarts the new one
+    assert str(b) in script
+
+
+def test_macos_install_swap_script_restores_the_old_app_if_the_move_fails(
+        tmp_path):
+    """The swap moves the old bundle aside first, so a failure at the last
+    step puts the working app back rather than leaving the user with none."""
+    b = _bundle(tmp_path)
+    started = []
+    updater.install_update_macos(
+        tmp_path / "new.dmg", bundle=str(b), run=_FakeRun(),
+        popen=lambda argv, **kw: started.append(list(argv)), pid=1)
+    script = Path(started[0][1]).read_text()
+    assert ".old" in script
+    move_back = [ln for ln in script.splitlines() if "exit 1" in ln]
+    assert any(".old" in ln for ln in move_back), script
+
+
+def test_macos_install_refuses_rather_than_half_doing_it(tmp_path):
+    """Each failure leaves the installed app untouched and says why — the
+    caller falls back to the browser flow."""
+    b = _bundle(tmp_path)
+    started = []
+    pop = lambda argv, **kw: started.append(1)          # noqa: E731
+
+    ok, err = updater.install_update_macos(
+        tmp_path / "n.dmg", bundle=str(b), run=_FakeRun(fail_on="hdiutil"),
+        popen=pop)
+    assert not ok and "mount" in err
+
+    # An image with no .app in it.
+    run = _FakeRun(app_name="readme.txt")
+    ok, err = updater.install_update_macos(
+        tmp_path / "n.dmg", bundle=str(b), run=run, popen=pop)
+    assert not ok and "no application" in err
+    assert any(c[1] == "detach" for c in run.argv_for("hdiutil"))
+
+    ok, err = updater.install_update_macos(
+        tmp_path / "n.dmg", bundle=None, run=_FakeRun(), popen=pop,
+        )
+    assert not ok
+
+    assert not started, "nothing may be launched on a failed install"

@@ -16,6 +16,7 @@ closes it.  Nothing is re-accepted or revoked.
 
 import tkinter as tk
 
+from .placement import centered_over
 from .theme import THEMES, dark_titlebar, platform_font
 
 
@@ -190,18 +191,11 @@ def show_disclaimer_dialog(parent, theme_name="light", review=False):
     dlg.update_idletasks()
     dw = max(dlg.winfo_reqwidth(), 640)
     dh = max(dlg.winfo_reqheight(), 540)
-    pw = parent.winfo_width()
-    ph = parent.winfo_height()
-    if pw <= 1 or ph <= 1:
-        # Parent not mapped yet — center on the screen instead.
-        sw = parent.winfo_screenwidth()
-        sh = parent.winfo_screenheight()
-        x = (sw - dw) // 2
-        y = (sh - dh) // 2
-    else:
-        x = parent.winfo_rootx() + (pw - dw) // 2
-        y = parent.winfo_rooty() + (ph - dh) // 2
-    dlg.geometry(f"{dw}x{dh}+{max(0, x)}+{max(0, y)}")
+    # placement.centered_over owns the rule, including the case this used to get
+    # wrong: max(0, x) is not a safety net on a multi-monitor machine, it is a
+    # teleport to the primary display whenever the app is on a screen left of it.
+    x, y = centered_over(parent, dw, dh)
+    dlg.geometry(f"{dw}x{dh}+{x}+{y}")
 
     # Modal: lift above the parent, ensure mapping has happened, then
     # grab focus.  On Windows pythonw a grab_set call against a

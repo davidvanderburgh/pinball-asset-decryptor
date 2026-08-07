@@ -20,6 +20,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ..core.admin import is_admin
+from .placement import centered_over
 from .theme import THEMES, dark_titlebar, platform_font
 
 
@@ -152,20 +153,13 @@ class DiagnoseCardDialog:
 
     def _center(self):
         dlg = self._dlg
-        self._parent.update_idletasks()
         dlg.update_idletasks()
         dw = max(dlg.winfo_reqwidth(), 700)
         dh = dlg.winfo_reqheight()
-        pw = self._parent.winfo_width()
-        ph = self._parent.winfo_height()
-        if pw <= 1 or ph <= 1:
-            sw = self._parent.winfo_screenwidth()
-            sh = self._parent.winfo_screenheight()
-            x, y = (sw - dw) // 2, (sh - dh) // 2
-        else:
-            x = self._parent.winfo_rootx() + (pw - dw) // 2
-            y = self._parent.winfo_rooty() + (ph - dh) // 2
-        dlg.geometry("%dx%d+%d+%d" % (dw, dh, max(0, x), max(0, y)))
+        # See placement.centered_over: the max(0, ...) this replaces was a
+        # single-screen assumption, not a safety net.
+        x, y = centered_over(self._parent, dw, dh)
+        dlg.geometry("%dx%d+%d+%d" % (dw, dh, x, y))
 
     # ------------------------------------------------------------------
     # Drive enumeration (same worker-thread pattern as FlashImageDialog).

@@ -17,6 +17,7 @@ grow ``HELP_CONTENT`` into a hook on ``Manufacturer`` like ``write_intro``.
 import tkinter as tk
 from tkinter import ttk
 
+from .placement import centered_over
 from .theme import THEMES, dark_titlebar, platform_font
 
 
@@ -968,15 +969,16 @@ class TabHelpWindow:
         dlg.bind("<Escape>", lambda _e: self.close())
         dlg.protocol("WM_DELETE_WINDOW", self.close)
         dlg.geometry(f"{_WIDTH}x{_HEIGHT}")
-        # Centre over the parent window, clamped to the screen — first open
-        # only; a refresh/re-show keeps wherever the user dragged it.
+        # Centre over the parent window — first open only; a refresh/re-show
+        # keeps wherever the user dragged it.  placement.centered_over owns the
+        # multi-monitor rule: this used to clamp against winfo_screenwidth(),
+        # which is the PRIMARY display, so on a two-screen Mac with the app on
+        # the second one the window was dragged onto the other monitor. It read
+        # as "the Tips window flashes up and closes".
         dlg.update_idletasks()
         try:
-            pw = self._parent.winfo_toplevel()
-            x = pw.winfo_rootx() + (pw.winfo_width() - _WIDTH) // 2
-            y = pw.winfo_rooty() + (pw.winfo_height() - _HEIGHT) // 2
-            x = max(0, min(x, dlg.winfo_screenwidth() - _WIDTH))
-            y = max(0, min(y, dlg.winfo_screenheight() - _HEIGHT))
+            x, y = centered_over(self._parent.winfo_toplevel(),
+                                 _WIDTH, _HEIGHT)
             dlg.geometry(f"+{x}+{y}")
         except tk.TclError:
             pass

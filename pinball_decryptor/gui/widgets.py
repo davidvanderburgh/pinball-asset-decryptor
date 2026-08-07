@@ -3,42 +3,18 @@
 import sys
 import tkinter as tk
 
+from . import placement
 from .theme import THEMES, platform_font
 
 
 _SANS_FONT, _MONO_FONT = platform_font()
 
 
-def _monitor_workarea(x, y, fallback_w, fallback_h):
-    """Return ``(left, top, right, bottom)`` of the work area — the screen
-    minus the taskbar — of the monitor containing point ``(x, y)``.
-
-    Used to keep pop-ups (tooltips) on-screen.  Falls back to the full primary
-    screen (``0, 0, fallback_w, fallback_h``) off Windows or on any failure.
-    """
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-
-            class _MONITORINFO(ctypes.Structure):
-                _fields_ = [("cbSize", wintypes.DWORD),
-                            ("rcMonitor", wintypes.RECT),
-                            ("rcWork", wintypes.RECT),
-                            ("dwFlags", wintypes.DWORD)]
-
-            MONITOR_DEFAULTTONEAREST = 2
-            hmon = user32.MonitorFromPoint(
-                wintypes.POINT(int(x), int(y)), MONITOR_DEFAULTTONEAREST)
-            mi = _MONITORINFO()
-            mi.cbSize = ctypes.sizeof(_MONITORINFO)
-            if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-                r = mi.rcWork
-                return (r.left, r.top, r.right, r.bottom)
-        except Exception:
-            pass
-    return (0, 0, fallback_w, fallback_h)
+#: Kept as a module-level name because the tooltip below has always called it
+#: that.  It now lives in placement.py, with the dialog and dropdown rules that
+#: need the same answer — this was the only correct multi-monitor lookup in the
+#: app, and every dialog rolled its own single-screen version beside it.
+_monitor_workarea = placement.monitor_workarea
 
 
 class _Tooltip:
@@ -127,6 +103,55 @@ class _Tooltip:
             self._tip = None
 
 
+def draw_folder_icon(cv, size):
+    """Draw a folder silhouette on canvas *cv*, white, sized to *size*.
+
+    THE GLYPH WAS THE BUG.  The Project button typed U+1F5C0 (🗀) off Windows,
+    and macOS's system font has no glyph for it — so the button rendered as the
+    empty box a missing glyph draws, reported as "the project icon is missing".
+    Every other header icon (⌂, ⚙, ?) happens to exist in that font, which is
+    why it was the only one broken.
+
+    Reaching for a different character is the same gamble again: what a font
+    contains is not knowable from here, and the next platform gets to lose it
+    too.  Six points are not a gamble.  Colour emoji is not an option either —
+    Tk 8.6 renders none, which is why these icons are canvas discs at all.
+    """
+    s = size / 24.0
+    pts = [(5, 18), (5, 7), (10.5, 7), (12.5, 9), (19, 9), (19, 18)]
+    cv.create_polygon([c * s for p in pts for c in p],
+                      fill="#ffffff", outline="")
+
+
+def flat_button(parent, text, bg, fg, active_bg, command,
+                padx=10, pady=2):
+    """A flat coloured button whose colours survive every platform.
+
+    ``tk.Button`` is the obvious widget and it is wrong on macOS: Aqua draws
+    buttons natively and IGNORES ``bg`` / ``activebackground`` outright, so the
+    update banner's blue buttons came out as default grey slabs sitting on a
+    dark blue strip ("the download and close buttons in the update banner are
+    unstyled").  A Label honours its background everywhere, so on macOS the
+    button becomes a Label carrying the two bindings a Button would have given
+    for free.
+
+    The returned widget answers ``pack`` / ``pack_forget`` /
+    ``winfo_ismapped`` / ``configure(text=…)`` either way, which is the whole
+    surface the banner uses.
+    """
+    if sys.platform != "darwin":
+        return tk.Button(parent, text=text, bg=bg, fg=fg,
+                         activebackground=active_bg, activeforeground=fg,
+                         relief="flat", padx=padx, pady=pady, borderwidth=0,
+                         cursor="hand2", command=command)
+    lbl = tk.Label(parent, text=text, bg=bg, fg=fg, padx=padx, pady=pady,
+                   cursor="hand2")
+    lbl.bind("<Button-1>", lambda _e: command())
+    lbl.bind("<Enter>", lambda _e: lbl.configure(bg=active_bg))
+    lbl.bind("<Leave>", lambda _e: lbl.configure(bg=bg))
+    return lbl
+
+
 def center_over(parent, win, min_w=0, min_h=0):
     """Center *win* over *parent*'s window — the app-wide modal-positioning
     rule (David: every modal appears centered over the app).  Same math the
@@ -137,20 +162,20 @@ def center_over(parent, win, min_w=0, min_h=0):
 
     With no minimums the geometry sets POSITION only — pinning a WxH would
     stop Tk auto-resizing a dialog whose content later changes (e.g. the
-    New-project structure preview)."""
+    New-project structure preview).
+
+    THE CLAMP MOVED OUT to placement.centered_over, and it changed meaning on
+    the way: this used to finish with ``max(0, x)``, which is only correct on a
+    single-screen machine.  Root coordinates are NEGATIVE on a display to the
+    left of the primary one, so on a multi-monitor setup that clamp did not
+    rescue a stray dialog, it dragged a correctly-placed one onto the wrong
+    monitor."""
     try:
-        parent.update_idletasks()
         win.update_idletasks()
         dw = max(win.winfo_reqwidth(), min_w)
         dh = max(win.winfo_reqheight(), min_h)
-        pw, ph = parent.winfo_width(), parent.winfo_height()
-        if pw <= 1 or ph <= 1:
-            sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-            x, y = (sw - dw) // 2, (sh - dh) // 2
-        else:
-            x = parent.winfo_rootx() + (pw - dw) // 2
-            y = parent.winfo_rooty() + (ph - dh) // 2
-        pos = "+%d+%d" % (max(0, x), max(0, y))
+        x, y = placement.centered_over(parent, dw, dh)
+        pos = "+%d+%d" % (x, y)
         if min_w or min_h:
             win.geometry("%dx%d%s" % (dw, dh, pos))
         else:

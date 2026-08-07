@@ -518,6 +518,15 @@ into Windows, then run **Install Prerequisites** again.
 4. The app now launches and remembers the override; subsequent launches
    open without prompting.
 
+**You only do this once, for the first install.**  From v0.115.0 the app
+updates itself: the update banner's **Install update** button downloads
+the disk image, replaces the app in place and restarts it, with no
+security prompt at any point.  That is not a bypass — the "could not
+verify" wall comes from `com.apple.quarantine`, which is set by whatever
+*downloads* a file.  A browser sets it; the app fetching its own update
+does not, so there is nothing to override.  Updating by downloading the
+DMG in a browser still goes through step 3 above.
+
 **If the app still bounces in the Dock and never appears** after the
 override, the quarantine attribute didn't get cleared — strip it
 manually in Terminal:

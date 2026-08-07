@@ -23,6 +23,7 @@ Linux
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import urllib.request
 
@@ -110,15 +111,35 @@ def _pick_installer_asset(assets, platform=None, machine=None):
         v0.85 through v0.88.  Fetching the file ourselves needs no
         browser, so there is nothing left to fail.
 
-    macOS keeps the browser flow (``None``): its ``open`` is not affected
-    by the bundle environment, and a .dmg still has to be mounted and
-    dragged by hand, so downloading it for the user saves nothing.
+    ``macos-dmg``
+        The disk image.  Mounted, the bundle inside it copied over the
+        installed one, and the app relaunched — see
+        :func:`install_update_macos`.
+
+        THIS USED TO RETURN ``None``, on the reasoning that macOS ``open``
+        works fine from a bundle and "a .dmg still has to be mounted and
+        dragged by hand, so downloading it for the user saves nothing".
+        The second half is what was wrong, and it is the same point the
+        Windows path is built on: ``com.apple.quarantine`` is applied by
+        the DOWNLOADING application.  A browser sets it, ``urlopen`` does
+        not.  So the browser handoff is precisely what produces "can't be
+        opened because Apple cannot check it", the trip to Privacy &
+        Security and the password — every release, forever.  Fetching the
+        file ourselves removes the flag's cause rather than working around
+        its effect, exactly as self-downloading dodges SmartScreen on
+        Windows.  Mounting the image is a two-line job the app can do.
     """
     plat = platform if platform is not None else sys.platform
     if plat == "win32":
         suffix, kind = _WINDOWS_ASSET_SUFFIX, "windows-installer"
     elif plat.startswith("linux"):
         suffix, kind = _LINUX_ASSET_SUFFIX, "appimage"
+    elif plat == "darwin":
+        import platform as _plat_mod
+        mach = (machine if machine is not None
+                else _plat_mod.machine()).lower()
+        suffix = _MAC_ARM_SUFFIX if mach == "arm64" else _MAC_INTEL_SUFFIX
+        kind = "macos-dmg"
     else:
         return None
     matches = [a for a in assets or []
@@ -274,3 +295,114 @@ def launch_installer_windows(path, shell_execute=None):
     ret = shell_execute(None, "open", str(path), INSTALLER_ARGS, None, 1)
     # Per the ShellExecute contract, values > 32 mean success.
     return int(ret) > 32
+
+
+def macos_app_bundle(start=None):
+    """The ``.app`` this process is running from, or None.
+
+    Walks up from the executable rather than guessing ``/Applications``: the
+    user may have put the bundle anywhere, and replacing the wrong copy is a
+    far worse outcome than declining to update.
+    """
+    p = os.path.abspath(start or sys.executable)
+    while True:
+        if p.endswith(".app"):
+            return p
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+
+
+#: Swaps the bundle once this process has exited, then starts the new one.
+#: A SEPARATE PROCESS is not a style choice: a running app cannot delete the
+#: bundle it is executing from, so something has to outlive it.  `kill -0`
+#: polls for the pid rather than sleeping a guessed interval; the script
+#: removes itself last so nothing is left in the temp directory.
+_MAC_SWAP_SCRIPT = """#!/bin/sh
+while kill -0 %(pid)d 2>/dev/null; do sleep 0.3; done
+rm -rf %(old)s.old
+mv %(old)s %(old)s.old || exit 1
+mv %(new)s %(old)s || { mv %(old)s.old %(old)s; exit 1; }
+rm -rf %(old)s.old
+open %(old)s
+rm -f "$0"
+"""
+
+
+def install_update_macos(dmg_path, bundle=None, run=None, popen=None,
+                         pid=None):
+    """Replace the running ``.app`` with the one inside *dmg_path*.
+
+    Returns ``(True, "")`` once the swap has been handed to a detached helper,
+    or ``(False, reason)`` with nothing changed.
+
+    NO GATEKEEPER PROMPT COMES OUT OF THIS, which is the entire point.  The
+    quarantine flag that produces "can't be opened because Apple cannot check
+    it for malicious software" is set by whatever downloads a file; the app's
+    own ``urlopen`` does not set it, so the bundle copied out of this image
+    was never quarantined.  The ``xattr -dr`` below is belt and braces for an
+    image that arrived some other way.
+
+    The swap runs after this process exits (see ``_MAC_SWAP_SCRIPT``) and moves
+    the old bundle aside before moving the new one in, so a failure at the last
+    step puts the working app back rather than leaving no app at all.
+    """
+    import shutil
+    import stat
+    import tempfile
+
+    run = run or subprocess.run
+    popen = popen or subprocess.Popen
+    bundle = bundle or macos_app_bundle()
+    if not bundle:
+        return False, "could not work out which application bundle to replace"
+    parent = os.path.dirname(bundle)
+    if not os.access(parent, os.W_OK):
+        # The one case that genuinely needs a password.  Say so and let the
+        # caller fall back to the browser rather than half-doing it.
+        return False, "%s is not writable by you" % parent
+
+    mnt = tempfile.mkdtemp(prefix="pad-update-")
+    staged = os.path.join(parent, ".%s.new" % os.path.basename(bundle))
+    try:
+        r = run(["hdiutil", "attach", "-nobrowse", "-readonly",
+                 "-mountpoint", mnt, str(dmg_path)],
+                capture_output=True, text=True)
+        if getattr(r, "returncode", 1) != 0:
+            return False, ("could not mount the disk image: %s"
+                           % (getattr(r, "stderr", "") or "").strip())
+        try:
+            apps = sorted(n for n in os.listdir(mnt) if n.endswith(".app"))
+            if not apps:
+                return False, "the disk image contains no application"
+            shutil.rmtree(staged, ignore_errors=True)
+            r = run(["ditto", os.path.join(mnt, apps[0]), staged],
+                    capture_output=True, text=True)
+            if getattr(r, "returncode", 1) != 0:
+                shutil.rmtree(staged, ignore_errors=True)
+                return False, ("could not copy the new version out of the "
+                               "image: %s"
+                               % (getattr(r, "stderr", "") or "").strip())
+        finally:
+            run(["hdiutil", "detach", mnt, "-quiet"],
+                capture_output=True, text=True)
+    finally:
+        shutil.rmtree(mnt, ignore_errors=True)
+
+    run(["xattr", "-dr", "com.apple.quarantine", staged],
+        capture_output=True, text=True)
+
+    fd, script = tempfile.mkstemp(prefix="pad-swap-", suffix=".sh")
+    with os.fdopen(fd, "w", newline="\n") as f:
+        f.write(_MAC_SWAP_SCRIPT % {
+            "pid": pid if pid is not None else os.getpid(),
+            "old": _shquote(bundle), "new": _shquote(staged)})
+    os.chmod(script, os.stat(script).st_mode | stat.S_IXUSR)
+    popen(["/bin/sh", script], start_new_session=True)
+    return True, ""
+
+
+def _shquote(path):
+    """Single-quote *path* for /bin/sh — bundle paths contain spaces."""
+    return "'" + str(path).replace("'", "'\\''") + "'"

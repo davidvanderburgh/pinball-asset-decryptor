@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import tkinter as tk
@@ -18,8 +19,49 @@ from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
 from .core.prereqs import check_prerequisite
 from .core.registry import all_manufacturers, get_manufacturer, load_plugins
 from .core.updater import (check_for_update, download_installer,
-                           launch_installer_windows)
+                           install_update_macos, launch_installer_windows)
 from .gui.main_window import MainWindow
+
+
+#: Pixels per point on a 96-dpi display, which is what Windows Tk uses and
+#: therefore what every hardcoded point size in this GUI was chosen against.
+_WINDOWS_TK_SCALING = 96.0 / 72.0
+
+
+def _match_windows_text_size(root):
+    """Make a point size mean the same thing on macOS as it does on Windows.
+
+    THE GUI SIZES ITS TEXT IN POINTS — ``font=(_SANS_FONT, 9)`` appears
+    hundreds of times — and Tk converts points to pixels with its ``scaling``
+    factor, which it takes from the display.  Windows reports 96 dpi, so a
+    9-point font is 12 pixels; macOS reports 72, so the same 9 points is 9
+    pixels.  Every label in the app is therefore about a quarter smaller on a
+    Mac than the layout was drawn for, which is what "the font sizes are
+    inconsistent with the Windows releases" is.
+
+    Setting the factor is the only central fix available.  The alternative is
+    editing several hundred size literals, which trades one platform's
+    inconsistency for a permanent maintenance tax and would still leave the
+    next platform wrong.
+
+    NOT APPLIED ON WINDOWS OR LINUX: both already resolve points against a real
+    display dpi, and overriding that would fight a user's own display scaling.
+    ``PAD_TK_SCALING`` overrides the number for anyone whose display makes this
+    the wrong call.
+    """
+    override = (os.environ.get("PAD_TK_SCALING") or "").strip()
+    if override:
+        try:
+            root.tk.call("tk", "scaling", float(override))
+        except Exception:                               # noqa: BLE001
+            pass
+        return
+    if sys.platform != "darwin":
+        return
+    try:
+        root.tk.call("tk", "scaling", _WINDOWS_TK_SCALING)
+    except Exception:                                   # noqa: BLE001
+        pass            # a wrong text size is not a reason to fail to start
 
 
 def _resolve_startup_manufacturer(manufacturers, settings):
@@ -51,6 +93,7 @@ class App:
                 "No manufacturer plugins registered.  Check the install.")
 
         self.root = tk.Tk()
+        _match_windows_text_size(self.root)
         self.msg_queue = queue.Queue()
         self.pipeline = None
         self._active_mode = "extract"
@@ -3198,8 +3241,43 @@ class App:
         """Main-thread continuation once the update file is on disk."""
         if kind == "appimage":
             self._finish_appimage_update(dialog, path, version)
+        elif kind == "macos-dmg":
+            self._finish_macos_update(dialog, path, version)
         else:
             self._launch_downloaded_installer(dialog, path, version)
+
+    def _finish_macos_update(self, dialog, path, version):
+        """macOS: swap the bundle and relaunch, with no Gatekeeper prompt.
+
+        THE POINT IS THE PROMPT THAT DOESN'T APPEAR.  Downloading the .dmg in
+        a browser marks it with ``com.apple.quarantine``, and the app is not
+        notarised, so every single release cost the user the same routine:
+        open the image, drag to Applications, double-click, be told it "can't
+        be opened because Apple cannot check it for malicious software", go to
+        System Settings, Privacy & Security, Open Anyway, and type a password.
+        Nothing about that is a security decision the user is making — they
+        already trust the app, they are running it.  The flag is set by the
+        DOWNLOADER, so fetching the image ourselves means it is never set.
+
+        Falls back to the browser when the bundle can't be replaced in place,
+        which is the one case that genuinely needs a password.
+        """
+        dialog.close()
+        ok, err = install_update_macos(path)
+        if not ok:
+            self.window.append_log(
+                f"Downloaded v{version}, but couldn't install it over the "
+                f"running app — {err}.", "warning")
+            messagebox.showinfo(
+                "Finish the update by hand",
+                f"v{version} downloaded to:\n\n{path}\n\n"
+                f"It couldn't be installed automatically ({err}), so open the "
+                "disk image and drag the app into Applications as usual.")
+            desktop.open_path(os.path.dirname(path))
+            return
+        self.window.append_log(
+            f"Installing v{version} and restarting…", "success")
+        self._on_close()
 
     def _finish_appimage_update(self, dialog, path, version):
         """Linux: the download IS the new app — make it runnable and offer

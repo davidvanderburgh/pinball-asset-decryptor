@@ -37,7 +37,9 @@ _SANS_FONT, _MONO_FONT = platform_font()
 
 # _Tooltip used to live here; moved to gui/widgets.py so picker.py can
 # also use it without importing main_window (circular).
-from .widgets import _Tooltip, center_over  # noqa: E402
+from . import placement  # noqa: E402
+from .widgets import (_Tooltip, center_over, draw_folder_icon,  # noqa: E402
+                      flat_button)
 
 
 # Hover-tooltip text for the generic per-type Extract checkboxes
@@ -1878,13 +1880,15 @@ class MainWindow:
         # (where home hides): Open/Recent + auto-load jump straight into a
         # project without picking a manufacturer first.
         # U+E8B7 = Segoe MDL2 "Folder" (an escape, not a literal, so the
-        # private-use char cannot be dropped by an editor); text fallback
-        # elsewhere, same pattern as the home button glyph.
-        project_glyph = ("\ue8b7" if sys.platform == "win32"
-                         else "\U0001f5c0")
+        # private-use char cannot be dropped by an editor).  Off Windows the
+        # folder is DRAWN rather than typed: the U+1F5C0 that used to be here
+        # is absent from macOS's system font, so the button rendered as an
+        # empty missing-glyph box.  See widgets.draw_folder_icon.
+        win_icons = sys.platform == "win32"
         self._project_btn = self._make_round_icon(
-            top, project_glyph, "#2980b9", "#4aa3df",
-            "Project", self._open_project_menu)
+            top, "\ue8b7" if win_icons else "", "#2980b9", "#4aa3df",
+            "Project", self._open_project_menu,
+            draw=None if win_icons else draw_folder_icon)
         # before=title puts it ahead of the title in the LEFT pack order;
         # show_mfr_view packs the home button before=this, giving
         # [home] [project] [title] in the working view and [project] [title]
@@ -11608,7 +11612,8 @@ class MainWindow:
         self._refresh_round_icon(cv)
 
     def _make_round_icon(self, parent, glyph, fill, hover, tooltip_text,
-                         command, size=24, font=None, tooltip_place="below"):
+                         command, size=24, font=None, tooltip_place="below",
+                         draw=None):
         """A round colorful icon button — colored circle, white glyph — the
         app's icon-button look (David: round colorful icons instead of
         square glyph buttons; drawn on a Canvas because Tk 8.6 renders no
@@ -11639,8 +11644,13 @@ class MainWindow:
             # size = pixels).
             font = (("Segoe MDL2 Assets", -13) if sys.platform == "win32"
                     else (_SANS_FONT, -13))
-        cv.create_text(size // 2, size // 2, text=glyph, fill="#ffffff",
-                       font=font)
+        if draw is not None:
+            # DRAWN, not typed — for an icon whose character does not exist in
+            # every platform's system font.  See widgets.draw_folder_icon.
+            draw(cv, size)
+        else:
+            cv.create_text(size // 2, size // 2, text=glyph, fill="#ffffff",
+                           font=font)
 
         def _set_fill(color):
             cv.icon_current = color
@@ -16782,12 +16792,16 @@ class MainWindow:
         self._post_header_menu(self._build_project_menu(), self._project_btn)
 
     def _post_header_menu(self, menu, btn):
+        # placement.dropdown_position owns the arithmetic, and it is not as
+        # simple as it looks: this used to read menu.winfo_reqwidth() off a
+        # Menu that had never been laid out, which answers 1, so the menu was
+        # posted at the button's right edge and opened rightwards instead of
+        # tucking under it.  On macOS it is worse - a tk.Menu there is a native
+        # NSMenu whose requested width is not a Tk value at all.
         try:
             self.root.update_idletasks()
-            x = (btn.winfo_rootx() + btn.winfo_width()
-                 - menu.winfo_reqwidth())
-            y = btn.winfo_rooty() + btn.winfo_height()
-            menu.tk_popup(max(0, x), y)
+            x, y = placement.dropdown_position(menu, btn)
+            menu.tk_popup(x, y)
         finally:
             menu.grab_release()
 
@@ -18347,35 +18361,29 @@ class MainWindow:
         # but packed only by show_update_banner when the release carries
         # this platform's asset and app.py wired the flow (jim-beam).
         # Its verb is set there too — Linux installs nothing.
-        self._update_install_btn = tk.Button(
-            self._update_banner, text="Install update",
-            bg="#3794ff", fg="#ffffff",
-            activebackground="#5fa5ff", activeforeground="#ffffff",
-            relief="flat", padx=10, pady=2, borderwidth=0,
-            cursor="hand2",
+        # flat_button, not tk.Button: Aqua draws buttons natively and ignores
+        # bg/activebackground, so on macOS all three of these came out as
+        # default grey slabs on the blue strip.  See widgets.flat_button.
+        self._update_install_btn = flat_button(
+            self._update_banner, "Install update",
+            bg="#3794ff", fg="#ffffff", active_bg="#5fa5ff",
             command=self._install_update_clicked,
         )
         # Download button — opens the release page in the browser.
         # Relabelled "Release notes" when the Install button is shown.
         # tk.Button (not ttk) so its bg color sticks; ttk's themed
         # blue would clash with the banner background on light mode.
-        self._update_download_btn = tk.Button(
-            self._update_banner, text="Download",
-            bg="#3794ff", fg="#ffffff",
-            activebackground="#5fa5ff", activeforeground="#ffffff",
-            relief="flat", padx=10, pady=2, borderwidth=0,
-            cursor="hand2",
+        self._update_download_btn = flat_button(
+            self._update_banner, "Download",
+            bg="#3794ff", fg="#ffffff", active_bg="#5fa5ff",
             command=self._open_update_url,
         )
         self._update_download_btn.pack(side=tk.LEFT, padx=4, pady=4)
         # Dismiss × — closes the banner for this session.
-        tk.Button(
-            self._update_banner, text="✕",
-            bg="#1e4a8a", fg="#ffffff",
-            activebackground="#3a5a8a", activeforeground="#ffffff",
-            relief="flat", padx=6, pady=2, borderwidth=0,
-            cursor="hand2",
-            command=self._dismiss_update_banner,
+        flat_button(
+            self._update_banner, "✕",
+            bg="#1e4a8a", fg="#ffffff", active_bg="#3a5a8a",
+            command=self._dismiss_update_banner, padx=6,
         ).pack(side=tk.LEFT, padx=(0, 6), pady=4)
         # The URL to open when the Download button is clicked.
         # Populated by show_update_banner.

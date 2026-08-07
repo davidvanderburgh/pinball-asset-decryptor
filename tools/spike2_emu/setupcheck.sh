@@ -25,6 +25,14 @@
 # OUTPUT: key=value lines, one per fact, parsed by the Emulate tab.
 #
 #   qemu|armgcc|debugfs|fuse   1 = the tool is on PATH, 0 = it is not
+#   need                       the packages that would supply the missing
+#                              ones, in apt's spelling
+#   nocand                     those of `need` that apt CANNOT install on this
+#                              machine - see below
+#   universe                   1 = nothing to say. 0 = this is Ubuntu, a
+#                              needed package is unavailable, and the
+#                              `universe` component that carries it is
+#                              switched off in apt's sources
 #   binfmt                     1 = a 32-bit ARM handler is registered and
 #                              enabled, disabled = registered but switched
 #                              off, 0 = the kernel has none
@@ -43,10 +51,60 @@
 
 _have() { command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0; }
 
-echo "qemu=$(_have qemu-arm-static)"
-echo "armgcc=$(_have arm-linux-gnueabihf-gcc)"
-echo "debugfs=$(_have debugfs)"
-echo "fuse=$(_have fusermount3)"
+#: WHAT THE EMULATOR NEEDS BEYOND THE RIG: fact key, the tool that IS the
+#: fact, and the package that is only how apt spells it. THE RIG'S ONE COPY -
+#: setupfix.sh installs what this reports as missing rather than keeping a
+#: second list, because two lists in two scripts is exactly how the thing that
+#: is explained and the thing that is installed stop being the same four.
+PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static
+armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf
+debugfs:debugfs:e2fsprogs
+fuse:fusermount3:fuse3"
+
+need=
+for _t in $PAD_SETUP_TOOLS; do
+    _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}; _pkg=${_rest#*:}
+    echo "$_key=$(_have "$_tool")"
+    command -v "$_tool" >/dev/null 2>&1 || need="$need $_pkg"
+done
+echo "need=${need# }"
+
+#: CAN apt actually install them? "Missing" and "installable" are two
+#: different facts, and only asking the first is what put a tester in front of
+#:
+#:     E: Package 'qemu-user-static' has no installation candidate
+#:
+#: after the tab had told him a button would install it. That message is not a
+#: download that failed: it is apt saying it knows the NAME and has no VERSION
+#: - which on Ubuntu means the `universe` component that carries
+#: qemu-user-static is switched off. `main` packages beside it in the same
+#: command resolve fine, which is why exactly one of his four was named.
+#:
+#: Asked only about what is already missing, so a healthy machine pays nothing.
+nocand=
+if [ -n "$need" ] && command -v apt-cache >/dev/null 2>&1; then
+    for _pkg in $need; do
+        apt-cache policy -- "$_pkg" 2>/dev/null |
+            sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p' |
+            grep -qv '^(none)$' || nocand="$nocand $_pkg"
+    done
+fi
+echo "nocand=${nocand# }"
+
+#: ...and if that is why, say so, because it is repairable. Ubuntu only: on
+#: Debian qemu-user-static is in `main` and an unavailable package means
+#: something else entirely, which a wrong-but-confident answer would hide.
+#: apt-get indextargets is apt's own view of what is configured, so a country
+#: mirror, ports.ubuntu.com and a deb822 ubuntu.sources all answer correctly
+#: where grepping a file for a hostname would not.
+if [ -n "$nocand" ] &&
+   grep -qs '^ID=ubuntu' /etc/os-release &&
+   ! apt-get indextargets --format '$(COMPONENT)' 2>/dev/null |
+       grep -qx universe; then
+    echo "universe=0"
+else
+    echo "universe=1"
+fi
 
 entry=$(_pad_binfmt_arm)
 if [ -z "$entry" ]; then

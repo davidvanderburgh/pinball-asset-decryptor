@@ -727,14 +727,20 @@ def _rig_text(name):
 
 
 def test_the_repair_installs_exactly_the_packages_the_tab_names():
-    """The tab explains four packages and setupfix.sh installs them.  Two
-    lists in two languages is precisely how they drift."""
+    """The tab explains four packages and the rig installs them.  Two lists in
+    two languages is precisely how they drift.
+
+    The rig's copy lives in setupcheck.sh, which probes the tool and knows the
+    package that carries it; setupfix.sh installs whatever that reports as
+    missing rather than keeping a third list."""
+    check = _rig_text("setupcheck.sh")
     fix = _rig_text("setupfix.sh")
     for key, pkg, _why in emulate_tab._SETUP_TOOLS:
         assert 'sudo' not in pkg
-        assert pkg in fix, "%s (%s) is explained but never installed" % (pkg,
-                                                                         key)
-        assert '_get "$facts" %s' % key in fix
+        assert pkg in check, "%s (%s) is explained but never installed" % (
+            pkg, key)
+        assert "%s:" % key in check
+    assert '_get "$facts" need' in fix
 
 
 def test_the_repair_does_not_hide_apt_failure_behind_a_pipe():
@@ -744,6 +750,85 @@ def test_the_repair_does_not_hide_apt_failure_behind_a_pipe():
     for line in fix.splitlines():
         if "apt-get install" in line or "apt-get update" in line:
             assert "| sed" not in line, line
+
+
+# ----------------------------------------------------------------------
+# "Missing" and "installable" are two different facts, and the tab used to
+# know only the first.  A tester on 2026-08-07 was told qemu-user-static was
+# missing, pressed the button that installs it, and got
+#
+#     E: Package 'qemu-user-static' has no installation candidate
+#
+# twice - because Ubuntu publishes it in `universe` and his WSL had that
+# component switched off.  gcc-arm-linux-gnueabihf, named in the same apt
+# command and sitting in `main`, was installable and was NOT installed either:
+# `apt-get install a b` is all or nothing.
+# ----------------------------------------------------------------------
+
+def test_a_package_apt_cannot_install_is_not_just_called_missing():
+    text = setup_notice(_facts(qemu="0", armgcc="0", binfmt="0",
+                               nocand="qemu-user-static", universe="0"),
+                        can_fix=True)
+    assert "universe" in text
+    assert "switched off" in text
+    # and the button must promise the extra step it is now going to take
+    assert "turns universe back on" in text
+
+
+def test_an_unavailable_package_with_no_known_cause_still_says_so():
+    """Not every "no installation candidate" is universe - an out-of-support
+    distro does it too.  Naming a cause we have not established would be a
+    guess, but saying nothing sends the user back to the same button."""
+    text = setup_notice(_facts(qemu="0", binfmt="1",
+                               nocand="qemu-user-static", universe="1"),
+                        can_fix=True)
+    assert "do not offer it" in text
+    assert "universe" not in text
+
+
+def test_the_printed_commands_lead_with_the_one_that_makes_the_rest_work():
+    """On Linux the app can only advise, and `sudo apt install
+    qemu-user-static` is advice that FAILS on this machine until universe is
+    on.  Order is the whole content here."""
+    text = setup_notice(_facts(qemu="0", armgcc="0", binfmt="0",
+                               nocand="qemu-user-static", universe="0"),
+                        can_fix=False)
+    assert text.index("add-apt-repository universe") < text.index("apt install")
+
+
+def test_a_rig_that_never_heard_of_nocand_accuses_nobody():
+    """The fact is new.  An older setupcheck.sh, or a probe that timed out,
+    must read as "nothing known against them" and not as "none of them can be
+    installed"."""
+    assert emulate_tab.setup_unavailable(_facts(qemu="0")) == []
+    assert emulate_tab.setup_unavailable(None) == []
+    assert "cannot install" not in setup_notice(_facts(qemu="0", binfmt="0"),
+                                                can_fix=True)
+
+
+def test_the_repair_installs_one_package_at_a_time():
+    """`apt-get install a b` is all or nothing: one package this machine's
+    sources do not carry means NONE of the others get installed, which is how
+    a user missing four things ends up with four things still missing."""
+    fix = _rig_text("setupfix.sh")
+    for line in fix.splitlines():
+        if line.lstrip().startswith("#"):
+            continue                    # the comment explaining exactly this
+        if "apt-get install" in line:
+            assert '"$pkg"' in line, line
+            assert "$pkgs" not in line, line
+
+
+def test_the_repair_only_edits_the_distro_s_own_sources():
+    """Appending `universe` to a PPA line turns a working repository into a
+    404 on every apt-get update.  The in-place edit is allowed exactly two
+    files, and within them only ubuntu.com archive lines."""
+    fix = _rig_text("setupfix.sh")
+    for line in fix.splitlines():
+        if line.strip().startswith("for f in"):
+            assert line.count("/etc/apt/") == 2, line
+            assert "sources.list.d/*" not in line, line
+    assert r"ubuntu\.com" in fix
 
 
 def test_the_probe_reuses_the_rig_s_own_binfmt_detection():

@@ -333,6 +333,17 @@ def setup_summary(facts):
     return missing, facts.get("binfmt", "1")
 
 
+def setup_unavailable(facts):
+    """The missing packages apt cannot install on this machine at all.
+
+    ``setupcheck.sh``'s ``nocand``, which is a fact about the machine's
+    package SOURCES rather than about the machine's tools.  Older rigs do not
+    emit it, and an absent key means "nothing known against them" - never
+    "all of them", which would put a wrong accusation on a working PC.
+    """
+    return (facts or {}).get("nocand", "").split()
+
+
 def setup_ok(facts):
     """Can this machine emulate?  Unknown counts as yes - see setup_state."""
     missing, binfmt = setup_summary(facts)
@@ -366,13 +377,34 @@ def setup_notice(facts, can_fix):
     if missing:
         parts.append("Missing:\n" + "\n".join(
             "     •  %s — %s" % (pkg, why) for pkg, why in missing))
+    # NOT INSTALLABLE IS NOT THE SAME AS MISSING, and saying only the first is
+    # what sent a tester to press a button that could never work: the tab
+    # named qemu-user-static, he pressed “Set up emulator…”, and apt answered
+    # "has no installation candidate" because Ubuntu's `universe` component -
+    # which is where that package lives - was switched off in his WSL.
+    unavailable = setup_unavailable(facts)
+    if unavailable:
+        named = ", ".join(unavailable)
+        if facts.get("universe") == "0":
+            parts.append(
+                "WSL cannot install %s as it stands: Ubuntu publishes it in "
+                "the “universe” component, and this distro has that switched "
+                "off." % named)
+        else:
+            parts.append(
+                "WSL cannot install %s: the package sources this Linux is set "
+                "up with do not offer it." % named)
     if can_fix:
         parts.append(
-            "“Set up emulator…” installs those in WSL and registers the "
+            "“Set up emulator…” %sinstalls those in WSL and registers the "
             "handler. It lists exactly what it will change first, and needs "
-            "no password.")
+            "no password."
+            % ("turns universe back on, "
+               if facts.get("universe") == "0" else ""))
     else:
         cmds = []
+        if facts.get("universe") == "0":
+            cmds.append("sudo add-apt-repository universe")
         if missing:
             cmds.append("sudo apt install " + " ".join(p for p, _ in missing))
         if binfmt != "1":
@@ -864,6 +896,14 @@ class EmulatePanel:
         facts = self._setup or {}
         missing, binfmt = setup_summary(facts)
         steps = []
+        # Named FIRST because it happens first, and because it is the one step
+        # here that changes how WSL finds packages at all rather than which
+        # packages are on it.
+        if facts.get("universe") == "0":
+            steps.append(
+                "Turn on Ubuntu's “universe” component in WSL — it is "
+                "switched off, and it is where %s is published."
+                % ", ".join(setup_unavailable(facts)))
         if missing:
             steps.append("Install in WSL:  "
                          + "  ".join(pkg for pkg, _ in missing))
@@ -895,7 +935,7 @@ class EmulatePanel:
         self._log("[emulate] %s" % " ".join(cmd))
 
         def run():
-            ok = False
+            result = ""
             restart = False
             try:
                 # Popen and drain, not run(): apt on a cold index takes long
@@ -906,8 +946,8 @@ class EmulatePanel:
                                         creationflags=_CREATE_FLAGS)
                 for raw in proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
-                    if line == "result=ok":
-                        ok = True
+                    if line.startswith("result="):
+                        result = line.split("=", 1)[1]
                     elif line == "needs_restart=1":
                         restart = True
                     if line:
@@ -915,13 +955,21 @@ class EmulatePanel:
                 proc.wait(timeout=60)
             except Exception as exc:                        # noqa: BLE001
                 self._log("[emulate] setup failed: %s" % exc)
-            if ok:
+            if result == "ok":
                 self._log("[emulate] this PC can run the emulator now.")
                 if restart:
                     self._log("[emulate] systemd was turned on for WSL so the "
                               "ARM handler survives a restart; it takes effect "
                               "the next time WSL starts, and nothing needs "
                               "restarting now.")
+            elif result == "nocandidate":
+                # A DEAD END, and it has to read like one: retrying this
+                # button cannot help, because nothing is failing - the Linux
+                # in WSL simply has nowhere to fetch the package from.
+                self._log("[emulate] setup cannot finish on this WSL "
+                          "installation: the package it needs is not offered "
+                          "by any of that Linux's package sources, so trying "
+                          "again will say the same thing.")
             else:
                 self._log("[emulate] setup did not finish — the emulator will "
                           "probably still fail to start.")

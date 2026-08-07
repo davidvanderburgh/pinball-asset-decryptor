@@ -746,9 +746,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    turns on systemd in `/etc/wsl.conf` so that registration survives a
    WSL restart. It lists every package and file it will touch before it
    changes one, and needs no password (`wsl -u root` is already root).
+   A package that is missing and a package apt can actually *install*
+   are two different facts, and the tab now reports both. Ubuntu
+   publishes `qemu-user-static` in its `universe` component while the
+   rest are in `main`, so a WSL distro with universe switched off
+   answers `E: Package 'qemu-user-static' has no installation
+   candidate` — and because `apt-get install a b` is all or nothing,
+   none of the others go on either. The notice says separately that WSL
+   can't install that package and why, turning universe back on is the
+   first line of the confirmation dialog, and the fix does that before
+   it installs anything, one package at a time so an unobtainable one
+   can't block the rest. When nothing can help — sources trimmed, or a
+   distro out of support — it names the package and says so instead of
+   suggesting another try.
    On Linux there's no button — sudo would want a password a GUI app has
    nowhere to ask for — and the notice prints the exact command for that
-   machine instead. Otherwise there is no setup step: pick a
+   machine instead, `sudo add-apt-repository universe` first when that
+   is what's wrong. Otherwise there is no setup step: pick a
    card image and press Start. The first run builds the guest filesystem
    the game runs inside out of that card (a few minutes, once, no root
    needed) and compiles the hardware shim and the GL renderer, and every

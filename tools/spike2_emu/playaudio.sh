@@ -24,8 +24,15 @@ command -v ffmpeg >/dev/null || { echo "[play] no ffmpeg" >&2; exit 1; }
 # The WSLg pulse socket materialises on demand, so it can genuinely be absent for
 # a moment at startup and present by the time ffmpeg connects. Wait rather than
 # warn about a race.
-for i in $(seq 1 40); do [ -S /mnt/wslg/PulseServer ] && break; sleep 0.25; done
-[ -S /mnt/wslg/PulseServer ] || echo "[play] WARNING: no /mnt/wslg/PulseServer after 10 s" >&2
+#
+# ONLY ON WSL. /mnt/wslg does not exist on a Linux desktop, so unconditionally
+# waiting for it spent 10 s and then printed a warning about a missing WSL
+# component on a machine that has no WSL - the kind of message that teaches
+# people to ignore warnings.
+if pad_is_wsl; then
+    for i in $(seq 1 40); do [ -S /mnt/wslg/PulseServer ] && break; sleep 0.25; done
+    [ -S /mnt/wslg/PulseServer ] || echo "[play] WARNING: no /mnt/wslg/PulseServer after 10 s" >&2
+fi
 
 rm -f "$FIFO" "$FMT"
 mkfifo "$FIFO" || exit 1
@@ -76,7 +83,10 @@ trap 'kill $HOLD 2>/dev/null; rm -f "$FIFO"' EXIT
 # Windows' localhost onto listeners inside the VM, so the player connects to
 # 127.0.0.1. Scored the same way, that path is -14.7 dB: level with Windows
 # playing the file directly.
-is_wsl() { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; }
+# is_wsl lived here as its own copy; padpath.sh now owns the answer, because
+# two scripts defining one fact is how alive.sh and killgame.sh once
+# disagreed about what a running rig even is.
+is_wsl() { pad_is_wsl; }
 
 # A Windows Python that can actually open a sound device. Both halves matter:
 # an interpreter without sounddevice is no use, and finding that out at startup

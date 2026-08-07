@@ -194,6 +194,44 @@ def test_ledio_builds_with_no_wire_log(rig):
     assert "NOT verified" not in ledio.text("t", rows, True)
 
 
+def test_wsl_detection_is_defined_in_exactly_one_place(rig):
+    """padpath owns it. playaudio.sh used to carry its own copy.
+
+    This rig's own rules forbid two scripts defining one fact - alive.sh and
+    killgame.sh disagreeing about what a running rig is has already cost a
+    session - and "are we on WSL" now decides real behaviour in several places.
+    """
+    import glob
+    import re
+    own = []
+    for path in sorted(glob.glob(os.path.join(RIG, "*.sh"))):
+        if os.path.basename(path) == "padpath.sh":
+            continue
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for n, line in enumerate(f, 1):
+                # A definition, not a call: `is_wsl() { pad_is_wsl; }` delegates
+                # and is fine; a second copy of the /proc/version test is not.
+                if re.search(r"microsoft\s+/proc/version", line):
+                    own.append("%s:%d" % (os.path.basename(path), n))
+    assert not own, "a second definition of 'are we on WSL': %s" % own
+
+
+def test_native_and_wsl_playfield_shapes_are_both_counted(rig):
+    """alive.sh is the rig's only definition of "clean".
+
+    Under WSL the playfield is a Windows process seen as an interop stub
+    (`/init ... playfield.py`); on a Linux desktop it is an ordinary
+    `python3 .../playfield.py`. Counting only the first printed a confident 0
+    over a live window on every Linux machine - the precise failure this script
+    exists to prevent.
+    """
+    with open(os.path.join(RIG, "alive.sh"), encoding="utf-8") as f:
+        text = f.read()
+    assert "playfield" in text
+    assert "^/init .*playfield" in text, "the WSL interop stub is no longer counted"
+    assert "python3? .*playfield" in text, "the native Linux process is not counted"
+
+
 def test_the_windows_installer_ships_the_rig():
     """The Emulate tab is unreachable for an installed user without this.
 

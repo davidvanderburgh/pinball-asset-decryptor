@@ -1002,6 +1002,27 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Loose ends worth a look, not yet worth a queue slot
 
+- **The Linux path has never been run on a real Linux desktop, and the one part
+  that cannot be tested from here is the playfield WINDOW.** Everything else was
+  exercised with `PAD_FORCE_NATIVE=1` on 2026-08-07 and works: the pulse audio
+  sink is chosen rather than the Windows bridge, the `/mnt/wslg` wait is skipped
+  (0 mentions in the log), the game boots and the renderer averaged **57.9 fps
+  over 120 s**, `alive.sh` printed 0. The window is the gap because THIS WSL has
+  no tkinter at all — which is the entire reason the Windows workaround exists —
+  so the native branch can only be seen refusing correctly and naming the
+  package. Someone with a Linux machine and a card image closes this in one run.
+- **macOS needs a decision, not effort.** `qemu-user` translates *Linux*
+  syscalls, and `unshare`, user namespaces and `chroot` into an ELF rootfs are
+  Linux kernel features, so there is no port — only "run Linux there", via
+  Docker or Lima. **The obvious objection is wrong and worth writing down:
+  software rendering is NOT the blocker.** The handoff's own measured table has
+  llvmpipe at **214 fps** on the real workload against 914 on the GPU; the 1.0
+  fps figure people remember is `glraster.c` INSIDE the emulated ARM guest,
+  which the bridge design already replaced and which a container would not use.
+  The real unknown is the display transport — Docker on macOS has no display, so
+  frames cross X11 to XQuartz — and nobody has measured that. It is an
+  afternoon: run `padglhost` against XQuartz and read the fps it already prints.
+
 - **Playfield LED markers choppy in ATTRACT, undiagnosed.** Raised by David
   during item 11 ("probably all related"). In GAMEPLAY it followed the game's
   render loop — the same loop the video storms were blocking — so item 11's

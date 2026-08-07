@@ -176,8 +176,9 @@ the result out of a `PAD_COIL_PROBE=1` capture.
 
 ## Requirements
 
-WSL with `qemu-user-static` (binfmt `qemu-arm` registered with the **F** flag),
-`gcc-arm-linux-gnueabihf` and `e2fsprogs`. Then, once:
+**Linux, or Windows with WSL.** `qemu-user-static` (binfmt `qemu-arm`
+registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `e2fsprogs`,
+`fuse3`, and `python3-tk` for the playfield window. Then, once:
 
 ```bash
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
@@ -197,6 +198,34 @@ cannot hold symlinks and `ld-linux.so.3` would silently vanish.
 It does **not** extract a title. `PAD_CARD=<image> watch.sh` runs one straight
 off the card in about a second; `rootfs.sh --game <title>` is there for a title
 you run constantly.
+
+### WSL and Linux are not two ports
+
+This is a Linux program. `run_game.sh`, `cardmount.sh`, `padglhost.c` and
+`padvidhost.py` contain nothing Windows-specific at all — the chroot, qemu-user,
+the node bus, the card mount and the renderer are the same code either way.
+What WSL needs on top are **workarounds, not features**, and there are exactly
+two:
+
+| | |
+|---|---|
+| the playfield runs as a **Windows** process | this WSL has no Tk of any kind, and installing one needs a sudo the rig does not have |
+| audio bridges to a **Windows** player | the WSLg→Windows audio hop degrades music, while every instrument inside WSL reads clean |
+
+On a Linux desktop both simply go away: the playfield is a local Tk window and
+audio goes straight to PulseAudio. `padpath.sh`'s `pad_is_wsl` (and
+`padpath.py`'s `is_wsl()`) is the **one** place that decides which of the two
+applies — `playaudio.sh` used to carry its own copy of that test, which is the
+duplication this rig's own rules forbid.
+
+**`PAD_FORCE_NATIVE=1` makes a WSL session take the Linux branches**, which is
+the only way to exercise them from a Windows machine. It is how the Linux path
+was tested; what it cannot show is the playfield window itself, because the
+distro that needs the workaround is by definition the one with no Tk.
+
+macOS is not on this list and is not a matter of effort: `qemu-user` translates
+*Linux* syscalls, and `unshare`, user namespaces and `chroot` into an ELF rootfs
+are Linux kernel features. Running it there means running Linux there.
 
 ## Paths
 

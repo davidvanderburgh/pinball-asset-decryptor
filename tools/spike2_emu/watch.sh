@@ -254,12 +254,12 @@ teardown() {
     # GONE_POLLS window) because it is worth having: the polite exit is what
     # saves the window position, and it is what usually happens. It failed in
     # one card run out of three, so this path is not theoretical.
-    if pgrep -f '^/init .*playfield\.py' >/dev/null; then
+    if pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
         for _ in $(seq 1 10); do
             sleep 0.5
-            pgrep -f '^/init .*playfield\.py' >/dev/null || break
+            pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
         done
-        if pgrep -f '^/init .*playfield\.py' >/dev/null; then
+        if pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
             echo "[watch] the playfield did not close itself; closing it the hard way"
             # `Name -like 'python*'` excludes THIS query: its own command line
             # contains the pattern string, so a CommandLine-only filter kills
@@ -270,7 +270,7 @@ teardown() {
                                        \$_.CommandLine -like '*spike2_emu\playfield.py*' } |
                         ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
               >/dev/null 2>&1
-            pkill -9 -f '^/init .*playfield\.py'
+            pkill -9 -f '^(/init|python3?) .*playfield\.py'
         fi
     fi
 
@@ -494,33 +494,58 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     fi
     rm -f "$TBL_OUT"
 
-    PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
-    # The rig's own path, as Windows sees it. `wslpath -w` is asked rather than
-    # the answer being written down: the literal here named one user's checkout
-    # on one machine's C: drive.
-    PF_WIN=$(pad_win "$RIG/playfield.py")
-    # The title goes on the COMMAND LINE, not in the environment: this is a
-    # Windows process started through interop and only variables named in
-    # WSLENV cross that boundary, which is one more thing to keep in step.
+    # TWO WAYS TO OPEN ONE WINDOW, AND WHICH ONE IS RIGHT IS A PROPERTY OF THE
+    # MACHINE, NOT A PREFERENCE.
     #
-    # PAD_ROOT and PAD_TABLES DO cross, through pad_export_win, and they must:
-    # the playfield window is a Windows process that has to open files inside
-    # WSL, and `/p` makes WSL translate each value into its `\\wsl.localhost`
-    # form on the way. Without it the window has to shell out to `wslpath` to
-    # work out where it is reading from - which it can, but paying ~200 ms per
-    # question for something this side already knows is silly.
-    pad_export_win
-    # PAD_PF_LOG reaches the playfield ONLY through WSLENV, same mechanism.
-    # The measurement that produced the 30 fps number had to bypass watch.sh
-    # entirely for want of this line.
-    [ -n "${PAD_PF_LOG:-}" ] && \
-        export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_LOG/p"
-    if command -v "$PF_PY" >/dev/null 2>&1; then
-        setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
-        echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
+    # On a Linux desktop the playfield is an ordinary local Tk process talking
+    # to the same X server as the game, and that is all it should ever have
+    # been. The elaborate path below it exists because THIS WSL HAS NO TK AT
+    # ALL - no tkinter, no gi/Gtk, no Qt - and installing one needs a sudo the
+    # rig does not have. Under WSL the window therefore runs as a WINDOWS
+    # process reached through interop, which is why it needs a translated path,
+    # WSLENV to carry anything at all, and pythonw.exe rather than python.exe.
+    if [ "$IS_WSL" = 0 ]; then
+        PF_PY=${PAD_PF_PYTHON:-python3}
+        if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then
+            setsid "$PF_PY" "$RIG/playfield.py" "$GAME" </dev/null >/dev/null 2>&1 &
+            echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
+        else
+            # Say what to install rather than just what is missing: on Debian
+            # and Ubuntu tkinter is a separate package from python3 itself, so
+            # "no module named tkinter" is a packaging surprise, not a mistake.
+            echo "[watch] no tkinter, so no playfield window." >&2
+            echo "[watch]   sudo apt-get install python3-tk   (or python3-tkinter)" >&2
+        fi
     else
-        echo "[watch] no Windows interop; run playfield.py yourself:" >&2
-        echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME" >&2
+        PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
+        # The rig's own path, as Windows sees it. `wslpath -w` is asked rather
+        # than the answer being written down: the literal here named one user's
+        # checkout on one machine's C: drive.
+        PF_WIN=$(pad_win "$RIG/playfield.py")
+        # The title goes on the COMMAND LINE, not in the environment: this is a
+        # Windows process started through interop and only variables named in
+        # WSLENV cross that boundary, which is one more thing to keep in step.
+        #
+        # PAD_ROOT and PAD_TABLES DO cross, through pad_export_win, and they
+        # must: the playfield window is a Windows process that has to open files
+        # inside WSL, and `/p` makes WSL translate each value into its
+        # `\\wsl.localhost` form on the way. Without it the window has to shell
+        # out to `wslpath` to work out where it is reading from - which it can,
+        # but paying ~200 ms per question for something this side already knows
+        # is silly.
+        pad_export_win
+        # PAD_PF_LOG reaches the playfield ONLY through WSLENV, same mechanism.
+        # The measurement that produced the 30 fps number had to bypass watch.sh
+        # entirely for want of this line.
+        [ -n "${PAD_PF_LOG:-}" ] && \
+            export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_LOG/p"
+        if command -v "$PF_PY" >/dev/null 2>&1; then
+            setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
+            echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
+        else
+            echo "[watch] no Windows interop; run playfield.py yourself:" >&2
+            echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME" >&2
+        fi
     fi
 fi
 

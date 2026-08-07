@@ -694,7 +694,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    itself), reads a version hint from each extract so you can see what
    you're combining, and wires the build straight to the new version so
    the result can't accidentally come out on the old code.
-9. **Emulate tab** *(Stern Spike 2, Windows + WSL2)* — run the
+9. **Emulate tab** *(Stern Spike 2, Windows via WSL2, or Linux)* — run the
    game itself on this PC and watch what you built. Point it at a card
    image and press Start: the card's game partition is mounted **read
    only** and the real armhf game binary runs under `qemu-user` with its
@@ -718,12 +718,17 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
    schematic of its switch list instead.
-   Requires WSL2. The rig itself ships with the app, in
-   `tools/spike2_emu`, and the prerequisites installer pulls in what it
-   needs inside the distro (`qemu-user-static`, an ARM cross-compiler,
-   `e2fsprogs`, `fuse3`). One first-time step builds the guest out of a
-   card image — `rootfs.sh <card.raw>`, then `build.sh` and
-   `buildbridge.sh`, none of which need root.
+   Runs on Linux, and on Windows through WSL2. The rig ships with the
+   app, in `tools/spike2_emu`, and the prerequisites installer pulls in
+   what it needs (`qemu-user-static`, an ARM cross-compiler,
+   `e2fsprogs`, `fuse3`, `python3-tk`). One first-time step builds the
+   guest out of a card image — `rootfs.sh <card.raw>`, then `build.sh`
+   and `buildbridge.sh`, none of which need root. It is a Linux program
+   throughout: the Windows-looking parts are workarounds for what WSL
+   lacks (no Tk for the playfield window, a degraded audio hop), and the
+   Linux path skips them. macOS would need a Linux VM — `qemu-user`
+   translates Linux syscalls and the chroot needs Linux namespaces — so
+   it is not offered there.
 10. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact. The app also remembers the

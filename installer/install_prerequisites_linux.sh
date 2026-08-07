@@ -27,6 +27,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     echo "  CGC:    e2fsprogs xxd"
+    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs fuse3 python3-tk"
     exit 1
 fi
 
@@ -39,6 +40,7 @@ declare -A MFR_NAMES=(
     [3]="Barrels of Fun"
     [4]="Jersey Jack Pinball"
     [5]="Chicago Gaming Company"
+    [6]="Stern Pinball"
 )
 declare -A MFR_DESCRIPTIONS=(
     [1]="ABBA, Alien, Queen, Predator (.upd files + Clonezilla ISOs)"
@@ -46,6 +48,7 @@ declare -A MFR_DESCRIPTIONS=(
     [3]="Labyrinth, Dune, Winchester (.fun files)"
     [4]="Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc. (.iso disk images)"
     [5]="Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction (.img installer images)"
+    [6]="Spike 2: Godzilla, Jurassic Park, Deadpool, Star Wars + more (SD-card images) - and the Emulate tab"
 )
 declare -A MFR_PACKAGES=(
     [1]="e2fsprogs"
@@ -55,6 +58,20 @@ declare -A MFR_PACKAGES=(
     # headers too — without them the dongle-extract hooks won't compile.
     [4]="partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     [5]="e2fsprogs xxd"
+    # Stern needs nothing on Linux for extract/write - native Linux mounts
+    # ext4 itself. Everything here is for the EMULATE tab, which runs the
+    # machine's own 32-bit ARM binary under qemu-user against a guest
+    # filesystem built from a card image:
+    #   qemu-user-static          runs the ARM binary
+    #   gcc-arm-linux-gnueabihf   builds the LD_PRELOAD hardware shim
+    #   e2fsprogs                 rootfs.sh, which needs no root to extract
+    #   fuse3                     fusermount3, so a card mounts read-only
+    #                             without root (fuse2fs itself is fetched by
+    #                             cardmount.sh into a private prefix)
+    #   python3-tk                the virtual playfield window. Separate from
+    #                             python3 on Debian and Ubuntu, and its
+    #                             absence reads as a puzzling ImportError.
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs fuse3 python3-tk"
 )
 
 # Pip packages -- installed into the same Python that runs the app
@@ -81,7 +98,8 @@ echo ""
 echo "Pick the manufacturers you plan to use.  We'll install only"
 echo "the tools those plugins actually need."
 echo ""
-for i in 1 2 3 4 5; do
+for i in $(printf "%s
+" "${!MFR_NAMES[@]}" | sort -n); do
     printf "  [%d] %s\n" "$i" "${MFR_NAMES[$i]}"
     printf "       %s\n" "${MFR_DESCRIPTIONS[$i]}"
 done

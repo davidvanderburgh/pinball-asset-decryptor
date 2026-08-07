@@ -63,6 +63,29 @@ def _env(name):
     return v or None
 
 
+def is_wsl():
+    """Whether this Linux is WSL. The Python twin of padpath.sh's pad_is_wsl.
+
+    It decides whether the helpers this rig shells out to are reached through
+    Windows interop or run directly, which is a ~200 ms difference per call and
+    the difference between working and not on a Linux desktop.
+
+    PAD_FORCE_NATIVE=1 makes a WSL session answer no, which is how the native
+    path is exercised from a Windows development machine.
+    """
+    if _WIN:
+        return False
+    if _env("PAD_FORCE_NATIVE") == "1":
+        return False
+    if _env("WSL_DISTRO_NAME"):
+        return True
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 def is_windows_path(p):
     """Whether `p` is already in a form Windows can open - UNC or drive letter.
 

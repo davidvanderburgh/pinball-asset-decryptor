@@ -54,6 +54,13 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \
+    `# The Spike 2 emulator rig. The Emulate tab resolves it relative to the` \
+    `# package, so it lands where emulate_tab.DEFAULT_RIG_DIR looks. Native` \
+    `# Linux is a first-class host for it: the chroot, qemu-user, the node bus` \
+    `# and the GL host have nothing Windows-specific in them, and what does -` \
+    `# the playfield as a Windows process, the audio bridge - are WSL` \
+    `# workarounds the Linux path skips.` \
+    --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
     --hidden-import "Crypto" \
     --hidden-import "Crypto.Cipher" \
     --hidden-import "Crypto.Cipher.AES" \

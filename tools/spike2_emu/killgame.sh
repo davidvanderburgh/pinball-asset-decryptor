@@ -82,10 +82,10 @@ pkill -9 -f '^bash [^ ]*longplay\.sh'
 # it lets that window close itself instead of surviving the kill.
 rm -f "$ROOT/dump/padled"
 for _ in 1 2 3 4 5 6; do
-    pgrep -f '^/init .*playfield\.py' >/dev/null || break
+    pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
     sleep 0.5
 done
-pkill -9 -f '^/init .*playfield\.py'
+pkill -9 -f '^(/init|python3?) .*playfield\.py'
 # BACKSTOPS for Windows children that did not take the hint. Matched on the
 # SCRIPT (and, for the player, the PORT), never on the image name alone: killing
 # every python.exe would take out whatever else the user is running, and the

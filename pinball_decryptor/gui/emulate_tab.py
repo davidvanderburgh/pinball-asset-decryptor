@@ -1,10 +1,18 @@
 """Emulate tab — run the Stern Spike 2 game on this PC and watch its health.
 
-The emulator itself is not part of PAD.  It is a rig of shell scripts, an
-``LD_PRELOAD`` hardware shim and a native GL host that live outside the repo
-(``c:\\tmp\\spike2_emu`` by default, ``PAD_EMU_DIR`` to move it) and run inside
-WSL.  This panel is a *control surface* for that rig: start it, stop it, and say
-truthfully what it is doing.  It deliberately does not reimplement any of it.
+The emulator is a rig of shell scripts, an ``LD_PRELOAD`` hardware shim and a
+native GL host, in ``tools/spike2_emu``.  It SHIPS WITH THE APP (this used to
+say it lived outside the repo, in ``c:\\tmp\\spike2_emu``, which stopped being
+true twice over).  ``PAD_EMU_DIR`` moves it.  This panel is a *control surface*
+for that rig: start it, stop it, and say truthfully what it is doing.  It
+deliberately does not reimplement any of it.
+
+WHERE IT RUNS.  The rig is a Linux program: the chroot, qemu-user, the node bus
+and the GL host have nothing Windows-specific in them.  On a Linux desktop it is
+simply run; from Windows it is reached through WSL, and everything that looks
+Windows-flavoured in it - the playfield window as a Windows process, the audio
+bridge - is a WORKAROUND for what WSL lacks, not a design choice.  ``rig_cmd()``
+is the one place that knows which of the two applies.
 
 Three things about it are worth knowing before changing anything here:
 
@@ -139,11 +147,39 @@ def state_text(info):
 
 
 def _wsl_path(win_path):
-    """``c:\\repo\\tools\\spike2_emu`` -> ``/mnt/c/repo/tools/spike2_emu``."""
+    """``c:\\repo\\tools\\spike2_emu`` -> ``/mnt/c/repo/tools/spike2_emu``.
+
+    A POSIX path has no drive letter and passes through untouched, so this is
+    also correct on a Linux desktop where there is no translation to do.
+    """
     p = win_path.replace("\\", "/")
     if len(p) > 1 and p[1] == ":":
         p = "/mnt/" + p[0].lower() + p[2:]
     return p
+
+
+def rig_cmd(script, *args, env=()):
+    """The command that runs one of the rig's scripts, on THIS platform.
+
+    ONE PLACE THAT KNOWS, because there are six call sites and they were six
+    copies of ``["wsl.exe", "-e", "bash", ...]``.  The rig is a Linux program:
+    from Windows it is reached through WSL, and on a Linux desktop it is simply
+    run.  Everything else about the invocation is identical, which is exactly
+    the shape that should not be written out six times.
+
+    `env` is a list of ``NAME=value`` strings, applied with ``env`` so the
+    values survive the hop without a shell re-parsing them - `wsl.exe` re-parses
+    its arguments, and `$var` expands to nothing on that second pass.
+    """
+    if sys.platform == "win32":
+        head = ["wsl.exe", "-e"]
+        path = "%s/%s" % (_wsl_path(rig_dir()), script)
+    else:
+        head = []
+        path = os.path.join(rig_dir(), script)
+    if env:
+        head = head + ["env"] + list(env)
+    return head + ["bash", path] + [str(a) for a in args]
 
 
 class EmulatePanel:
@@ -254,9 +290,16 @@ class EmulatePanel:
         # It is here because the alternative is remembering a command that has
         # nothing to do with pinball, at the moment you are least inclined to
         # go looking for one.
+        #
+        # WINDOWS ONLY, because there is no WSL to restart anywhere else and a
+        # button that cannot do its one job is worse than no button.  The two
+        # faults it cures are both WSL's: a WSLg window still being painted
+        # after its X client has gone, and the WSLg-to-Windows audio hop
+        # degrading over a long session.  Neither exists on a Linux desktop.
         self._fixaud_btn = ttk.Button(btns, text="Restart WSL…",
                                       command=self._audio_reset, width=17)
-        self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
+        if sys.platform == "win32":
+            self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # BOTH tickboxes are read ONCE, when Start builds the environment for
         # watch.sh, so they are start-time options and not live controls.  They
@@ -447,7 +490,6 @@ class EmulatePanel:
         self._starting = True
         self._run_label(False, True)
         self._set("state", "Starting…")
-        d = _wsl_path(rig_dir())
         # Validate the source BEFORE anything is launched, and put the reason
         # on the tab.  A bad path reaching the rig becomes a shell error in the
         # log pane, which is the wrong place to read it.
@@ -462,8 +504,7 @@ class EmulatePanel:
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
             env.append("PAD_AUTO_ATTRACT=0")
-        cmd = (["wsl.exe", "-e", "env"] + env
-               + ["bash", "%s/watch.sh" % d, str(self.BACKSTOP_MIN)])
+        cmd = rig_cmd("watch.sh", self.BACKSTOP_MIN, env=env)
         self._log("[emulate] %s" % " ".join(cmd))
 
         def run():
@@ -501,12 +542,11 @@ class EmulatePanel:
         self._stopping = True
         self._run_label(True, True)
         self._set("state", "Stopping…")
-        d = _wsl_path(rig_dir())
 
         def run():
             try:
                 out = subprocess.run(
-                    ["wsl.exe", "-e", "bash", "%s/killgame.sh" % d],
+                    rig_cmd("killgame.sh"),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=60, creationflags=_CREATE_FLAGS)
                 for line in out.stdout.decode("utf-8", "replace").splitlines():
@@ -579,7 +619,6 @@ class EmulatePanel:
         self._resetting = True
         self._fixaud_btn.configure(state=tk.DISABLED)
         self._set("state", "Restarting WSL…")
-        d = _wsl_path(rig_dir())
 
         def run():
             try:
@@ -587,7 +626,7 @@ class EmulatePanel:
                 # enabled when nothing is up: a terminal-started run the poll
                 # has not seen yet would otherwise be killed by the shutdown
                 # with no teardown at all.
-                subprocess.run(["wsl.exe", "-e", "bash", "%s/killgame.sh" % d],
+                subprocess.run(rig_cmd("killgame.sh"),
                                stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT,
                                timeout=60, creationflags=_CREATE_FLAGS)
@@ -626,10 +665,9 @@ class EmulatePanel:
         if not rig_available():
             return
         self._stopped = True             # no more polls into a dying Tk
-        d = _wsl_path(rig_dir())
         try:
             subprocess.run(
-                ["wsl.exe", "-e", "bash", "%s/killgame.sh" % d],
+                rig_cmd("killgame.sh"),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=25, creationflags=_CREATE_FLAGS)
         except Exception:                               # noqa: BLE001
@@ -654,13 +692,11 @@ class EmulatePanel:
         if not rig_available():
             self._schedule_poll()
             return
-        d = _wsl_path(rig_dir())
 
         def run():
             try:
                 out = subprocess.run(
-                    ["wsl.exe", "-e", "bash", "%s/status.sh" % d,
-                     self._logfile],
+                    rig_cmd("status.sh", self._logfile),
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     timeout=20, creationflags=_CREATE_FLAGS)
                 text = out.stdout.decode("utf-8", "replace")

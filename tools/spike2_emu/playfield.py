@@ -402,11 +402,20 @@ def wsl_run(script, *args):
     env = ["PAD_SW_SRC=f"]
     if os.environ.get("PAD_SW_FILE"):
         env.append("PAD_SW_FILE=%s" % os.environ["PAD_SW_FILE"])
+
+    # THE BOUNDARY IS THE ONLY THING THAT DECIDES THIS, and it exists in exactly
+    # one case: this window running as a WINDOWS process against a guest inside
+    # WSL. On a Linux desktop, and when this file is run inside WSL itself, the
+    # helper is on the same machine and is simply run - which also removes the
+    # ~200 ms interop spawn that SwitchDriver's whole serialised queue exists to
+    # cope with.
+    if sys.platform == "win32":
+        cmd = (["wsl.exe", "-e", "env"] + env
+               + ["python3", "%s/%s" % (WSL_DIR, script)] + list(args))
+    else:
+        cmd = ["env"] + env + ["python3", os.path.join(HERE, script)] + list(args)
     try:
-        r = subprocess.run(["wsl.exe", "-e", "env"] + env +
-                           ["python3", "%s/%s" % (WSL_DIR, script)] +
-                           list(args),
-                           capture_output=True, timeout=30,
+        r = subprocess.run(cmd, capture_output=True, timeout=30,
                            creationflags=_CREATE_NO_WINDOW)
     except Exception:                                       # noqa: BLE001
         return None

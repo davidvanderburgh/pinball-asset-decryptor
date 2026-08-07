@@ -148,7 +148,13 @@ HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F "$HOME/padvid"\.lo
 #
 # Anchored on '^/init ' so this matches the STUB and not a shell whose command
 # line merely mentions the script (the documented pgrep trap, one line up).
+# ...and on a LINUX desktop there is no stub, because there is no boundary: the
+# playfield is an ordinary local python3 process. Counting only the interop
+# shape would have printed a confident 0 over a live playfield window on every
+# Linux machine, which is the exact failure this script exists to prevent.
+# Both patterns are counted always; only one of them can match on any machine.
 STUB=$(n -f '^/init .*playfield\.py')
+STUB=$((STUB + $(n -f '^python3? .*playfield\.py')))
 
 # The run scripts themselves. Four leaked watch.sh trees once sat on the
 # playfield launch line before anyone noticed, because the symptom of a leaked

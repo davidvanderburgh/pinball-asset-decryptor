@@ -5245,6 +5245,12 @@ struct padled_shm {
     unsigned char coil[16][16];       /* wrapping fire counter, see coil_publish */
     unsigned char lvl[16][16];        /* last drive byte                         */
     unsigned coil_gen, coil_decoded;
+    /* Version 3, the fade layer - the twin of padled.h, which carries the
+     * meaning; keep the two in step. */
+    unsigned fade_head;
+    struct { unsigned ms;
+             unsigned char node, start, end, from, to, rise, fall, pad;
+    } fade[96];
 };
 #define PADLED_MAGIC 0x44454c50u
 
@@ -5274,7 +5280,7 @@ static void led_map(void)
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    led_shm->version = 2;             /* 2 adds the coil block; see padled.h */
+    led_shm->version = 3;             /* 3 adds the fade ring; see padled.h  */
 }
 
 /* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
@@ -5511,9 +5517,53 @@ static void led_publish(const unsigned char *p, int n)
      *
      * `cmd a2` with a 6-byte body opens with the SAME range prefix (45 of 45:
      * body[0] an announced lamp, body[1] = 0x80 | an announced lamp) followed
-     * by four payload bytes whose meaning is not established - patterns like
-     * `00 ff 0a 00` and `ff 00 00 0a` look like (from, to, rate, ...) but
-     * nobody has shown it. That is the sharpened remainder of this work. */
+     * by four payload bytes. */
+
+    /* ---- THE FADE LAYER (cmd a2, blen 6): the animation half of the show --
+     *
+     *     [start][0x80|end][FROM][TO][RISE][FALL]
+     *
+     * A ONE-SHOT PULSE ENVELOPE over the lamp range: go FROM -> TO using the
+     * rate slot for the direction of travel, then return to FROM using the
+     * other slot, 0 = instantly. Established 2026-08-07 over 93 captured
+     * frames (every c:/tmp capture at once):
+     *
+     *  - 93/93 fit the envelope once "0 = instant" is read into the slots;
+     *    86 fit the naive one-directional split and the 7 exceptions are all
+     *    one frame, `00 ff 00 02` - instant-on then slow decay, a flash tail.
+     *  - the SAME command repeats on the SAME range (x8 for `00 ff 0a 00` on
+     *    47..50) - a re-triggered blink, not a state machine. Successive
+     *    fades on one range do NOT chain end-to-start (0 of 23), which is
+     *    what killed the "it moves the base level" reading.
+     *  - the mid-level payloads land on the fixtures that FLICKER on the
+     *    real machine: node 9's 72..86 -R BUILDING FIRE lamps get 11->0f
+     *    fall 6d (ember) and 0f->ee rise 92 (flare); the -G bank 73..87
+     *    fades out. The semantics named themselves.
+     *
+     * The pulses are an OVERLAY: later base writes into a pulsed range agree
+     * with TO only 57 of 651 times, so val[] is deliberately NOT touched -
+     * the base layer owns it and a pulse ends where the base says. What is
+     * NOT established: the rate unit (the reader scales it; the oracle is
+     * Diagnostics -> LED Tests) and together-vs-sweep across a wide range.
+     * The longer a2/b4/b5 bodies remain undecoded and still count skipped. */
+    if (blen == 6
+        && body[0] < 96 && led_known[node][body[0]]
+        && (body[1] & 0x80)
+        && (body[1] & 0x7f) < 96 && led_known[node][body[1] & 0x7f]
+        && body[0] <= (body[1] & 0x7f)) {
+        unsigned slot = led_shm->fade_head % 96u;
+        led_shm->fade[slot].ms    = (unsigned)pad_ms();
+        led_shm->fade[slot].node  = (unsigned char)node;
+        led_shm->fade[slot].start = body[0];
+        led_shm->fade[slot].end   = body[1] & 0x7f;
+        led_shm->fade[slot].from  = body[2];
+        led_shm->fade[slot].to    = body[3];
+        led_shm->fade[slot].rise  = body[4];
+        led_shm->fade[slot].fall  = body[5];
+        led_shm->fade[slot].pad   = 0;
+        led_shm->fade_head++;     /* AFTER the entry, single writer */
+        return;
+    }
     {
         int is_range = blen == 2
             && body[0] < 96 && led_known[node][body[0]]

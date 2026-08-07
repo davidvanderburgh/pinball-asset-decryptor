@@ -51,6 +51,7 @@ sys.path.insert(0, HERE)
 MAGIC = 0x44454C50
 LED_HDR = 20
 OFF_GEN, OFF_DECODED = 8, 12
+FADE_HEAD_OFF, FADE_ENT_OFF, FADE_RING = 2076, 2080, 96
 BLOCK = 4096
 
 GAME = os.environ.get("PAD_GAME", "godzilla_pro")
@@ -59,15 +60,25 @@ GAME = os.environ.get("PAD_GAME", "godzilla_pro")
 class Feed:
     """Publishes a padled block at a scripted rate. The ground truth."""
 
-    def __init__(self, path, channels):
+    def __init__(self, path, channels, version=3):
         self.path = path
         self.channels = channels          # [(node, idx), ...] actually drawn
         self.buf = bytearray(BLOCK)
-        struct.pack_into("<II", self.buf, 0, MAGIC, 2)
+        struct.pack_into("<II", self.buf, 0, MAGIC, version)
         self.gen = self.dec = 0
+        self.fades = 0
         self.stop = False
         self.frames = 0
         self.written = 0
+        self._flush()
+
+    def fade(self, node, s, e, frm, to, rise, fall):
+        """One a2 pulse envelope into the version-3 fade ring."""
+        off = FADE_ENT_OFF + (self.fades % FADE_RING) * 12
+        struct.pack_into("<I8B", self.buf, off, 0, node, s, e, frm, to,
+                         rise, fall, 0)
+        self.fades += 1
+        struct.pack_into("<I", self.buf, FADE_HEAD_OFF, self.fades)
         self._flush()
 
     def _flush(self):
@@ -291,6 +302,29 @@ def run_fade_case(path):
           % (len(up), "lit" if want_on and want_on[2] else "NOT LIT"))
     print("  down: %d distinct paints, landed %s"
           % (len(down), "off" if down and down[-1][2] == 0.0 else "NOT OFF"))
+
+    # ---- THE a2 PULSE ENVELOPE (version 3 fade ring) ----------------------
+    # One command: 00 -> ff, rise rate 20, fall rate 20. The fixture must
+    # sweep UP through distinct paints, come back DOWN on its own with no
+    # further data, and END at the base state (off) - the envelope is an
+    # overlay, so returning to base is the whole point. The window was primed
+    # by the reads above (fade_seen is set), so this entry counts as new.
+    target["state"] = ()                    # force a clean resync
+    feed.fade(node, idx, idx, 0x00, 0xFF, 20, 20)
+    env_span = (40 * playfield.FADE_UNIT_MS + 400)
+    swing = settle(env_span)
+    peak = max((s for s in swing if s[2]), default=None, key=lambda s: s[2])
+    if len(swing) < 8:
+        fail.append("envelope drew %d distinct states - no sweep: %s"
+                    % (len(swing), swing[:6]))
+    if not peak:
+        fail.append("envelope never lit at all")
+    if not swing or swing[-1][2] != 0.0:
+        fail.append("envelope did not return to base (last %r)"
+                    % (swing[-1] if swing else None,))
+    print("  env : %d distinct paints, peaked %s, ended %s"
+          % (len(swing), "lit" if peak else "dark",
+             "at base" if swing and swing[-1][2] == 0.0 else "WRONG"))
     root.destroy()
     return fail
 

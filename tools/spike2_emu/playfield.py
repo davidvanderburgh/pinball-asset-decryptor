@@ -84,14 +84,23 @@ values already drawn or address fixtures this window does not draw.
 TRANSITIONS ARE ANIMATED, AND THAT IS EMULATION RATHER THAN DECORATION. On the
 real machine the LED boards render fades themselves: the game sends a fade
 COMMAND and the board ramps the PWM locally, so the wire never carries the
-intermediate levels - mostly it carries 0x00/0x7f/0xff steps (hwshim.c's a6
-notes). A window that repaints only the values on the wire therefore SNAPS
-where the real playfield sweeps, which David reported in exactly those terms.
-Every fixture now tweens from its drawn state to each new target over
-PAD_PF_FADE_MS (default 200, 0 = snap, the A/B control). The one thing still
-missing is the REAL duration per fade: that is in the undecoded `cmd a2`
-payload - item 1d - and when it decodes, its (from, to, rate) drops straight
-into the per-fixture target this tween already animates.
+intermediate levels - the indexed stream is 0x00/0x7f/0xff steps. Two layers
+render here, matching the wire:
+
+  * THE FADE LAYER - `cmd a2` blen=6, decoded 2026-08-07 (hwshim.c's fade
+    notes carry the evidence; 93/93 captured frames fit). Each command is a
+    one-shot PULSE ENVELOPE over a lamp range - FROM -> TO at the rate slot
+    for that direction, back to FROM on the other slot, 0 = instant - and the
+    shim publishes it in the padled fade ring (version 3). This window runs
+    the envelope per channel ON TOP of the base picture, which is what turns
+    "24 pixel-changes in 9 seconds" into the swells, blinks and BUILDING FIRE
+    flicker the real playfield shows. The rate UNIT is the one guess left
+    (PAD_PF_FADE_UNIT_MS scales it, reader-side, no rebuild); the long
+    a2/b4/b5 bodies are still undecoded - item 1d holds both.
+  * THE BASE LAYER snaps softly - PAD_PF_FADE_MS (default 80, 0 = hard snap)
+    smooths a step over ~5 frames. The real boards snap direct writes, so
+    this is deliberately just above imperceptible: 200 ms here read as LAG,
+    which David reported in exactly that word.
 
 A DARK INSERT HERE MEANS OFF, NOT "NO DATA" - which is worth stating plainly,
 because the docstring used to warn the opposite. The undecoded strip boards
@@ -249,7 +258,11 @@ LED_HDR, LED_IDX = 20, 96
 COIL_OFF, COIL_N = 1556, 16          # wrapping fire counter per (node, index)
 LVL_OFF = COIL_OFF + 16 * COIL_N     # last drive byte
 COIL_GEN_OFF = LVL_OFF + 16 * COIL_N
-PADLED_READ = COIL_GEN_OFF + 8
+#: Version 3, the fade ring (padled.h): head counter then 96 entries of
+#: (u32 guest ms, node, start, end, from, to, rise, fall, pad).
+FADE_HEAD_OFF = COIL_GEN_OFF + 8
+FADE_ENT_OFF, FADE_STRIDE, FADE_RING = FADE_HEAD_OFF + 4, 12, 96
+PADLED_READ = FADE_ENT_OFF + FADE_RING * FADE_STRIDE
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
@@ -283,15 +296,21 @@ FRAME_MS = 1000.0 / TARGET_FPS
 #: responds inside a few seconds when the rate really moves.
 RATE_WIN_S = 3.0
 
-#: How long a fixture takes to move from its old state to its new one, in ms.
-#: THE WIRE DOES NOT CARRY RAMPS, so this window has to render them: the real
-#: LED boards animate fades locally from a fade command and publish nothing
-#: while they do it, which is why the decoded stream is almost entirely
-#: 0x00/0x7f/0xff steps. 200 ms is a placeholder shaped like a CSS transition,
-#: honest about being one - the REAL per-fade duration is in the undecoded
-#: `cmd a2` payload (item 1d) and replaces this constant per fade when it
-#: decodes. 0 disables the tween entirely, which is the A/B control.
-FADE_MS = float(os.environ.get("PAD_PF_FADE_MS", "200"))
+#: How long a BASE-LAYER step takes on screen, in ms. The real boards snap on
+#: a direct write - the smoothness of a real light show is the FADE layer, not
+#: the base - so this is only enough smoothing to keep a step from popping,
+#: and it came DOWN from 200 when the fade layer landed: 200 ms of smear on
+#: every step read as lag, which David reported in exactly that word. 0 snaps,
+#: the A/B control.
+FADE_MS = float(os.environ.get("PAD_PF_FADE_MS", "80"))
+
+#: Milliseconds per unit of an a2 fade's rate byte - THE ONE GUESS LEFT in the
+#: fade layer, and it is a reader-side scale so it tunes live with no rebuild.
+#: At 12: the common blink (rate 0x0a) has 120 ms legs, the BUILDING FIRE
+#: ember (0x6d) burns for ~1.3 s, the flare (0x92) ~1.75 s - all plausible
+#: against the real machine. The oracle that will pin it is Diagnostics ->
+#: LED Tests (item 1d).
+FADE_UNIT_MS = float(os.environ.get("PAD_PF_FADE_UNIT_MS", "12"))
 
 #: Kept as the fallback pacing for the Schematic view, which draws nothing per
 #: frame and has no reason to run at 30 Hz.
@@ -795,6 +814,19 @@ class Field:
         self._decoded = None                  # last `decoded` seen, to diff it
         self._gap_worst = 0.0                 # longest still stretch, for the log
         self._draw_last = None
+        # THE FADE LAYER (padled.h version 3). overlay maps a channel
+        # (node, idx) to its running pulse envelope; while one is active the
+        # channel's level comes from the envelope, not from val[]. _fade_seen
+        # is the ring head already consumed - primed on the FIRST read so a
+        # window opened mid-run does not replay a backlog of old pulses.
+        self.overlay = {}
+        self._fade_seen = None
+        # channel -> fixtures drawn from it, so a fade range finds its dots
+        # without walking all 81 fixtures per lamp.
+        self.chan_fix = {}
+        for F in self.fixtures:
+            for key in F["channels"].values():
+                self.chan_fix.setdefault(key, []).append(F)
 
         # Every glow before any core marker: fixtures overlap on this picture
         # (the three SCOOP BB inserts share one XY), and interleaving would put
@@ -1082,17 +1114,77 @@ class Field:
         self._door = not d[off + SW_COIN_DOOR]
         return self._door
 
-    def _chan_vals(self, F, d):
+    def _take_fades(self, d, now):
+        """Consume new fade-ring entries into channel envelopes. Returns how
+        many arrived - each is ONE picture update for the rate fields, however
+        many frames its animation spans."""
+        if len(d) < FADE_ENT_OFF or struct.unpack_from("<I", d, 4)[0] < 3:
+            return 0
+        head = struct.unpack_from("<I", d, FADE_HEAD_OFF)[0]
+        if self._fade_seen is None:
+            self._fade_seen = head          # opened mid-run: skip the backlog
+            return 0
+        new = head - self._fade_seen
+        if new <= 0:
+            return 0
+        # A reader further than a full ring behind lost the oldest entries;
+        # take the survivors rather than replaying slots twice.
+        first = head - min(new, FADE_RING)
+        for n in range(first, head):
+            off = FADE_ENT_OFF + (n % FADE_RING) * FADE_STRIDE
+            if off + FADE_STRIDE > len(d):
+                break
+            _ms, node, s, e, frm, to, rise, fall, _pad = struct.unpack_from(
+                "<I8B", d, off)
+            # The slot for the direction of travel takes the pulse out; the
+            # OTHER slot brings it home. 0 = instantly (padled.h).
+            out_r, back_r = (rise, fall) if to >= frm else (fall, rise)
+            env = dict(t0=now, frm=frm, to=to,
+                       out_s=out_r * FADE_UNIT_MS / 1000.0,
+                       back_s=back_r * FADE_UNIT_MS / 1000.0)
+            if env["out_s"] <= 0 and env["back_s"] <= 0:
+                continue                    # degenerate: nothing visible
+            for i in range(s, e + 1):
+                self.overlay[(node, i)] = env
+        self._fade_seen = head
+        return new
+
+    def _env_level(self, env, now):
+        """The envelope's level right now, or None once it has expired."""
+        t = now - env["t0"]
+        if t < env["out_s"]:
+            k = t / env["out_s"]
+            return env["frm"] + (env["to"] - env["frm"]) * k
+        t -= env["out_s"]
+        if t < env["back_s"]:
+            k = t / env["back_s"]
+            return env["to"] + (env["frm"] - env["to"]) * k
+        return None
+
+    def _chan_vals(self, F, d, now=None):
         """Live channel values for a fixture, e.g. {'R': 255, 'G': 40, 'B': 0}.
-        A channel with no readable byte reports None (distinct from 0 = off)."""
+        A channel with no readable byte reports None (distinct from 0 = off).
+        An active fade envelope OVERRIDES the base byte for its channel - the
+        pulse layer draws on top of the picture, exactly as on the wire."""
         out = {}
+        env_on = False
         for chan, (node, idx) in F["channels"].items():
             v = None
             if d:
                 off = LED_HDR + node * LED_IDX + idx
                 if off < len(d):
                     v = d[off]
+            if now is not None:
+                env = self.overlay.get((node, idx))
+                if env is not None:
+                    lv = self._env_level(env, now)
+                    if lv is None:
+                        del self.overlay[(node, idx)]
+                    else:
+                        v = int(lv)
+                        env_on = True
             out[chan] = v
+        F["env"] = env_on
         return out
 
     def _coil_state(self, d):
@@ -1161,14 +1253,22 @@ class Field:
         lit = 0
         changed = 0
         for F in self.fixtures:
-            rgb, level = fixture_color(self._chan_vals(F, d))
+            rgb, level = fixture_color(self._chan_vals(F, d, now))
             if rgb:
                 lit += 1
             st = (rgb, level)
             if st == F["state"]:
                 continue
             F["state"] = st
-            changed += 1
+            # An ENVELOPED fixture changes every tick because the envelope is
+            # feeding it the ramp: track it with no extra smoothing (the ramp
+            # IS the animation) and do not count the frames as picture
+            # updates - the pulse was counted once when its command arrived.
+            if F.get("env"):
+                F["dur"] = 0.0
+            else:
+                changed += 1
+                F["dur"] = FADE_MS / 1000.0
             v = F["vis"]
             if rgb:
                 rs, alpha = level_shape(level)
@@ -1193,16 +1293,16 @@ class Field:
     def animate_fixtures(self, now):
         """Advance every mid-fade fixture and paint the ones that moved.
 
-        Linear, deliberately: a PWM ramp is linear in duty, and at 60 fps a
-        200 ms fade is ~12 frames - an easing curve would be invisible. When
-        item 1d decodes the a2 payload, its per-fade rate replaces FADE_MS
-        for that fixture and this loop needs no other change.
+        Linear, deliberately: a PWM ramp is linear in duty, and at 60 fps an
+        80 ms step is ~5 frames - an easing curve would be invisible. The
+        duration is per fixture: a base step gets FADE_MS, an enveloped
+        fixture gets 0 because the a2 pulse itself is feeding the ramp.
         """
-        dur = FADE_MS / 1000.0
         for F in self.fixtures:
             vt = F["vt"]
             if vt is None:
                 continue
+            dur = F.get("dur", FADE_MS / 1000.0)
             t = 1.0 if dur <= 0 else min(1.0, (now - F["t0"]) / dur)
             v0 = F["v0"]
             vis = tuple(a + (b - a) * t for a, b in zip(v0, vt))
@@ -1308,9 +1408,16 @@ class Field:
             if self._decoded is not None and decoded != self._decoded:
                 self._mark(self._data_ev, t0)
             self._decoded = decoded
+            # The fade ring first: a pulse command is both data arriving and
+            # one picture update, however many frames its envelope spans.
+            nfades = self._take_fades(d, t0)
+            for _ in range(nfades):
+                self._draw_ev.append(t0)
+                self._data_ev.append(t0)
             lit, changed = self.draw_fixtures(d, t0)
             if changed:
                 self._mark(self._draw_ev, t0)
+            if changed or nfades:
                 if self._draw_last is not None:
                     self._gap_worst = max(self._gap_worst, t0 - self._draw_last)
                 self._draw_last = t0

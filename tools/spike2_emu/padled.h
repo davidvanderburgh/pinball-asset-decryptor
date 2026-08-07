@@ -57,6 +57,28 @@ struct padled_shm {
     unsigned char lvl[PADLED_NODES][PADLED_COILS];   /* last drive byte      */
     unsigned coil_gen;            /* bumped after every decoded coil frame   */
     unsigned coil_decoded;        /* total coil fires decoded, ever          */
+    /* VERSION 3: the FADE layer - `cmd a2` blen=6, the animation half of the
+     * light show. One entry per command, a ring so a slow reader loses old
+     * pulses rather than blocking the shim. Offsets for a Python reader:
+     * fade_head 2076, entries 2080, entry stride 12, FADE_RING 96.
+     *
+     * WHAT AN ENTRY MEANS (established 2026-08-06/07 from the skip captures,
+     * see REMAINING item 1d): a ONE-SHOT PULSE ENVELOPE over a lamp RANGE -
+     * go FROM -> TO using the rate slot for that direction, then return to
+     * FROM using the other slot; 0 = instantly. The pulses are an OVERLAY on
+     * the base picture (the indexed writes), which is why val[] is NOT
+     * touched here: the base layer owns it, and a pulse ends where the base
+     * says. The RATE UNIT is not established - the reader scales it.
+     * NOT established either: whether a wide range pulses together or as a
+     * travelling sweep. Rendered together until an LED Tests run says. */
+    unsigned fade_head;           /* entries written, ever; ring index = %96 */
+    struct padled_fade {
+        unsigned ms;              /* guest CLOCK_MONOTONIC ms at decode      */
+        unsigned char node, start, end;      /* raw indices, inclusive      */
+        unsigned char from, to;              /* levels                      */
+        unsigned char rise, fall;            /* rate per direction, 0=snap  */
+        unsigned char pad;
+    } fade[96];
 };
 
 #endif

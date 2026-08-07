@@ -719,8 +719,10 @@ HELP_CONTENT = {
          "window, at 60 fps on the graphics card, with sound and keyboard "
          "input. Start it, and the game boots exactly as the machine does: "
          "splash, then its own boot sequence, then attract mode or the "
-         "operator menu. Stop kills every part of it and then verifies "
-         "nothing survived."),
+         "operator menu. On macOS the window is Screen Sharing — the picture "
+         "renders inside the container, and the app opens the viewer by "
+         "itself once the game is up. Stop kills every part of it and then "
+         "verifies nothing survived."),
         ("It runs the card you pick here, not the Input box",
          "This is the one tab that ignores the Input box: point it at a card "
          "image of its own. That image is mounted READ ONLY and run in place — "

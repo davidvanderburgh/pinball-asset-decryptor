@@ -1168,6 +1168,65 @@ These have each been violated at least once and each cost a run or a window:
       needs a run, it reproduces every time, and the instrument is a one-line
       trap - the unknown is which host it belongs to, not how to see it.
 
+- [ ] **32. Stretching the game window brings the emulation to a crawl.**
+      `S2 D3`
+      **★ DAVID, 2026-08-07: "stretching the display size for the stern spike 2
+      emulator window brings the emulation to a crawl (like when I make it 3 or
+      four times larger)."** The desktop is 3840x2160 at 120 Hz, so "3 or four
+      times" the default 1360x768 is at or past maximised.
+      **ESTABLISHED AT THE DESK, FROM THE SOURCE, AND IT NARROWS THE SEARCH
+      BEFORE ANY RUN: the guest's own drawing does NOT grow with the window.**
+      `fb_w`/`fb_h` are set once from `PAD_GL_W`/`PAD_GL_H` (`padglhost.c:2079`)
+      and the guest renders into `tex_screen` at that size whatever the window
+      does. The only thing that scales is `win_present()` (`padglhost.c:1367`):
+      one textured quad letterboxed into `win_w x win_h`, then `eglSwapBuffers`.
+      **ARITHMETIC, NOT A MEASUREMENT, so treat it as a reason to look further
+      rather than as a result — and it says the GPU fill is NOT enough on its
+      own.** `gpuprobe` measured the default adapter (the AMD iGPU, item 18) at
+      **1.096 ms/frame for 4 full-screen 1080p quads = 8.29 Mpixel**. The blit is
+      1.04 Mpixel at 1360x768 and ~8.3 Mpixel maximised, i.e. **~0.14 ms →
+      ~1.1 ms against a 16.7 ms budget**. That is real but it is not a crawl, so
+      do not stop at "it is the integrated GPU". The untested suspects are
+      downstream of the quad: the per-frame **cross-adapter copy** to a display
+      the NVIDIA card owns, the **msrdc RAIL present** of a much larger surface,
+      and whether either back-pressures the guest through the swap.
+      **RELATED MEASUREMENT, so nobody re-derives it: item 18 found msrdc CPU is
+      not pixel-proportional** — a quarter of the pixels moved it 72.1 → 70.3.
+      **But that was tested DOWNWARD from the default and never above it**, which
+      is the whole range this item is about.
+      **EVERY INSTRUMENT NEEDED ALREADY EXISTS AND THE THREE SEPARATE THE TWO
+      HALVES:** `[eglshim] N frames in M ms = X fps` is the GUEST's own rate,
+      `padglhost`'s `fps` line is the HOST's, and item 11's `swap_us` says how
+      long `eglSwapBuffers` blocks. Guest fps falling with host fps while
+      `swap_us` balloons is back-pressure; host fps falling alone is a display
+      cost only. **A free fourth oracle needs no instrument at all: audio does
+      not go through the renderer** (`padplay.py`, Windows side), so if the sound
+      crawls too, the guest genuinely slowed.
+      **REPRO WITHOUT TOUCHING A WINDOW, which matters because `SetWindowPos` on
+      an emulator window is a standing non-negotiable:** item 5 (`19e1b85`) made
+      `.pad_windows` lines `key x y [w h]` and padglhost CREATES at the saved
+      size — so write a big size in and start the run. If a resize DURING a run
+      is wanted, item 5's verified technique is a SendInput corner drag from a
+      DPI-aware process, not a programmatic move.
+      **Two levers exist but are knobs awaiting an A/B, not fixes:**
+      `PAD_GL_ADAPTER` (built for item 18, **unset by default**) points Mesa at
+      the NVIDIA card, and `PAD_GL_WIN_EVERY` presents every Nth frame.
+      **Acceptance:** state the window size in pixels and all three rates (guest
+      `[eglshim]`, host `fps`, `swap_us`) at the default size and at ~4x, on the
+      same run recipe — that pair alone is the finding, and it is worth a commit
+      even if no fix follows. A FIX means the guest's own fps holds at ~4x within
+      a stated margin of its default-size figure, with the picture still correct
+      and letterboxed, and dragging plus the item 5 size restore still working
+      afterwards — that is exactly what the banned fix broke.
+      — S2: play works at the default size so nobody is blocked outright, which
+      is why it is not S1; what it costs is playing at a viewable size on a 4K
+      desktop, and it makes every item whose oracle is David's eyes (1d's fade
+      curves, 21's trough markers) dearer by pinning the window small. Arguable
+      as S1 if you read "the game visibly misbehaves while you are playing it" as
+      covering a size the user chose. D3: needs a run, it shows up the moment you
+      look, and all three instruments exist and are validated — the unknown is
+      which stage of the present path pays, not how to see it.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

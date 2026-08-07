@@ -400,662 +400,6 @@ These have each been violated at least once and each cost a run or a window:
       is blocked on CRIU; this is the input-replay route and needs no checkpoint.
       They may partly substitute for each other — do not build both blind.
 
-- [ ] **11. Background video stutters every ~7 seconds.** `S2 D2` ← IN
-      PROGRESS *(**D3 → D2, 2026-08-06 evening:** the seam is decomposed and
-      its three host-side costs are eliminated and verified; what is left is
-      David's eyes on the current build, and only his report decides whether
-      the persistent seekable decoder is still worth building.)*
-      — S2 because you can still play through it, though 60.0 → 17.7 fps is
-      nearer a malfunction than a quality defect and S2 is being held only
-      because nobody loses a ball to it. **D3 → D2 on 2026-08-06:** the caller
-      is now named (below), so the fix has a location instead of a choice; the
-      storm reproduced twice inside one three-minute game, so it is no longer a
-      fault you have to wait for; and **item 20 is CLOSED as of `e1e9cb3`**, so
-      a stable game is no longer in the way — coin/Start/`plunge.py plunge`
-      held Ball 1 for a full five minutes. What is left is a local change plus
-      one confirming run.
-      **★★ THE OPEN QUESTION IS ANSWERED: `caller=rewind`.** Read off a game
-      David played on the current build 2026-08-06 and handed over as a crash
-      report — **no run was spent on it.** Both storms in that session say the
-      same thing, verbatim:
-      `[vid] ch2 RE-ARM STORM: 8 prepares of ...35.asset/1.asset in a row, each
-      delivering <=1 frame, caller=rewind` and the same for `35.asset/6.asset`;
-      they ran **93 and 56 prepares**. So the runaway is `pad_vid_seek()` — the
-      game's **EOS handler looping the clip** — and NOT
-      `gst_element_set_state(PAUSED)` re-arming a pipeline it already has. Those
-      two wanted opposite fixes (`gstvid.c:182`) and the guess is no longer
-      needed. (The `caller=state` on the *ended* line is not a contradiction:
-      `prepare_why` is one static naming the LAST prepare, so only the START
-      line names the runaway.)
-      **Two more facts from the same log, both free:** the storms were on
-      **ch2, the 520x294 TV inset**, not on the 1360x768 background — the inset
-      took **158 serves against ch0's 55** in three minutes; and the storm fires
-      on the build that already has the ffprobe cache, so **caching the probe
-      did not stop it** and was never going to. It made each prepare cheap; the
-      loop is still there.
-      **★ DAVID'S THEORY — "it stutters when LOGS ARE WRITTEN, maybe a separate
-      logging thread" — IS RULED OUT, and the measurement that killed it also
-      found the real cause.** Of 24 video stalls in his screen recording, **16
-      are surrounded ONLY by video-pipeline churn and 0 are switch-only**; the
-      single `[sw]`-only log burst in the whole recording was **smooth (8/9
-      advances)**. The log line is the symptom. **Do not build a logging
-      thread.**
-      **Established, from two independent instruments that agree:**
-      • **Every `serving` line is one `pad_vid_prepare`, and prepare BLOCKS THE
-      GAME'S OWN UI THREAD** on `ack_gen` (`gstvid.c`), while the host did a
-      full **ffprobe spawn before acking** — measured on this machine, idle:
-      **23.4 ms** at 149 KB, 27.5 ms at 16 MB, **38.6 ms** at 60 MB.
-      • In gameplay one channel re-served **the same file 17 times a second**;
-      **116 of that run's 140 serves died after exactly ONE frame**.
-      • **Screen recording** (outside WSL): 19 of 24 stalls within ±33 ms of a
-      log write against a 16.7% chance rate; 19 two-second buckets with zero
-      serves averaged **26.0 fps**, 5 buckets with ≥10 serves **20.0 fps**.
-      • **eglshim, inside the guest**: 61 zero-serve buckets **58.7 fps**
-      (mostly exactly 60.0), 4 busy buckets **31.1 fps**, worst **17.7**.
-      corr(serves, guest fps) = **−0.622**.
-      **★ THE ITEM'S OWN "NOT the clip loop boundary" RULING WAS WRONG, and it
-      was wrong because it measured the WRONG CLIP.** It timed the background
-      `264.asset/0.asset` (1965 frames, 65.78 s). The clip actually on screen in
-      attract is **`2.asset/55.asset`, 240 frames = 8.00 s**, and it re-serves
-      every 8 s — which fits David's "~7 seconds" far better than 65.78 s does.
-      Confirmed on a 3 min attract run this pass: 14 loops, all of that one clip.
-      **RULED OUT, with numbers, so nobody pays twice:**
-      • **a separate logging thread** (above).
-      • **`ffmpeg ended` → `serving` as the hole.** It measures 140 ms and looks
-      damning, but the ring is `SLOTS`=4 deep and the guest is still playing
-      those frames out at 33.3 ms each — **4 × 33.3 = 133 ms**. The picture is
-      moving through all of it. The real hole is the other side of the re-arm:
-      **ffmpeg cold start to first frame = 35 ms** (min 33, max 38).
-      • **eglshim as the instrument for ATTRACT.** It counts the GAME'S RENDER
-      LOOP, so it sees a blocked guest (the gameplay storm, 17.7 fps) and
-      **cannot see a frozen video texture** — the game happily redraws a stale
-      frame at 60 fps. Across 178 s of attract it held **60.1 fps median with
-      one dip**, which is not evidence attract is smooth. Attract needs the
-      screen-recording differ, not eglshim.
-      **Shipped this pass:** the ffprobe is **cached per (path, size, mtime)** —
-      a repeat serve now costs ~1 µs instead of 23-39 ms of blocked UI thread,
-      verified on the real storm asset including that an mtime change
-      re-probes; the host's idle poll goes **10 ms → 1 ms while a channel is
-      hot**, which was up to 10 ms per serve of pure latency on the game's
-      critical path; and both ends grew a **runaway detector** — the host logs
-      `chN STORM` after 8 serves of one file, the guest logs `chN RE-ARM STORM`
-      with **`caller=state` vs `caller=rewind`**, which is the one fact the host
-      cannot see and the fact that decides the fix. Both stayed silent through
-      attract (the negative control).
-      **★ DAVID, 2026-08-06, watching live: "the video stuttering [is] most
-      right before the next video comes in. like the last 500ms - 1 second of a
-      video stutters before the next one loads in." THE LOG AGREES AND NAMES
-      THE MECHANISM — marked CANDIDATE until a fixed build is watched:** at a
-      transition the game re-arms the OUTGOING pipeline (`caller=state`
-      prepare, same file) before setting the new location, and prepare()
-      always restarts ffmpeg from frame 0 because the host cannot seek — so
-      the outgoing clip visibly JUMPS BACK to its own start and replays while
-      the UI thread eats blocking prepares. His crash log, 110.0 s: ch0 was
-      283 frames into `2.asset/290.asset`, got re-armed and re-served the
-      SAME file from 0, and the real next clip only arrived at 111.3 s —
-      1.3 s of churn, matching the reported 0.5-1 s. This also re-frames the
-      original "~7 s" attract stutter: the attract clip is 8.00 s, one
-      transition per 8 s, and the stutter IS the transition.
-      **★ THE REWIND-PATH STORM IS FIXED AND CONFIRMED (run 2, uncommitted):
-      host STORM lines 2 → 0, ch2 serves 158 (crash run) → 75 (narrow absorb)
-      → 13 (widened), max 3 serves per file, clips playing to real ends
-      (162/200/242/168 frames), one burst absorbing 148 redundant rewinds.
-      The absorb predicate is `playing && same path` — the first version
-      (`delivered <= 1`) was MEASURED TOO NARROW: the game seeks every 33 ms
-      tick for the whole scene step, not just until frames flow, so the
-      narrow guard only slowed the storm (re-arm, absorb 4, re-arm; host
-      storms still fired twice).**
-      **THE STATE PATH TURNED OUT TO CARRY TWO DEFECTS, both now built and
-      on run 3 as this is written:** (a) the same-file mid-play re-arm
-      restarting ffmpeg from 0 — absorbed by the same predicate in
-      `pad_vid_prepare`; (b) **the armed-but-unplayed stall**: after a real
-      re-arm, `pad_vid_play` declined while the DOOMED old thread's
-      `s->playing` was still 1 (it wakes up to 33 ms later), so the new arm
-      filled a 4-slot ring nobody drained — that is the ubiquitous
-      `superseded while throttled after 4 frames` line and the serve-PAIRS at
-      every transition; fixed by clearing `s->playing` in the committed
-      re-arm path so play-after-prepare always starts the thread.
-      **★ DAVID, same session: "the stutter might be lining up with queued
-      sound effects too. it seems whenever something happens, there is
-      stuttering."** Consistent with everything above — "something happens" is
-      when the UI thread does event work (prepares are PROVEN blocking; sfx
-      asset loads are a CANDIDATE, unmeasured). If stutter still tracks
-      sound effects after the video fixes are judged, that residual is a
-      separate blocking source. CONFOUND to control: his session ran
-      PAD_CARD (fuse2fs), the measurement runs are extracted — asset I/O
-      cost differs between them.
-      **★ DAVID WATCHED RUN 3 LIVE (all three fixes active) AND STILL SEES
-      STUTTER, refined by two answers that redirect the hunt:** (1) **"only
-      the video content"** hitches — overlays/score/LEDs stay smooth — so the
-      game's render loop is exonerated and the residual is gaps in frame
-      DELIVERY to the texture; (2) it is **intermittent and "sometimes looks
-      more like screen tearing"** (his earlier screen recording is the
-      reference). Run 3's own live numbers confirm the fixes work AND the
-      residual is real: absorbs firing, superseded-after-1 down 170 → 33,
-      throttled-4 down to 9, but padglhost dips 60 → 53/49.9 fps in busy
-      stretches.
-      **TWO NAMED CANDIDATES for the residual, neither yet measured:**
-      • **Fragment-cut cold starts.** During events the game chains
-      sub-second clip fragments (live log: `329.asset` cut after 14 frames =
-      0.36 s, `316.asset` after 30 = 0.75 s) and every cut pays ffmpeg spawn
-      + ~35 ms cold start — freeze-gaps peppering exactly the moments David
-      reports. **The census instrument for this is BUILT and arms on the
-      next run** (padvidhost.py: `first frame consumed N ms after serve
-      start` + `guest consume STALLED N ms at frame F`, budgeted).
-      • **Ring-slot reuse race → TEARING.** The guest hands the game a
-      POINTER into the shared ring (no copy), padglhost reads those pixels
-      LATER at its own pace, but the guest frees the slot the moment the
-      handoff returns and the ring is 4 deep — a lagging upload reads a slot
-      ffmpeg is overwriting. Fits "intermittent, worse when things happen,
-      looks like tearing". **Detector designed, not built:** stamp each slot
-      with its frame number host-side, have padglhost verify the stamp at
-      upload time and log mismatches — spans the GL bridge, next pass.
-      **RUN 3 FINAL, and the three fixes are COMMITTED (`cef2627`):** storms
-      0/0 on both detectors, state-absorb 72 bursts, rewind-absorb 5,
-      superseded-after-1 185 → 108 (what remains is the game's own
-      loop-then-advance at clip ends), throttled-4 everywhere → 29, 75 full
-      plays, rig clean after.
-      *(run 4, watch.sh 20 min with the census armed, ended long ago — its
-      padvid.log was the first with the census lines.)*
-      **★ THE CADENCE FIX LANDED AND DAVID CONFIRMED IT LIVE** ("the
-      stuttering on this city loop is gone"), `a6d9ce1`: vid_thread now
-      schedules frame N at t_epoch + N*period instead of sleeping a period
-      after each frame's work, so pacing error cannot accumulate. The census
-      agreed: ZERO mid-clip stalls the whole run. **Instrument lessons paid
-      for in the same commit:** a 30-on-30 screen capture is phase-ambiguous
-      and freezedetect on near-static content measures its own threshold
-      (300 "freezes" before AND 306 after the fix — both garbage); a
-      change-detection histogram read 25% of a PRISTINE extract as stalls.
-      Change detection is the wrong class for this footage; David's pure
-      extracts (`OneDrive\Desktop\gz\video`, 659 named clips) enable
-      ground-truth frame MATCHING instead — `framematch.py` in the session
-      scratchpad, designed, unvalidated.
-      **★ THEN THE BALL-2 REGRESSION, David live: "now the stutter is back...
-      on ball 2 this stutter is very obvious" — WHILE EVERY DELIVERY COUNTER
-      READ CLEAN** (padglhost flat 60, zero stalls, healthy serves). The log
-      names the suspect: MY OWN widened rewind absorb swallowed a seek at
-      **delivered=1780** — at a ball change the game deliberately seeks its
-      still-playing backgrounds to 0, a mid-play seek can never be an EOS
-      loop (EOS stands the stream down first), and refusing it plays the
-      picture mid-clip against a game timeline that thinks it restarted.
-      **Fix COMMITTED (`dba987d`): the discriminator is SEEK RATE, not
-      delivered-count** — absorb only a seek within 3 frame periods (100 ms)
-      of the previous seek on that stream, so the FIRST seek of any burst
-      re-arms: a restart is honoured, a storm pays one re-arm instead of 93.
-      Three predicates tried, each killed by measurement: `delivered<=1` too
-      narrow (storm survived), `playing+same-path` too wide (ball-2 restarts
-      refused), burst-only is the third.
-      **RUN 6 IS LIVE on that build as this is written** (watch.sh 30 min,
-      census armed, game started, ~15:35 2026-08-06) — David is playing
-      through a ball change as the acceptance test.
-      **★★ MEASURED AT LAST, OFF DAVID'S OWN SCREEN RECORDING, AGAINST A
-      PRISTINE CONTROL — and it relocates the fault out of everything fixed
-      so far.** `Recording 2026-08-06 154107.mp4` (Ball 2, MechaGodzilla
-      barrier, 21.8 s) against its extract `gz\video\MechaGodzilla_Loop.mp4`:
-      | | repeated frames | held events | longest |
-      | capture | **22.7%** (148/653) | 97 | **1500 ms** |
-      | pristine control | **0.0%** (0/1995) | — | — |
-      The control is what makes it real: that clip NEVER repeats a frame, so
-      all 22.7% is the emulator. **TWO DISTINCT FAULTS, told apart by their
-      time distribution:** (a) a STEADY ~4.5 single-frame holds per second,
-      uniform across every 2 s bucket (9-11 holds, ~1 frame each) — a rate
-      loss, NOT event-driven; (b) ONE 1500 ms freeze at 10.03 s.
-      **AND THE RUN'S OWN LOGS WERE CLEAN THROUGHOUT** (run 6, same minutes:
-      0 storms, 0 consume stalls, 57 healthy serves, padglhost 59.4 fps avg).
-      **So the loss is DOWNSTREAM of decode and of guest delivery** — between
-      the guest handing a frame over and pixels reaching the screen. Same
-      shape as the audio fault this rig already solved: every instrument
-      inside WSL read perfect while the room heard breakage, and the answer
-      was the WSLg→Windows hop.
-      **★★ REPRODUCED WITHOUT DAVID AND LOCALISED, 2026-08-06 (runs 7-8).**
-      Agent-driven capture of its own gameplay: **18.7% repeated frames, 306
-      held events, 5.6/s** — matching David's 22.1% / 6.6/s, so it is the
-      same fault and it no longer needs his hands to study.
-      **STAGE COUNTERS NOW EXIST AT BOTH ENDS OF THE BOUNDARY** (`[vid] chN
-      handed the game N frames ... /s` in gstvid.c, `vid N uploads/s N NEW/s`
-      beside padglhost's fps line) and they name the mechanism:
-      • healthy seconds: guest 30.0/s → padglhost 30.0 uploads/s, all NEW,
-        60.0 fps.
-      • bad seconds: guest **27.4/s** → padglhost **25.5 uploads/s** at
-        **54.0 fps**. **The guest handoff and the renderer dip in the SAME
-        seconds.**
-      **FOUR CANDIDATES RULED OUT BY MEASUREMENT, so nobody pays twice:**
-      • **WSLg/RDP presentation.** David: only the VIDEO hitches while scene
-        art and overlays stay smooth — one window, one swap, so a dropping
-        RAIL hop would take everything with it. The per-swap tick was
-        designed for this and is NOT needed.
-      • **CPU starvation.** 67% idle, load 0.99 on 6 vCPUs, during the dips.
-      • **Decode starvation.** New `RING EMPTY` counter (gstvid.c, fires when
-        a frame is due and the ring has none): **0 events** across a whole
-        gameplay run. The host decoder is never behind.
-      • **The recorder perturbing it.** The dips are identical with no
-        capture running (one window fell to 14.3/s).
-      **★ GL BACK PRESSURE IS ALSO RULED OUT — runs 9-10 timed it.**
-      padglhost's per-frame cost is **conv 0.70-0.85 ms + swap 3.70-3.83 ms
-      against a 16.7 ms budget**, flat in the bad seconds as well as the
-      good. It is never the bottleneck; when its fps reads 55-57 it is
-      WAITING for guest commands, so **padglhost's fps is a readout of the
-      GUEST's render rate, not of the renderer.** Do not re-time it.
-      **GUEST HANDOFF SPACING IS NOW MEASURED, and it splits by condition:**
-      • idle game: **worst gap 33 ms, 0 late, 0 early** — textbook.
-      • under scene churn (longplay): **exactly ONE late gap per 2 s, of
-        46-223 ms**, rate 27.1-29.9/s.
-      So the guest contributes a real but INTERMITTENT hiccup, roughly
-      0.5-3 frames/s, and the screen shows **5.6 holds/s**. Those do not
-      reconcile, so **something after the handoff is still unaccounted for**
-      and it is the last unmeasured link.
-      **★★ MEASURED, run 11, AND IT IS THE PRESENTATION HOP — every stage
-      inside the rig is now proven clean and the screen still is not.**
-      padglhost's swaps-per-video-frame histogram is essentially PERFECT:
-      `2x` on 53-60 frames per 2 s window, **HOLDS 0.0-1.0/s**. Over the same
-      seconds the screen showed **5.72 holds/s**.
-      **A 60 fps capture makes it unambiguous** (perfect 30-on-60 delivery
-      MUST read exactly 2 refreshes per frame):
-      | 1 refresh (too short) | **18.4%** |
-      | 2 refreshes (perfect) | **48.4%** |
-      | 3+ refreshes (a hold) | **33.1% = 8.50 holds/s**, longest 250 ms |
-      So padglhost gives each frame exactly two SWAPS while the desktop shows
-      it for one or three REFRESHES. The swaps are right; their PRESENTATION
-      is uneven. The loss is after `eglSwapBuffers`, in the WSLg/RAIL/RDP hop
-      to Windows.
-      **★ AND THIS OVERTURNS THIS ITEM'S OWN EARLIER RULING, which was mine
-      and was wrong.** Presentation was "ruled out" from David's report that
-      only the video hitches while scene art and overlays stay smooth. That
-      inference does not hold: static or slow overlays CANNOT reveal an
-      uneven present, only 30 fps motion can. The observation was right and
-      the deduction from it was not. **The same shape as the audio fault this
-      rig already solved** - every instrument inside WSL read perfect, the
-      room heard breakage, and the answer was to bypass the WSLg hop
-      (PortAudio on the Windows side, `13c4410`).
-      **★★★ RETRACTED THE SAME DAY, BY THE TICK. THE PRESENTATION HOP IS
-      INNOCENT AND THE SCREEN-CAPTURE NUMBERS ABOVE ARE CONTAMINATED.**
-      `PAD_GL_TICK=1` draws the low byte of the swap counter as 8 black/white
-      blocks (padglhost, bottom-left - GL's origin, which cost one decode
-      attempt). Decoded off a 60 fps capture, 256 distinct values seen:
-      **the counter advances 1798 over 1799 captured frames in 30 s = 59.9
-      swaps/s, exactly padglhost's rate. NO SWAP IS EVER LOST.** The deltas
-      spread 36.8% at 0, 32.9% at 1, 30.3% at 2+, netting to exactly 1.0 -
-      **that is the GRABBER sampling unevenly, not the desktop dropping
-      frames.**
-      **SO THE INSTRUMENT HAD A HOLE AND EVERY SCREEN NUMBER IN THIS ITEM
-      INHERITS IT.** `dupcensus.py` compared a CAPTURE against a FILE: the
-      file has no capture jitter and the capture has ~37% double-samples, so
-      the "22.7% excess repeats" measured a real fault PLUS the recorder's
-      own jitter and cannot separate them. The 18.7%, 19.1%, 5.72/s and the
-      60 fps 1x/3x split are all unreliable AS MAGNITUDES. Treat them as
-      "something is wrong", never as a size, and never as a before/after.
-      **WHAT SURVIVES, and it is not nothing:** David sees the stutter with
-      his own eyes, which no sampler artefact explains; and the guest-side
-      hiccup is measured INSIDE the rig where no grabber is involved -
-      **one late handoff gap per 2 s of 46-223 ms under scene churn**, rate
-      27.1-29.9/s against a target of 30. That is now the only trustworthy
-      quantitative handle on the fault.
-      **★★ BUILT AND MEASURED: `tickcensus.py`, and THE NUMBERS FINALLY
-      RECONCILE.** It decodes the tick beside the content and keeps ONLY the
-      pairs where the tick advanced by exactly 1 - genuinely adjacent swaps,
-      nothing missed, nothing double-sampled (75.1% of pairs were discarded
-      as jitter, which is the size of the hole in the old number).
-      **Baseline is 50%, NOT 0** - video is 30 fps over 60 Hz swaps, so
-      identical content across two adjacent swaps is CORRECT half the time,
-      and reading "repeats are bad" here calls a healthy pipeline 50% broken.
-      **Measured on a scene-driven game: 52.9%, i.e. +2.9 points = 1.76
-      holds/s** - about a third of the contaminated 5.72/s.
-      **AND 1.76/s IS WHAT THE GUEST-SIDE HICCUP PREDICTS** (one late handoff
-      gap per 2 s, 46-223 ms, plus a rate shortfall of 27.1-29.9 against 30).
-      Before this the screen said 5.72/s and the guest said ~0.5-3/s and they
-      did not reconcile, which is what drove two passes downstream. They
-      reconcile now: **there is nothing unexplained after the handoff.**
-      **SO THE WHOLE REMAINING FAULT IS THE GUEST'S LATE HANDOFF UNDER SCENE
-      CHURN**, and the mechanism is narrowed by what is already excluded -
-      not CPU (67% idle), not decode (RING EMPTY = 0), not renderer cost
-      (4.5 ms of 16.7), not presentation (tick: no swap ever lost).
-      **★★★ SETTLED, run 14. THE HANDOFF DOES NOT BLOCK, AND THE "LATE
-      HANDOFF" WAS THE CLIP TRANSITION ALL ALONG.**
-      Timed: `handoff avg 8-11 us, worst 10-32 us` — including in the very
-      windows reporting a 206 ms gap. It is never the cost. Candidate dead.
-      **What the same lines say instead is the answer:** every window with
-      `late 0` has `worst gap` of **exactly 33 ms** — textbook — and every
-      window with a late gap shows **132-206 ms**, at about the rate
-      `longplay` changes scenes. `RING EMPTY` stayed **0** and the host
-      census shows `first frame consumed 34-39 ms after serve start`. So the
-      thread is never stalled and never starved: the gap IS the cost of
-      changing clips (ffmpeg cold start + prepare), measured end to end.
-      **AND THAT IS EXACTLY WHAT DAVID SAID ON DAY ONE** — *"the stuttering
-      [is] most right before the next video comes in"* and *"activating
-      another video shows stutter in that video when it transitions."* Every
-      other candidate has now been excluded with a number, so his original
-      report is the whole remaining fault, quantified: **~150-200 ms of no
-      new frames per transition = 4-6 dropped frames each**, which at the
-      observed transition rate is the **1.76 holds/s** `tickcensus.py`
-      measures. The loop closes; nothing is left over.
-      **★ THE PRE-ARM WAS BUILT AND IT REGRESSED THE PICTURE — built, tried,
-      measured, disabled, `PAD_VID_PREARM=1` to revive.** Arming the host at
-      `pad_vid_note_location()` time, in place on the same channel:
-      | | tickcensus (50% = perfect) | implied holds |
-      | before | 52.9% | 1.76/s |
-      | pre-arm in place | **63.1%** | **7.86/s** — WORSE |
-      **AND THE GUEST-SIDE LOG CALLED IT A TRIUMPH**, every window reading a
-      flawless `late 0 early 0 worst gap 33 ms` where before it showed
-      132-206 ms gaps. Both readings are true and the guest's is worthless:
-      **the channel is a SHARED resource**, so arming it for the incoming
-      clip bumps `req_gen` under the clip still streaming, the host abandons
-      that decode, and `vid_thread` sees the generation move and stands down
-      holding its last frame. Nothing is ever LATE because nothing is
-      delivered at all. This is the exact failure mode `tickcensus.py` was
-      built for, one turn after it was built.
-      **THE IDEA IS STILL RIGHT; ARMING IN PLACE IS NOT.** The 30-70 ms
-      between location-set and prepare is real budget and the transition is
-      still the last measured cost. **Next design: pre-arm on a SPARE
-      CHANNEL** — decode the incoming clip where nobody is watching, then
-      have `prepare()` adopt that channel instead of re-arming this one.
-      `PADVID_CHANNELS` is 8 and a scene uses at most 3, so the room exists.
-      **★ THE STRUCTURAL BLOCKER — CLEARED, `d1a7b8d` (2026-08-06). Step 1's
-      hwchan indirection is committed, pushed, and CONFIRMED UNCHANGED on its
-      own run:** 0 WRONG-SIZE uploads (the refactor's specific risk), 0
-      storms, 0 RING EMPTY/TAKEN OVER/NOT MINE, 226 serves, 42 absorbs, 54
-      clean EOS loops, ~30/s delivery, renderer 58-60 fps, alive 0. The only
-      late gaps were the known 104-206 ms transitions — the thing steps 2-3
-      exist to remove. Original scoping, kept for the record: `chan_of(s)` is
-      `s - streams`: **the padvid channel IS the stream's array index**, so a
-      stream cannot currently use any channel but its own and "adopt a spare"
-      is not expressible. The work, in order:
-      **(1)** add `unsigned hwchan` to `struct stream`, defaulting to the
-      index, and a `hw_of(s)` accessor; replace the **9 sites that index the
-      shared block or the ring** — `gstvid.c` lines 407, 464, 579-580, 592,
-      839, 1145, 1148, 1158, 1256 — leaving the ~22 logging uses of
-      `chan_of()` alone so log lines keep naming the STREAM.
-      **(2)** pick a spare: a channel no live stream currently has as its
-      `hwchan`, searched from the top so it rarely collides with a stream
-      index that later goes live.
-      **(3)** arm it at `note_location()` (the code for that already exists
-      behind `PAD_VID_PREARM=1`, it just writes the wrong channel), and in
-      `prepare()` adopt by setting `s->hwchan` to the armed channel instead
-      of bumping `req_gen` on the current one.
-      **The outgoing clip must keep streaming from its old channel while
-      this happens** — that is the entire point, and it is the exact thing
-      the in-place version broke.
-      **Do step 1 as its own commit with NO behaviour change** and confirm a
-      run is unchanged before building 2 and 3 on top; it touches every read
-      of the shared block and a mistake there looks like item 6's wrong-size
-      frames, not like a transition bug.
-      **Judge it with `tickcensus.py` against the 50% baseline (before =
-      52.9% = 1.76 holds/s), NEVER with the guest log** — that is now a
-      measured trap, not a caution.
-      **INSTRUMENT LEDGER — four built, ONE trustworthy, and the failures
-      matter more than the successes here:** `dupcensus.py` (TRUSTWORTHY:
-      consecutive-frame repeats over the moving region, needs no alignment,
-      calibrated at 0.0% on a pristine extract); `screenrec.py` (capture is
-      fine, its freezedetect analysis is phase-ambiguous at 30-on-30 — it
-      read 300 freezes before a fix and 306 after); `framematch.py`
-      (ground-truth matching, correct in principle, FAILED in practice — the
-      game bakes overlays into the picture so capture and extract have
-      differently-shaped moving regions, margin collapsed to 0.05 and it
-      claimed 40 loop wraps inside 21.8 s of a 66 s clip; do not revive
-      without solving alignment); a change-interval histogram (read 25% of a
-      PRISTINE extract as stalls — change detection is the wrong class for
-      this footage).
-      **Transition cold starts also remain, census-priced:** 35-40 ms (ch0),
-      64-71 ms (the 65 s background, also at every loop wrap). Fix
-      candidates unbuilt: host pre-arm at location-set, loop-flash suppress.
-      **★ STEPS 2+3 ARE BUILT AND ON A VERIFICATION RUN AS THIS IS WRITTEN
-      (2026-08-06 ~18:26), UNCOMMITTED in gstvid.c.** The design as built:
-      `spare_chan()` searches from the top, excluding host-serving channels
-      (`c->playing`, which also covers other streams' pending arms) and
-      guest-playing owners; the arm at `note_location()` is gated on the
-      location CHANGING (a rewind re-sets the same filename, and after an
-      adopt cleared `armed_path` that re-set would arm a spare for the clip
-      already playing); `prepare()` adopts via `s->hwchan1` with an ownership
-      SWAP so hwchan stays a permutation of 0..7 — two streams can never
-      drive one channel — and every race on the spare falls back through the
-      `req_gen` check to today's cold start, never to something new. Still
-      gated behind `PAD_VID_PREARM=1`; the default flips only on a tickcensus
-      win.
-      **★ RUN 2 (PREARM=1, ~18:30): THE MACHINERY HOLDS UNDER REAL CHANNEL
-      MOVES.** All 261 serves ran on hw 5/6/7 — the three live streams
-      adopted their spares early and STAYED there — with 0 WRONG-SIZE, 0
-      storms, 0 wasted arms, delivery 26-30/s, alive 0. **98 location
-      changes produced 98 arms: the arm fires on every real transition.**
-      The `superseded after 1` churn (~165 of 261) MATCHES the no-prearm
-      step-1 run (166 of 226), so it is the game's own loop-then-advance,
-      not a new storm.
-      **TWO LESSONS PAID FOR IN RUN 2, both instrument lessons:**
-      • **My adopt log line sat inside `if (moved)`, so IN-PLACE adopts —
-      the common case, arming your own channel while it idles at a clip
-      boundary — were SILENT SUCCESSES.** The run read as "98 arms, 5
-      adopts, 93 vanished" for an hour of analysis before the miscount
-      surfaced. Fixed: every ADOPT now logs, moved or in place, WITH the
-      measured ack wait (its own before/after). One line per transition.
-      • **tickcensus.py cannot judge a per-transition fix: two windows of
-      the SAME run, same build, read 59.9% and 67.5%** — window-content
-      variance far exceeds the effect size. Yesterday's single-window
-      52.9/63.1 inherit that as MAGNITUDES (the in-place regression stays
-      real — its mechanism was proven, delivery stood down). Judging this
-      fix needs multi-window medians or the adopt-wait lines themselves.
-      **★★ RUN 3 (adopt telemetry): 97 location changes → 97 arms → 97
-      ADOPTS, 0 wasted — adoption is 100% and the machinery is flawless —
-      AND THE PRE-ARM HIDES ALMOST NOTHING: adopt waits min 29 / med 60 /
-      max 86 ms, the SAME distribution as ordinary prepares.** Two facts
-      fall out, and they redirect the fix:
-      • **The "30-70 ms location→prepare budget" this design was built on
-      DOES NOT HOLD on this path** — the game's prepare follows the
-      location-set within a couple of ms, so the armed decode has no window
-      to warm up in.
-      • **The wait decomposes as the HOST'S FIRST-SIGHT FFPROBE (25-40 ms,
-      spawned synchronously before the ack the game's UI thread spins on)
-      plus supersede/kill overhead.** The probe CACHE (`(path,size,mtime)`)
-      only ever helped repeat serves; a transition is by definition
-      first-sight, so every transition paid the spawn. THAT is the
-      transition cost, not ffmpeg's decode cold start.
-      **THE FIX THAT FOLLOWS: a native MP4 header parse in padvidhost.py's
-      probe path** — width/height from the stsd sample entry, nframes and
-      the rate from stts against the mdhd timescale, microseconds instead
-      of a 25-40 ms spawn, ffprobe kept as a loud fallback
-      (`PAD_VID_NO_MP4PARSE=1` reverts). Helps EVERY serve: transitions,
-      loop wraps, event fragments. Host-side Python only, no guest rebuild
-      — watch.sh runs padvidhost.py straight from the repo.
-      **VALIDATED AND COMMITTED, `76363db`: 658 video clips, five numbers
-      IDENTICAL to ffprobe on every one, zero declines; 897 non-video
-      assets refused by both sides; 0.4 s total against ffprobe's 42.8 s.**
-      ffprobe stays as the loud fallback; `PAD_VID_NO_MP4PARSE=1` reverts.
-      Host-side only — no shim rebuild.
-      **★ RUN 4 (parser live): adopt waits med 60 → 35 ms, max 86 → 61,
-      mean 56.5 → 35.6, over 102/102 adoptions with ZERO parse declines**
-      — the parser removed exactly the probe's share. **The ~35 ms floor
-      that remains was then decomposed off the same telemetry: serve()'s
-      `finally` did `proc.kill(); proc.wait()` SYNCHRONOUSLY, so
-      chan_loop could not even SEE a pending arm until the dead ffmpeg
-      was reaped (~30 ms), on every re-arm — transitions, loop wraps,
-      everything.** Fixed: kill, reap on a daemon thread, nobody waits
-      (padvidhost.py, host-only). Run 5 verifies it.
-      **Run 4 also logged ONE `WRONG-SIZE` upload — examined, NOT a
-      refactor fault:** a stale game element re-uploaded its old
-      1360x768 pointer from a ring channel that had moved on to 520x294;
-      the size guard REFUSED it, which is its job, and the element keeps
-      its last-good texture. Same hazard class the LRU steal always had;
-      channel moves make it slightly more frequent; the guard makes it
-      harmless. NOTE the guard's log dedups per (channel, size) — a count
-      of 1 line is not a count of 1 event.
-      **RUN SHAPE, per David 2026-08-06: runs are now 4 MINUTES** —
-      watch.sh 4, ~45 s boot, recipe, 2 min longplay. The 10-minute shape
-      existed for tickcensus captures; the adopt-wait telemetry needs
-      only a few dozen transitions and 2 min of churn provides them. Do
-      not run long by default.
-      **★ RUN 5 (async reap, first 4-minute run): adopt waits med 31 /
-      mean 32.2 / max 54 — the reap bought ~3 ms, NOT the ~30 predicted,
-      so that theory is mostly DEAD.** (The change stays: it is strictly
-      correct and free.) 45/45 adoptions, 0 wasted, 0 declines, 0
-      wrong-size, rig clean. **A ~30 ms ack floor remains, and it is
-      UNDECOMPOSED: either the host's notice→ack path is slower than its
-      code reads, or the guest's `usleep(1000)` spin iterations cost more
-      than 1 ms under qemu and the printed "ms" over-counts.** The two
-      are told apart by ONE cheap instrument: a host-side log of
-      request-noticed→ack-published per serve, diffed against the guest's
-      spin count on the same serves.
-      **PAD_VID_PREARM STAYS OPT-IN, decided on measurement:** with the
-      probe free, an armed prepare's edge over an ordinary one is only
-      the 2-5 ms arm→prepare head start — within noise of the ~30 ms
-      floor. The machinery is committed, safe (100% adoption, 0 wasted
-      across three runs), and worth keeping for the day the floor drops.
-      The PARSER was the real win of the pass: every serve's UI-thread
-      block lost the 25-40 ms probe — transitions, loop wraps, fragments.
-      **What a transition still costs, fully priced:** ~30 ms ack floor
-      (above, undecomposed) + ~35 ms ffmpeg cold start to first frame
-      (census: 32-40 ms, unchanged). Worst delivery gaps under churn now
-      80-173 ms against 132-206 before the pass.
-      **★★ RUN 6 DECOMPOSED THE FLOOR, and both suspects were innocent:
-      host noticed→ack = 0.1 ms median over 110 serves (the parser made
-      the host instant), and the guest's spin loop counts honestly (31
-      spins = 34 ms wall). The ~30 ms is WRITE→NOTICE, and there is
-      exactly one place the host can be deaf that long: `serve()` sat
-      BLOCKED in a bare `readinto()` for ffmpeg's ~35 ms cold start,
-      checking nothing.** And that blind read happens at exactly the
-      wrong moment, which is ALSO the mechanism of David's live sighting
-      (2026-08-06 evening): *"a single frame jump at the end of the clip
-      — jumping backwards and pausing just before going to the next
-      clip."* At clip end the game's EOS reflex REWINDS the outgoing clip
-      (the backwards frame = its frame 0 flashing — authentic game
-      behaviour, instant on the real VPU), ffmpeg cold-starts for that
-      spurious restart, the REPLACEMENT clip's request lands during the
-      blind read and waits it out (~30 ms), then pays its own ~35 ms cold
-      start: jump, pause, next clip.
-      **★★ RUN 7 KILLED THE FLOOR: adopt waits med 34 → 2 ms, p90 42 →
-      2, max 54 → 9, over 40/40 adoptions, health clean.** The read is
-      select()-gated at 2 ms (padvidhost.py); a supersede now lands
-      mid-cold-start, so the spurious EOS rewind usually dies BEFORE its
-      frame 0 renders — the backwards flash David reported should mostly
-      be gone, not just shorter. The prepare-blocking cost of a
-      transition went ~60 ms → ~2 ms across this pass (probe 25-40 +
-      blind read ~30, both eliminated).
-      **What remains of a transition, the LAST structural cost: ffmpeg's
-      ~35 ms cold start to first frame, once per real clip change** (and
-      at every loop wrap). Two designs on the table:
-      • **persistent seekable decoder** per channel — emulates the real
-      VPU (David's hardware point), biggest but cleanest;
-      • **first-frames cache** — keep the first ~4-8 decoded frames per
-      file (LRU, ~6-12 MB per 1360x768 file, cap it), serve them into
-      the ring INSTANTLY on any re-serve while a fresh ffmpeg spools up
-      and discards what the cache already covered (~50 ms of decode
-      hidden behind 133-267 ms of runway). Cheaper, host-only, and it
-      erases the loop-wrap seam and the transition seam in one move.
-      **THE FIRST-FRAMES CACHE IS BUILT, UNCOMMITTED, ON RUN 8 as this
-      is written** (padvidhost.py, host-only): first HEAD_N=6 decoded
-      frames per (path,size,mtime,w,h), LRU budgeted by
-      `PAD_VID_HEADCACHE_MB` (default 192, 0 disables); on a re-serve
-      the head goes into the ring instantly while a fresh ffmpeg spools
-      and discards what the head covered (200 ms runway vs ~60 ms
-      spool); a clip that fits in the head never spawns ffmpeg. Serve
-      is three phases (head → discard → live) sharing one select-gated
-      `read_frame()`; the head is collected on miss and stored in the
-      `finally`, so superseded serves still contribute a full head.
-      **★ RUN 8 (head cache, first run): THE CACHE WORKS — 6 hits, "6
-      frames instant", adopt waits med 2 ms, worst delivery gaps down to
-      55-80 ms (from 84-173), zero storms/wrong-size — AND THE GUEST
-      SEGFAULTED ~2 min in** (17 serves against ~110 typical): NULL
-      deref inside libpthread, called from GAME code (`pc=libpthread
-      +0x8858, lr=0x4db77c` in the game binary, `fault=0x0`). Logs
-      preserved: `~/crashlogs/{gzpad,padvid,padglhost}_item11_run8.log`.
-      **★★ THE CACHE IS EXONERATED, and it took three runs plus a
-      re-audit of the whole series to get the attribution right.** Run 9
-      (cache on) crashed at the same ~80 s, byte-identical segv. Run 10,
-      the CONTROL (`PAD_VID_HEADCACHE_MB=0`), **crashed too — same pc,
-      same lr, same r0** — killing the cache theory. The re-audit then
-      showed the "7 clean runs before" premise was FALSE: **runs 2 and 3
-      (10-minute shape, 6-min longplay, BEFORE the cache/select-gate/reap
-      existed) also ended "the game exited", not their backstops** — I
-      had read their healthy stats as full runs without checking the
-      endings. So the crash is a STANDING, churn-provoked game fault that
-      pre-dates everything this pass built — it is item 23's, upgraded
-      there with today's evidence (site, disassembly, repro, and a
-      designed shim-side fix). The cache's own numbers stand: hits
-      instant, adopt waits med 2 ms, worst gaps 55-80 ms, zero
-      storms/wrong-size across all its runs. COMMITTED.
-      **Also learned, the self-match trap again: a healthy watch log
-      greps 1 for SEGV** — the event-feed awk's own pattern, echoed by
-      teardown's process listing. Judge runs by their ENDING line
-      (`backstop reached` vs `the game exited`), never by that grep.
-      **The crashes left interop-relay zombies + a ghost game window on
-      David's desktop (item 12's shapes); `wsl --shutdown` cleared all
-      of it, alive 0 confirmed after.**
-      **★★ DAVID'S EYES LANDED, 2026-08-06 ~19:39 — two reports off ONE
-      run, logs handed over, no run spent: severe TEARING in the video at
-      the L-ramp opto, and "the logs pause for a significant amount of
-      time, then catch up" on a Godzilla-vs-Ebirah clip. BOTH DIAGNOSED
-      OFF HIS LOG AND BOTH FIXED HOST-SIDE (padvidhost.py only, no shim
-      rebuild).**
-      • **The pause-then-catch-up is a ~3.3 s WEDGE OF THE GAME'S UI
-      THREAD, and the mechanism is THE BLIND SERVE:** serve() re-read
-      req_gen at its own start, a few ms after chan_loop's ack (a Popen
-      and a 1.5 MB alloc sit between), and at every clip end the EOS
-      reflex lands a SECOND request inside that window — state re-arm
-      then rewind, ~1 ms apart. The serve adopted the NEW generation
-      number for the OLD request, its gone() check went blind, the
-      pending request was never acked, and prepare() sat out all 3000
-      spins = 3.26-3.4 s measured. His run: 3 loud `host did not
-      answer`, ~8 gaps of 3.3-3.9 s; recovery is always the NEXT
-      location change finally superseding. The log goes quiet because
-      the UI thread IS the log's main author; the catch-up flood is its
-      queued scene work landing at once. **Fix: chan_loop passes the gen
-      it ACKED into serve(); a mid-window bump now supersedes in ~2 ms.**
-      • **David's theory for it — "our logging is stuttering the video
-      playback" — stays RULED OUT** (the earlier measurement stands: 16
-      of 24 stalls video-churn-only, 0 switch-only). The log line
-      remains the symptom; the pause is the wedge above.
-      • **The TEARING is the ring-slot reuse race this item had already
-      named as a candidate, WIDENED from shimmer to severe by the head
-      cache:** padglhost re-reads the on-screen frame's slot at ~60 Hz
-      (zero-copy by design), every re-serve resets the ring to slot 0,
-      and phase A now slams 4 slots in MICROSECONDS where ffmpeg's
-      ~35 ms cold start used to shield the displayed frame by accident.
-      A steady-state variant also existed: at full depth the throttle
-      lets the very next write land in the slot of the frame JUST
-      handed, inside padglhost's <=16 ms upload lag. **Fix, both
-      variants: serve() throttles at SLOTS-1** (one slot of distance
-      between write head and display; RING EMPTY measured 0, so the
-      depth is spare) **plus a DISPLAY GUARD**: the previous request's
-      last-consumed slot stays unwritten until the guest consumes a
-      frame of the new request, bounded at 0.4 s so a never-playing game
-      degrades to today's behaviour, and frame 0 in the guard slot
-      writes immediately because waiting there would deadlock. Also
-      clamped: a stale read_idx published by the doomed previous thread
-      after chan_loop's zero let a serve slam the whole ring unthrottled
-      over a live picture.
-      • **RESIDUAL, accepted and named: when the on-screen slot IS slot
-      0 (~25% of transitions), frame 0 must overwrite it** — the cut can
-      land one padglhost tick (<=16 ms) before the upload, so a
-      single-frame seam can still show. Erasing it needs ring-phase
-      continuation across serves, which is a GUEST change (vid_thread's
-      `consumed` starts at 0 by design) — fold it into the
-      persistent-seekable-decoder decision rather than patching it
-      alone.
-      **Resume:** David watches a run on this build (the fix is host-side
-      Python, so it takes effect on the NEXT watch.sh run — nothing to
-      rebuild). Expected: zero `host did not answer` freezes, no log
-      pauses, tearing gone at transitions except at most a single-frame
-      seam on ~25% of them. His report decides the persistent seekable
-      decoder as before — which would also erase the residual seam.
-      Crash logs for 23:
-      `~/crashlogs/gzpad_item11_run{8,9,10_control}.log`.
-      **The deeper route regardless, David's hardware point (2026-08-06):
-      the real Spike 2 is an i.MX6 whose VPU seeks cheaply and prerolls in
-      ms; a persistent seekable decoder per channel would emulate that
-      instead of compensating for it, and would also erase the loop-wrap
-      seam the pre-arm cannot touch by design (no location change to arm
-      on).**
-      *(A much older "Resume: fix the REWIND path" instruction stood here —
-      DONE long since, `cef2627`; the live Resume is the one above.)*
-      **The recipe that reaches a stable game, verified 2026-08-06:**
-      `plunge.py reset`, wait 8 s, `plunge.py coin`, `swpoke.py 36 900`, wait
-      8 s, `plunge.py plunge` — then the game holds Ball 1 indefinitely.
-      **The crash log that answered `caller=` is kept at
-      `/home/david/crashlogs/gzpad_crash_1406.log`** — it is a gameplay session
-      with two storms in it, so a fix can be checked against a stored before.
-      **Related, raised by David 2026-08-06: the playfield LED markers are
-      choppy too, "probably all related".** In GAMEPLAY that follows — the game
-      publishes LEDs from the same loop that eglshim measured at 17.7 fps, so
-      they must go choppy with it. In ATTRACT it does NOT follow, because that
-      same loop held 60.1 fps, so attract's LED choppiness is a separate thing
-      and is undiagnosed. Do not fold the two together.
-
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
       is half confirmed. D3 — one run; the instrument exists and is validated,
       but the Coil Test menu has not been reached yet so the navigation is
@@ -1267,6 +611,14 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Loose ends worth a look, not yet worth a queue slot
 
+- **Playfield LED markers choppy in ATTRACT, undiagnosed.** Raised by David
+  during item 11 ("probably all related"). In GAMEPLAY it followed the game's
+  render loop — the same loop the video storms were blocking — so item 11's
+  fixes plausibly cover it. In attract it does NOT follow: that loop held
+  60.1 fps while the LEDs still looked choppy, so the attract half is its own
+  thing and nobody has looked at it. Moved here when item 11 closed so the
+  closure would not silently take it along.
+
 - **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
   like the rig is broken.** `game` is coin → start → plunge, and the plunge
   takes a ball out of the trough whether or not the Start press took. If it did
@@ -1319,6 +671,74 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **11. Background video stutters every ~7 seconds.** DONE 2026-08-06,
+      David live on the final build: **"the video stuttering and tearing all
+      seems gone"** — his eyes were the acceptance oracle throughout, and the
+      last two fixes landed off his own pasted logs with no run spent. The
+      item opened as one ~7 s attract stutter and closed as SIX distinct
+      mechanisms, each measured, fixed, and confirmed separately. The full
+      pass-by-pass narrative — every ruled-out candidate with its numbers —
+      is this file's own history through `248a35d`; what follows is the
+      record that earns its keep.
+      **(1) Re-arm storms.** The game's EOS reflex and state churn re-armed
+      pipelines up to 93 times per clip, every prepare blocking its UI
+      thread. Absorbed by predicate — third iteration right: the
+      discriminator is SEEK RATE, not delivered-count, so a ball-change
+      restart is honoured and a storm pays one re-arm (`cef2627`,
+      `dba987d`).
+      **(2) Cadence drift.** vid_thread slept a period after each frame's
+      work, so error accumulated one slipped frame at a time. Absolute
+      schedule, frame N at t_epoch + N*period (`a6d9ce1`); David live: "the
+      stuttering on this city loop is gone".
+      **(3) Transition cost, ~60 ms → ~2 ms, decomposed into four parts:**
+      the first-sight ffprobe spawn (25-40 ms — replaced by a native MP4
+      header parse, validated identical on all 658 clips, `76363db`);
+      serve()'s deaf readinto through ffmpeg's cold start (select-gated at
+      2 ms); synchronous corpse reaping (~30 ms — daemon-thread reap); and
+      the first-frames head cache, 6 frames instant on any re-serve
+      (`f08e814`).
+      **(4) The blind serve.** serve() re-read req_gen after chan_loop had
+      already acked; a request landing in that few-ms gap was never served
+      and the game's UI thread sat out its full 3 s prepare timeout —
+      David's "logs pause for a significant amount of time, then catch up",
+      ~8 freezes of 3.3-3.9 s in one run, 3 loud `host did not answer`.
+      serve() now trusts the gen chan_loop acked (`9a7c32b`).
+      **(5) The ring-slot display race.** padglhost reads the on-screen
+      frame straight out of the shared ring at ~60 Hz — the zero-copy
+      design — and a re-serve reset the ring and rewrote the displayed slot;
+      the head cache made that a microseconds-fast slam where ffmpeg's
+      ~35 ms cold start used to shield the picture by accident: David's
+      "severe tearing" at the L-ramp opto. Fixed by the SLOTS-1 throttle
+      (one slot of distance between write head and display) plus the
+      display guard on the previous request's on-screen slot (`9a7c32b`).
+      **(6) The channel machinery underneath it all:** hwchan indirection —
+      stream-to-channel is a permutation, two streams can never drive one
+      channel (`d1a7b8d`) — and pre-arm adoption, 100% adoption, 0 wasted
+      across three runs. **PAD_VID_PREARM stays OPT-IN:** with the probe
+      free its edge is the 2-5 ms arm→prepare head start, within noise.
+      **ACCEPTED RESIDUAL, named:** when the on-screen slot IS slot 0
+      (~25% of transitions) frame 0 must overwrite it, so a single-frame
+      seam can still flash there. Erasing it needs ring-phase continuation
+      across serves (a guest change — vid_thread's `consumed` starts at 0
+      by design) or the persistent seekable decoder. **The persistent
+      decoder is NOT BUILT, and David's confirmation is the decision that
+      it need not be.** Revive either only if the seam ever bothers a
+      session.
+      **The instrument ledger is the lesson worth keeping.** A 30-on-30
+      screen capture is phase-ambiguous, and the grabber double-samples
+      ~37% of frames — every uncorrected screen magnitude in the early
+      passes measured the recorder, not the fault. The two trustworthy
+      tools: `tickcensus.py` (swap-tick-gated, 50% repeat baseline — video
+      is 30 fps on 60 Hz swaps, so "repeats are bad" calls a healthy
+      pipeline half broken) and `dupcensus.py` (calibrated 0.0% on a
+      pristine extract). eglshim cannot see a frozen texture, and the
+      guest's own delivery log can read flawless while nothing is delivered
+      (the in-place pre-arm proved it) — judge video with tickcensus,
+      never the guest log.
+      **What the passes paid for elsewhere:** item 23's churn-segv repro
+      and its second and third shapes fell out of this item's runs, and
+      runs are 4 minutes now (`watch.sh 4`, recipe, 2 min longplay).
 
 - [x] **20. Plunge does not take a ball out of the trough, so the game ends
       itself.** DONE 2026-08-06, `e1e9cb3`. **It was the wrong END of the

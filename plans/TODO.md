@@ -654,6 +654,47 @@ These have each been violated at least once and each cost a run or a window:
       armchair: one script, the fault (a pulse where a hold should be)
       reproduces on demand every time, and only the feel half needs a run.
 
+- [ ] **25. Move Start / Plunge / Reset balls next to the plunger, and drop the
+      "click a switch or a coil" line.** `S3 D1`
+      **★ DAVID, 2026-08-06: "i want to move the 'start', 'plunge', and 'reset
+      balls' switches to be next to the plunger on the diagram (just to the
+      right of the bottom right corner). the 'click a switch or a coil' text is
+      not needed."**
+      All four widgets are the top toolbar in `playfield.py`: the three buttons
+      are built at `:640` (`Start`/`Plunge`/`Reset balls`, all
+      `run_plunge(arg)`) and the label at `:645` reads
+      `"  click a switch or a coil - hover anything for detail"`. With the
+      buttons moved and the label gone the `bar` Frame (`:638`) is empty and
+      should go too, which gives the artwork back its vertical space.
+      **The numbers that place it:** the artwork is 313x710 and SHOOTER LANE
+      (switch 62) sits at 283,608 in table coords — so the plunger really is the
+      bottom-right corner, ~30 px in from the right edge and ~100 px up from the
+      bottom. Canvas coords are those times `self.scale` (`pick_scale`, screen
+      dependent), so place in SCALED coords, not table coords.
+      **ASSUMPTION, stated because the description reads two ways and they need
+      different work.** Taken as: put the buttons ON the canvas over the
+      bottom-right, beside the shooter lane, via `create_window` — no window
+      resize, so item 5's saved position and size are untouched. The other
+      reading is a new strip to the RIGHT of the artwork, which widens the
+      window and does touch item 5. If David meant the second, say so and this
+      becomes D2.
+      **Assumption 2:** the whole label goes, including its "hover anything for
+      detail" half, since it is one widget and the hover behaviour is
+      discoverable.
+      **One thing to get right:** use real `tk.Button` widgets through
+      `create_window`, not canvas items. A canvas item would land in
+      `find_overlapping` and so in `_hit()`, which is the switch/coil hit test —
+      a button that also presses whatever marker is under it.
+      **Acceptance:** the three buttons appear beside the plunger at the
+      bottom-right, the toolbar row is gone, and a press-and-hold on a switch or
+      coil marker still works (item 24). Oracle is a screenshot —
+      `playfield.py` runs standalone with no emulator (it just reports "no
+      emulator"), and `scripts/take_screenshots.py` does the PrintWindow grab —
+      so this needs NO run.
+      — S3: nothing is broken and the toolbar works; this is reach and clutter.
+      D1, armchair: one file, no emulator run, no new instrument, and the
+      acceptance is a screenshot of a window that opens without a game.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

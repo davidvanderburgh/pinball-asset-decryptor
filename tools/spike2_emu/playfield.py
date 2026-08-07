@@ -392,6 +392,19 @@ def pick_scale(root, img_h, chrome=170):
     client area was 1362, and the status bar did not fit. Being wrong in this
     direction costs a strip of artwork nobody looks at; being wrong the other
     way costs the only line of text the window prints about itself.
+
+    STILL 170 AFTER THE BUTTON ROW WENT AWAY, AND THAT IS DELIBERATE - it was
+    tried at 140 and MEASURED (REMAINING item 25). The row claimed ~30 px, so
+    reclaiming it is arithmetic and it works: the artwork goes 1270 -> 1300 on
+    a 5120x1440 screen with the status bar still fitting. What it also does is
+    move every marker, and `_hit()` at a marker's own CENTRE resolves to
+    whatever NEIGHBOUR happens to overlap there - a switch oval is unfilled, so
+    a click in its middle never finds the switch itself. Diffed offline over 51
+    switch and coil centres, 20 of them changed what a press lands on, and one
+    was a real loss: the POP BUMPER coil centre stopped resolving to a switch
+    and started resolving to an insert, i.e. a click there would do nothing.
+    2.3% more artwork is not worth perturbing the hit test item 24 just
+    stabilised. Reclaim it only with that diff re-run and clean.
     """
     env = os.environ.get("PAD_PF_SCALE")
     if env:
@@ -635,16 +648,6 @@ class Field:
         self._art = img.resize((w, h), Image.LANCZOS)
         self.bg = ImageTk.PhotoImage(self._art)
 
-        bar = tk.Frame(root, bg="#111")
-        bar.pack(fill="x")
-        for label, arg in (("Start", "start"), ("Plunge", "plunge"),
-                           ("Reset balls", "reset")):
-            tk.Button(bar, text=label, width=11,
-                      command=lambda a=arg: self.run_plunge(a)).pack(side="left",
-                                                                    padx=3, pady=3)
-        tk.Label(bar, text="  click a switch or a coil - hover anything for detail",
-                 bg="#111", fg="#888", font=("Consolas", 9)).pack(side="left")
-
         # THE STATUS BAR IS PACKED FIRST, AND side="bottom", AND THAT IS A FIX
         # RATHER THAN A STYLE CHOICE. Packed after the canvas it is last in
         # line for space, and the canvas is sized from the ARTWORK: on David's
@@ -707,6 +710,8 @@ class Field:
             i = self.cv.create_oval(x - r, y - r, x + r, y + r,
                                     outline="#2a8cff", width=2)
             self.info[i] = dict(kind="switch", d=S)
+
+        self._place_actions(w, h)
 
         self.tip = Tip(root)
         self.drv = SwitchDriver()
@@ -832,6 +837,47 @@ class Field:
         self.holding = None
         self.drv.release(sw_id)
         self.cv.itemconfig(item, outline=restore, width=2)
+
+    #: The gap between the action buttons, and their inset from the canvas
+    #: corner, in screen pixels. Not scaled: these space WIDGETS, which are sized
+    #: in points by the theme, not in table units.
+    ACT_PAD, ACT_GAP = 6, 4
+
+    def _place_actions(self, w, h):
+        """Start / Plunge / Reset balls, on the artwork beside the plunger.
+
+        THEY USED TO BE A TOOLBAR ROW ABOVE THE CANVAS and are down here now
+        because that is where the hand already is (REMAINING item 25): the
+        shooter lane is switch 62 at table 283,608 of a 313x710 picture, so the
+        plunger IS the bottom-right corner and the toolbar was the far end of a
+        1300 px window from it.
+
+        REAL tk.Button WIDGETS THROUGH create_window, NOT CANVAS ITEMS. A canvas
+        item would land in find_overlapping and therefore in `_hit()`, which is
+        the switch/coil hit test - the button would press whatever marker it was
+        drawn over. A window item is in find_overlapping too, but it is not in
+        `self.info`, so `_hit()` skips it, and the widget eats the click before
+        the canvas binding ever runs.
+
+        A ROW PINNED TO THE BOTTOM EDGE, NOT A STACK UP THE RIGHT SIDE, and the
+        reason is the markers rather than taste. The lowest marker on this
+        picture is RIGHT FLIPPER BUTTON at table y=656, which leaves 54*scale px
+        under it: a three-high stack (~86 px) covers that marker on a 1080p
+        screen, where one row (~26 px) clears it at every scale this window
+        runs at, including PAD_PF_SCALE=1. Widths are asked of the widgets
+        rather than assumed, so a different theme or DPI still lines up.
+        """
+        self._acts = []
+        for label, arg in (("Start", "start"), ("Plunge", "plunge"),
+                           ("Reset balls", "reset")):
+            self._acts.append(tk.Button(self.cv, text=label, width=11,
+                                        command=lambda a=arg: self.run_plunge(a)))
+        x, y = w - self.ACT_PAD, h - self.ACT_PAD
+        # Right to left, so "Reset balls" is the one against the corner and the
+        # reading order left to right is the order the toolbar had.
+        for b in reversed(self._acts):
+            self.cv.create_window(x, y, anchor="se", window=b)
+            x -= b.winfo_reqwidth() + self.ACT_GAP
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)

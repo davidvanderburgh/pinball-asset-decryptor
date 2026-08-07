@@ -3,7 +3,7 @@
 # shows these live and they change (Invalid -> Not Initialized), so the set of
 # possible values names every node-board state the game can be in.
 . "$(dirname "$0")/padpath.sh"
-cd $ROOT/games/godzilla_pro
+cd "$ROOT/games/godzilla_pro"
 echo "=== 'Not Initialized' and neighbours ==="
 strings -td game | grep -nE 'Not Initialized|Not Detected|Not Responding|Wrong Type|Bad Firmware' | head -20
 echo

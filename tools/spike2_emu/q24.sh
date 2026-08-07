@@ -43,4 +43,4 @@ $OD -d --start-address=0x1d7d14 --stop-address=0x1d7d34 $G | sed -n '7,20p'
 
 echo
 echo "############ strb to the flag: search .text for 'strb .*[r?, #0]' near movw 0xcb54 ############"
-grep -naE 'movw	r[0-9a-z]+, #52052' $HOME/game.dis | head -20
+grep -naE 'movw	r[0-9a-z]+, #52052' "$HOME/game.dis" | head -20

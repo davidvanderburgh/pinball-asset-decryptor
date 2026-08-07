@@ -8,11 +8,11 @@ D=$HOME/game.dis
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ sites building the voice-array address 0x7b90c0 ############"
-bash $RIG/findref.sh 0x7b90c0
+bash "$RIG/findref.sh" 0x7b90c0
 
 echo
 echo "############ sites building 0x7b8990 (the TU's state block) ############"
-bash $RIG/findref.sh 0x7b8990
+bash "$RIG/findref.sh" 0x7b8990
 
 echo
 echo "############ every 'str rX,[rY,#56]' between 0x29e000 and 0x2a8000 ############"

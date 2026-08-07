@@ -11,4 +11,4 @@ echo "=== all callers of 0x4f0720 (the boot step) ==="
 grep -n '	4f0720' $D
 echo
 echo "=== who references the thread entry 0x447440 ==="
-bash $RIG/findref.sh 0x447440
+bash "$RIG/findref.sh" 0x447440

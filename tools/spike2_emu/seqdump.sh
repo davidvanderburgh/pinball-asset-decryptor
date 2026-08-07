@@ -15,4 +15,4 @@ export PAD_GL_DUMP=${PAD_GL_DUMP:-$HOME/shots}
 export PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-10}
 export PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-14}
 mkdir -p "$PAD_GL_DUMP"; rm -f "$PAD_GL_DUMP"/frame_*.png
-exec bash $RIG/runbridge.sh "${1:-gzseq.log}" "${2:-20}" gpu
+exec bash "$RIG/runbridge.sh" "${1:-gzseq.log}" "${2:-20}" gpu

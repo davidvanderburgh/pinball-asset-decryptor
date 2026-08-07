@@ -115,17 +115,17 @@ if [ -n "$WANT_GAME" ]; then
         echo "[rootfs] could not identify the games partition" >&2; exit 1; }
     echo "[rootfs] extracting title $WANT_GAME (offset $GOFF) - 3-6 GB, minutes"
     mkdir -p "$ROOT/games/$WANT_GAME"
-    debugfs -R "rdump /$WANT_GAME $ROOT/games" "$IMG?offset=$GOFF" 2>&1 \
+    debugfs -R "rdump /$WANT_GAME "$ROOT/games"" "$IMG?offset=$GOFF" 2>&1 \
         | grep -v '^debugfs' | head -5
     # The node firmware images and conagent are LOOSE files beside the binary,
     # under neither assets/ nor data/, and the original recipe missed all 18.
     # Without them every node board sits on "Runtime Info".
     bash "$RIG/gethex.sh" "$IMG" "$ROOT/games/$WANT_GAME" || true
-    debugfs -R "rdump /spk $ROOT/games" "$IMG?offset=$GOFF" 2>/dev/null | head -2
+    debugfs -R "rdump /spk "$ROOT/games"" "$IMG?offset=$GOFF" 2>/dev/null | head -2
 fi
 
 echo
 echo "[rootfs] done. Next:"
-echo "[rootfs]   bash $RIG/build.sh          # the ARM hardware shim"
-echo "[rootfs]   bash $RIG/buildbridge.sh    # the GL backend"
-echo "[rootfs]   PAD_CARD=$IMG bash $RIG/watch.sh"
+echo "[rootfs]   bash "$RIG/build.sh"          # the ARM hardware shim"
+echo "[rootfs]   bash "$RIG/buildbridge.sh"    # the GL backend"
+echo "[rootfs]   PAD_CARD=$IMG bash "$RIG/watch.sh""

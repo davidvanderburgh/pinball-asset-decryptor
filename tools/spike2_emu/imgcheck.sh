@@ -23,7 +23,7 @@ echo "=== VERSION.txt from the image's rootfs (p2 @ 12582912) ==="
 debugfs -R 'dump /usr/local/spike/VERSION.txt /var/tmp/imgcheck/VERSION.img.txt' "$IMG?offset=12582912" 2>/dev/null
 cat $T/VERSION.img.txt 2>/dev/null || echo "(dump failed)"
 echo "=== VERSION.txt in the extracted rootfs ==="
-cat $ROOT/usr/local/spike/VERSION.txt
+cat "$ROOT/usr/local/spike/VERSION.txt"
 
 echo
 echo "=== /spk on the image's game partition (p5 @ 364904448) ==="

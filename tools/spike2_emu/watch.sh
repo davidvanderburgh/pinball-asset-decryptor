@@ -114,7 +114,7 @@ elif [ -n "${PAD_GAME_DIR:-}" ]; then
     GAME=$(basename "${PAD_GAME_DIR%/}")
     export PAD_GAME_DIR PAD_VID_ROOT="${PAD_GAME_DIR%/}"
 fi
-[ -z "$GAME" ] && { GAME=$(readlink $ROOT/games/game 2>/dev/null); GAME=${GAME%/game}; }
+[ -z "$GAME" ] && { GAME=$(readlink "$ROOT/games/game" 2>/dev/null); GAME=${GAME%/game}; }
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
 
@@ -214,7 +214,7 @@ teardown() {
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.
     [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
-    pkill -9 -f "tail -q -n 0 -F $HOME/padvid[.]log" 2>/dev/null
+    pkill -9 -f "tail -q -n 0 -F "$HOME/padvid"[.]log" 2>/dev/null
     # The background table builder, if this run started one. It sits in a poll
     # loop waiting for the guest to publish its switch table, so a run that
     # ends first leaves it with nothing to wait for. Added to alive.sh and
@@ -322,7 +322,7 @@ fi
 FREE_G=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
 if [ "${FREE_G:-999}" -lt 10 ]; then
     echo "[watch] WARNING: only ${FREE_G}G free on /. Run logs grow fast." >&2
-    echo "[watch]   du -sh $HOME/gz*.log   to see the worst offenders." >&2
+    echo "[watch]   du -sh "$HOME/gz"*.log   to see the worst offenders." >&2
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
@@ -361,7 +361,7 @@ fi
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then
     setsid bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
-        > $HOME/padaudio.log 2>&1 &
+        > "$HOME/padaudio.log" 2>&1 &
     AUDPG=$!
     for i in $(seq 1 40); do [ -p "$AUD_HOST" ] && break; sleep 0.05; done
     if [ -p "$AUD_HOST" ]; then
@@ -370,13 +370,13 @@ if [ "${PAD_AUDIO:-1}" != 0 ]; then
         export PAD_AUDIO_FMT="$AUD_FMT_GUEST"
     else
         echo "[watch] audio: player did not come up, continuing silent" >&2
-        tail -3 $HOME/padaudio.log >&2
+        tail -3 "$HOME/padaudio.log" >&2
     fi
 fi
 
 if [ "${PAD_VID:-1}" != 0 ]; then
     rm -f "$VID_HOST"
-    setsid python3 "$S/padvidhost.py" "$VID_HOST" > $HOME/padvid.log 2>&1 &
+    setsid python3 "$S/padvidhost.py" "$VID_HOST" > "$HOME/padvid.log" 2>&1 &
     VIDPG=$!
     for i in $(seq 1 40); do [ -s "$VID_HOST" ] && break; sleep 0.05; done
     if [ -s "$VID_HOST" ]; then
@@ -387,7 +387,7 @@ if [ "${PAD_VID:-1}" != 0 ]; then
         VID_FOR_GL="$VID_HOST"
     else
         echo "[watch] video: host decoder did not come up, continuing without" >&2
-        tail -3 $HOME/padvid.log >&2
+        tail -3 "$HOME/padvid.log" >&2
         export PAD_VID=0
     fi
 fi
@@ -420,7 +420,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
-           bash $RIG/run_game.sh > "$LOG" 2>&1 &
+           bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 
 # The virtual playfield: clickable switches, inserts lit from the wire.
@@ -558,7 +558,7 @@ fi
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
 if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    setsid bash "$S/autoattract.sh" "$LOG" > $HOME/padauto.log 2>&1 &
+    setsid bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -577,8 +577,8 @@ fi
 # after every print matters - awk into a pipe is block-buffered, and a "live"
 # event feed that arrives four kilobytes at a time is not live.
 if [ "${PAD_EVENTS:-1}" != 0 ]; then
-    tail -q -n 0 -F $HOME/padvid.log $HOME/padaudio.log \
-                    $HOME/padglhost.log "$LOG" 2>/dev/null | awk '
+    tail -q -n 0 -F "$HOME/padvid.log" "$HOME/padaudio.log" \
+                    "$HOME/padglhost.log" "$LOG" 2>/dev/null | awk '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)
                 { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }

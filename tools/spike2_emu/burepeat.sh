@@ -10,7 +10,7 @@ set -u
 N=${1:-3}
 for i in $(seq 1 "$N"); do
   L="gzr$i.log"
-  bash $RIG/nbrun.sh "$L" 115 \
+  bash "$RIG/nbrun.sh" "$L" 115 \
       PAD_SW_PEND=60,84 PAD_SW_TAP=60,84 PAD_SW_TAP_AT_S=55 \
       PAD_SW_DUMP=6000 PAD_GL_FRAME_EVERY=6000 PAD_GL_MAX_FRAMES=1 \
       > "$HOME/$L.out" 2>&1

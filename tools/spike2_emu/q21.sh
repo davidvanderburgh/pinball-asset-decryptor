@@ -6,11 +6,11 @@
 . "$(dirname "$0")/padpath.sh"
 cd $HOME
 R=$ROOT
-rm -f $R/dump/tb.log
+rm -f "$R/dump/tb.log"
 export QEMU_LOG=in_asm
 export QEMU_LOG_FILENAME=/dump/tb.log
 ./run_game.sh > gz85.log 2>&1
-echo "tb.log size: $(du -h $R/dump/tb.log | cut -f1)"
+echo "tb.log size: $(du -h "$R/dump/tb.log" | cut -f1)"
 echo
 echo "=== did the worker execute these blocks? (1 = yes) ==="
 for a in 00459184:worker-entry \
@@ -22,8 +22,8 @@ for a in 00459184:worker-entry \
          00458e98:queue-allocator \
          0033a478:store-queue-into-voice ; do
   addr=${a%%:*}; name=${a##*:}
-  printf '  %-30s 0x%s -> %s\n' "$name" "$addr" "$(grep -ac "0x$addr" $R/dump/tb.log)"
+  printf '  %-30s 0x%s -> %s\n' "$name" "$addr" "$(grep -ac "0x$addr" "$R/dump/tb.log")"
 done
 echo
 echo "=== who writes the gate byte 0x7acb54 ? ==="
-bash $RIG/findref.sh 0x7acb54
+bash "$RIG/findref.sh" 0x7acb54

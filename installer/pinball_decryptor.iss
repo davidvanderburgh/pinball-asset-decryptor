@@ -57,6 +57,24 @@ Source: "{#ProjectDir}\pinball_decryptor\*"; DestDir: "{app}\pinball_decryptor";
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo"
 
+; --- Spike 2 emulator rig ------------------------------------------------
+; The Emulate tab runs the machine's own game binary under qemu-user inside
+; WSL, and this is that rig.  It was deliberately NOT shipped for a while, on
+; the grounds that it needs WSL, a C toolchain and a card image before it does
+; anything - but the result was an Emulate tab that could never work for anyone
+; who installed the app rather than cloning it, telling them only that the rig
+; "was not found".  3.3 MB of scripts is a poor reason to make a whole feature
+; unreachable, so it ships.
+;
+; NOTHING HERE IS WRITTEN TO AT RUN TIME, which is what makes {app} a safe home
+; for it: build.sh copies the C sources to ~/emusrc inside WSL and compiles
+; there (drvfs is too slow to compile on), rootfs.sh refuses to build into a
+; /mnt path at all, and the derived per-title tables live under the rootfs.
+; Program Files being read-only for the user therefore costs nothing.
+Source: "{#ProjectDir}\tools\spike2_emu\*"; DestDir: "{app}\tools\spike2_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,games\*,shots\*,*.log,*.dis,*.png,*.raw"
+
 ; --- Entry point + bundled launcher --------------------------------------
 Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ignoreversion
 Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion

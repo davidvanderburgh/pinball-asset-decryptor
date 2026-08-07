@@ -694,7 +694,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    itself), reads a version hint from each extract so you can see what
    you're combining, and wires the build straight to the new version so
    the result can't accidentally come out on the old code.
-9. **Emulate tab** *(Stern Spike 2, source checkouts only)* — run the
+9. **Emulate tab** *(Stern Spike 2, Windows + WSL2)* — run the
    game itself on this PC and watch what you built. Point it at a card
    image and press Start: the card's game partition is mounted **read
    only** and the real armhf game binary runs under `qemu-user` with its
@@ -718,9 +718,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
    schematic of its switch list instead.
-   Requires WSL2 and the rig under
-   `tools/spike2_emu`, which the packaged installers don't carry; the
-   tab says so rather than disappearing when it isn't there.
+   Requires WSL2. The rig itself ships with the app, in
+   `tools/spike2_emu`, and the prerequisites installer pulls in what it
+   needs inside the distro (`qemu-user-static`, an ARM cross-compiler,
+   `e2fsprogs`, `fuse3`). One first-time step builds the guest out of a
+   card image — `rootfs.sh <card.raw>`, then `build.sh` and
+   `buildbridge.sh`, none of which need root.
 10. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact. The app also remembers the
@@ -792,7 +795,7 @@ those plugins need.
 | Jersey Jack Pinball | – | partclone, e2fsprogs/debugfs, xorriso, pigz, ffmpeg, python3-zstandard | – |
 | Pinball Brothers | – | `e2fsprogs/debugfs` *(only for `.iso` Clonezilla)* | – |
 | Spooky Pinball | GnuPG (gpg.exe), ffmpeg | partclone, e2fsprogs/debugfs, zstd + python3-zstandard | – |
-| Stern Pinball (Spike 2) | ffmpeg *(Replace Audio/Video preview, spectrograms, video conversion)*; **WSL2 itself** *(full-size video replacement, the opt-in blip-free callouts, and different-size file swaps in the Partition Explorer — resizes files inside the card's ext4 partition; without it an oversized clip is crushed into its stock byte slot, a Partition Explorer replacement has to match the original's size exactly, and a build that opted in to blip-free silently falls back to the standard build with the brief original-sound scrap, which the prerequisites strip and Write Complete dialog now say. A distro running under WSL 1 has no loop devices and can't mount card images — it used to pass the prerequisite check and then fail mid-write; both the strip and the write path now probe for a real loop device up front and name the fix: `wsl -l -v` to check, `wsl --set-version <name> 2` to convert)* | – (the loop-mount tools ship in stock Ubuntu's util-linux/mount) | macOS uses e2fsprogs' `debugfs` for the same ext4 file-growth path (`brew install e2fsprogs`); native Linux mounts ext4 itself. The audio engine's pip packages (numpy, unicorn, capstone) are bundled by the installer. The **Emulate** tab additionally needs WSL2 plus the emulator rig in [`tools/spike2_emu`](tools/spike2_emu) (`qemu-user`, a C toolchain, `e2fsprogs` and `fuse2fs` inside the distro), and one first-time setup step — `rootfs.sh <card.raw>` builds the guest rootfs out of a card image, with no root, then `build.sh` and `buildbridge.sh`; see that folder's README. Everything else the rig needs is derived from the card at run time, including the virtual playfield's artwork and its switch, coil and insert positions, so no title needs anything added to the repository to work. The rig is not carried by the packaged installers, so Emulate is a source-checkout feature and the tab says as much when it can't find it. |
+| Stern Pinball (Spike 2) | ffmpeg *(Replace Audio/Video preview, spectrograms, video conversion)*; **WSL2 itself** *(full-size video replacement, the opt-in blip-free callouts, and different-size file swaps in the Partition Explorer — resizes files inside the card's ext4 partition; without it an oversized clip is crushed into its stock byte slot, a Partition Explorer replacement has to match the original's size exactly, and a build that opted in to blip-free silently falls back to the standard build with the brief original-sound scrap, which the prerequisites strip and Write Complete dialog now say. A distro running under WSL 1 has no loop devices and can't mount card images — it used to pass the prerequisite check and then fail mid-write; both the strip and the write path now probe for a real loop device up front and name the fix: `wsl -l -v` to check, `wsl --set-version <name> 2` to convert)* | – (the loop-mount tools ship in stock Ubuntu's util-linux/mount) | macOS uses e2fsprogs' `debugfs` for the same ext4 file-growth path (`brew install e2fsprogs`); native Linux mounts ext4 itself. The audio engine's pip packages (numpy, unicorn, capstone) are bundled by the installer. The **Emulate** tab additionally needs WSL2; the emulator rig itself ships with the app in [`tools/spike2_emu`](tools/spike2_emu), and the prerequisites installer adds what it needs inside the distro (`qemu-user-static`, an ARM cross-compiler, `e2fsprogs`, `fuse3`). It has one first-time setup step — `rootfs.sh <card.raw>` builds the guest rootfs out of a card image, with no root, then `build.sh` and `buildbridge.sh`; see that folder's README. Everything else the rig needs is derived from the card at run time, including the virtual playfield's artwork and its switch, coil and insert positions, so no title needs anything added to the repository to work. The rig ships with the app from v0.109.0; before that it was a source-checkout feature, which left anyone who installed the app rather than cloning it with a tab that could only report the rig missing. |
 | Williams (WPC) | ffmpeg; `faster-whisper` *(optional — Auto-transcribe)* | – (no WSL needed) | **libpinmame** (for the optional PinMAME capture path — download from [vpinball/pinmame releases](https://github.com/vpinball/pinmame/releases)). DCS audio decoding uses a bundled DCSExplorer build (BSD-3). User-supplied MAME ROM zips — no ROMs bundled. |
 
 On Linux, the Windows host-side tools (gpg, ffmpeg) are just additional

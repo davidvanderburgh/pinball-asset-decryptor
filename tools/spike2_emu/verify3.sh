@@ -15,7 +15,7 @@ T=${2:-45}
 S=$(date +%s)
 # Via runlim.sh, NOT `timeout` - see the comment in runlim.sh. timeout leaves
 # the game running forever at ~140% CPU because it only signals the shell.
-bash $RIG/runlim.sh "$L" "$T" PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1
+bash "$RIG/runlim.sh" "$L" "$T" PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1
 E=$(date +%s)
 echo "elapsed: $((E-S)) s   (the run is stopped by the time limit; it does not exit on its own)"
 echo "=== milestone ==="

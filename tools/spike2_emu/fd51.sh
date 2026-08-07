@@ -12,6 +12,6 @@ echo "=== other I/O syscalls on fd 51 ==="
 grep -ao '\(pread64\|readv\|lseek\|_llseek\|mmap2\)([^)]*51[^)]*)' $L | head -10
 echo
 echo "=== was the throw path 0x2731ac ever translated? ==="
-grep -ac '0x002731ac' $ROOT/dump/tb.log
+grep -ac '0x002731ac' "$ROOT/dump/tb.log"
 echo "=== block after loadBinary returns (0x273198)? ==="
-grep -ac '0x00273198' $ROOT/dump/tb.log
+grep -ac '0x00273198' "$ROOT/dump/tb.log"

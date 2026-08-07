@@ -7,13 +7,17 @@
 # frame as if it were the result of the press is exactly the "check the dump
 # directory's mtimes before believing a frame is from this run" trap.
 . "$(dirname "$0")/padpath.sh"
+# WHERE SCRATCH OUTPUT GOES. Not beside the scripts: the rig now ships
+# in the installer and can live under Program Files, which is read-only
+# for the user. PAD_OUT moves it; $HOME is the default.
+OUT_DIR=${PAD_OUT:-$HOME}
 set -u
 ID=${1:?switch id}
 MS=${2:-300}
-OUT=${3:-$RIG/now.png}
+OUT=${3:-$OUT_DIR/now.png}
 D=$HOME/shots
 BEFORE=$(ls -t $D/*.png 2>/dev/null | head -1)
-python3 $RIG/swpoke.py "$ID" "$MS"
+python3 "$RIG/swpoke.py" "$ID" "$MS"
 for i in $(seq 1 120); do
     F=$(ls -t $D/*.png 2>/dev/null | head -1)
     [ -n "$F" ] && [ "$F" != "$BEFORE" ] && break
@@ -27,4 +31,4 @@ for i in $(seq 1 120); do
     sleep 0.25
 done
 echo "frame: $F"
-python3 $RIG/repack.py "$F" "$OUT" 1
+python3 "$RIG/repack.py" "$F" "$OUT" 1

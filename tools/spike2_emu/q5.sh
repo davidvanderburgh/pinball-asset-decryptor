@@ -33,4 +33,4 @@ PY
 
 echo
 echo "### SoLoud vtables ###"
-python3 $RIG/rtti.py 0x6f6e08 0x6f6e60 0x6f6e88 0x6f6e30 2>&1
+python3 "$RIG/rtti.py" 0x6f6e08 0x6f6e60 0x6f6e88 0x6f6e30 2>&1

@@ -16,7 +16,7 @@ set -u
 LOG=${1:-$HOME/gzhold.log}
 shift || true
 
-bash $RIG/killgame.sh >/dev/null 2>&1
+bash "$RIG/killgame.sh" >/dev/null 2>&1
 sleep 1
 rm -f "$LOG"
 
@@ -25,7 +25,7 @@ for kv in "$@"; do export "${kv?}"; done
 export PAD_AUTO_ATTRACT=0 LOG="$LOG"
 echo "[holdtest] $LOG  $*"
 
-setsid bash $RIG/watch.sh 4 > $HOME/watchhold.log 2>&1 &
+setsid bash "$RIG/watch.sh" 4 > "$HOME/watchhold.log" 2>&1 &
 
 for i in $(seq 1 400); do [ -s "$LOG" ] && break; sleep 0.25; done
 [ -s "$LOG" ] || { echo "[holdtest] the game never started"; exit 1; }
@@ -40,13 +40,13 @@ while [ $i -lt 60 ]; do
     if [ "$(c)" -gt 10 ]; then
         echo "[holdtest] RESULT t=${now}s after $((i - 1)) holds   $*"
         to=$(grep -ac 'ExchangeData: read failed' "$LOG"); echo "[holdtest] timeouts: $to"
-        bash $RIG/killgame.sh >/dev/null 2>&1
+        bash "$RIG/killgame.sh" >/dev/null 2>&1
         exit 0
     fi
     pgrep -x game >/dev/null || { echo "[holdtest] the game exited"; exit 1; }
-    python3 $RIG/swpoke.py 28 1600 >/dev/null 2>&1
+    python3 "$RIG/swpoke.py" 28 1600 >/dev/null 2>&1
     sleep 2
 done
 echo "[holdtest] gave up after 60 holds"
-bash $RIG/killgame.sh >/dev/null 2>&1
+bash "$RIG/killgame.sh" >/dev/null 2>&1
 exit 1

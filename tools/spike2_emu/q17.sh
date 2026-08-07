@@ -21,4 +21,4 @@ $OD -d --start-address=0x330000 --stop-address=0x345000 $G | grep -aE '	str	r[0-
 echo
 echo "############ is 'Thread create failed' from THIS run? ############"
 date -u +'now      : %Y-%m-%dT%H:%M:%SZ'
-tail -6 $ROOT/dump/debug_log.txt
+tail -6 "$ROOT/dump/debug_log.txt"

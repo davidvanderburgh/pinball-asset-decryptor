@@ -73,8 +73,10 @@ class Capabilities:
     # Emulate tab: run the manufacturer's OWN game binary on this PC under
     # qemu-user with LD_PRELOAD hardware shims, in a window, with sound and
     # keyboard input.  Unlike ``capture`` this is interactive and is NOT driven
-    # by the image on the Input box — it runs a prepared root filesystem that
-    # lives outside the repo (see gui/emulate_tab.py).  Used by Stern Spike 2.
+    # by the image on the Input box — it runs a prepared root filesystem built
+    # from a card image by the rig in ``tools/spike2_emu`` (see
+    # gui/emulate_tab.py).  Used by Stern Spike 2.  Windows only in practice:
+    # the rig runs inside WSL and draws through WSLg.
     emulate: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its

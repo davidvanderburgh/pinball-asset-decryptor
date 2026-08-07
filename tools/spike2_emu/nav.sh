@@ -9,10 +9,14 @@
 # hold and a 1.5 s gap, which has not dropped one yet. If a press is dropped the
 # whole rest of the sequence lands on the wrong screen, so slow is cheap here.
 . "$(dirname "$0")/padpath.sh"
+# WHERE SCRATCH OUTPUT GOES. Not beside the scripts: the rig now ships
+# in the installer and can live under Program Files, which is read-only
+# for the user. PAD_OUT moves it; $HOME is the default.
+OUT_DIR=${PAD_OUT:-$HOME}
 set -u
 D=$HOME/shots
 for id in "$@"; do
-    python3 $RIG/swpoke.py "$id" 400 >/dev/null
+    python3 "$RIG/swpoke.py" "$id" 400 >/dev/null
     echo "  press $id"
     sleep 1.5
 done
@@ -23,4 +27,4 @@ for i in $(seq 1 160); do
     sleep 0.25
 done
 echo "frame: $F"
-python3 $RIG/repack.py "$F" $RIG/now.png 1
+python3 "$RIG/repack.py" "$F" "$OUT_DIR/now.png" 1

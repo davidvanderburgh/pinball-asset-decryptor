@@ -17,13 +17,13 @@ SW=${1:?switch id}
 MS=${2:?hold milliseconds}
 LOG=${3:-$HOME/gzpress.log}
 
-bash $RIG/killgame.sh >/dev/null 2>&1
+bash "$RIG/killgame.sh" >/dev/null 2>&1
 sleep 5                     # let the previous renderer release its ring, or
                             # the next one dies on startup
 rm -f "$LOG"
 export PAD_AUTO_ATTRACT=0 LOG="$LOG"
-nohup setsid bash $RIG/watch.sh 4 \
-    > $HOME/watchpress.log 2>&1 < /dev/null &
+nohup setsid bash "$RIG/watch.sh" 4 \
+    > "$HOME/watchpress.log" 2>&1 < /dev/null &
 disown
 
 for i in $(seq 1 400); do [ -s "$LOG" ] && break; sleep 0.25; done
@@ -43,7 +43,7 @@ while [ "$w" -lt 120 ]; do
 done
 
 before=$(c)
-python3 $RIG/swpoke.py "$SW" "$MS" >/dev/null 2>&1
+python3 "$RIG/swpoke.py" "$SW" "$MS" >/dev/null 2>&1
 sleep 6
 after=$(c)
 if [ "$after" -gt 10 ]; then
@@ -51,4 +51,4 @@ if [ "$after" -gt 10 ]; then
 else
     echo "id=$SW ms=$MS  no effect (factory_make $before -> $after, ready at ${w}s)"
 fi
-bash $RIG/killgame.sh >/dev/null 2>&1
+bash "$RIG/killgame.sh" >/dev/null 2>&1

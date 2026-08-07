@@ -47,7 +47,7 @@ pkill -9 -f 'autoattract.sh'
 # it outlives a run that ends first. alive.sh counts it.
 pkill -9 -f 'mktables[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
-pkill -9 -f "^tail -q -n 0 -F $HOME/padvid\.log"
+pkill -9 -f "^tail -q -n 0 -F "$HOME/padvid"\.log"
 pkill -9 -f 'padvidhost\.py'
 pkill -9 -f 'playaudio.sh'
 # ^-anchored, and matched on the fifo not on '-f pulse': a severed player
@@ -80,7 +80,7 @@ pkill -9 -f '^bash .*(watch|runbridge|nbrun)\.sh'
 pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
-rm -f $ROOT/dump/padled
+rm -f "$ROOT/dump/padled"
 for _ in 1 2 3 4 5 6; do
     pgrep -f '^/init .*playfield\.py' >/dev/null || break
     sleep 0.5
@@ -113,7 +113,7 @@ pkill -9 -f '^/init .*playfield\.py'
 # script has just killed everything that could have been reading one, and the
 # expensive part (the local image cache under ~/cardcache) is a file that
 # survives: a remount is a fraction of a second.
-for m in $HOME/card/*/; do
+for m in "$HOME/card/"*/; do
     mountpoint -q "$m" 2>/dev/null || continue
     fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null
     rmdir "$m" 2>/dev/null

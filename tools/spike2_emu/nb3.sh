@@ -9,4 +9,4 @@
 # which is the default object every slot holds today ([+20] == 0, so the
 # exchange wrapper at 0x59ec1c refuses to talk to it).
 . "$(dirname "$0")/padpath.sh"
-bash $RIG/disval.sh 0x5a2d70 0x5a2f40
+bash "$RIG/disval.sh" 0x5a2d70 0x5a2f40

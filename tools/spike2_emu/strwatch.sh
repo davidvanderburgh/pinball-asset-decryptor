@@ -8,7 +8,7 @@ export PAD_GL_DUMP=$HOME/shots
 export PAD_GL_FRAME_EVERY=100
 export PAD_GL_MAX_FRAMES=3
 mkdir -p "$PAD_GL_DUMP"
-bash $RIG/runbridge.sh "${1:-gzstr.log}" "${2:-20}" gpu > /dev/null 2>&1
+bash "$RIG/runbridge.sh" "${1:-gzstr.log}" "${2:-20}" gpu > /dev/null 2>&1
 echo "--- [strwatch] hits ---"
 grep -a '\[strwatch\]' "$HOME/${1:-gzstr.log}" | head -40
 echo "--- distinct callers ---"

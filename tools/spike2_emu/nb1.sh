@@ -4,8 +4,8 @@
 # (that is exactly how the mixer's voice array hid).
 . "$(dirname "$0")/padpath.sh"
 echo "=== movw/movt sites building 0x70a474 / 0x70a49c ==="
-bash $RIG/findref.sh 0x70a474 0x70a49c 0x69cc08
+bash "$RIG/findref.sh" 0x70a474 0x70a49c 0x69cc08
 
 echo
 echo "=== literal-pool words equal to 0x70a474 / 0x70a49c / 0x69cc08 ==="
-python3 $RIG/litref.py 0x70a474 0x70a49c 0x69cc08
+python3 "$RIG/litref.py" 0x70a474 0x70a49c 0x69cc08

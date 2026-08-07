@@ -6,13 +6,13 @@
 G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
-$OD -T $G | awk '$1 ~ /^[0-9a-f]{8}$/ && $1 != "00000000" {print $1, $NF}' | sort -u > $HOME/dynsym.txt
-echo "dynsyms with addresses: $(wc -l < $HOME/dynsym.txt)"
+$OD -T $G | awk '$1 ~ /^[0-9a-f]{8}$/ && $1 != "00000000" {print $1, $NF}' | sort -u > "$HOME/dynsym.txt"
+echo "dynsyms with addresses: $(wc -l < "$HOME/dynsym.txt")"
 
 echo
 echo "### SoLoud symbols present ###"
-grep -c SoLoud $HOME/dynsym.txt
-grep SoLoud $HOME/dynsym.txt | head -60
+grep -c SoLoud "$HOME/dynsym.txt"
+grep SoLoud "$HOME/dynsym.txt" | head -60
 
 echo
 echo "### nearest preceding dynsym for each crash-stack address ###"

@@ -17,7 +17,7 @@ LOG=${1:-gzrun.log}
 SECS=${2:-45}
 shift 2 || true
 
-setsid env "$@" bash $RIG/run_game.sh > "$LOG" 2>&1 &
+setsid env "$@" bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 LEADER=$!
 
 # setsid makes the child a session leader, so its pid is also its process

@@ -7,7 +7,7 @@ python3 - <<'PY'
 print(hex(6248668 + 0x8000), hex(6248868 + 0x8000))
 PY
 echo "=== refs to the format string ==="
-bash $RIG/findref.sh 0x5fda9c 0x5fdb64
+bash "$RIG/findref.sh" 0x5fda9c 0x5fdb64
 echo "=== the status strings, in file order ==="
 python3 - <<'PY'
 import os

@@ -96,7 +96,7 @@ else
 fi
 
 # The renderer prints its rate every 2 s; take the most recent.
-f=$(grep -ao '[0-9.]* fps' $HOME/padglhost.log 2>/dev/null | tail -1)
+f=$(grep -ao '[0-9.]* fps' "$HOME/padglhost.log" 2>/dev/null | tail -1)
 [ -n "$f" ] && echo "fps=${f% fps}"
 
 # Audio comes from the PAD_AUDIO_DUMP line, which watch.sh only emits when

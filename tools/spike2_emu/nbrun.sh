@@ -13,8 +13,8 @@ LOG=${1:-gznb.log}
 SECS=${2:-25}
 shift 2 || true
 
-mkdir -p $HOME/shots
-rm -f $HOME/shots/*.png
+mkdir -p "$HOME/shots"
+rm -f "$HOME/shots/"*.png
 
 # PAD_GL_DUMP is read by the HOST, a native WSL process, so it takes a WSL path
 # and not the chroot's /dump. Pointed at /dump the host writes nothing at all
@@ -30,7 +30,7 @@ export PAD_NB_DUMP=${PAD_NB_DUMP:-400}
 export PAD_NB_SILENT=${PAD_NB_SILENT:-2}
 for kv in "$@"; do export "$kv"; done
 
-bash $RIG/runbridge.sh "$LOG" "$SECS" gpu
+bash "$RIG/runbridge.sh" "$LOG" "$SECS" gpu
 
 echo "--- node board registry, last dump ---"
 awk '/\[nbtbl\] --- /{buf=""} {if (/\[nbtbl\]/) buf = buf $0 "\n"} END{printf "%s", buf}' "$LOG" | tail -20
@@ -41,4 +41,4 @@ echo "--- subcommands at or below 0xef (only sent to REGISTERED boards) ---"
 grep -aoE '\[nb\] TX len=[0-9]+ 8[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' "$LOG" \
   | awk '{print $4}' | cut -c5-6 | sort | uniq -c | sort -rn | head -20
 echo "--- frames ---"
-ls -l $HOME/shots/*.png 2>/dev/null | tail -5
+ls -l "$HOME/shots/"*.png 2>/dev/null | tail -5

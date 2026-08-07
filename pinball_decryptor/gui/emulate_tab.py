@@ -307,10 +307,32 @@ class EmulatePanel:
         if not rig_available():
             self._run_btn.configure(state=tk.DISABLED)
             self._fixaud_btn.configure(state=tk.DISABLED)
-            self._hint.configure(
-                text=("The emulator rig was not found in %s.\n"
-                      "It is not part of this repository; set PAD_EMU_DIR to "
-                      "point at it." % rig_dir()))
+            # SAY WHERE IT ACTUALLY IS. This used to read "it is not part of
+            # this repository", which was wrong and sent people looking for a
+            # separate download: the rig IS in the repository, at
+            # tools/spike2_emu, and it is the INSTALLERS that deliberately do
+            # not carry it. A user who installed to Program Files and read that
+            # sentence had no way to work out what to do next.
+            if sys.platform != "win32":
+                # The rig runs inside WSL and draws through WSLg, so there is
+                # nothing to point at here and no point sending anyone looking.
+                # The Windows installer carries it; the Linux and macOS bundles
+                # deliberately do not.
+                self._hint.configure(
+                    text=("The Emulate tab needs Windows with WSL2.\n\n"
+                          "It runs the machine's own ARM game binary under "
+                          "qemu-user inside WSL and draws through WSLg, so it "
+                          "is not available on this platform."))
+            else:
+                self._hint.configure(
+                    text=("The emulator rig was not found in %s.\n\n"
+                          "It ships with the app, so this usually means an "
+                          "upgrade over a copy that predates it, or a checkout "
+                          "without tools/spike2_emu. Re-run the installer, or "
+                          "set PAD_EMU_DIR to point at that folder.\n\n"
+                          "First time only, inside WSL: rootfs.sh <card.raw> "
+                          "builds the guest from a card image, then build.sh "
+                          "and buildbridge.sh." % rig_dir()))
         # The poll re-arms itself forever, so it MUST be cancelled when the tab
         # goes away.  A pending `after` job outliving its widgets is what makes
         # Tk raise "can't delete Tcl command" during teardown - it showed up

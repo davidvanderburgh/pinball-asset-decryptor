@@ -270,6 +270,17 @@ $ManufacturerPrereqs = [ordered]@{
         # the WSL2 + Ubuntu framework step for Stern users.
         WslPackages  = @(
             @{ probe="losetup"; pkg="util-linux mount"; label="util-linux (losetup/mount, in WSL)"; reason="Blip-free callouts + full-size video replacement: loop-mounts the card image to grow files in its ext4 partition" }
+            # The Emulate tab.  These are what let the rig in tools\spike2_emu
+            # build the guest and run the machine's own armhf binary; without
+            # them the tab starts and the run dies at the first missing tool.
+            # fuse2fs itself is NOT listed: cardmount.sh fetches it into a
+            # private prefix with `apt-get download`, deliberately, because that
+            # needs no root - but it does need fusermount3 to be present and
+            # setuid, which is what the fuse3 package provides.
+            @{ probe="qemu-arm-static";        pkg="qemu-user-static";         label="qemu-user-static";        reason="Emulate tab: runs the machine's own 32-bit ARM game binary on this PC" }
+            @{ probe="arm-linux-gnueabihf-gcc"; pkg="gcc-arm-linux-gnueabihf"; label="ARM cross-compiler";      reason="Emulate tab: builds the LD_PRELOAD hardware shim the game runs against" }
+            @{ probe="debugfs";                pkg="e2fsprogs";                label="e2fsprogs/debugfs";       reason="Emulate tab: builds the guest filesystem out of a card image, without root" }
+            @{ probe="fusermount3";            pkg="fuse3";                    label="fuse3 (fusermount3)";     reason="Emulate tab: mounts a card read-only so a title runs without extracting 6 GB" }
         )
         HostPackages = @(
             @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }

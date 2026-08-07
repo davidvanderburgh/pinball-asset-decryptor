@@ -9,4 +9,4 @@ export PAD_GL_DUMP=$HOME/shots
 export PAD_GL_FRAME_EVERY=60
 export PAD_GL_MAX_FRAMES=4
 mkdir -p "$PAD_GL_DUMP"
-exec bash $RIG/runbridge.sh "${1:-gzopen.log}" "${2:-20}" gpu
+exec bash "$RIG/runbridge.sh" "${1:-gzopen.log}" "${2:-20}" gpu

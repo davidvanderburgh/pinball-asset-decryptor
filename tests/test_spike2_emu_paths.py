@@ -194,6 +194,87 @@ def test_ledio_builds_with_no_wire_log(rig):
     assert "NOT verified" not in ledio.text("t", rows, True)
 
 
+def test_the_windows_installer_ships_the_rig():
+    """The Emulate tab is unreachable for an installed user without this.
+
+    The rig was left out of the installers on the grounds that it needs WSL, a
+    C toolchain and a card image before it does anything - and the result was a
+    tab that could only ever tell an installed user the rig "was not found".
+    3.3 MB of scripts is a poor reason to make a feature unreachable, so it
+    ships, and this is here because a dropped [Files] line would be invisible
+    until someone installed the app and tried it.
+    """
+    iss = os.path.join(os.path.dirname(RIG), "..", "installer",
+                       "pinball_decryptor.iss")
+    iss = os.path.normpath(iss)
+    if not os.path.exists(iss):
+        pytest.skip("installer manifest not present")
+    with open(iss, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    assert "tools\\spike2_emu" in text, \
+        "pinball_decryptor.iss no longer ships tools/spike2_emu"
+    line = next(l for l in text.splitlines()
+                if "tools\\spike2_emu" in l and l.strip().startswith("Source:"))
+    assert "recursesubdirs" in text.split(line, 1)[1][:200], \
+        "the rig is shipped without recursesubdirs, so subdirectories are lost"
+
+
+def test_the_rig_never_writes_into_its_own_directory():
+    """Because {app} is Program Files, which is read-only for the user.
+
+    build.sh compiles in ~/emusrc, rootfs.sh refuses a /mnt destination, and
+    the derived tables live under the rootfs - so nothing on the runtime path
+    writes here. Three forensic scripts did (`$RIG/now.png`, `$RIG/dev.dis`),
+    which would have been a permission error the moment the rig shipped.
+    """
+    import glob
+    import re
+    bad = []
+    pat = re.compile(r"\$\{?(?:RIG|S)\}?/[A-Za-z0-9_]+\.(png|log|dis|txt|json)\b")
+    for path in sorted(glob.glob(os.path.join(RIG, "*.sh"))
+                       + glob.glob(os.path.join(RIG, "*.py"))):
+        with open(path, encoding="utf-8", errors="replace", newline="") as f:
+            for n, line in enumerate(f, 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if pat.search(line):
+                    bad.append("%s:%d: %s"
+                               % (os.path.basename(path), n, line.strip()[:90]))
+    assert not bad, ("writes into the rig's own directory, which is read-only "
+                     "once installed:\n  " + "\n  ".join(bad))
+
+
+def test_no_unquoted_path_expansion_in_the_shell_scripts():
+    """A path with a SPACE in it must not word-split into two arguments.
+
+    THIS COULD NOT HAPPEN BEFORE AND NOW IT CAN. Every script used to carry one
+    hard-coded path, and that path had no spaces, so nothing was ever quoted.
+    De-welding made the rig runnable from anywhere - which includes
+    `C:\\Program Files\\Pinball Asset Decryptor\\tools\\spike2_emu`, where
+    `cp $RIG/hwshim.c $HOME/emusrc/hwshim.c` becomes five arguments and cp
+    reports "target ... Not a directory".
+
+    A lint rather than a run: the failure needs WSL, a card and several minutes
+    to see, and this sees it in milliseconds after any edit. It only checks the
+    argument-leading case, which is the one that splits - an assignment's
+    right-hand side does not word-split and is left alone.
+    """
+    import glob
+    import re
+    bad = []
+    pat = re.compile(r"(?<=[ \t])\$\{?(?:RIG|S|ROOT|R|HOME|TABLES)\}?/")
+    for path in sorted(glob.glob(os.path.join(RIG, "*.sh"))):
+        with open(path, encoding="utf-8", newline="") as f:
+            for n, line in enumerate(f, 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if pat.search(line):
+                    bad.append("%s:%d: %s"
+                               % (os.path.basename(path), n, line.strip()[:90]))
+    assert not bad, ("unquoted path expansion (breaks under a path with a "
+                     "space):\n  " + "\n  ".join(bad))
+
+
 def _art_dir(rig, title, names):
     """A fake title whose assets hold `names`, so artwork discovery can be
     checked without a card."""

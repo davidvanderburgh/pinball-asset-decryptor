@@ -20,7 +20,7 @@ $OD -d --start-address=0x33a5a0 --stop-address=0x33a620 $G | sed -n '7,40p'
 
 echo
 echo "############ who else touches the pool global 0x7b8a90 ? ############"
-bash $RIG/findref.sh 0x7b8a90
+bash "$RIG/findref.sh" 0x7b8a90
 export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct

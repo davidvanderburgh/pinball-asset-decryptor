@@ -19,15 +19,15 @@ awk '
     else      printf "event  ??  handler 0x%x  prio %d   @ %s\n",     r2hi*65536+r2lo, r3, addr
   }
 }
-' $D > $HOME/evmap.txt
+' $D > "$HOME/evmap.txt"
 
-echo "total registrations: $(wc -l < $HOME/evmap.txt)"
+echo "total registrations: $(wc -l < "$HOME/evmap.txt")"
 echo
 echo "=== event 93 (0x5d) ==="
-grep -E '^event  93' $HOME/evmap.txt
+grep -E '^event  93' "$HOME/evmap.txt"
 echo "=== event 94 (0x5e) ==="
-grep -E '^event  94' $HOME/evmap.txt
+grep -E '^event  94' "$HOME/evmap.txt"
 echo
 echo "=== distinct event ids seen ==="
-awk '{print $2}' $HOME/evmap.txt | sort -n | uniq -c | tr '\n' ' ' | head -c 3000
+awk '{print $2}' "$HOME/evmap.txt" | sort -n | uniq -c | tr '\n' ' ' | head -c 3000
 echo

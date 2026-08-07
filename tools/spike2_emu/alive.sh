@@ -130,7 +130,7 @@ VID=$(n -f 'padvidhost\.py')
 # for the guest to publish. A run that ends first leaves it waiting for
 # something that will never come, which is exactly the shape of every leak this
 # script exists to catch.
-HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $HOME/padvid\.log") \
+HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F "$HOME/padvid"\.log") \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
@@ -206,7 +206,7 @@ if [ "$TOTAL" -ne 0 ]; then
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
     | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|fuse2fs' \
     | grep -v grep | head -12
-  mountpoint -q $HOME/card 2>/dev/null
+  mountpoint -q "$HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'
 fi
 

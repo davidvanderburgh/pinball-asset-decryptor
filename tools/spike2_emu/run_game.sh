@@ -52,7 +52,7 @@ if [ -z "$CARD_SRC" ]; then
         GAME=$(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | head -1)
     fi
     if [ ! -x "$R/games/$GAME/game" ]; then
-        echo "[run] no game ELF at $R/games/$GAME/game" >&2
+        echo "[run] no game ELF at "$R/games/$GAME/game"" >&2
         echo "[run] extracted titles: $(cd "$R/games" && ls -d */ 2>/dev/null | tr -d / | tr '\n' ' ')" >&2
         echo "[run] or run it straight off a card: PAD_CARD=<image.raw>" >&2
         exit 1

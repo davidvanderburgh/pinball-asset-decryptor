@@ -65,6 +65,22 @@ achieved rate, and PAD_PF_LOG=<path> writes a line a second breaking it into
 transport and drawing. It was 15 fps before that was measured, while nominally
 being a 20 Hz loop.
 
+BUT THAT IS THE POLL RATE AND IT IS NOT WHAT A HUMAN SEES, which is why the bar
+now carries two numbers. A loop that reads `dump/padled` perfectly on time and
+finds nothing new reports 30 fps forever, so "30 fps" sat next to a picture that
+was changing 2.6 times a second (REMAINING item 31, measured off a screen
+recording: 24 of 275 frame transitions changed a pixel, with one gap of 2.83 s,
+while every one of the 276 frames read a rock-steady 30 fps). The `LED n.n Hz`
+field is the rate the PICTURE changes, counted over the last few seconds from
+the redraws that actually happened, and it is the one to believe. `poll 30 fps`
+is the loop, labelled as the loop.
+
+WHEN THE TWO DISAGREE THE BAR SAYS SO, and that is the diagnosis rather than a
+decoration: `LED 3.3 Hz of 12.0 Hz data` means new bytes are arriving four times
+faster than anything on screen changes, i.e. the writes carry values already
+drawn or address fixtures this window does not draw. Equal numbers mean the
+window is showing everything it is given and the source is the slow half.
+
 A DARK INSERT HERE MEANS OFF, NOT "NO DATA" - which is worth stating plainly,
 because the docstring used to warn the opposite. The undecoded strip boards
 (nodes 7, 12 and 14) do exist, but every insert this window draws sits on node 8
@@ -73,6 +89,7 @@ enumeration. The strip boards drive the TOPPER and the cabinet, and neither is
 on this picture. 113 channels (53 on node 8, 60 on node 9) join into 81
 fixtures: 13 RGB, 6 red+green (the BUILDING FIRE pairs), 62 single. All covered.
 """
+import collections
 import json
 import os
 import queue
@@ -241,6 +258,20 @@ PRESS_MS = 150
 #: frame rate is how this window sat at an unknown rate for weeks.
 TARGET_FPS = 30
 FRAME_MS = 1000.0 / TARGET_FPS
+
+#: How far back the LED rate on the status bar looks. The picture changes a few
+#: times a second, so a per-second count would read 2, 5, 0, 3 and be unusable,
+#: and an EWMA over a sparse event is worse - it decays toward whatever the last
+#: gap was. Counting the events inside a sliding window is the honest form: at
+#: ~3 Hz this is ~10 events, which is enough for one decimal place and still
+#: responds inside a few seconds when the rate really moves.
+RATE_WIN_S = 3.0
+
+#: Only spend the extra characters on "of N Hz data" when the two rates actually
+#: differ - a bar that always shows both trains the eye to ignore both. This is
+#: the ratio at which "the window is dropping updates" becomes a real claim
+#: rather than sampling noise between two counts over the same short window.
+RATE_SPLIT = 1.5
 
 #: Kept as the fallback pacing for the Schematic view, which draws nothing per
 #: frame and has no reason to run at 30 Hz.
@@ -723,6 +754,16 @@ class Field:
         self._read_ms = 0.0     # last tick's transport cost, for PAD_PF_LOG
         self._redrawn = 0       # fixtures actually reconfigured since the log
         self._log_t, self._log_n = time.perf_counter(), 0
+        # THE TWO RATES BEHIND THE STATUS BAR (see the module docstring). Both
+        # are deques of the tick times at which the thing happened, trimmed to
+        # RATE_WIN_S - a count over a window rather than a smoothed number,
+        # because these events are sparse and an EWMA of a sparse event reports
+        # the last gap rather than the rate.
+        self._draw_ev = collections.deque()   # ticks that changed the picture
+        self._data_ev = collections.deque()   # ticks that read a moved counter
+        self._decoded = None                  # last `decoded` seen, to diff it
+        self._gap_worst = 0.0                 # longest still stretch, for the log
+        self._draw_last = None
 
         # Every glow before any core marker: fixtures overlap on this picture
         # (the three SCOOP BB inserts share one XY), and interleaving would put
@@ -1112,6 +1153,23 @@ class Field:
                                    x + LED_GLOW_R, y + LED_GLOW_R)
         return lit
 
+    def _mark(self, dq, t):
+        """Record an event and return its rate over the last RATE_WIN_S."""
+        dq.append(t)
+        return self._rate(dq, t)
+
+    @staticmethod
+    def _rate(dq, t):
+        while dq and t - dq[0] > RATE_WIN_S:
+            dq.popleft()
+        if not dq:
+            return 0.0
+        # Divide by the window, NOT by the span of the events in it: dividing by
+        # the span reports 30 Hz for two redraws 33 ms apart inside an otherwise
+        # dead three seconds, which is the exact overclaim this field exists to
+        # stop making.
+        return len(dq) / RATE_WIN_S
+
     def tick(self):
         t0 = time.perf_counter()
         # The achieved rate is measured from tick START to tick START, which is
@@ -1141,7 +1199,20 @@ class Field:
         else:
             decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
             skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
+            # DID NEW BYTES ARRIVE THIS TICK? Diffed rather than trusted: the
+            # counter is written by the shim inside the guest and read across
+            # the VM boundary, so "the number moved" is the only evidence this
+            # side has that the block is live at all.
+            if self._decoded is not None and decoded != self._decoded:
+                self._mark(self._data_ev, t0)
+            self._decoded = decoded
+            before = self._redrawn
             lit = self.draw_fixtures(d)
+            if self._redrawn != before:
+                self._mark(self._draw_ev, t0)
+                if self._draw_last is not None:
+                    self._gap_worst = max(self._gap_worst, t0 - self._draw_last)
+                self._draw_last = t0
             coils = ""
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
                 self._tick_coils(d, time.monotonic() * 1000.0)
@@ -1156,13 +1227,21 @@ class Field:
             # (handoff item 1b) - and the window used to look identical either
             # way. Shown only once any have been dropped, so a clean run stays
             # uncluttered.
-            drops = "   %d frames NOT decoded" % skipped if skipped else ""
-            # THE RATE IS ON SCREEN. "At least 30 fps" is the requirement, so
-            # the number that satisfies it has to be visible while the game is
-            # running rather than inferred afterwards from a log.
+            drops = ", %d dropped" % skipped if skipped else ""
+            # BOTH RATES ARE ON SCREEN, and which is which is spelled out. "At
+            # least 30 fps" is the requirement and the loop meets it, but the
+            # loop is not the picture: see the module docstring, and item 31,
+            # which is this window reading 30 fps over a 2.83 s freeze.
+            draw_hz = self._rate(self._draw_ev, t0)
+            data_hz = self._rate(self._data_ev, t0)
+            # Only when it means something - see RATE_SPLIT.
+            split = ("" if draw_hz * RATE_SPLIT >= data_hz
+                     else " of %.1f Hz data" % data_hz)
             self.status.config(
-                text=" %d of %d inserts lit   %d LED writes decoded%s%s   %.0f fps"
-                     % (lit, len(self.fixtures), decoded, drops, coils, self.fps))
+                text=" %d of %d inserts lit   LED %.1f Hz%s (%d writes%s)"
+                     "%s   poll %.0f fps"
+                     % (lit, len(self.fixtures), draw_hz, split, decoded, drops,
+                        coils, self.fps))
 
         # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
         # every interval and land at 20-25 fps while claiming 30; subtracting
@@ -1180,6 +1259,15 @@ class Field:
         number, and so the split between the read and the drawing is on the
         record. Off unless the variable is set, and it costs one compare when
         it is off.
+
+        IT CARRIES THE PICTURE RATE AND THE WORST FREEZE, not just the loop.
+        Item 31's acceptance asks for the achieved visual updates a second and
+        the longest still stretch, and getting those off a screen recording
+        costs a recording, a frame extraction and a differ. This answers the
+        same question from inside the window, on any run, for one line a
+        second - and `worst` is a MAXIMUM SINCE THE LAST LINE rather than a
+        smoothed figure, because a 2.8 s freeze inside a second-long average is
+        exactly what averaging hides.
         """
         if not PF_LOG:
             return
@@ -1189,13 +1277,16 @@ class Field:
         try:
             with open(PF_LOG, "a") as f:
                 f.write("%.1f fps over %d ticks   frame %.1f ms "
-                        "(read %.1f, draw %.1f)   %d fixtures redrawn\n"
+                        "(read %.1f, draw %.1f)   %d fixtures redrawn   "
+                        "LED %.1f Hz  data %.1f Hz  worst gap %.2f s\n"
                         % (self._log_n / (t0 - self._log_t), self._log_n,
                            spent, self._read_ms, spent - self._read_ms,
-                           self._redrawn))
+                           self._redrawn, self._rate(self._draw_ev, t0),
+                           self._rate(self._data_ev, t0), self._gap_worst))
         except OSError:
             pass
         self._log_t, self._log_n, self._redrawn = t0, 0, 0
+        self._gap_worst = 0.0
 
 
 def load_state():

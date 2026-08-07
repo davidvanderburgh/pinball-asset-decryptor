@@ -72,6 +72,14 @@ _IMG_GROUP_IID = "::grp::"
 # child (a NUL can't appear in a real POSIX path, so it never collides).
 _PEX_PLACEHOLDER = "\x00__lazy__"
 
+# Partition Explorer preview: the file types worth drawing rather than dumping
+# as bytes, and how much of one we'll pull off the card to do it.  A card's UI
+# art is a few hundred KB to a couple of MB; the cap is what keeps a click on a
+# multi-gigabyte video from reading it into RAM to "preview" it.
+_PEX_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp")
+_PEX_FONT_EXTS = (".ttf", ".otf")
+_PEX_RENDER_CAP = 12 << 20
+
 
 class _PexCancelled(Exception):
     """Partition Explorer extract cancelled — raised inside the worker's
@@ -8962,18 +8970,25 @@ class MainWindow:
         self._pex_populated = set()      # dir iids whose children were loaded
         self._pex_busy = False           # an extract is running
         self._pex_part_labels = {}       # combobox label -> Partition
+        self._pex_changed_marks = {}     # on-card path -> "replaced <date>"
+        self._pex_preview_seq = 0        # discards a superseded async preview
+        self._pex_preview_img = None     # keeps the rendered PhotoImage alive
         self.partition_image_var = tk.StringVar()
         self.partition_part_var = tk.StringVar()
+        self.partition_show_var = tk.StringVar(value="All")
 
         intro = ttk.Label(
             f, text="Browse a raw Stern card image (.raw / .img): view its "
-                    "partitions and files, extract any file or folder to disk, "
+                    "partitions and files, preview images, fonts and text, "
+                    "extract any file or folder to disk, "
                     "and (right-click) replace any file with one of your own — "
                     "a same-size file is written straight into its slot, and a "
                     "bigger or smaller one is resized on the card through the "
                     "Linux filesystem driver (needs WSL2). Validation records "
                     "are refreshed automatically. Browsing never changes the "
-                    "card; only an explicit Replace writes to it.",
+                    "card; only an explicit Replace writes to it. Changed marks "
+                    "the files you have replaced here, remembered per card "
+                    "image — an edit made outside PAD leaves no trace to find.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         # Rewrap to the actual window width instead of a fixed 720px
@@ -9005,6 +9020,22 @@ class MainWindow:
         self._pex_part_combo.pack(side=tk.LEFT)
         self._pex_part_combo.bind(
             "<<ComboboxSelected>>", lambda _e: self._pex_on_partition_select())
+        # Show filter — the same All / Changed / Unchanged the Replace tabs
+        # got, over the files this card image has had replaced (batch 30).
+        ttk.Label(prow, text="Show:").pack(side=tk.LEFT, padx=(14, 4))
+        self._pex_show_combo = ttk.Combobox(
+            prow, textvariable=self.partition_show_var, state="readonly",
+            width=11, values=("All", "Changed", "Unchanged"))
+        self._pex_show_combo.pack(side=tk.LEFT)
+        self._pex_show_combo.bind("<<ComboboxSelected>>",
+                                  lambda _e: self._pex_apply_show())
+        # place="side": a tip under a combobox lands where its drop-down opens.
+        _Tooltip(self._pex_show_combo,
+                 "Changed = the files you have replaced on this card image "
+                 "with PAD (it remembers them per image, so they are still "
+                 "marked next session).\nUnchanged = the rest of the tree "
+                 "with those files left out.",
+                 lambda: self._current_theme, place="side")
         # (No partition-count label here — the dropdown already shows every
         # partition; extract results land next to the extract buttons below.)
         # Find-in-partition: substring over full paths, Enter / "Find Next"
@@ -9028,15 +9059,21 @@ class MainWindow:
         left = ttk.Frame(body); left.pack(side=tk.LEFT, fill=tk.BOTH,
                                           expand=True)
         self._pex_tree = ttk.Treeview(
-            left, columns=("size", "type"), height=14, selectmode="browse")
+            left, columns=("size", "type", "changed"), height=14,
+            selectmode="browse")
         self._pex_tree.heading("#0", text="Name", anchor=tk.W)
         self._pex_tree.heading("size", text="Size", anchor=tk.E)
         self._pex_tree.heading("type", text="Type", anchor=tk.W)
+        self._pex_tree.heading("changed", text="Changed", anchor=tk.W)
         self._pex_tree.column("#0", width=320, minwidth=160)
         self._pex_tree.column("size", width=90, minwidth=60, anchor=tk.E,
                               stretch=False)
         self._pex_tree.column("type", width=160, minwidth=90, anchor=tk.W,
                               stretch=False)
+        self._pex_tree.column("changed", width=150, minwidth=90, anchor=tk.W,
+                              stretch=False)
+        self._pex_tree.tag_configure(
+            "pex_changed", foreground=THEMES[self._current_theme]["warning"])
         vs = ttk.Scrollbar(left, orient="vertical",
                            command=self._pex_tree.yview)
         self._pex_tree.configure(yscrollcommand=vs.set)
@@ -9055,12 +9092,26 @@ class MainWindow:
 
         right = ttk.Frame(body); right.pack(side=tk.LEFT, fill=tk.BOTH,
                                             padx=(8, 0))
+        self._pex_preview_frame = right
         ttk.Label(right, text="Preview", font=(_SANS_FONT, 9, "bold")).pack(
             anchor=tk.W)
-        # Raw tk.Text, so it needs explicit colours — ttk styling doesn't
-        # reach it and it otherwise renders as a white panel inside the dark
-        # tab.  _apply_theme re-colours it on a live theme switch.
+        # What the pane is showing ("PNG · 1360 × 768 · 162.1 KB") — a rendered
+        # image says nothing about its real dimensions once it's been scaled to
+        # fit, and those are exactly what a replacement has to match.
+        self._pex_preview_caption = ttk.Label(right, text="",
+                                              font=(_SANS_FONT, 9))
+        self._pex_preview_caption.pack(anchor=tk.W)
+        # Raw tk widgets, so they need explicit colours — ttk styling doesn't
+        # reach them and they otherwise render as white panels inside the dark
+        # tab.  _apply_theme re-colours them on a live theme switch.
         _pc = THEMES[self._current_theme]
+        # Images and fonts render on the canvas, everything else stays text;
+        # only one of the two is ever packed (see _pex_show_*_preview).
+        self._pex_preview_canvas = tk.Canvas(
+            right, width=330, height=250, bg=_pc["field_bg"],
+            highlightthickness=1, highlightbackground=_pc["border"],
+            relief=tk.FLAT)
+        self._pex_preview_canvas.bind("<Configure>", self._pex_centre_preview)
         self._pex_preview = tk.Text(right, width=46, height=10, wrap="none",
                                     state="disabled", font=(_MONO_FONT, 9),
                                     bg=_pc["field_bg"], fg=_pc["fg"],
@@ -9207,7 +9258,11 @@ class MainWindow:
         self._pex_find_btn.config(state=tk.NORMAL)
         if any(q.browsable for q in self._pex_part_labels.values()):
             self._pex_extract_all_btn.config(state=tk.NORMAL)
-        self._pex_populate_dir("", "/")     # the partition root's children
+        self._pex_refresh_changed_marks()
+        if self.partition_show_var.get() == "Changed":
+            self._pex_fill_changed_only()
+        else:
+            self._pex_populate_dir("", "/")     # the partition root's children
 
     # ---- Partition Explorer: find ------------------------------------
 
@@ -9220,6 +9275,7 @@ class MainWindow:
         query = (self.partition_search_var.get() or "").strip().lower()
         if not query:
             return
+        self._pex_unfilter_for_reveal()
         key = (self._pex_image_path, self._pex_part_index)
         cache = self._pex_search_cache
         if not cache or cache[0] != key:
@@ -9353,11 +9409,23 @@ class MainWindow:
             if label:
                 self.partition_part_var.set(label)
                 self._pex_on_partition_select()
+        self._pex_unfilter_for_reveal()
         self._pex_reveal(hit)
         self._pex_action_status.configure(text=note or "")
         self.append_log("Find in Partition: %s → %s%s"
                         % (rel, hit, ("  (%s)" % note) if note else ""),
                         "info")
+
+    def _pex_unfilter_for_reveal(self):
+        """Drop back to Show: All before revealing a path.
+
+        A filtered tree doesn't hold every path, and it deliberately doesn't
+        lazy-load into itself — so a Find for something the filter left out
+        would quietly do nothing.  Finding it is what the user asked for; the
+        filter isn't."""
+        if self.partition_show_var.get() != "All":
+            self.partition_show_var.set("All")
+            self._pex_apply_show()
 
     def _pex_reveal(self, path):
         """Expand the lazy tree down to *path* and select it."""
@@ -9384,8 +9452,15 @@ class MainWindow:
     def _pex_populate_dir(self, parent_iid, path):
         """Insert *path*'s children under the tree node *parent_iid* (``""`` for
         the partition root).  Each directory gets a placeholder child so it
-        shows an expander and loads lazily on open."""
+        shows an expander and loads lazily on open.
+
+        Honours the Show filter: on "Unchanged" the files this card image has
+        had replaced are left out as they're loaded, which keeps the tree's
+        shape and its laziness (folders always stay — whether one still holds
+        an unchanged file isn't knowable without walking it)."""
         tree = self._pex_tree
+        hide_changed = self.partition_show_var.get() == "Unchanged"
+        marks = self._pex_changed_marks
         for c in tree.get_children(parent_iid):
             if c.endswith(_PEX_PLACEHOLDER):
                 tree.delete(c)
@@ -9399,15 +9474,103 @@ class MainWindow:
             iid = e.path
             if e.is_dir:
                 tree.insert(parent_iid, tk.END, iid=iid, text=e.name,
-                            values=("", "folder"))
+                            values=("", "folder", ""))
                 tree.insert(iid, tk.END, iid=iid + _PEX_PLACEHOLDER, text="")
                 self._pex_dirs.add(iid)
             else:
+                mark = marks.get(iid, "")
+                if mark and hide_changed:
+                    continue
                 typ = ("symlink → " + (e.link_target or "?")
                        if e.is_symlink else "file")
                 tree.insert(parent_iid, tk.END, iid=iid, text=e.name,
-                            values=(self._pex_human(e.size), typ))
+                            values=(self._pex_human(e.size), typ, mark),
+                            tags=("pex_changed",) if mark else ())
         self._pex_populated.add(parent_iid)
+
+    def _pex_refresh_changed_marks(self):
+        """Reload the current image+partition's "replaced by you" marks from
+        :mod:`core.card_edits` (the journal the Replace writes)."""
+        from ..core import card_edits
+        marks = {}
+        if self._pex_image_path and self._pex_part_index is not None:
+            try:
+                for p, e in card_edits.replaced(
+                        self._pex_image_path, self._pex_part_index).items():
+                    when = str(e.get("when") or "")[:10]
+                    marks[p] = ("replaced %s" % when) if when else "replaced"
+            except Exception:
+                marks = {}
+        self._pex_changed_marks = marks
+
+    def _pex_apply_show(self):
+        """Rebuild the tree for the Show filter (All / Changed / Unchanged)."""
+        if self._pex_busy or self._pex_card is None:
+            return
+        part = self._pex_part_index
+        if part is None:
+            return
+        self._pex_refresh_changed_marks()
+        self._clear_pex_tree()
+        # Pinned back deliberately: only _pex_close_card drops the partition
+        # today, and a filter switch must never be the thing that loses it.
+        self._pex_part_index = part
+        self._pex_extract_part_btn.config(state=tk.NORMAL)
+        self._pex_find_btn.config(state=tk.NORMAL)
+        if any(q.browsable for q in self._pex_part_labels.values()):
+            self._pex_extract_all_btn.config(state=tk.NORMAL)
+        if self.partition_show_var.get() == "Changed":
+            self._pex_fill_changed_only()
+        else:
+            self._pex_populate_dir("", "/")
+
+    def _pex_fill_changed_only(self):
+        """Show just the files replaced on this image, each under its own
+        folders, fully expanded.
+
+        Built from the journal rather than by walking the card — the set is
+        small and known, so this is instant even on the 6 GB data partition."""
+        tree = self._pex_tree
+        paths = sorted(self._pex_changed_marks)
+        if not paths:
+            self._pex_action_status.configure(
+                text="Nothing replaced on this partition yet — Show: Changed "
+                     "lists the files you replace here.")
+            return
+        made = set()
+        missing = 0
+        for p in paths:
+            names = [n for n in p.strip("/").split("/") if n]
+            if not names:
+                continue
+            fs = ""
+            for name in names[:-1]:
+                parent, fs = fs, fs + "/" + name
+                if fs not in made:
+                    tree.insert(parent, tk.END, iid=fs, text=name,
+                                values=("", "folder", ""), open=True)
+                    made.add(fs)
+                    self._pex_dirs.add(fs)
+                    # Nothing lazy-loads into a filtered view.
+                    self._pex_populated.add(fs)
+            try:
+                size = self._pex_human(
+                    self._pex_card.file_size(self._pex_part_index, p))
+                typ = "file"
+            except Exception:
+                # Recorded against this image but not on it any more (the file
+                # was renamed, or the image was replaced by another copy).
+                size, typ = "", "not on the card now"
+                missing += 1
+            tree.insert(p.rsplit("/", 1)[0], tk.END, iid=p,
+                        text=names[-1], values=(size, typ,
+                                                self._pex_changed_marks[p]),
+                        tags=("pex_changed",))
+        self._pex_populated.add("")
+        self._pex_action_status.configure(
+            text="%d file%s replaced on this partition%s."
+                 % (len(paths), "" if len(paths) == 1 else "s",
+                    " (%d no longer on the card)" % missing if missing else ""))
 
     def _pex_on_tree_open(self, _event=None):
         """Lazily populate a just-expanded directory node.
@@ -9448,6 +9611,11 @@ class MainWindow:
         if iid in self._pex_dirs:
             self._pex_set_preview("")
             return
+        self._pex_preview_seq += 1          # supersede any in-flight render
+        ext = os.path.splitext(iid)[1].lower()
+        if _HAVE_PIL and ext in (_PEX_IMAGE_EXTS + _PEX_FONT_EXTS):
+            self._pex_render_preview(iid, ext, self._pex_preview_seq)
+            return
         try:
             data = self._pex_card.preview(self._pex_part_index, iid)
         except Exception as e:
@@ -9459,6 +9627,64 @@ class MainWindow:
         else:
             self._pex_set_preview(self._pex_decode_preview(data))
 
+    def _pex_render_preview(self, iid, ext, seq):
+        """Draw *iid* — an image or a font — into the preview canvas.
+
+        The read happens on a worker: the text preview's 256 KB cap is small
+        enough to pull on the Tk thread, but a card's PNGs run into megabytes
+        and the image may be sitting on a NAS.  *seq* is checked before
+        anything is drawn, so clicking down a list only ever shows the row
+        that's still selected.
+        """
+        import threading
+
+        from ..core import image as image_mod
+        card, part = self._pex_card, self._pex_part_index
+        self._pex_set_preview("(reading %s…)" % os.path.basename(iid))
+        w, h = self._pex_preview_box()
+        is_font = ext in _PEX_FONT_EXTS
+
+        def _work():
+            png = caption = err = None
+            try:
+                data = card.preview(part, iid, cap=_PEX_RENDER_CAP)
+            except Exception as e:
+                data = None
+                err = "(error: %s)" % e
+            if data is None and err is None:
+                err = ("(too big to preview here — over %s; extract it to "
+                       "view)" % self._pex_human(_PEX_RENDER_CAP))
+            elif data is not None:
+                if is_font:
+                    png = image_mod.font_sample_png(data, w, h)
+                    caption = "%s · %s" % (ext.lstrip(".").upper(),
+                                           self._pex_human(len(data)))
+                    if png is None:
+                        err = "(not a font Pillow can read)"
+                else:
+                    png = image_mod.thumbnail_png_bytes(data, w, h)
+                    info = image_mod.detect_image_info_bytes(data, iid)
+                    if info is not None:
+                        caption = "%s · %d × %d · %s" % (
+                            info.fmt or ext.lstrip(".").upper(), info.width,
+                            info.height, self._pex_human(len(data)))
+                    if png is None:
+                        err = "(not an image Pillow can read)"
+
+            def _done():
+                if seq != self._pex_preview_seq:
+                    return                  # a later selection won
+                if png is None:
+                    self._pex_set_preview(err or "(nothing to preview)")
+                    return
+                self._pex_show_canvas_preview(png, caption or "")
+            try:
+                self._tk_root().after(0, _done)
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
     @staticmethod
     def _pex_decode_preview(data):
         sample = data[:4096]
@@ -9468,11 +9694,82 @@ class MainWindow:
         return data.decode("utf-8", "replace")
 
     def _pex_set_preview(self, text):
+        """Show *text* in the preview pane (and put the text widget back in
+        front of the image canvas if a render had swapped it in)."""
+        canvas = getattr(self, "_pex_preview_canvas", None)
+        if canvas is not None and canvas.winfo_ismapped():
+            canvas.delete("all")
+            canvas.pack_forget()
+            self._pex_preview_img = None
+        cap = getattr(self, "_pex_preview_caption", None)
+        if cap is not None:
+            cap.configure(text="")
         w = self._pex_preview
+        if not w.winfo_ismapped():
+            w.pack(fill=tk.BOTH, expand=True)
         w.config(state="normal")
         w.delete("1.0", tk.END)
         w.insert("1.0", text)
         w.config(state="disabled")
+
+    def _pex_preview_box(self):
+        """``(w, h)`` the preview canvas has to draw inside.
+
+        Its laid-out size once Tk has one, else the size it was created at — an
+        unmapped Tk widget reports a width of 1, which would scale every
+        preview down to a thumbnail of a thumbnail.
+        """
+        c = self._pex_preview_canvas
+        try:
+            w, h = c.winfo_width(), c.winfo_height()
+        except tk.TclError:
+            w = h = 0
+        if w <= 1 or h <= 1:
+            try:
+                w, h = int(c.cget("width")), int(c.cget("height"))
+            except (tk.TclError, ValueError):
+                w, h = 330, 250
+        return max(80, w - 10), max(80, h - 10)
+
+    def _pex_show_canvas_preview(self, png, caption):
+        """Swap the text pane for the image canvas and centre *png* on it."""
+        canvas = self._pex_preview_canvas
+        if self._pex_preview.winfo_ismapped():
+            self._pex_preview.pack_forget()
+        if not canvas.winfo_ismapped():
+            canvas.pack(fill=tk.BOTH, expand=True)
+        canvas.delete("all")
+        self._pex_preview_caption.configure(text=caption)
+        try:
+            img = tk.PhotoImage(data=base64.b64encode(png))
+        except tk.TclError:
+            self._pex_preview_img = None
+            self._pex_set_preview("(could not draw this preview)")
+            return
+        self._pex_preview_img = img          # keep the reference alive
+        # The canvas was packed a moment ago (or the pane was resized), so its
+        # geometry isn't settled yet — centring against a stale width drew the
+        # preview into the top-left corner and clipped it.
+        try:
+            canvas.update_idletasks()
+        except tk.TclError:
+            pass
+        self._pex_centre_preview()
+
+    def _pex_centre_preview(self, _event=None):
+        """Put the rendered preview back in the middle of the canvas — also the
+        <Configure> handler, so dragging the window keeps it centred."""
+        canvas = getattr(self, "_pex_preview_canvas", None)
+        img = self._pex_preview_img
+        if canvas is None or img is None or not canvas.winfo_ismapped():
+            return
+        try:
+            cw, ch = self._pex_preview_box()
+            canvas.delete("preview")
+            canvas.create_image(cw // 2 + 5, ch // 2 + 5, anchor=tk.CENTER,
+                                image=img, tags="preview")
+        except tk.TclError:
+            pass
 
     # ---- Partition Explorer: extract ---------------------------------
 
@@ -9583,6 +9880,11 @@ class MainWindow:
             lines += ["Partition:  %s" % dev,
                       "Path:       %s" % iid,
                       "Mounted at: <mount point>%s" % iid]
+            # What PAD has already done to this file on this image — the point
+            # of a per-file history being "keep track of all changes" (batch
+            # 30), including what each swap came from.
+            for ev in self._pex_replace_history(iid):
+                lines.append("Replaced:   %s" % ev)
             messagebox.showinfo("Properties — %s"
                                 % (os.path.basename(iid) or iid),
                                 "\n".join(lines))
@@ -9613,6 +9915,28 @@ class MainWindow:
                 pass
 
         threading.Thread(target=_work, daemon=True).start()
+
+    def _pex_replace_history(self, card_path):
+        """Human lines for every replace PAD has made to *card_path* on the
+        open image, oldest first (``[]`` when it hasn't touched it)."""
+        from ..core import card_edits
+        out = []
+        part = self._pex_part_index
+        for e in card_edits.edits_for(self._pex_image_path):
+            if e.get("path") != card_path:
+                continue
+            if (part is not None and e.get("partition") is not None
+                    and e.get("partition") != part):
+                continue
+            sizes = ""
+            old, new = e.get("old_size"), e.get("new_size")
+            if isinstance(old, int) and isinstance(new, int):
+                sizes = " (%s → %s)" % (self._pex_human(old),
+                                        self._pex_human(new))
+            src = e.get("source") or ""
+            out.append("%s%s%s" % (e.get("when") or "?", sizes,
+                                   ("\n            from " + src) if src else ""))
+        return out
 
     def _pex_replace_selected(self, iid):
         """Right-click → Replace with…: write one file into the card image,
@@ -9695,6 +10019,7 @@ class MainWindow:
                     n, refreshed = c.replace_file(
                         part, iid, src, allow_resize=True,
                         log=lambda m, lvl="info": state["log"].append((m, lvl)))
+                state["n"] = n
                 resized = ""
                 if cur_size is not None and n != cur_size:
                     resized = (" — %s on the card from %s"
@@ -9716,6 +10041,16 @@ class MainWindow:
                     self.append_log(line, lvl)
                 self._pex_finish_extract(msg)
                 if not msg.startswith("Replace failed"):
+                    # Remember the swap against this image BEFORE re-opening:
+                    # the reopen rebuilds the tree, and the Changed column is
+                    # filled from this journal (core.card_edits).  It is also
+                    # what stops the "source image changed — re-run Extract"
+                    # banner firing on an edit PAD just made itself.
+                    from ..core import card_edits
+                    card_edits.record_replace(
+                        image_path, part, iid, cur_size,
+                        state.get("n"), src)
+                    self._pex_report_extract_impact(image_path, iid)
                     # Re-open the card so the browse handle, preview and any
                     # cached reads see the new bytes.  That reselects the
                     # partition, which blanks the status line — so put the
@@ -9733,6 +10068,38 @@ class MainWindow:
 
         threading.Thread(target=_work, daemon=True).start()
         _tick(0)
+
+    def _pex_report_extract_impact(self, image_path, card_path):
+        """Say in the log whether a just-finished Replace makes the open
+        extract stale.
+
+        Replacing a file on the card moves the image's mtime, and the asset
+        tabs' banner used to read that as "your extract is out of date, re-run
+        Extract" — for a file (``/usr/local/spike/SternLogo.png`` on the OS
+        partition) that no extracted asset came from.  The banner knows better
+        now (core.extract_source); this puts the same verdict in the log at the
+        moment of the write, where the user is looking.
+        """
+        from ..core import card_paths, extract_source
+        assets = (self.write_assets_var.get() or "").strip()
+        if not assets:
+            return
+        rec = extract_source.read_extract_source(assets) or {}
+        recorded = rec.get("input_path") or ""
+        if (not recorded or os.path.normcase(os.path.abspath(recorded))
+                != os.path.normcase(os.path.abspath(image_path))):
+            return                  # a different image than the extract's
+        if card_paths.is_extract_source(assets, card_path):
+            self.append_log(
+                "This image is where %s was extracted from, and %s is one of "
+                "the files those assets came from — re-run Extract so the "
+                "Replace tabs match the card."
+                % (os.path.basename(assets), card_path), "warning")
+        else:
+            self.append_log(
+                "This image is where %s was extracted from, but %s is not one "
+                "of the files those assets came from — no re-Extract needed."
+                % (os.path.basename(assets), card_path), "info")
 
     def _pex_do_extract(self, kind, path, dest, part=None, image_path=None,
                         tree_prog=None, file_prog=None, chunk_prog=None,
@@ -9905,6 +10272,7 @@ class MainWindow:
         self._pex_tree.delete(*self._pex_tree.get_children(""))
         self._pex_dirs.clear()
         self._pex_populated.clear()
+        self._pex_preview_seq += 1          # drop any in-flight image render
         self._pex_set_preview("")
         self._pex_extract_btn.config(state=tk.DISABLED)
         self._pex_extract_part_btn.config(state=tk.DISABLED)
@@ -18851,12 +19219,19 @@ class MainWindow:
             # Refresh the byte-budget readout's normal colour for the new theme.
             self._text_update_budget()
 
-        # Partition Explorer's preview is a raw tk.Text (see _build_partition_tab).
+        # Partition Explorer's preview is a raw tk.Text over a raw tk.Canvas
+        # (see _build_partition_tab).
         if getattr(self, "_pex_preview", None) is not None:
             self._pex_preview.configure(
                 bg=c["field_bg"], fg=c["fg"], insertbackground=c["fg"],
                 selectbackground=c["select_bg"],
                 highlightbackground=c["border"])
+        if getattr(self, "_pex_preview_canvas", None) is not None:
+            self._pex_preview_canvas.configure(
+                bg=c["field_bg"], highlightbackground=c["border"])
+        if getattr(self, "_pex_tree", None) is not None:
+            self._pex_tree.tag_configure("pex_changed",
+                                         foreground=c["warning"])
 
         # Any open Image Info window keeps its own bg (raw Toplevel).
         _info = getattr(self, "_info_win", None)

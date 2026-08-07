@@ -85,6 +85,58 @@ def image_card_path(assets_dir, rel_path):
                   "to record where it came from.")
 
 
+def extracted_card_paths(assets_dir):
+    """Every on-card path *assets_dir*'s extract took content out of.
+
+    The same manifests the per-slot resolvers above read, inverted: instead of
+    "where did this slot come from", "which files on the card is this extract
+    made of".  Manifest-listed files only — the sound banks and the game ELF
+    are named by :func:`is_extract_source` instead, since no manifest records
+    a path for them.
+
+    ``set()`` for an extract with no manifests (an older extract, or one made
+    from a device) — callers treat that as "can't answer", not as "nothing".
+    Used to decide whether a Partitions-tab replace actually invalidates the
+    extract or merely moved the image's mtime (:mod:`core.extract_source`).
+    """
+    out = set()
+    if not assets_dir:
+        return out
+    for rel_manifest in ("video/manifest.txt",
+                         "images/manifest.txt",
+                         "images/scene_textures/manifest.txt",
+                         "images/scene_textures/radium_images.txt"):
+        for card in _read_manifest(assets_dir, rel_manifest).values():
+            p = _abs(card)
+            if p:
+                out.add(p)
+    return out
+
+
+#: On-card files an extract reads that no manifest lists by path: the sound
+#: banks every decoded WAV comes out of, and the game ELF the text strings and
+#: adjustment defaults are read from.
+_EXTRACT_SOURCE_NAMES = re.compile(r"^(?:image(?:-sc\d+)?\.bin|game_real)$",
+                                   re.IGNORECASE)
+
+
+def is_extract_source(assets_dir, card_path):
+    """Whether replacing *card_path* on the card invalidates *assets_dir*.
+
+    True for a file the extract's own manifests name, and for the sound banks /
+    game ELF that back the sounds and strings (no manifest lists those by
+    path).  False means "this file is not where any of these assets came from"
+    — which is how a Partitions-tab swap of, say,
+    ``/usr/local/spike/SternLogo.png`` is told apart from one that really does
+    make the extract stale.
+    """
+    if not card_path:
+        return False
+    if _EXTRACT_SOURCE_NAMES.match(os.path.basename(card_path)):
+        return True
+    return _abs(card_path) in extracted_card_paths(assets_dir)
+
+
 def audio_container(rel_path):
     """Basename of the bank a Spike 2 sound was decoded out of, or ``None``.
 

@@ -205,9 +205,14 @@ class CardImage:
         out.sort(key=lambda e: (not e.is_dir, e.name.lower()))
         return out
 
-    def preview(self, part_index, path):
-        """First :data:`PREVIEW_CAP` bytes of a regular file, or ``None`` when
-        it's a directory or too big to preview (extract it instead)."""
+    def preview(self, part_index, path, cap=PREVIEW_CAP):
+        """The bytes of a regular file up to *cap*, or ``None`` when it's a
+        directory or bigger than that (extract it instead).
+
+        *cap* defaults to :data:`PREVIEW_CAP`, which is sized for the text
+        preview; the GUI raises it for the file types it can actually render
+        (a card's PNGs run past 256 KB) and reads those off the Tk thread.
+        """
         reader = self._reader(part_index)
         res = self._resolve(reader, path)
         if res is None:
@@ -215,7 +220,7 @@ class CardImage:
         _ino, node = res
         if (node["mode"] & S_IFMT) != S_IFREG:
             return None
-        if node["size"] > PREVIEW_CAP:
+        if node["size"] > cap:
             return None
         return reader.read_file_bytes(node)
 

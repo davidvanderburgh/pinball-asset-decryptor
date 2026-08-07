@@ -269,6 +269,32 @@ These have each been violated at least once and each cost a run or a window:
       it, `[swlatch]` prints the closure width and the wait each time it saves a
       press (**42 saves in the verification run**). One change fixes the
       keyboard and the scripts, because both writers land in the same merge.
+      **★★ THE BLOCKING QUESTION IS ANSWERED. DAVID, 2026-08-06: "the left and
+      right flipper buttons when needed to navigate the game options does not
+      seem to react very well. it's hard to determine if i need to press it over
+      and over again or hold it (for example: when selecting a battle). are the
+      flipper keys working? (left and right arrows)"** This item's own Resume
+      line asked which key and which screen before any of the repeat half was
+      written. **The key: LEFT/RIGHT FLIPPER — 60 and 59 — bound to the left and
+      right arrows in padglhost's `binds[]`. The screen: in-game option
+      navigation, worked example BATTLE SELECT.**
+      **The symptom is not "it does nothing", it is "the rule is not legible" —
+      and this rig has ALREADY MEASURED exactly that, so start there rather than
+      from scratch.** `padsw.h`: on the Main Menu a hold of 120 ms and 200 ms
+      moved the cursor 0 rows, 250 ms moved 1 or 2, and 300 ms moved 3, because
+      what decides it is how many SPI transfers land inside the hold. A rule
+      that changes with the transfer phase is a rule a human cannot learn, which
+      is precisely "hard to determine if I press it over and over or hold it".
+      **NOT ESTABLISHED, and it is David's actual question: whether the flipper
+      keys work AT ALL on that screen.** `swladder.py` laddered switch 34
+      (node 1) and 46 (node 8) — **not 59 or 60** — so the flippers have never
+      been through the instrument, and the 72/72 result does not cover them.
+      Ladder 59 and 60 first; a flipper is on a different node from either
+      switch already tested, and the sampling gap is per node.
+      **New cost this exposes: BATTLE SELECT has never been reached by this
+      rig**, the way `Diagnostics → Coil Test` has not (item 3). It needs a game
+      played into a mode, not attract, so budget the run for that and say how
+      you got there.
       **WHAT IS NOT DONE, and it is why the box is open:**
       **(a) nobody has played it.** This is the script path; the keyboard shares
       the merge so the same latch applies, but David's hands are the final
@@ -303,11 +329,17 @@ These have each been violated at least once and each cost a run or a window:
       the only one that knows how long a key was really held; the three clocks
       are never aligned, only differenced within themselves).
       **Committed:** `979b940` (measurement + latch + instruments).
-      **Resume:** put hands on the keyboard. Play a ball with `[key]` and `[sw]`
-      both on and diff each key edge's X-time width against the closure the
-      guest was handed; a normal keystroke must register every time. Then ask
-      David what "does not repeat" means concretely — which key, which screen —
-      because the obvious answer is ruled out above.
+      **Resume:** ladder switches 59 and 60 with `swladder.py` — they have never
+      been measured and David's report is about them. Then play into a battle
+      and put `[key]` and `[sw]` both on, diffing each key edge's X-time width
+      against the closure the guest was handed. **Do not ask David which key and
+      which screen; he answered on 2026-08-06 and the answer is at the top of
+      this item.**
+      **The acceptance for the repeat half needs writing before it is built, and
+      the bar David set is LEGIBILITY, not just delivery:** one press moves one
+      row, and a hold repeats at a rate a human can predict — not 0 rows at
+      200 ms and 3 rows at 300 ms. State the rule the fix gives and show it
+      holds at several hold lengths.
       — S1 because unreliable input is not a defect
       you play around, it is the thing you play WITH.
       **Observed 2026-08-06:** a normal-length keystroke sometimes does not

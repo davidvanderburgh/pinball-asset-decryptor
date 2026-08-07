@@ -46,6 +46,16 @@ fi
 _facts() { bash "$RIG/setupcheck.sh" 2>/dev/null; }
 _get() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
+#: The Ubuntu release to fall back to when this one has no version of a
+#: package: an LTS, and the one this rig is developed and tested against, so
+#: it is a choice with evidence behind it rather than "try something newer".
+#: The two spellings are the same release - the distro name is what a user
+#: types at wsl.exe, the suite is what apt calls it - and emulate_tab.py names
+#: it too, before the user ever presses anything.
+#: test_the_two_halves_agree_on_the_fallback_release keeps all three together.
+PAD_KNOWN_GOOD_DISTRO=Ubuntu-24.04
+PAD_FALLBACK_SUITE=noble
+
 facts=$(_facts)
 
 # ---- 1. the packages ------------------------------------------------------
@@ -115,6 +125,125 @@ _add_universe() {
     [ "$touched" = 1 ]
 }
 
+#: FETCH A PACKAGE THIS RELEASE DOES NOT PUBLISH, from one that does.
+#:
+#: WHY THIS IS SAFE, AND WHY IT IS NOT A GENERAL FACILITY. Mixing releases is
+#: normally how you break apt: a .deb built against another release pulls in
+#: its dependency chain and you end up with half of it installed. This does
+#: none of that, for one reason that is checked and not assumed - the package
+#: it is allowed to fetch Depends on NOTHING. qemu-user-static is a static-pie
+#: interpreter and a binfmt.d config file; there is no chain to drag in. The
+#: control file of the ACTUAL DOWNLOADED FILE is read before dpkg is called,
+#: so if that ever stops being true this refuses instead of discovering it
+#: halfway through. setupcheck.sh's `xrel` decides which packages are even
+#: offered here, and it says exactly one.
+#:
+#: AND NOTHING PERMANENT IS TOUCHED. apt runs entirely against a throwaway
+#: root under /tmp - its own sources file, its own lists, its own cache - so
+#: /etc/apt and /var/lib/apt are exactly as they were whether this works or
+#: not. No source is added, nothing is pinned, and there is no cleanup that
+#: can be skipped and leave a foreign repository behind on the machine, which
+#: is the failure mode that makes the sources-editing version of this idea a
+#: bad one.
+#:
+#: The mirror is apt's OWN, not archive.ubuntu.com: someone on a country
+#: mirror or on ports.ubuntu.com has that for a reason, and it carries the
+#: same pool.
+_fetch_foreign() {
+    local pkg=$1 t mirror arch deps predeps deb rc=1
+    arch=$(dpkg --print-architecture 2>/dev/null)
+    mirror=$(apt-get indextargets --format '$(REPO_URI)' 2>/dev/null |
+             head -1)
+    if [ -z "$mirror" ]; then
+        case $arch in
+        amd64|i386) mirror=http://archive.ubuntu.com/ubuntu ;;
+        *)          mirror=http://ports.ubuntu.com/ubuntu-ports ;;
+        esac
+    fi
+    t=$(mktemp -d) || return 1
+    mkdir -p "$t/lists/partial" "$t/cache/archives/partial" "$t/dl"
+    # apt drops to the _apt user to fetch, and cannot read a 0700 mktemp dir.
+    chmod -R 0755 "$t"
+    printf 'deb %s %s universe\ndeb %s %s-updates universe\n' \
+        "$mirror" "$PAD_FALLBACK_SUITE" "$mirror" "$PAD_FALLBACK_SUITE" \
+        > "$t/pad.list"
+    set -- -o "Dir::Etc::sourcelist=$t/pad.list" \
+           -o Dir::Etc::sourceparts=/dev/null \
+           -o "Dir::State::lists=$t/lists" -o "Dir::Cache=$t/cache" \
+           -o APT::Get::List-Cleanup=0 -o Acquire::Languages=none
+
+    echo "fetching $pkg from Ubuntu $PAD_FALLBACK_SUITE instead"
+    if _run apt-get "$@" update -qq &&
+       ( cd "$t/dl" && _run apt-get "$@" download "$pkg" ); then
+        deb=$(ls "$t/dl"/*.deb 2>/dev/null | head -1)
+    fi
+    if [ -z "$deb" ]; then
+        echo "could not download $pkg from Ubuntu $PAD_FALLBACK_SUITE"
+        rm -rf "$t"; return 1
+    fi
+
+    # THE GATE. Anything with a dependency belongs to its own release and is
+    # not installed here, however it got this far.
+    deps=$(dpkg-deb -f "$deb" Depends 2>/dev/null)
+    predeps=$(dpkg-deb -f "$deb" Pre-Depends 2>/dev/null)
+    if [ -n "$deps$predeps" ]; then
+        echo "not installing it: this build of $pkg depends on other packages"
+        echo "($deps$predeps), and those belong to the release it was built"
+        echo "for. Mixing them in is not something this will do behind your"
+        echo "back."
+        rm -rf "$t"; return 1
+    fi
+    echo "  $(dpkg-deb -f "$deb" Package) $(dpkg-deb -f "$deb" Version)" \
+         "($(dpkg-deb -f "$deb" Architecture), depends on nothing)"
+    _run dpkg -i "$deb" && rc=0
+    rm -rf "$t"
+    return $rc
+}
+
+#: WHY apt has no version, said only from facts this run established.
+#:
+#: WHAT USED TO STAND HERE, and why it is gone. The sentence was "a WSL distro
+#: that is out of support, or one whose sources have been trimmed, does this;
+#: installing a current Ubuntu in WSL is the way back." It named two causes
+#: nothing had checked, and the first machine to meet it was on a CURRENT
+#: Ubuntu whose archive had installed twenty-one packages seconds earlier with
+#: universe switched on. The one piece of advice it gave him was the thing he
+#: had already done.
+#:
+#: So: the release, the components, and whether the index is one we just
+#: refreshed - all reported, none inferred - and then the route that is left.
+_why_nocand() {
+    local f=$1 updated=$2 nocand=$3 distro comps
+    distro=$(_get "$f" distro); comps=$(_get "$f" components)
+    [ -n "$distro" ] && echo "This Linux is: $distro"
+    [ -n "$comps" ] && echo "apt has these archive components switched on:"
+    [ -n "$comps" ] && echo "  $comps"
+    if [ "$updated" = 1 ]; then
+        echo "The index was refreshed a moment ago and the archive answered,"
+        echo "so this is not a stale index and not a download that failed:"
+        echo "this release does not publish the package at all."
+    else
+        # apt-get update FAILED, so "the release does not have it" is not a
+        # claim this run has earned - the index may simply be incomplete.
+        echo "apt-get update did not succeed just now, so the index may be"
+        echo "incomplete too. Whatever is wrong with the package sources is"
+        echo "worth fixing before reading anything into the line above."
+    fi
+    case " $nocand " in
+    *" qemu-user-static "*)
+        echo "The emulator cannot do without this one: qemu-user-static is"
+        echo "the only package that carries a statically linked ARM"
+        echo "interpreter, and the game is a 32-bit ARM binary." ;;
+    esac
+    # PAD talks to whichever distro WSL calls the default, so a distro that
+    # does carry the package, made the default, is a real way through and does
+    # not disturb the one that is there. Run on the WINDOWS side, not in here.
+    echo "A WSL distro that does have it, made the default, is the way"
+    echo "through. In a Windows terminal:"
+    echo "  wsl --install -d $PAD_KNOWN_GOOD_DISTRO"
+    echo "  wsl --set-default $PAD_KNOWN_GOOD_DISTRO"
+}
+
 if [ -n "$pkgs" ]; then
     echo "installing: $pkgs"
     export DEBIAN_FRONTEND=noninteractive
@@ -122,7 +251,13 @@ if [ -n "$pkgs" ]; then
     # too old to resolve anything, and the failure that produces ("Unable to
     # locate package") reads like the package does not exist. Not fatal on its
     # own - the install below is what decides.
-    _run apt-get update -qq
+    #
+    # ITS STATUS IS KEPT, though, because it is the difference between two
+    # verdicts that read the same and are not: "this release does not publish
+    # the package" can only be said about an index that was actually
+    # refreshed. Without it, an unreachable archive looks exactly like a
+    # package that does not exist.
+    if _run apt-get update -qq; then updated=1; else updated=0; fi
 
     # Ask again with a fresh index before installing: "apt has no version of
     # this" is a different fault from "the download failed", it is knowable
@@ -150,18 +285,34 @@ if [ -n "$pkgs" ]; then
         _run apt-get install -y -qq "$pkg" || failed="$failed $pkg"
     done
 
+    # BEFORE CALLING IT A DEAD END. A package this release does not publish is
+    # not a package that cannot be got: the rig fetches the one that Depends
+    # on nothing from an Ubuntu that does have it, rather than printing two
+    # commands and leaving the user to it. Only ever what setupcheck.sh's
+    # `xrel` names, and _fetch_foreign re-checks the downloaded file itself.
+    if [ -n "$failed" ]; then
+        facts=$(_facts)
+        xrel=$(_get "$facts" xrel)
+        still=
+        for pkg in $failed; do
+            case " $xrel " in
+            *" $pkg "*) _fetch_foreign "$pkg" || still="$still $pkg" ;;
+            *)          still="$still $pkg" ;;
+            esac
+        done
+        failed=$still
+    fi
+
     if [ -n "$failed" ]; then
         facts=$(_facts)
         nocand=$(_get "$facts" nocand)
         echo "could not install:$failed"
         if [ -n "$nocand" ]; then
-            # Not a failed download. The package sources this Linux is
-            # configured with do not offer the package at all, which no amount
-            # of retrying changes - so say which, and say what would.
-            echo "apt has no version of $nocand to install from the package"
-            echo "sources this Linux is set up with. A WSL distro that is out"
-            echo "of support, or one whose sources have been trimmed, does"
-            echo "this; installing a current Ubuntu in WSL is the way back."
+            # Not a failed download: apt has a record of the name and no
+            # VERSION, in an index refreshed seconds ago, which no amount of
+            # retrying changes - so say which, WHY, and what would.
+            echo "apt has no version of $nocand to install."
+            _why_nocand "$facts" "$updated" "$nocand"
             echo "result=nocandidate"
         else
             echo "apt-get failed - see above"

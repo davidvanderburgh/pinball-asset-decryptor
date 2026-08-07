@@ -344,10 +344,111 @@ def setup_unavailable(facts):
     return (facts or {}).get("nocand", "").split()
 
 
+#: Where to send someone whose own WSL distro cannot supply a package.  An
+#: LTS, and the one the rig is developed against, so it is a recommendation
+#: with evidence behind it rather than "try something newer" - which is what
+#: the old wording amounted to, in front of a tester already on the newest.
+#: setupfix.sh names the same one in the log; a test holds the two together.
+KNOWN_GOOD_DISTRO = "Ubuntu-24.04"
+
+#: The same release, as a user reads it.  One constant, two spellings, so the
+#: sentence and the command can never name different Ubuntus.
+FALLBACK_RELEASE = KNOWN_GOOD_DISTRO.split("-", 1)[1]
+
+
+def setup_fetchable(facts):
+    """The unavailable packages the rig will go and GET rather than give up on.
+
+    ``setupcheck.sh``'s ``xrel``: a package this release does not publish, but
+    which depends on nothing and so installs cleanly out of another Ubuntu's
+    archive.  Exactly one qualifies today (qemu-user-static, a static-pie
+    interpreter with an empty Depends), and setupfix.sh re-reads the
+    downloaded file's control before it installs it — this is what the tab is
+    allowed to PROMISE, not what the rig is allowed to do.
+
+    Absent on an older rig, and absent means "none", which is the safe way for
+    a promise to be wrong.
+    """
+    return (facts or {}).get("xrel", "").split()
+
+
+def setup_fixable(facts):
+    """Can “Set up emulator…” actually change anything on this machine?
+
+    A BUTTON THAT CANNOT IS WORSE THAN NO BUTTON.  A tester pressed this one
+    twice against a package apt had no version of, and both times the tab had
+    promised, underneath the sentence saying the package could not be
+    installed, that pressing it would install the package.
+
+    Unknown is yes, like everywhere else here: an older rig that never emitted
+    ``nocand`` must not have its silence read as "nothing works".
+    """
+    if not facts:
+        return True
+    if facts.get("universe") == "0":
+        return True             # turning universe on IS the repair
+    unavailable = set(setup_unavailable(facts)) - set(setup_fetchable(facts))
+    if not unavailable:
+        return True             # nothing left that cannot be got somehow
+    missing, binfmt = setup_summary(facts)
+    if any(pkg not in unavailable for pkg, _ in missing):
+        return True             # some of them still install
+    # Nothing installable left.  Switching a handler that is merely off back
+    # on is the one repair that needs no package.
+    return binfmt == "disabled"
+
+
 def setup_ok(facts):
     """Can this machine emulate?  Unknown counts as yes - see setup_state."""
     missing, binfmt = setup_summary(facts)
     return not missing and binfmt == "1"
+
+
+def setup_fix_steps(facts):
+    """Everything “Set up emulator…” is about to change, one line each.
+
+    THIS LIST IS THE CONSENT.  setupfix.sh installs packages and writes to
+    /etc/wsl.conf inside the user's distro, and the dialog built from this is
+    the only place any of that is agreed to - so it is a pure function with
+    tests on it rather than a list assembled inside a callback where nothing
+    can see it.
+    """
+    facts = facts or {}
+    missing, binfmt = setup_summary(facts)
+    unavailable = setup_unavailable(facts)
+    fetch = [p for p in unavailable if p in setup_fetchable(facts)]
+    steps = []
+    # Named FIRST because it happens first, and because it is the one step
+    # here that changes how WSL finds packages at all rather than which
+    # packages are on it.
+    if facts.get("universe") == "0":
+        steps.append(
+            "Turn on Ubuntu's “universe” component in WSL — it is "
+            "switched off, and it is where %s is published."
+            % ", ".join(unavailable))
+    # The ordinary install covers everything EXCEPT what has to be fetched:
+    # naming a package on both lines reads as installing it twice, and one of
+    # the two descriptions of how would be wrong.
+    ordinary = [pkg for pkg, _ in missing if pkg not in fetch]
+    if ordinary:
+        steps.append("Install in WSL:  " + "  ".join(ordinary))
+    # NAMED SEPARATELY because it is a different act from `apt install`: the
+    # package comes out of ANOTHER Ubuntu's archive.  Folding that into the
+    # line above would make this dialog a consent to something it did not say.
+    if fetch:
+        steps.append(
+            "%s is not published for your Ubuntu at all, so fetch that one "
+            "from Ubuntu %s's archive and install it (it depends on nothing, "
+            "so nothing else comes with it). Your package sources are not "
+            "changed." % (", ".join(fetch), FALLBACK_RELEASE))
+    if binfmt == "0":
+        steps.append("Register the kernel's handler for 32-bit ARM programs.")
+    elif binfmt == "disabled":
+        steps.append("Switch the 32-bit ARM handler back on.")
+    if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+        steps.append("Add [boot] systemd=true to /etc/wsl.conf, so the "
+                     "registration is still there after WSL restarts.")
+    return steps
 
 
 def setup_notice(facts, can_fix):
@@ -391,26 +492,72 @@ def setup_notice(facts, can_fix):
                 "the “universe” component, and this distro has that switched "
                 "off." % named)
         else:
-            parts.append(
-                "WSL cannot install %s: the package sources this Linux is set "
-                "up with do not offer it." % named)
-    if can_fix:
+            # SAY WHAT WE KNOW, NOT WHAT IT MIGHT BE.  The line that stood
+            # here ("the package sources this Linux is set up with do not
+            # offer it") is true but shapeless, and the log underneath it went
+            # on to blame an out-of-support distro and trimmed sources —
+            # neither of which had been checked, and neither of which was true
+            # of the machine that met it.  The release and its components are
+            # facts setupcheck.sh now reports, so they are what gets said.
+            where = facts.get("distro", "").strip()
+            comps = facts.get("components", "").split()
+            said = "WSL cannot install %s from its own sources." % named
+            if where:
+                said += "  This is %s" % where
+                if "universe" in comps:
+                    said += ", with “universe” switched on"
+                said += ", and that release does not publish it."
+            else:
+                said += ("  The package sources this Linux is set up with do "
+                         "not offer it.")
+            parts.append(said)
+    fetch = [p for p in setup_unavailable(facts) if p in setup_fetchable(facts)]
+    if can_fix and not setup_fixable(facts):
+        # The button is hidden in this state (see _setup_apply), so this is
+        # the whole of what the user has to go on.
+        parts.append(
+            "“Set up emulator…” cannot get past this — there is nothing left "
+            "for it to install. PAD uses whichever distro WSL calls the "
+            "default, so a distro that does carry %s, made the default, is "
+            "the way through. In a Windows terminal:\n"
+            "     wsl --install -d %s\n"
+            "     wsl --set-default %s"
+            % (", ".join(unavailable) or "the packages",
+               KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
+    elif can_fix:
         parts.append(
             "“Set up emulator…” %sinstalls those in WSL and registers the "
             "handler. It lists exactly what it will change first, and needs "
             "no password."
             % ("turns universe back on, "
                if facts.get("universe") == "0" else ""))
+        if fetch:
+            # The user is about to be told the button works after being told
+            # the package cannot be installed, so it has to say HOW — and say
+            # the thing that makes it safe, which is the empty Depends.
+            parts.append(
+                "%s comes from Ubuntu %s's archive instead, which does "
+                "publish it. It depends on nothing, so nothing else comes "
+                "with it and the rest of this Linux is left alone."
+                % (", ".join(fetch), FALLBACK_RELEASE))
     else:
         cmds = []
         if facts.get("universe") == "0":
             cmds.append("sudo add-apt-repository universe")
-        if missing:
-            cmds.append("sudo apt install " + " ".join(p for p, _ in missing))
+        # A package apt has no version of must not be printed INTO the command
+        # unless the line above is about to make it installable: `apt install
+        # a b` is all or nothing, so one such name in the list is an apt
+        # command that installs none of the others.  That is the fault PAD-41
+        # fixed in the rig, and it was still here in the advice the rig prints.
+        askable = [p for p, _ in missing
+                   if facts.get("universe") == "0" or p not in unavailable]
+        if askable:
+            cmds.append("sudo apt install " + " ".join(askable))
         if binfmt != "1":
             cmds.append(facts.get("advice", "sudo apt install qemu-user-static"))
-        parts.append("Run this, then start again:\n" + "\n".join(
-            "     %s" % c for c in cmds))
+        if cmds:
+            parts.append("Run this, then start again:\n" + "\n".join(
+                "     %s" % c for c in cmds))
     return "\n\n".join(parts)
 
 
@@ -870,8 +1017,15 @@ class EmulatePanel:
                 return
             self._setup_msg.configure(
                 text=setup_notice(facts, can_fix=sys.platform == "win32"))
-            if sys.platform == "win32":
+            # THE BUTTON GOES AWAY WHEN IT CANNOT HELP.  Leaving it there under
+            # a notice that says the package cannot be installed is an
+            # invitation to press it, and a tester took it twice - two runs,
+            # the same dead end, minutes apart.  The notice carries the route
+            # out instead (setup_notice, same condition).
+            if sys.platform == "win32" and setup_fixable(facts):
                 self._setup_btn.pack(side=tk.LEFT, padx=(6, 0))
+            else:
+                self._setup_btn.pack_forget()
             self._setup_msg.pack(anchor=tk.W,
                                  **getattr(self, "_setup_pad", {}))
         except (tk.TclError, AttributeError):
@@ -894,27 +1048,7 @@ class EmulatePanel:
         if self._setup_fixing or sys.platform != "win32":
             return
         facts = self._setup or {}
-        missing, binfmt = setup_summary(facts)
-        steps = []
-        # Named FIRST because it happens first, and because it is the one step
-        # here that changes how WSL finds packages at all rather than which
-        # packages are on it.
-        if facts.get("universe") == "0":
-            steps.append(
-                "Turn on Ubuntu's “universe” component in WSL — it is "
-                "switched off, and it is where %s is published."
-                % ", ".join(setup_unavailable(facts)))
-        if missing:
-            steps.append("Install in WSL:  "
-                         + "  ".join(pkg for pkg, _ in missing))
-        if binfmt == "0":
-            steps.append("Register the kernel's handler for 32-bit ARM "
-                         "programs.")
-        elif binfmt == "disabled":
-            steps.append("Switch the 32-bit ARM handler back on.")
-        if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
-            steps.append("Add [boot] systemd=true to /etc/wsl.conf, so the "
-                         "registration is still there after WSL restarts.")
+        steps = setup_fix_steps(facts)
         if not steps:
             return
         if not messagebox.askyesno(

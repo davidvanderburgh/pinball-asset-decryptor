@@ -27,12 +27,21 @@
 #   qemu|armgcc|debugfs|fuse   1 = the tool is on PATH, 0 = it is not
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
+#   indexed                    1 = apt has index metadata to answer questions
+#                              about the archive from. 0 = it has none, and
+#                              `nocand` and `universe` are therefore not asked
 #   nocand                     those of `need` that apt CANNOT install on this
 #                              machine - see below
 #   universe                   1 = nothing to say. 0 = this is Ubuntu, a
 #                              needed package is unavailable, and the
 #                              `universe` component that carries it is
 #                              switched off in apt's sources
+#   components                 the archive components apt actually has indexes
+#                              for, so a message about the sources can be
+#                              built from what IS configured
+#   distro                     `ID VERSION_ID CODENAME` from /etc/os-release,
+#                              so nothing downstream has to guess which Linux
+#                              this is before telling the user about it
 #   binfmt                     1 = a 32-bit ARM handler is registered and
 #                              enabled, disabled = registered but switched
 #                              off, 0 = the kernel has none
@@ -52,19 +61,33 @@
 _have() { command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0; }
 
 #: WHAT THE EMULATOR NEEDS BEYOND THE RIG: fact key, the tool that IS the
-#: fact, and the package that is only how apt spells it. THE RIG'S ONE COPY -
-#: setupfix.sh installs what this reports as missing rather than keeping a
-#: second list, because two lists in two scripts is exactly how the thing that
-#: is explained and the thing that is installed stop being the same four.
-PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static
-armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf
-debugfs:debugfs:e2fsprogs
-fuse:fusermount3:fuse3"
+#: fact, the package that is only how apt spells it, and whether that package
+#: may be fetched from ANOTHER Ubuntu release when this one has no version of
+#: it. THE RIG'S ONE COPY - setupfix.sh installs what this reports as missing
+#: rather than keeping a second list, because two lists in two scripts is
+#: exactly how the thing that is explained and the thing that is installed
+#: stop being the same four.
+#:
+#: THE LAST FIELD IS A PERMISSION, NOT A PROMISE, and only one package has it.
+#: qemu-user-static is a statically linked binary that Depends on NOTHING (a
+#: 133 MB static-pie interpreter and a binfmt.d config file), so a .deb built
+#: for one Ubuntu installs cleanly on another and drags nothing in with it.
+#: The other three are ordinary dynamically linked packages whose dependency
+#: chains belong to their own release; cross-installing those would be how you
+#: turn "the emulator will not start" into "apt is broken". setupfix.sh checks
+#: the actual downloaded file's Depends before it installs anything, so this
+#: flag can only ever narrow what is attempted, never widen what is allowed.
+PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
+armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
+debugfs:debugfs:e2fsprogs:0
+fuse:fusermount3:fuse3:0"
 
-need=
+need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do
-    _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}; _pkg=${_rest#*:}
+    _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}
+    _rest=${_rest#*:}; _pkg=${_rest%%:*}; _xrel=${_rest#*:}
     echo "$_key=$(_have "$_tool")"
+    [ "$_xrel" = 1 ] && _xrel_ok="$_xrel_ok $_pkg"
     command -v "$_tool" >/dev/null 2>&1 || need="$need $_pkg"
 done
 echo "need=${need# }"
@@ -81,8 +104,33 @@ echo "need=${need# }"
 #: command resolve fine, which is why exactly one of his four was named.
 #:
 #: Asked only about what is already missing, so a healthy machine pays nothing.
+#:
+#: FIRST, THOUGH: IS THERE AN INDEX TO ASK? Both questions below are answered
+#: out of apt's DOWNLOADED metadata in /var/lib/apt/lists, not out of the
+#: sources config, and a distro that has never run `apt-get update` has none of
+#: it - which is the state every freshly installed WSL Ubuntu is in, because
+#: the image ships with the lists emptied. With no index:
+#:
+#:   * `apt-cache policy <a package that is not installed>` prints NOTHING, so
+#:     the Candidate test below finds no candidate and marks it uninstallable;
+#:   * `apt-get indextargets` prints nothing at all, so the universe test finds
+#:     no universe component and blames one that is in fact switched on.
+#:
+#: Together those told a brand-new WSL Ubuntu that its package sources offered
+#: none of the four packages the emulator needs and that universe was off. Both
+#: false, and both about the most common machine state there is. An empty index
+#: is not evidence: it is the absence of it, so neither question is asked and
+#: setupfix.sh's `apt-get update` is what turns the answers real.
+components=$(apt-get indextargets --format '$(COMPONENT)' 2>/dev/null |
+             sort -u | tr '\n' ' ')
+components=${components% }
+[ -n "$components" ] && indexed=1 || indexed=0
+echo "indexed=$indexed"
+echo "components=$components"
+
 nocand=
-if [ -n "$need" ] && command -v apt-cache >/dev/null 2>&1; then
+if [ -n "$need" ] && [ "$indexed" = 1 ] &&
+   command -v apt-cache >/dev/null 2>&1; then
     for _pkg in $need; do
         apt-cache policy -- "$_pkg" 2>/dev/null |
             sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p' |
@@ -94,17 +142,36 @@ echo "nocand=${nocand# }"
 #: ...and if that is why, say so, because it is repairable. Ubuntu only: on
 #: Debian qemu-user-static is in `main` and an unavailable package means
 #: something else entirely, which a wrong-but-confident answer would hide.
-#: apt-get indextargets is apt's own view of what is configured, so a country
+#: `components` is apt's own view of what it has indexes for, so a country
 #: mirror, ports.ubuntu.com and a deb822 ubuntu.sources all answer correctly
 #: where grepping a file for a hostname would not.
 if [ -n "$nocand" ] &&
    grep -qs '^ID=ubuntu' /etc/os-release &&
-   ! apt-get indextargets --format '$(COMPONENT)' 2>/dev/null |
-       grep -qx universe; then
+   ! printf '%s\n' $components | grep -qx universe; then
     echo "universe=0"
 else
     echo "universe=1"
 fi
+
+#: ...and of the ones apt has no version of, which the rig is willing to go
+#: and FETCH from an Ubuntu release that does publish it. Reported here rather
+#: than decided in setupfix.sh so that the tab can promise, before the user
+#: presses anything, exactly what the button is about to do.
+xrel=
+for _pkg in $nocand; do
+    case " $_xrel_ok " in *" $_pkg "*) xrel="$xrel $_pkg" ;; esac
+done
+echo "xrel=${xrel# }"
+
+#: WHICH Linux this is, so that nothing downstream has to guess. A package apt
+#: has no version of is a fact about a RELEASE, and the message about it named
+#: two causes it had never checked ("out of support", "sources trimmed") in
+#: front of a tester on a current Ubuntu whose archive had installed twenty-one
+#: packages seconds earlier. Reported rather than inferred for the same reason
+#: the tools are probed rather than assumed.
+_osrel() { sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | tr -d '"' | head -1; }
+distro="$(_osrel ID) $(_osrel VERSION_ID) $(_osrel VERSION_CODENAME)"
+echo "distro=$(printf '%s' "$distro" | sed 's/[[:space:]]\{1,\}/ /g;s/^ //;s/ $//')"
 
 entry=$(_pad_binfmt_arm)
 if [ -z "$entry" ]; then

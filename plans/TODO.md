@@ -604,10 +604,32 @@ These have each been violated at least once and each cost a run or a window:
       around a fire. **48V needs the door CLOSED again (`swhold.py 33 1`)**
       before anything will fire.
 
-- [ ] **1d. The a2 / b4 / b5 payload.** `S3 D3` ← IN PROGRESS *(**D4 → D3,
-      2026-08-07:** the main shape is cracked at the desk and the pipeline is
-      built end to end; what is left needs a run, and the faults show when you
-      look.)*
+- [ ] **1d. The a2 / b4 / b5 payload — WIRE DECODE SHIPPED; the item stays
+      open for the NODE-BOARD FIRMWARE RE.** `S3 D5` *(**D3 → D5, 2026-08-07
+      evening:** the wire half is done and released, and what David kept the
+      item open FOR is a different and much harder job — decrypting LPC node
+      firmware. Budget more than one pass and say so up front.)*
+      **★★ DAVID'S VERDICT ON THE SHIPPED BUILD, 2026-08-07, after watching a
+      live run: "i mean it's much better than it was. we can ship it for now,
+      but the RE work on the firmware should keep this item open."** His eyes
+      were the acceptance oracle for the rendering half and they passed it.
+      **SHIPPED IN v0.117.0** (the tag landed on top of this work; the release
+      notes credit it). Three decodes in one day, all live-verified: the a2
+      pulse envelopes (`2520d44`), the b4/b5 bank fades (`d145083`), the form A
+      multi-lamp steps (`c950da3`/`4a3eda1`).
+      **SO THE REMAINING SCOPE IS EXACTLY TWO THINGS**, and neither is the
+      payload census this item was originally about:
+      **(a) THE NODE-BOARD FIRMWARE, which is the reason the item is open.**
+      The true fade CURVES and the rate UNIT live in the boards, not on the
+      wire — David's own diagnosis, and it is correct. Everything known about
+      the attack surface is in the assessment below; it is a fresh Stern
+      firmware-crypto crack.
+      **(b) The header-prefixed b4/b5 long forms** (~7 per run), still skipped.
+      Small, and independent of (a).
+      **What is NOT left: the rendering.** The window already animates
+      envelopes per channel, expires them onto the base, and reports its own
+      picture rate honestly. When the curves are known they replace a linear
+      ramp and a constant; no new plumbing.
       **★★ THE blen=6 SLICE IS DECODED AND SHIPPED, 2026-08-07, `2520d44` —
       NOT yet live-verified; the shim is unbuilt (a run was live all session)
       and ensurebuild rebuilds it at the next start.**
@@ -701,11 +723,25 @@ These have each been violated at least once and each cost a run or a window:
       is a real project (a new Stern firmware-crypto crack), not an
       afternoon** — worth its own queue item if David wants the true curves;
       until then the curve is linear and the unit is a knob.
-      **Resume:** David judges the current build by eye and tunes
-      `PAD_PF_FADE_UNIT_MS` (crosses WSLENV now, so it works on a watch.sh
-      run). Remaining decode targets, in order: the header-prefixed b4/b5
-      long forms, then the 06/07 hex records if anyone opens the node-firmware
-      question. Trace: `/var/tmp/led_trace_1d.log`.
+      **Resume — and it is the FIRMWARE now, not the wire.** Start at the four
+      non-data Intel HEX records (types 06/07, 58 bytes total) at the top of
+      each `.hex`: they are the only unexplained structure in the file and are
+      where a header, key id or IV would live. Compare them ACROSS the four LED
+      node files and across titles — `~/spike2root/games/*/`, and every title's
+      card carries the same `1_35_0` firmware set, so a repeated block is a
+      constant and a varying one is per-image. Then, before any crypto: check
+      whether a plaintext LPC image of the same part exists anywhere (NXP
+      bootloader stubs, an unencrypted older Spike release) to give a known
+      pair. **Already ruled out, do not repeat: repeating-key XOR** (IC 0.0039
+      at every period 1…1024) **and a sibling crib** (`ws2812node` vs
+      `hdmi_ws2812node`: same length, 0.4% shared bytes).
+      **The cheap fallback if the crypto holds:** the curve is only two
+      unknowns — shape and unit — and both are visible from OUTSIDE the board.
+      `Diagnostics → LED Tests` drives one fixture at a time by name; filming
+      a real machine, or David's eye against ours, calibrates
+      `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
+      with no firmware at all. Do that first if a pass has to produce
+      something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only

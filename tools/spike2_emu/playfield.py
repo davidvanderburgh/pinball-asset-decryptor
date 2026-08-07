@@ -60,26 +60,38 @@ the marker covers, sampled from the artwork once at build time. Both scales
 have a floor on purpose - a lamp at 5% duty is ON, and must not render as a
 ghost. The HUE is still brightness-lifted so a dim insert keeps its colour.
 
-THE RATE IS 30 fps AND IT IS MEASURED, not assumed: the status bar shows the
+THE RATE IS 60 fps AND IT IS MEASURED, not assumed: the status bar shows the
 achieved rate, and PAD_PF_LOG=<path> writes a line a second breaking it into
 transport and drawing. It was 15 fps before that was measured, while nominally
-being a 20 Hz loop.
+being a 20 Hz loop; 30 until 2026-08-07, when David asked why not 60 - the
+3.4 ms read is a ~147 fps ceiling, so 30 was only ever the written acceptance
+bar, not a limit.
 
 BUT THAT IS THE POLL RATE AND IT IS NOT WHAT A HUMAN SEES, which is why the bar
-now carries two numbers. A loop that reads `dump/padled` perfectly on time and
-finds nothing new reports 30 fps forever, so "30 fps" sat next to a picture that
-was changing 2.6 times a second (REMAINING item 31, measured off a screen
-recording: 24 of 275 frame transitions changed a pixel, with one gap of 2.83 s,
-while every one of the 276 frames read a rock-steady 30 fps). The `LED n.n Hz`
-field is the rate the PICTURE changes, counted over the last few seconds from
-the redraws that actually happened, and it is the one to believe. `poll 30 fps`
-is the loop, labelled as the loop.
+carries two more numbers. A loop that reads `dump/padled` perfectly on time and
+finds nothing new reports its target forever, so "30 fps" sat next to a picture
+that was changing 2.6 times a second (item 31, measured off a screen recording:
+24 of 275 frame transitions changed a pixel, with one gap of 2.83 s, while
+every one of the 276 frames read a rock-steady 30 fps). `LED n.n Hz` is the
+rate the STATE ARRIVING actually changes something, `data n.n Hz` is the rate
+new bytes arrive at all, `poll n fps` is the loop labelled as the loop. Both
+rate fields are ALWAYS shown: the first form of this bar showed the data field
+only when it disagreed, and the toggling text width made the window resize
+itself to fit (David saw it the same day it shipped). Reading the two numbers
+against each other is the diagnosis: data far above LED means the writes carry
+values already drawn or address fixtures this window does not draw.
 
-WHEN THE TWO DISAGREE THE BAR SAYS SO, and that is the diagnosis rather than a
-decoration: `LED 3.3 Hz of 12.0 Hz data` means new bytes are arriving four times
-faster than anything on screen changes, i.e. the writes carry values already
-drawn or address fixtures this window does not draw. Equal numbers mean the
-window is showing everything it is given and the source is the slow half.
+TRANSITIONS ARE ANIMATED, AND THAT IS EMULATION RATHER THAN DECORATION. On the
+real machine the LED boards render fades themselves: the game sends a fade
+COMMAND and the board ramps the PWM locally, so the wire never carries the
+intermediate levels - mostly it carries 0x00/0x7f/0xff steps (hwshim.c's a6
+notes). A window that repaints only the values on the wire therefore SNAPS
+where the real playfield sweeps, which David reported in exactly those terms.
+Every fixture now tweens from its drawn state to each new target over
+PAD_PF_FADE_MS (default 200, 0 = snap, the A/B control). The one thing still
+missing is the REAL duration per fade: that is in the undecoded `cmd a2`
+payload - item 1d - and when it decodes, its (from, to, rate) drops straight
+into the per-fixture target this tween already animates.
 
 A DARK INSERT HERE MEANS OFF, NOT "NO DATA" - which is worth stating plainly,
 because the docstring used to warn the opposite. The undecoded strip boards
@@ -158,7 +170,7 @@ WINDOW_TITLE = "%s - virtual playfield" % GAME
 LED_PATH = os.path.join(padpath.dump() or "", "padled")
 
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
-#: Unset in normal use; this is the instrument the 30 fps claim rests on.
+#: Unset in normal use; this is the instrument the frame-rate claim rests on.
 PF_LOG = os.environ.get("PAD_PF_LOG")
 
 #: PAD_PF_SWDEBUG=1 echoes every switch action this window takes, with the
@@ -169,7 +181,8 @@ SW_DEBUG = bool(os.environ.get("PAD_PF_SWDEBUG"))
 def fine_timers():
     """Ask Windows for 1 ms timers, and say whether it agreed.
 
-    WITHOUT THIS, 30 fps IS UNREACHABLE HERE AND THE REASON IS INVISIBLE.
+    WITHOUT THIS, THE TARGET RATE IS UNREACHABLE HERE AND THE REASON IS
+    INVISIBLE.
     Windows' default scheduler tick is 15.6 ms and Tk's `after` rounds up to
     it, so a 4 ms frame asking for a 29 ms delay does not wait 29 ms - it
     waits for the next tick, and sometimes the one after. Measured on this
@@ -240,9 +253,9 @@ PADLED_READ = COIL_GEN_OFF + 8
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
-#: readable flash, not a measurement. SHORTENED from 260 ms with the move to
-#: 30 fps: at 33 ms a frame this is still four frames of magenta, which is
-#: comfortably visible, and it is four times closer to the real pulse - two
+#: readable flash, not a measurement. SHORTENED from 260 ms with the move off
+#: the 50 ms poll: at 60 fps this is still eight frames of magenta, which is
+#: comfortably visible, and it is twice as close to the real pulse - two
 #: slingshot hits 150 ms apart now read as two flashes rather than one long one.
 COIL_FLASH_MS = 130
 
@@ -251,12 +264,15 @@ COIL_FLASH_MS = 130
 #: length comes from the mouse. Kept for callers that genuinely want an event.
 PRESS_MS = 150
 
-#: THE TARGET, and it is David's acceptance test: "at least 30 fps feedback on
-#: coil, LED and switch state". The loop is PACED, not slept - see Field.tick -
-#: so this is the rate it aims at rather than a sleep between frames, and the
-#: rate it ACHIEVES is measured and printed in the status bar. An unmeasured
-#: frame rate is how this window sat at an unknown rate for weeks.
-TARGET_FPS = 30
+#: THE TARGET. David's acceptance test said "at least 30 fps feedback on coil,
+#: LED and switch state" and this sat at exactly 30 until 2026-08-07, when he
+#: asked why not 60: nothing - the 3.4 ms read is a ~147 fps ceiling and the
+#: draw is change-gated, so 60 costs ~25% of one core in blocking reads and
+#: buys the tween below its full smoothness. The loop is PACED, not slept -
+#: see Field.tick - and the rate it ACHIEVES is measured and printed in the
+#: status bar. An unmeasured frame rate is how this window sat at an unknown
+#: rate for weeks.
+TARGET_FPS = 60
 FRAME_MS = 1000.0 / TARGET_FPS
 
 #: How far back the LED rate on the status bar looks. The picture changes a few
@@ -267,11 +283,15 @@ FRAME_MS = 1000.0 / TARGET_FPS
 #: responds inside a few seconds when the rate really moves.
 RATE_WIN_S = 3.0
 
-#: Only spend the extra characters on "of N Hz data" when the two rates actually
-#: differ - a bar that always shows both trains the eye to ignore both. This is
-#: the ratio at which "the window is dropping updates" becomes a real claim
-#: rather than sampling noise between two counts over the same short window.
-RATE_SPLIT = 1.5
+#: How long a fixture takes to move from its old state to its new one, in ms.
+#: THE WIRE DOES NOT CARRY RAMPS, so this window has to render them: the real
+#: LED boards animate fades locally from a fade command and publish nothing
+#: while they do it, which is why the decoded stream is almost entirely
+#: 0x00/0x7f/0xff steps. 200 ms is a placeholder shaped like a CSS transition,
+#: honest about being one - the REAL per-fade duration is in the undecoded
+#: `cmd a2` payload (item 1d) and replaces this constant per fade when it
+#: decodes. 0 disables the tween entirely, which is the A/B control.
+FADE_MS = float(os.environ.get("PAD_PF_FADE_MS", "200"))
 
 #: Kept as the fallback pacing for the Schematic view, which draws nothing per
 #: frame and has no reason to run at 30 Hz.
@@ -287,9 +307,11 @@ DOOR_EVERY = max(1, int(TARGET_FPS / 4))
 #: removes dump/padled on exit precisely so this can tell), and the window
 #: closes itself instead of sitting around as "no emulator". ~2 s of misses
 #: rather than one, because a read over \\wsl.localhost can fail transiently
-#: while everything is fine. A playfield started with no emulator at all never
-#: trips this - nothing was seen, so there is nothing to close with.
-GONE_POLLS = 40
+#: while everything is fine - derived from the rate so the 2 s holds whatever
+#: TARGET_FPS is (a fixed 40 quietly became 0.7 s when the loop went to 60).
+#: A playfield started with no emulator at all never trips this - nothing was
+#: seen, so there is nothing to close with.
+GONE_POLLS = 2 * TARGET_FPS
 
 
 def emu_gone(view, readable):
@@ -734,8 +756,17 @@ class Field:
         # decoded, the frame rate - lives in that label, so the one part that
         # says whether the thing is working was invisible on the machine it was
         # built for. Claiming space before the canvas cannot go wrong that way.
+        #
+        # width=1 SO THE TEXT CAN NEVER SIZE THE WINDOW. A Label asks for the
+        # width of its text, the window is the max of its children's asks, and
+        # the bar's text changes width as its counters grow - so the whole
+        # window widened and narrowed with the wording, which David saw the day
+        # the two-rate bar shipped. One nominal character keeps its ask below
+        # the canvas's always; fill="x" then stretches it to the artwork's
+        # width, and text longer than that clips at the right instead of
+        # resizing the playfield.
         self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
-                               font=("Consolas", 9))
+                               font=("Consolas", 9), width=1)
         self.status.pack(side="bottom", fill="x")
         self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
                             bg="black")
@@ -783,6 +814,15 @@ class Field:
             # What is on screen right now, so a tick can skip a fixture that
             # has not changed. See draw_fixtures().
             F["drawn"] = None
+            # The tween's state (see draw_fixtures / animate_fixtures):
+            # `state` is the last (rgb, level) decoded off the wire - the
+            # empty tuple compares unequal to every real state, so the first
+            # read always paints; `vis` is what is on screen NOW as floats
+            # (r, g, b, alpha, radius); `v0`/`vt`/`t0` are the running fade.
+            F["state"] = ()
+            F["vis"] = (0.0, 0.0, 0.0, 0.0, float(LED_R))
+            F["v0"] = F["vt"] = None
+            F["t0"] = 0.0
             self.info[i] = dict(kind="led", d=F)
 
         for C in self.coils:
@@ -829,7 +869,7 @@ class Field:
         exactly that. Loading the tables once at build time therefore meant the
         first run of a title ALWAYS showed a playfield with no switches on it,
         and the fix was to close the window and run the title again, which is a
-        strange thing to have to know. The window is already polling at 30 fps;
+        strange thing to have to know. The window is already polling fast;
         this is one os.path.exists a couple of seconds while a table is missing,
         and nothing at all once it is there.
         """
@@ -1014,7 +1054,7 @@ class Field:
 
         CACHED, and re-read only every DOOR_EVERY ticks. This is a SECOND
         round trip across the VM boundary, and it used to happen on every
-        tick - at 30 fps that is 60 crossings a second for a switch a human
+        tick - at 60 fps that is 120 crossings a second for a switch a human
         toggles by hand perhaps twice an hour. Measured: 3.35 ms, the same as
         the LED read, because a 9p round trip costs what it costs regardless
         of the 72 bytes it carries.
@@ -1100,58 +1140,120 @@ class Field:
                                width=3 if hot else 2)
         return fired
 
-    def draw_fixtures(self, d):
-        """Repaint the inserts. Returns how many are lit.
+    def draw_fixtures(self, d, now):
+        """Set each fixture's fade TARGET from the wire. Returns (lit, changed).
 
         ONLY WHAT CHANGED. This used to reconfigure all 81 fixtures - two
         canvas items each, 162 calls - every single tick, whether or not a
         single byte had moved, and a Tk itemconfig is a round trip into the
         Tcl interpreter. On a real attract frame a handful of inserts change
-        and the rest are identical, so the cached-tuple compare turns almost
+        and the rest are identical, so the (rgb, level) compare turns almost
         all of that work into a dict lookup. That, and not the transport, is
-        what makes 30 fps affordable.
+        what makes the frame rate affordable.
+
+        NOTHING IS PAINTED HERE ANY MORE. The wire carries steps, the real
+        boards render the ramps (module docstring), so a state change only
+        RETARGETS the fixture's tween and animate_fixtures() draws the frames.
+        `changed` counts fixtures whose decoded state moved - the honest
+        "picture rate" for the status bar, which must NOT count tween frames:
+        a 200 ms fade drawn at 60 fps is one update, not twelve.
         """
         lit = 0
+        changed = 0
         for F in self.fixtures:
             rgb, level = fixture_color(self._chan_vals(F, d))
             if rgb:
                 lit += 1
-                rs, alpha = level_shape(level)
-                # Quantised so that PWM jitter of one duty step does not make
-                # the marker resize every frame; 0.25 px is finer than the eye
-                # and coarse enough to be stable.
-                r = round(LED_R * rs * 4) / 4.0
-                want = (blend(rgb, F["bg"], alpha),
-                        blend([c // 2 for c in rgb], F["bg"], alpha * 0.7), r)
-            else:
-                want = ("#1a1a1a", "", 0.0)
-            if want == F["drawn"]:
+            st = (rgb, level)
+            if st == F["state"]:
                 continue
-            prev = F["drawn"]
-            F["drawn"] = want
-            self._redrawn += 1
-            fill, glow, r = want
-            if r:
-                self.cv.itemconfig(F["item"], fill=fill, outline="")
-                self.cv.itemconfig(F["glow"], fill=glow)
-                if prev is None or prev[2] != r:
-                    x, y = F["cx"], F["cy"]
-                    self.cv.coords(F["item"], x - r, y - r, x + r, y + r)
-                    g = LED_GLOW_R * (r / LED_R)
-                    self.cv.coords(F["glow"], x - g, y - g, x + g, y + g)
+            F["state"] = st
+            changed += 1
+            v = F["vis"]
+            if rgb:
+                rs, alpha = level_shape(level)
+                if v[3] <= 0.0:
+                    # A fade IN starts from the target's own hue at zero
+                    # alpha, not from black - lerping the colour up from
+                    # (0,0,0) sweeps it through mud on the way.
+                    v = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
+                         0.0, v[4])
+                    F["vis"] = v
+                F["vt"] = (float(rgb[0]), float(rgb[1]), float(rgb[2]),
+                           alpha, LED_R * rs)
             else:
-                self.cv.itemconfig(F["item"], fill=fill, outline="#3a3a3a")
-                self.cv.itemconfig(F["glow"], fill="")
-                # An insert that fades out from dim would otherwise keep the
-                # SMALL radius it had while lit, so the dark dots would be
-                # different sizes depending on how each one last went out.
-                if prev is not None and prev[2] != LED_R:
-                    x, y = F["cx"], F["cy"]
-                    self.cv.coords(F["item"], x - LED_R, y - LED_R,
-                                   x + LED_R, y + LED_R)
-                    self.cv.coords(F["glow"], x - LED_GLOW_R, y - LED_GLOW_R,
-                                   x + LED_GLOW_R, y + LED_GLOW_R)
-        return lit
+                # A fade OUT keeps the hue it had on the way down, growing
+                # back to the resting radius so the dark dots stay one size
+                # however each one went out.
+                F["vt"] = (v[0], v[1], v[2], 0.0, float(LED_R))
+            F["v0"] = v
+            F["t0"] = now
+        return lit, changed
+
+    def animate_fixtures(self, now):
+        """Advance every mid-fade fixture and paint the ones that moved.
+
+        Linear, deliberately: a PWM ramp is linear in duty, and at 60 fps a
+        200 ms fade is ~12 frames - an easing curve would be invisible. When
+        item 1d decodes the a2 payload, its per-fade rate replaces FADE_MS
+        for that fixture and this loop needs no other change.
+        """
+        dur = FADE_MS / 1000.0
+        for F in self.fixtures:
+            vt = F["vt"]
+            if vt is None:
+                continue
+            t = 1.0 if dur <= 0 else min(1.0, (now - F["t0"]) / dur)
+            v0 = F["v0"]
+            vis = tuple(a + (b - a) * t for a, b in zip(v0, vt))
+            F["vis"] = vis
+            if t >= 1.0:
+                F["vt"] = None          # arrived; stop paying for this one
+            self._paint(F, vis)
+
+    def _paint(self, F, vis):
+        """Put one visual state (r, g, b, alpha, radius floats) on the canvas.
+
+        QUANTISED before the change-gate, so a tween costs a handful of
+        itemconfigs rather than one per frame: alpha in 1/32 steps (finer
+        than blend()'s 8-bit output can show), radius in 0.25 px (finer than
+        the eye, and the same step the old PWM-jitter guard used).
+        """
+        alpha, rad = vis[3], vis[4]
+        if alpha <= 1.0 / 64:
+            want = ("#1a1a1a", "", 0.0)
+        else:
+            a_q = round(alpha * 32) / 32.0
+            r_q = round(rad * 4) / 4.0
+            rgb = (int(vis[0]), int(vis[1]), int(vis[2]))
+            want = (blend(rgb, F["bg"], a_q),
+                    blend([c // 2 for c in rgb], F["bg"], a_q * 0.7), r_q)
+        if want == F["drawn"]:
+            return
+        prev = F["drawn"]
+        F["drawn"] = want
+        self._redrawn += 1
+        fill, glow, r = want
+        if r:
+            self.cv.itemconfig(F["item"], fill=fill, outline="")
+            self.cv.itemconfig(F["glow"], fill=glow)
+            if prev is None or prev[2] != r:
+                x, y = F["cx"], F["cy"]
+                self.cv.coords(F["item"], x - r, y - r, x + r, y + r)
+                g = LED_GLOW_R * (r / LED_R)
+                self.cv.coords(F["glow"], x - g, y - g, x + g, y + g)
+        else:
+            self.cv.itemconfig(F["item"], fill=fill, outline="#3a3a3a")
+            self.cv.itemconfig(F["glow"], fill="")
+            # An insert that fades out from dim would otherwise keep the
+            # SMALL radius it had while lit, so the dark dots would be
+            # different sizes depending on how each one last went out.
+            if prev is not None and prev[2] != LED_R:
+                x, y = F["cx"], F["cy"]
+                self.cv.coords(F["item"], x - LED_R, y - LED_R,
+                               x + LED_R, y + LED_R)
+                self.cv.coords(F["glow"], x - LED_GLOW_R, y - LED_GLOW_R,
+                               x + LED_GLOW_R, y + LED_GLOW_R)
 
     def _mark(self, dq, t):
         """Record an event and return its rate over the last RATE_WIN_S."""
@@ -1206,13 +1308,13 @@ class Field:
             if self._decoded is not None and decoded != self._decoded:
                 self._mark(self._data_ev, t0)
             self._decoded = decoded
-            before = self._redrawn
-            lit = self.draw_fixtures(d)
-            if self._redrawn != before:
+            lit, changed = self.draw_fixtures(d, t0)
+            if changed:
                 self._mark(self._draw_ev, t0)
                 if self._draw_last is not None:
                     self._gap_worst = max(self._gap_worst, t0 - self._draw_last)
                 self._draw_last = t0
+            self.animate_fixtures(t0)
             coils = ""
             if len(d) >= PADLED_READ and struct.unpack_from("<I", d, 4)[0] >= 2:
                 self._tick_coils(d, time.monotonic() * 1000.0)
@@ -1228,20 +1330,19 @@ class Field:
             # way. Shown only once any have been dropped, so a clean run stays
             # uncluttered.
             drops = ", %d dropped" % skipped if skipped else ""
-            # BOTH RATES ARE ON SCREEN, and which is which is spelled out. "At
-            # least 30 fps" is the requirement and the loop meets it, but the
+            # BOTH RATES ARE ON SCREEN, and which is which is spelled out. The
             # loop is not the picture: see the module docstring, and item 31,
-            # which is this window reading 30 fps over a 2.83 s freeze.
+            # which is this window reading 30 fps over a 2.83 s freeze. The
+            # data field is ALWAYS shown - the first version showed it only
+            # when the two disagreed, and the toggling width resized the whole
+            # window (the label's width=1 is the belt to this brace).
             draw_hz = self._rate(self._draw_ev, t0)
             data_hz = self._rate(self._data_ev, t0)
-            # Only when it means something - see RATE_SPLIT.
-            split = ("" if draw_hz * RATE_SPLIT >= data_hz
-                     else " of %.1f Hz data" % data_hz)
             self.status.config(
-                text=" %d of %d inserts lit   LED %.1f Hz%s (%d writes%s)"
-                     "%s   poll %.0f fps"
-                     % (lit, len(self.fixtures), draw_hz, split, decoded, drops,
-                        coils, self.fps))
+                text=" %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
+                     " (%d writes%s)%s   poll %.0f fps"
+                     % (lit, len(self.fixtures), draw_hz, data_hz, decoded,
+                        drops, coils, self.fps))
 
         # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
         # every interval and land at 20-25 fps while claiming 30; subtracting
@@ -1378,8 +1479,10 @@ class Schematic:
                     text="%3d  %-28s" % (sw["id"], sw["name"][:28]))
                 self.info[i] = dict(kind="switch", d=sw)
 
+        # width=1 for the same reason as Field's bar: the text must never be
+        # what sizes the window.
         self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
-                               font=("Consolas", 9))
+                               font=("Consolas", 9), width=1)
         self.status.pack(fill="x")
         self.tip = Tip(root)
         self.drv = SwitchDriver()

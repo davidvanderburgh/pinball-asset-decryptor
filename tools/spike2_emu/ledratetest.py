@@ -20,11 +20,18 @@ THE TWO CASES, and the second is the one that makes the first mean anything:
                would say 30 here and pass nothing.
   2. CHURN   - 30 Hz of writes that carry values ALREADY ON SCREEN. The picture
                cannot change, so the LED rate must fall to ~0 while the data
-               rate reads ~30, and the bar must show the `of N Hz data` split.
+               rate reads ~30 in the always-present data field.
                This is the labelled negative example: an instrument that has
                never been shown a case it must score LOW is not evidence, and
                this rig has three audio metrics on record that failed exactly
                that check.
+
+  3. FADE    - one step 0 -> 255 -> 0. The window must pass through several
+               DISTINCT intermediate paints on the way up and again on the way
+               down (PAD_PF_FADE_MS, David's CSS-transition ask, 2026-08-07),
+               and must LAND: the final drawn state is the full-brightness
+               tuple, then the off tuple. A tween that snaps scores 1 paint
+               and fails; a tween that never arrives fails the landing.
 
 It validates ledrate.py in the same breath, off the same writer, because that
 one reads the same block from the other side of the VM boundary and its numbers
@@ -206,6 +213,88 @@ def run_case(name, script, secs, expect_led, expect_data, expect_gap,
     return fail
 
 
+def run_fade_case(path):
+    """One step 0 -> 255 -> 0: the tween must MOVE and must LAND.
+
+    Samples the target fixture's drawn tuple every few ms across each edge.
+    Distinct tuples < 4 means it snapped (or the quantisation ate the ramp);
+    a wrong final tuple means it animated somewhere other than the target.
+    Runs with the default PAD_PF_FADE_MS so it tests what ships.
+    """
+    import tkinter as tk
+    import playfield
+
+    playfield.fine_timers()
+    root = tk.Tk()
+    try:
+        root.attributes("-alpha", 0.0)
+    except tk.TclError:
+        pass
+    root.title("ledratetest-fade")
+    view = playfield.Field(root)
+    root.update()
+
+    feed = Feed(path, [])
+    node, idx = None, None
+    target = None
+    for F in view.fixtures:
+        if len(F["channels"]) == 1 and "W" in F["channels"]:
+            node, idx = F["channels"]["W"]
+            target = F
+            break
+    if target is None:
+        root.destroy()
+        return ["no single-channel fixture to drive"]
+
+    def settle(ms):
+        """Pump real ticks for ms, collecting the drawn tuples seen."""
+        seen = []
+        end = time.perf_counter() + ms / 1000.0
+        while time.perf_counter() < end:
+            root.update()
+            d = target["drawn"]
+            if d is not None and (not seen or seen[-1] != d):
+                seen.append(d)
+            time.sleep(0.004)
+        return seen
+
+    fail = []
+    span = max(400.0, playfield.FADE_MS * 2)
+
+    feed.buf[LED_HDR + node * 96 + idx] = 255
+    feed.gen += 1
+    feed.dec += 1
+    feed._flush()
+    up = settle(span)
+    if len(up) < 4:
+        fail.append("fade IN drew %d distinct states - it snapped: %s"
+                    % (len(up), up))
+    want_on = up[-1] if up else None
+    if not want_on or not want_on[2]:
+        fail.append("fade IN never landed lit (last drawn %r)" % (want_on,))
+
+    feed.buf[LED_HDR + node * 96 + idx] = 0
+    feed.gen += 1
+    feed.dec += 1
+    feed._flush()
+    down = settle(span)
+    if len(down) < 4:
+        fail.append("fade OUT drew %d distinct states - it snapped: %s"
+                    % (len(down), down))
+    if not down or down[-1][2] != 0.0:
+        fail.append("fade OUT never landed off (last drawn %r)"
+                    % (down[-1] if down else None,))
+
+    print("\n--- FADE  one step up, one step down (FADE_MS=%g) ---"
+          % playfield.FADE_MS)
+    print("  up  : %d distinct paints, landed %s"
+          % (len(up), "lit" if want_on and want_on[2] else "NOT LIT"))
+    print("  down: %d distinct paints, landed %s"
+          % (len(down), "off" if down and down[-1][2] == 0.0 else "NOT OFF"))
+    root.destroy()
+    return fail
+
+
 def main():
     sys.argv = [sys.argv[0], GAME]
     # THE TABLES HAVE TO BE PINNED BEFORE PAD_ROOT MOVES. dump/ and tables/ are
@@ -248,6 +337,11 @@ def main():
         7.5, expect_led=(0.0, 0.7), expect_data=(15.0, 32.0),
         expect_gap=None, tables=None, root_dir=root_dir, path=path)]
 
+    # 3. FADE: the tween animates and lands. A fresh block so case 2's last
+    # values cannot leak into the edge being scored.
+    path = build(root_dir)
+    fails += [("fade", f) for f in run_fade_case(path)]
+
     print("\n" + "=" * 62)
     if fails:
         for case, f in fails:
@@ -256,7 +350,8 @@ def main():
     print("PASS  the LED field tracks the picture, not the poll:")
     print("      it reads ~5 Hz when the picture moves 5 times a second,")
     print("      falls to ~0 when 30 Hz of writes change nothing on screen,")
-    print("      and catches a 2 s freeze the poll rate cannot see.")
+    print("      catches a 2 s freeze the poll rate cannot see,")
+    print("      and a state step fades through the middle and lands.")
     return 0
 
 

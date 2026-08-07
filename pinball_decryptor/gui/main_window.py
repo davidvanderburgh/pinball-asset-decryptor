@@ -1592,12 +1592,27 @@ class MainWindow:
         self.text_new_var = tk.StringVar()      # edit-panel "New text" entry
         self.text_budget_var = tk.StringVar(value="")   # "N / M bytes"
         self.text_apply_all_var = tk.BooleanVar(value=False)
+        # Same Show dropdown the audio/video/image tabs have (batch 29 asked
+        # for it here too), plus a Scene one: on a card this size the useful
+        # question is "just this scene" or "just the game program".
+        self.text_change_filter_var = tk.StringVar(value="All")
+        self.text_scene_filter_var = tk.StringVar(value=self._TEXT_SCENE_ALL)
         self._text_rows = []             # list[{path, original, replacement}]
         self._text_scan_dir = ""         # folder the rows were loaded from
         self._text_scan_id = 0           # bump-counter (parity w/ other tabs)
         self._text_current_iid = None    # selected row iid (str(index))
         self._text_sort = ("#0", False)  # (column_id, descending)
+        # Scene dropdown/Name column state: {display: scene path} and its
+        # inverse, rebuilt on every list refresh; the friendly names are the
+        # SAME store the Images tab's "Rename group…" writes.
+        self._text_scene_choices = {}
+        self._text_scene_displays = {}
+        self._text_scene_names = {}      # {"rad::<card path>": name}
         self.text_search_var.trace_add(
+            "write", lambda *a: self._refresh_text_list())
+        self.text_change_filter_var.trace_add(
+            "write", lambda *a: self._refresh_text_list())
+        self.text_scene_filter_var.trace_add(
             "write", lambda *a: self._refresh_text_list())
         self.text_new_var.trace_add(
             "write", lambda *a: self._text_update_budget())
@@ -4001,12 +4016,14 @@ class MainWindow:
     # The three modes of the audio / video / image "Show" dropdown.
     _CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 
-    def _build_change_filter(self, parent, kind):
+    def _build_change_filter(self, parent, kind, tip=None):
         """Build the "Show: All / Changed / Unchanged" dropdown for a Replace
         tab and return its frame (unpacked — the caller places it).
 
         The list refresh comes off the variable's own trace (set up with the
-        tab's other filters), so this only has to persist the choice."""
+        tab's other filters), so this only has to persist the choice.  *tip*
+        overrides the tooltip for a tab where "changed" means something else
+        (Text: an edited string, not a staged file)."""
         frame = ttk.Frame(parent)
         ttk.Label(frame, text="Show:").pack(side=tk.LEFT)
         combo = ttk.Combobox(
@@ -4017,6 +4034,7 @@ class MainWindow:
                    lambda _e: self._save_staged_changes())
         _Tooltip(
             combo,
+            tip or
             "Narrow the list by what you've already done to it. Changed = the "
             "slots with a pending replacement or already changed on disk by a "
             "previous build. Unchanged = everything you haven't touched yet, "
@@ -8130,7 +8148,8 @@ class MainWindow:
             self._land_on_row(tree, rel)
 
     def reveal_text_string(self, text):
-        """Scene Browser: find one display string on the Replace Text tab."""
+        """Scene Browser: find one display string on the Replace Text tab
+        (clearing any filter that would hide it)."""
         self._step_aside_for_jump()
         self._notebook.select(self._tab_text)
         tree = getattr(self, "_text_tree", None)
@@ -8139,6 +8158,8 @@ class MainWindow:
                 self._scan_text_strings()
             except Exception:
                 pass
+        self.text_change_filter_var.set("All")
+        self.text_scene_filter_var.set(self._TEXT_SCENE_ALL)
         self.text_search_var.set(text)
         # The search alone leaves nothing selected, which reads as "nothing
         # happened" — land on the row itself.
@@ -8873,6 +8894,11 @@ class MainWindow:
             data["video_no_conversion"] = bool(
                 self.video_no_conversion_var.get())
             data["video_change_filter"] = self.video_change_filter_var.get()
+        if _live(getattr(self, "_text_scan_dir", "")):
+            # The Text tab stages nothing (edits go straight to strings.tsv),
+            # but its two view filters are folder state like everyone else's.
+            data["text_change_filter"] = self.text_change_filter_var.get()
+            data["text_scene_filter"] = self.text_scene_filter_var.get()
         if _live(self._image_scan_dir):
             hist += history_log.diff_assignments(
                 "image", data.get("image"), self._image_assignments)
@@ -12316,6 +12342,37 @@ class MainWindow:
             "line, with the line picked out — so you can see it in place, "
             "and recolour it there. Stern Spike 2.",
             lambda: self._current_theme)
+        # Show: All / Changed / Unchanged — the same dropdown the other
+        # Replace tabs got in batch 28, asked for here in batch 29.
+        self._build_change_filter(
+            tools, "text",
+            tip="Narrow the list by what you've already done to it. Changed = "
+                "the lines you have edited (they show your new text and are "
+                "written on the next build). Unchanged = everything you "
+                "haven't touched yet, so a part-finished pass is what's left "
+                "in front of you instead of something to scroll past."
+        ).pack(side=tk.LEFT, padx=(12, 0))
+        # Scene: All / Game program / one scene.  Not every row is a scene —
+        # the game program draws its own strings — and a card this size is
+        # only workable one scene at a time (batch 29).
+        sframe = ttk.Frame(tools)
+        sframe.pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Label(sframe, text="Scene:").pack(side=tk.LEFT)
+        self._text_scene_combo = ttk.Combobox(
+            sframe, textvariable=self.text_scene_filter_var, state="readonly",
+            width=30, values=(self._TEXT_SCENE_ALL,))
+        self._text_scene_combo.pack(side=tk.LEFT, padx=(4, 0))
+        self._text_scene_combo.bind("<<ComboboxSelected>>",
+                                    lambda _e: self._save_staged_changes())
+        _Tooltip(
+            self._text_scene_combo,
+            "Narrow the list to one screen's worth of text. \"Game program\" "
+            "is the text the game code draws itself (mode titles, battle "
+            "names) — everything else is one scene file, listed with how many "
+            "strings it holds. A scene's folder name never changes, so a name "
+            "you give it (right-click a row → Name this scene…) sticks, and "
+            "it's the same name the Images tab shows for that scene.",
+            lambda: self._current_theme)
         self._text_status_lbl = ttk.Label(
             tools, textvariable=self.text_status_var, font=(_SANS_FONT, 9))
         self._text_status_lbl.pack(side=tk.RIGHT)
@@ -12324,21 +12381,30 @@ class MainWindow:
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
         self._text_tree = ttk.Treeview(
-            list_frame, columns=("new", "max", "scene"),
+            list_frame, columns=("new", "max", "scene", "name"),
             height=8, selectmode="browse")
         self._text_tree.heading("#0", text="On-Screen Text", anchor=tk.W)
         self._text_tree.heading("new", text="New Text", anchor=tk.W)
         self._text_tree.heading("max", text="Max", anchor=tk.W)
         self._text_tree.heading("scene", text="Scene", anchor=tk.W)
+        self._text_tree.heading("name", text="Name", anchor=tk.W)
         self._text_tree.column("#0", width=300, minwidth=160)
         self._text_tree.column("new", width=230, minwidth=120)
-        self._text_tree.column("max", width=50, minwidth=40, anchor=tk.E)
-        self._text_tree.column("scene", width=150, minwidth=80)
+        # Max: left-aligned and fixed-width.  It used to right-align its
+        # numbers in a column that stretched with the window, so the header
+        # sat hundreds of pixels from its own numbers and the numbers ended
+        # up hard against the Scene column — they read as part of it (batch
+        # 29).  Header and numbers now sit together and stay put.
+        self._text_tree.column("max", width=56, minwidth=44, anchor=tk.W,
+                               stretch=False)
+        self._text_tree.column("scene", width=170, minwidth=90, stretch=False)
+        self._text_tree.column("name", width=170, minwidth=90)
         self._persist_tree_columns(
-            self._text_tree, "text", ("#0", "new", "max", "scene"))
+            self._text_tree, "text", ("#0", "new", "max", "scene", "name"))
         self._text_sort_cfg = [
             ("#0", "On-Screen Text", False), ("new", "New Text", False),
-            ("max", "Max", True), ("scene", "Scene", False)]
+            ("max", "Max", True), ("scene", "Scene", False),
+            ("name", "Name", False)]
         self._wire_sort_headings(self._text_tree, self._text_sort_cfg,
                                  "_text_sort", self._refresh_text_list)
         text_scroll = ttk.Scrollbar(
@@ -12404,20 +12470,27 @@ class MainWindow:
             command=self._text_clear_selected)
         self._text_revert_btn.pack(side=tk.RIGHT, padx=(0, 4))
 
+        # Both of these carried a fixed wraplength, so on a wide window they
+        # wrapped in the left half with 600px of empty space beside them
+        # (batch 29: "the text to the left wraps early").  They follow the
+        # window now, like the tab's own intro text.
         self._text_scene_full_var = tk.StringVar(value="")
-        ttk.Label(edit, textvariable=self._text_scene_full_var,
-                  font=(_SANS_FONT, 8, "italic"), foreground="#888888",
-                  wraplength=700, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=8, pady=(0, 4))
+        _scene_note = ttk.Label(
+            edit, textvariable=self._text_scene_full_var,
+            font=(_SANS_FONT, 8, "italic"), foreground="#888888",
+            wraplength=700, justify=tk.LEFT)
+        _scene_note.pack(anchor=tk.W, padx=8, pady=(0, 4))
+        self._register_responsive_wrap(_scene_note, margin=60)
 
-        ttk.Label(
+        _saved_note = ttk.Label(
             f,
             text="Your edits are saved to text/strings.tsv as you Apply them "
                  "and are written to the card automatically when you build the "
                  "update on the Write tab — no extra step.",
             font=(_SANS_FONT, 9), foreground="#888888",
-            wraplength=720, justify=tk.LEFT).pack(
-            anchor=tk.W, padx=12, pady=(6, 8))
+            wraplength=720, justify=tk.LEFT)
+        _saved_note.pack(anchor=tk.W, padx=12, pady=(6, 8))
+        self._register_responsive_wrap(_saved_note, margin=48)
 
     # ---- Replace Text: helpers ---------------------------------------
 
@@ -12460,6 +12533,208 @@ class MainWindow:
 
     def _text_is_edited(self, r):
         return bool(r["replacement"]) and r["replacement"] != r["original"]
+
+    # ---- Replace Text: scene identity, names + filters ----------------
+
+    # The two fixed entries in the Scene dropdown.  _TEXT_SCENE_PROGRAM
+    # doubles as the "not a scene file" selector inside the row filter.
+    _TEXT_SCENE_ALL = "All scenes"
+    _TEXT_SCENE_PROGRAM = "Game program"
+
+    @staticmethod
+    def _text_scene_key(path):
+        """The shared container key for a scene path — the SAME key the
+        Replace Images tab tags its radium groups under, so a name given on
+        either tab is the one name for that scene.  Spike 2 scene folders are
+        content hashes that never change, so the key is stable across
+        sessions (and across a re-extract of the same card)."""
+        return "rad::" + (path or "")
+
+    def _text_scene_name(self, path):
+        """The user's friendly name for a scene, or "" — never for the game
+        program, which isn't a scene."""
+        if not (path or "").lower().endswith(".radium"):
+            return ""
+        return self._text_scene_names.get(self._text_scene_key(path), "")
+
+    @classmethod
+    def _text_row_matches(cls, r, query, want_changed, scene):
+        """True when row *r* survives the Text tab's three filters.
+
+        *query* is the lower-cased search box ("" = off) and matches the
+        original or the user's new text; *want_changed* is True/False for
+        Show = Changed/Unchanged (None = All); *scene* is a scene's card path,
+        ``_TEXT_SCENE_PROGRAM`` for the game program, or None for all.
+        Deliberately free of Tk so the whole filter is testable."""
+        if query:
+            if (query not in r["original"].lower()
+                    and query not in (r["replacement"] or "").lower()):
+                return False
+        if want_changed is not None:
+            edited = bool(r["replacement"]) and r["replacement"] != r["original"]
+            if edited != want_changed:
+                return False
+        if scene is not None:
+            is_scene_file = (r["path"] or "").lower().endswith(".radium")
+            if scene == cls._TEXT_SCENE_PROGRAM:
+                return not is_scene_file
+            return r["path"] == scene
+        return True
+
+    def _text_scene_selection(self):
+        """What the Scene dropdown currently selects: a scene's card path,
+        ``_TEXT_SCENE_PROGRAM``, or None for "All scenes" (also None when the
+        saved choice names a scene this folder doesn't have)."""
+        choice = (self.text_scene_filter_var.get() or "").strip()
+        if not choice or choice == self._TEXT_SCENE_ALL:
+            return None
+        if choice == self._TEXT_SCENE_PROGRAM:
+            return self._TEXT_SCENE_PROGRAM
+        return self._text_scene_choices.get(choice)
+
+    @classmethod
+    def _text_scene_menu(cls, rows, names):
+        """``([display…], {display: path})`` for the Scene dropdown over
+        *rows*, given the ``{key: friendly name}`` map.
+
+        Named scenes sort first (they're the ones the user cares about), then
+        the rest by their hash label; each entry carries its string count so
+        a scene worth opening is obvious before you pick it."""
+        counts, labels = {}, {}
+        program = 0
+        for r in rows:
+            path = r["path"] or ""
+            if not path.lower().endswith(".radium"):
+                program += 1
+                continue
+            counts[path] = counts.get(path, 0) + 1
+            if path not in labels:
+                name = names.get(cls._text_scene_key(path), "")
+                labels[path] = (name, cls._text_scene_label(path))
+        order = sorted(counts,
+                       key=lambda p: (not labels[p][0], labels[p][0].lower(),
+                                      labels[p][1].lower()))
+        values = [cls._TEXT_SCENE_ALL]
+        by_display = {}
+        if program:
+            values.append(cls._TEXT_SCENE_PROGRAM)
+        for path in order:
+            name, label = labels[path]
+            display = "%s — %s (%d)" % (name, label, counts[path]) if name \
+                else "%s (%d)" % (label, counts[path])
+            values.append(display)
+            by_display[display] = path
+        return values, by_display
+
+    def _text_rebuild_scene_menu(self):
+        """Refresh the Scene dropdown's values from the loaded rows."""
+        values, by_display = self._text_scene_menu(
+            self._text_rows, self._text_scene_names)
+        self._text_scene_choices = by_display
+        self._text_scene_displays = {p: d for d, p in by_display.items()}
+        combo = getattr(self, "_text_scene_combo", None)
+        if combo is not None:
+            try:
+                combo.configure(values=values)
+            except tk.TclError:
+                pass
+
+    def _text_scene_rename(self, iid=None):
+        """Right-click → Name this scene…: give a scene a name of your own.
+
+        Spike 2 names every scene folder with a content hash, so the Scene
+        column is 40 hex characters that mean nothing until you've opened
+        them (batch 29).  The name is stored against the scene's container
+        key in the folder's own sidecar — the same store the Images tab's
+        "Rename group…" uses, so naming a scene here names it there too."""
+        if iid is None:
+            sel = self._text_tree.selection()
+            iid = sel[0] if sel else self._text_current_iid
+        try:
+            r = self._text_rows[int(iid)]
+        except (TypeError, ValueError, IndexError):
+            return
+        path = r["path"] or ""
+        if not path.lower().endswith(".radium"):
+            messagebox.showinfo(
+                "Name this scene",
+                "This is a game-program string — the game code draws it at "
+                "runtime, so there's no scene file to name.")
+            return
+        key = self._text_scene_key(path)
+        name = self._ask_text(
+            "Name this scene",
+            "A name for the scene %s\n(blank clears it):"
+            % self._text_scene_label(path),
+            initialvalue=self._text_scene_names.get(key, ""))
+        if name is None:
+            return                              # cancelled
+        self._text_set_scene_name(key, " ".join(name.split())[:50])
+
+    def _text_set_scene_name(self, key, name):
+        """Store (or clear, on a blank *name*) a scene's friendly name and
+        write it straight to the folder's sidecar, keeping the Replace Images
+        tab in step when it's looking at the same folder."""
+        from ..core import staged_changes
+        was = self._text_scene_selection()
+        if name:
+            self._text_scene_names[key] = name
+        else:
+            self._text_scene_names.pop(key, None)
+        scan_dir = self._text_scan_dir
+        if scan_dir and os.path.isdir(scan_dir):
+            data = staged_changes.load(scan_dir)
+            tags = {str(k): str(v) for k, v in
+                    (data.get("image_group_tags") or {}).items()
+                    if str(v).strip()}
+            if name:
+                tags[key] = name
+            else:
+                tags.pop(key, None)
+            data["image_group_tags"] = tags
+            staged_changes.save(scan_dir, data)
+            if self._same_folder(getattr(self, "_image_scan_dir", ""),
+                                 scan_dir):
+                self._image_group_tags = dict(tags)
+                if hasattr(self, "_image_tree"):
+                    self._refresh_image_list()
+        self._text_rebuild_scene_menu()
+        # A rename rewrites the scene's own entry in the dropdown, so follow
+        # it — filtering to a scene and naming it must not drop the filter.
+        followed = False
+        if was and was != self._TEXT_SCENE_PROGRAM:
+            display = self._text_scene_displays.get(was)
+            if display and display != self.text_scene_filter_var.get():
+                self.text_scene_filter_var.set(display)   # traces the refresh
+                followed = True
+        if not followed:
+            self._refresh_text_list()
+        # The refresh rebuilds every row, which drops the selection — put the
+        # user back on the line they right-clicked.
+        self._text_reselect(getattr(self, "_text_current_iid", None))
+
+    def _text_reselect(self, iid):
+        """Re-select row *iid* after a refresh rebuilt the tree (no-op when
+        it's gone — a filter may now hide it)."""
+        tree = getattr(self, "_text_tree", None)
+        if tree is None or iid is None:
+            return
+        try:
+            if tree.exists(str(iid)):
+                tree.selection_set(str(iid))
+                tree.focus(str(iid))
+                tree.see(str(iid))
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _same_folder(a, b):
+        """True when two paths name the same existing folder (case/sep
+        insensitive) — both empty never matches."""
+        if not a or not b:
+            return False
+        return (os.path.normcase(os.path.normpath(a))
+                == os.path.normcase(os.path.normpath(b)))
 
     # ---- Replace Text: scanning / list -------------------------------
 
@@ -12531,6 +12806,24 @@ class MainWindow:
                 row["budget"] = r["budget"]
             rows.append(row)
         self._text_rows = rows
+        if not self._same_folder(scan_dir, self._text_scan_dir):
+            # New folder: take its filters and its scene names off its own
+            # sidecar (the names are the Images tab's group tags — one store,
+            # so a scene named on either tab reads the same on both).
+            staged = self._load_staged_changes(scan_dir)
+            # Default both filters back to "everything" first: a filter
+            # carried over from the last project would open the new one
+            # looking empty for no visible reason.
+            self.text_change_filter_var.set("All")
+            self._restore_change_filter("text", staged)
+            tags = staged.get("image_group_tags")
+            self._text_scene_names = (
+                {str(k): str(v).strip()[:50] for k, v in tags.items()
+                 if str(v).strip()} if isinstance(tags, dict) else {})
+            saved_scene = staged.get("text_scene_filter")
+            self.text_scene_filter_var.set(
+                saved_scene if isinstance(saved_scene, str) and saved_scene
+                else self._TEXT_SCENE_ALL)
         self._text_scan_dir = scan_dir
         self._text_clear_edit_panel()
         self._refresh_text_list()
@@ -12553,13 +12846,26 @@ class MainWindow:
             self._scan_text_strings()
 
     def _refresh_text_list(self):
-        """Apply the search filter and repopulate the string tree."""
+        """Apply the search box + the Show / Scene filters and repopulate the
+        string tree."""
         tree = getattr(self, "_text_tree", None)
         if tree is None:
+            return
+        self._text_rebuild_scene_menu()
+        choice = (self.text_scene_filter_var.get() or "").strip()
+        scene = self._text_scene_selection()
+        if scene is None and choice and choice != self._TEXT_SCENE_ALL:
+            # A saved scene this folder doesn't have (or one whose strings
+            # are all filtered out): fall back to All rather than an
+            # inexplicably empty list.  The set re-enters through the trace.
+            self.text_scene_filter_var.set(self._TEXT_SCENE_ALL)
             return
         tree.delete(*tree.get_children())
 
         query = (self.text_search_var.get() or "").strip().lower()
+        mode = self.text_change_filter_var.get()
+        want_changed = (mode == "Changed") if mode in ("Changed",
+                                                       "Unchanged") else None
         total = len(self._text_rows)
         edited = sum(1 for r in self._text_rows if self._text_is_edited(r))
         col, desc = self._text_sort
@@ -12573,6 +12879,10 @@ class MainWindow:
             if col == "scene":
                 return (self._text_scene_label(r["path"]).lower(),
                         r["original"].lower())
+            if col == "name":
+                # Unnamed scenes sort last, not first under a blank string.
+                name = self._text_scene_name(r["path"])
+                return (not name, name.lower(), r["original"].lower())
             return (r["original"].lower(),)  # "#0" on-screen text
 
         # Filter first, then sort — but keep each row's ORIGINAL index as its
@@ -12580,9 +12890,7 @@ class MainWindow:
         # so sorting only changes display order, never identity.
         visible = [
             (i, r) for i, r in enumerate(self._text_rows)
-            if not (query and query not in r["original"].lower()
-                    and (not r["replacement"]
-                         or query not in r["replacement"].lower()))]
+            if self._text_row_matches(r, query, want_changed, scene)]
         visible.sort(key=_key, reverse=desc)
         self._show_sort_arrows(tree, self._text_sort_cfg, self._text_sort)
         shown = len(visible)
@@ -12590,7 +12898,8 @@ class MainWindow:
             tree.insert(
                 "", tk.END, iid=str(i), text=r["original"],
                 values=(r["replacement"], self._text_row_budget(r),
-                        self._text_scene_label(r["path"])),
+                        self._text_scene_label(r["path"]),
+                        self._text_scene_name(r["path"])),
                 tags=("assigned",) if self._text_is_edited(r) else ())
 
         if total == 0:
@@ -12619,7 +12928,9 @@ class MainWindow:
         self._text_current_iid = iid
         self._text_orig_var.set(r["original"])
         if (r["path"] or "").lower().endswith(".radium"):
-            self._text_scene_full_var.set("Scene: " + r["path"])
+            name = self._text_scene_name(r["path"])
+            self._text_scene_full_var.set(
+                ("Scene “%s”: " % name if name else "Scene: ") + r["path"])
         else:
             self._text_scene_full_var.set(
                 "Game program: %s — drawn by game code (mode titles, battle "
@@ -12657,6 +12968,8 @@ class MainWindow:
                          command=lambda: self._text_new_entry.focus_set())
         menu.add_command(label="Show in Scenes…",
                          command=lambda r=row: self._text_show_in_scene(r))
+        menu.add_command(label="Name this scene…",
+                         command=lambda r=row: self._text_scene_rename(r))
         try:
             edited = self._text_is_edited(self._text_rows[int(row)])
         except (ValueError, IndexError):
@@ -15778,15 +16091,61 @@ class MainWindow:
         self._scan_cmds[tab_key] = scan_cmd   # restore after a Cancel
 
     def _project_mirror_label(self, parent):
-        """The read-only project-folder mirror the Replace tabs show: a plain
-        label tracking the shared project variable — visibly NOT an editable
-        field (batch 20: a readonly Entry still looked like per-tab state you
-        could change here).  A tooltip says where the value is actually set."""
-        lbl = ttk.Label(parent, textvariable=self._project_mirror_var,
-                        anchor=tk.W)
-        _Tooltip(lbl, "The project folder — shared by every tab. It is set "
-                      "on the Extract tab.", lambda: self._current_theme)
+        """The read-only project-folder mirror the Replace tabs show: a link
+        tracking the shared project variable — visibly NOT an editable field
+        (batch 20: a readonly Entry still looked like per-tab state you could
+        change here).  A tooltip says where the value is actually set."""
+        return self._folder_link_label(
+            parent, self._project_mirror_var,
+            "The project folder — shared by every tab. It is set on the "
+            "Extract tab.", path_var=self.write_assets_var)
+
+    def _folder_link_label(self, parent, var, tip, path_var=None):
+        """A folder path shown as a link: clicking it opens the folder in the
+        OS file browser, same as the two paths in Project properties.
+
+        Batch 29 asked whether the links had been reverted — they had only
+        ever been in Properties, so every Project Folder row is one now.  The
+        path is still read-only: the click opens it, it never edits it.
+
+        *path_var* is the folder to open when the label shows something other
+        than a bare path (the Replace tabs' mirror carries a "set it on the
+        Extract tab" note while no project is loaded)."""
+        lbl = ttk.Label(parent, textvariable=var, anchor=tk.W)
+        src = path_var if path_var is not None else var
+        lbl.bind("<Button-1>", lambda _e, v=src: self._open_folder_link(v))
+        _Tooltip(lbl, tip + " Click to open it.", lambda: self._current_theme)
+        self._style_folder_link(lbl, src)
+        src.trace_add("write",
+                      lambda *_a, l=lbl, v=src: self._style_folder_link(l, v))
         return lbl
+
+    def _style_folder_link(self, lbl, var):
+        """Dress *lbl* as a link only while there's somewhere to go — with no
+        project loaded the row carries a note, not a path, and an underlined
+        blue note reads as a broken link."""
+        live = bool((var.get() or "").strip())
+        try:
+            lbl.configure(style="Link.TLabel" if live else "TLabel",
+                          cursor="hand2" if live else "")
+        except tk.TclError:
+            pass
+
+    def _open_folder_link(self, var):
+        """Click handler for a folder link: open the path in the file manager,
+        or say plainly why there's nothing to open."""
+        path = (var.get() or "").strip()
+        if not path:
+            messagebox.showinfo(
+                "Open folder",
+                "No project folder yet — set it on the Extract tab.")
+            return
+        if not os.path.exists(path):
+            messagebox.showinfo(
+                "Open folder",
+                "This folder doesn't exist yet:\n%s" % path)
+            return
+        self._reveal_in_file_manager(path)
 
     _SCAN_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"     # braille frames for the scanning animation
     _SCAN_LABELS = {"audio": "Audio", "video": "Video", "image": "Images",
@@ -17396,14 +17755,13 @@ class MainWindow:
 
     def _project_path_display(self, parent, var):
         """The read-only path row the Replace/Write/Mod-pack tabs show for
-        project-derived fields: a plain label mirroring *var* — visibly not
-        an editable field, matching the Replace tabs' project mirror.  The
+        project-derived fields: a link mirroring *var* — visibly not an
+        editable field, matching the Replace tabs' project mirror.  The
         old "Set on Extract tab" jump button is gone (batch 21: both rows
         only ever led back to the Extract tab, so labels say it instead)."""
-        lbl = ttk.Label(parent, textvariable=var, anchor=tk.W)
-        _Tooltip(lbl, "Shared by every tab — it is set on the Extract tab.",
-                 lambda: self._current_theme)
-        return lbl
+        return self._folder_link_label(
+            parent, var,
+            "Shared by every tab — it is set on the Extract tab.")
 
     def _default_write_filename(self):
         """The name Write gives the built file before the user renames it: the
@@ -18313,6 +18671,12 @@ class MainWindow:
                         selectforeground="#ffffff", insertcolor=c["fg"])
         style.configure("TFrame", background=c["bg"])
         style.configure("TLabel", background=c["bg"], foreground=c["fg"])
+        # Folder paths shown as links.  Project properties turned its two
+        # paths into links (batch 21: "reveal" read as jargon, and a link on
+        # the path itself says where the click goes) — batch 29 asked why the
+        # Project Folder rows on the tabs hadn't followed, so they have now.
+        style.configure("Link.TLabel", background=c["bg"], foreground=c["link"],
+                        font=(_SANS_FONT, 9, "underline"))
         style.configure("TLabelframe", background=c["bg"], foreground=c["fg"])
         style.configure("TLabelframe.Label", background=c["bg"],
                         foreground=c["fg"])

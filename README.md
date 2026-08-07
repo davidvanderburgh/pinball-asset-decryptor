@@ -756,9 +756,27 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    can't install that package and why, turning universe back on is the
    first line of the confirmation dialog, and the fix does that before
    it installs anything, one package at a time so an unobtainable one
-   can't block the rest. When nothing can help — sources trimmed, or a
-   distro out of support — it names the package and says so instead of
-   suggesting another try.
+   can't block the rest.
+   Both of those readings come out of apt's *downloaded* package lists
+   rather than out of the sources config, so neither question is asked
+   at all until there is an index to answer it from — a WSL distro that
+   has never run `apt-get update`, which is how a freshly installed one
+   ships, used to be told its sources offered none of the four packages
+   and that universe was switched off, on a machine where all four
+   install perfectly. When a release genuinely doesn't publish one, the
+   notice names the release, the components apt has switched on, and the
+   distro to move to, rather than guessing at a cause it never checked.
+   One package doesn't need that move: `qemu-user-static` depends on
+   nothing, so the fix downloads it from Ubuntu 24.04's archive and
+   installs that file. It happens under a throwaway apt root, the
+   downloaded file's own `Depends` is re-read and the install refused if
+   it has any, and your package sources are left exactly as they were.
+   The confirmation dialog names that as its own step, because it isn't
+   an `apt install`. When there is still nothing the button can do it
+   goes away instead of sitting under a notice saying the package can't
+   be installed — a tester pressed that button twice — and the notice
+   carries the two `wsl` commands that switch to a distro which has the
+   package.
    On Linux there's no button — sudo would want a password a GUI app has
    nowhere to ask for — and the notice prints the exact command for that
    machine instead, `sudo add-apt-repository universe` first when that

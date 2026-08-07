@@ -626,7 +626,12 @@ These have each been violated at least once and each cost a run or a window:
       dropped frame is a missing multi-second ANIMATION, not one missing
       update — decoding it is the remaining smoothness the playfield window
       can gain, and the window's new `LED Hz`/`worst gap` fields are a free
-      before/after for it.
+      before/after for it. **The RENDERING half is already built** (`a955b10`):
+      the window tweens every fixture between states — David asked for
+      CSS-like transitions, 2026-08-07 — at a placeholder `PAD_PF_FADE_MS`
+      (200 ms). So this item's decode has a socket waiting: (from, to, rate)
+      per fade replaces that constant per fixture, and nothing else needs
+      building on the window side.
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only
@@ -1188,6 +1193,19 @@ These have each been violated at least once and each cost a run or a window:
       and the LED stream itself is honest at every rate it actually has.
       Logs kept: `/var/tmp/pf31_attract.log`, `/var/tmp/pf31_game_kept.log`,
       `/var/tmp/ledrate31_attract.csv`, `/var/tmp/ledrate31_game.csv`.
+      **SAME-DAY FOLLOW-UP off David's first look, `a955b10`:** (1) the
+      two-rate bar's conditional `of N Hz data` field made the WINDOW RESIZE
+      ITSELF to fit the text — fixed by always showing both rates and
+      `width=1` on both status labels so text can never size the window;
+      (2) the poll went 30 → 60 fps at his ask (the 3.4 ms read is a ~147 fps
+      ceiling; 30 was only the written acceptance bar), with `GONE_POLLS`
+      derived from the rate so the ~2 s close-with-the-run grace survived;
+      (3) fixtures now TWEEN between states over `PAD_PF_FADE_MS` (200 ms
+      default, 0 = snap) because the real LED boards render fades locally and
+      the wire only carries steps — see item 1d for the true durations. The
+      bar's LED Hz counts state changes, never tween frames, and
+      `ledratetest.py` grew a FADE case that fails on a snap (12 distinct
+      paints each way, lands exactly; CHURN still reads 0.0 Hz).
 
 - [x] **24. Press-and-hold a switch on the virtual playfield.** DONE
       2026-08-06, `68a18c5`. **David, on the shipped build: "item 24 looks good

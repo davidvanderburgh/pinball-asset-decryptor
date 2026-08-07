@@ -99,6 +99,28 @@ These have each been violated at least once and each cost a run or a window:
       **Repro recipe:** watch.sh 4 + the verified game recipe + longplay
       2 min; expect the exit within ~15 s of churn about half the time —
       run twice before calling anything fixed.
+      **★ A THIRD SHAPE, CONFIRMED REPEATING 2026-08-06 20:02:38** (the
+      end of David's own play session — the same run that reported item
+      11's tearing — ~23.6 min in, renderer healthy to the last line at
+      60 fps / 30 NEW/s, teardown clean). The app pane caught only the
+      stack TAIL and the next run truncated gzpad.log before it could be
+      preserved — but the five captured stack values are BYTE-IDENTICAL
+      to `~/crashlogs/gz_item11_fix2.log` (stack[1]=0x4bb464,
+      [5]=0x3cab40, [7]=0x230000, [13]=0x4ec8e4, [17]=0x254d14), whose
+      COMPLETE block is preserved: **`pc=0x51ef7c` = game text +
+      0x516f7c, `lr=0x6a48c`, `r0=0x0`, `fault=0x0` — a NULL deref in
+      GAME code, NOT the pthread shape, so the designed EINVAL interpose
+      would not catch this one.** Two sightings now, both 2026-08-06
+      (the fix2 run, then this). Item 23 therefore holds THREE distinct
+      exits — the clean thread-return, the pthread NULL-mutex churn
+      segv, and this game-code NULL deref — and a fix for one is not a
+      fix for the others; report against the signature, never against
+      "the crash".
+      **Instrument gap, noted not fixed (a run was live at the time):
+      watch.sh's exit tail prints only the LAST lines of the segv block,
+      so the pc/lr header scrolls off before the app pane sees it — it
+      should grep the `[segv] pc=` header on exit so the pane always
+      carries the signature.
       **Observed 2026-08-06 (David), one sighting:** *"emulator just crashed
       when i clicked out into Claude"* — a game in progress, ~181 s into the
       run, and the guest process was gone. Logs preserved before the next run

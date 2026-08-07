@@ -116,7 +116,10 @@ def playfield_size(game=None):
 
 
 def load(path=None):
-    d = open(path or gameinfo.elf(), "rb").read()
+    path = path or gameinfo.elf()
+    if not path:
+        raise SystemExit("devicexy: no game binary - set PAD_GAME, or start a run")
+    d = open(path, "rb").read()
 
     def cstr(va):
         o = va - VA_BIAS
@@ -228,27 +231,45 @@ def records(d, cstr):
     return out
 
 
-def main():
-    game = gameinfo.active()
-    art = gameinfo.find_playfield_art(game)
-    pf_w, pf_h = playfield_size(game)
-    d, cstr = load()
-    keep = sorted(records(d, cstr), key=lambda r: r["va"])
+def build(game=None, elf_path=None):
+    """Every device record for a title, from its game binary alone.
+
+    Split out of main() so mktables.py can call it in process. Nothing here
+    touches the wire, a log or a running game: this table is static data in the
+    ELF, which is why the artwork half of the playfield window needs no run.
+
+    `game` IS PASSED THROUGH TO gameinfo, and the first version of this did not
+    do that - it called `gameinfo.elf()` with no argument, so asking for one
+    title's records handed back whichever title was ACTIVE. Building
+    `turtles_pro` returned Godzilla's 575 records, its 313x710 artwork size and
+    its 31/31 left-right check, all of which look like a healthy result, and 18
+    of TMNT's switch names collided with Godzilla's well enough to place markers
+    on a playfield TMNT does not have.
+    """
+    d, cstr = load(elf_path or gameinfo.elf(game))
+    return sorted(records(d, cstr), key=lambda r: r["va"])
+
+
+def checks(keep, pf_w, pf_h):
+    """The self-checks, as lines of text. They RUN on every build, on purpose.
+
+    Each one is here because a plausible-looking table was wrong in a way only
+    it could see:
+
+      * positions must land inside the artwork they name - outside means the
+        record is being read one field over, or the coordinates belong to some
+        other image.
+      * 31 playfield devices are named LEFT-something or RIGHT-something, and a
+        correct table puts every one on the correct side of the centreline. The
+        wrong name offset scored 21/31 and looked fine to a human reading rows.
+      * -R/-G/-B of one stem are three channels of ONE physical LED, so they
+        should share a position. Splits mean a misaligned record.
+    """
     pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
-    print("# %s: %d records from %s" % (game, len(keep), gameinfo.elf(game)))
-
-    # SELF-CHECK. Positions must land inside the artwork they name; anything
-    # outside means the record is being read one field over, or the coordinates
-    # are in some other image's pixels. The size comes from the title's OWN
-    # drawing, so this is a real check on a title nobody has run before.
     out = [r for r in pf if not (0 <= r["x"] <= pf_w and 0 <= r["y"] <= pf_h)]
-    print("# %d playfield records, %d outside the %dx%d artwork"
-          % (len(pf), len(out), pf_w, pf_h))
+    lines = ["%d playfield records, %d outside the %dx%d artwork"
+             % (len(pf), len(out), pf_w, pf_h)]
 
-    # THE CHECK THAT WOULD HAVE CAUGHT THE OFF-BY-ONE, so it runs every time.
-    # 31 playfield devices are named LEFT-something or RIGHT-something, and a
-    # correct table puts every one of them on the correct side of the
-    # centreline. The wrong name offset scored 21/31; the right one scores 31/31.
     mid, ok, wrong = pf_w / 2.0, 0, []
     for r in pf:
         u = r["name"].upper()
@@ -256,27 +277,33 @@ def main():
             ok, wrong = (ok + 1, wrong) if r["x"] < mid else (ok, wrong + [r["name"]])
         elif u.startswith("RIGHT "):
             ok, wrong = (ok + 1, wrong) if r["x"] > mid else (ok, wrong + [r["name"]])
-    print("# left/right names on the correct side: %d ok, %d WRONG%s"
-          % (ok, len(wrong), (" - " + ", ".join(wrong[:4])) if wrong else ""))
+    lines.append("left/right names on the correct side: %d ok, %d WRONG%s"
+                 % (ok, len(wrong), (" - " + ", ".join(wrong[:4])) if wrong else ""))
 
-    # -R/-G/-B of one stem sharing a position is the other consistency signal:
-    # they are three channels of one physical LED, so they should agree.
     stems = {}
     for r in keep:
         if r["name"][-2:-1] == "-":
             stems.setdefault(r["name"][:-2], set()).add((r["x"], r["y"]))
     split = sum(1 for pts in stems.values() if len(pts) > 1)
-    print("# %d of %d -R/-G/-B stems have channels at different positions"
-          % (split, len(stems)))
+    lines.append("%d of %d -R/-G/-B stems have channels at different positions"
+                 % (split, len(stems)))
+    return lines
 
-    counts = {}
+
+def counts(keep):
+    out = {}
     for r in keep:
-        counts[r["kind"]] = counts.get(r["kind"], 0) + 1
-    print("# by class: %s" % ", ".join("%s=%d" % kv for kv in sorted(counts.items())))
+        out[r["kind"]] = out.get(r["kind"], 0) + 1
+    return out
 
+
+def text(game, keep, art, pf_w, pf_h):
+    """device_xy.txt, as a string."""
+    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    c = counts(keep)
     lines = ["# %s device positions, from the game binary." % game,
              "# %d records (%s), %d on the playfield image."
-             % (len(keep), " ".join("%s=%d" % kv for kv in sorted(counts.items())),
+             % (len(keep), " ".join("%s=%d" % kv for kv in sorted(c.items())),
                 len(pf)),
              "# playfield image: %s (%dx%d)"
              % (os.path.basename(art) if art else "(not found)", pf_w, pf_h),
@@ -284,7 +311,7 @@ def main():
              ("class", "name", "x", "y", "w", "h", "grp", "index", "conn", "image")]
     for r in keep:
         # "-" rather than "" for a missing connector, so EVERY row has the same
-        # number of whitespace-separated fields. It does not here: coils carry no
+        # number of whitespace-separated fields. It did not here: coils carry no
         # connector, an empty column made their rows one field short, and the
         # only reader - which counts fields from the right, because the NAME is
         # the multi-word one - silently read `h` as the group and the group as
@@ -292,31 +319,39 @@ def main():
         lines.append("%-9s %-34s %5d %5d %4d %4d %4d %5d  %-6s %s"
                      % (r["kind"], r["name"], r["x"], r["y"], r["w"], r["h"],
                         r["group"], r["index"], r["conn"] or "-", r["image"]))
-    text = "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n"
 
-    # Default to the title's own table directory rather than the cwd, and copy
-    # the artwork in beside it: the playfield window runs on Windows against a
-    # checkout, and pairing the drawing with the coordinates derived against it
-    # is what lets a title open with no card extracted.
+
+def main():
+    game = gameinfo.active()
+    if not game:
+        print(__doc__)
+        print("no active title - set PAD_GAME, or start a run.")
+        return 1
+    art = gameinfo.find_playfield_art(game)
+    pf_w, pf_h = playfield_size(game)
+    keep = build(game)
+    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    print("# %s: %d records from %s" % (game, len(keep), gameinfo.elf(game)))
+    for line in checks(keep, pf_w, pf_h):
+        print("# %s" % line)
+    print("# by class: %s"
+          % ", ".join("%s=%d" % kv for kv in sorted(counts(keep).items())))
+
     dest = sys.argv[1] if len(sys.argv) > 1 else gameinfo.table("device_xy.txt", game)
     d_dir = os.path.dirname(os.path.abspath(dest))
     if not os.path.isdir(d_dir):
         os.makedirs(d_dir)
     with open(dest, "w", newline="") as f:      # newline='': LF even on Windows
-        f.write(text)
+        f.write(text(game, keep, art, pf_w, pf_h))
     print("%d records (%d on the playfield) -> %s" % (len(keep), len(pf), dest))
     xs = [r["x"] for r in pf]
     ys = [r["y"] for r in pf]
     if xs:
         print("playfield x %d..%d (image %d), y %d..%d (image %d)"
               % (min(xs), max(xs), pf_w, min(ys), max(ys), pf_h))
-    if art and os.path.exists(art):
-        local = os.path.join(d_dir, "playfield.png")
-        if not os.path.exists(local):
-            with open(art, "rb") as s, open(local, "wb") as t:
-                t.write(s.read())
-            print("playfield artwork -> %s" % local)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

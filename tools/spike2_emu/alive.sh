@@ -124,7 +124,7 @@ VID=$(n -f 'padvidhost\.py')
 # "alive.sh must print 0 after every run" is worthless if it cannot. The
 # character class is what rejects a wrapper (`bash -lc '... bash longplay.sh'`)
 # while still matching the real `bash /path/to/longplay.sh`.
-HELP=$(( $(n -f 'autoattract\.sh') + $(n -f '^tail -q -n 0 -F /home/david/padvid\.log') \
+HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $HOME/padvid\.log") \
          + $(n -f '^bash [^ ]*longplay\.sh') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
@@ -200,7 +200,7 @@ if [ "$TOTAL" -ne 0 ]; then
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
     | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|watch\.sh|fuse2fs' \
     | grep -v grep | head -12
-  mountpoint -q /home/david/card 2>/dev/null
+  mountpoint -q $HOME/card 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'
 fi
 

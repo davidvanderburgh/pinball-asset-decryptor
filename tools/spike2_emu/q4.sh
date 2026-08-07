@@ -2,23 +2,25 @@
 # Q4: the binary keeps .dynsym, and objdump is naming things off it.
 # Dump every dynsym with an address, sorted, and show the neighbourhood of each
 # frame in the crash stack.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
-$OD -T $G | awk '$1 ~ /^[0-9a-f]{8}$/ && $1 != "00000000" {print $1, $NF}' | sort -u > /home/david/dynsym.txt
-echo "dynsyms with addresses: $(wc -l < /home/david/dynsym.txt)"
+$OD -T $G | awk '$1 ~ /^[0-9a-f]{8}$/ && $1 != "00000000" {print $1, $NF}' | sort -u > $HOME/dynsym.txt
+echo "dynsyms with addresses: $(wc -l < $HOME/dynsym.txt)"
 
 echo
 echo "### SoLoud symbols present ###"
-grep -c SoLoud /home/david/dynsym.txt
-grep SoLoud /home/david/dynsym.txt | head -60
+grep -c SoLoud $HOME/dynsym.txt
+grep SoLoud $HOME/dynsym.txt | head -60
 
 echo
 echo "### nearest preceding dynsym for each crash-stack address ###"
 python3 - <<'PY'
 import bisect
 rows=[]
-for line in open('/home/david/dynsym.txt'):
+import os
+for line in open(os.path.expanduser('~/dynsym.txt')):
     a,n=line.split()
     rows.append((int(a,16),n))
 rows.sort()

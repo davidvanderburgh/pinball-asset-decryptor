@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz54.log}
 grep '\[ifs\]' "$L"
 echo

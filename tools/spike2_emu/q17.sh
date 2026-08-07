@@ -1,8 +1,9 @@
 #!/bin/bash
 # Q17: 0x458e98 bailed at the "free ring empty" test ([pool+0x84]==[pool+0x74]).
 # Find who PUSHES onto that ring (+0x84) and who builds the pool at [0x7b8a90].
-G=/home/david/spike2root/games/godzilla_pro/game
-D=/home/david/game.dis
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
+D=$HOME/game.dis
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ stores to +0x84 (ring tail) in 0x450000-0x462000 ############"
@@ -20,4 +21,4 @@ $OD -d --start-address=0x330000 --stop-address=0x345000 $G | grep -aE '	str	r[0-
 echo
 echo "############ is 'Thread create failed' from THIS run? ############"
 date -u +'now      : %Y-%m-%dT%H:%M:%SZ'
-tail -6 /home/david/spike2root/dump/debug_log.txt
+tail -6 $ROOT/dump/debug_log.txt

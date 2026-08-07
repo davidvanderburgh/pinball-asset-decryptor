@@ -9,8 +9,9 @@
 # It sits just before 1d77bc (mov r4,#1) and the success return, so a guest
 # stuck here has finished every identity exchange and still never starts the
 # service loop: no ff, no 0x11, no scan gate. That is the stall exactly.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '
@@ -28,7 +29,7 @@ echo "== who else calls 0x3ba5e4 =="
 grep -aoE "^ *[0-9a-f]+:.*bl[[:space:]]+3ba5e4 <" "$D" | sed 's/:.*//' | tr -d ' ' | sort -u
 
 echo "== what lives at VA 0x6fa618 (RW: file = VA - 0x10000) =="
-G=/home/david/spike2root/games/godzilla_pro/game
+G=$ROOT/games/godzilla_pro/game
 python3 - "$G" <<'EOF'
 import sys, struct
 g = open(sys.argv[1], 'rb').read()

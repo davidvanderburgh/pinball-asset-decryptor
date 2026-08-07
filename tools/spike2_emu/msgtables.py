@@ -12,8 +12,11 @@ way in rather than searching for a name.
 """
 import struct
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-GAME = "/home/david/spike2root/games/godzilla_pro/game"
+GAME = gameinfo.elf()
 VA_BIAS = 0x8000
 STRIDE = 0x18
 LO, HI = 0x700000, 0x790000

@@ -19,8 +19,9 @@ command byte is already stored.
 Static, so it names commands no run has happened to send yet.
 """
 import re, collections
+import os
 
-DIS = "/home/david/game.dis"
+DIS = os.path.expanduser("~/game.dis")
 LO, HI = 0x59d000, 0x5a9000
 
 line_re = re.compile(r"^\s*([0-9a-f]+):\t[0-9a-f ]+\t(\S+)\s*(.*)$")

@@ -2,8 +2,9 @@
 # Q13: voice[2].mixA=0x339204 mixB=0x336c6c, but execution reached 0x30ed20
 # (table 0x67e1c0 index 147) with lr still 0x2a24ac -- so 0x336c6c must TAIL
 # BRANCH through the table. Confirm, and find the queue's allocator.
-G=/home/david/spike2root/games/godzilla_pro/game
-D=/home/david/game.dis
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
+D=$HOME/game.dis
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ 0x336c6c : the mix dispatcher (mixB) ############"

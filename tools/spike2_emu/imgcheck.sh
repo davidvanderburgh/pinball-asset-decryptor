@@ -5,8 +5,13 @@
 # Godzilla Pro 1.15.0. If the rootfs came from a different card, a system/game
 # mismatch is a live candidate for GAME VALIDATION ERROR #2/#3 - and it is a rig
 # integrity problem either way.
+. "$(dirname "$0")/padpath.sh"
 set -u
-IMG="/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/images/Stern/spike2/godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw"
+# The card to check, as an argument or PAD_CARD. It used to default to one
+# image on one machine's D: drive, which is not a default any other checkout
+# can use.
+IMG=${1:-${PAD_CARD:-}}
+[ -n "$IMG" ] || { echo "usage: imgcheck.sh <card.raw>   (or set PAD_CARD)"; exit 1; }
 [ -f "$IMG" ] || { echo "image not found: $IMG"; exit 1; }
 T=/var/tmp/imgcheck; rm -rf $T; mkdir -p $T
 
@@ -18,7 +23,7 @@ echo "=== VERSION.txt from the image's rootfs (p2 @ 12582912) ==="
 debugfs -R 'dump /usr/local/spike/VERSION.txt /var/tmp/imgcheck/VERSION.img.txt' "$IMG?offset=12582912" 2>/dev/null
 cat $T/VERSION.img.txt 2>/dev/null || echo "(dump failed)"
 echo "=== VERSION.txt in the extracted rootfs ==="
-cat /home/david/spike2root/usr/local/spike/VERSION.txt
+cat $ROOT/usr/local/spike/VERSION.txt
 
 echo
 echo "=== /spk on the image's game partition (p5 @ 364904448) ==="
@@ -31,7 +36,7 @@ echo "=== a few rootfs files: image vs extracted ==="
 for f in /etc/init.d/game /usr/local/bin/spk /usr/local/spike/spike_menu/game; do
     debugfs -R "dump $f /var/tmp/imgcheck/x" "$IMG?offset=12582912" 2>/dev/null
     A=$(sha1sum $T/x 2>/dev/null | cut -c1-12)
-    B=$(sha1sum "/home/david/spike2root$f" 2>/dev/null | cut -c1-12)
+    B=$(sha1sum "$ROOT$f" 2>/dev/null | cut -c1-12)
     printf '%-40s image=%s extracted=%s %s\n' "$f" "${A:-none}" "${B:-none}" \
         "$([ "$A" = "$B" ] && echo SAME || echo DIFFER)"
 done

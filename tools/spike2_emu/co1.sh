@@ -6,7 +6,7 @@
 # 0x70 = 112 (mov #112), 0x86 = mvn #121? no - 0x86 = 134, built as mov #134.
 # Small NEGATIVE constants use mvn; 0x86 and 0x70 are both representable as
 # 8-bit rotated immediates so they come out as mov.
-D=/home/david/game.dis
+D=$HOME/game.dis
 awk '
 /^ *[0-9a-f]+:/ {
   a = $0; sub(/:.*/, "", a); gsub(/ /, "", a); v = strtonum("0x" a)

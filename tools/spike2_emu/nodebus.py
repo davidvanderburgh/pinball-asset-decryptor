@@ -16,8 +16,13 @@ import termios
 import time
 import tty
 
-PATH_FILE = "/home/david/nodebus.path"
-LOG_FILE = "/home/david/nodebus.log"
+#: Where the pty path and the traffic log are written. run_game.sh sets
+#: PAD_NODEBUS_DIR to the rootfs `dump/` directory, which is the shared area
+#: everything else in the rig already publishes into; the fallback keeps this
+#: runnable by hand. Both were absolute paths into one user's home directory.
+_DIR = os.environ.get("PAD_NODEBUS_DIR") or os.path.expanduser("~")
+PATH_FILE = os.path.join(_DIR, "nodebus.path")
+LOG_FILE = os.path.join(_DIR, "nodebus.log")
 
 
 def main() -> None:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """padvidhost.py - the HOST half of the video bridge.
 
-    wsl -e bash -c 'python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/padvidhost.py \\
-        /home/david/spike2root/dump/padvid'
+    wsl -e bash -c 'python3 <rig>/padvidhost.py \\
+        $PAD_ROOT/dump/padvid'
 
 The emulated game has no software H.264 decoder - of the 175 plugins in its
 gstreamer-0.10 the only one that decodes h264 is the i.MX6 hardware element, and
@@ -46,6 +46,8 @@ import subprocess
 import sys
 import threading
 import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 
 MAGIC = 0x56444150
 VERSION = 3
@@ -80,7 +82,7 @@ CH_BASE = 12
 _GAME = os.environ.get("PAD_GAME") or "godzilla_pro"
 GUEST_ROOT = "/games/" + _GAME
 HOST_ROOT = os.environ.get(
-    "PAD_VID_ROOT", "/home/david/spike2root/games/" + _GAME)
+    "PAD_VID_ROOT", os.path.join(padpath.root(), "games", _GAME))
 
 
 _T0 = time.monotonic()
@@ -845,7 +847,7 @@ def chan_loop(m, c):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else "/home/david/spike2root/dump/padvid"
+    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(padpath.dump(), "padvid")
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
     if os.fstat(fd).st_size < TOTAL:
         os.ftruncate(fd, TOTAL)

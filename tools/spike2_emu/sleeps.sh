@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz60.log}
 echo "=== all logged usleep calls ==="
 grep '\[sleep\]' "$L" | head -45

@@ -1,14 +1,17 @@
 #!/bin/bash
 # nb5.sh - find the code that formats "Check Node Board %d : %s".
 # The literal is at file offset 6248668; .rodata maps VA = file offset + 0x8000.
+. "$(dirname "$0")/padpath.sh"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 print(hex(6248668 + 0x8000), hex(6248868 + 0x8000))
 PY
 echo "=== refs to the format string ==="
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/findref.sh 0x5fda9c 0x5fdb64
+bash $RIG/findref.sh 0x5fda9c 0x5fdb64
 echo "=== the status strings, in file order ==="
 python3 - <<'PY'
-d = open('/home/david/spike2root/games/godzilla_pro/game','rb').read()
+import os
+d = open(os.environ['PAD_ELF'],'rb').read()
 o = 6248640
 end = 6249100
 s = d[o:end].split(b'\0')

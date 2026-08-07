@@ -2,7 +2,8 @@
 # Q12: only four instructions in the whole audio TU store to +0x38.
 # 0x2a209c sits inside 0x2a2044, which the wrapper 0x2a212c calls under the
 # global audio mutex 0x704bf4 -- i.e. the "start a voice" path.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ 0x2a2044 .. 0x2a212c  (called under the audio mutex) ############"

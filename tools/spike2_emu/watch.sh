@@ -1,7 +1,7 @@
 #!/bin/bash
 # watch.sh [minutes] - WATCH the emulated game in a real window.
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/watch.sh
+#   wsl -e bash $RIG/watch.sh
 #
 # Opens a window on the Windows desktop (via WSLg) showing Godzilla Pro running
 # under emulation at 60 fps on the GPU. Close the window to stop everything.
@@ -24,37 +24,38 @@
 #   - `timeout` is deliberately NOT used anywhere: it signals only its direct
 #     child, which here is a setsid wrapper, so the guest survives it.
 set -u
-cd /home/david
+. "$(dirname "$0")/padpath.sh"
+cd "$HOME"
 
 MINS=${1:-30}
-LOG=${LOG:-/home/david/gzwatch.log}
-HOSTLOG=/home/david/padglhost.log
-RING_HOST=/home/david/spike2root/dump/padgl
+LOG=${LOG:-$HOME/gzwatch.log}
+HOSTLOG=$HOME/padglhost.log
+RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
 # The keyboard channel. Same host-path/guest-path split as the GL ring: the
 # native renderer owns the window and so is the only thing that can see a key,
 # the shim inside the emulated game is the only thing that can press a switch.
-SW_HOST=/home/david/spike2root/dump/padsw
+SW_HOST=$ROOT/dump/padsw
 # Live LED state (padled.h): the shim decodes the insert boards' per-LED writes
 # and publishes them here, so the virtual playfield needs no log and no
 # PAD_NB_LOG - raising that quadruples the boot.
-LED_HOST=/home/david/spike2root/dump/padled
+LED_HOST=$ROOT/dump/padled
 LED_GUEST=/dump/padled
 SW_GUEST=/dump/padsw
 # Audio: the guest writes PCM into a FIFO, a native ffmpeg drains it into WSLg's
 # PulseAudio. Same host-path/guest-path split as the GL ring and the keyboard.
 # PAD_AUDIO=0 turns it off.
-AUD_HOST=/home/david/spike2root/dump/audio.fifo
+AUD_HOST=$ROOT/dump/audio.fifo
 AUD_GUEST=/dump/audio.fifo
-AUD_FMT_HOST=/home/david/spike2root/dump/audio.fmt
+AUD_FMT_HOST=$ROOT/dump/audio.fmt
 AUD_FMT_GUEST=/dump/audio.fmt
 AUD_RATE=${PAD_AUDIO_RATE:-48000}   # fallback only; the guest reports the real one
 # Video: the guest has no H.264 decoder at all, so the HOST decodes with ffmpeg
 # and publishes raw I420 frames into a shared ring. Same split as the GL bridge
 # and the audio player. PAD_VID=0 turns it off.
-VID_HOST=/home/david/spike2root/dump/padvid
+VID_HOST=$ROOT/dump/padvid
 VID_GUEST=/dump/padvid
-S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+S=$RIG
 
 export PAD_GL_W=${PAD_GL_W:-1360}
 export PAD_GL_H=${PAD_GL_H:-768}
@@ -113,7 +114,7 @@ elif [ -n "${PAD_GAME_DIR:-}" ]; then
     GAME=$(basename "${PAD_GAME_DIR%/}")
     export PAD_GAME_DIR PAD_VID_ROOT="${PAD_GAME_DIR%/}"
 fi
-[ -z "$GAME" ] && { GAME=$(readlink /home/david/spike2root/games/game 2>/dev/null); GAME=${GAME%/game}; }
+[ -z "$GAME" ] && { GAME=$(readlink $ROOT/games/game 2>/dev/null); GAME=${GAME%/game}; }
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
 
@@ -213,7 +214,7 @@ teardown() {
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.
     [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
-    pkill -9 -f 'tail -q -n 0 -F /home/david/padvid[.]log' 2>/dev/null
+    pkill -9 -f "tail -q -n 0 -F $HOME/padvid[.]log' 2>/dev/null
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
     pkill -9 -f 'playaudio.sh' 2>/dev/null
     pkill -9 -f '^ffmpeg .*audio\.fifo' 2>/dev/null
@@ -314,7 +315,7 @@ fi
 FREE_G=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
 if [ "${FREE_G:-999}" -lt 10 ]; then
     echo "[watch] WARNING: only ${FREE_G}G free on /. Run logs grow fast." >&2
-    echo "[watch]   du -sh /home/david/gz*.log   to see the worst offenders." >&2
+    echo "[watch]   du -sh $HOME/gz*.log   to see the worst offenders." >&2
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
@@ -353,7 +354,7 @@ fi
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then
     setsid bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
-        > /home/david/padaudio.log 2>&1 &
+        > $HOME/padaudio.log 2>&1 &
     AUDPG=$!
     for i in $(seq 1 40); do [ -p "$AUD_HOST" ] && break; sleep 0.05; done
     if [ -p "$AUD_HOST" ]; then
@@ -362,13 +363,13 @@ if [ "${PAD_AUDIO:-1}" != 0 ]; then
         export PAD_AUDIO_FMT="$AUD_FMT_GUEST"
     else
         echo "[watch] audio: player did not come up, continuing silent" >&2
-        tail -3 /home/david/padaudio.log >&2
+        tail -3 $HOME/padaudio.log >&2
     fi
 fi
 
 if [ "${PAD_VID:-1}" != 0 ]; then
     rm -f "$VID_HOST"
-    setsid python3 "$S/padvidhost.py" "$VID_HOST" > /home/david/padvid.log 2>&1 &
+    setsid python3 "$S/padvidhost.py" "$VID_HOST" > $HOME/padvid.log 2>&1 &
     VIDPG=$!
     for i in $(seq 1 40); do [ -s "$VID_HOST" ] && break; sleep 0.05; done
     if [ -s "$VID_HOST" ]; then
@@ -379,7 +380,7 @@ if [ "${PAD_VID:-1}" != 0 ]; then
         VID_FOR_GL="$VID_HOST"
     else
         echo "[watch] video: host decoder did not come up, continuing without" >&2
-        tail -3 /home/david/padvid.log >&2
+        tail -3 $HOME/padvid.log >&2
         export PAD_VID=0
     fi
 fi
@@ -412,7 +413,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
-           bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
+           bash $RIG/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 
 # The virtual playfield: clickable switches, inserts lit from the wire.
@@ -443,17 +444,41 @@ GAMEPG=$!
 #     group kills leave it alone. It talks to the rig only through dump/padled
 #     (read) and swpoke.py (clicks), so it survives the game restarting under it.
 #   * </dev/null and &, so nothing can block here again.
-if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -d "$S/games/$GAME" ]; then
+if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
+    # THE TABLES ARE BUILT FROM THE TITLE, HERE, RATHER THAN COMMITTED. See
+    # mktables.py. Three of the four need nothing but the game binary, so the
+    # window can open with artwork, inserts and coils on a title's very first
+    # run; the switch list only exists once the game has published its own
+    # table a few seconds in, so wait a bounded while for it. Cached per title
+    # afterwards, so every later run of the same title skips all of this.
+    #
+    # THE GATE THIS REPLACES WAS `[ -d "$S/games/$GAME" ]`, and it is why Jaws
+    # opened no window at all: `games/` held two titles with hand-made tables,
+    # anything else was skipped, AND NOTHING WAS PRINTED. Whatever happens now,
+    # something is said.
+    PF_WAIT=${PAD_PF_WAIT:-25}
+    echo "[watch] playfield tables for $GAME:"
+    python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
+        | sed 's/^/[watch]   /'
+
     PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
-    PF_WIN='C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu\playfield.py'
+    # The rig's own path, as Windows sees it. `wslpath -w` is asked rather than
+    # the answer being written down: the literal here named one user's checkout
+    # on one machine's C: drive.
+    PF_WIN=$(pad_win "$RIG/playfield.py")
     # The title goes on the COMMAND LINE, not in the environment: this is a
     # Windows process started through interop and only variables named in
     # WSLENV cross that boundary, which is one more thing to keep in step.
-    # PAD_PF_LOG reaches the playfield ONLY through WSLENV. It is a Windows
-    # process, so nothing in this shell's environment crosses unless it is
-    # named there; /p translates the value from a WSL path to a Windows one,
-    # so `PAD_PF_LOG=/tmp/pf.log watch.sh` writes where you would expect. The
-    # measurement that produced the 30 fps number had to bypass watch.sh
+    #
+    # PAD_ROOT and PAD_TABLES DO cross, through pad_export_win, and they must:
+    # the playfield window is a Windows process that has to open files inside
+    # WSL, and `/p` makes WSL translate each value into its `\\wsl.localhost`
+    # form on the way. Without it the window has to shell out to `wslpath` to
+    # work out where it is reading from - which it can, but paying ~200 ms per
+    # question for something this side already knows is silly.
+    pad_export_win
+    # PAD_PF_LOG reaches the playfield ONLY through WSLENV, same mechanism.
+    # The measurement that produced the 30 fps number had to bypass watch.sh
     # entirely for want of this line.
     [ -n "${PAD_PF_LOG:-}" ] && \
         export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_LOG/p"
@@ -462,7 +487,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ] && [ -d "$S/games/$GAME" ]; then
         echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
     else
         echo "[watch] no Windows interop; run playfield.py yourself:" >&2
-        echo "[watch]   pythonw tools\\spike2_emu\\playfield.py" >&2
+        echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME" >&2
     fi
 fi
 
@@ -500,7 +525,7 @@ fi
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
 if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    setsid bash "$S/autoattract.sh" "$LOG" > /home/david/padauto.log 2>&1 &
+    setsid bash "$S/autoattract.sh" "$LOG" > $HOME/padauto.log 2>&1 &
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
@@ -519,8 +544,8 @@ fi
 # after every print matters - awk into a pipe is block-buffered, and a "live"
 # event feed that arrives four kilobytes at a time is not live.
 if [ "${PAD_EVENTS:-1}" != 0 ]; then
-    tail -q -n 0 -F /home/david/padvid.log /home/david/padaudio.log \
-                    /home/david/padglhost.log "$LOG" 2>/dev/null | awk '
+    tail -q -n 0 -F $HOME/padvid.log $HOME/padaudio.log \
+                    $HOME/padglhost.log "$LOG" 2>/dev/null | awk '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)
                 { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }

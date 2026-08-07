@@ -42,6 +42,8 @@ import struct
 import subprocess
 import sys
 import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -49,7 +51,7 @@ sys.path.insert(0, HERE)
 #: The fake block. /var/tmp and not /tmp: /tmp is a tmpfs here and is wiped on a
 #: WSL restart, which has bitten this rig before.
 WSL_BLOCK = "/var/tmp/pad_swholdtest"
-WIN_BLOCK = r"\\wsl.localhost\Ubuntu\var\tmp\pad_swholdtest"
+WIN_BLOCK = padpath.to_win(WSL_BLOCK)
 
 #: `--live` runs the SAME test against a RUNNING GAME's block instead of a fake
 #: one, which is the only way to watch `mrg[]` - the array the game is actually
@@ -58,8 +60,8 @@ WIN_BLOCK = r"\\wsl.localhost\Ubuntu\var\tmp\pad_swholdtest"
 #: and nothing about the guest's. Start a run first and check alive.sh after.
 LIVE = "--live" in sys.argv
 if LIVE:
-    WSL_BLOCK = "/home/david/spike2root/dump/padsw"
-    WIN_BLOCK = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padsw"
+    WSL_BLOCK = padpath.wsl_root() + "/dump/padsw"
+    WIN_BLOCK = os.path.join(padpath.dump(), "padsw")
 
 #: How often we look at the block. A reopen+read over \\wsl.localhost costs
 #: ~3.4 ms (measured, see playfield.py), so this is about as fast as the far

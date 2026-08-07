@@ -3,7 +3,7 @@
 # READ ONLY, WITHOUT ROOT, so a title can be run without extracting 6 GB first.
 #
 #   cardmount.sh .../jaws_le-1_02_0.Release.16G.sdcard.raw
-#   -> /home/david/card/jaws_le-1_02_0   (and prints the title directory)
+#   -> $HOME/card/jaws_le-1_02_0   (and prints the title directory)
 #
 # WHY THIS IS POSSIBLE AT ALL. The obvious `mount -o loop,offset=` needs real
 # root, and this rig has no sudo. Two things make it work anyway:
@@ -21,9 +21,9 @@
 set -u
 
 SELF=$(cd "$(dirname "$0")" && pwd)
-PREFIX=/home/david/local
-CARDS=/home/david/card
-CACHE=/home/david/cardcache
+PREFIX=$HOME/local
+CARDS=$HOME/card
+CACHE=$HOME/cardcache
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 

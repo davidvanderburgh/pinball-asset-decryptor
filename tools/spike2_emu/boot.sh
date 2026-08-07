@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz62.log}
 echo "=== [boot] marker: did the big init tail run? ==="
 grep '\[boot\]' "$L"

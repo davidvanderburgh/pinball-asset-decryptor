@@ -1,5 +1,6 @@
 #!/bin/bash
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 echo "########## caller: around 0x458fec ##########"
 $OD -d --start-address=0x458fa0 --stop-address=0x459000 $G | sed -n '7,60p'

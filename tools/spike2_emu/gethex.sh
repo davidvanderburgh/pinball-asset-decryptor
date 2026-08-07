@@ -13,16 +13,29 @@
 # with no match it registers nothing, so board[+88] and the registry head at
 # 0x7e1b98 both stay 0 and the status gate at 0x1d56cc can never pass.
 #
-# The games partition is partition 3 of the card: start LBA 712704 * 512 =
-# 364904448, which is the same ?offset= the handoff already uses.
+# THE OFFSET IS READ OFF THE PARTITION TABLE, not written down. It was
+# 364904448 on the 8 GB Godzilla card this was built against - LBA 712704 * 512 -
+# and that number is a property of that image and no other. parts.py identifies
+# the games partition structurally; see there for why the partition NUMBER is
+# not a safe answer either.
 set -eu
+. "$(dirname "$0")/padpath.sh"
 
-IMG=${1:-/mnt/d/Pinball/images/Stern/spike2/godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw}
-DEST=${2:-/home/david/spike2root/games/godzilla_pro}
-OFF=364904448
+IMG=${1:-${PAD_CARD:-}}
+DEST=${2:-}
+OFF=${3:-}
 
+[ -n "$IMG" ] || { echo "usage: gethex.sh <card.raw> [dest-dir] [offset]" >&2; exit 1; }
 [ -f "$IMG" ] || { echo "no such image: $IMG" >&2; exit 1; }
+[ -n "$DEST" ] || DEST=$ROOT/games/$(python3 "$RIG/gameinfo.py" --game)
 [ -d "$DEST" ] || { echo "no such dir: $DEST" >&2; exit 1; }
+[ -n "$OFF" ] || OFF=$(python3 "$RIG/parts.py" --games "$IMG")
+[ -n "$OFF" ] || { echo "could not find the games partition in $IMG" >&2; exit 1; }
+
+# The title directory ON THE CARD is named for the title, and the destination
+# is named for the same title, so one is derived from the other rather than
+# both being written out.
+TITLE=$(basename "$DEST")
 
 echo "image : $IMG"
 echo "dest  : $DEST"
@@ -30,15 +43,15 @@ echo
 
 # debugfs 'ls -l' on the game dir, so we can see what is actually there rather
 # than trusting the manifest.
-echo "--- loose files in /godzilla_pro on the card ---"
-debugfs -R 'ls -l /godzilla_pro' "$IMG?offset=$OFF" 2>/dev/null \
+echo "--- loose files in /$TITLE on the card ---"
+debugfs -R "ls -l /$TITLE" "$IMG?offset=$OFF" 2>/dev/null \
   | awk '{ for (i=1;i<=NF;i++) if ($i ~ /\.hex$|^conagent$/) print "  ", $i, "(" $(i-1) " bytes)" }'
 echo
 
 n=0
-for f in $(debugfs -R 'ls -p /godzilla_pro' "$IMG?offset=$OFF" 2>/dev/null \
+for f in $(debugfs -R "ls -p /$TITLE" "$IMG?offset=$OFF" 2>/dev/null \
            | cut -d/ -f6 | grep -E '\.hex$|^conagent$'); do
-    debugfs -R "dump /godzilla_pro/$f $DEST/$f" "$IMG?offset=$OFF" 2>/dev/null
+    debugfs -R "dump /$TITLE/$f $DEST/$f" "$IMG?offset=$OFF" 2>/dev/null
     if [ -s "$DEST/$f" ]; then
         n=$((n + 1))
         printf '  recovered %-44s %8s bytes\n' "$f" "$(stat -c%s "$DEST/$f")"

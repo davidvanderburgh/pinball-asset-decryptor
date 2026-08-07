@@ -2,7 +2,7 @@
 # longplay.sh <gamelog> [minutes] [WxH] - PLAY THE GAME, UNATTENDED, FOR A LONG
 # TIME, and shout the moment a video of size WxH starts streaming.
 #
-#   bash longplay.sh /home/david/gz6.log 25 520x294
+#   bash longplay.sh $HOME/gz6.log 25 520x294
 #
 # WHY THIS EXISTS. Item 6 (the TV inset draws pink/green noise) has a validated
 # instrument and no way to point it at anything: the inset is the Planet X
@@ -39,7 +39,7 @@ set -u
 S=$(cd "$(dirname "$0")" && pwd)
 . "$S/gamestate.sh"
 
-LOG=${1:-/home/david/gzwatch.log}
+LOG=${1:-$HOME/gzwatch.log}
 MINS=${2:-25}
 WANT=${3:-520x294}
 OUTDIR=${LONGPLAY_OUT:-/tmp/longplay}

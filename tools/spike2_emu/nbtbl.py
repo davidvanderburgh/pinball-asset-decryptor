@@ -12,8 +12,11 @@ So this table IS the list of board identities the game will accept.
 """
 import struct
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 d = open(PATH, 'rb').read()
 
 

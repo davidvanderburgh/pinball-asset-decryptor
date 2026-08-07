@@ -1,5 +1,6 @@
 #!/bin/bash
-A=/home/david/spike2root/games/godzilla_pro/assets/lcd
+. "$(dirname "$0")/padpath.sh"
+A=$ROOT/games/godzilla_pro/assets/lcd
 echo "=== scene.radium header (first 64 bytes, hex + ascii) ==="
 F=$(find $A/auto_loaded -name scene.radium | head -1)
 echo "$F"

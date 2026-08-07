@@ -3,7 +3,8 @@
 # start +0x74..+0x80, finish +0x84..+0x90) and it is EMPTY with start.cur 16
 # slots in -- 16 queues handed out, none returned. Read the worker thread
 # (created at 0x459604) and the queue initialiser 0x4db6b8.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ 0x4595c0 .. 0x45960c : worker thread entry + pool ctor head ############"

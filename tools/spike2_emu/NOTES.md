@@ -26,5 +26,5 @@ been folded into it; nothing here supersedes it.
     nodebus_replylen_map.txt  request -> expected reply length, as the game reported it
     nvram_formatted.bin       the 64 KB NVRAM image the game formatted for itself
 
-Guest rootfs lives at `/home/david/spike2root` in WSL; shim build sources are kept at
-`/home/david/emusrc`; run logs are `/home/david/gz*.log`.
+Guest rootfs lives at `$PAD_ROOT` in WSL; shim build sources are kept at
+`~/emusrc`; run logs are `~/gz*.log`.

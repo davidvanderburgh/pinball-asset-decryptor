@@ -7,8 +7,9 @@
 # the OS partition and carries no title of its own - and each title is a
 # directory under games/ holding its own `game` ELF and assets. Which one boots
 # is decided here and nowhere else.
-R=/home/david/spike2root
-S=$(cd "$(dirname "$0")" && pwd)
+. "$(dirname "$0")/padpath.sh"
+R=$ROOT
+S=$RIG
 
 # STRAIGHT OFF THE CARD, with no extraction:
 #
@@ -97,13 +98,30 @@ for f in null zero urandom random tty console spidev1.0 i2c-1 ttymxc1 ttymxc0 rt
   [ -e "$R/dev/$f" ] || : > "$R/dev/$f"
 done
 
+# WHERE THE TITLE'S FILES REALLY ARE, published for anything that needs to read
+# them from outside this script. NOT redundant with `games/<title>`: on a card
+# or folder run that path is the empty stub created above, and the real
+# directory is bind-mounted into it inside the private namespace below, which
+# nothing outside the run can see. mktables.py reads this to find the game
+# binary and the playfield artwork; gameinfo.py reads it to name the title.
+mkdir -p "$R/dump"
+{
+    echo "name=$GAME"
+    echo "dir=${CARD_SRC:-$R/games/$GAME}"
+} > "$R/dump/title"
+
 # Virtual node bus: hold the master end of a pty outside the container and
 # bind its slave onto /dev/ttymxc1, so the game's serial traffic is captured.
-rm -f /home/david/nodebus.path
-python3 /home/david/nodebus.py >/dev/null 2>&1 &
+#
+# RUN THE RIG'S OWN COPY. This used to exec `$HOME/nodebus.py`, a copy outside
+# the checkout that nothing kept in step with the one in git - so the file being
+# read here and the file being edited there could differ with no sign.
+export PAD_NODEBUS_DIR="$R/dump"
+rm -f "$R/dump/nodebus.path"
+python3 "$S/nodebus.py" >/dev/null 2>&1 &
 NODEBUS_PID=$!
-for _ in $(seq 1 50); do [ -s /home/david/nodebus.path ] && break; sleep 0.1; done
-NODEBUS_PTY=$(cat /home/david/nodebus.path 2>/dev/null)
+for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
+NODEBUS_PTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
 echo "[run] node bus pty: ${NODEBUS_PTY:-NONE}"
 # The bind mount needs a mountpoint, so a card or folder run creates an empty
 # directory under games/ that outlives the run. Left behind it looks exactly

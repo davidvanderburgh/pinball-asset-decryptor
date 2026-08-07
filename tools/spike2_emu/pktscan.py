@@ -9,10 +9,10 @@ At the bl, r0 must be a known sp+K; packet = mem[K], mem[K+1], ...
 Layout (from 0x59d824): [0]=node|0x80, [1]=len, [2..2+len-1]=payload,
 [2+len]=reply-length field.
 """
-import re, sys, collections
+import os, re, sys, collections
 
-DIS = "/home/david/game.dis"
-TARGETS = "/home/david/bltargets.txt"
+DIS = os.path.expanduser("~/game.dis")
+TARGETS = os.path.expanduser("~/bltargets.txt")
 
 line_re = re.compile(r"^\s*([0-9a-f]+):\t([0-9a-f ]+)\t(\S+)\s*(.*)$")
 
@@ -32,6 +32,7 @@ print("insns %d" % len(insns), file=sys.stderr)
 
 fnstarts = sorted(int(x, 16) for x in open(TARGETS))
 import bisect
+import os
 def fnstart(a):
     i = bisect.bisect_right(fnstarts, a) - 1
     return fnstarts[i] if i >= 0 else a

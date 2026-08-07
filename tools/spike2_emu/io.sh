@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz67.log}
 echo "=== scene handles ==="
 grep '\[sceneopen\]' "$L"

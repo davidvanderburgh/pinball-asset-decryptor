@@ -8,13 +8,14 @@
 #                       the re-reading wait on 0x7acb54 that its own code
 #                       fails to do, because it loads the byte once and then
 #                       spins on the register.
-cd /home/david
+. "$(dirname "$0")/padpath.sh"
+cd $HOME
 L=${1:-gz91.log}
 T=${2:-45}
 S=$(date +%s)
 # Via runlim.sh, NOT `timeout` - see the comment in runlim.sh. timeout leaves
 # the game running forever at ~140% CPU because it only signals the shell.
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/runlim.sh "$L" "$T" PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1
+bash $RIG/runlim.sh "$L" "$T" PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1
 E=$(date +%s)
 echo "elapsed: $((E-S)) s   (the run is stopped by the time limit; it does not exit on its own)"
 echo "=== milestone ==="

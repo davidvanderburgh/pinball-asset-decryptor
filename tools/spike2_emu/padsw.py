@@ -32,10 +32,13 @@ import mmap
 import os
 import struct
 import time
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 
 #: PAD_SW_FILE points the helpers at a block that is not a running game's, which
 #: is the only way to check any of this without one. The rig never sets it.
-PATH = os.environ.get("PAD_SW_FILE", "/home/david/spike2root/dump/padsw")
+PATH = os.environ.get("PAD_SW_FILE", os.path.join(padpath.dump(), "padsw"))
 MAGIC = 0x53444150
 MAX_ID = 256
 

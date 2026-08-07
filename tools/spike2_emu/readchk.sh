@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=gz52.strace
 echo "=== fds assigned to scene.radium opens ==="
 grep -ao 'scene.radium",O_RDONLY|O_LARGEFILE) = [0-9]*' $L | sort | uniq -c | sort -rn | head

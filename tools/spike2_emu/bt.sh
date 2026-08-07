@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz53.log}
 grep '\[scenebt\]' "$L"
 echo

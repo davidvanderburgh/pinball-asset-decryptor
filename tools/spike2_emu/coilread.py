@@ -4,10 +4,17 @@ One line per addressed coil: `node index count lvl`. Diffing two invocations
 around a Coil Test fire names the (node, index) the highlighted row drives.
 Offsets are padled.h's, same hard-coded values playfield.py carries.
 """
+import os
 import struct
 import sys
 
-PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padled"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
+
+#: Runs on WINDOWS, so this is the rootfs seen over `\\wsl.localhost`. Asked of
+#: padpath rather than written out: the literal named a distro ("Ubuntu") and a
+#: user that need not exist, under a prefix older WSL spells `\\wsl$`.
+PATH = os.path.join(padpath.dump(), "padled")
 MAGIC = 0x44454C50
 COIL_OFF, COIL_N, NODES = 1556, 16, 16
 LVL_OFF = COIL_OFF + NODES * COIL_N

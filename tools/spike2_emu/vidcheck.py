@@ -40,6 +40,8 @@ import subprocess
 import sys
 import tempfile
 import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -59,7 +61,7 @@ CH_BASE = 12
 OK = 1
 
 GAME = os.environ.get("PAD_GAME") or "godzilla_pro"
-HOST_ROOT = os.environ.get("PAD_VID_ROOT", "/home/david/spike2root/games/" + GAME)
+HOST_ROOT = os.environ.get("PAD_VID_ROOT", os.path.join(padpath.root(), "games", GAME))
 
 
 def get(m, c, name):

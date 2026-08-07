@@ -1,5 +1,6 @@
 #!/bin/bash
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "### string/global refs inside the faulting function 0x30ed30..0x30ef80 ###"
@@ -12,9 +13,11 @@ awk '
 
 echo
 echo "### resolve any of those that land in .rodata as strings ###"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

@@ -31,6 +31,16 @@ plus 53 on node 8). Those are reported, not hidden: they are most likely board
 channels with no playfield fixture behind them.
 
   ledio.py ~/gzwatch.log led_io.txt     # log from a run with PAD_NB_LOG raised
+  ledio.py                              # no log: build from the binary alone
+
+THE MAP ITSELF IS STATIC AND THE WIRE IS ONLY THE CHECK. Every column written
+below - node, index, name, position, connector - comes from the device table in
+the ELF; the enumeration contributes not one field, it agrees or it does not. So
+the map can be built with no run at all, which is what mktables.py does when it
+first sees a title, and the wire check is applied when a log happens to be
+there. Requiring the log was a real cost: it meant the LEDs on the virtual
+playfield could not be drawn until someone had captured a boot with PAD_NB_LOG
+raised, which quadruples the boot, for a table that never depended on it.
 """
 import collections
 import os
@@ -57,52 +67,53 @@ def wire_enumeration(path):
     return out
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        return 1
-    wire = wire_enumeration(sys.argv[1])
-    d, cs = devicexy.load()
-    recs = devicexy.records(d, cs)
+def build(recs, wire=None):
+    """([(node, record)], problems, report) for a title's LEDs.
 
-    rows, problems = [], []
+    `wire` is the boot enumeration when a log was captured, and None when there
+    is no run to read - see the header. With no wire there is nothing to
+    disagree with, so `problems` is empty and the rows are exactly what the
+    binary says.
+    """
+    rows, problems, report = [], [], []
     for group, node in sorted(GROUP_NODE.items()):
         leds = [r for r in recs if r["kind"] == "led" and r["group"] == group]
         if not leds:
             continue
         tbl = {r["index"] for r in leds}
-        seen = wire.get(node, set())
-        missing = sorted(tbl - seen)
-        extra = sorted(seen - tbl)
-        print("node %-2d (group %d): %d LEDs in the table, %d enumerated on the wire"
-              % (node, group, len(tbl), len(seen)))
-        print("    every table index on the wire: %s"
-              % ("YES" if not missing else "NO - missing %s" % missing))
-        if extra:
-            print("    on the wire with no table entry: %s" % extra)
-        if missing:
-            problems.append((node, missing))
+        if wire is not None:
+            seen = wire.get(node, set())
+            missing = sorted(tbl - seen)
+            extra = sorted(seen - tbl)
+            report.append("node %-2d (group %d): %d LEDs in the table, %d "
+                          "enumerated on the wire" % (node, group, len(tbl), len(seen)))
+            report.append("    every table index on the wire: %s"
+                          % ("YES" if not missing else "NO - missing %s" % missing))
+            if extra:
+                report.append("    on the wire with no table entry: %s" % extra)
+            if missing:
+                problems.append((node, missing))
+        else:
+            report.append("node %-2d (group %d): %d LEDs in the table (no wire "
+                          "log - not verified)" % (node, group, len(tbl)))
         for r in sorted(leds, key=lambda r: r["index"]):
             rows.append((node, r))
+    return rows, problems, report
 
-    if problems:
-        # REFUSE, rather than write a map that says it is untrustworthy in a
-        # comment nobody reads. The usual cause is a log without the boot
-        # enumeration in it: those 6-byte 0x84/0x85 writes only survive with
-        # PAD_NB_LOG raised, and the default 400-line budget drops them, so the
-        # wire simply looks like it has no LEDs.
-        print("\nJOIN IS NOT CLEAN - refusing to write. Missing indices per node:")
-        for node, missing in problems:
-            print("   node %d: %d missing (%s%s)"
-                  % (node, len(missing), missing[:8],
-                     " ..." if len(missing) > 8 else ""))
-        print("Capture again with PAD_NB_LOG=400000 and a run that reaches"
-              " ~25 s, then re-run this.")
-        return 2
 
-    lines = ["# %s LED I/O map." % gameinfo.active(),
-             "# Position from the device table in the binary; node/index verified",
-             "# against the boot enumeration on the wire (see ledio.py).",
+def text(game, rows, verified):
+    """led_io.txt, as a string.
+
+    The header line SAYS whether the wire agreed, because "verified against the
+    boot enumeration" was previously printed on every file whether or not any
+    enumeration had been read.
+    """
+    lines = ["# %s LED I/O map." % game,
+             "# Position, node and index from the device table in the binary.",
+             "# node/index %s"
+             % ("verified against the boot enumeration on the wire (see ledio.py)."
+                if verified else
+                "NOT verified - built from the binary alone, no wire log."),
              "# %-4s %-5s %-34s %5s %5s  %-5s %s"
              % ("node", "index", "name", "x", "y", "conn", "image")]
     for node, r in rows:
@@ -112,16 +123,47 @@ def main():
         lines.append("%-6d %-5d %-34s %5d %5d  %-5s %s"
                      % (node, r["index"], r["name"], r["x"], r["y"],
                         r["conn"] or "-", r["image"]))
-    text = "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    game = gameinfo.active()
+    if not game:
+        print(__doc__)
+        print("no active title - set PAD_GAME, or start a run.")
+        return 1
+    wire = wire_enumeration(sys.argv[1]) if len(sys.argv) > 1 else None
+    recs = devicexy.build(game)
+    rows, problems, report = build(recs, wire)
+    for line in report:
+        print(line)
+
+    if problems:
+        # REFUSE, rather than write a map that says it is untrustworthy in a
+        # comment nobody reads. The usual cause is a log without the boot
+        # enumeration in it: those 6-byte 0x84/0x85 writes only survive with
+        # PAD_NB_LOG raised, and the default 400-line budget drops them, so the
+        # wire simply looks like it has no LEDs.
+        #
+        # Only reachable when a log was NAMED. Asking for verification and
+        # getting a contradiction is an error; not asking is not.
+        print("\nJOIN IS NOT CLEAN - refusing to write. Missing indices per node:")
+        for node, missing in problems:
+            print("   node %d: %d missing (%s%s)"
+                  % (node, len(missing), missing[:8],
+                     " ..." if len(missing) > 8 else ""))
+        print("Capture again with PAD_NB_LOG=400000 and a run that reaches"
+              " ~25 s, then re-run this.")
+        return 2
 
     # Default into the TITLE's table directory, not the cwd: these tables are
     # per title now, and a second game must not overwrite the first one's.
-    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("led_io.txt")
+    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("led_io.txt", game)
     d = os.path.dirname(os.path.abspath(dest))
     if not os.path.isdir(d):
         os.makedirs(d)
     with open(dest, "w", newline="") as f:       # newline='': LF even on Windows
-        f.write(text)
+        f.write(text(game, rows, wire is not None))
     print("\n%d LEDs -> %s" % (len(rows), dest))
     return 0
 

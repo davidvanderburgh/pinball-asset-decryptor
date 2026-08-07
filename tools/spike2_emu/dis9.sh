@@ -1,6 +1,7 @@
 #!/bin/bash
-D=/home/david/game.dis
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "### refs to the boot-ready flag 0x7e1974 (movw #6516) ###"

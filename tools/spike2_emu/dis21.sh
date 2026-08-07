@@ -1,5 +1,6 @@
 #!/bin/bash
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 echo "########## 0x27316c (called by the archive ctor with size=1) ##########"
 $OD -d --start-address=0x27316c --stop-address=0x273260 $G | sed -n '7,120p'

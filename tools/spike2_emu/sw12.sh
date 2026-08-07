@@ -3,8 +3,9 @@
 # 0x4605e8 runs immediately BEFORE the drain in the game tick at 0x4ec828, and
 # 0x1e6860 is called BY the drain for every entry with a non-zero id. Either
 # could be re-arming entry[+22].
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

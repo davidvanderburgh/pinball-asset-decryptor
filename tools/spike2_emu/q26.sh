@@ -1,7 +1,8 @@
 #!/bin/bash
 # Q26: exact EGL/GLES import surface, so the rasterizer covers all of it and
 # nothing silently stays a no-op.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 echo "### undefined EGL/GL symbols the game imports ###"
 arm-linux-gnueabihf-objdump -T $G | awk '$4=="*UND*" || $2=="DF" {print $NF}' \
   | grep -E '^(egl|gl|fb)' | sort -u > /tmp/glsyms.txt

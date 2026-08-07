@@ -2,8 +2,9 @@
 # in_asm logs each translation block once, when it is first translated - i.e.
 # when it first executes. Bounded output, so qemu's buffered log actually gets
 # flushed even though the guest dies via _exit.
-cd /home/david
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+cd $HOME
+R=$ROOT
 rm -f $R/dump/tb.log
 export QEMU_LOG=in_asm
 export QEMU_LOG_FILENAME=/dump/tb.log

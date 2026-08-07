@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz64.log}
 echo "=== which branch does the scene loader take? ==="
 grep '\[branch\]' "$L"

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Q18: 0x2a4a64 writes the pool into [0x7b8990+0x100]. Read the construction
 # site, and the ring push side (0x4596e0/0x4596f0 set head AND tail = init).
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ pool construction: 0x2a49c0 .. 0x2a4a90 ############"

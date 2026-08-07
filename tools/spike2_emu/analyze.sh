@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 LOG=${1:-gz50.log}
 echo "########## [maps] ##########"
 grep -E '^\[maps\]|r-xp' "$LOG" | head -30

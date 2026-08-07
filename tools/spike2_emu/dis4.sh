@@ -1,5 +1,5 @@
 #!/bin/bash
-D=/home/david/game.dis
+D=$HOME/game.dis
 
 echo "### head of game.dis (sanity) ###"
 head -6 $D

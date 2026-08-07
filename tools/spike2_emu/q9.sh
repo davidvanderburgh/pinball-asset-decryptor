@@ -3,8 +3,9 @@
 # level (usat #8) and calls a mixer through a 512-entry fn-ptr table.
 # Read the two literals it uses, find the enclosing function and its callers,
 # and check whether 0x674fc0 really is a 256-entry gain curve.
-G=/home/david/spike2root/games/godzilla_pro/game
-D=/home/david/game.dis
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
+D=$HOME/game.dis
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ literals used by the mixer loop ############"
@@ -20,9 +21,11 @@ grep -naE 'bl	2a212c' $D | head
 
 echo
 echo "############ 0x674fc0: first 32 halfwords (gain curve?) ############"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

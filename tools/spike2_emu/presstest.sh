@@ -2,7 +2,7 @@
 # presstest.sh <switch-id> <ms> [log] - does ONE press of this switch, for this
 # long, leave Tech Alerts?
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/presstest.sh 28 600
+#   wsl -e bash $RIG/presstest.sh 28 600
 #
 # Boots with auto-advance off, waits for the node bus timeout storm to go quiet
 # (the point at which the game starts accepting an operator at all), presses
@@ -11,18 +11,19 @@
 # ONE PRESS PER BOOT, NECESSARILY. Once the game leaves Tech Alerts the question
 # cannot be asked again in the same run, so every candidate costs a fresh boot
 # (~45 s). That is why this is a script and not something typed each time.
+. "$(dirname "$0")/padpath.sh"
 set -u
 SW=${1:?switch id}
 MS=${2:?hold milliseconds}
-LOG=${3:-/home/david/gzpress.log}
+LOG=${3:-$HOME/gzpress.log}
 
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/killgame.sh >/dev/null 2>&1
+bash $RIG/killgame.sh >/dev/null 2>&1
 sleep 5                     # let the previous renderer release its ring, or
                             # the next one dies on startup
 rm -f "$LOG"
 export PAD_AUTO_ATTRACT=0 LOG="$LOG"
-nohup setsid bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/watch.sh 4 \
-    > /home/david/watchpress.log 2>&1 < /dev/null &
+nohup setsid bash $RIG/watch.sh 4 \
+    > $HOME/watchpress.log 2>&1 < /dev/null &
 disown
 
 for i in $(seq 1 400); do [ -s "$LOG" ] && break; sleep 0.25; done
@@ -42,7 +43,7 @@ while [ "$w" -lt 120 ]; do
 done
 
 before=$(c)
-python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/swpoke.py "$SW" "$MS" >/dev/null 2>&1
+python3 $RIG/swpoke.py "$SW" "$MS" >/dev/null 2>&1
 sleep 6
 after=$(c)
 if [ "$after" -gt 10 ]; then
@@ -50,4 +51,4 @@ if [ "$after" -gt 10 ]; then
 else
     echo "id=$SW ms=$MS  no effect (factory_make $before -> $after, ready at ${w}s)"
 fi
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/killgame.sh >/dev/null 2>&1
+bash $RIG/killgame.sh >/dev/null 2>&1

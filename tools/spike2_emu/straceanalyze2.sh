@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=gz52.strace
 echo "=== scene.radium opens WITHOUT O_DIRECTORY (i.e. real file opens) ==="
 grep 'scene.radium' $L | grep -v O_DIRECTORY | head -10

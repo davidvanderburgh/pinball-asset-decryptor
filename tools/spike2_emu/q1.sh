@@ -2,8 +2,9 @@
 # Q1: find how 0x30ed30 is entered, and what class it belongs to.
 # It has no `bl` callers, so look for (a) `b` tail branches and (b) the address
 # sitting in a data word, i.e. a vtable slot or a function-pointer table.
-G=/home/david/spike2root/games/godzilla_pro/game
-D=/home/david/game.dis
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
+D=$HOME/game.dis
 
 echo "### tail branches / any reference to 30ed30 in the disassembly ###"
 grep -nE '\b(b|bl|blx)\t30ed30' $D | head -20
@@ -11,9 +12,11 @@ echo "(none above means: not reached by a direct branch either)"
 
 echo
 echo "### words in the file equal to 0x30ed30 / 0x30ed31 (vtable or fn-ptr table) ###"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

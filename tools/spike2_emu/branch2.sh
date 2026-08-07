@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz66.log}
 echo "=== loader string-literal sequence (radium vs json) ==="
 grep '\[branch\]' "$L" | head -20

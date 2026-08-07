@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """rigprof.py - the WSL side of winprof.py. Per-process CPU and RSS, sampled.
 
-    wsl -e python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/rigprof.py --secs 90 --label attract --out /home/david
+    wsl -e python3 <rig>/rigprof.py --secs 90 --label attract --out ~
 
 RUN IT INSIDE WSL. It is the twin of `winprof.py`, which runs on Windows; item
 18 needs both sides of the boundary in the same window, because a slowdown that
@@ -107,7 +107,7 @@ def main():
     ap.add_argument("--secs", type=int, default=90)
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--label", default="cap")
-    ap.add_argument("--out", default="/home/david")
+    ap.add_argument("--out", default=os.path.expanduser("~"))
     a = ap.parse_args()
 
     if not os.path.isdir("/proc/1"):

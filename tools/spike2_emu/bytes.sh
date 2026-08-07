@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz72.log}
 N=$(grep -c '\[scenebytes\]' "$L")
 echo "=== per-scene byte accounting: $N scenes reported ==="

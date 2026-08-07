@@ -8,10 +8,11 @@
 # game debounces and the menu itself has a repeat delay - so this uses a 400 ms
 # hold and a 1.5 s gap, which has not dropped one yet. If a press is dropped the
 # whole rest of the sequence lands on the wrong screen, so slow is cheap here.
+. "$(dirname "$0")/padpath.sh"
 set -u
-D=/home/david/shots
+D=$HOME/shots
 for id in "$@"; do
-    python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/swpoke.py "$id" 400 >/dev/null
+    python3 $RIG/swpoke.py "$id" 400 >/dev/null
     echo "  press $id"
     sleep 1.5
 done
@@ -22,4 +23,4 @@ for i in $(seq 1 160); do
     sleep 0.25
 done
 echo "frame: $F"
-python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/repack.py "$F" /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/now.png 1
+python3 $RIG/repack.py "$F" $RIG/now.png 1

@@ -2,7 +2,8 @@
 # Q22: this qemu build's in_asm prints only the block START address plus raw
 # OBJD-T bytes - no disassembly - so only block starts can be grepped. Thread
 # entry points ARE block starts, so ask which threads ever executed.
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+R=$ROOT
 T=$R/dump/tb.log
 echo "=== game-thread entry points seen in [thread] lines vs actually executed ==="
 for a in 005a9b60:thread1 \

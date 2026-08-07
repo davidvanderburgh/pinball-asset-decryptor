@@ -4,7 +4,7 @@
 # builds the table address with movw/movt or a literal pool, so the rows must be
 # reached by index. Find code windows that mention several of 151..156 as
 # immediates - that is the function that decides which one to raise.
-D=/home/david/game.dis
+D=$HOME/game.dis
 awk '
 /^ *[0-9a-f]+:/ {
   addr = $0; sub(/:.*/, "", addr); gsub(/ /, "", addr)

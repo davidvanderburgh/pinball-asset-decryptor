@@ -3,8 +3,9 @@
 # 0x1d6d94 calls 0x4e7718(node, buf8) BEFORE 0x1e78f4, and only on the
 # PLAYFIELD path (0x1d6d58, the cabinet path, does not call it). The drain's
 # only caller, 0x4ec8b8, is in the same module. Dump both.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

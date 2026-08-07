@@ -15,9 +15,11 @@ import sys
 from PIL import Image, ImageDraw
 
 import devicexy as ledxy
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PF = ("/home/david/spike2root/games/godzilla_pro/assets/nuk/images/Test/"
-      "scaled_godzilla_pro_playfield.png")
+PF = gameinfo.playfield_png()
 
 
 def main():

@@ -14,8 +14,11 @@ Most of these blobs are decrypted INLINE with the key constant-folded into
 immediates, so recovering it from the ciphertext beats reading seven call sites.
 """
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 SEGS = [(0x000000, 0x008000, 0x6e52c0), (0x6e52c0, 0x6f52c0, 0x9f460)]
 OK = set(range(32, 127)) | {9, 10, 13}
 

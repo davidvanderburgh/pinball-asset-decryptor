@@ -2,8 +2,9 @@
 # Q14: the queue pool at [0x7b8a90] is live (0x9b1a98) and the teardown path
 # hands queues back to it via 0x458674. Find the ACQUIRE counterpart and the
 # store that puts a queue into voice+0x38.
-G=/home/david/spike2root/games/godzilla_pro/game
-D=/home/david/game.dis
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
+D=$HOME/game.dis
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ stores to +0x38 in the sound-instance TU (0x330000-0x345000) ############"
@@ -19,10 +20,12 @@ $OD -d --start-address=0x33a5a0 --stop-address=0x33a620 $G | sed -n '7,40p'
 
 echo
 echo "############ who else touches the pool global 0x7b8a90 ? ############"
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/findref.sh 0x7b8a90
+bash $RIG/findref.sh 0x7b8a90
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

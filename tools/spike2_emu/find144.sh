@@ -10,7 +10,7 @@
 #
 # The board init at 0x39d3ac..0x39d3d4 zeroes +124 through +143 and deliberately
 # stops short of +144, so +144 is written somewhere else - or never.
-D=/home/david/game.dis
+D=$HOME/game.dis
 
 echo "=== stores to offset 144 (0x90) ==="
 grep -nE 'str[bh]?[[:space:]]+r[0-9a-z]+, \[r[0-9a-z]+, #144\]' $D | head -20

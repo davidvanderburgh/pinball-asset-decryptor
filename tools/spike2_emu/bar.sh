@@ -1,6 +1,6 @@
 #!/bin/bash
 # bar.sh <log> - print the validation-bar counters for a run log in one place.
-cd /home/david
+cd $HOME
 L=${1:-gz208.log}
 printf 'log                : %s\n' "$L"
 printf 'Radium Warning     : %s\n' "$(grep -ac 'Radium Warning' "$L")"

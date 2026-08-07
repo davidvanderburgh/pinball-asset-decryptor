@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 rm -f gz17.log            # 1.6 GB from an earlier strace run, no longer needed
 df -h /home | tail -1
 S=$(date +%s)

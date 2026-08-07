@@ -1,5 +1,6 @@
 #!/bin/bash
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "########## 0x4475a8 (called from the big init at 0x4f0918) ##########"

@@ -3,8 +3,9 @@
 # Dump the three functions that touch the 8 scan bytes, plus every caller of
 # the queue drain, so the pending-counter (entry[+22]) lifecycle can be read
 # rather than guessed.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {  # dis <lo> <hi> <outfile>
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

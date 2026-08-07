@@ -1,8 +1,9 @@
 #!/bin/bash
 # Ask qemu-user itself which basic blocks of the scene loader actually execute.
 # QEMU_DFILTER keeps the log to just the ranges of interest.
-cd /home/david
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+cd $HOME
+R=$ROOT
 rm -f $R/dump/tb.log
 export QEMU_LOG=exec,nochain
 export QEMU_LOG_FILENAME=/dump/tb.log

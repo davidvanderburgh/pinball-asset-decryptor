@@ -3,7 +3,19 @@
 # not fine now that this one is version controlled. 30 MB of screenshots and
 # half a megabyte of objdump output are all reproducible from the card image and
 # the scripts here, so none of it belongs in git.
+#
+# THIS RULE ONCE SWALLOWED SOMETHING THAT MATTERED, and the way it did is worth
+# keeping in view: `games/godzilla_pro/playfield.png` was the artwork the whole
+# artwork half of the virtual playfield depended on, it sat here ignored while
+# gameinfo.py's docstring claimed it was checked in, and it was the only
+# ignored-but-present file in the rig. Nothing under games/ is generated into
+# the checkout any more - mktables.py builds every per-title table and the
+# artwork into $PAD_TABLES (under the rootfs, see padpath.py) - so the rule is
+# now true rather than merely unnoticed.
 *.png
+
+# Derived per-title tables, if anyone points PAD_TABLES back in here.
+games/
 *.dis
 *.log
 *.raw

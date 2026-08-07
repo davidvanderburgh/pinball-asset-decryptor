@@ -5,7 +5,7 @@
 # at ~140% CPU each and never exit on their own, because the game installs its
 # own SIGINT/SIGTERM handler (0x1b4f0) and ignores polite signals. SIGKILL only.
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/killgame.sh
+#   wsl -e bash $RIG/killgame.sh
 #
 # Note: vmmemWSL itself can NOT be killed from Task Manager - it is the WSL VM's
 # memory process and Windows denies access. Kill the guest processes (this
@@ -18,6 +18,7 @@
 # alive.sh, whose pgrep sees only Windows processes there. 2026-08-06 that pair
 # of confident zeros led to a second full run being started on top of a live
 # one. Same /proc test as alive.sh, same reason: refuse rather than reassure.
+. "$(dirname "$0")/padpath.sh"
 if [ ! -d /proc/1 ] || ! grep -qs . /proc/1/comm 2>/dev/null; then
     echo "killgame.sh: this is not a Linux shell - nothing here can see the rig." >&2
     echo "  Run it inside WSL:  wsl -e bash \$0" >&2
@@ -42,7 +43,7 @@ pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'
 # The event feed. An orphaned `tail -F` never exits by itself.
-pkill -9 -f '^tail -q -n 0 -F /home/david/padvid\.log'
+pkill -9 -f "^tail -q -n 0 -F $HOME/padvid\.log"
 pkill -9 -f 'padvidhost\.py'
 pkill -9 -f 'playaudio.sh'
 # ^-anchored, and matched on the fifo not on '-f pulse': a severed player
@@ -75,7 +76,7 @@ pkill -9 -f '^bash .*(watch|runbridge|nbrun)\.sh'
 pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
-rm -f /home/david/spike2root/dump/padled
+rm -f $ROOT/dump/padled
 for _ in 1 2 3 4 5 6; do
     pgrep -f '^/init .*playfield\.py' >/dev/null || break
     sleep 0.5
@@ -108,7 +109,7 @@ pkill -9 -f '^/init .*playfield\.py'
 # script has just killed everything that could have been reading one, and the
 # expensive part (the local image cache under ~/cardcache) is a file that
 # survives: a remount is a fraction of a second.
-for m in /home/david/card/*/; do
+for m in $HOME/card/*/; do
     mountpoint -q "$m" 2>/dev/null || continue
     fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null
     rmdir "$m" 2>/dev/null

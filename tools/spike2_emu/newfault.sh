@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz75.log}
 PC=0x40a6a858
 echo "=== which library contains $PC ? ==="

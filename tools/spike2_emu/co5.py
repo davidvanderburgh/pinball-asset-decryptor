@@ -13,8 +13,12 @@ only reliable move here: litref.py over these addresses returns nothing,
 the same dead end every other .rodata search in this binary hits.
 """
 import struct, sys
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 SEGS = [(0x000000, 0x008000, 0x6e52c0), (0x6e52c0, 0x6f52c0, 0x9f460)]
 img = open(PATH, 'rb').read()
 

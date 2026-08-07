@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vidroute.py - WHICH CLIP DID EACH VIDEO CHANNEL ACTUALLY GET? (item 15)
 
-    python3 vidroute.py /home/david/padvid.log [split_seconds]
+    python3 vidroute.py ~/padvid.log [split_seconds]
 
 Reads padvidhost's own log and answers the one question item 15 turns on: is
 the game being served DISTINCT clips, or is a channel nailed to a single file

@@ -2,7 +2,7 @@
 # disval.sh - disassemble around the two sites that construct the
 # "GAME VALIDATION ERROR" strings (found live with PAD_STR_WATCH, because
 # nothing in the binary references the message table statically).
-D=/home/david/game.dis
+D=$HOME/game.dis
 LO=${1:-0x4dec00}
 HI=${2:-0x4df040}
 awk -v lo=$(printf '%d' $LO) -v hi=$(printf '%d' $HI) '

@@ -7,15 +7,16 @@
 # creates the ring and waits), and is killed with the guest afterwards - the
 # same process-group discipline as runlim.sh, because nothing here exits on its
 # own and orphans spin at full CPU.
+. "$(dirname "$0")/padpath.sh"
 set -u
-cd /home/david
+cd $HOME
 LOG=${1:-gzbridge.log}
 SECS=${2:-30}
 MODE=${3:-gpu}
 
-RING_HOST=/home/david/spike2root/dump/padgl
+RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
-HOSTLOG=/home/david/padglhost.log
+HOSTLOG=$HOME/padglhost.log
 
 # 1360x768 is the game's own UI size, not a guess: its post-boot screens set a
 # scissor of exactly 0,312,1360,768 inside a 1920x1080 surface. At 1920x1080 the
@@ -49,7 +50,7 @@ sleep 0.3
 grep -aE 'GL |ring |ready' "$HOSTLOG" | head -3
 
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
-           bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/run_game.sh > "$LOG" 2>&1 &
+           bash $RIG/run_game.sh > "$LOG" 2>&1 &
 GAMEPG=$!
 
 # Ctrl-C used to leak BOTH processes: they are setsid'd into their own sessions

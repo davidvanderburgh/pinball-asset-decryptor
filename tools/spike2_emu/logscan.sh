@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 echo "=== logs containing [trace] ==="
 grep -l '\[trace\]' gz*.log 2>/dev/null
 echo

@@ -3,8 +3,9 @@
 # empty. Moving them back is exactly what the worker thread 0x459184 does at
 # 0x459264..0x459324. Prove whether the worker ever got past its opening spin,
 # using in_asm block translation (each block logged once, when first executed).
-cd /home/david
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+cd $HOME
+R=$ROOT
 rm -f $R/dump/tb.log
 export QEMU_LOG=in_asm
 export QEMU_LOG_FILENAME=/dump/tb.log
@@ -25,4 +26,4 @@ for a in 00459184:worker-entry \
 done
 echo
 echo "=== who writes the gate byte 0x7acb54 ? ==="
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/findref.sh 0x7acb54
+bash $RIG/findref.sh 0x7acb54

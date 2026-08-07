@@ -1,7 +1,8 @@
 #!/bin/bash
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
-D=/home/david/game.dis
+D=$HOME/game.dis
 
 echo "### registrar region 0x4bb320 - 0x4bb42c ###"
 $OD -d --start-address=0x4bb320 --stop-address=0x4bb430 $G | sed -n '7,200p'

@@ -15,8 +15,11 @@ plausible-coordinate reading, and let the layout show itself.
 """
 import struct
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-GAME = "/home/david/spike2root/games/godzilla_pro/game"
+GAME = gameinfo.elf()
 VA_BIAS = 0x8000
 
 

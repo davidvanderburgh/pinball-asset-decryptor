@@ -86,9 +86,11 @@ import tkinter as tk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
 import gameinfo
+import mktables
+import padpath
 import padsw
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = padpath.RIG
 
 #: The window's title. It is also the single-instance handle (see
 #: raise_existing()), so it MUST carry the title of the game: with a fixed
@@ -105,10 +107,38 @@ STATE = os.path.join(os.path.expanduser("~"), ".pad_playfield.json")
 #: The title, and everything derived from it. watch.sh passes the name on the
 #: command line; gameinfo works it out otherwise.
 GAME = gameinfo.active(sys.argv[1] if len(sys.argv) > 1 else None)
+if not GAME:
+    # Better than a window titled "None" drawing nothing. watch.sh always passes
+    # the title on the command line, so this is the by-hand case.
+    sys.exit("playfield.py: no title - pass one, or set PAD_GAME.\n"
+             "  pythonw playfield.py godzilla_pro")
 TDIR = gameinfo.table_dir(GAME)
+
+# BUILD WHAT IS MISSING RATHER THAN DRAWING A SCHEMATIC BECAUSE NOBODY RAN A
+# SCRIPT. The artwork, the insert map and the coil positions are all derivable
+# from the title's own files (mktables.py), so a title that HAS a device table
+# should never fall back to the switch list merely because this is the first
+# time it has been opened. watch.sh normally builds these before launching this
+# window; this is the by-hand path, and the guard keeps the usual start free.
+if TDIR and not os.path.exists(os.path.join(TDIR, "device_xy.txt")):
+    try:
+        mktables.build(GAME, say=lambda m: None)
+    except Exception:                                       # noqa: BLE001
+        # A window with a schematic beats no window. Whatever went wrong here
+        # (no rootfs, an unreadable card mount) is reported properly by
+        # mktables.py's own CLI, and is not worth losing the playfield over.
+        pass
+
 PF_PNG = gameinfo.playfield_png(GAME)
 WINDOW_TITLE = "%s - virtual playfield" % GAME
-LED_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padled"
+
+#: The live LED block, published by the shim inside the guest and read from
+#: HERE, which is Windows. Asked of padpath rather than written out as
+#: `\\wsl.localhost\Ubuntu\home\david\...`: that literal named a distro and a
+#: user that need not exist, under a prefix older WSL spells `\\wsl$`. watch.sh
+#: passes PAD_ROOT across interop already translated (WSLENV's `/p`), so in the
+#: normal case this costs nothing at all.
+LED_PATH = os.path.join(padpath.dump() or "", "padled")
 
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
 #: Unset in normal use; this is the instrument the 30 fps claim rests on.
@@ -165,11 +195,14 @@ def coarse_timers():
 #: two writers have an array each (padsw.py / padsw.h). Reading the keyboard's
 #: half would miss a door opened with swhold.py, which is exactly how the door
 #: gets opened from a script.
-SW_PATH = r"\\wsl.localhost\Ubuntu\home\david\spike2root\dump\padsw"
+SW_PATH = os.path.join(padpath.dump() or "", "padsw")
 PADSW_MAGIC = padsw.MAGIC
 SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
-WSL_DIR = ("/mnt/c/Users/david/Documents/development/pinball-asset-decryptor"
-           "/tools/spike2_emu")
+
+#: This directory, as WSL sees it - the helpers below are run inside WSL through
+#: interop, so they cannot be handed the Windows path this file was loaded from.
+#: `wslpath -u` is asked instead of assuming the checkout is on C:.
+WSL_DIR = padpath.to_wsl(padpath.RIG)
 
 #: Offsets into padled.h's block. Hard-coded because Python cannot include the
 #: header; the header lists them next to the struct and says APPEND ONLY, so a
@@ -1323,11 +1356,16 @@ def main():
         rows = load_switch_list()
         if not rows:
             tk.Label(root, padx=20, pady=20, justify="left", font=("Consolas", 10),
-                     text=("No tables for %s." + '\n\n' +
-                           "Positions:   devicexy.py   (needs a title that ships" '\n' +
-                           "             a device table; many do not)" '\n' +
-                           "Switch list: swtable.py <run.log> %s")
-                     % (GAME, GAME)).pack()
+                     text=("No tables for %s yet." '\n\n'
+                           "They are built from the title's own files, not" '\n'
+                           "shipped: mktables.py reads the game binary for" '\n'
+                           "positions and the run log for the switch list." '\n\n'
+                           "  tables : %s" '\n'
+                           "  game   : %s" '\n\n'
+                           "The switch list only exists once the game has" '\n'
+                           "published its table, a few seconds into a run, so" '\n'
+                           "the first start of a title can land here.")
+                     % (GAME, TDIR, gameinfo.game_dir(GAME))).pack()
         else:
             view = Schematic(root, rows)
     pos = load_state().get("playfield_pos")

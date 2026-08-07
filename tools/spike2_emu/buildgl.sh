@@ -3,19 +3,26 @@
 # shim as libEGL.so.1. They are SEPARATE translation units on purpose: the
 # framebuffer and all GL state must exist exactly once, and libEGL links
 # against libGLESv2 to reach it.
+. "$(dirname "$0")/padpath.sh"
 set -e
-R=/home/david/spike2root
-S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
-cp $S/glraster.c $S/eglshim.c /home/david/emusrc/
+R=$ROOT
+S=$RIG
+# The staging directory the sources are copied into. Created here: it
+# was simply assumed to exist, which is fine on the machine where it was
+# made by hand once and is a `cp: No such file or directory` on any
+# other. Compiling from /mnt/c is what it avoids - drvfs is slow enough
+# to matter over a few thousand lines of C.
+mkdir -p "$HOME/emusrc"
+cp $S/glraster.c $S/eglshim.c $HOME/emusrc/
 
 CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall"
 
 arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libGLESv2.so.2 \
-  -o $R/usr/lib/libGLESv2.so.2 /home/david/emusrc/glraster.c \
+  -o $R/usr/lib/libGLESv2.so.2 $HOME/emusrc/glraster.c \
   -L$R/lib -l:libc.so.6
 
 arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libEGL.so.1 \
-  -o $R/usr/lib/libEGL.so.1 /home/david/emusrc/eglshim.c \
+  -o $R/usr/lib/libEGL.so.1 $HOME/emusrc/eglshim.c \
   -L$R/lib -L$R/usr/lib -l:libGLESv2.so.2 -l:libc.so.6
 
 echo "libGLESv2.so.2 : $(stat -c%s $R/usr/lib/libGLESv2.so.2) bytes"

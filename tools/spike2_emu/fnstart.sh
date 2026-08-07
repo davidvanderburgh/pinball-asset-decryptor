@@ -5,8 +5,8 @@
 # Caveat from the handoff, still true: this FAILS inside 0x2a4b24..0x33a030,
 # a 610 KB region with no bl targets at all because everything there is
 # dispatched indirectly through data tables.
-D=/home/david/game.dis
-T=/home/david/bltargets.txt
+D=$HOME/game.dis
+T=$HOME/bltargets.txt
 if [ ! -s "$T" ]; then
   grep -aoE 'bl[x]?[[:space:]]+[0-9a-f]+ <' "$D" \
     | grep -aoE '[0-9a-f]+ <' | tr -d ' <' | sort -u > "$T"

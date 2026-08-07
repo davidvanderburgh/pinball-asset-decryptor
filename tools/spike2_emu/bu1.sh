@@ -4,8 +4,9 @@
 # thread and then falls into the service loop 0x1d7d88. In a stalled run it
 # never gets out: only fe/f9/fc/fa/f2/f0 are ever sent, never ff and never 0x11.
 # Dump it whole, plus the service loop, plus the thread body that owns them.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

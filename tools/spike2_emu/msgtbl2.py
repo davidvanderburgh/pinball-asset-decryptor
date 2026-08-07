@@ -8,8 +8,12 @@ is wrong. This relaxes the test to "five words that are all valid .rodata string
 pointers" and reports the maximal run, then dumps the head and tail of it.
 """
 import struct
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 SEGS = [(0x000000, 0x008000, 0x6e52c0), (0x6e52c0, 0x6f52c0, 0x9f460)]
 RODATA_LO, RODATA_HI = 0x5d3178, 0x6d63d4
 

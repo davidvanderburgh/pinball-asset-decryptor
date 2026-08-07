@@ -2,13 +2,16 @@
 # Q11: findref.sh only resolves movw/movt. The mixer loads the voice array from
 # a pc-relative LITERAL POOL, so scan .text for pool words equal to 0x7b90c0
 # and friends, then find the stores that fill voice+0x38.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ literal-pool words pointing into the voice array ############"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

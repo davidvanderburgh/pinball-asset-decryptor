@@ -2,7 +2,7 @@
 """swwidth.py <gamelog> [ladder_manifest] - how WIDE does a switch closure have
 to be before the game sees it?
 
-  swwidth.py /home/david/gz_item17.log /home/david/ladder.txt
+  swwidth.py ~/gz_item17.log ~/ladder.txt
 
 Reads two traces out of one run log and joins them:
 

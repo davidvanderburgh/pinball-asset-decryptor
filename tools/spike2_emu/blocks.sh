@@ -1,5 +1,6 @@
 #!/bin/bash
-T=/home/david/spike2root/dump/tb.log
+. "$(dirname "$0")/padpath.sh"
+T=$ROOT/dump/tb.log
 echo "=== which blocks of the caller 0x444014 executed? ==="
 grep -aoE '^0x00444[0-1][0-9a-f]{2}' $T | sort -u
 echo

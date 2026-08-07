@@ -4,8 +4,9 @@
 # times. A stalled run is still in that loop when the run ends: it never reaches
 # the ff poll at 0x1d7630, so the per-node scan gate at 0x7a908c+276+node is
 # never written and no 0x11 is ever sent.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

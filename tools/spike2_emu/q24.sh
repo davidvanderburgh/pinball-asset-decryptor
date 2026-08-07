@@ -2,13 +2,16 @@
 # Q24: 0x7acb54 reads 1 when the audio worker starts and 0 at crash time.
 # Find who writes it (strb through movw/movt or a literal pool) so we know
 # what the flag means before experimenting on it.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ literal-pool entries for 0x7acb54 ############"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]
@@ -40,4 +43,4 @@ $OD -d --start-address=0x1d7d14 --stop-address=0x1d7d34 $G | sed -n '7,20p'
 
 echo
 echo "############ strb to the flag: search .text for 'strb .*[r?, #0]' near movw 0xcb54 ############"
-grep -naE 'movw	r[0-9a-z]+, #52052' /home/david/game.dis | head -20
+grep -naE 'movw	r[0-9a-z]+, #52052' $HOME/game.dis | head -20

@@ -1,7 +1,7 @@
 #!/bin/bash
 # co3.sh - every global address a VA range builds with movw/movt, counted.
 # The driver (coil) subsystem's own tables show up as the ones it touches most.
-D=/home/david/game.dis
+D=$HOME/game.dis
 LO=${1:-0x250000}
 HI=${2:-0x256000}
 awk -v lo=$(printf '%d' $LO) -v hi=$(printf '%d' $HI) '

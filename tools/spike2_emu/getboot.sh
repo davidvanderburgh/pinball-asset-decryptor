@@ -16,19 +16,36 @@
 # faking the check - it is giving the guest the same bytes the machine has, and
 # the game then hashes it for real and grades it itself.
 #
-# The boot partition is p1: FAT12 (despite the 0x0c partition type), 8 MB at
-# LBA 8192. mtools is not installed, so the directory is walked in Python.
+# The boot partition is FAT12 (despite the 0x0c partition type). mtools is not
+# installed, so the directory is walked in Python.
+#
+# THE LBA IS READ OFF THE PARTITION TABLE, not assumed. It was 8192 on the one
+# card this was written against, which says nothing about the next one; the MBR
+# has said so all along and asking it costs one dd of the first sector.
 set -eu
+. "$(dirname "$0")/padpath.sh"
 
-IMG=${1:-/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/images/Stern/spike2/godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw}
-R=${2:-/home/david/spike2root}
-TMP=/home/david/bootp1
+IMG=${1:-${PAD_CARD:-}}
+R=${2:-$ROOT}
+LBA=${3:-}
+TMP=$(mktemp -d "${TMPDIR:-/var/tmp}/getboot.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT
 
+[ -n "$IMG" ] || { echo "usage: getboot.sh <card.raw> [rootfs] [lba]" >&2; exit 1; }
 [ -f "$IMG" ] || { echo "no card image at $IMG" >&2; exit 1; }
 
-mkdir -p "$TMP" "$R/mnt/boot"
-echo "[getboot] reading p1 (LBA 8192, 8 MB) out of $(basename "$IMG")"
-dd if="$IMG" of="$TMP/p1.img" bs=512 skip=8192 count=16384 status=none
+if [ -z "$LBA" ]; then
+    read -r LBA COUNT <<EOF
+$(python3 "$RIG/parts.py" --fat "$IMG")
+EOF
+    [ -n "${LBA:-}" ] || { echo "[getboot] no FAT partition in $IMG" >&2; exit 1; }
+else
+    COUNT=16384
+fi
+
+mkdir -p "$R/mnt/boot"
+echo "[getboot] reading the boot partition (LBA $LBA, $((COUNT / 2048)) MB) out of $(basename "$IMG")"
+dd if="$IMG" of="$TMP/p1.img" bs=512 skip="$LBA" count="$COUNT" status=none
 
 python3 - "$TMP/p1.img" "$R/mnt/boot" <<'PY'
 import hashlib

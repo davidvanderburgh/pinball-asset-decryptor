@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=gz52.strace
 echo "=== does it contain qemu strace lines? ==="
 grep -cE '^[0-9]+ (open|openat|read|close)' $L

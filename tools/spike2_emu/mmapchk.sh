@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=gz52.strace
 echo "=== mmap calls referencing fd 51 (the scene fd) ==="
 grep -ao 'mmap2\?([^)]*,51,[^)]*)[^,]*' $L | head -10

@@ -1,6 +1,10 @@
 import struct, sys
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 data = open(PATH, 'rb').read()
 
 # Program headers give the real VA -> file offset mapping; the +0x8000 rule of

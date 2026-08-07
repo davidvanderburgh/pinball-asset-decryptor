@@ -25,8 +25,11 @@ different title is dumped.
 import re
 import struct
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-GAME = "/home/david/spike2root/games/godzilla_pro/game"
+GAME = gameinfo.elf()
 
 #: Message-table base, found by the pointer scan described above.
 TABLE_VA = 0x766000

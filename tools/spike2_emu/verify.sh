@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=gz70.log
 ./run_game.sh > $L 2>&1
 echo "=== validation bar ==="

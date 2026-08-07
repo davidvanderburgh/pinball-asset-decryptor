@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""gameinfo.py [name] - which Spike 2 title the rig is pointed at, and where its parts are.
+r"""gameinfo.py [name] - which Spike 2 title the rig is pointed at, and where its parts are.
 
-Every other tool here used to carry `/home/david/spike2root/games/godzilla_pro`
-as a constant. This is the one place that knows, so a second title is a
-directory next to the first rather than a fork of the rig.
+Every other tool here used to carry one machine's path to one title as a
+constant. This is the one place that knows, so a second title is a directory
+next to the first rather than a fork of the rig.
 
     gameinfo.py              # what is installed, and which is active
     gameinfo.py turtles_pro  # everything known about one title
@@ -11,52 +11,92 @@ directory next to the first rather than a fork of the rig.
 WHICH TITLE IS ACTIVE, in order:
 
   1. `PAD_GAME` in the environment.
-  2. the `games/game` symlink, which is what run_game.sh points at the title it
-     is about to boot - and what the machine itself uses, so reading it is not a
-     rig invention.
-  3. the only title present, if there is exactly one.
+  2. what run_game.sh PUBLISHED for the run in progress (`dump/title`), which is
+     the only source that can name a title running straight off a card - the
+     card's title directory is bind-mounted inside a private namespace and is
+     not at `games/<title>` from out here at all.
+  3. the `games/game` symlink, which is what the machine itself uses, so reading
+     it is not a rig invention.
+  4. the only title extracted, or the only title with derived tables, if there
+     is exactly one of either.
+
+It returns None rather than guessing when none of those answer. It used to fall
+back to `godzilla_pro` - the title this rig was built against - which is a lie
+on any other machine and exactly the class of thing this file exists to stop.
 
 BOTH SIDES OF THE VM BOUNDARY. The guest sees `/games/<title>`, WSL sees
-`/home/david/spike2root/games/<title>`, and the playfield window - which runs on
-WINDOWS, because this WSL has no GUI toolkit - sees the same directory through
-`\\\\wsl.localhost`. All three are the same files; only the prefix differs, so
-that is all this switches on.
+`$PAD_ROOT/games/<title>`, and the playfield window - which runs on WINDOWS,
+because this WSL has no GUI toolkit - sees the same files through
+`\\wsl.localhost`. All three are the same bytes; only the prefix differs, and
+padpath.py is what knows how to spell each one HERE rather than on the machine
+this was written on.
 
-THE GENERATED TABLES live beside the rig, per title, under `games/<title>/`:
-device_xy.txt, switch_xy.txt, led_io.txt and a copy of the playfield artwork.
-They are derived from the game binary (devicexy.py) and from the wire (ledio.py)
-and are checked in, so the playfield window opens on a machine that has never
-extracted a card.
+THE DERIVED TABLES - device_xy.txt, switch_xy.txt, led_io.txt, switch_list.txt
+and a copy of the playfield artwork - are NOT checked in and are not written
+beside the scripts. They are built from the title's own game binary and assets
+by mktables.py, into `$PAD_TABLES/<title>/` (under the rootfs by default, see
+padpath.py). Two reasons, and the second is the one that bit:
+
+  * they are derived data. A copy in git goes stale against the binary it came
+    from and, for the artwork, is a copy of Stern's art in a repository that
+    otherwise ships none.
+  * only ONE title's were ever generated. Every other title got a schematic and
+    it looked like a property of the title rather than of the repository.
 """
 import os
 import sys
 
-#: The rootfs, as WSL sees it.
-WSL_ROOT = "/home/david/spike2root"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import padpath
 
-#: The same rootfs as WINDOWS sees it. Not a guess: WSL publishes every distro
-#: under this UNC path, and the playfield window already reads dump/padled
-#: through it.
-WIN_ROOT = r"\\wsl.localhost\Ubuntu\home\david\spike2root"
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-
-#: Where the per-title generated tables live, relative to this file.
-TABLE_DIR = os.path.join(HERE, "games")
+HERE = padpath.RIG
 
 
 def root():
     """The rootfs path in the form THIS interpreter can open."""
-    return WIN_ROOT if sys.platform == "win32" else WSL_ROOT
+    return padpath.root()
+
+
+def table_root():
+    """Where derived per-title tables are cached, this side of the boundary."""
+    return padpath.tables()
 
 
 def _join(*parts):
-    return os.path.join(root(), *parts)
+    r = root()
+    return os.path.join(r, *parts) if r else None
+
+
+def published():
+    """What run_game.sh said about the run in progress, or {}.
+
+    `dump/title` is written before the game starts and names both the title and
+    the directory its files are REALLY in. That second field is not redundant:
+    on a card run the title directory is a read-only FUSE mount elsewhere on the
+    machine, bind-mounted into `games/<title>` inside a private namespace that
+    nothing outside the run can see. Reading `games/<title>` from here finds the
+    empty stub directory that exists only to be a mountpoint.
+    """
+    d = padpath.dump()
+    if not d:
+        return {}
+    out = {}
+    try:
+        with open(os.path.join(d, "title")) as f:
+            for line in f:
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    out[k.strip()] = v.strip()
+    except OSError:
+        return {}
+    return out
 
 
 def installed():
     """Titles extracted into the rootfs, i.e. directories holding a `game` ELF."""
     g = _join("games")
+    if not g:
+        return []
     try:
         names = sorted(os.listdir(g))
     except OSError:
@@ -66,73 +106,97 @@ def installed():
                 os.path.join(g, n))]
 
 
+def tables_installed():
+    """Titles that have derived tables built, whether or not extracted."""
+    t = table_root()
+    if not t:
+        return []
+    try:
+        return sorted(n for n in os.listdir(t)
+                      if os.path.isfile(os.path.join(t, n, "device_xy.txt")))
+    except OSError:
+        return []
+
+
 def active(name=None):
-    """The title to work with, by the rules in the header. May not be installed:
-    the tables are checked in, so the window works with no rootfs at all."""
+    """The title to work with, by the rules in the header, or None."""
     if name:
         return name
-    env = os.environ.get("PAD_GAME")
+    env = padpath._env("PAD_GAME")
     if env:
         return env
+    pub = published().get("name")
+    if pub:
+        return pub
     link = _join("games", "game")
-    try:
-        # games/game is a symlink to <title>/game on the machine and here.
-        target = os.readlink(link)
-        part = target.replace("\\", "/").split("/")
-        if len(part) >= 2:
-            return part[-2]
-    except OSError:
-        pass
+    if link:
+        try:
+            # games/game is a symlink to <title>/game on the machine and here.
+            target = os.readlink(link)
+            part = target.replace("\\", "/").split("/")
+            if len(part) >= 2:
+                return part[-2]
+        except OSError:
+            pass
     have = installed()
     if len(have) == 1:
         return have[0]
     tables = tables_installed()
     if len(tables) == 1:
         return tables[0]
-    return "godzilla_pro"
-
-
-def tables_installed():
-    """Titles that have generated tables checked in, whether or not extracted."""
-    try:
-        return sorted(n for n in os.listdir(TABLE_DIR)
-                      if os.path.isfile(os.path.join(TABLE_DIR, n, "device_xy.txt")))
-    except OSError:
-        return []
+    return None
 
 
 def game_dir(name=None):
-    return _join("games", active(name))
+    """The directory holding the title's `game` ELF and `assets/`, or None.
+
+    Prefers what the run published, because that is the only answer that is
+    right for a card run. Falls back to `games/<title>` in the rootfs, which is
+    where an extracted title lives.
+    """
+    game = active(name)
+    if not game:
+        return None
+    pub = published()
+    if pub.get("name") == game and pub.get("dir"):
+        # Published by a WSL-side script, so it is a POSIX path; the playfield
+        # window reads this file from Windows and needs the other spelling.
+        return padpath.to_win(pub["dir"]) if sys.platform == "win32" else pub["dir"]
+    return _join("games", game)
 
 
 def elf(name=None):
-    return os.path.join(game_dir(name), "game")
+    d = game_dir(name)
+    return os.path.join(d, "game") if d else None
 
 
 def assets(name=None):
-    return os.path.join(game_dir(name), "assets")
+    d = game_dir(name)
+    return os.path.join(d, "assets") if d else None
 
 
 def table_dir(name=None):
-    return os.path.join(TABLE_DIR, active(name))
+    """Where this title's derived tables are cached."""
+    t, game = table_root(), active(name)
+    return os.path.join(t, game) if t and game else None
 
 
 def table(what, name=None):
-    return os.path.join(table_dir(name), what)
+    d = table_dir(name)
+    return os.path.join(d, what) if d else None
 
 
 def playfield_png(name=None):
-    """The playfield artwork.
+    """The playfield artwork, or None.
 
-    The game ships it - `assets/nuk/images/Test/*_playfield.png` - and the copy
-    beside the tables is exactly those bytes, so the window can open without the
-    card extracted. Prefer the checked-in copy: it is the one the coordinates in
-    device_xy.txt were checked against, and a title with both a Pro and an LE
-    drawing has two candidates in the assets with no way to tell them apart by
-    name alone.
+    The game ships it - `assets/nuk/images/Test/*_playfield.png` - and mktables
+    copies exactly those bytes next to the tables. Prefer that copy for two
+    reasons: it is the one the coordinates in device_xy.txt were checked
+    against, and on a card run the assets themselves are on a FUSE mount that
+    the playfield window (a Windows process) may not be able to reach at all.
     """
     local = table("playfield.png", name)
-    if os.path.exists(local):
+    if local and os.path.exists(local):
         return local
     return find_playfield_art(name)
 
@@ -144,7 +208,10 @@ def find_playfield_art(name=None):
     scaled_godzilla_le_playfield.png sit side by side), so the directory name is
     used to choose: `godzilla_pro` prefers the file whose name carries "pro".
     """
-    d = os.path.join(assets(name), "nuk", "images", "Test")
+    a = assets(name)
+    if not a:
+        return None
+    d = os.path.join(a, "nuk", "images", "Test")
     try:
         found = [f for f in sorted(os.listdir(d))
                  if f.lower().endswith("_playfield.png")]
@@ -152,7 +219,7 @@ def find_playfield_art(name=None):
         return None
     if not found:
         return None
-    want = active(name).lower().split("_")
+    want = (active(name) or "").lower().split("_")
     for f in found:
         if all(w in f.lower() for w in want if w):
             return os.path.join(d, f)
@@ -173,14 +240,43 @@ def png_size(path):
 
 
 def main():
-    name = sys.argv[1] if len(sys.argv) > 1 else None
+    argv = sys.argv[1:]
+    # One-value queries, so a shell script can ask for a path without parsing
+    # prose. The forensic scripts in this directory used to open the ELF at a
+    # literal path; they ask for it here now.
+    if argv and argv[0].startswith("--"):
+        what, argv = argv[0], argv[1:]
+        name = argv[0] if argv else None
+        value = {"--elf": elf, "--dir": game_dir, "--tables": table_dir,
+                 "--art": playfield_png, "--game": active}.get(what)
+        if not value:
+            print("usage: gameinfo.py [--elf|--dir|--tables|--art|--game] [title]",
+                  file=sys.stderr)
+            return 2
+        v = value(name)
+        if not v:
+            return 1
+        print(v)
+        return 0
+
+    name = argv[0] if argv else None
+    game = active(name)
     print("rootfs seen as   : %s" % root())
+    print("table cache      : %s" % table_root())
+    pub = published()
+    if pub:
+        print("published run    : %s" % ", ".join("%s=%s" % kv
+                                                  for kv in sorted(pub.items())))
     print("extracted titles : %s" % (", ".join(installed()) or "(none)"))
     print("titles with tables: %s" % (", ".join(tables_installed()) or "(none)"))
-    print("active title     : %s" % active(name))
+    if not game:
+        print("active title     : (unknown - set PAD_GAME, or start a run)")
+        return 1
+    print("active title     : %s" % game)
     print("  game dir       : %s" % game_dir(name))
+    e = elf(name)
     print("  ELF            : %s%s"
-          % (elf(name), "" if os.path.exists(elf(name)) else "   (NOT EXTRACTED)"))
+          % (e, "" if e and os.path.exists(e) else "   (NOT PRESENT)"))
     print("  tables         : %s" % table_dir(name))
     art = playfield_png(name)
     print("  playfield art  : %s %s"

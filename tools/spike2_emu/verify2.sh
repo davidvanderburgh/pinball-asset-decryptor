@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz75.log}
 S=$(date +%s); ./run_game.sh > $L 2>&1; E=$(date +%s)
 echo "elapsed: $((E-S)) s"

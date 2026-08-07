@@ -18,9 +18,10 @@
 # Tech Alerts waiting for an operator to press something, and 3 means it is still
 # waiting rather than stuck. That distinction cost this project a whole pass, so
 # it is computed here once rather than re-derived by every caller.
+. "$(dirname "$0")/padpath.sh"
 set -u
-LOG=${1:-/home/david/gzwatch.log}
-S=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+LOG=${1:-$HOME/gzwatch.log}
+S=$RIG
 # shellcheck source=gamestate.sh
 . "$S/gamestate.sh"
 
@@ -81,7 +82,7 @@ echo "auto=$(n -f autoattract.sh)"
 #   gaveup  - the presses did not clear it (the game may be on the service menu)
 #   working - still going
 #   none    - it was never started (Skip to attract mode unticked)
-AUTOLOG=/home/david/padauto.log
+AUTOLOG=$HOME/padauto.log
 if [ "$(n -f autoattract.sh)" != 0 ]; then
     echo "auto_result=working"
 elif [ ! -r "$AUTOLOG" ]; then
@@ -95,7 +96,7 @@ else
 fi
 
 # The renderer prints its rate every 2 s; take the most recent.
-f=$(grep -ao '[0-9.]* fps' /home/david/padglhost.log 2>/dev/null | tail -1)
+f=$(grep -ao '[0-9.]* fps' $HOME/padglhost.log 2>/dev/null | tail -1)
 [ -n "$f" ] && echo "fps=${f% fps}"
 
 # Audio comes from the PAD_AUDIO_DUMP line, which watch.sh only emits when

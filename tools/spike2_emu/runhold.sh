@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 LOG=${1:-gz58.log}
 SECS=${2:-25}
 export PAD_BOOT_DELAY=$SECS

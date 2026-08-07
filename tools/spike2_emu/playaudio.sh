@@ -13,11 +13,12 @@
 # The FIFO is the safety boundary. The guest opens and writes it NON-BLOCKING and
 # drops on EAGAIN, so nothing here - a slow reader, a dead reader, no reader at
 # all - can stall the emulated game. Worst case is silence.
+. "$(dirname "$0")/padpath.sh"
 set -u
-FIFO=${1:-/home/david/spike2root/dump/audio.fifo}
+FIFO=${1:-$ROOT/dump/audio.fifo}
 RATE=${2:-48000}
 CH=${3:-2}
-FMT=${4:-/home/david/spike2root/dump/audio.fmt}
+FMT=${4:-$ROOT/dump/audio.fmt}
 
 command -v ffmpeg >/dev/null || { echo "[play] no ffmpeg" >&2; exit 1; }
 # The WSLg pulse socket materialises on demand, so it can genuinely be absent for

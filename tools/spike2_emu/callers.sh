@@ -4,7 +4,7 @@
 # Written as a file on purpose: `wsl -e bash -c "...$t..."` loses the variable
 # to the outer shell, which silently produced "callers of <empty>" three times
 # in a row and looked like three functions sharing a caller set.
-D=/home/david/game.dis
+D=$HOME/game.dis
 for t in "$@"; do
   t=${t#0x}
   echo "== callers of 0x$t =="

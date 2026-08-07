@@ -5,8 +5,9 @@
 # is a per-byte XOR difference, i.e. the shim and the game disagree about the
 # obfuscation key schedule. Read the game's own deobfuscator rather than fit a
 # rotation to two data points.
-D=/home/david/game.dis
-O=/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu
+. "$(dirname "$0")/padpath.sh"
+D=$HOME/game.dis
+O=$RIG
 
 dis() {
   awk -v lo=$(printf '%d' $1) -v hi=$(printf '%d' $2) '

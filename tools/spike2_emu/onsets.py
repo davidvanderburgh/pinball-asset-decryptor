@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """onsets.py <file.raw> [rate] [channels] - COUNT THE CLICKS in captured PCM.
 
-    wsl -e bash -c 'python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/onsets.py \\
-        /home/david/spike2root/dump/audio.raw'
+    wsl -e bash -c 'python3 <rig>/onsets.py \\
+        $PAD_ROOT/dump/audio.raw'
 
 PAD_AUDIO_OUT writes raw interleaved s16le straight out of snd_pcm_writei.
 pcmstat.py already answers "is this audio at all"; this answers the different

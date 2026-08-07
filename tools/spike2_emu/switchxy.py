@@ -36,42 +36,65 @@ def read_live(path):
     return out
 
 
-def build(swmap_log):
-    live = read_live(swmap_log)
-    d, cs = devicexy.load()
+def join(live, recs):
+    """[(id, node, bit, record)] for every switch with BOTH an id and a position.
+
+    `live` is {NAME: (id, node, bit)} from whichever dump was captured - the
+    `[swmap]` lines read above, or the `[sw]` lines swtable.py reads. Either
+    will do: this join only needs the id and the name, and both carry both.
+    That matters because `[swmap]` needs `PAD_SW_MAP` set while `[sw]` is
+    printed by every run, so requiring the first made switch positions depend on
+    a deliberately-instrumented run rather than on any run at all.
+    """
     rows = []
-    for r in devicexy.records(d, cs):
+    for r in recs:
         if r["kind"] != "switch" or r["image"] != "playfield":
             continue
         hit = live.get(r["name"].upper())
         if hit:
             rows.append((hit[0], hit[1], hit[2], r))
-    return sorted(rows), live
+    return sorted(rows)
+
+
+def text(game, rows):
+    """switch_xy.txt, as a string."""
+    lines = ["# %s switch ID -> playfield position." % game,
+             "# id from the running game's own switch table, position from the",
+             "# device table in the binary, joined on the NAME.",
+             "# %-4s %-4s %-4s %-32s %5s %5s"
+             % ("id", "node", "bit", "name", "x", "y")]
+    for sid, node, bit, r in rows:
+        lines.append("%-6d %-5d %-5d %-32s %5d %5d"
+                     % (sid, node, bit, r["name"], r["x"], r["y"]))
+    return "\n".join(lines) + "\n"
+
+
+def build(swmap_log, recs=None):
+    live = read_live(swmap_log)
+    if recs is None:
+        recs = devicexy.build()
+    return join(live, recs), live
 
 
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return 1
+    game = gameinfo.active()
+    if not game:
+        print("no active title - set PAD_GAME, or start a run.")
+        return 1
     rows, live = build(sys.argv[1])
     print("%d live switches, %d joined to a playfield position" % (len(live), len(rows)))
 
-    lines = ["# Godzilla Pro switch ID -> playfield position.",
-             "# id from the running game (PAD_SW_MAP), position from the device",
-             "# table in the binary, joined on the NAME.",
-             "# %-4s %-4s %-4s %-32s %5s %5s" % ("id", "node", "bit", "name", "x", "y")]
-    for sid, node, bit, r in rows:
-        lines.append("%-6d %-5d %-5d %-32s %5d %5d"
-                     % (sid, node, bit, r["name"], r["x"], r["y"]))
-    text = "\n".join(lines) + "\n"
     # Default into the TITLE's table directory, not the cwd - these are per
     # title now and a second game must not overwrite the first one's.
-    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("switch_xy.txt")
+    dest = sys.argv[2] if len(sys.argv) > 2 else gameinfo.table("switch_xy.txt", game)
     d = os.path.dirname(os.path.abspath(dest))
     if not os.path.isdir(d):
         os.makedirs(d)
     with open(dest, "w", newline="") as f:
-        f.write(text)
+        f.write(text(game, rows))
     print("-> %s" % dest)
     return 0
 

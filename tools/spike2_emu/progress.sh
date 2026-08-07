@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz75.log}
 echo "=== game-emitted lines (not shim/instrumentation) ==="
 grep -vaE '\[scenebytes\]|\[hdr\]|\[fb\]|\[read\]|\[fread\]|\[sync\]|\[branch\]|\[new\]|\[ifs\]|\[scene\]|\[sleep\]|\[hwshim\]|\[i2c\]|\[maps\]|\[nb\]|\[segv\]|\[trace\]|\[thread\]|\[glstub\]|\[alsa\]|\[gst\]|\[boot\]|\[run\]|^[0-9a-f]+-[0-9a-f]+ ' $L | sort | uniq -c | sort -rn | head -25

@@ -2,7 +2,7 @@
 # nb7.sh - find the per-command bus functions for 0xf9 and 0xfc.
 # Small negative constants are built with mvn, never mov: 0xf9 = mvn #6,
 # 0xfc = mvn #3, 0xfe = mvn #1. Grepping for #249 or #252 finds nothing.
-D=/home/david/game.dis
+D=$HOME/game.dis
 awk '
 /^ *[0-9a-f]+:/ {
   a = $0; sub(/:.*/, "", a); gsub(/ /, "", a); v = strtonum("0x" a)

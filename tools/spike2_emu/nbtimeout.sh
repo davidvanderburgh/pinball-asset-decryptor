@@ -2,15 +2,16 @@
 # nbtimeout.sh <log> - attribute every ExchangeData timeout to the node bus
 # frame that caused it.
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/nbtimeout.sh /home/david/gznb.log
+#   wsl -e bash $RIG/nbtimeout.sh $HOME/gznb.log
 #
 # ONLY MEANINGFUL ON A RUN WITH PAD_NB_LOG RAISED. The [nb] budget is 400 lines
 # by default, so on an ordinary run every [nb] line is from the first second and
 # the "frame that caused it" is stale for the whole rest of the log - which
 # reads as "every timeout is the 00 poll" and is completely wrong. This script
 # refuses rather than print that.
+. "$(dirname "$0")/padpath.sh"
 set -u
-L=${1:-/home/david/gznb.log}
+L=${1:-$HOME/gznb.log}
 
 nb=$(grep -ac '^\[nb\] ' "$L" 2>/dev/null)
 to=$(grep -ac 'ExchangeData: read failed' "$L" 2>/dev/null)

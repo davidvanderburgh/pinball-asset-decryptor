@@ -1,5 +1,6 @@
 #!/bin/bash
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+R=$ROOT
 echo "=== available -d items ==="
 qemu-arm-static -d help 2>&1 | head -25
 echo

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz55.log}
 echo "=== ifstream ctor calls: total $(grep -c '\[ifs\]' "$L") ==="
 echo "auto_loaded  : $(grep '\[ifs\]' "$L" | grep -c auto_loaded)"

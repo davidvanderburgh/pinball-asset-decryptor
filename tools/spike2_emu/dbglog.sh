@@ -1,5 +1,6 @@
 #!/bin/bash
-R=/home/david/spike2root
+. "$(dirname "$0")/padpath.sh"
+R=$ROOT
 echo "=== /dump contents ==="
 ls -la $R/dump/ 2>/dev/null | head
 echo

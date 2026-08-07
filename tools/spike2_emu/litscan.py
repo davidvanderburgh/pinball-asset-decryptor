@@ -10,8 +10,11 @@ the base is not what you assumed.
 import struct
 import sys
 from collections import Counter
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-PATH = '/home/david/spike2root/games/godzilla_pro/game'
+PATH = gameinfo.elf()
 TEXT_OFF_LO, TEXT_OFF_HI = 0x16a00 - 0x8000, 0x5d3168 - 0x8000
 
 

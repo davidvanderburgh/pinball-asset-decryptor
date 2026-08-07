@@ -8,4 +8,5 @@
 # 0x69cc24, keyed on a value in lr; not-found falls to 0x69cc24-28 = 0x69cc08,
 # which is the default object every slot holds today ([+20] == 0, so the
 # exchange wrapper at 0x59ec1c refuses to talk to it).
-bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/disval.sh 0x5a2d70 0x5a2f40
+. "$(dirname "$0")/padpath.sh"
+bash $RIG/disval.sh 0x5a2d70 0x5a2f40

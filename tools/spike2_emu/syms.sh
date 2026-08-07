@@ -1,5 +1,6 @@
 #!/bin/bash
-L=/home/david/spike2root/usr/lib/libstdc++.so.6.0.20
+. "$(dirname "$0")/padpath.sh"
+L=$ROOT/usr/lib/libstdc++.so.6.0.20
 echo "=== filebuf / streambuf symbols exported by the guest libstdc++ ==="
 arm-linux-gnueabihf-nm -D --defined-only $L 2>/dev/null \
   | grep -E 'basic_filebuf.*(xsgetn|underflow|open|_M_)|basic_streambuf.*xsgetn' \

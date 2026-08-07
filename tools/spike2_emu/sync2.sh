@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz56.log}
 echo "=== [sync] events by call site ==="
 grep '\[sync\]' "$L" | awk '{print $2, $4}' | sort | uniq -c | sort -rn | head -30

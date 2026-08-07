@@ -2,7 +2,8 @@
 # Q8: 0x30ed20 has no bl callers but IS entry 0x67e40c of a function-pointer
 # table, and the crash stack says its caller returns to 0x2a24ac. So 0x2a24a8
 # must be the indirect call. Find the index computation and the table base.
-G=/home/david/spike2root/games/godzilla_pro/game
+. "$(dirname "$0")/padpath.sh"
+G=$ROOT/games/godzilla_pro/game
 OD=arm-linux-gnueabihf-objdump
 
 echo "############ 0x2a2400 .. 0x2a24c0 : the indirect call site ############"
@@ -10,9 +11,11 @@ $OD -d --start-address=0x2a2400 --stop-address=0x2a24c0 $G | sed -n '7,200p'
 
 echo
 echo "############ extent of the fn-ptr table around 0x67e40c ############"
+export PAD_ELF="${PAD_ELF:-${G:-$(python3 "$RIG/gameinfo.py" --elf)}}"
 python3 - <<'PY'
 import struct
-P='/home/david/spike2root/games/godzilla_pro/game'
+import os
+P=os.environ['PAD_ELF']
 d=open(P,'rb').read()
 ph,=struct.unpack_from('<I',d,0x1c); es,en=struct.unpack_from('<HH',d,0x2a)
 segs=[]

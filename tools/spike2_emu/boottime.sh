@@ -1,7 +1,7 @@
 #!/bin/bash
 # boottime.sh [log] [maxsecs] - WHERE THE BOOT SPENDS ITS TIME.
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/boottime.sh /home/david/gzboot.log 120
+#   wsl -e bash $RIG/boottime.sh $HOME/gzboot.log 120
 #
 # Start it at the same time as watch.sh. It polls the run log and prints the
 # offset at which each phase of the boot first shows up, so "the boot takes ~15
@@ -21,9 +21,10 @@
 # it finds a log that is already full and reports every phase at t=0.00, which
 # looks like a clean instant boot and is worth nothing. The first attempt at
 # this measurement did exactly that.
+. "$(dirname "$0")/padpath.sh"
 set -u
 
-LOG=${1:-/home/david/gzwatch.log}
+LOG=${1:-$HOME/gzwatch.log}
 MAX=${2:-180}
 
 # marker|pattern  - printed the first time the pattern appears.

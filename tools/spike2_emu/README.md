@@ -56,6 +56,33 @@ only inside adjustment help text. So the playfield window draws artwork when a
 title has it and a schematic switch list (`swtable.py`) when it does not. Both
 are clickable and live; only one is a picture.
 
+### Where those tables come from, and where they do not
+
+`mktables.py` builds them, per title, into `$PAD_TABLES/<title>/` — under the
+rootfs by default, so the WSL side that writes them and the Windows playfield
+window that reads them name one directory. `watch.sh` runs it before opening
+the window, and the window runs it itself if it finds nothing.
+
+| | |
+|---|---|
+| `playfield.png` | copied out of the title's own assets |
+| `device_xy.txt` | the device table in the game ELF |
+| `led_io.txt` | derived from `device_xy`; the wire enumeration only ever *checked* it |
+| `switch_list.txt` | the shim's `[sw]` dump, i.e. it needs a run |
+| `switch_xy.txt` | the two joined on the device NAME |
+
+**Three of the five need no run at all**, which is what lets a title show
+artwork, inserts and coils the first time it boots. The switch half is the one
+exception and cannot be made otherwise: the game builds its switch table on the
+heap, so the id belonging to a name is not in the binary anywhere. It is cached
+per title, so only the first run of a title waits for it.
+
+**These were checked into git until 2026-08-06, and only Godzilla's existed** —
+so every other title got a schematic and it read like a property of the title
+rather than of the repository. The artwork was worse: it sat here ignored by
+this directory's own `*.png` rule while `gameinfo.py` claimed it was committed.
+Nothing under `games/` is generated into the checkout any more.
+
 Anything the shim reads at a hard-coded address is a `TITLE_ADDR`: overridable
 per title, checked before use, and switched off rather than fatal when it is not
 mapped. That is not tidiness - the first attempt at a second title died 0.06 s
@@ -78,6 +105,9 @@ list of confident conclusions that turned out to be wrong — lives there.
 | Virtual playfield (Windows) | `playfield.py`, `coilact.py`, `plunge.py`, `swpoke.py` |
 | Switch block layout | `padsw.h` (C), `padsw.py` (the scripts) — three regions, one writer each |
 | Device maps and decoders | `devicexy.py`, `ledio.py`, `leddecode.py`, `coildecode.py`, `padled.h` |
+| Where anything is | `padpath.py` / `padpath.sh` (paths), `gameinfo.py` (titles), `parts.py` (partitions) |
+| Per-title tables | `mktables.py`, built from the card — see above |
+| First-time setup | `rootfs.sh`, `getboot.sh`, `gethex.sh` |
 | Build | `build.sh`, `buildgl.sh`, `buildbridge.sh` |
 | Run | `watch.sh`, `runbridge.sh`, `nbrun.sh`, `verify2.sh`, `verify3.sh` |
 | Safety | `alive.sh`, `killgame.sh`, `runlim.sh` |
@@ -146,15 +176,60 @@ the result out of a `PAD_COIL_PROBE=1` capture.
 
 ## Requirements
 
-WSL with `qemu-user-static` (binfmt `qemu-arm` registered with the **F** flag) and
-`gcc-arm-linux-gnueabihf`. The guest rootfs is extracted from the card image to
-`/home/david/spike2root`; the handoff has the `debugfs` recipe, and a warning
-that the obvious version of it is incomplete in two ways that each cost an
-investigation.
+WSL with `qemu-user-static` (binfmt `qemu-arm` registered with the **F** flag),
+`gcc-arm-linux-gnueabihf` and `e2fsprogs`. Then, once:
+
+```bash
+rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
+build.sh                # the ARM hardware shim
+buildbridge.sh          # the GL backend
+```
+
+`rootfs.sh` is the step that used to be missing: `run_game.sh` chroots into
+`$PAD_ROOT` and nothing in the repository created it, so the recipe lived only
+in a planning document that is not in git. It reads the partition table rather
+than assuming one card's offsets (`parts.py`), extracts the OS partition with
+`debugfs` — no loop mount, no sudo — and finishes with the boot partition,
+which `rdump` of the OS partition never touches and whose absence is a `GAME
+VALIDATION ERROR #3`. It refuses to extract to a `/mnt` path, because drvfs
+cannot hold symlinks and `ld-linux.so.3` would silently vanish.
+
+It does **not** extract a title. `PAD_CARD=<image> watch.sh` runs one straight
+off the card in about a second; `rootfs.sh --game <title>` is there for a title
+you run constantly.
 
 ## Paths
 
-The scripts carry this directory's absolute path, because they are invoked from
-WSL against a Windows-side checkout and there is no reliable relative anchor.
-They were rewritten when the rig moved out of `c:\tmp\spike2_emu` into the repo;
-if you move it again, the path appears in 44 files and a single `sed` fixes it.
+Nothing here carries a path to a particular machine any more. `padpath.sh`
+(sourced by the scripts) and `padpath.py` (imported by the Python) are the only
+two files that know:
+
+| | | |
+|---|---|---|
+| `RIG` | this directory | from `BASH_SOURCE` / `__file__` |
+| `ROOT` | the guest rootfs | `PAD_ROOT`, else `~/spike2root` |
+| `TABLES` | derived per-title data | `PAD_TABLES`, else `$ROOT/dump/tables` |
+| — | any of those as **Windows** sees it | asked of `wslpath`, never built by pasting strings |
+
+That last row is the one that reads like a detail and is not.
+`\\wsl.localhost\Ubuntu\...` was written out in four files: it names a distro
+that need not exist, under a prefix older WSL spells `\\wsl$`. `wslpath -w`
+knows the right answer for the running system, and `watch.sh` passes the
+translated values across interop through `WSLENV`'s `/p` flag, so the playfield
+window normally has them already and asks nothing.
+
+**This used to be 187 files carrying `/home/david` and 51 carrying the
+checkout's absolute path**, and this section used to say it was 44 files and one
+`sed`. Both halves of that were wrong, which is roughly the point: a count
+nobody re-derives goes stale, and a path nobody derives never works anywhere
+else. If you move the rig now, nothing needs editing.
+
+Two things to know if you add a script:
+
+- **Source `padpath.sh` before using `$RIG` or `$ROOT`**, with
+  `. "$(dirname "$0")/padpath.sh"`.
+- **A quoted heredoc does not expand anything**, so `$ROOT` inside `<<'PY'`
+  reaches Python as five literal characters. Pass it through the environment
+  (`export PAD_ELF=...` then `os.environ["PAD_ELF"]`), which is what the
+  forensic scripts here do. Same trap for `pkill -f '...'`: single quotes stop
+  the pattern expanding and it silently matches nothing.

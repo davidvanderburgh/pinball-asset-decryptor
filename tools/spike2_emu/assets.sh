@@ -1,5 +1,6 @@
 #!/bin/bash
-A=/home/david/spike2root/games/godzilla_pro/assets
+. "$(dirname "$0")/padpath.sh"
+A=$ROOT/games/godzilla_pro/assets
 echo "=== assets/lcd ==="
 ls "$A/lcd" | head
 echo

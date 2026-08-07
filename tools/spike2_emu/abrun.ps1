@@ -45,7 +45,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $EMU_WIN = "C:\Users\david\Documents\development\pinball-asset-decryptor\tools\spike2_emu"
-$EMU_WSL = "/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu"
+$EMU_WSL = "<rig>"
 $WINPROF = Join-Path $EMU_WIN "winprof.py"
 New-Item -ItemType Directory -Force $Out | Out-Null
 
@@ -133,7 +133,7 @@ while (((Get-Date) - $t0).TotalSeconds -lt $AttractWaitSecs) {
     # Plain 'filesrc', deliberately: the exact pattern gamestate.sh uses has a
     # quote in it, and a quote crossing PowerShell -> wsl.exe -> bash is how the
     # first version of this wait silently matched nothing for 200 seconds.
-    $n = (wsl -e grep -ac filesrc /home/david/gzwatch.log)
+    $n = (wsl -e grep -ac filesrc ~/gzwatch.log)
     if ([int]$n -ge 1) {
         $reached = $true
         Say ("reached attract after {0:N0}s" -f ((Get-Date) - $t0).TotalSeconds)
@@ -151,7 +151,7 @@ if ($Game) {
     Say "starting longplay to put a ball in play and keep it alive"
     $lp = Join-Path $Out "longplay_$Label.log"
     Start-Process wsl -ArgumentList "-e", "bash", "$EMU_WSL/longplay.sh", `
-                      "/home/david/gzwatch.log", "$Backstop", "1x1" `
+                      "~/gzwatch.log", "$Backstop", "1x1" `
                   -PassThru -WindowStyle Hidden -RedirectStandardOutput $lp | Out-Null
     Say "letting the game settle for $GameSettleSecs s before profiling"
     Start-Sleep -Seconds $GameSettleSecs
@@ -169,13 +169,13 @@ if ($Game) {
 # we set. An env var that did not reach padglhost would otherwise produce two
 # arms that were secretly the same arm, which is the worst possible A/B failure
 # because it looks like a null result.
-$adapter = (wsl -e grep -am1 "D3D12" /home/david/padglhost.log)
+$adapter = (wsl -e grep -am1 "D3D12" ~/padglhost.log)
 Say "renderer says: $adapter"
 
 # --- 7. profile both sides of the boundary, in the same window ---------------
 Say "profiling $Secs s (progress every 10 s; it is NOT stuck if it pauses)"
 $rig = Start-Process wsl -ArgumentList "-e", "python3", "$EMU_WSL/rigprof.py", `
-                         "--secs", "$Secs", "--label", $Label, "--out", "/home/david" `
+                         "--secs", "$Secs", "--label", $Label, "--out", "~" `
                      -PassThru -WindowStyle Hidden
 & py -3 -u $WINPROF --secs $Secs --label $Label --out $Out
 $rig.WaitForExit()
@@ -192,6 +192,6 @@ if ($after -ne "0") {
     Say "rig clean"
 }
 
-wsl -e cp "/home/david/rigprof_$Label.json" /mnt/c/tmp/spike2_item18/ 2>$null
+wsl -e cp "~/rigprof_$Label.json" /mnt/c/tmp/spike2_item18/ 2>$null
 Say "adapter for this arm: $adapter"
 Say "captures in $Out"

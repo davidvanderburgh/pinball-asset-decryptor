@@ -2,7 +2,7 @@
 # autoattract.sh [log] - carry the game from Tech Alerts to attract mode by
 # itself, so a human does not have to sit through the boot and press Escape.
 #
-#   wsl -e bash /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/autoattract.sh /home/david/gzwatch.log
+#   wsl -e bash $RIG/autoattract.sh $HOME/gzwatch.log
 #
 # watch.sh starts this automatically unless PAD_AUTO_ATTRACT=0.
 #
@@ -64,13 +64,14 @@
 # was ready and the hold that followed landed just after. Press LENGTH was
 # confounded with READINESS, and the conclusion drawn was about the wrong
 # variable. Once readiness is detected properly, 300-500 ms is plenty.
+. "$(dirname "$0")/padpath.sh"
 set -u
 
-LOG=${1:-/home/david/gzwatch.log}
+LOG=${1:-$HOME/gzwatch.log}
 S=$(dirname "$0")
 # shellcheck source=gamestate.sh
 . "$S/gamestate.sh"
-SW=/home/david/spike2root/dump/padsw
+SW=$ROOT/dump/padsw
 
 BACK=28                              # Service Back == Esc in the legend window
 HOLD=${PAD_AUTO_HOLD:-500}           # ms to press; see the table above

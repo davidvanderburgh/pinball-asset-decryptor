@@ -2,7 +2,7 @@
 # Resolve movw/movt immediate pairs per register and report the sites that
 # build the given absolute addresses. String refs in this binary exist ONLY as
 # movw/movt pairs, so this is the only way to find them.
-D=/home/david/game.dis
+D=$HOME/game.dis
 TARGETS="$*"
 
 awk -v targets="$TARGETS" '

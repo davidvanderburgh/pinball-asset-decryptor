@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz65.log}
 echo "=== exceptions thrown ==="
 grep '\[throw\]' "$L"

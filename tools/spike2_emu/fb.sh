@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david
+cd $HOME
 L=${1:-gz71.log}
 echo "=== libstdc++ read-path hook activity ==="
 grep '\[fb\]' "$L" | head -25

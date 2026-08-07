@@ -6,13 +6,14 @@
 # counts swaps, so the wall-clock gap between dumps drifts. Reading the previous
 # frame as if it were the result of the press is exactly the "check the dump
 # directory's mtimes before believing a frame is from this run" trap.
+. "$(dirname "$0")/padpath.sh"
 set -u
 ID=${1:?switch id}
 MS=${2:-300}
-OUT=${3:-/mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/now.png}
-D=/home/david/shots
+OUT=${3:-$RIG/now.png}
+D=$HOME/shots
 BEFORE=$(ls -t $D/*.png 2>/dev/null | head -1)
-python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/swpoke.py "$ID" "$MS"
+python3 $RIG/swpoke.py "$ID" "$MS"
 for i in $(seq 1 120); do
     F=$(ls -t $D/*.png 2>/dev/null | head -1)
     [ -n "$F" ] && [ "$F" != "$BEFORE" ] && break
@@ -26,4 +27,4 @@ for i in $(seq 1 120); do
     sleep 0.25
 done
 echo "frame: $F"
-python3 /mnt/c/Users/david/Documents/development/pinball-asset-decryptor/tools/spike2_emu/repack.py "$F" "$OUT" 1
+python3 $RIG/repack.py "$F" "$OUT" 1

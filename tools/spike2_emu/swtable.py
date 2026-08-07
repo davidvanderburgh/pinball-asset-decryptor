@@ -43,6 +43,30 @@ def read(path):
     return [out[k] for k in sorted(out)]
 
 
+def by_name(rows):
+    """{NAME: (id, node, bit)} - what switchxy.join() needs from a `[sw]` dump.
+
+    The same shape read_live() produces from `[swmap]`, so either dump can drive
+    the join. `[sw]` is printed by EVERY run (the shim dumps on find); `[swmap]`
+    needs PAD_SW_MAP set, so preferring this one is what stops switch positions
+    depending on a deliberately-instrumented run.
+    """
+    return {name.upper(): (sid, node, bit)
+            for sid, _num, node, bit, name in rows if name and name != "?"}
+
+
+def text(game, rows):
+    """switch_list.txt, as a string."""
+    nodes = sorted({r[2] for r in rows})
+    lines = ["# %s switch list, from the shim's reading of the game's own table."
+             % game,
+             "# %d switches on nodes %s." % (len(rows), nodes),
+             "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
+    for sid, num, node, bit, name in rows:
+        lines.append("%-6d %-5d %-5d %-4d %s" % (sid, num, node, bit, name))
+    return "\n".join(lines) + "\n"
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -61,19 +85,12 @@ def main():
     print("%s: %d switches, %d named, nodes %s"
           % (game, len(rows), named, nodes))
 
-    lines = ["# %s switch list, from the shim's reading of the game's own table."
-             % game,
-             "# %d switches on nodes %s." % (len(rows), nodes),
-             "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
-    for sid, num, node, bit, name in rows:
-        lines.append("%-6d %-5d %-5d %-4d %s" % (sid, num, node, bit, name))
-
     d = gameinfo.table_dir(game)
     if not os.path.isdir(d):
         os.makedirs(d)
     dest = os.path.join(d, "switch_list.txt")
     with open(dest, "w", newline="") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(text(game, rows))
     print("-> %s" % dest)
     return 0
 

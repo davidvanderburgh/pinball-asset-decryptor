@@ -1,5 +1,6 @@
 import re
-lines=open('/home/david/game.dis','r',errors='ignore').read().split('\n')
+import os
+lines=open(os.path.expanduser("~/game.dis"),'r',errors='ignore').read().split('\n')
 pat=re.compile(r'^\s*([0-9a-f]+):\s+[0-9a-f]{8}\s+movw\s+(\w+), #38284')
 hits=[]
 for i,l in enumerate(lines):

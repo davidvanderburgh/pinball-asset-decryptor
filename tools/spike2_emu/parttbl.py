@@ -15,8 +15,11 @@ This is .rodata, so VA = file offset + 0x8000.
 """
 import struct
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gameinfo
 
-GAME = "/home/david/spike2root/games/godzilla_pro/game"
+GAME = gameinfo.elf()
 BASE = 0x69CC24
 DELTA = 0x8000
 CLASS = ["UNSUPPORTED", "LPC1112_101", "LPC1112_201", "LPC1113_302",

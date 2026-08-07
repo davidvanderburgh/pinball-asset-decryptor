@@ -120,12 +120,18 @@ specific wrong answer, and the handoff says which.
 All of these are `wsl -e bash <path>/<script>`, from this directory:
 
 ```bash
-build.sh          # the hardware shim
-buildbridge.sh    # the GL backend  <- run this one last, see below
 watch.sh          # WATCH IT: a real window on the Windows desktop, keyboard drives it
 alive.sh          # what is still running. MUST print 0 after every run
 killgame.sh       # emergency stop
+build.sh          # the hardware shim      \ both built on demand; see below
+buildbridge.sh    # the GL backend         /
 ```
+
+**`watch.sh` and `runbridge.sh` build what they need.** `ensurebuild.sh` checks
+the hardware shim and both halves of the GL bridge against a digest of their
+sources: missing gets built and stops the run if it cannot be, stale gets
+rebuilt and never blocks, and neither happens while a run is live. The builds
+above are for building deliberately, not because a start needs them.
 
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.
@@ -182,9 +188,12 @@ registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `e2fsprogs`,
 
 ```bash
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
-build.sh                # the ARM hardware shim
-buildbridge.sh          # the GL backend
 ```
+
+That is the whole of it: the ARM hardware shim and the GL backend are compiled
+by the first run that needs them. They used to be two more steps printed as
+advice, which is how a user reached `env: './padglhost': No such file or
+directory` at their first start.
 
 `rootfs.sh` is the step that used to be missing: `run_game.sh` chroots into
 `$PAD_ROOT` and nothing in the repository created it, so the recipe lived only

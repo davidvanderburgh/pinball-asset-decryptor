@@ -88,12 +88,57 @@ export PAD_SHIM_STAMP
 # Empty when nothing is there, so a caller can tell "no sources" from "these
 # sources", and eol=lf is pinned for this directory (see .gitattributes), so
 # the repo copy and the installed copy hash identically.
-pad_shim_hash() {
-    local d=${1:-$RIG} f
-    for f in $PAD_SHIM_SRCS; do
+#
+# THE DIGEST ITSELF TAKES A LIST, because there are now three of them - the
+# shim and the bridge's two halves - and the reasoning above is the same for
+# every one. Three copies of these six lines is how the rule this rig keeps
+# writing down ("never let two scripts define the same fact") gets broken
+# inside a single file.
+pad_src_hash() {
+    local d=$1 f
+    shift
+    for f in "$@"; do
         [ -f "$d/$f" ] && cat "$d/$f"
     done | sha256sum | cut -d' ' -f1
 }
+pad_shim_hash() { pad_src_hash "${1:-$RIG}" $PAD_SHIM_SRCS; }
+
+# ---- WHAT THE GL BRIDGE IS BUILT FROM, THE SAME WAY -----------------------
+#
+# The bridge is TWO binaries either side of one shared-memory protocol
+# (padgl.h): `padglhost`, a NATIVE renderer that owns the window, and
+# libGLESv2.so.2 / libEGL.so.1, which are ARM and live inside the guest.
+# buildbridge.sh builds them.
+#
+# WHY THIS EXISTS AT ALL. On 2026-08-07 a user's run died with
+#
+#     env: './padglhost': No such file or directory
+#
+# because `buildbridge.sh` had never been run on that machine - it is step
+# three of a three-step setup that rootfs.sh only PRINTS - and nothing checked.
+# That is the same fault the hardware shim had one release earlier, in a worse
+# form: the shim at least ran something old, and this ran nothing at all while
+# the tab said "Starting...".
+#
+# TWO LISTS AND TWO STAMPS, not one. The halves are built by different
+# compilers, and a machine can have the native one and not the cross one - so
+# a missing arm-linux-gnueabihf-gcc must not be able to withhold the renderer.
+# padgl.h is on BOTH lists, so a change to the protocol makes both stale
+# together, which is the only way the two are ever allowed to move.
+PAD_GLHOST_SRCS="padglhost.c padgl.h padvid.h padsw.h i420.h"
+PAD_GLGUEST_SRCS="glbridge.c eglshim.c padgl.h"
+export PAD_GLHOST_SRCS PAD_GLGUEST_SRCS
+
+#: The native renderer, and what it was built from - both in $HOME, which is
+#: where buildbridge.sh has always put the binary.
+PAD_GLHOST_BIN=$HOME/padglhost
+PAD_GLHOST_STAMP=$HOME/padglhost.srcs
+#: The guest half, stamped beside the libraries it produces.
+PAD_GLGUEST_STAMP=$ROOT/usr/lib/glbridge.srcs
+export PAD_GLHOST_BIN PAD_GLHOST_STAMP PAD_GLGUEST_STAMP
+
+pad_glhost_hash()  { pad_src_hash "${1:-$RIG}" $PAD_GLHOST_SRCS; }
+pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # WSLENV is how any of this reaches a Windows process, and it is the only way:

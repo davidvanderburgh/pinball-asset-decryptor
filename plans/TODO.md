@@ -39,7 +39,11 @@ These have each been violated at least once and each cost a run or a window:
 - **NEVER `SetWindowPos` an emulator window.** RAIL divergence froze David's
   windows. Move them from inside X (`XMoveWindow`) or not at all.
 - **NEVER rebuild while a run is live.** Overwriting `hwshim.so` under a mapped
-  guest can kill it. `build.sh` / `buildbridge.sh` only between runs.
+  guest can kill it (SIGBUS), and `padglhost` cannot be relinked while it runs
+  at all (ETXTBSY). `build.sh` / `buildbridge.sh` only between runs.
+  `ensurebuild.sh` — which `watch.sh` and `runbridge.sh` now go through, so a
+  start builds what is missing and rebuilds what is stale — asks `alive.sh
+  --total` before every build and refuses rather than risk it.
 - **NEVER wrap a run in `timeout`.** It leaks 140%-CPU processes forever. Use
   `runlim.sh` / `killgame.sh`.
 - **`alive.sh` must print 0 after every run.** Confirm it, do not assume it —

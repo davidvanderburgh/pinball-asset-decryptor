@@ -457,8 +457,9 @@ class EmulatePanel:
                           "the installer, or set PAD_EMU_DIR to point at that "
                           "folder.\n\n"
                           "First time only: rootfs.sh <card.raw> builds the "
-                          "guest from a card image, then build.sh and "
-                          "buildbridge.sh." % rig_dir()))
+                          "guest from a card image. The shim and the renderer "
+                          "are compiled by the first run that needs them."
+                          % rig_dir()))
             else:
                 self._hint.configure(
                     text=("The emulator rig was not found in %s.\n\n"
@@ -467,8 +468,9 @@ class EmulatePanel:
                           "without tools/spike2_emu. Re-run the installer, or "
                           "set PAD_EMU_DIR to point at that folder.\n\n"
                           "First time only, inside WSL: rootfs.sh <card.raw> "
-                          "builds the guest from a card image, then build.sh "
-                          "and buildbridge.sh." % rig_dir()))
+                          "builds the guest from a card image. The shim and "
+                          "the renderer are compiled by the first run that "
+                          "needs them." % rig_dir()))
         # The poll re-arms itself forever, so it MUST be cancelled when the tab
         # goes away.  A pending `after` job outliving its widgets is what makes
         # Tk raise "can't delete Tcl command" during teardown - it showed up

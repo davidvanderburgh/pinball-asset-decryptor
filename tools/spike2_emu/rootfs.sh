@@ -151,6 +151,18 @@ fi
 
 echo
 echo "[rootfs] done. Next:"
-echo "[rootfs]   bash "$RIG/build.sh"          # the ARM hardware shim"
-echo "[rootfs]   bash "$RIG/buildbridge.sh"    # the GL backend"
-echo "[rootfs]   PAD_CARD=$IMG bash "$RIG/watch.sh""
+# THE TWO BUILDS ARE NO LONGER A STEP, and that is a fix and not a tidy-up.
+# They were printed here as advice and enforced nowhere, so a user who stopped
+# after the extraction got `env: './padglhost': No such file or directory` at
+# their first start, ten seconds after the app said "Starting...". watch.sh now
+# builds whatever is missing and rebuilds whatever is stale (ensurebuild.sh),
+# so the setup is this one command and then run it.
+# The quotes are IN the advice, not around it: this rig is now installed to
+# `C:\Program Files\...` as often as it is checked out, and a command printed
+# bare there is a command that word-splits when it is pasted.
+echo "[rootfs]   PAD_CARD=\"$IMG\" bash \"$RIG/watch.sh\""
+echo "[rootfs]"
+echo "[rootfs] It builds the hardware shim and the GL backend itself on the"
+echo "[rootfs] first run. To build them now instead:"
+echo "[rootfs]   bash \"$RIG/build.sh\"          # the ARM hardware shim"
+echo "[rootfs]   bash \"$RIG/buildbridge.sh\"    # the GL backend"

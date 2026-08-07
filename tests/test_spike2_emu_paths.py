@@ -395,10 +395,12 @@ def test_one_list_of_shim_sources_not_two():
     assert "PAD_SHIM_SRCS=" in padpath
     for f in ("hwshim.c", "alsastub.c", "gststub.c", "gstvid.c"):
         assert f in padpath, f
-    build, watch = _rig_text("build.sh"), _rig_text("watch.sh")
-    assert "$PAD_SHIM_SRCS" in build and "$PAD_SHIM_SRCS" in watch
+    # The rebuild decision moved out of watch.sh into ensurebuild.sh, which
+    # runbridge.sh sources too - so the third place is now one place.
+    build, ensure = _rig_text("build.sh"), _rig_text("ensurebuild.sh")
+    assert "$PAD_SHIM_SRCS" in build and "$PAD_SHIM_SRCS" in ensure
     # Neither may carry its own copy of the list.
-    for name, text in (("build.sh", build), ("watch.sh", watch)):
+    for name, text in (("build.sh", build), ("ensurebuild.sh", ensure)):
         body = "\n".join(ln for ln in text.splitlines()
                          if not ln.lstrip().startswith("#"))
         assert body.count("alsastub.c") == 0, name
@@ -414,21 +416,22 @@ def test_the_rebuild_decision_is_a_digest_not_a_file_time():
     build = _rig_text("build.sh")
     # Stamped by the build, so what it compiled is recorded beside the output.
     assert "pad_shim_hash" in build and "$PAD_SHIM_STAMP" in build
-    watch = _rig_text("watch.sh")
-    assert "pad_shim_hash" in watch and "$PAD_SHIM_STAMP" in watch
+    ensure = _rig_text("ensurebuild.sh")
+    assert "pad_shim_hash" in ensure and "$PAD_SHIM_STAMP" in ensure
 
 
-def test_the_shim_is_never_rebuilt_under_a_running_guest():
-    """The linker truncates and rewrites hwshim.so in place and a live guest
-    has it mapped, so a rebuild underneath one is a SIGBUS in a process that
-    has nothing to do with this start.  alive.sh is the rig's single definition
-    of what is running; a second copy of that logic here is the bug alive.sh's
-    own header is about."""
-    watch = _rig_text("watch.sh")
-    assert "alive.sh" in watch and "--total" in watch
-    body = "\n".join(ln for ln in watch.splitlines()
+def test_nothing_is_rebuilt_under_a_running_guest():
+    """The linker truncates and rewrites its output in place: a live guest has
+    hwshim.so MAPPED (SIGBUS) and a live padglhost is its own text file
+    (ETXTBSY).  alive.sh is the rig's single definition of what is running; a
+    second copy of that logic here is the bug alive.sh's own header is about."""
+    ensure = _rig_text("ensurebuild.sh")
+    assert "alive.sh" in ensure and "--total" in ensure
+    body = "\n".join(ln for ln in ensure.splitlines()
                      if not ln.lstrip().startswith("#"))
-    assert "pgrep" not in body.split("teardown()")[0]
+    assert "pgrep" not in body
+    # Every rebuild path asks, and asks the same way.
+    assert body.count("_pad_run_live") >= 4
 
 
 def test_the_run_log_names_which_copy_of_the_rig_it_came_from():

@@ -8,8 +8,17 @@
 # same process-group discipline as runlim.sh, because nothing here exits on its
 # own and orphans spin at full CPU.
 . "$(dirname "$0")/padpath.sh"
+. "$(dirname "$0")/ensurebuild.sh"
 set -u
 cd $HOME
+
+# The measurement path gets the same guarantee as watch.sh: what runs is built,
+# and built from these sources. It used to get neither, so a rig whose renderer
+# had never been compiled failed here as `env: './padglhost': No such file or
+# directory` and a rig whose sources had moved on measured the OLD binary -
+# which is worse than failing, because the numbers look fine.
+pad_ensure_shim || exit 1
+pad_ensure_bridge || exit 1
 LOG=${1:-gzbridge.log}
 SECS=${2:-30}
 MODE=${3:-gpu}
@@ -38,7 +47,7 @@ fi
 setsid env PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
            PAD_GL_FRAME_EVERY="${PAD_GL_FRAME_EVERY:-30}" \
            PAD_GL_MAX_FRAMES="${PAD_GL_MAX_FRAMES:-20}" \
-           ./padglhost "$RING_HOST" > "$HOSTLOG" 2>&1 &
+           "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
 HOSTPG=$!
 
 # wait for the host to create and publish the ring

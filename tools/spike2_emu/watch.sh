@@ -25,76 +25,23 @@
 #     child, which here is a setsid wrapper, so the guest survives it.
 set -u
 . "$(dirname "$0")/padpath.sh"
+. "$(dirname "$0")/ensurebuild.sh"
 cd "$HOME"
 
-# ---- THE SHIM IS REBUILT WHEN ITS SOURCE MOVES ON --------------------------
+# ---- WHAT RUNS IS BUILT, AND BUILT FROM THESE SOURCES ----------------------
 #
-# hwshim.so is compiled by build.sh into $ROOT/lib, ONCE, when the rig is first
-# set up - and nothing ever looked at it again. That was harmless while the rig
-# and its sources were the same working copy on one developer's disk, and it
-# stopped being harmless the moment the emulator started SHIPPING WITH THE APP:
-# an app update now delivers a new hwshim.c to Program Files while the .so that
-# actually runs stays whatever was built months ago. A fix to the shim would
-# have been installed, believed, and silently not running.
+# Both of these used to be assumed. The shim was rebuilt here from v0.113.0 and
+# the renderer was not checked at all, which is how a user got
+# `env: './padglhost': No such file or directory` ten seconds after Start said
+# "Starting...". ensurebuild.sh holds the whole rule and the reasoning; it is
+# sourced rather than copied so runbridge.sh gets the same answer.
 #
-# This is build.sh's own lesson one level up. Its comment records alsastub.c
-# being absent from the copy list while still on the compile line, so an edit
-# was never built AND THE BUILD STILL SAID "built ok"; the same shape here is a
-# whole release that says it fixed something it did not.
-#
-# Only when a source is genuinely NEWER, so a machine that is up to date pays a
-# stat per file and nothing else. A failure is reported and not fatal: the shim
-# that is already there still runs the game, and refusing to start because a
-# cross compiler is missing would take the emulator away from someone whose only
-# problem is that they cannot rebuild it.
-_shim_stale() {
-    _so=$ROOT/lib/hwshim.so
-    [ -f "$_so" ] || return 1        # not built at all: rootfs.sh's job, not this
-    # THE DIGEST WINS WHENEVER THERE IS ONE. It is the only test that answers
-    # the same way in both directions, which matters because THE RIG NOW EXISTS
-    # IN MORE THAN ONE COPY - the installed one and, on a development machine,
-    # the repo - and "am I running what we are about to release?" is a question
-    # about bytes, not about file times. See pad_shim_hash() in padpath.sh.
-    if [ -f "$PAD_SHIM_STAMP" ]; then
-        [ "$(pad_shim_hash "$RIG")" = "$(cat "$PAD_SHIM_STAMP")" ] && return 1
-        return 0
-    fi
-    # No stamp: a rig built before build.sh started writing one. Timestamps are
-    # what is left, and they are right in the common case of an edit followed by
-    # a run. The first rebuild lays a stamp down and this branch is never taken
-    # again on that machine.
-    for _src in $PAD_SHIM_SRCS; do
-        [ -f "$RIG/$_src" ] || continue
-        [ "$RIG/$_src" -nt "$_so" ] && return 0
-    done
-    return 1
-}
-if _shim_stale; then
-    # NEVER UNDER A LIVE GUEST. The linker truncates and rewrites hwshim.so in
-    # place and a running guest has it MAPPED, so rebuilding here would SIGBUS a
-    # process that has nothing to do with this start. Two copies of the rig on
-    # one machine is exactly how that arises: start from the repo, then start
-    # again from the installed app, and the second start would rewrite the shim
-    # under the first. `alive.sh --total` is the rig's own definition of what is
-    # running - killgame.sh asks it the same way rather than keeping a second
-    # list, and this does too.
-    if [ "$(bash "$RIG/alive.sh" --total 2>/dev/null)" != 0 ]; then
-        echo "[watch] the hardware shim is older than its source, but a run is" >&2
-        echo "[watch] still up and the shim cannot be rewritten underneath it." >&2
-        echo "[watch] Stop it (killgame.sh) and start again to pick up the fix." >&2
-    elif command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
-        echo "[watch] the hardware shim is older than its source; rebuilding"
-        if _BUILD_OUT=$(bash "$RIG/build.sh" 2>&1); then
-            printf '%s\n' "$_BUILD_OUT" | sed 's/^/[watch]   /'
-        else
-            echo "[watch]   rebuild FAILED; running the shim already built" >&2
-            printf '%s\n' "$_BUILD_OUT" | tail -5 | sed 's/^/[watch]   /' >&2
-        fi
-    else
-        echo "[watch] the hardware shim is older than its source, but there is no" >&2
-        echo "[watch] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
-    fi
-fi
+# MISSING blocks the start, STALE never does. What is already built still runs
+# the game, so a machine that cannot rebuild keeps its emulator; but a binary
+# that was never built means no hardware or no picture at all, and starting the
+# guest anyway just leaves a 140%-CPU process to kill.
+pad_ensure_shim || exit 1
+pad_ensure_bridge || exit 1
 
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
@@ -471,7 +418,7 @@ echo "[watch] starting renderer (window opens when the game's first frame arrive
 setsid env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
            PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-1}" \
            PAD_VID_SHM="${VID_FOR_GL:-}" \
-           ./padglhost "$RING_HOST" > "$HOSTLOG" 2>&1 &
+           "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
 # PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd` keeps
 # the rest of the environment, so exporting them before watch.sh already reaches
 # padglhost, and naming them here would pass "" when they are unset - which

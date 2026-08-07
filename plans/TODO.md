@@ -762,6 +762,78 @@ These have each been violated at least once and each cost a run or a window:
       so no shot is unreachable; what is missing is the magnitude. D4, armchair
       beyond the desk work above.
 
+- [ ] **28. The rig is welded to one machine, and its per-title tables are
+      checked in instead of derived from the card.** `S2 D3` ← IN PROGRESS
+      **★ DAVID, 2026-08-06: "we shouldn't weld the rig to my machine and
+      additionally, the artwork was extracted from the game image, so we should
+      be able to pull the artwork and necessary leds and switch and coil
+      placements from the image when we load it."**
+      **Three findings, all counted at the desk, all from tracked files:**
+      **(a) THE PATHS.** `/home/david` is in **187** tracked rig files and the
+      checkout's own absolute path in **51**, on both sides of the VM boundary —
+      `watch.sh:56` `S=/mnt/c/Users/david/...`, `watch.sh:448` `PF_WIN='C:\Users\
+      david\...\playfield.py'`, `run_game.sh:10` `R=/home/david/spike2root`. Four
+      files also hard-code `\\wsl.localhost\Ubuntu\...` (`playfield.py:111,168`,
+      `gameinfo.py`), which names a distro that need not exist under a prefix
+      older WSL spells `\\wsl$`. The rig README says the path is in 44 files and
+      one `sed` fixes it; both halves of that are wrong.
+      **(b) THE TABLES ARE COMMITTED, AND ONLY GODZILLA'S EXIST.**
+      `games/godzilla_pro/{device_xy,switch_xy,led_io}.txt` and
+      `games/turtles_pro/switch_list.txt` are the whole of it — and
+      `games/godzilla_pro/playfield.png` is swallowed by
+      `tools/spike2_emu/.gitignore:6` (`*.png`, written to keep frame dumps out).
+      It is **the only ignored-but-present file in the entire rig**, and
+      `gameinfo.py`'s docstring claims the opposite in terms: *"checked in, so
+      the playfield window opens on a machine that has never extracted a card."*
+      **This is the same shape as item 27(a)** — a per-title table with only
+      Godzilla filled in — so deriving them removes 27's generate-and-commit step
+      for every future title rather than repeating it.
+      **(c) NOTHING IN THE REPO CAN BUILD THE ROOTFS.** `run_game.sh:199`
+      chroots into `$R`; no tracked script creates it (grepped for `debugfs`,
+      `rdump`, `mkdir.*spike2root`). `PAD_CARD` does not cover it —
+      `cardmount.sh` mounts the **games** partition only. The recipe lives in
+      `plans/spike2_pc_emulation_handoff.md`, which is gitignored, and the
+      handoff itself records that the obvious version of it is incomplete twice
+      over (`gethex.sh`, `getboot.sh`).
+      **THE TRAP THAT DECIDES THE DESIGN, and it is not obvious: on a card run
+      the title's files are NOT at `games/<title>`.** `run_game.sh:117`
+      bind-mounts the card's title directory inside an `unshare -m` namespace, so
+      from outside the run that path is the empty stub created at `:31`. Anything
+      reading the ELF or the artwork must be told the real directory — hence
+      `run_game.sh` publishing `dump/title`.
+      **Design, being built now:** `padpath.py` / `padpath.sh` as the single
+      source of machine-specific paths (rig from `__file__`/`BASH_SOURCE`, rootfs
+      from `PAD_ROOT` else `~/spike2root`, the UNC asked of `wslpath -w` rather
+      than concatenated, and `PAD_ROOT`/`PAD_TABLES` crossing interop through
+      `WSLENV`'s `/p`); `mktables.py` building artwork + `device_xy` + `led_io` +
+      `switch_xy` + `switch_list` into `$PAD_TABLES/<title>/` — under the rootfs,
+      because watch.sh writes them inside WSL and the playfield window reads them
+      from Windows and the two must name ONE directory; and `rootfs.sh` so a
+      clone can build the guest rootfs from a card image.
+      **ESTABLISHED, from `devicexy.py` and `ledio.py`: the artwork, the LED map
+      and the coil positions are ALL static data in the ELF** — `ledio.py`'s wire
+      enumeration contributes no column, it only agrees or disagrees — so those
+      three need no run at all. **Only `switch_xy` needs one:** the switch table
+      is built in the HEAP and reaches the outside world only as the shim's
+      `[sw]`/`[swmap]` dump (`hwshim.c:3543,4851`), so the id→name join cannot be
+      done from the binary. Cache it per title so only the FIRST run of a title
+      pays.
+      **Acceptance:** with `PAD_ROOT` and `PAD_TABLES` pointed somewhere that is
+      not this machine's defaults, and with `games/` empty and no table committed,
+      `PAD_CARD=<godzilla image> watch.sh` opens the virtual playfield with the
+      real artwork, lit inserts and clickable switches — all of it built from the
+      card during that run. Then `grep -rl 'home/david\|Users/david\|wsl\.localhost'`
+      over tracked rig files returns nothing. State which titles you ran, and say
+      whether the first run of a fresh title got its switches or only its
+      artwork, because that is the one thing the cache cannot hide.
+      — S2: nothing is broken on THIS machine, which is why it is not S1; what it
+      costs is that every new title needs a table generated and committed by hand
+      (making item 27 and every title after it dearer), and that the repo cannot
+      be run by anyone else at all. Arguable as S3 if you read "nobody is blocked
+      today" as decisive. D3: needs a run to confirm, the result shows up the
+      moment you look, and the mechanism is fully read off the source — the cost
+      is breadth (~190 files, both sides of the boundary), not uncertainty.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

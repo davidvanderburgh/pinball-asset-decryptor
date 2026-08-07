@@ -5385,12 +5385,68 @@ static void led_publish(const unsigned char *p, int n)
 
     body = p + 3;
     blen = (unsigned)n - 5;                  /* drop checksum + reply-length */
+
+    /* ---- RANGE FADES (cmd b4 up / b5 down) - TESTED BEFORE THE INDEXED
+     * SHAPES, WHICH IS THE WHOLE FIX. A 3-byte body parses beautifully as the
+     * single-write shape, so `0e b6 0f` - lamps 14..54 fading at rate 0x0f -
+     * spent weeks decoded as "lamp 14 := 0x0f": one dim dot per bank sweep,
+     * and a RATE byte written into a BRIGHTNESS. The census that caught it:
+     * 44 of 44 b4 blen=3 and 22 of 22 b5 fit [start][0x80|end][rate] and 0 of
+     * 66 carry the 0x0f gap byte a genuine single write has (97: 71 of 80).
+     *
+     *   [start][0x80|end][rate]           blen 3
+     *   [start][mid][0x80|end][rate]      blen 4 (refs strictly ascend; the
+     *                                     mid point is not yet rendered)
+     *
+     * b4 fades the range UP to full, b5 DOWN to off - direction from what
+     * follows on the wire (the next write into a b4'd range asserts HIGH) and
+     * from the rate alphabet matching a2's. Unlike an a2 pulse this MOVES THE
+     * BASE: val[] takes the target, and the ring entry's envelope expires
+     * onto it, so the window ramps and lands with no code of its own. */
+    if ((cmd == 0xb4 || cmd == 0xb5) && (blen == 3 || blen == 4)) {
+        unsigned s0 = body[0], e7 = body[blen - 2], rate = body[blen - 1];
+        unsigned mid_ok = blen == 3 ||
+            (body[1] < 96 && led_known[node][body[1]] && body[1] >= body[0]);
+        if ((e7 & 0x80) && s0 < 96 && led_known[node][s0]
+            && (e7 & 0x7f) < 96 && led_known[node][e7 & 0x7f]
+            && s0 <= (e7 & 0x7f) && mid_ok) {
+            unsigned e0 = e7 & 0x7f, k;
+            unsigned char frm = led_shm->val[node][s0];
+            unsigned char to = (cmd == 0xb4) ? 0xff : 0x00;
+            unsigned slot = led_shm->fade_head % 96u;
+            for (k = s0; k <= e0; k++)
+                if (led_known[node][k])
+                    led_shm->val[node][k] = to;
+            led_shm->decoded += (e0 - s0 + 1);
+            led_shm->gen++;
+            led_shm->fade[slot].ms    = (unsigned)pad_ms();
+            led_shm->fade[slot].node  = (unsigned char)node;
+            led_shm->fade[slot].start = (unsigned char)s0;
+            led_shm->fade[slot].end   = (unsigned char)e0;
+            led_shm->fade[slot].from  = frm;
+            led_shm->fade[slot].to    = to;
+            led_shm->fade[slot].rise  = (unsigned char)(cmd == 0xb4 ? rate : 0);
+            led_shm->fade[slot].fall  = (unsigned char)(cmd == 0xb4 ? 0 : rate);
+            led_shm->fade[slot].pad   = 0;
+            led_shm->fade_head++;
+            return;
+        }
+    }
+
     for (s = 0; s < 3; s++) {
         unsigned extra = (unsigned)shape[s].extra, gap = (unsigned)shape[s].gap;
         unsigned cnt;
         if (blen < extra + 2 || ((blen - extra) & 1)) continue;
         cnt = (blen - extra) / 2;
         if (!cnt) continue;
+        /* A single-lamp 2N+1 frame must actually CARRY its 0x0f gap byte.
+         * With one index the structural test is nearly no test at all, and
+         * this shape was eating the a4/a5 pair frames ([lamp][lamp][rate] -
+         * `36 37 bb` became "lamp 0x36 := 0xbb", a rate as a brightness).
+         * 71 of 80 genuine single writes have the 0x0f; the census says the
+         * pair/range families never do. The 9 nonconforming frames now land
+         * in the skip log, which is where an undecoded shape belongs. */
+        if (cnt == 1 && extra == 1 && body[1] != 0x0f) continue;
         for (i = 0; i < cnt; i++)
             if (body[i] >= 96 || !led_known[node][body[i]]) break;
         if (i != cnt) continue;              /* not all valid indices */

@@ -666,10 +666,46 @@ These have each been violated at least once and each cost a run or a window:
       1-4** (a2 fits at best 7 of 40). Note the strip boards (nodes 12/14)
       also carry b4/b5 in a DIFFERENT layout (`c00b000a`, bit7 on byte 0) —
       the insert-node gate keeps them out of the decoder, correctly.
+      **★★★ THIRD DECODE, `c950da3`, live-verified: FORM A — the long a2
+      bodies are `[refs…, last|0x80][FROM×N][TO×N]`, blen==3N**, a multi-lamp
+      fade step. It signs itself: three CONSECUTIVE refs ⇒ an identical value
+      TRIPLE in the TO region (an RGB fixture fading to one colour). Moves the
+      base like b4/b5. **After a 4-min run: ZERO long a2 bodies left in the
+      skip log.** What still skips: 389 a4/a5 blen=2 (lamp REFERENCES, no
+      lamp data by construction), 26 blen=3 the gap-byte gate correctly
+      pushed out, ~7 header-prefixed b4/b5 long forms.
+      **★ RULED OUT, and it was the best remaining suspect: `cmd 0x70`.** It
+      is the most common command on the insert boards (3483 node 8, 1935 node
+      9, 1161 node 1) and is not in the decoder's gate, so it read as a whole
+      missing lamp stream. It is not: body is ALWAYS `(index, 00, 00)` in
+      6579/6579 frames, rlen 0, and it runs at a dead-constant 243 frames per
+      20 s bucket from boot to teardown regardless of the light show. A
+      brightness stream varies with the show; a 12.15 Hz metronome carrying no
+      value is a refresh or keepalive. Do not decode it as lamp data.
+      **★ DAVID's NODE-BOARD RE PROPOSAL, 2026-08-07, assessed not dismissed:
+      "maybe if the fade curve logic lives in the node boards (and there's
+      sparse data fed to them), we just need to look into the node board logic
+      to RE what the curves are."** The premise is CORRECT and the firmware
+      ships on the card — `games/<title>/*.hex`, and the LED ones are
+      `coil4_lednode-LPC1313`, `ws2812node-LPC1313`, `ws2812pinnode-LPC1313`,
+      `hdmi_ws2812node-LPC1313`. **But they are ENCRYPTED, measured:** valid
+      Intel HEX (400/400 checksums) wrapping ciphertext — **entropy 7.992
+      bits/byte, 0.4% zero bytes, all 256 values present, no plausible
+      Cortex-M vector table** (word 0 = 0x7ce94728, not an LPC1313 stack
+      pointer). **Ruled out: repeating-key XOR** — index of coincidence is
+      0.0039 (= random) at every period 1…1024 — and **a shared-plaintext
+      crib between siblings**: `ws2812node` vs `hdmi_ws2812node` are the same
+      length and share only 0.4% of bytes, i.e. no aligned common code. Note
+      the four non-data records at the top (types 06/07, 58 bytes total) are
+      unexplained and are the obvious place a header/IV would live. **So this
+      is a real project (a new Stern firmware-crypto crack), not an
+      afternoon** — worth its own queue item if David wants the true curves;
+      until then the curve is linear and the unit is a knob.
       **Resume:** David judges the current build by eye and tunes
-      `PAD_PF_FADE_UNIT_MS`; then crack the long bodies from
-      `/var/tmp/led_trace_1d.log` with the census pattern (scratchpad
-      a2fade.py / a2chain.py).
+      `PAD_PF_FADE_UNIT_MS` (crosses WSLENV now, so it works on a watch.sh
+      run). Remaining decode targets, in order: the header-prefixed b4/b5
+      long forms, then the 06/07 hex records if anyone opens the node-firmware
+      question. Trace: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
       item 16: play works, but every run pays for its absence. D5 — the only

@@ -852,10 +852,18 @@ def test_the_repair_only_edits_the_distro_s_own_sources():
 #     Reproduced in WSL with APT_CONFIG pointing at an empty lists dir.
 # ----------------------------------------------------------------------
 
+#: Jim-Beam's machine as the fixed probe describes it: a release that does not
+#: publish qemu-user-static, which the rig is willing to go and fetch.
 _NOCAND = dict(qemu="0", armgcc="1", debugfs="1", fuse="1", binfmt="0",
-               nocand="qemu-user-static", universe="1", indexed="1",
+               nocand="qemu-user-static", xrel="qemu-user-static",
+               universe="1", indexed="1",
                components="main restricted universe multiverse",
                distro="ubuntu 26.10 resolute")
+
+#: The same shape, for a package the rig will NOT cross-install: an ordinary
+#: dynamically linked one whose dependencies belong to its own release.
+_NOCAND_HARD = dict(_NOCAND, qemu="1", armgcc="0", binfmt="1",
+                    nocand="gcc-arm-linux-gnueabihf", xrel="")
 
 
 def test_the_release_that_lacks_the_package_is_named_not_guessed_at():
@@ -870,15 +878,54 @@ def test_the_release_that_lacks_the_package_is_named_not_guessed_at():
         assert guess not in text
 
 
-def test_a_dead_end_takes_the_button_away_and_says_where_to_go():
-    """The button promised, underneath the line saying the package could not
-    be installed, that pressing it would install the package."""
+def test_the_app_fetches_the_package_rather_than_telling_him_to_move_distro():
+    """THE POINT OF PAD-42.  qemu-user-static depends on nothing, so a .deb
+    from an Ubuntu that publishes it installs cleanly on one that does not -
+    and the app doing that beats the app printing two wsl commands."""
     facts = _facts(**_NOCAND)
+    assert emulate_tab.setup_fetchable(facts) == ["qemu-user-static"]
+    assert emulate_tab.setup_fixable(facts), "the button can still do this"
+    text = setup_notice(facts, can_fix=True)
+    assert "Ubuntu %s's archive" % emulate_tab.FALLBACK_RELEASE in text
+    assert "depends on nothing" in text
+    # ...and it must NOT fall back to telling him to move distro.
+    assert "wsl --set-default" not in text
+
+
+def test_the_fetch_is_named_in_the_dialog_that_consents_to_it():
+    """Fetching from another release is not `apt install`, and the dialog is
+    the only place the user agrees to any of it."""
+    steps = emulate_tab.setup_fix_steps(_facts(**_NOCAND))
+    fetch = [s for s in steps if "Ubuntu %s's archive"
+             % emulate_tab.FALLBACK_RELEASE in s]
+    assert len(fetch) == 1, steps
+    assert "depends on nothing" in fetch[0]
+    assert "sources are not changed" in fetch[0]
+    # and it is not ALSO promised as an ordinary install
+    assert not [s for s in steps
+                if s.startswith("Install in WSL") and "qemu-user-static" in s]
+
+
+def test_a_package_that_cannot_be_fetched_still_takes_the_button_away():
+    """The fetch is allowed for one package because it depends on nothing.
+    Everything else is still a dead end, and must still read like one."""
+    facts = _facts(**_NOCAND_HARD)
+    assert emulate_tab.setup_fetchable(facts) == []
     assert not emulate_tab.setup_fixable(facts)
     text = setup_notice(facts, can_fix=True)
     assert "installs those in WSL" not in text
     assert "wsl --install -d %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
     assert "wsl --set-default %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
+
+
+def test_a_rig_that_never_heard_of_xrel_promises_nothing():
+    """`xrel` is new.  An older setupcheck.sh must not have its silence read
+    as "yes, fetch it" - that would promise a repair that never happens."""
+    assert emulate_tab.setup_fetchable(_facts(qemu="0")) == []
+    assert emulate_tab.setup_fetchable(None) == []
+    old = _facts(**dict(_NOCAND, xrel=None))
+    del old["xrel"]
+    assert not emulate_tab.setup_fixable(old)
 
 
 def test_the_button_stays_when_any_of_it_can_still_be_installed():
@@ -951,10 +998,53 @@ def test_an_update_that_failed_is_not_evidence_the_release_lacks_it():
     assert 'if _run apt-get update -qq; then' in fix
 
 
-def test_the_two_halves_recommend_the_same_distro():
-    """The tab names it before the user ever presses the button and the log
-    names it after.  Two spellings of one recommendation is how they drift."""
-    assert emulate_tab.KNOWN_GOOD_DISTRO in _rig_text("setupfix.sh")
+def test_the_two_halves_agree_on_the_fallback_release():
+    """One release, three spellings: the distro name a user types at wsl.exe,
+    the suite apt knows it by, and the version the tab says out loud."""
+    fix = _rig_text("setupfix.sh")
+    assert "PAD_KNOWN_GOOD_DISTRO=%s" % emulate_tab.KNOWN_GOOD_DISTRO in fix
+    assert emulate_tab.FALLBACK_RELEASE == "24.04"
+    assert "PAD_FALLBACK_SUITE=noble" in fix
+
+
+def test_only_a_package_that_depends_on_nothing_is_cross_installed():
+    """THE SAFETY PROPERTY.  A .deb from another release drags its dependency
+    chain in with it, which is how "the emulator will not start" becomes "apt
+    is broken".  qemu-user-static is exempt because its Depends is empty - and
+    that is re-read off the DOWNLOADED FILE, so the flag in setupcheck.sh can
+    only narrow what is attempted, never widen what is allowed."""
+    check = _rig_text("setupcheck.sh")
+    flagged = [ln.split(":")[2] for ln in check.splitlines()
+               if ln.count(":") == 3 and ln.rstrip().endswith(":1")]
+    assert flagged == ["qemu-user-static"], flagged
+    fix = _rig_text("setupfix.sh")
+    assert "dpkg-deb -f \"$deb\" Depends" in fix
+    assert "dpkg-deb -f \"$deb\" Pre-Depends" in fix
+    gate = fix.split("dpkg-deb -f \"$deb\" Depends", 1)[1]
+    assert gate.index('[ -n "$deps$predeps" ]') < gate.index("dpkg -i"), \
+        "the dependency gate must come before the install, not after"
+
+
+def test_the_fetch_leaves_the_machine_s_package_sources_alone():
+    """The sources-editing version of this idea fails open: a cleanup that is
+    skipped leaves a foreign repository on the machine, and every apt-get
+    upgrade from then on is pulling from the wrong release.  apt is run
+    against a throwaway root instead, so there is no cleanup to skip."""
+    fix = _rig_text("setupfix.sh")
+    body = fix.split("_fetch_foreign() {", 1)[1].split("\n}", 1)[0]
+    for override in ("Dir::Etc::sourcelist=", "Dir::Etc::sourceparts=/dev/null",
+                     "Dir::State::lists=", "Dir::Cache="):
+        assert override in body, override
+    assert "/etc/apt" not in body, "the fetch must not touch the real sources"
+    assert 'rm -rf "$t"' in body
+
+
+def test_the_fetch_uses_the_mirror_apt_is_already_configured_with():
+    """Someone on a country mirror or on ports.ubuntu.com has that for a
+    reason, and the pool is the same on all of them."""
+    body = _rig_text("setupfix.sh").split("_fetch_foreign() {", 1)[1]
+    assert "REPO_URI" in body.split("\n}", 1)[0]
+    assert "ports.ubuntu.com" in body, "no fallback for non-x86 hosts"
 
 
 def test_the_probe_reuses_the_rig_s_own_binfmt_detection():

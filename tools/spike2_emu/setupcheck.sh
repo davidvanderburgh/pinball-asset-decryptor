@@ -61,19 +61,33 @@
 _have() { command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0; }
 
 #: WHAT THE EMULATOR NEEDS BEYOND THE RIG: fact key, the tool that IS the
-#: fact, and the package that is only how apt spells it. THE RIG'S ONE COPY -
-#: setupfix.sh installs what this reports as missing rather than keeping a
-#: second list, because two lists in two scripts is exactly how the thing that
-#: is explained and the thing that is installed stop being the same four.
-PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static
-armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf
-debugfs:debugfs:e2fsprogs
-fuse:fusermount3:fuse3"
+#: fact, the package that is only how apt spells it, and whether that package
+#: may be fetched from ANOTHER Ubuntu release when this one has no version of
+#: it. THE RIG'S ONE COPY - setupfix.sh installs what this reports as missing
+#: rather than keeping a second list, because two lists in two scripts is
+#: exactly how the thing that is explained and the thing that is installed
+#: stop being the same four.
+#:
+#: THE LAST FIELD IS A PERMISSION, NOT A PROMISE, and only one package has it.
+#: qemu-user-static is a statically linked binary that Depends on NOTHING (a
+#: 133 MB static-pie interpreter and a binfmt.d config file), so a .deb built
+#: for one Ubuntu installs cleanly on another and drags nothing in with it.
+#: The other three are ordinary dynamically linked packages whose dependency
+#: chains belong to their own release; cross-installing those would be how you
+#: turn "the emulator will not start" into "apt is broken". setupfix.sh checks
+#: the actual downloaded file's Depends before it installs anything, so this
+#: flag can only ever narrow what is attempted, never widen what is allowed.
+PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
+armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
+debugfs:debugfs:e2fsprogs:0
+fuse:fusermount3:fuse3:0"
 
-need=
+need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do
-    _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}; _pkg=${_rest#*:}
+    _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}
+    _rest=${_rest#*:}; _pkg=${_rest%%:*}; _xrel=${_rest#*:}
     echo "$_key=$(_have "$_tool")"
+    [ "$_xrel" = 1 ] && _xrel_ok="$_xrel_ok $_pkg"
     command -v "$_tool" >/dev/null 2>&1 || need="$need $_pkg"
 done
 echo "need=${need# }"
@@ -138,6 +152,16 @@ if [ -n "$nocand" ] &&
 else
     echo "universe=1"
 fi
+
+#: ...and of the ones apt has no version of, which the rig is willing to go
+#: and FETCH from an Ubuntu release that does publish it. Reported here rather
+#: than decided in setupfix.sh so that the tab can promise, before the user
+#: presses anything, exactly what the button is about to do.
+xrel=
+for _pkg in $nocand; do
+    case " $_xrel_ok " in *" $_pkg "*) xrel="$xrel $_pkg" ;; esac
+done
+echo "xrel=${xrel# }"
 
 #: WHICH Linux this is, so that nothing downstream has to guess. A package apt
 #: has no version of is a fact about a RELEASE, and the message about it named

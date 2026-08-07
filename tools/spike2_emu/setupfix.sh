@@ -46,12 +46,15 @@ fi
 _facts() { bash "$RIG/setupcheck.sh" 2>/dev/null; }
 _get() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
-#: The WSL distro to send someone to when their own cannot supply a package.
-#: An LTS, and the one this rig is developed and tested against, so it is a
-#: recommendation with evidence behind it rather than "try something newer".
-#: emulate_tab.py names the same one to the user before they ever get here;
-#: test_the_two_halves_recommend_the_same_distro keeps the two from drifting.
+#: The Ubuntu release to fall back to when this one has no version of a
+#: package: an LTS, and the one this rig is developed and tested against, so
+#: it is a choice with evidence behind it rather than "try something newer".
+#: The two spellings are the same release - the distro name is what a user
+#: types at wsl.exe, the suite is what apt calls it - and emulate_tab.py names
+#: it too, before the user ever presses anything.
+#: test_the_two_halves_agree_on_the_fallback_release keeps all three together.
 PAD_KNOWN_GOOD_DISTRO=Ubuntu-24.04
+PAD_FALLBACK_SUITE=noble
 
 facts=$(_facts)
 
@@ -120,6 +123,81 @@ _add_universe() {
         esac
     done
     [ "$touched" = 1 ]
+}
+
+#: FETCH A PACKAGE THIS RELEASE DOES NOT PUBLISH, from one that does.
+#:
+#: WHY THIS IS SAFE, AND WHY IT IS NOT A GENERAL FACILITY. Mixing releases is
+#: normally how you break apt: a .deb built against another release pulls in
+#: its dependency chain and you end up with half of it installed. This does
+#: none of that, for one reason that is checked and not assumed - the package
+#: it is allowed to fetch Depends on NOTHING. qemu-user-static is a static-pie
+#: interpreter and a binfmt.d config file; there is no chain to drag in. The
+#: control file of the ACTUAL DOWNLOADED FILE is read before dpkg is called,
+#: so if that ever stops being true this refuses instead of discovering it
+#: halfway through. setupcheck.sh's `xrel` decides which packages are even
+#: offered here, and it says exactly one.
+#:
+#: AND NOTHING PERMANENT IS TOUCHED. apt runs entirely against a throwaway
+#: root under /tmp - its own sources file, its own lists, its own cache - so
+#: /etc/apt and /var/lib/apt are exactly as they were whether this works or
+#: not. No source is added, nothing is pinned, and there is no cleanup that
+#: can be skipped and leave a foreign repository behind on the machine, which
+#: is the failure mode that makes the sources-editing version of this idea a
+#: bad one.
+#:
+#: The mirror is apt's OWN, not archive.ubuntu.com: someone on a country
+#: mirror or on ports.ubuntu.com has that for a reason, and it carries the
+#: same pool.
+_fetch_foreign() {
+    local pkg=$1 t mirror arch deps predeps deb rc=1
+    arch=$(dpkg --print-architecture 2>/dev/null)
+    mirror=$(apt-get indextargets --format '$(REPO_URI)' 2>/dev/null |
+             head -1)
+    if [ -z "$mirror" ]; then
+        case $arch in
+        amd64|i386) mirror=http://archive.ubuntu.com/ubuntu ;;
+        *)          mirror=http://ports.ubuntu.com/ubuntu-ports ;;
+        esac
+    fi
+    t=$(mktemp -d) || return 1
+    mkdir -p "$t/lists/partial" "$t/cache/archives/partial" "$t/dl"
+    # apt drops to the _apt user to fetch, and cannot read a 0700 mktemp dir.
+    chmod -R 0755 "$t"
+    printf 'deb %s %s universe\ndeb %s %s-updates universe\n' \
+        "$mirror" "$PAD_FALLBACK_SUITE" "$mirror" "$PAD_FALLBACK_SUITE" \
+        > "$t/pad.list"
+    set -- -o "Dir::Etc::sourcelist=$t/pad.list" \
+           -o Dir::Etc::sourceparts=/dev/null \
+           -o "Dir::State::lists=$t/lists" -o "Dir::Cache=$t/cache" \
+           -o APT::Get::List-Cleanup=0 -o Acquire::Languages=none
+
+    echo "fetching $pkg from Ubuntu $PAD_FALLBACK_SUITE instead"
+    if _run apt-get "$@" update -qq &&
+       ( cd "$t/dl" && _run apt-get "$@" download "$pkg" ); then
+        deb=$(ls "$t/dl"/*.deb 2>/dev/null | head -1)
+    fi
+    if [ -z "$deb" ]; then
+        echo "could not download $pkg from Ubuntu $PAD_FALLBACK_SUITE"
+        rm -rf "$t"; return 1
+    fi
+
+    # THE GATE. Anything with a dependency belongs to its own release and is
+    # not installed here, however it got this far.
+    deps=$(dpkg-deb -f "$deb" Depends 2>/dev/null)
+    predeps=$(dpkg-deb -f "$deb" Pre-Depends 2>/dev/null)
+    if [ -n "$deps$predeps" ]; then
+        echo "not installing it: this build of $pkg depends on other packages"
+        echo "($deps$predeps), and those belong to the release it was built"
+        echo "for. Mixing them in is not something this will do behind your"
+        echo "back."
+        rm -rf "$t"; return 1
+    fi
+    echo "  $(dpkg-deb -f "$deb" Package) $(dpkg-deb -f "$deb" Version)" \
+         "($(dpkg-deb -f "$deb" Architecture), depends on nothing)"
+    _run dpkg -i "$deb" && rc=0
+    rm -rf "$t"
+    return $rc
 }
 
 #: WHY apt has no version, said only from facts this run established.
@@ -206,6 +284,24 @@ if [ -n "$pkgs" ]; then
     for pkg in $pkgs; do
         _run apt-get install -y -qq "$pkg" || failed="$failed $pkg"
     done
+
+    # BEFORE CALLING IT A DEAD END. A package this release does not publish is
+    # not a package that cannot be got: the rig fetches the one that Depends
+    # on nothing from an Ubuntu that does have it, rather than printing two
+    # commands and leaving the user to it. Only ever what setupcheck.sh's
+    # `xrel` names, and _fetch_foreign re-checks the downloaded file itself.
+    if [ -n "$failed" ]; then
+        facts=$(_facts)
+        xrel=$(_get "$facts" xrel)
+        still=
+        for pkg in $failed; do
+            case " $xrel " in
+            *" $pkg "*) _fetch_foreign "$pkg" || still="$still $pkg" ;;
+            *)          still="$still $pkg" ;;
+            esac
+        done
+        failed=$still
+    fi
 
     if [ -n "$failed" ]; then
         facts=$(_facts)

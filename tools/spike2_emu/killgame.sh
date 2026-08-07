@@ -42,6 +42,10 @@ pkill -9 -f 'arm-binfmt'
 pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'
+# The background table builder watch.sh starts on a title that already
+# has artwork. It waits in a poll loop for the guest's switch table, so
+# it outlives a run that ends first. alive.sh counts it.
+pkill -9 -f 'mktables[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
 pkill -9 -f "^tail -q -n 0 -F $HOME/padvid\.log"
 pkill -9 -f 'padvidhost\.py'

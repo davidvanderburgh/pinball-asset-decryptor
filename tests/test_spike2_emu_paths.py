@@ -194,6 +194,54 @@ def test_ledio_builds_with_no_wire_log(rig):
     assert "NOT verified" not in ledio.text("t", rows, True)
 
 
+def _art_dir(rig, title, names):
+    """A fake title whose assets hold `names`, so artwork discovery can be
+    checked without a card."""
+    d = rig.root / "games" / title / "assets" / "nuk" / "images" / "Test"
+    d.mkdir(parents=True)
+    for n in names:
+        (d / n).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 25)
+    return d
+
+
+@pytest.mark.parametrize("title,files,want", [
+    # Jaws puts the qualifier LAST. A `*_playfield.png` suffix test found
+    # nothing and the rig reported "this title ships no playfield drawing"
+    # about a title shipping two of them.
+    ("jaws_le", ["jaws_le_playfield_scaled.png", "jaws_pro_playfield_scaled.png",
+                 "jaws_pro_backpanel_scaled.png", "jaws_topper_scaled.png"],
+     "jaws_le_playfield_scaled.png"),
+    # The same directory must give the Pro machine the Pro drawing. A substring
+    # test picks this pair correctly BY ACCIDENT, because "scaLEd" contains
+    # "le" - so it would hand an LE machine the Pro artwork the moment the
+    # alphabetical order changed.
+    ("jaws_pro", ["jaws_le_playfield_scaled.png", "jaws_pro_playfield_scaled.png"],
+     "jaws_pro_playfield_scaled.png"),
+    ("godzilla_pro", ["scaled_godzilla_le_playfield.png",
+                      "scaled_godzilla_pro_playfield.png"],
+     "scaled_godzilla_pro_playfield.png"),
+    ("godzilla_le", ["scaled_godzilla_le_playfield.png",
+                     "scaled_godzilla_pro_playfield.png"],
+     "scaled_godzilla_le_playfield.png"),
+    ("john_wick_le", ["john_wick_le_playfield.png"], "john_wick_le_playfield.png"),
+])
+def test_playfield_artwork_is_found_and_the_right_model_chosen(
+        rig, monkeypatch, title, files, want):
+    _art_dir(rig, title, files)
+    monkeypatch.setenv("PAD_GAME", title)
+    got = rig.gameinfo.find_playfield_art()
+    assert got is not None, "no artwork found for %s" % title
+    assert os.path.basename(got) == want
+
+
+def test_a_title_with_no_drawing_is_not_a_failure(rig, monkeypatch):
+    """Elvira and Led Zeppelin ship no images/Test at all, and the schematic
+    playfield is the right answer for them."""
+    _art_dir(rig, "elvira3", ["elvira3_topper_scaled.png"])
+    monkeypatch.setenv("PAD_GAME", "elvira3")
+    assert rig.gameinfo.find_playfield_art() is None
+
+
 def test_ledio_reports_a_wire_disagreement(rig):
     import ledio
     recs = [dict(kind="led", group=6, index=4, name="A", x=1, y=2, conn="8b",

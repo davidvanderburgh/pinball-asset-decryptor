@@ -166,7 +166,7 @@ for _v in $(set | sed -n 's/^\(PAD_[A-Z0-9_]*\|MESA_[A-Z0-9_]*\|GALLIUM_DRIVER\)
 done
 unset _v _val
 
-HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""
+HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
 # NOTE: CARD_MNT is deliberately NOT reset here - it is set above, and this is
 # below that. See the comment on its declaration.
 
@@ -214,7 +214,14 @@ teardown() {
     # for a pipeline); the tail at its head is caught by name. Both matter: an
     # orphaned tail -F never exits by itself.
     [ -n "$EVTPG" ] && kill -9 "$EVTPG" 2>/dev/null
-    pkill -9 -f "tail -q -n 0 -F $HOME/padvid[.]log' 2>/dev/null
+    pkill -9 -f "tail -q -n 0 -F $HOME/padvid[.]log" 2>/dev/null
+    # The background table builder, if this run started one. It sits in a poll
+    # loop waiting for the guest to publish its switch table, so a run that
+    # ends first leaves it with nothing to wait for. Added to alive.sh and
+    # killgame.sh the same day, per this rig's own rule about anything a run
+    # starts.
+    [ -n "$TBLPG" ] && kill -9 -"$TBLPG" 2>/dev/null
+    pkill -9 -f 'mktables[.]py' 2>/dev/null
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
     pkill -9 -f 'playaudio.sh' 2>/dev/null
     pkill -9 -f '^ffmpeg .*audio\.fifo' 2>/dev/null
@@ -456,10 +463,36 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # opened no window at all: `games/` held two titles with hand-made tables,
     # anything else was skipped, AND NOTHING WAS PRINTED. Whatever happens now,
     # something is said.
-    PF_WAIT=${PAD_PF_WAIT:-25}
+    # MEASURED, not guessed: the shim publishes the switch table about a MINUTE
+    # into a run, not 25 s. A 25 s budget got it on one pass of four titles and
+    # missed it on the next pass of two, which is the worst possible shape -
+    # it looks like a property of the title. `[swfind] found the switch table`
+    # in the run log is the moment being waited for.
+    PF_WAIT=${PAD_PF_WAIT:-120}
+    TBL_OUT=$(mktemp "${TMPDIR:-/tmp}/padtables.XXXXXX")
     echo "[watch] playfield tables for $GAME:"
-    python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
-        | sed 's/^/[watch]   /'
+
+    # PASS ONE: everything that needs no run at all - the artwork, the device
+    # positions, the insert map. Fast, and cached after the first time.
+    python3 "$RIG/mktables.py" > "$TBL_OUT" 2>&1
+    grep -v '^drawable=' "$TBL_OUT" | sed 's/^/[watch]   /'
+
+    # PASS TWO IS WHERE THE WAIT GOES, AND WHETHER IT BLOCKS DEPENDS ON WHETHER
+    # THERE IS ANYTHING TO LOOK AT MEANWHILE. Blocking always would delay the
+    # window by a minute on every first run of a title; never blocking would
+    # open an empty window for a title that has no artwork and no device table,
+    # which is exactly what Led Zeppelin and Elvira are.
+    if grep -q '^drawable=yes' "$TBL_OUT"; then
+        echo "[watch]   opening now; the switch table follows in the background"
+        setsid python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
+            > "$HOME/padtables.log" 2>&1 &
+        TBLPG=$!
+    else
+        echo "[watch]   nothing to draw yet - waiting for the game's own switch list"
+        python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
+            | grep -v '^drawable=' | sed 's/^/[watch]   /'
+    fi
+    rm -f "$TBL_OUT"
 
     PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
     # The rig's own path, as Windows sees it. `wslpath -w` is asked rather than

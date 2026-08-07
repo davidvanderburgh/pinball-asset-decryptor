@@ -844,12 +844,56 @@ These have each been violated at least once and each cost a run or a window:
       device table now.
       **New fast tests:** `tests/test_spike2_emu_paths.py`, 21 tests in 0.19 s,
       synthetic fixtures only — no WSL, no card, no ELF.
-      **NOT DONE, and it is the whole acceptance below: nobody has started a
-      run.** In particular the first-run switch path — watch.sh waiting up to
-      `PAD_PF_WAIT` (25 s) for the shim's `[sw]` dump and building `switch_xy`
-      from it — has been exercised only from old logs, never live. The seeded
-      Godzilla `switch_xy.txt` was deliberately REMOVED after testing so the
-      next run exercises it for real.
+      **★★ RUN ON FOUR TITLES 2026-08-06, ALL FROM THEIR CARDS, NOTHING
+      COMMITTED. All four boot, render at 60 fps and open a playfield window.**
+      Led Zeppelin LE 1.22.0, Elvira's HoH 1.13.0, Jaws LE 1.02.0, John Wick LE
+      1.01.0. **John Wick is the headline: a title with nothing in the
+      repository drew a full artwork playfield — 503 device records, 63 inserts,
+      56 switches placed, live coils, 30 fps.** Jaws draws its artwork with 73
+      inserts and 14 coils. Led Zeppelin and Elvira ship neither artwork nor a
+      device table and correctly get the clickable schematic.
+      **THREE FAULTS FOUND BY THE RUNS, two fixed here and one filed:**
+      **(a) FIXED — the playfield windows never closed, and it was a
+      REGRESSION FROM THIS ITEM'S OWN SWEEP.** `watch.sh` teardown had
+      `pkill -9 -f "tail … [.]log'` — a double quote closed by a single one,
+      which swallows the rest of the teardown into one string. **`bash -n`
+      cannot see it**, because a later quote in the file rebalances the parse;
+      that is why it shipped. Four playfield stubs and four audio processes
+      leaked across four runs, and it also corrupted the evidence, because
+      `shotwin.py` kept matching the leaked earlier window. Every `.sh` in the
+      rig has been scanned for the same shape; it was the only one.
+      **(b) FIXED — Jaws ships artwork and the rig said it did not.**
+      `find_playfield_art` matched `*_playfield.png`; Jaws spells it
+      `jaws_le_playfield_scaled.png`, qualifier last. Now matched on the word
+      anywhere, and the LE/Pro choice is made on WHOLE WORDS — the old
+      substring test picked that pair correctly only by accident, because
+      "scaLEd" contains "le".
+      **(c) FILED AS ITEM 29 — switch names come back as `?`** on Led Zeppelin,
+      Elvira and Jaws (John Wick and Godzilla are fine), so the schematic is a
+      list of numbers and Jaws gets no switch positions despite having 78 in
+      its binary. NOT fixed here and deliberately not guessed at.
+      **THE 25 s SWITCH-DUMP BUDGET WAS WRONG AND THE WAY IT WAS WRONG WAS THE
+      WORST SHAPE: it caught the dump on one pass of four titles and missed it
+      on the next pass of two, which reads as a property of the title.**
+      Measured: the shim publishes the table about a MINUTE in, consistently,
+      across all five logs. Raising the budget alone would have delayed every
+      first-run window by that minute, so the build is now in two passes —
+      everything that needs no run first, and then the wait BLOCKS only when
+      there is nothing to draw meanwhile (`mktables.py --drawable`). Jaws opens
+      at ~45 s with artwork, inserts and coils and finishes its switch table
+      behind the window; Led Zeppelin waits, because for it an early window is
+      an empty one. Budget now 120 s (`PAD_PF_WAIT`).
+      **Also fixed: the artwork view required switch POSITIONS**, which is a
+      different question from "is there a playfield to show" — so Jaws opened
+      its first run on the "no tables" label despite shipping a drawing and 217
+      positioned devices. It now draws whenever there is artwork and anything to
+      put on it.
+      **The background table builder is a process a run starts, so it went into
+      `alive.sh`, `killgame.sh` and teardown the same day**, per this file's own
+      rule. `alive.sh` printed 0 after every run above.
+      **STILL NOT DONE:** nobody has run this with `PAD_ROOT`/`PAD_TABLES`
+      pointed somewhere other than this machine's defaults, which is the
+      portability half of the acceptance below. The derivation half is done.
       **Two known prose-only hits** on the grep below: this repo's README
       describing the fix, and `playaudio.sh`'s `/mnt/c/Users/*/AppData/...`
       glob, which is already a wildcard across users.
@@ -868,6 +912,66 @@ These have each been violated at least once and each cost a run or a window:
       today" as decisive. D3: needs a run to confirm, the result shows up the
       moment you look, and the mechanism is fully read off the source — the cost
       is breadth (~190 files, both sides of the boundary), not uncertainty.
+
+- [ ] **29. Switch names come back as `?` on most titles, so the schematic
+      playfield is a list of numbers and switch positions cannot be joined.**
+      `S2 D4`
+      **MEASURED 2026-08-06 across four card runs, and the split is clean:**
+      Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
+      109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
+      0 of 105**, real names (`QR SCANNER STATUS READY`, …). Godzilla is also
+      fine. So this is per title, not universal, and at least two titles prove
+      the reader itself works.
+      **WHAT IT COSTS, and it is two separate things.** (a) The schematic view
+      draws 96 rows that all say `?`, so you cannot tell which switch you are
+      about to close — see the screenshot behaviour in item 27's sense of "see a
+      switch layout". (b) `switch_xy` is joined on the NAME, so a title with a
+      perfectly good device table gets **no clickable positions at all**: Jaws
+      has 78 switch records with names and coordinates in its binary and scored
+      `NONE of the 108 switches matched a device-table name`.
+      **ESTABLISHED AT THE DESK, from `hwshim.c`:** the name is
+      `msg_row(*(nameobj + 16))` at `hwshim.c:3574`, and `msg_row` (`:3219`)
+      opens with `if (!MSG_LANG) return 0;`. `MSG_LANG` is
+      `TITLE_ADDR(a_msg_lang, "PAD_MSG_LANG", 0x708330u)` — a **Godzilla Pro
+      1.15.0** address (`:2960`).
+      **BUT THE OBVIOUS ONE-LINE FIX IS PROBABLY NOT IT, and this is the trap
+      worth writing down before someone spends a pass on it.** `title_addr()`
+      (`:1267`) returns the default whenever it is merely READABLE, and this
+      file already records that trap for the switch table: *"EHOH's binary is
+      big enough to cover Godzilla Pro's 0x7a958c, so a_sw_struct() returned an
+      address … and the shim read a switch table out of somebody else's data."*
+      So on these titles `MSG_LANG` is most likely non-zero-but-wrong, the
+      early-out never fires, and `msg_row` is instead failing one of its two
+      range checks on `row` or `row[0]`. **Making `!MSG_LANG` fall back to
+      language slot 0 is therefore a guess, not a fix** — and note `msg_row`
+      ALREADY tolerates a garbage `lang` (it validates `lang < 5` and the
+      resulting pointer, falling back to slot 0), which is more evidence the
+      early-out is not where this dies.
+      **FIRST JOB IS AN INSTRUMENT, WHICH IS THE D4.** Print `nameobj`, `row`,
+      `row[0]` and `MSG_LANG`'s value for the first few switches on a title that
+      fails and on John Wick, which does not. That says in one run whether the
+      name object is absent, at a different offset, or pointing at a message
+      table this shim cannot resolve. Only then choose between a per-title
+      `PAD_MSG_LANG`, a shape-based finder like `sw_find_table`, and reading the
+      names some other way.
+      **RULED OUT — joining on the NUMBER instead.** `switchxy.py`'s own header
+      says why: the device table's `index` is a sequential position within its
+      board and not the hardware bit (node 8 runs bits 9,10,11… against index
+      8,9,10…, then the hardware skips 21-23 and the index does not), so a
+      numeric join "produces a map that looks right and presses the wrong
+      switch". Do not reach for it as a workaround.
+      **Acceptance:** on a title that fails today, the schematic shows real
+      switch names, and a title that also ships a device table gets its switches
+      placed on the artwork. State which titles you checked and include one that
+      already worked (John Wick or Godzilla) as a regression control.
+      — S2: the playfield opens, is clickable and the keyboard works, so nobody
+      is blocked from playing; what it costs is that the switch layout is
+      unreadable on three of the four titles tried and that positions are
+      unavailable on a title whose binary has them. Arguable as S1 against item
+      27's wording, which asked to "see a switch layout". D4: the mechanism is
+      NOT established, the leading theory is explicitly marked above as probably
+      wrong, and it needs a guest-side instrument and a run before anything can
+      be chosen.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the

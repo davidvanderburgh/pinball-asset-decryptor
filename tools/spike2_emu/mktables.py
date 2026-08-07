@@ -267,6 +267,38 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     return made
 
 
+def drawable(game=None):
+    """Whether this title has enough to draw a playfield WITHOUT a run.
+
+    The caller that matters is watch.sh, and the decision it makes with this is
+    the difference between a useful first run and a useless one:
+
+      * yes - artwork or device positions exist, so open the window NOW and
+        finish the switch tables behind it. The window shows the playfield,
+        its inserts and its coils immediately, and gains clickable switches on
+        the next run of that title.
+      * no  - there is nothing to draw at all until the game publishes its
+        switch list, so waiting for it is the only way the window is worth
+        opening. Led Zeppelin and Elvira are this case: no images/Test and no
+        device table anywhere in the binary.
+    """
+    game = gameinfo.active(game)
+    if not game:
+        return False
+    tdir = gameinfo.table_dir(game)
+    if not tdir:
+        return False
+    art = os.path.join(tdir, "playfield.png")
+    if os.path.exists(art):
+        return True
+    dev = os.path.join(tdir, "device_xy.txt")
+    try:
+        with open(dev) as f:
+            return any(not ln.startswith("#") and ln.strip() for ln in f)
+    except OSError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--game", default=None, help="title (default: the active one)")
@@ -278,6 +310,9 @@ def main():
     made = build(a.game, a.log, a.wait, a.force)
     if not made:
         print("nothing written")
+    # A machine-readable last line, so watch.sh can decide whether to open the
+    # playfield window now or wait for the switch table first.
+    print("drawable=%s" % ("yes" if drawable(a.game) else "no"))
     return 0
 
 

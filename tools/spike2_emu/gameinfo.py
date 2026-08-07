@@ -201,12 +201,33 @@ def playfield_png(name=None):
     return find_playfield_art(name)
 
 
+def _tokens(filename):
+    """A filename's words, lowercased: 'jaws_le_playfield_scaled.png' ->
+    {jaws, le, playfield, scaled}."""
+    import re
+    return set(re.split(r"[^a-z0-9]+", filename.lower())) - {""}
+
+
 def find_playfield_art(name=None):
     """The title's playfield drawing inside its own assets, or None.
 
-    A title ships one per model (scaled_godzilla_pro_playfield.png and
-    scaled_godzilla_le_playfield.png sit side by side), so the directory name is
-    used to choose: `godzilla_pro` prefers the file whose name carries "pro".
+    TWO THINGS HERE ARE NOT AS OBVIOUS AS THEY LOOK, and each cost a title.
+
+    **The word "playfield" is not always a SUFFIX.** This matched
+    `*_playfield.png` - which is how Godzilla
+    (`scaled_godzilla_pro_playfield.png`) and John Wick
+    (`john_wick_le_playfield.png`) spell it. Jaws puts the qualifier last,
+    `jaws_le_playfield_scaled.png`, so a suffix test found nothing and the rig
+    reported "this title ships no playfield drawing" about a title shipping two
+    of them. Match on the word appearing anywhere instead.
+
+    **Choosing between models needs WHOLE WORDS, not substrings.** A title
+    ships one drawing per model side by side - `jaws_le_playfield_scaled.png`
+    and `jaws_pro_playfield_scaled.png` - and the directory name picks. A
+    substring test appears to work and does so by accident: looking for "le" in
+    `jaws_pro_playfield_scaled.png` succeeds, because "scaLEd" contains it. It
+    would have picked the Pro drawing for an LE machine as soon as the
+    alphabetical order changed.
     """
     a = assets(name)
     if not a:
@@ -214,17 +235,19 @@ def find_playfield_art(name=None):
     d = os.path.join(a, "nuk", "images", "Test")
     try:
         found = [f for f in sorted(os.listdir(d))
-                 if f.lower().endswith("_playfield.png")]
+                 if f.lower().endswith(".png") and "playfield" in f.lower()]
     except OSError:
         return None
     if not found:
         return None
-    want = (active(name) or "").lower().split("_")
+    want = _tokens(active(name) or "")
     for f in found:
-        if all(w in f.lower() for w in want if w):
+        if want and want <= _tokens(f):
             return os.path.join(d, f)
-    for f in found:                       # fall back on the model suffix alone
-        if want and want[-1] in f.lower():
+    # Fall back on the model word alone (`le` / `pro`), then on anything.
+    model = (active(name) or "").lower().rsplit("_", 1)[-1]
+    for f in found:
+        if model and model in _tokens(f):
             return os.path.join(d, f)
     return os.path.join(d, found[0])
 

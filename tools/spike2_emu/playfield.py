@@ -1350,7 +1350,19 @@ def main():
     # real answers; which one applies is a property of the game, not of this
     # window. See load_switch_list() for why most titles are the second case.
     view = None
-    if PF_PNG and os.path.exists(PF_PNG) and load_switches():
+    # ARTWORK IF THERE IS ARTWORK AND ANYTHING TO DRAW ON IT.
+    #
+    # THIS USED TO ALSO REQUIRE SWITCH POSITIONS, and that is a different
+    # question from "is there a playfield to show". Switch positions are the
+    # one part of the table set that needs a RUN - the game builds its switch
+    # list on the heap, so the id behind a name only reaches us in the shim's
+    # dump about a minute in - while the artwork, the inserts and the coils all
+    # come straight from the card. Requiring all four meant Jaws, which ships a
+    # playfield drawing and 217 positioned devices, opened its FIRST run
+    # showing the "no tables" label, and only became a playfield on the second.
+    # Inserts and coils are worth looking at on their own.
+    if PF_PNG and os.path.exists(PF_PNG) and (
+            load_switches() or load_leds() or load_coils()):
         view = Field(root)
     else:
         rows = load_switch_list()

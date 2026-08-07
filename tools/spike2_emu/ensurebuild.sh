@@ -3,6 +3,8 @@
 # and built from THESE sources?"
 #
 #   . "$(dirname "$0")/ensurebuild.sh"
+#   pad_ensure_rootfs || exit 1
+#   pad_ensure_guest_exec || exit 1
 #   pad_ensure_shim
 #   pad_ensure_bridge || exit 1
 #
@@ -287,4 +289,187 @@ pad_ensure_rootfs() {
     mkdir -p "$ROOT/dump" 2>/dev/null
     echo "[build] guest filesystem ready"
     return 0
+}
+
+# ---- AND WHETHER IT CAN RUN ANYTHING, WHICH IS A DIFFERENT QUESTION --------
+#
+# A guest filesystem that EXISTS is not one that RUNS, and the gap between
+# those two reached a user on 2026-08-07 as a single line with nothing in it
+# to act on:
+#
+#     chroot: failed to run command '/bin/sh': No such file or directory
+#
+# printed a minute after the window opened, followed by "the game never
+# started". Every check the rig had passed: the directories were there, the
+# shim was built, the renderer was built, the card mounted, the tables were
+# derived. The one thing nobody asked was whether a program could be started
+# inside the thing at all.
+#
+# IT IS ASKED BY DOING IT. The probe is the run's own first step - a user
+# namespace, a chroot, /bin/sh - and it costs about 30 ms. Everything below it
+# runs ONLY when that fails, so a healthy machine pays a fork and nothing else,
+# and a broken one is told which of the four possible faults it has instead of
+# waiting 60 seconds to be told the game never started.
+#
+# The four, all of which produce that ONE message and no other clue:
+#
+#   * /bin/sh does not resolve inside the rootfs - an extraction that was
+#     interrupted, or one made where the WSL disk filled up. REPAIRABLE: the
+#     card that was chosen to run is the same card it is built from.
+#   * the ARM loader is gone, so the kernel cannot start the shell it found.
+#     Same cause, same repair.
+#   * the kernel has no handler for 32-bit ARM binaries. Needs root, once, and
+#     WSL forgets it on restart unless systemd is enabled - so the message says
+#     both how to do it now and how to make it stick.
+#   * a handler that is registered WITHOUT the F flag, whose interpreter the
+#     kernel then looks for INSIDE the chroot, where it is not. REPAIRABLE
+#     with no root at all: put a copy of the interpreter there.
+
+#: THE ONLY TEST THAT PROVES IT. Same namespace and same chroot as
+#: run_game.sh, so a pass here means the real thing gets as far as the game.
+_pad_guest_probe() {
+    unshare -r -m bash -c 'chroot "$1" /bin/sh -c "exit 0"' _ "$ROOT" 2>&1
+}
+
+#: The kernel's handler for 32-bit ARM binaries, if it has one. `qemu-arm` on
+#: Debian and Ubuntu; anything else is matched on the ELF magic it registered
+#: (e_machine 0x28 = ARM, at offset 18), because THAT is the fact and the name
+#: is only a convention. aarch64 and armeb are 64-bit and big-endian and would
+#: both match a sloppier test.
+_pad_binfmt_arm() {
+    local d=/proc/sys/fs/binfmt_misc f
+    [ -d "$d" ] || return 1
+    [ -f "$d/qemu-arm" ] && { printf '%s\n' "$d/qemu-arm"; return 0; }
+    for f in "$d"/*; do
+        case "${f##*/}" in register|status|*aarch64*|*armeb*) continue ;; esac
+        [ -f "$f" ] || continue
+        grep -qi '^magic .*02002800$' "$f" 2>/dev/null && {
+            printf '%s\n' "$f"; return 0; }
+    done
+    return 1
+}
+
+#: The command that would register the ARM handler ON THIS MACHINE. Ubuntu
+#: 24.04 has no /usr/share/binfmts entry for it any more - systemd imports
+#: /usr/lib/binfmt.d instead - so a single printed recipe is wrong on half the
+#: machines that need it. Printed only, never run: registering is the one step
+#: in this rig that genuinely needs root.
+_pad_binfmt_advice() {
+    if [ -f /usr/lib/binfmt.d/qemu-arm.conf ]; then
+        echo "sudo sh -c 'cat /usr/lib/binfmt.d/qemu-arm.conf > /proc/sys/fs/binfmt_misc/register'"
+    elif [ -f /usr/share/binfmts/qemu-arm ]; then
+        echo "sudo update-binfmts --import qemu-arm"
+    else
+        echo "sudo apt install qemu-user-static"
+    fi
+}
+
+pad_ensure_guest_exec() {
+    local out missing entry interp flags card
+
+    out=$(_pad_guest_probe) && return 0
+
+    echo "[guest] the guest filesystem is there, but nothing can be STARTED" >&2
+    echo "[guest] inside it, so the game would die the moment it launched:" >&2
+    printf '%s\n' "$out" | sed 's/^/[guest]   /' >&2
+
+    # unshare refused before the chroot was ever reached, so nothing below is
+    # the fault and none of it would help.
+    case "$out" in
+        *unshare*)
+            echo "[guest] That is the sandbox, not the game: this kernel will" >&2
+            echo "[guest] not let an ordinary user make a namespace, and the" >&2
+            echo "[guest] run needs one. On WSL, wsl --shutdown and start" >&2
+            echo "[guest] again; on Linux, check kernel.unprivileged_userns_clone." >&2
+            return 1 ;;
+    esac
+
+    # ---- 1. the filesystem, which is the fault that was actually reported --
+    missing=$(pad_guest_missing)
+    if [ -n "$missing" ]; then
+        echo "[guest] $missing is not in $ROOT. The guest filesystem is" >&2
+        echo "[guest] INCOMPLETE - an extraction that stopped part way, or one" >&2
+        echo "[guest] made where the disk filled up. Every directory the rig" >&2
+        echo "[guest] looks for is there, which is why nothing said so before." >&2
+        card=${PAD_CARD:-}
+        if [ -z "$card" ] || [ ! -f "$card" ]; then
+            echo "[guest] Pick a card image and start again and it is rebuilt" >&2
+            echo "[guest] for you (a few minutes, once)." >&2
+            return 1
+        fi
+        echo "[guest] Rebuilding it from $card. A few minutes, and only once."
+        if ! bash "$RIG/rootfs.sh" --force "$card"; then
+            echo "[guest] the rebuild failed - see above." >&2
+            return 1
+        fi
+        out=$(_pad_guest_probe) && {
+            echo "[guest] the guest starts programs again; carrying on."
+            return 0
+        }
+        printf '%s\n' "$out" | sed 's/^/[guest]   /' >&2
+    fi
+
+    # ---- 2. the kernel's ARM handler --------------------------------------
+    entry=$(_pad_binfmt_arm)
+    if [ -z "$entry" ]; then
+        if [ ! -d /proc/sys/fs/binfmt_misc ]; then
+            echo "[guest] This machine's table of binary formats is not visible" >&2
+            echo "[guest] from in here, so whether 32-bit ARM can run at all" >&2
+            echo "[guest] cannot be checked - and the probe above says it did" >&2
+            echo "[guest] not." >&2
+            return 1
+        fi
+        echo "[guest] This kernel has no handler registered for 32-bit ARM" >&2
+        echo "[guest] binaries, and the game is one - so nothing off the" >&2
+        echo "[guest] machine can run here. That handler is qemu-user-static," >&2
+        echo "[guest] and on WSL it is usually installed and then FORGOTTEN:" >&2
+        echo "[guest] the registration lives in the running kernel and is put" >&2
+        echo "[guest] back at boot by systemd, so a distro started without" >&2
+        echo "[guest] systemd loses it every time WSL restarts." >&2
+        echo "[guest] Now:  $(_pad_binfmt_advice)" >&2
+        echo "[guest] Keep: put   [boot]   and   systemd=true   in /etc/wsl.conf," >&2
+        echo "[guest]       then wsl --shutdown once." >&2
+        return 1
+    fi
+    if [ "$(head -1 "$entry" 2>/dev/null)" = disabled ]; then
+        echo "[guest] The kernel's handler for 32-bit ARM binaries is" >&2
+        echo "[guest] registered but DISABLED, so the game cannot start." >&2
+        echo "[guest] Enable it:  sudo sh -c 'echo 1 > $entry'" >&2
+        return 1
+    fi
+
+    # ---- 3. a handler whose interpreter the chroot cannot reach ------------
+    #
+    # Without the F ("fix binary") flag the kernel opens the interpreter by
+    # PATH at exec time, and that path is resolved inside the chroot - where a
+    # rootfs off a pinball machine has never heard of qemu. The kernel's ENOENT
+    # then names the shell, not the interpreter, which is how this hides.
+    # Copying the interpreter in needs no root and no registration change, so
+    # it is done rather than explained - and then PROVED by probing again.
+    flags=$(sed -n 's/^flags: *//p' "$entry")
+    interp=$(sed -n 's/^interpreter *//p' "$entry")
+    case "$flags" in
+        *F*) ;;
+        *)
+            if [ -n "$interp" ] && [ -x "$interp" ] && \
+               [ ! -e "$ROOT$interp" ]; then
+                echo "[guest] The ARM handler is registered without the F flag," >&2
+                echo "[guest] so the kernel looks for $interp" >&2
+                echo "[guest] INSIDE the guest, where it is not. Putting a copy" >&2
+                echo "[guest] there, which needs no root and no re-registering." >&2
+                mkdir -p "$ROOT${interp%/*}" 2>/dev/null
+                cp -fL "$interp" "$ROOT$interp" 2>/dev/null && \
+                    chmod +x "$ROOT$interp" 2>/dev/null
+                out=$(_pad_guest_probe) && {
+                    echo "[guest] the guest starts programs now; carrying on."
+                    return 0
+                }
+                printf '%s\n' "$out" | sed 's/^/[guest]   /' >&2
+            fi ;;
+    esac
+
+    echo "[guest] Nothing here could repair that, so the run is stopped now" >&2
+    echo "[guest] rather than after a minute of waiting for a game that has" >&2
+    echo "[guest] already failed to start." >&2
+    return 1
 }

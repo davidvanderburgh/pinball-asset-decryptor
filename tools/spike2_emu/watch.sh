@@ -40,7 +40,15 @@ cd "$HOME"
 # the game, so a machine that cannot rebuild keeps its emulator; but a binary
 # that was never built means no hardware or no picture at all, and starting the
 # guest anyway just leaves a 140%-CPU process to kill.
+#
+# AND THAT IT RUNS. "The guest filesystem is there" and "a program can be
+# started inside it" are different questions, and a user whose rootfs answered
+# yes to the first and no to the second got `chroot: failed to run command
+# '/bin/sh': No such file or directory` and then sixty seconds of waiting for a
+# game that had already died. Asked BEFORE the shim and the renderer, because
+# both build into a filesystem that has to work first.
 pad_ensure_rootfs || exit 1
+pad_ensure_guest_exec || exit 1
 pad_ensure_shim || exit 1
 pad_ensure_bridge || exit 1
 

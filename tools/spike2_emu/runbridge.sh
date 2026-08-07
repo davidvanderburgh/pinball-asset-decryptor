@@ -18,6 +18,7 @@ cd $HOME
 # directory` and a rig whose sources had moved on measured the OLD binary -
 # which is worse than failing, because the numbers look fine.
 pad_ensure_rootfs || exit 1
+pad_ensure_guest_exec || exit 1
 pad_ensure_shim || exit 1
 pad_ensure_bridge || exit 1
 LOG=${1:-gzbridge.log}

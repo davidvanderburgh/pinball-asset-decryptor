@@ -103,6 +103,61 @@ pad_src_hash() {
 }
 pad_shim_hash() { pad_src_hash "${1:-$RIG}" $PAD_SHIM_SRCS; }
 
+# ---- WHAT THE GUEST NEEDS BEFORE IT CAN RUN ANYTHING AT ALL ---------------
+#
+# Two files, and the rig checked for neither. run_game.sh ends in
+#
+#     chroot "$R" /bin/sh -c "... exec ./game"
+#
+# and if the chroot cannot start that shell the whole run is over before the
+# game is reached, with one line that names the shell and nothing else:
+#
+#     chroot: failed to run command '/bin/sh': No such file or directory
+#
+# That message is the kernel's ENOENT and it does NOT mean what it says. It is
+# what you get from a rootfs whose /bin/sh is a dangling symlink (this one is
+# `/bin/sh -> /bin/bash`, so bash is the file that must exist), and from one
+# where the extraction stopped part way. Reported by a user on 2026-08-07 whose
+# rootfs had been extracted on an older WSL; every directory the rig checked
+# for was there, so nothing before this said a word.
+#
+# THE HOST'S OWN readlink -f IS THE WRONG TOOL and quietly gives the wrong
+# answer: /bin/sh points at the ABSOLUTE path /bin/bash, which on the host is
+# the host's own bash - present on every machine, and not the file the chroot
+# will open. So links are followed with $ROOT as /, the way the chroot follows
+# them. Defined HERE because rootfs.sh (which builds the tree) and
+# ensurebuild.sh (which refuses to run against a broken one) must agree about
+# what "built" means; two copies of that is the split this rig keeps paying for.
+
+#: Resolve a guest-absolute path as the chroot resolves it. Prints the host
+#: path it lands on; non-zero when nothing is there.
+pad_guest_path() {              # <guest-absolute-path>
+    local p=$1 n=0 link
+    while [ -L "$ROOT$p" ] && [ "$n" -lt 20 ]; do
+        link=$(readlink "$ROOT$p")
+        case "$link" in
+            /*) p=$link ;;
+            *)  p=${p%/*}/$link ;;
+        esac
+        n=$((n + 1))
+    done
+    printf '%s\n' "$ROOT$p"
+    [ -e "$ROOT$p" ]
+}
+
+#: The first thing the guest cannot start without, or nothing at all. The
+#: shell is what run_game.sh execs; the ELF loader is what the kernel opens on
+#: its behalf; /usr/lib is where the guest half of the GL bridge is installed.
+pad_guest_missing() {
+    pad_guest_path /bin/sh >/dev/null 2>&1 || { echo /bin/sh; return 0; }
+    if ! pad_guest_path /lib/ld-linux-armhf.so.3 >/dev/null 2>&1 &&
+       ! pad_guest_path /lib/ld-linux.so.3       >/dev/null 2>&1; then
+        echo /lib/ld-linux-armhf.so.3
+        return 0
+    fi
+    [ -d "$ROOT/usr/lib" ] || echo /usr/lib
+}
+
 # ---- WHAT THE GL BRIDGE IS BUILT FROM, THE SAME WAY -----------------------
 #
 # The bridge is TWO binaries either side of one shared-memory protocol

@@ -5602,6 +5602,55 @@ static void led_publish(const unsigned char *p, int n)
      * NOT established: the rate unit (the reader scales it; the oracle is
      * Diagnostics -> LED Tests) and together-vs-sweep across a wide range.
      * The longer a2/b4/b5 bodies remain undecoded and still count skipped. */
+    /* ---- FORM A (long a2): a multi-lamp fade PROGRAM STEP ---------------
+     *
+     *     [lamp refs..., last | 0x80] [FROM x N] [TO x N]     blen == 3N
+     *
+     * The lamp list ends at the first bit7-flagged byte. Established from
+     * 16 unique long bodies across every capture, and the structure signs
+     * itself: wherever the list carries three CONSECUTIVE lamps, the TO
+     * region carries an identical value TRIPLE (a2a2a2, 757575, c7c7c7...)
+     * - an RGB fixture's three channels fading to one colour. No rate byte
+     * anywhere in the frame, so the reader's nominal rate applies (0x0a,
+     * the wire's own most common). These MOVE THE BASE like b4/b5: val[]
+     * takes TO and the envelope expires onto it. The header-prefixed long
+     * forms (8x 1a/2a Fx ...) remain undecoded and still count skipped.
+     *
+     * Tried HERE - after the indexed shapes - because every one of these
+     * frames landed in the skip log until today: the shapes loop is proven
+     * by that data never to claim them, and this order cannot steal a
+     * genuine indexed frame the loop would have taken first. */
+    if (cmd == 0xa2 && blen > 6 && (blen % 3) == 0) {
+        unsigned nref = 0, k, okA = 0;
+        for (k = 0; k < blen; k++) {
+            unsigned v = body[k] & 0x7f;
+            if (v >= 96 || !led_known[node][v]) break;
+            nref++;
+            if (body[k] & 0x80) { okA = 1; break; }
+        }
+        if (okA && blen == 3 * nref && nref >= 3) {
+            const unsigned char *frm = body + nref, *to = body + 2 * nref;
+            for (k = 0; k < nref; k++) {
+                unsigned lamp = body[k] & 0x7f;
+                unsigned slot = led_shm->fade_head % 96u;
+                led_shm->val[node][lamp] = to[k];
+                led_shm->fade[slot].ms    = (unsigned)pad_ms();
+                led_shm->fade[slot].node  = (unsigned char)node;
+                led_shm->fade[slot].start = (unsigned char)lamp;
+                led_shm->fade[slot].end   = (unsigned char)lamp;
+                led_shm->fade[slot].from  = frm[k];
+                led_shm->fade[slot].to    = to[k];
+                led_shm->fade[slot].rise  = to[k] >= frm[k] ? 0x0a : 0;
+                led_shm->fade[slot].fall  = to[k] >= frm[k] ? 0 : 0x0a;
+                led_shm->fade[slot].pad   = 0;
+                led_shm->fade_head++;
+            }
+            led_shm->decoded += nref;
+            led_shm->gen++;
+            return;
+        }
+    }
+
     if (blen == 6
         && body[0] < 96 && led_known[node][body[0]]
         && (body[1] & 0x80)

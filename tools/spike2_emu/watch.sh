@@ -577,6 +577,13 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         # entirely for want of this line.
         [ -n "${PAD_PF_LOG:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_LOG/p"
+        # The two fade knobs cross the same way (no /p - they are numbers, not
+        # paths). Without these lines "tunes live with no rebuild" was only
+        # true for a window started by hand on the Windows side.
+        [ -n "${PAD_PF_FADE_UNIT_MS:-}" ] && \
+            export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_UNIT_MS"
+        [ -n "${PAD_PF_FADE_MS:-}" ] && \
+            export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
         if command -v "$PF_PY" >/dev/null 2>&1; then
             setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"

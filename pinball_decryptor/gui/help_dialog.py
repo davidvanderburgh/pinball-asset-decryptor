@@ -457,6 +457,20 @@ HELP_CONTENT = {
          "line itself picked out — so you can see the font, the colour and "
          "the art it sits on before changing the words. Game-program lines "
          "have no scene to show: the game code draws them at runtime."),
+        ("Narrowing a big card down",
+         "Show gives you All / Changed / Unchanged: Unchanged is exactly the "
+         "lines you haven't dealt with yet, so a part-finished pass is what's "
+         "left in front of you. Scene narrows to the game program or to one "
+         "scene file, each listed with how many strings it holds. Both stay "
+         "with the project folder, so you come back to the view you left."),
+        ("Naming a scene",
+         "Spike 2 names every scene folder with a hash, so the Scene column "
+         "is characters that mean nothing until you've opened them. "
+         "Right-click a row and choose \"Name this scene…\" to give it a name "
+         "of your own; it shows in the Name column and in the Scene "
+         "dropdown. The folder name never changes, so the name sticks — and "
+         "it's the same name the Replace Images tab shows for that scene, "
+         "from either direction."),
     ],
     "Write": [
         ("What a build does",

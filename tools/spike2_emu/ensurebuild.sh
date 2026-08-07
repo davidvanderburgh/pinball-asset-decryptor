@@ -232,3 +232,59 @@ pad_ensure_bridge() {
     echo "[build]   rebuild FAILED; running the bridge already built" >&2
     return 0
 }
+
+# ---- THE GUEST FILESYSTEM, WHICH IS STEP ONE AND WAS NOT CHECKED EITHER -----
+#
+# run_game.sh chroots into $ROOT, and $ROOT is what rootfs.sh builds out of a
+# card image. On a machine where somebody once ran that by hand it is simply
+# there - which is every machine this rig was developed on, and no machine a
+# user installs the app onto.
+#
+# THE SYMPTOM WAS FOUR UNRELATED ERRORS AND NO MENTION OF THE ROOTFS. macOS,
+# a fresh container volume, v0.114.0:
+#
+#     dd: failed to open '/pad/rootfs/dump/padled': No such file or directory
+#     mkfifo: cannot create fifo '/pad/rootfs/dump/audio.fifo': ...
+#     FileNotFoundError: ... '/pad/rootfs/dump/padvid'
+#     [watch] the renderer died on startup: open ring: No such file or directory
+#
+# Not one of those names the thing that is actually missing. This file's own
+# header claimed "no rootfs at all is not this function's business - the run
+# says so itself, in words about the rootfs", and that was simply not true: the
+# run says it four times, in words about a ring, a fifo and two files.
+#
+# SO IT IS BUILT, not merely reported. Everything needed is already here - the
+# user has chosen a card image, which is what pressing Start means, and
+# rootfs.sh needs no root - and the alternative is telling someone who installed
+# a GUI to run a shell script inside a container, which is not an instruction
+# anybody can act on. Minutes, once, with every line of it in the log.
+pad_ensure_rootfs() {
+    # SCRATCH, AND REMADE EVERY RUN. dump/ holds this run's rings, fifos and
+    # derived tables; it is not part of the guest image and only ever existed
+    # because rootfs.sh made it on the way past. A rootfs built before a change
+    # here, or one whose volume was cleared, otherwise loses every ring
+    # separately and one error at a time.
+    mkdir -p "$ROOT/dump" 2>/dev/null
+
+    [ -d "$ROOT/usr/lib" ] && return 0          # already built
+
+    _card=${PAD_CARD:-}
+    if [ -z "$_card" ] || [ ! -f "$_card" ]; then
+        echo "[build] There is no guest filesystem at $ROOT, and that is what" >&2
+        echo "[build] the game runs inside - it is built once, from a card" >&2
+        echo "[build] image, and this machine has not done it yet." >&2
+        echo "[build] Pick a card image and start again and it is built for" >&2
+        echo "[build] you (a few minutes, once)." >&2
+        return 1
+    fi
+    echo "[build] FIRST RUN ON THIS MACHINE: building the guest filesystem the"
+    echo "[build] game runs inside, from $_card."
+    echo "[build] A few minutes, and only this once."
+    if ! bash "$RIG/rootfs.sh" "$_card"; then
+        echo "[build] the guest filesystem could not be built - see above" >&2
+        return 1
+    fi
+    mkdir -p "$ROOT/dump" 2>/dev/null
+    echo "[build] guest filesystem ready"
+    return 0
+}

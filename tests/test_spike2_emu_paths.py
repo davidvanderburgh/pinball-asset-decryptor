@@ -497,3 +497,58 @@ def test_staging_never_deletes_the_directory_a_live_run_has_mounted():
                      if not ln.lstrip().startswith("#"))
     assert "rm -rf" not in code
     assert "cp -R" in code
+
+
+# --------------------------------------------------------------------------
+# The guest filesystem is step one, and nothing checked it either
+#
+# run_game.sh chroots into $ROOT, built by rootfs.sh from a card image — a step
+# rootfs.sh only ever PRINTED as advice.  On a fresh machine (a new Docker
+# volume on macOS, a new WSL install on Windows) it simply is not there, and the
+# run died with four errors that each named something else: a missing LED block,
+# a fifo that could not be created, a video ring, and finally "open ring: No
+# such file or directory" from the renderer.  Not one of them said "the guest
+# filesystem has not been built".
+# --------------------------------------------------------------------------
+
+def _ensurebuild():
+    with open(os.path.join(RIG, "ensurebuild.sh"),
+              encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def test_a_missing_guest_filesystem_is_built_not_merely_reported():
+    """Everything needed is already present when Start is pressed — the user
+    has chosen a card image and rootfs.sh needs no root — and the alternative
+    is telling someone who installed a GUI to run a shell script inside a
+    container."""
+    eb = _ensurebuild()
+    assert "pad_ensure_rootfs" in eb
+    body = eb[eb.index("pad_ensure_rootfs() {"):]
+    assert "rootfs.sh" in body, "it must actually build, not just complain"
+    assert "PAD_CARD" in body, "the card the user already chose is the input"
+
+
+def test_the_dump_directory_is_treated_as_scratch():
+    """$ROOT/dump holds the run's rings, fifos and derived tables.  It only
+    ever existed because rootfs.sh made it in passing, so a rootfs built before
+    that — or one whose volume was cleared — lost every ring separately."""
+    eb = _ensurebuild()
+    body = eb[eb.index("pad_ensure_rootfs() {"):]
+    assert 'mkdir -p "$ROOT/dump"' in body
+    # Made BEFORE the already-built early return, or a built rootfs missing
+    # only dump/ (exactly the reported case) is never repaired.
+    assert (body.index('mkdir -p "$ROOT/dump"')
+            < body.index('[ -d "$ROOT/usr/lib" ] && return 0'))
+
+
+def test_both_entry_points_check_the_rootfs_before_the_binaries():
+    """The shim builds INTO $ROOT/lib, so the filesystem has to exist first —
+    and runbridge.sh is checked too, or the measurement path keeps the bug."""
+    for name in ("watch.sh", "runbridge.sh"):
+        with open(os.path.join(RIG, name), encoding="utf-8",
+                  newline="") as f:
+            text = f.read()
+        assert "pad_ensure_rootfs" in text, name
+        assert (text.index("pad_ensure_rootfs")
+                < text.index("pad_ensure_shim")), name

@@ -40,6 +40,7 @@ cd "$HOME"
 # the game, so a machine that cannot rebuild keeps its emulator; but a binary
 # that was never built means no hardware or no picture at all, and starting the
 # guest anyway just leaves a 140%-CPU process to kill.
+pad_ensure_rootfs || exit 1
 pad_ensure_shim || exit 1
 pad_ensure_bridge || exit 1
 

@@ -762,6 +762,14 @@ HELP_CONTENT = {
          "core once it is running, plus 1–2 GB of memory. The status line "
          "shows both live. There is a two-hour cap: it stops by itself so a "
          "forgotten window cannot run all night."),
+        ("The first run on a machine takes a few minutes",
+         "Nothing is set up in advance. The first time you press Start on a "
+         "machine, the emulator builds the guest filesystem the game runs "
+         "inside out of the card image you picked, and compiles the two "
+         "pieces that talk to the hardware and the screen. That is several "
+         "minutes with no game window, and the log says what it is doing "
+         "throughout. It happens once: later runs start in seconds, and only "
+         "rebuild a piece when an app update has changed it."),
         ("The virtual playfield",
          "A second window opens beside the game showing the machine's own "
          "playfield drawing, with every insert lit live from the wire and "

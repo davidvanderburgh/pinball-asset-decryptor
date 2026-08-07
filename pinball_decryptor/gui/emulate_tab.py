@@ -244,6 +244,144 @@ def rig_cmd(script, *args, env=()):
     return head + ["bash", path] + [str(a) for a in args]
 
 
+def rig_cmd_root(script, *args):
+    """The same script, as root.  WINDOWS ONLY, and that is not a limitation
+    that was settled for - it is the only platform where it is honest.
+
+    ``wsl -u root`` is uid 0 with NO PASSWORD, because the Windows side is what
+    launches the distro; ``install_prerequisites.ps1`` has installed the WSL
+    packages that way for several releases.  On a Linux desktop the equivalent
+    is sudo, which wants a password that a GUI app has nowhere to ask for
+    without becoming an invisible hang - so there the rig keeps printing the
+    command instead, which is what ``ensurebuild.sh`` has always done.
+
+    NOT ``rig_cmd(..., env=...)`` with a root flag bolted on: the normal path
+    deliberately runs as the ordinary user (WSLg and the audio session belong
+    to them), and the two must not be one call that a wrong argument could
+    flip.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("rig_cmd_root is WSL-only")
+    return ["wsl.exe", "-u", "root", "-e", "bash",
+            "%s/%s" % (_wsl_path(rig_dir()), script)] + [str(a) for a in args]
+
+
+#: What the emulator needs BEYOND the rig itself, in the order a run meets
+#: them: probe key (from setupcheck.sh) -> package, and what it is for.
+#:
+#: The tool is what is probed, because that is the fact; the package name is
+#: only how Debian spells it.  Same four as the Stern section of
+#: install_prerequisites.ps1 - that installer is where a user who never opens
+#: this tab still gets them.
+_SETUP_TOOLS = (
+    ("qemu", "qemu-user-static",
+     "runs the machine's own 32-bit ARM game binary"),
+    ("armgcc", "gcc-arm-linux-gnueabihf",
+     "builds the hardware shim the game runs against"),
+    ("debugfs", "e2fsprogs",
+     "builds the guest filesystem out of a card image, without root"),
+    ("fuse", "fuse3",
+     "mounts a card read only, so a title runs without extracting 6 GB"),
+)
+
+#: How long to give the setup probe.  It is four `command -v`s and a read of
+#: /proc, so it answers instantly on a warm WSL - the timeout is entirely for a
+#: COLD one, where `wsl.exe` has to boot the distro first.
+_SETUP_PROBE_S = 90
+
+
+def setup_state():
+    """What this machine still needs before it can emulate, as setupcheck.sh's
+    facts - or None when the question could not be asked at all.
+
+    None IS NOT "everything is fine", and no caller may read it that way: a
+    machine with no WSL installed answers that way too, and so does one where
+    the probe timed out.  Claiming a fault on no evidence is how a prerequisite
+    notice ends up in front of someone whose machine is perfect.
+
+    macOS is excluded because it emulates in a container that already carries
+    every one of these (docker/Dockerfile installs them at build time); there
+    the prerequisite is Docker itself, which ``docker_state`` owns.
+    """
+    if sys.platform == "darwin" or not rig_available():
+        return None
+    try:
+        out = subprocess.run(rig_cmd("setupcheck.sh"), stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL,
+                             timeout=_SETUP_PROBE_S,
+                             creationflags=_CREATE_FLAGS)
+    except Exception:                                       # noqa: BLE001
+        return None                 # no WSL, no bash, or it never came back
+    if out.returncode != 0:
+        return None
+    # parse_status, not a second parser: setupcheck.sh emits the same key=value
+    # shape as status.sh, and that function already survives the warnings
+    # wsl.exe is entitled to prepend to stdout.
+    facts = parse_status(out.stdout.decode("utf-8", "replace"))
+    return facts or None
+
+
+def setup_summary(facts):
+    """``(missing, binfmt)`` - the two things the notice is built from.
+
+    Pure, so the wording tests do not need a WSL or a Tk root.
+    """
+    if not facts:
+        return [], "1"
+    missing = [(pkg, why) for key, pkg, why in _SETUP_TOOLS
+               if facts.get(key) == "0"]
+    return missing, facts.get("binfmt", "1")
+
+
+def setup_ok(facts):
+    """Can this machine emulate?  Unknown counts as yes - see setup_state."""
+    missing, binfmt = setup_summary(facts)
+    return not missing and binfmt == "1"
+
+
+def setup_notice(facts, can_fix):
+    """What the tab says about a machine that cannot emulate yet.
+
+    THE ARM HANDLER LEADS, when it is what is wrong, because it is the fault
+    that produced this: a tester's first run stopped at
+
+        chroot: failed to run command '/bin/sh': Exec format error
+
+    which names the shell and not the missing thing, arrives after Start has
+    said "Starting…", and is the one of the rig's four guest-exec faults that
+    it cannot repair by itself (the other three it fixes without asking).
+    """
+    if setup_ok(facts):
+        return ""
+    missing, binfmt = setup_summary(facts)
+    parts = ["This PC cannot run the emulator yet."]
+    if binfmt == "0":
+        parts.append(
+            "This machine has no handler registered for 32-bit ARM programs, "
+            "and the game is one — so a run would stop the moment it started.")
+    elif binfmt == "disabled":
+        parts.append(
+            "The handler for 32-bit ARM programs is registered but switched "
+            "off, and the game is a 32-bit ARM program.")
+    if missing:
+        parts.append("Missing:\n" + "\n".join(
+            "     •  %s — %s" % (pkg, why) for pkg, why in missing))
+    if can_fix:
+        parts.append(
+            "“Set up emulator…” installs those in WSL and registers the "
+            "handler. It lists exactly what it will change first, and needs "
+            "no password.")
+    else:
+        cmds = []
+        if missing:
+            cmds.append("sudo apt install " + " ".join(p for p, _ in missing))
+        if binfmt != "1":
+            cmds.append(facts.get("advice", "sudo apt install qemu-user-static"))
+        parts.append("Run this, then start again:\n" + "\n".join(
+            "     %s" % c for c in cmds))
+    return "\n\n".join(parts)
+
+
 class EmulatePanel:
     """The Emulate tab's widgets and its background poller."""
 
@@ -302,6 +440,13 @@ class EmulatePanel:
         self._docker_busy = False
         self._docker_ticks = 0
         self._docker_result = None
+        #: Last answer from setup_state(), Windows/Linux only.  None means the
+        #: question has not been answered yet OR could not be asked, and both
+        #: read the same way on purpose: nothing is claimed without evidence.
+        self._setup = None
+        self._setup_busy = False
+        self._setup_result = None
+        self._setup_fixing = False
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -396,6 +541,14 @@ class EmulatePanel:
         self._docker_btn = ttk.Button(btns, text="Install Docker…",
                                       command=self._docker_fix, width=17)
 
+        # WINDOWS ONLY, and for the same reason the Docker button is macOS
+        # only: it can only do its job where the app can actually get root.
+        # See rig_cmd_root - on WSL that is free, on a Linux desktop it is a
+        # password prompt with nowhere to appear.  Packs itself from
+        # _setup_apply(), so a machine that is already set up never sees it.
+        self._setup_btn = ttk.Button(btns, text="Set up emulator…",
+                                     command=self._setup_fix, width=18)
+
         # BOTH tickboxes are read ONCE, when Start builds the environment for
         # watch.sh, so they are start-time options and not live controls.  They
         # are therefore disabled while the emulator is up: leaving them
@@ -443,6 +596,12 @@ class EmulatePanel:
         self._docker_msg = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                      foreground="#c07000", text="")
         self._docker_pad = pad
+
+        # Same reasoning, same colour: this is a prerequisite notice, not the
+        # rig's state, so it must not share a label with the status poll.
+        self._setup_msg = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
+                                    foreground="#c07000", text="")
+        self._setup_pad = pad
 
         # The key list that used to be here is gone. The rig opens its own
         # Controls window listing every binding, and it is generated from the
@@ -495,6 +654,12 @@ class EmulatePanel:
         frame.bind("<Destroy>", self._on_destroy, add="+")
         if sys.platform == "darwin":
             self._docker_check()
+        else:
+            # ASKED ONCE, HERE, rather than left for the run to discover. The
+            # rig finds each missing tool one at a time by failing on it, which
+            # is three separate runs and three separate walls of log text for
+            # someone who has none of them.
+            self._setup_check()
         self._schedule_poll()
 
     # ------------------------------------------------------------------
@@ -622,6 +787,160 @@ class EmulatePanel:
             self._log("[emulate] could not open Terminal: %s" % exc)
             import webbrowser
             webbrowser.open(DOCKER_URL)
+
+    # ------------------------------------------------------------------
+    # the setup check, which is what WSL needs and Docker is on a Mac
+    # ------------------------------------------------------------------
+
+    def _setup_check(self):
+        """Probe the machine off the main loop and show the answer.
+
+        Same shape as _docker_check, and for the same reason: one of the
+        callers is tab BUILD time, where there is no mainloop yet, so the
+        worker touches no widget and schedules nothing.  It leaves its answer
+        in a field for _setup_drain to collect.
+        """
+        if self._setup_busy or sys.platform == "darwin":
+            return
+        self._setup_busy = True
+
+        def run():
+            try:
+                self._setup_result = setup_state()
+            finally:
+                self._setup_busy = False
+
+        threading.Thread(target=run, daemon=True).start()
+        self._setup_drain()
+
+    def _setup_drain(self):
+        """Main-loop side of _setup_check."""
+        if self._stopped:
+            return
+        if self._setup_busy:
+            try:
+                self._timer().after(250, self._setup_drain)
+            except tk.TclError:
+                self._stopped = True
+            return
+        if self._setup_result is not None:
+            self._setup_apply(self._setup_result)
+            self._setup_result = None
+
+    def _setup_apply(self, facts):
+        """Put the answer on the tab, or take it away when there is nothing to
+        say.  A machine that is ready carries no notice and no button."""
+        self._setup = facts
+        try:
+            if setup_ok(facts):
+                self._setup_btn.pack_forget()
+                self._setup_msg.pack_forget()
+                return
+            self._setup_msg.configure(
+                text=setup_notice(facts, can_fix=sys.platform == "win32"))
+            if sys.platform == "win32":
+                self._setup_btn.pack(side=tk.LEFT, padx=(6, 0))
+            self._setup_msg.pack(anchor=tk.W,
+                                 **getattr(self, "_setup_pad", {}))
+        except (tk.TclError, AttributeError):
+            pass            # the tab was never built, or is being torn down
+
+    def _setup_fix(self):
+        """Install what is missing and register the ARM handler.
+
+        PROMPTED ONCE, THEN DONE.  This installs Debian packages and writes to
+        /etc/wsl.conf inside the user's distro, which is a bigger thing than
+        anything else on this tab does - so it names every package and every
+        file before it touches one, and a No leaves the machine exactly as it
+        was.  It does not ask again per step: a dialog per package is how a
+        user stops reading them.
+
+        The work itself is setupfix.sh's.  This panel is a control surface for
+        the rig and does not reimplement it - which is also what keeps the
+        Windows path and a future Linux one from drifting apart.
+        """
+        if self._setup_fixing or sys.platform != "win32":
+            return
+        facts = self._setup or {}
+        missing, binfmt = setup_summary(facts)
+        steps = []
+        if missing:
+            steps.append("Install in WSL:  "
+                         + "  ".join(pkg for pkg, _ in missing))
+        if binfmt == "0":
+            steps.append("Register the kernel's handler for 32-bit ARM "
+                         "programs.")
+        elif binfmt == "disabled":
+            steps.append("Switch the 32-bit ARM handler back on.")
+        if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+            steps.append("Add [boot] systemd=true to /etc/wsl.conf, so the "
+                         "registration is still there after WSL restarts.")
+        if not steps:
+            return
+        if not messagebox.askyesno(
+                "Set up the emulator",
+                "This will change your WSL installation:\n\n"
+                + "\n\n".join("  •  " + s for s in steps)
+                + "\n\nIt runs as root inside WSL, which needs no password. "
+                  "Nothing on the Windows side is touched, and nothing is "
+                  "removed.\n\nGo ahead?"):
+            return
+
+        self._setup_fixing = True
+        try:
+            self._setup_btn.configure(state=tk.DISABLED, text="Setting up…")
+        except tk.TclError:
+            pass
+        cmd = rig_cmd_root("setupfix.sh")
+        self._log("[emulate] %s" % " ".join(cmd))
+
+        def run():
+            ok = False
+            restart = False
+            try:
+                # Popen and drain, not run(): apt on a cold index takes long
+                # enough that a silent minute reads as a hang, and the log pane
+                # is where the user is already looking.
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        creationflags=_CREATE_FLAGS)
+                for raw in proc.stdout:
+                    line = raw.decode("utf-8", "replace").rstrip()
+                    if line == "result=ok":
+                        ok = True
+                    elif line == "needs_restart=1":
+                        restart = True
+                    if line:
+                        self._log("[emulate] " + line)
+                proc.wait(timeout=60)
+            except Exception as exc:                        # noqa: BLE001
+                self._log("[emulate] setup failed: %s" % exc)
+            if ok:
+                self._log("[emulate] this PC can run the emulator now.")
+                if restart:
+                    self._log("[emulate] systemd was turned on for WSL so the "
+                              "ARM handler survives a restart; it takes effect "
+                              "the next time WSL starts, and nothing needs "
+                              "restarting now.")
+            else:
+                self._log("[emulate] setup did not finish — the emulator will "
+                          "probably still fail to start.")
+            self._setup_fixing = False
+            # Re-probe rather than assume it worked: the notice must reflect
+            # the machine, not the fact that a button was pressed.
+            try:
+                self._timer().after(0, self._setup_recheck)
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _setup_recheck(self):
+        try:
+            self._setup_btn.configure(state=tk.NORMAL, text="Set up emulator…")
+        except tk.TclError:
+            pass
+        self._setup_check()
 
     def _build_source(self, frame, pad):
         """The card image to run.  One box and a Browse button.

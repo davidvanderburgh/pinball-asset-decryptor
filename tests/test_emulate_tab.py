@@ -20,7 +20,26 @@ import pytest
 from pinball_decryptor.gui import emulate_tab
 
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
+                                               rig_cmd_root, setup_notice,
+                                               setup_ok, setup_state,
+                                               setup_summary,
                                                state_text, _wsl_path)
+
+# ``setup_state`` is imported BY VALUE here on purpose.  The autouse fixture
+# below replaces ``emulate_tab.setup_state`` so that building a panel never
+# shells out to WSL, and the two tests that are about the probe itself have to
+# reach the real one - through this binding, which monkeypatch does not touch.
+# Without it they exercised the stub and one of them passed for that reason.
+
+
+@pytest.fixture(autouse=True)
+def _no_real_setup_probe(monkeypatch):
+    """Building a panel probes THIS machine for what the emulator needs, and a
+    unit test must not shell out to WSL to find out.  None is "could not ask",
+    which is deliberately the same as "nothing to say" - so the default panel
+    in every test below carries no prerequisite notice.  Tests that are about
+    the notice patch this again with facts of their own."""
+    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
 
 
 def test_parse_status_reads_key_value_lines():
@@ -568,3 +587,170 @@ def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
         assert panel._docker_btn.cget("text") == "Start Docker"
     finally:
         root.destroy()
+
+
+# ----------------------------------------------------------------------
+# The setup check: what this machine still needs before it can emulate.
+#
+# The fault these are about reached a user on 2026-08-07 as
+#
+#     chroot: failed to run command '/bin/sh': Exec format error
+#
+# arriving in the log pane after Start had said "Starting…", on a machine
+# that had never had qemu-user-static.  It is the one of the rig's four
+# guest-exec faults that the rig cannot repair by itself, so the app has to
+# - and the wording is what a user acts on, which is why it is tested.
+# ----------------------------------------------------------------------
+
+_READY = {"qemu": "1", "armgcc": "1", "debugfs": "1", "fuse": "1",
+          "binfmt": "1", "iswsl": "1", "wslconf": "1"}
+
+
+def _facts(**over):
+    f = dict(_READY)
+    f.update(over)
+    return f
+
+
+def test_a_ready_machine_is_told_nothing():
+    assert setup_ok(_facts())
+    assert setup_notice(_facts(), can_fix=True) == ""
+
+
+def test_a_machine_we_could_not_ask_is_not_accused():
+    """setup_state returns None for a PC with no WSL and for a probe that
+    timed out.  Neither is evidence of a fault, and a prerequisite notice in
+    front of someone whose machine is fine is worse than none at all."""
+    assert setup_ok(None)
+    assert setup_notice(None, can_fix=True) == ""
+    assert setup_summary(None) == ([], "1")
+
+
+def test_summary_lists_only_what_is_actually_missing():
+    missing, binfmt = setup_summary(_facts(qemu="0", fuse="0", binfmt="0"))
+    assert [pkg for pkg, _ in missing] == ["qemu-user-static", "fuse3"]
+    assert binfmt == "0"
+
+
+def test_the_arm_handler_leads_because_it_is_what_stops_the_run():
+    """Ralf's machine: no qemu-user-static and no registration.  The headline
+    has to be the thing that would kill the run, not a package list."""
+    text = setup_notice(_facts(qemu="0", armgcc="0", binfmt="0"),
+                        can_fix=True)
+    assert "cannot run the emulator yet" in text
+    handler = text.index("32-bit ARM")
+    packages = text.index("qemu-user-static")
+    assert handler < packages, "the package list must not bury the cause"
+    # And it must say what it will do about it, since it can.
+    assert "Set up emulator" in text
+
+
+def test_every_missing_package_says_what_it_is_for():
+    text = setup_notice(_facts(qemu="0", armgcc="0", debugfs="0", fuse="0"),
+                        can_fix=True)
+    for pkg in ("qemu-user-static", "gcc-arm-linux-gnueabihf", "e2fsprogs",
+                "fuse3"):
+        assert pkg in text
+    assert "32-bit ARM game binary" in text
+    assert "without extracting" in text
+
+
+def test_a_registered_but_disabled_handler_is_not_called_missing():
+    """Different fault, different repair: it is registered, so nothing needs
+    installing and telling the user to install something would be wrong."""
+    text = setup_notice(_facts(binfmt="disabled"), can_fix=True)
+    assert "switched" in text.lower()
+    assert "Missing" not in text
+    assert not setup_ok(_facts(binfmt="disabled"))
+
+
+def test_without_a_fixer_the_user_gets_the_rig_s_own_command():
+    """On a Linux desktop the app cannot get root without a password prompt it
+    has nowhere to show, so it prints - and it prints the command THIS machine
+    wants, which the rig derived (Ubuntu 24.04 and Debian differ)."""
+    advice = "sudo sh -c 'cat /usr/lib/binfmt.d/qemu-arm.conf > /proc/sys/fs/binfmt_misc/register'"
+    text = setup_notice(_facts(binfmt="0", advice=advice), can_fix=False)
+    assert advice in text
+    assert "Set up emulator" not in text
+
+
+def test_missing_packages_are_named_as_one_apt_line_not_four():
+    text = setup_notice(_facts(qemu="0", armgcc="0", binfmt="1"),
+                        can_fix=False)
+    assert "sudo apt install qemu-user-static gcc-arm-linux-gnueabihf" in text
+
+
+def test_probe_failure_is_none_rather_than_a_wrong_answer(monkeypatch):
+    """A probe that cannot run must not read as "everything is missing"."""
+    def boom(*a, **kw):
+        raise FileNotFoundError("wsl.exe")
+    monkeypatch.setattr(emulate_tab.subprocess, "run", boom)
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    assert setup_state() is None
+
+
+def test_probe_reads_the_rig_s_key_value_output(monkeypatch):
+    out = (b"qemu=0\nbinfmt=0\n"
+           b"advice=sudo apt install qemu-user-static\n")
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab.subprocess, "run",
+                        lambda *a, **kw: SimpleNamespace(returncode=0,
+                                                         stdout=out))
+    facts = setup_state()
+    assert facts["qemu"] == "0"
+    # The advice is a whole command with '=' nowhere but the first split.
+    assert facts["advice"] == "sudo apt install qemu-user-static"
+
+
+def test_root_commands_are_wsl_only_and_actually_ask_for_root(monkeypatch):
+    """The no-root rule the rig follows is a LINUX fact.  `wsl -u root` is uid
+    0 with no password, which is why the Windows path may repair and the Linux
+    one may only advise - so this must never quietly produce a non-root
+    command on a platform where root is not free."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    cmd = rig_cmd_root("setupfix.sh")
+    assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
+    assert cmd[-1].endswith("/setupfix.sh")
+    for plat in ("linux", "darwin"):
+        monkeypatch.setattr(emulate_tab.sys, "platform", plat)
+        with pytest.raises(RuntimeError):
+            rig_cmd_root("setupfix.sh")
+
+
+# ---- the rig side, checked as text: these are the two ways the pair can
+# ---- silently stop agreeing with each other.
+
+def _rig_text(name):
+    return (pathlib.Path(DEFAULT_RIG_DIR) / name).read_text(encoding="utf-8")
+
+
+def test_the_repair_installs_exactly_the_packages_the_tab_names():
+    """The tab explains four packages and setupfix.sh installs them.  Two
+    lists in two languages is precisely how they drift."""
+    fix = _rig_text("setupfix.sh")
+    for key, pkg, _why in emulate_tab._SETUP_TOOLS:
+        assert 'sudo' not in pkg
+        assert pkg in fix, "%s (%s) is explained but never installed" % (pkg,
+                                                                         key)
+        assert '_get "$facts" %s' % key in fix
+
+
+def test_the_repair_does_not_hide_apt_failure_behind_a_pipe():
+    """`apt-get ... | sed` reports SED's exit status, so a failed install
+    reads as a clean one and the tab would announce success."""
+    fix = _rig_text("setupfix.sh")
+    for line in fix.splitlines():
+        if "apt-get install" in line or "apt-get update" in line:
+            assert "| sed" not in line, line
+
+
+def test_the_probe_reuses_the_rig_s_own_binfmt_detection():
+    """setupcheck.sh must not grow its own copy of "is there an ARM handler" -
+    ensurebuild.sh owns that, and the run itself uses ensurebuild's."""
+    check = _rig_text("setupcheck.sh")
+    assert "ensurebuild.sh" in check
+    assert "_pad_binfmt_arm" in check
+    assert "_pad_binfmt_advice" in check
+    assert "binfmt_misc/qemu-arm" not in check, "that is a second detector"

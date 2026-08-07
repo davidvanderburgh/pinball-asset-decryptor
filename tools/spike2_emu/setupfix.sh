@@ -46,6 +46,13 @@ fi
 _facts() { bash "$RIG/setupcheck.sh" 2>/dev/null; }
 _get() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
+#: The WSL distro to send someone to when their own cannot supply a package.
+#: An LTS, and the one this rig is developed and tested against, so it is a
+#: recommendation with evidence behind it rather than "try something newer".
+#: emulate_tab.py names the same one to the user before they ever get here;
+#: test_the_two_halves_recommend_the_same_distro keeps the two from drifting.
+PAD_KNOWN_GOOD_DISTRO=Ubuntu-24.04
+
 facts=$(_facts)
 
 # ---- 1. the packages ------------------------------------------------------
@@ -115,6 +122,50 @@ _add_universe() {
     [ "$touched" = 1 ]
 }
 
+#: WHY apt has no version, said only from facts this run established.
+#:
+#: WHAT USED TO STAND HERE, and why it is gone. The sentence was "a WSL distro
+#: that is out of support, or one whose sources have been trimmed, does this;
+#: installing a current Ubuntu in WSL is the way back." It named two causes
+#: nothing had checked, and the first machine to meet it was on a CURRENT
+#: Ubuntu whose archive had installed twenty-one packages seconds earlier with
+#: universe switched on. The one piece of advice it gave him was the thing he
+#: had already done.
+#:
+#: So: the release, the components, and whether the index is one we just
+#: refreshed - all reported, none inferred - and then the route that is left.
+_why_nocand() {
+    local f=$1 updated=$2 nocand=$3 distro comps
+    distro=$(_get "$f" distro); comps=$(_get "$f" components)
+    [ -n "$distro" ] && echo "This Linux is: $distro"
+    [ -n "$comps" ] && echo "apt has these archive components switched on:"
+    [ -n "$comps" ] && echo "  $comps"
+    if [ "$updated" = 1 ]; then
+        echo "The index was refreshed a moment ago and the archive answered,"
+        echo "so this is not a stale index and not a download that failed:"
+        echo "this release does not publish the package at all."
+    else
+        # apt-get update FAILED, so "the release does not have it" is not a
+        # claim this run has earned - the index may simply be incomplete.
+        echo "apt-get update did not succeed just now, so the index may be"
+        echo "incomplete too. Whatever is wrong with the package sources is"
+        echo "worth fixing before reading anything into the line above."
+    fi
+    case " $nocand " in
+    *" qemu-user-static "*)
+        echo "The emulator cannot do without this one: qemu-user-static is"
+        echo "the only package that carries a statically linked ARM"
+        echo "interpreter, and the game is a 32-bit ARM binary." ;;
+    esac
+    # PAD talks to whichever distro WSL calls the default, so a distro that
+    # does carry the package, made the default, is a real way through and does
+    # not disturb the one that is there. Run on the WINDOWS side, not in here.
+    echo "A WSL distro that does have it, made the default, is the way"
+    echo "through. In a Windows terminal:"
+    echo "  wsl --install -d $PAD_KNOWN_GOOD_DISTRO"
+    echo "  wsl --set-default $PAD_KNOWN_GOOD_DISTRO"
+}
+
 if [ -n "$pkgs" ]; then
     echo "installing: $pkgs"
     export DEBIAN_FRONTEND=noninteractive
@@ -122,7 +173,13 @@ if [ -n "$pkgs" ]; then
     # too old to resolve anything, and the failure that produces ("Unable to
     # locate package") reads like the package does not exist. Not fatal on its
     # own - the install below is what decides.
-    _run apt-get update -qq
+    #
+    # ITS STATUS IS KEPT, though, because it is the difference between two
+    # verdicts that read the same and are not: "this release does not publish
+    # the package" can only be said about an index that was actually
+    # refreshed. Without it, an unreachable archive looks exactly like a
+    # package that does not exist.
+    if _run apt-get update -qq; then updated=1; else updated=0; fi
 
     # Ask again with a fresh index before installing: "apt has no version of
     # this" is a different fault from "the download failed", it is knowable
@@ -155,13 +212,11 @@ if [ -n "$pkgs" ]; then
         nocand=$(_get "$facts" nocand)
         echo "could not install:$failed"
         if [ -n "$nocand" ]; then
-            # Not a failed download. The package sources this Linux is
-            # configured with do not offer the package at all, which no amount
-            # of retrying changes - so say which, and say what would.
-            echo "apt has no version of $nocand to install from the package"
-            echo "sources this Linux is set up with. A WSL distro that is out"
-            echo "of support, or one whose sources have been trimmed, does"
-            echo "this; installing a current Ubuntu in WSL is the way back."
+            # Not a failed download: apt has a record of the name and no
+            # VERSION, in an index refreshed seconds ago, which no amount of
+            # retrying changes - so say which, WHY, and what would.
+            echo "apt has no version of $nocand to install."
+            _why_nocand "$facts" "$updated" "$nocand"
             echo "result=nocandidate"
         else
             echo "apt-get failed - see above"

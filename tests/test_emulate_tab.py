@@ -831,6 +831,132 @@ def test_the_repair_only_edits_the_distro_s_own_sources():
     assert r"ubuntu\.com" in fix
 
 
+# ----------------------------------------------------------------------
+# PAD-42.  The SAME tester, one release on, and both halves of "apt has no
+# installation candidate" were still wrong.
+#
+#   * His machine: a current Ubuntu, universe ON, whose archive had installed
+#     twenty-one packages seconds earlier - and the app told him his distro
+#     was out of support or its sources trimmed, and that installing a current
+#     Ubuntu was the way back.  Two causes nothing had checked, and the advice
+#     was the thing he had already done.  The button stayed on offer, under a
+#     sentence saying the package could not be installed, and he pressed it
+#     twice.
+#
+#   * Every OTHER machine: `nocand` and `universe` are both read out of apt's
+#     DOWNLOADED metadata, and a WSL Ubuntu that has never run `apt-get
+#     update` has none.  `apt-cache policy` prints nothing for a package that
+#     is not installed, `apt-get indextargets` prints nothing at all - so a
+#     brand-new distro, where all four packages install perfectly, was told
+#     its sources offered none of them and that universe was switched off.
+#     Reproduced in WSL with APT_CONFIG pointing at an empty lists dir.
+# ----------------------------------------------------------------------
+
+_NOCAND = dict(qemu="0", armgcc="1", debugfs="1", fuse="1", binfmt="0",
+               nocand="qemu-user-static", universe="1", indexed="1",
+               components="main restricted universe multiverse",
+               distro="ubuntu 26.10 resolute")
+
+
+def test_the_release_that_lacks_the_package_is_named_not_guessed_at():
+    """"Out of support" and "sources have been trimmed" were both guesses,
+    and both wrong about the machine that met them.  What setupcheck.sh can
+    actually report is the release and the components apt has on."""
+    text = setup_notice(_facts(**_NOCAND), can_fix=True)
+    assert "ubuntu 26.10 resolute" in text
+    assert "universe” switched on" in text
+    assert "does not publish it" in text
+    for guess in ("out of support", "trimmed", "latest version"):
+        assert guess not in text
+
+
+def test_a_dead_end_takes_the_button_away_and_says_where_to_go():
+    """The button promised, underneath the line saying the package could not
+    be installed, that pressing it would install the package."""
+    facts = _facts(**_NOCAND)
+    assert not emulate_tab.setup_fixable(facts)
+    text = setup_notice(facts, can_fix=True)
+    assert "installs those in WSL" not in text
+    assert "wsl --install -d %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
+    assert "wsl --set-default %s" % emulate_tab.KNOWN_GOOD_DISTRO in text
+
+
+def test_the_button_stays_when_any_of_it_can_still_be_installed():
+    """One unavailable package out of two is not a dead end - installing the
+    other is still progress, and one at a time is what the rig now does."""
+    facts = _facts(qemu="0", armgcc="0", binfmt="0",
+                   nocand="qemu-user-static", universe="1", indexed="1")
+    assert emulate_tab.setup_fixable(facts)
+    assert "installs those in WSL" in setup_notice(facts, can_fix=True)
+
+
+def test_universe_is_still_the_repair_it_was_made_in_pad_41():
+    """The new dead-end path must not swallow the case that HAS a fix."""
+    facts = _facts(qemu="0", binfmt="0", nocand="qemu-user-static",
+                   universe="0", indexed="1")
+    assert emulate_tab.setup_fixable(facts)
+    assert "turns universe back on" in setup_notice(facts, can_fix=True)
+
+
+def test_printed_advice_leaves_out_a_package_apt_has_no_version_of():
+    """`apt install a b` is all or nothing, so naming an uninstallable
+    package in the printed command installs neither.  That is the PAD-41 bug,
+    still living in the advice the app prints on Linux."""
+    text = setup_notice(_facts(qemu="0", armgcc="0", binfmt="1",
+                               nocand="qemu-user-static", universe="1",
+                               indexed="1"), can_fix=False)
+    assert "sudo apt install gcc-arm-linux-gnueabihf" in text
+    assert "apt install qemu-user-static" not in text
+
+
+def test_an_empty_apt_index_is_not_evidence_against_the_sources():
+    """The probe must not answer either question out of metadata it does not
+    have; setupfix.sh's `apt-get update` is what makes them answerable."""
+    check = _rig_text("setupcheck.sh")
+    assert 'echo "indexed=$indexed"' in check
+    # The loop that fills `nocand` must be behind the index gate.
+    lines = [ln for ln in check.splitlines() if not ln.lstrip().startswith("#")]
+    start = next(i for i, ln in enumerate(lines) if 'if [ -n "$need" ]' in ln)
+    cond = " ".join(lines[start:start + 3])
+    assert '[ "$indexed" = 1 ]' in cond, \
+        "nocand is still computed off an index that may not be there: " + cond
+    # ...and universe is judged from what apt reports it has, not re-probed.
+    assert "printf '%s\\n' $components | grep -qx universe" in check
+
+
+def test_the_probe_reports_the_release_it_is_talking_about():
+    check = _rig_text("setupcheck.sh")
+    for key in ("indexed=", "components=", "distro="):
+        assert "echo \"%s" % key in check or "echo %s" % key in check, key
+
+
+def test_the_repair_stops_naming_causes_it_never_checked():
+    fix = _rig_text("setupfix.sh")
+    body = "\n".join(ln for ln in fix.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    for guess in ("out of support", "have been trimmed",
+                  "installing a current Ubuntu"):
+        assert guess not in body, guess
+    # and it says the release instead
+    assert '_get "$f" distro' in fix
+    assert '_get "$f" components' in fix
+
+
+def test_an_update_that_failed_is_not_evidence_the_release_lacks_it():
+    """"This release does not publish the package" can only be said about an
+    index that was actually refreshed.  An unreachable archive looks exactly
+    the same from `apt-cache policy`."""
+    fix = _rig_text("setupfix.sh")
+    assert "updated=1" in fix and "updated=0" in fix
+    assert 'if _run apt-get update -qq; then' in fix
+
+
+def test_the_two_halves_recommend_the_same_distro():
+    """The tab names it before the user ever presses the button and the log
+    names it after.  Two spellings of one recommendation is how they drift."""
+    assert emulate_tab.KNOWN_GOOD_DISTRO in _rig_text("setupfix.sh")
+
+
 def test_the_probe_reuses_the_rig_s_own_binfmt_detection():
     """setupcheck.sh must not grow its own copy of "is there an ARM handler" -
     ensurebuild.sh owns that, and the run itself uses ensurebuild's."""

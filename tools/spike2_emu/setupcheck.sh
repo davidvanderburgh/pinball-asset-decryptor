@@ -27,12 +27,21 @@
 #   qemu|armgcc|debugfs|fuse   1 = the tool is on PATH, 0 = it is not
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
+#   indexed                    1 = apt has index metadata to answer questions
+#                              about the archive from. 0 = it has none, and
+#                              `nocand` and `universe` are therefore not asked
 #   nocand                     those of `need` that apt CANNOT install on this
 #                              machine - see below
 #   universe                   1 = nothing to say. 0 = this is Ubuntu, a
 #                              needed package is unavailable, and the
 #                              `universe` component that carries it is
 #                              switched off in apt's sources
+#   components                 the archive components apt actually has indexes
+#                              for, so a message about the sources can be
+#                              built from what IS configured
+#   distro                     `ID VERSION_ID CODENAME` from /etc/os-release,
+#                              so nothing downstream has to guess which Linux
+#                              this is before telling the user about it
 #   binfmt                     1 = a 32-bit ARM handler is registered and
 #                              enabled, disabled = registered but switched
 #                              off, 0 = the kernel has none
@@ -81,8 +90,33 @@ echo "need=${need# }"
 #: command resolve fine, which is why exactly one of his four was named.
 #:
 #: Asked only about what is already missing, so a healthy machine pays nothing.
+#:
+#: FIRST, THOUGH: IS THERE AN INDEX TO ASK? Both questions below are answered
+#: out of apt's DOWNLOADED metadata in /var/lib/apt/lists, not out of the
+#: sources config, and a distro that has never run `apt-get update` has none of
+#: it - which is the state every freshly installed WSL Ubuntu is in, because
+#: the image ships with the lists emptied. With no index:
+#:
+#:   * `apt-cache policy <a package that is not installed>` prints NOTHING, so
+#:     the Candidate test below finds no candidate and marks it uninstallable;
+#:   * `apt-get indextargets` prints nothing at all, so the universe test finds
+#:     no universe component and blames one that is in fact switched on.
+#:
+#: Together those told a brand-new WSL Ubuntu that its package sources offered
+#: none of the four packages the emulator needs and that universe was off. Both
+#: false, and both about the most common machine state there is. An empty index
+#: is not evidence: it is the absence of it, so neither question is asked and
+#: setupfix.sh's `apt-get update` is what turns the answers real.
+components=$(apt-get indextargets --format '$(COMPONENT)' 2>/dev/null |
+             sort -u | tr '\n' ' ')
+components=${components% }
+[ -n "$components" ] && indexed=1 || indexed=0
+echo "indexed=$indexed"
+echo "components=$components"
+
 nocand=
-if [ -n "$need" ] && command -v apt-cache >/dev/null 2>&1; then
+if [ -n "$need" ] && [ "$indexed" = 1 ] &&
+   command -v apt-cache >/dev/null 2>&1; then
     for _pkg in $need; do
         apt-cache policy -- "$_pkg" 2>/dev/null |
             sed -n 's/^[[:space:]]*Candidate:[[:space:]]*//p' |
@@ -94,17 +128,26 @@ echo "nocand=${nocand# }"
 #: ...and if that is why, say so, because it is repairable. Ubuntu only: on
 #: Debian qemu-user-static is in `main` and an unavailable package means
 #: something else entirely, which a wrong-but-confident answer would hide.
-#: apt-get indextargets is apt's own view of what is configured, so a country
+#: `components` is apt's own view of what it has indexes for, so a country
 #: mirror, ports.ubuntu.com and a deb822 ubuntu.sources all answer correctly
 #: where grepping a file for a hostname would not.
 if [ -n "$nocand" ] &&
    grep -qs '^ID=ubuntu' /etc/os-release &&
-   ! apt-get indextargets --format '$(COMPONENT)' 2>/dev/null |
-       grep -qx universe; then
+   ! printf '%s\n' $components | grep -qx universe; then
     echo "universe=0"
 else
     echo "universe=1"
 fi
+
+#: WHICH Linux this is, so that nothing downstream has to guess. A package apt
+#: has no version of is a fact about a RELEASE, and the message about it named
+#: two causes it had never checked ("out of support", "sources trimmed") in
+#: front of a tester on a current Ubuntu whose archive had installed twenty-one
+#: packages seconds earlier. Reported rather than inferred for the same reason
+#: the tools are probed rather than assumed.
+_osrel() { sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | tr -d '"' | head -1; }
+distro="$(_osrel ID) $(_osrel VERSION_ID) $(_osrel VERSION_CODENAME)"
+echo "distro=$(printf '%s' "$distro" | sed 's/[[:space:]]\{1,\}/ /g;s/^ //;s/ $//')"
 
 entry=$(_pad_binfmt_arm)
 if [ -z "$entry" ]; then

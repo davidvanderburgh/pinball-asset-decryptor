@@ -109,12 +109,15 @@ mkdir -p "$ROOT"
 # this, so the card's own /dump was skipped on every fresh build, with one
 # alarming red line to show for it.
 #
-# The staged tree is just the OS partition (about 350 MB), it is made beside
-# $ROOT so the merge stays on one filesystem, and `cp -a` merges where rdump
-# will not - which also means an extracted title under games/ (3-6 GB) and the
-# derived tables under dump/ are left exactly where they are.
-STAGE=$(mktemp -d "$ROOT.stage.XXXXXX") || {
-    echo "[rootfs] could not make a staging directory beside $ROOT" >&2
+# The staged tree is just the OS partition (about 350 MB) and it is made INSIDE
+# $ROOT - the one directory we already know is writable and the one the merge
+# has to end up on anyway, which on macOS is a Docker volume and on WSL is the
+# ext4 disk. `cp -a` then merges where rdump will not, so an extracted title
+# under games/ (3-6 GB) and the derived tables under dump/ are left exactly
+# where they are.
+rm -rf "$ROOT"/.stage.*            # a previous run that was killed outright
+STAGE=$(mktemp -d "$ROOT/.stage.XXXXXX") || {
+    echo "[rootfs] could not make a staging directory in $ROOT" >&2
     exit 1; }
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 

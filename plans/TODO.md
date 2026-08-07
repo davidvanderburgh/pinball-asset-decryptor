@@ -722,6 +722,56 @@ These have each been violated at least once and each cost a run or a window:
       D1, armchair: one file, no emulator run, no new instrument, and the
       acceptance is a screenshot of a window that opens without a game.
 
+- [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
+      **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
+      function that 'rips the spinner' as long as the click is held."**
+      The sibling of item 24: left-hold closes a switch and keeps it closed,
+      right-hold should make it close over and over for as long as the button
+      is down, the way a ball spinning a spinner does. **Godzilla's three
+      spinners: 47 LEFT SPINNER (node 8 bit 9), 83 TOP SPINNER (node 9 bit 21),
+      84 RIGHT SPINNER (node 9 bit 28).** No `<Button-3>` binding exists
+      anywhere in `playfield.py` today.
+      **★★ ESTABLISHED AT THE DESK, from `hwshim.c`, and it decides the whole
+      shape — do NOT build a host-side pulse loop.** The `0x11` switch scan
+      replies with a per-switch LEVEL, not a closure count: `hwshim.c:4464` is
+      `if (held) level = !level` into a bitmap. So the game counts spins by
+      DIFFING successive scans, which caps the rip at **one closure per scan of
+      that switch's own node** however fast anything pulses. Two rates bound it
+      and they are not the same number: the poll itself is described as a
+      37.5 Hz scan (`hwshim.c:5665`), but item 17 measured the gap between two
+      scans of ONE node running to **670 ms in attract**. The during-play
+      per-node rate has never been measured and is the first thing to find out.
+      **Which also kills the obvious implementation.** Each host action is a
+      ~80 ms `wsl.exe` spawn (item 24, measured) and each closure needs two, so
+      a host-side ripper tops out near 6 closures/s while saturating
+      SwitchDriver's queue and blocking every other switch action including a
+      release.
+      **THE DESIGN THIS POINTS AT, not yet built:** a SPIN flag in the shared
+      block, and `hwshim.c` flips the reported level on each scan of that node
+      while the flag is set. That delivers the maximum rate the wire can carry
+      by construction and costs ONE interop call on press and one on release,
+      exactly like `swhold.py`. Right-click then rides item 24's `SwitchDriver`
+      queue unchanged.
+      **What makes it D4 rather than D2: it spans the boundary.** A new flag
+      means `padsw.h`, `padsw.py`, a new `swspin.py`, `hwshim.c` and
+      `playfield.py` — and the block layout is THREE hand-kept copies, which is
+      what `swlayout.sh` (item 16, `145e79b`) exists to prove agree. Run
+      `swlayout.sh` before believing any of it. A rebuild is needed, so no run
+      may be live. The ladder would call a boundary-spanning change D5; it is
+      D4 because the mechanism above is already read off the source and the
+      design is written down, which is what D5 usually pays for.
+      **Acceptance, and the oracle must be on the GAME's side of the wire:** a
+      right-hold on a spinner produces many closures the GAME SEES, not many
+      writes this rig made. Count them with item 17's `PAD_SW_PEND` /
+      `swladder.py`, which read the game's own `entry[+24]`, and state the
+      achieved closures per second against the measured per-node scan rate.
+      Left-click hold must still behave as item 24 shipped it, and a right-hold
+      must end OPEN — the stuck-switch failure is the same one, and
+      `swholdtest.py` is the harness that already checks for it.
+      — S3: nothing is broken and a spinner can still be closed once per click,
+      so no shot is unreachable; what is missing is the magnitude. D4, armchair
+      beyond the desk work above.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

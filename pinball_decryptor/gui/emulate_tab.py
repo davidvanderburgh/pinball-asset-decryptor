@@ -278,7 +278,24 @@ class EmulatePanel:
         self._resetting = False
         self._poll_job = None
         self._stopped = False
-        self._logfile = "/home/david/gzpad.log"
+        # NO game-log path is chosen here, on purpose. The GUI runs on the
+        # HOST and the rig runs wherever Linux is (WSL, a container), so a
+        # path picked on this side is wrong exactly when the two differ: a
+        # hardcoded LOG=/home/david/gzpad.log was handed into the macOS
+        # container, the game start's `> "$LOG"` redirect failed, and the
+        # game never ran at all while everything around it looked normal.
+        # watch.sh, status.sh and every helper script already default to the
+        # same $HOME/gzwatch.log resolved on the LINUX side; saying nothing
+        # is what keeps them agreeing.
+        #: macOS only: whether Screen Sharing has been opened for the current
+        #: run. The picture lives on a VNC display inside the container -
+        #: there is no native window coming, and a user left to wait for one
+        #: waits forever.
+        self._vnc_opened = False
+        #: True only for a run THIS panel started. Attaching to a run that
+        #: was started from a terminal must not pop a viewer nobody asked
+        #: for - the terminal already said where the picture is.
+        self._started_here = False
         #: Last answer from docker_state(), macOS only.  None until the first
         #: probe comes back, which is why nothing is claimed before then.
         self._docker = None
@@ -722,7 +739,7 @@ class EmulatePanel:
             self._run_label(False, False)
             self._set("state", "Not running")
             return
-        env = ["LOG=%s" % self._logfile, "PAD_AUDIO_DUMP=30"] + src
+        env = ["PAD_AUDIO_DUMP=30"] + src
         if not self._audio_var.get():
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
@@ -770,6 +787,7 @@ class EmulatePanel:
             # thread now lives for the whole session draining output, and
             # holding a flag across it is what stopped Stop from working.
             self._starting = False
+            self._started_here = True
             try:
                 # Drain so the pipe cannot fill and block the rig; the rig keeps
                 # its own log, this is only for PAD's log pane.
@@ -962,7 +980,7 @@ class EmulatePanel:
         def run():
             try:
                 out = subprocess.run(
-                    rig_cmd("status.sh", self._logfile),
+                    rig_cmd("status.sh"),
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     timeout=20, creationflags=_CREATE_FLAGS)
                 text = out.stdout.decode("utf-8", "replace")
@@ -1011,6 +1029,24 @@ class EmulatePanel:
 
             busy = self._starting or self._stopping
             up = info.get("running") == "1" or procs != "0"
+            if self._last_up and not up:
+                # The run went away; the next one gets its own viewer.
+                self._vnc_opened = False
+                self._started_here = False
+            if (sys.platform == "darwin" and up and self._started_here
+                    and not self._vnc_opened):
+                # The picture is a VNC display inside the container, so the
+                # "own window" this tab promises is macOS Screen Sharing.
+                # Opened from the poll, not from Start, so it cannot race the
+                # container's VNC server: by the first up=1 answer x11vnc is
+                # already listening (entrypoint.sh starts it before watch.sh).
+                self._vnc_opened = True
+                try:
+                    subprocess.Popen(["open", "vnc://localhost:5900"])
+                    self._log("[emulate] opening the picture in Screen "
+                              "Sharing (vnc://localhost:5900)")
+                except Exception:                       # noqa: BLE001
+                    pass
             self._last_up = up
             self._run_label(up, busy)
             # Resetting WSL audio kills every distro, so never offer it while a

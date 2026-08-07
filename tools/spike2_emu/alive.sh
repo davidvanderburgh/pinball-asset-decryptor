@@ -160,11 +160,30 @@ STUB=$((STUB + $(n -f '^python3? .*playfield\.py')))
 # playfield launch line before anyone noticed, because the symptom of a leaked
 # run script is "it looks like it is still starting up".
 #
-# MINUS OUR OWN CALLER. watch.sh's teardown ends by running this script, so a
-# naive count reports the very run that is tidying itself up and this can never
-# print clean from the one place that matters most. $PPID is that caller.
+# MINUS OUR OWN CALL CHAIN - the WHOLE chain, not just $PPID. watch.sh's
+# teardown and ensurebuild.sh's "is a run live?" both ask this script about
+# the very run they belong to, and the second one asks through a command
+# substitution: `$( )` interposes a subshell, so alive.sh's $PPID was that
+# subshell and the exclusion missed. watch.sh then COUNTED ITSELF, every
+# fresh machine answered "a run is still up" at the exact moment
+# ensurebuild.sh asked, and the guest GL bridge was never built - which on
+# macOS meant Stern's own libGLESv2 stayed in the rootfs and the game drew
+# nothing, run after run, with killgame.sh unable to clear it because the
+# next start self-matched the same way. Walking every ancestor is right in
+# both directions: a watch.sh that is ASKING cannot be evidence of a second
+# run, and a watch.sh that is not an ancestor still counts - that is how the
+# app's status poll sees a live run. The walk must reach PID 1: in the macOS
+# container watch.sh IS PID 1.
+ANC=$PPID
+_p=$PPID
+while :; do
+    _p=$(ps -o ppid= -p "$_p" 2>/dev/null | tr -d ' ')
+    case "$_p" in ''|0) break ;; esac
+    ANC="$ANC
+$_p"
+done
 SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun)\.sh' 2>/dev/null \
-         | grep -cvx "$PPID")
+         | grep -cvxF "$ANC")
 SCRIPT=${SCRIPT:-0}
 
 # ★ CARD MOUNTS - the other class that leaked. cardmount.sh setsid's fuse2fs on

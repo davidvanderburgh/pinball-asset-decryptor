@@ -54,6 +54,13 @@ pad_ensure_bridge || exit 1
 
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
+# FAIL NOW if it cannot be written, not at the game start 400 lines down. A bad
+# LOG used to surface as one bash "No such file or directory" over a run that
+# then looked normal forever: the start's `> "$LOG"` redirect failed, so the
+# game simply never ran. macOS hit exactly this with a WSL home path handed
+# into the container. `>>` on purpose - this is a writability probe, and the
+# truncation stays where it always was, at the game start itself.
+: >> "$LOG" || { echo "[watch] LOG=$LOG is not writable here - nothing would start. Fix or unset LOG." >&2; exit 1; }
 HOSTLOG=$HOME/padglhost.log
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl

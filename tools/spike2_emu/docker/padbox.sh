@@ -21,6 +21,13 @@ RIG=$(cd "$SELF/.." && pwd)
 IMAGE=${PAD_BOX_IMAGE:-pad-spike2-emu}
 NAME=${PAD_BOX_NAME:-pad-spike2}
 PORT=${PAD_VNC_PORT:-5900}
+# A PASSWORD IS NOT OPTIONAL HERE, and not for security (the port is loopback
+# only): macOS Screen Sharing refuses a VNC server that offers no
+# authentication at all. Against the old -nopw default it put up a password
+# prompt anyway, and whatever was typed failed - a tester hit exactly that.
+# The Emulate tab opens vnc://:pinball@localhost:5900, so the two defaults
+# must match; see _apply() in pinball_decryptor/gui/emulate_tab.py.
+PAD_VNC_PASSWD=${PAD_VNC_PASSWD:-pinball}
 
 command -v docker >/dev/null 2>&1 || {
     echo "[box] docker is not installed." >&2
@@ -167,6 +174,6 @@ case "${1:-}" in
     --shell) exec docker run -it "${RUN_ARGS[@]}" "$IMAGE" bash ;;
 esac
 
-echo "[box] starting; the picture appears at vnc://localhost:$PORT"
-echo "[box] on macOS: open vnc://localhost:$PORT   (Screen Sharing, nothing to install)"
+echo "[box] starting; the picture appears at vnc://:$PAD_VNC_PASSWD@localhost:$PORT"
+echo "[box] on macOS: open 'vnc://:$PAD_VNC_PASSWD@localhost:$PORT'   (Screen Sharing; VNC password: $PAD_VNC_PASSWD)"
 exec docker run "${RUN_ARGS[@]}" "$IMAGE" "$@"

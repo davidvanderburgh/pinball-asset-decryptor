@@ -80,7 +80,11 @@ case "${1:-}" in --total|--procs) ONLY=$1 ;; esac
 n() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
 
 GAME=$(n -x game)
-QEMU=$(n -f arm-binfmt)
+# arm-binfmt is WSL's interpreter name; qemu-arm covers a container whose
+# binfmt rewrites argv with its own qemu path. On a platform where neither
+# appears (the guest exec'd with no interpreter on its command line), GAME
+# alone carries the count - comm=game holds everywhere measured.
+QEMU=$(n -f 'arm-binfmt|qemu-arm')
 HOST=$(n -x padglhost)
 BUS=$(n -f nodebus.py)
 

@@ -602,7 +602,7 @@ fi
 # game exited" 0.25 s in and kill a perfectly healthy run.
 echo "[watch] waiting for the game to start..."
 for i in $(seq 1 240); do
-    pgrep -f arm-binfmt >/dev/null && break
+    pad_guest_up && break
     if ! pgrep -x padglhost >/dev/null; then
         echo "[watch] the renderer died while the game was starting:" >&2
         tail -20 "$HOSTLOG" >&2
@@ -610,7 +610,7 @@ for i in $(seq 1 240); do
     fi
     sleep 0.25
 done
-if ! pgrep -f arm-binfmt >/dev/null; then
+if ! pad_guest_up; then
     echo "[watch] the game never started. Last lines of its log:" >&2
     tail -20 "$LOG" >&2
     exit 1
@@ -675,7 +675,7 @@ while :; do
         echo "[watch] renderer exited (window closed)."
         break
     fi
-    if ! pgrep -f arm-binfmt >/dev/null; then
+    if ! pad_guest_up; then
         echo "[watch] the game exited. Last lines of its log:"
         tail -5 "$LOG"
         break

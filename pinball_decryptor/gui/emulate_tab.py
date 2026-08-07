@@ -1041,10 +1041,16 @@ class EmulatePanel:
                 # container's VNC server: by the first up=1 answer x11vnc is
                 # already listening (entrypoint.sh starts it before watch.sh).
                 self._vnc_opened = True
+                # The password rides in the URL because Screen Sharing will
+                # ask for one either way: it refuses a VNC server with no
+                # authentication, so padbox.sh always sets one (its default,
+                # "pinball", and this URL must agree). It exists to satisfy
+                # the client, not to protect anything - the port is loopback
+                # only.
                 try:
-                    subprocess.Popen(["open", "vnc://localhost:5900"])
+                    subprocess.Popen(["open", "vnc://:pinball@localhost:5900"])
                     self._log("[emulate] opening the picture in Screen "
-                              "Sharing (vnc://localhost:5900)")
+                              "Sharing (VNC password: pinball)")
                 except Exception:                       # noqa: BLE001
                     pass
             self._last_up = up

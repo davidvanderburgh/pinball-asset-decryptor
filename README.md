@@ -759,13 +759,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    namespaces — there is no port to write, only Linux to run. It needs
    Docker Desktop and shows its picture over VNC: the app opens it in
    macOS Screen Sharing by itself once the game is up, with nothing to
-   install. Nothing has to be added to
+   install (the VNC password, should Screen Sharing ask, is `pinball`).
+   Nothing has to be added to
    Docker's file-sharing list: the app copies the rig into your home
    directory, which Docker already shares, and mounts the copy.
    Measured at 57 fps in the
-   container with software rendering; a known issue is that a run stops
-   by itself after about a minute, seen on a Windows host and not yet
-   checked on a Mac.
+   container with software rendering. A run used to stop by itself after
+   about a minute — the "did the game start?" check looked for the WSL
+   qemu process name, which does not exist in the container — and that
+   is fixed.
 10. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact. The app also remembers the

@@ -38,7 +38,7 @@ echo "rig processes running: $before"
 [ "$before" -gt 0 ] && bash "$SELF/alive.sh" | sed -n '/--- what is still up ---/,$p'
 
 pkill -9 -x game
-pkill -9 -f 'arm-binfmt'
+pkill -9 -f 'arm-binfmt|qemu-arm'
 pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'

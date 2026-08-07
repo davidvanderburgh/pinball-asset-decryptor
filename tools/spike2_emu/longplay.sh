@@ -66,7 +66,10 @@ pick() { local -n arr=$1; echo "${arr[$((RANDOM % ${#arr[@]}))]}"; }
 # from the rig's own boot press. See padsw.h; swreplay.py --list groups by it.
 poke() { PAD_SW_SRC=g python3 "$S/swpoke.py" "$1" "${2:-90}" >/dev/null 2>&1; }
 
-guest_up() { pgrep -f arm-binfmt >/dev/null 2>&1; }
+# The same union as padpath.sh's pad_guest_up (this script sources only
+# gamestate.sh): comm=game on every platform measured; the interpreter names
+# are platform details - arm-binfmt is WSL's, qemu-arm a container's.
+guest_up() { pgrep -x game >/dev/null 2>&1 || pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1; }
 
 # One ball into play. plunge.py takes the lowest trough ball still held, so a
 # `reset` first is what makes this repeatable across blocks.

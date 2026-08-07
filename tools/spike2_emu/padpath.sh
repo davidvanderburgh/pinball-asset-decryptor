@@ -56,6 +56,22 @@ pad_is_wsl() {
     grep -qi microsoft /proc/version 2>/dev/null
 }
 
+# Is the emulated GUEST running? Ask about BOTH process shapes, because the
+# qemu interpreter's name is a PLATFORM detail, not a fact about the guest:
+# WSL registers qemu under binfmt as `arm-binfmt-P` and that path appears on
+# the guest's command line, so `pgrep -f arm-binfmt` works there - and ONLY
+# there. In the macOS container no such string exists anywhere, and a wait
+# loop grepping for it declared a run whose own log showed 55 fps "never
+# started" at the 60 s mark and tore it down. comm is the basename of the
+# original ELF (`game`) on every platform measured, so it leads; the
+# interpreter names stay because arm-binfmt also matches the chroot's busybox
+# sh in the second or two before ./game execs, and qemu-arm covers a container
+# whose binfmt rewrites argv with its own interpreter path.
+pad_guest_up() {
+    pgrep -x game >/dev/null 2>&1 && return 0
+    pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1
+}
+
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
 #
 # build.sh compiles this list and stamps its digest beside the .so; watch.sh

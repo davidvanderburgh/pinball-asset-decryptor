@@ -436,3 +436,61 @@ def test_the_run_log_names_which_copy_of_the_rig_it_came_from():
     - and they can differ.  A log that does not name the one it ran from cannot
     answer "was that the release, or my working copy?"."""
     assert "cfg RIG=$RIG" in _rig_text("watch.sh")
+
+
+# --------------------------------------------------------------------------
+# macOS: the container can only mount what Docker is allowed to share
+# --------------------------------------------------------------------------
+
+def _padbox():
+    with open(os.path.join(RIG, "docker", "padbox.sh"),
+              encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def test_the_rig_is_staged_out_of_a_path_docker_cannot_share():
+    """Docker Desktop bind-mounts only paths on its file-sharing list, whose
+    default is /Users /Volumes /private /tmp /var/folders.  An installed app
+    lives in /Applications, which is NOT on it, so mounting the rig out of the
+    bundle failed with "is not shared from the host and is not known to
+    Docker" - for precisely the people who installed the app rather than
+    cloning it."""
+    box = _padbox()
+    assert "pad_docker_can_share" in box
+    for shared in ("/Users/", "/Volumes/", "/private/", "/tmp/", "/var/folders/"):
+        assert shared in box, shared
+    # The staging copy, and the mount that uses it.
+    assert "PAD_BOX_STAGE" in box
+    assert "$RIG:/pad/rig:ro" in box
+    # The share check has to come BEFORE the mount is built, or it decides
+    # nothing.
+    assert box.index("pad_docker_can_share") < box.index("$RIG:/pad/rig:ro")
+
+
+def test_a_status_poll_does_not_build_a_container_configuration():
+    """The Emulate tab asks status.sh every two seconds.  That question needs
+    no image, no volume, no mount and no staged copy - it is answered from
+    `docker ps` alone - so it must be answered before any of that is set up.
+    It used to sit at the bottom, where every poll built the whole run
+    configuration and could trigger an image build."""
+    box = _padbox()
+    poll = box.index("alive.sh|killgame.sh|status.sh")
+    for later in ("docker volume create", "$RIG:/pad/rig:ro",
+                  "PAD_BOX_STAGE", "docker image inspect"):
+        assert poll < box.index(later), later
+
+
+def test_staging_never_deletes_the_directory_a_live_run_has_mounted():
+    """A running container has the staged directory bind mounted; wiping it
+    before the copy would break a run that has nothing to do with the command
+    being issued.  Nothing in the rig is written to at run time, so copying
+    over the top is both safe and sufficient."""
+    box = _padbox()
+    stage = box[box.index("PAD_BOX_STAGE"):box.index("$RIG:/pad/rig:ro")]
+    # Comments stripped first: the code says why it does NOT rm -rf, and a lint
+    # that reads its own explanation as the thing it forbids is a lint that can
+    # only be satisfied by deleting the reasoning.
+    code = "\n".join(ln for ln in stage.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "rm -rf" not in code
+    assert "cp -R" in code

@@ -32,6 +32,75 @@ docker info >/dev/null 2>&1 || {
     exit 1
 }
 
+# alive.sh / killgame.sh talk about a RUN, so they belong in the container that
+# is running it - not in a second one that shares none of its processes. This is
+# the same "one definition of what is running" rule the rig applies everywhere.
+#
+# ANSWERED FIRST, before anything below is set up, because status.sh is asked
+# every two seconds by the Emulate tab and none of it needs an image, a volume,
+# a mount or a staged copy. It used to sit at the bottom, so every poll built
+# the whole run configuration and could even trigger an image build, to answer
+# a question that needs neither.
+case "${1:-}" in
+    alive.sh|killgame.sh|status.sh)
+        if docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
+            exec docker exec "$NAME" bash "/pad/rig/$1" "${@:2}"
+        fi
+        # No container: nothing this rig started can be running, so answer
+        # rather than starting a box to ask.
+        [ "${1:-}" = "alive.sh" ] && { echo "TOTAL STILL RUNNING    : 0  (clean)"; exit 0; }
+        [ "${1:-}" = "status.sh" ] && { echo "state=off"; echo "procs=0"; exit 0; }
+        echo "[box] nothing running"; exit 0 ;;
+esac
+
+# ---- THE RIG HAS TO LIVE SOMEWHERE DOCKER IS ALLOWED TO LOOK ---------------
+#
+# Docker Desktop on macOS bind-mounts only paths on its file-sharing list, and
+# the default list is /Users /Volumes /private /tmp /var/folders. AN INSTALLED
+# APP LIVES IN /Applications, WHICH IS NOT ON IT, so mounting the rig straight
+# out of the bundle fails with
+#
+#   the path /Applications/Pinball Asset Decryptor.app/Contents/Resources/
+#   tools/spike2_emu is not shared from the host and is not known to Docker
+#
+# and the emulator is unreachable for precisely the people who installed the app
+# instead of cloning it - the case the rig was made to ship for. Telling them to
+# add /Applications to Docker's settings is a support instruction, not a fix.
+#
+# So the rig is COPIED into the user's home, which Docker shares out of the box,
+# and the container mounts the copy. Copied EVERY START rather than tracked for
+# staleness: it is a few megabytes of scripts, so freshness is worth more than
+# the milliseconds, and an app update reaches the box with no cache to reason
+# about. (The hardware shim is the opposite case - minutes to rebuild - which is
+# why that one is digest-tracked instead. See watch.sh.)
+pad_docker_can_share() {
+    case "$1" in
+        /Users/*|/Volumes/*|/private/*|/tmp/*|/var/folders/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ "$(uname -s)" = Darwin ] && ! pad_docker_can_share "$RIG"; then
+    STAGE=${PAD_BOX_STAGE:-$HOME/Library/Application Support/pinball_decryptor/spike2_emu}
+    if ! pad_docker_can_share "$STAGE"; then
+        echo "[box] Docker cannot share $RIG, and the staging directory" >&2
+        echo "[box]   $STAGE" >&2
+        echo "[box] is not one it can share either. Point PAD_BOX_STAGE at a" >&2
+        echo "[box] directory under your home folder." >&2
+        exit 1
+    fi
+    echo "[box] $RIG is outside Docker's file sharing; using a copy in $STAGE"
+    # OVER THE TOP, never rm -rf first: a live container has this directory
+    # bind mounted, and deleting it underneath one would break a run that has
+    # nothing to do with this command. Nothing in the rig is written to at run
+    # time, so an overwrite in place is safe.
+    mkdir -p "$STAGE" || exit 1
+    cp -R "$RIG"/. "$STAGE"/ || {
+        echo "[box] could not copy the rig into $STAGE" >&2; exit 1; }
+    RIG=$STAGE
+    SELF=$STAGE/docker
+fi
+
 build() {
     echo "[box] building $IMAGE (first time takes a few minutes)"
     docker build -t "$IMAGE" "$SELF"
@@ -96,21 +165,6 @@ done
 
 case "${1:-}" in
     --shell) exec docker run -it "${RUN_ARGS[@]}" "$IMAGE" bash ;;
-esac
-
-# alive.sh / killgame.sh talk about a RUN, so they belong in the container that
-# is running it - not in a second one that shares none of its processes. This is
-# the same "one definition of what is running" rule the rig applies everywhere.
-case "${1:-}" in
-    alive.sh|killgame.sh|status.sh)
-        if docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
-            exec docker exec "$NAME" bash "/pad/rig/$1" "${@:2}"
-        fi
-        # No container: nothing this rig started can be running, so answer
-        # rather than starting a box to ask.
-        [ "${1:-}" = "alive.sh" ] && { echo "TOTAL STILL RUNNING    : 0  (clean)"; exit 0; }
-        [ "${1:-}" = "status.sh" ] && { echo "state=off"; echo "procs=0"; exit 0; }
-        echo "[box] nothing running"; exit 0 ;;
 esac
 
 echo "[box] starting; the picture appears at vnc://localhost:$PORT"

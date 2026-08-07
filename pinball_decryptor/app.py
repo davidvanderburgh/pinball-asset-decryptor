@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from . import __version__
-from .core import desktop, modpack
+from .core import build_output, desktop, modpack
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
 from .core.messages import (DoneMsg, LinkMsg, LogLineMsg, LogMsg, PhaseMsg,
@@ -1387,6 +1387,16 @@ class App:
                 "The build's name matches the original file.\n\n"
                 "Rename the build (File Name) or choose a different output "
                 "folder so it doesn't overwrite the original.")
+            return
+
+        # Make the destination folder NOW, before any of the work.  A Build
+        # Location that isn't on disk yet used to fail deep inside the write
+        # with "[Errno 2] No such file or directory: <the build file>", a
+        # minute-plus in and naming the file instead of the missing folder
+        # (see core.build_output).
+        dest_err = build_output.ensure_dir_for(output_path)
+        if dest_err:
+            messagebox.showerror("Build Location", dest_err)
             return
 
         # Collision check: warn before clobbering an existing build with the

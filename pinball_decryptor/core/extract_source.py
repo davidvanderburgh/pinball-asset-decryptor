@@ -12,6 +12,14 @@ This module drops a tiny sidecar (:data:`SIDE_CAR`) into the extract output
 folder recording the source image's path + ``(size, mtime)`` at extract time.
 :func:`stale_source_message` re-checks that signature with a single ``stat``
 (no multi-GB read) and returns a human warning when it no longer matches.
+
+Not every change to the image is a reason to re-extract, though.  PAD's own
+Partitions-tab Replace writes into the card image and moves its mtime, so the
+warning used to fire on an edit the user had just made *in the app* — and told
+him to re-run Extract over a file (``/usr/local/spike/SternLogo.png`` on the OS
+partition) that no extracted asset came from.  :mod:`core.card_edits` remembers
+those replaces, so the check can now tell "PAD changed this image, and not in a
+way that matters here" from "something else changed it".
 """
 
 import json
@@ -140,8 +148,55 @@ def stale_source_message(assets_dir: str) -> Optional[str]:
             and current["mtime"] == recorded.get("mtime")):
         return None
     name = recorded.get("input_name") or os.path.basename(path)
+    own = _own_edit_verdict(path, assets_dir, name)
+    if own is not _NOT_OURS:
+        return own
     return (
         f"The source image “{name}” has changed on disk since these "
         "assets were extracted. The original-track names and replacements "
         "shown may not match the current image — re-run Extract to refresh."
     )
+
+
+#: "PAD's own edits do not explain this image" — distinct from the ``None`` that
+#: means "explained, and nothing is wrong".
+_NOT_OURS = object()
+
+
+def _own_edit_verdict(image_path, assets_dir, name):
+    """What to say when the source image's own change was PAD's doing.
+
+    The Partitions tab's Replace writes into the card image, which moves its
+    mtime — so a tester swapping ``/usr/local/spike/SternLogo.png`` on sda2 got
+    told his extract was stale and to re-run Extract, which was both alarming
+    and wrong: that file is not where any extracted asset came from, and the
+    only thing that changed about the image was the swap he had just watched
+    PAD make.
+
+    Returns ``None`` when PAD's journal accounts for the image exactly and the
+    extract is unaffected (no banner), a warning naming the file when a replace
+    DID hit one of the extract's own source files, or :data:`_NOT_OURS` when
+    the journal can't account for the change — something else touched the
+    image, so the general warning stands.
+    """
+    from . import card_edits, card_paths
+    if not card_edits.signature_current(image_path):
+        return _NOT_OURS
+    ours = card_edits.replaced(image_path)
+    if not ours:
+        return _NOT_OURS
+    covered = card_paths.extracted_card_paths(assets_dir)
+    if not covered:
+        # No manifests to check against (an older or device-sourced extract) —
+        # can't prove the swap missed the extract, so don't suppress.
+        return _NOT_OURS
+    hits = sorted(p for p in ours
+                  if card_paths.is_extract_source(assets_dir, p))
+    if hits:
+        return (
+            f"You replaced {hits[0]} on “{name}” with the Partitions tab, and "
+            "these assets were extracted from that file. The original-track "
+            "names and replacements shown may not match it any more — re-run "
+            "Extract to refresh."
+        )
+    return None

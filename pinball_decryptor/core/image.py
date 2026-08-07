@@ -82,6 +82,19 @@ def detect_image_info(path):
         return None
 
 
+def detect_image_info_bytes(data, name=""):
+    """:func:`detect_image_info` for image bytes with no file behind them —
+    the Partitions tab reads its preview out of the card's ext4 filesystem."""
+    if not _PIL_OK or not data:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return ImageInfo(name, im.format or "", im.width, im.height,
+                             im.mode, _has_alpha(im))
+    except Exception:
+        return None
+
+
 # The image editors' transparency checkerboard: both black and white art
 # reads against it in either app theme (a black font glyph on the dark theme
 # was invisible — the preview canvas matched the glyph).
@@ -103,35 +116,106 @@ def _checkerboard(size):
     return bg
 
 
-def thumbnail_png(path, max_w, max_h):
-    """Return PNG bytes of *path* scaled to fit ``max_w`` x ``max_h`` (aspect
-    preserved), for the tab's preview pane, or ``None`` on failure.
+def _fit_png(im, max_w, max_h):
+    """PNG bytes of the open image *im* fitted to ``max_w`` x ``max_h``.
 
     An image smaller than the pane (font glyph slices are usually a few dozen
     pixels) is upscaled by a whole-number factor with nearest-neighbour so it
-    stays crisp and inspectable; anything with transparency is composited
-    over the standard checkerboard."""
+    stays crisp and inspectable; anything with transparency is composited over
+    the standard checkerboard.
+    """
+    im = im.convert("RGBA")
+    max_w = max(1, int(max_w))
+    max_h = max(1, int(max_h))
+    if im.width > max_w or im.height > max_h:
+        im.thumbnail((max_w, max_h))
+    else:
+        k = min(max_w // im.width, max_h // im.height)
+        if k >= 2:
+            im = im.resize((im.width * k, im.height * k), Image.NEAREST)
+    if im.getchannel("A").getextrema()[0] < 255:
+        bg = _checkerboard(im.size)
+        bg.alpha_composite(im)
+        im = bg
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def thumbnail_png(path, max_w, max_h):
+    """Return PNG bytes of *path* scaled to fit ``max_w`` x ``max_h`` (aspect
+    preserved), for the tab's preview pane, or ``None`` on failure."""
     if not _PIL_OK or not path or not os.path.isfile(path):
         return None
     try:
         with Image.open(path) as im:
-            im = im.convert("RGBA")
-            max_w = max(1, int(max_w))
-            max_h = max(1, int(max_h))
-            if im.width > max_w or im.height > max_h:
-                im.thumbnail((max_w, max_h))
-            else:
-                k = min(max_w // im.width, max_h // im.height)
-                if k >= 2:
-                    im = im.resize((im.width * k, im.height * k),
-                                   Image.NEAREST)
-            if im.getchannel("A").getextrema()[0] < 255:
-                bg = _checkerboard(im.size)
-                bg.alpha_composite(im)
-                im = bg
-            buf = io.BytesIO()
-            im.save(buf, "PNG")
-            return buf.getvalue()
+            return _fit_png(im, max_w, max_h)
+    except Exception:
+        return None
+
+
+def thumbnail_png_bytes(data, max_w, max_h):
+    """:func:`thumbnail_png` for image bytes that were never a file on disk.
+
+    The Partitions tab reads its preview straight out of the card image's ext4
+    filesystem, so there is no path to hand Pillow — and extracting a file to a
+    temp dir just to look at it is what the tab was trying to save the user
+    from ("no preview for images. Would it be possible to preview common
+    formats such as images?", batch 30).
+    """
+    if not _PIL_OK or not data:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return _fit_png(im, max_w, max_h)
+    except Exception:
+        return None
+
+
+#: What a font specimen spells out.  Kept to plain ASCII: a Stern card's fonts
+#: are Latin UI faces, and a glyph the font lacks renders as a blank box that
+#: reads as a broken preview.
+_FONT_SPECIMEN = ("ABCDEFGHIJKLM", "abcdefghijklm", "0123456789 !?$%")
+
+
+def font_sample_png(data, max_w, max_h, text=None):
+    """PNG bytes of a short specimen set in the TrueType/OpenType font in
+    *data*, or ``None`` when it isn't a font Pillow can load.
+
+    Same question as the images ("maybe fonts?"): a card carries several
+    ``.ttf``/``.otf`` files and nothing about the name says what they look
+    like.  Rendered black-on-transparent and composited over the same
+    checkerboard as the image previews, so it reads on either theme.
+    """
+    if not _PIL_OK or not data:
+        return None
+    try:
+        from PIL import ImageDraw, ImageFont
+    except Exception:                   # pragma: no cover - Pillow optional
+        return None
+    lines = tuple(text) if text else _FONT_SPECIMEN
+    max_w = max(1, int(max_w))
+    max_h = max(1, int(max_h))
+    try:
+        # Pick the largest size that fits the pane's width, then let the fitter
+        # scale it down if the specimen is still too tall.
+        size = max(8, min(44, max_h // (len(lines) + 1)))
+        font = ImageFont.truetype(io.BytesIO(data), size)
+        probe = Image.new("RGBA", (1, 1))
+        draw = ImageDraw.Draw(probe)
+        widths, heights = [], []
+        for line in lines:
+            box = draw.textbbox((0, 0), line, font=font)
+            widths.append(box[2] - box[0])
+            heights.append(box[3] - box[1])
+        line_h = max(heights or [size]) + max(2, size // 4)
+        im = Image.new("RGBA", (max(1, max(widths or [1])) + 4,
+                                line_h * len(lines) + 4), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(im)
+        for i, line in enumerate(lines):
+            draw.text((2, 2 + i * line_h), line, font=font,
+                      fill=(0, 0, 0, 255))
+        return _fit_png(im, max_w, max_h)
     except Exception:
         return None
 

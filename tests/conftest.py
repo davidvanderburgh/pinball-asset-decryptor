@@ -75,6 +75,24 @@ def _load_plugins_once():
     load_plugins()
 
 
+# ---------------------------------------------------------------------------
+# Nothing in the suite may write to the user's real app-data stores.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_card_edits(tmp_path_factory):
+    """Point the card-edit journal at a temp file for the whole run.
+
+    The Partition Explorer's Replace records what it swapped (core.card_edits),
+    and the GUI smoke tests drive a real Replace — which dropped entries for
+    pytest's throwaway card images into the developer's own
+    ``%APPDATA%/pinball_decryptor/card_edits.json``.
+    """
+    from pinball_decryptor.core import card_edits
+    card_edits.CARD_EDITS_FILE = str(
+        tmp_path_factory.mktemp("card_edits") / "card_edits.json")
+
+
 @pytest.fixture(scope="session")
 def all_manufacturers():
     from pinball_decryptor.core.registry import all_manufacturers as _am

@@ -3916,6 +3916,17 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     import shutil
     import threading
 
+    from ...core import build_output
+
+    # The destination folder before anything else.  The copy below is the first
+    # thing that touches it, on a background thread whose failure only surfaces
+    # at the join — so a Build Location that wasn't on disk yet used to fail a
+    # minute and a half in, with an [Errno 2] naming the build FILE rather than
+    # the missing folder (see core.build_output).
+    dest_err = build_output.ensure_dir_for(output_path)
+    if dest_err:
+        raise OSError(dest_err)
+
     # Copy the (unpatched) card image to the output in a BACKGROUND THREAD while
     # we compute the patches.  Computing them is CPU-bound -- the parallel cat-0
     # re-encode and the in-process master-directory integrity assert -- and both
@@ -3956,7 +3967,11 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     copier.join()
     if copy_err:                            # the background copy itself failed
         _safe_remove(output_path)
-        raise copy_err[0]
+        # Say what was being done and where — the raw error is an errno and a
+        # path, which read as the app losing the user's card image.
+        raise OSError("Could not copy the card image to the build's "
+                      "destination:\n\n    %s\n\n%s"
+                      % (output_path, copy_err[0])) from copy_err[0]
     if writes is None:                      # cancelled mid-compute
         _safe_remove(output_path)
         _rmtree_grow_plan(grow_plan)

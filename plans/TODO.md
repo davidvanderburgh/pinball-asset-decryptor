@@ -1019,6 +1019,69 @@ These have each been violated at least once and each cost a run or a window:
       needs a run, it reproduces every time, and the instrument is a one-line
       trap - the unknown is which host it belongs to, not how to see it.
 
+- [ ] **31. The playfield claims "30 fps" while the LEDs actually move 2.6
+      times a second, in bursts and freezes.** `S2 D3`
+      **★ DAVID, 2026-08-07: "we are claiming '30fps' on the virtual playfield.
+      but look at this video recording on my desktop. the LEDs are very
+      jumpy."**
+      **MEASURED OFF HIS OWN RECORDING, NO RUN SPENT** —
+      `C:\Users\david\OneDrive\Desktop\Recording 2026-08-07 093210.mp4`, 9.2 s
+      of the `godzilla_pro` playfield window, 276 frames at 30 fps. Extract the
+      frames, crop to the artwork, count the frame-to-frame transitions whose
+      pixels differ: **24 of 275 change anything at all = 2.6 visual updates a
+      second**, while the status bar reads a rock-steady `30 fps` in every one
+      of the 276 frames.
+      **AND IT IS NOT A LOW RATE, IT IS BURSTS AND FREEZES — which is exactly
+      the word "jumpy".** Median gap between updates 100 ms, but **one gap of
+      2.83 s and another of 1.83 s**, and inside a burst it changes on 15 of 41
+      consecutive frames (~11/s). The 2.6/s mean is the average of a stall and
+      a scramble, so do not chase it as a uniform rate.
+      **ESTABLISHED, from `playfield.py:1115-1123`: the number on screen is the
+      POLL rate, not the picture rate.** `self.fps` is measured tick-START to
+      tick-START of the Tk `after` loop, so a loop that reads `dump/padled`
+      perfectly on time and finds nothing new reports 30 fps forever. The
+      docstring at `playfield.py:63` — *"THE RATE IS 30 fps AND IT IS MEASURED,
+      not assumed"* — is true about the loop and says nothing about what a human
+      sees. **The drawing is not the fault: `draw_fixtures` is correctly
+      change-gated** (`F["drawn"] != want`, `:1090`), so a still picture means
+      the DECODED STATE is still, not that a redraw was skipped.
+      **RULED OUT WITH A NUMBER, so nobody spends a pass on item 1d: undecoded
+      frames are NOT the cause.** The bar's own drop counter went 62 → 72 across
+      the recording — **10 drops in 9.2 s, ~1.1/s** — which cannot turn 30
+      updates/s into 2.6. It is consistent, though, and worth keeping: all 8
+      frames where the drop counter ticked had ZERO change on the playfield, and
+      none of the 24 redraws coincided with a drop.
+      **THE OPEN QUESTION IS ONE SUBTRACTION.** The `LED writes decoded` counter
+      went **1523 → 1877 = 354 writes in 9.17 s ≈ 39/s**, so data IS arriving at
+      better than 30 Hz while the picture changes 2.6 times a second. Three
+      candidates, none tested: most writes carry values already on screen; they
+      address fixtures this window does not draw; or many land inside one 33 ms
+      poll and collapse. `led_publish()` (`hwshim.c:5345`) is called from the
+      node-bus request path (`:6222`), so the block is EVENT-driven and never
+      clocked — the window can only ever see the last value before its poll.
+      **NOT ESTABLISHED: whether this is attract-specific.** The recording is
+      the playfield window alone, `0 coils addressed`, so the game's state is
+      not visible in it. The promoted loose end above claims gameplay was
+      covered by item 11 and attract was not; that split has never been tested
+      against a measurement. State which state you measured.
+      **Acceptance, and state both halves separately.** (a) The claim stops
+      being wrong: the status bar reports a rate a human can check — the redraw
+      rate alongside the poll rate, or the poll rate labelled as such — so
+      "30 fps" never again describes a frozen picture. (b) The fault: re-run the
+      frame diff on a fresh recording and state the achieved visual updates a
+      second and the longest freeze, in both attract and a game.
+      — S2: the game plays and the window is still usable, so nobody is blocked
+      and this is not S1. What it costs is that the rig's main feedback surface
+      is misleading about itself, and that **item 21's trough display reads the
+      same block through the same poll** — six ball markers at 2.6 updates/s
+      with 2.8 s freezes would be built broken from the start. Arguable as S3 if
+      you read a feedback window as pure comfort. D3: it needs a run to confirm
+      a fix, the fault showed up on David's first recording and is visible the
+      moment you look, and every instrument exists already (`PAD_PF_LOG`, the
+      two on-screen counters, and the frame diff, which scores a recording with
+      no run at all) — the unknown is which of the three mechanisms, not how to
+      see it.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.
@@ -1069,13 +1132,13 @@ These have each been violated at least once and each cost a run or a window:
   frames cross X11 to XQuartz — and nobody has measured that. It is an
   afternoon: run `padglhost` against XQuartz and read the fps it already prints.
 
-- **Playfield LED markers choppy in ATTRACT, undiagnosed.** Raised by David
-  during item 11 ("probably all related"). In GAMEPLAY it followed the game's
-  render loop — the same loop the video storms were blocking — so item 11's
-  fixes plausibly cover it. In attract it does NOT follow: that loop held
-  60.1 fps while the LEDs still looked choppy, so the attract half is its own
-  thing and nobody has looked at it. Moved here when item 11 closed so the
-  closure would not silently take it along.
+- **PROMOTED TO ITEM 31 on 2026-08-07 — "Playfield LED markers choppy in
+  ATTRACT, undiagnosed"** sat here unnumbered from item 11's closure because it
+  had no acceptance condition. It has one now, and a measurement: 2.6 visual
+  updates a second against a status bar reading 30 fps. What this bullet said
+  and item 31 must not lose: in GAMEPLAY the choppiness followed the game's
+  render loop, so item 11's fixes plausibly cover that half; in ATTRACT it did
+  NOT — that loop held 60.1 fps while the LEDs still looked choppy.
 
 - **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
   like the rig is broken.** `game` is coin → start → plunge, and the plunge

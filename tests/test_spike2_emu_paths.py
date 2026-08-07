@@ -552,3 +552,110 @@ def test_both_entry_points_check_the_rootfs_before_the_binaries():
         assert "pad_ensure_rootfs" in text, name
         assert (text.index("pad_ensure_rootfs")
                 < text.index("pad_ensure_shim")), name
+
+
+# --------------------------------------------------------------------------
+# ...and a guest filesystem that EXISTS is not one that RUNS
+#
+# Reported 2026-08-07: a rootfs that passed every check the rig had, and one
+# line to go on —
+#
+#     chroot: failed to run command '/bin/sh': No such file or directory
+#
+# — followed by a minute of "waiting for the game to start" and "the game never
+# started".  Reproduced exactly: a rootfs whose /bin/sh does not resolve (this
+# one is a symlink to /bin/bash, so bash is the file that has to be there)
+# gives that message and no other clue, and so does a binfmt handler whose
+# interpreter the chroot cannot reach.
+# --------------------------------------------------------------------------
+
+def _padpath():
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf-8",
+              newline="") as f:
+        return f.read()
+
+
+def test_the_guest_is_proved_to_run_by_running_something_in_it():
+    """Listing files cannot answer this — the reported rootfs had every
+    directory the rig looked for.  The probe is the run's own first step (a
+    user namespace, a chroot, /bin/sh), so a pass means the real thing gets as
+    far as the game, and it costs one fork on a healthy machine."""
+    eb = _ensurebuild()
+    assert "pad_ensure_guest_exec" in eb
+    probe = eb[eb.index("_pad_guest_probe() {"):]
+    probe = probe[:probe.index("\n}")]
+    assert "unshare" in probe and "chroot" in probe
+
+
+def test_guest_symlinks_are_followed_the_way_the_chroot_follows_them():
+    """/bin/sh -> /bin/bash is an ABSOLUTE link, so the host's own readlink -f
+    resolves it to the HOST's bash — present on every machine, and not the file
+    the chroot will open.  Answered in padpath.sh, once, because rootfs.sh
+    (which builds the tree) and ensurebuild.sh (which refuses to run against a
+    broken one) have to agree on what "built" means."""
+    pp = _padpath()
+    assert "pad_guest_path" in pp and "pad_guest_missing" in pp
+    body = pp[pp.index("pad_guest_path() {"):]
+    assert "readlink -f" not in body, "that resolves against the HOST's root"
+    assert '"$ROOT$p"' in body
+    for name in ("rootfs.sh", "ensurebuild.sh"):
+        with open(os.path.join(RIG, name), encoding="utf-8", newline="") as f:
+            assert "pad_guest_missing" in f.read(), name
+
+
+def test_an_incomplete_guest_filesystem_is_rebuilt_from_the_chosen_card():
+    """Same stance as the missing one: the user has already chosen the card it
+    is built from, and rootfs.sh needs no root."""
+    eb = _ensurebuild()
+    body = eb[eb.index("pad_ensure_guest_exec() {"):]
+    assert "rootfs.sh" in body and "--force" in body
+    assert "PAD_CARD" in body
+    # And it is PROVED afterwards rather than assumed: every repair path ends
+    # in the probe again.
+    assert body.count("_pad_guest_probe") >= 3
+
+
+def test_a_missing_arm_handler_is_told_apart_from_a_broken_rootfs():
+    """Both produce that one ENOENT.  The kernel's handler is the case this
+    rig cannot fix for you — registering needs root — so it has to be NAMED,
+    with the command for this machine and the reason WSL keeps losing it."""
+    eb = _ensurebuild()
+    body = eb[eb.index("pad_ensure_guest_exec() {"):]
+    assert "_pad_binfmt_arm" in body
+    advice = eb[eb.index("_pad_binfmt_advice() {"):]
+    advice = advice[:advice.index("\n}")]
+    # Ubuntu 24.04 has no /usr/share/binfmts entry any more (systemd imports
+    # /usr/lib/binfmt.d), so one printed recipe is wrong half the time.
+    assert "/usr/lib/binfmt.d/qemu-arm.conf" in advice
+    assert "update-binfmts" in advice
+    assert "systemd=true" in body, "WSL forgets it on every restart without it"
+
+
+def test_a_dangling_loader_symlink_is_not_read_as_a_finished_extraction():
+    """`[ ! -e ] && [ ! -L ]` was the loader test, and a dangling symlink
+    passes both halves of it — so the one file the check exists for could be
+    missing while the check passed."""
+    with open(os.path.join(RIG, "rootfs.sh"), encoding="utf-8",
+              newline="") as f:
+        rootfs = f.read()
+    code = "\n".join(ln for ln in rootfs.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert '[ ! -L "$ROOT/lib/ld-linux.so.3" ]' not in code
+    # An unfinished extraction must not be able to call itself populated.
+    assert 'if [ -z "$INCOMPLETE" ] && [ "$FORCE" = 0 ]' in code
+    # Re-extracting puts the card's OWN libGLESv2.so.2 back over the bridge's,
+    # and only the stamp beside it would know.
+    assert "rm -f \"$ROOT/usr/lib/glbridge.srcs\"" in code
+
+
+def test_the_guest_is_checked_before_anything_is_built_into_it():
+    """The shim and the bridge both build INTO the rootfs, and a cross compile
+    into a filesystem that cannot start a program is minutes spent to reach the
+    same error."""
+    for name in ("watch.sh", "runbridge.sh"):
+        with open(os.path.join(RIG, name), encoding="utf-8", newline="") as f:
+            text = f.read()
+        assert "pad_ensure_guest_exec" in text, name
+        assert (text.index("pad_ensure_rootfs")
+                < text.index("pad_ensure_guest_exec")
+                < text.index("pad_ensure_shim")), name

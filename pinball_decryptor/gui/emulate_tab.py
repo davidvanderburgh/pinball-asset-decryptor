@@ -162,15 +162,31 @@ def rig_cmd(script, *args, env=()):
     """The command that runs one of the rig's scripts, on THIS platform.
 
     ONE PLACE THAT KNOWS, because there are six call sites and they were six
-    copies of ``["wsl.exe", "-e", "bash", ...]``.  The rig is a Linux program:
-    from Windows it is reached through WSL, and on a Linux desktop it is simply
-    run.  Everything else about the invocation is identical, which is exactly
-    the shape that should not be written out six times.
+    copies of ``["wsl.exe", "-e", "bash", ...]``.  The rig is a Linux program,
+    and the three platforms differ only in how Linux is reached:
+
+    ============  ======================================================
+    Linux         run it.  Nothing in between.
+    Windows       through WSL, which is Linux.
+    macOS         in a container, because ``qemu-user`` translates LINUX
+                  syscalls and the chroot needs Linux namespaces - so
+                  this is not a port that could be written, it is Linux
+                  that has to be running somewhere.  ``docker/padbox.sh``
+                  owns every detail of that and this only calls it.
+    ============  ======================================================
 
     `env` is a list of ``NAME=value`` strings, applied with ``env`` so the
     values survive the hop without a shell re-parsing them - `wsl.exe` re-parses
     its arguments, and `$var` expands to nothing on that second pass.
     """
+    if sys.platform == "darwin":
+        # padbox.sh forwards the interesting variables into the container
+        # itself, so they are set for IT rather than wrapped around it: `docker
+        # run` takes its environment through -e, and an `env` prefix out here
+        # would set them on the docker client and nowhere useful.
+        box = os.path.join(rig_dir(), "docker", "padbox.sh")
+        return ["/usr/bin/env"] + list(env) + ["bash", box, script] + \
+               [str(a) for a in args]
     if sys.platform == "win32":
         head = ["wsl.exe", "-e"]
         path = "%s/%s" % (_wsl_path(rig_dir()), script)
@@ -356,16 +372,24 @@ class EmulatePanel:
             # tools/spike2_emu, and it is the INSTALLERS that deliberately do
             # not carry it. A user who installed to Program Files and read that
             # sentence had no way to work out what to do next.
-            if sys.platform != "win32":
-                # The rig runs inside WSL and draws through WSLg, so there is
-                # nothing to point at here and no point sending anyone looking.
-                # The Windows installer carries it; the Linux and macOS bundles
-                # deliberately do not.
+            if sys.platform == "darwin":
                 self._hint.configure(
-                    text=("The Emulate tab needs Windows with WSL2.\n\n"
-                          "It runs the machine's own ARM game binary under "
-                          "qemu-user inside WSL and draws through WSLg, so it "
-                          "is not available on this platform."))
+                    text=("The emulator rig was not found in %s.\n\n"
+                          "It ships with the app. On macOS it runs in a "
+                          "container — the emulator needs Linux — and shows "
+                          "its picture over VNC, which Screen Sharing opens "
+                          "with nothing to install.\n\n"
+                          "Docker Desktop is required. Set PAD_EMU_DIR if the "
+                          "rig is somewhere else." % rig_dir()))
+            elif sys.platform != "win32":
+                self._hint.configure(
+                    text=("The emulator rig was not found in %s.\n\n"
+                          "It ships with the app, in tools/spike2_emu. Re-run "
+                          "the installer, or set PAD_EMU_DIR to point at that "
+                          "folder.\n\n"
+                          "First time only: rootfs.sh <card.raw> builds the "
+                          "guest from a card image, then build.sh and "
+                          "buildbridge.sh." % rig_dir()))
             else:
                 self._hint.configure(
                     text=("The emulator rig was not found in %s.\n\n"

@@ -694,7 +694,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    itself), reads a version hint from each extract so you can see what
    you're combining, and wires the build straight to the new version so
    the result can't accidentally come out on the old code.
-9. **Emulate tab** *(Stern Spike 2, Windows via WSL2, or Linux)* — run the
+9. **Emulate tab** *(Stern Spike 2 — Windows via WSL2, Linux, or macOS in a container)* — run the
    game itself on this PC and watch what you built. Point it at a card
    image and press Start: the card's game partition is mounted **read
    only** and the real armhf game binary runs under `qemu-user` with its
@@ -726,9 +726,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    and `buildbridge.sh`, none of which need root. It is a Linux program
    throughout: the Windows-looking parts are workarounds for what WSL
    lacks (no Tk for the playfield window, a degraded audio hop), and the
-   Linux path skips them. macOS would need a Linux VM — `qemu-user`
-   translates Linux syscalls and the chroot needs Linux namespaces — so
-   it is not offered there.
+   Linux path skips them. macOS runs it in a container, because
+   `qemu-user` translates Linux syscalls and the chroot needs Linux
+   namespaces — there is no port to write, only Linux to run. It needs
+   Docker Desktop and shows its picture over VNC, which macOS Screen
+   Sharing opens with nothing to install. Measured at 57 fps in the
+   container with software rendering; a known issue is that a run stops
+   by itself after about a minute, seen on a Windows host and not yet
+   checked on a Mac.
 10. **< Back** in the top bar returns to the picker. Each manufacturer
    keeps its own log scrollback, so coming back to the same one
    shows your previous activity intact. The app also remembers the

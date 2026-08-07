@@ -362,3 +362,64 @@ def test_keys_help_is_gone(tmp_path):
         assert "shooter lane" not in blob
     finally:
         root.destroy()
+
+
+# --- how each platform reaches the rig ---------------------------------------
+#
+# The rig is a Linux program and the three platforms differ only in how Linux is
+# reached.  Getting this wrong is invisible on the machine you develop on and
+# total on the other two, which is exactly what a test is for.
+
+def _cmd_on(monkeypatch, platform, tmp_path, *args, **kw):
+    monkeypatch.setattr(emulate_tab.sys, "platform", platform)
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    return emulate_tab.rig_cmd(*args, **kw)
+
+
+def test_linux_runs_the_rig_directly(monkeypatch, tmp_path):
+    cmd = _cmd_on(monkeypatch, "linux", tmp_path, "watch.sh", 30)
+    assert cmd[0] == "bash"
+    assert cmd[1].endswith("watch.sh")
+    assert cmd[2] == "30"
+    assert "wsl.exe" not in cmd
+
+
+def test_windows_reaches_the_rig_through_wsl(monkeypatch, tmp_path):
+    cmd = _cmd_on(monkeypatch, "win32", tmp_path, "watch.sh", 30)
+    assert cmd[:2] == ["wsl.exe", "-e"]
+    assert "bash" in cmd
+    # The path handed to WSL must be a POSIX one, never the Windows spelling.
+    assert not any("\\" in c for c in cmd), cmd
+
+
+def test_macos_goes_through_the_container(monkeypatch, tmp_path):
+    """qemu-user translates LINUX syscalls and the chroot needs Linux
+    namespaces, so macOS runs the rig in a container rather than natively.
+    padbox.sh owns every detail of that."""
+    cmd = _cmd_on(monkeypatch, "darwin", tmp_path, "watch.sh", 30)
+    assert any(c.endswith("padbox.sh") for c in cmd), cmd
+    assert "wsl.exe" not in cmd
+    assert cmd[-2:] == ["watch.sh", "30"]
+
+
+def test_env_survives_the_hop_on_every_platform(monkeypatch, tmp_path):
+    """`env NAME=value` rather than a shell assignment: wsl.exe re-parses its
+    arguments, and `$var` expands to nothing on that second pass."""
+    for platform in ("linux", "win32", "darwin"):
+        cmd = _cmd_on(monkeypatch, platform, tmp_path, "watch.sh", 30,
+                      env=["LOG=/tmp/x.log"])
+        assert "LOG=/tmp/x.log" in cmd, (platform, cmd)
+        assert any(c.endswith("env") or c == "env" for c in cmd), (platform, cmd)
+
+
+def test_the_container_entry_point_ships_with_the_rig():
+    """rig_cmd names it on macOS, so its absence would be a macOS-only failure
+    that nobody developing on Windows or Linux would ever see."""
+    import os
+    box = pathlib.Path(DEFAULT_RIG_DIR) / "docker" / "padbox.sh"
+    dockerfile = pathlib.Path(DEFAULT_RIG_DIR) / "docker" / "Dockerfile"
+    entry = pathlib.Path(DEFAULT_RIG_DIR) / "docker" / "entrypoint.sh"
+    if not pathlib.Path(DEFAULT_RIG_DIR).is_dir():
+        pytest.skip("rig not present")
+    for p in (box, dockerfile, entry):
+        assert p.is_file(), "missing %s" % p

@@ -71,6 +71,11 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \
+    `# The Spike 2 emulator rig, including its Dockerfile. macOS cannot run it` \
+    `# directly - qemu-user translates LINUX syscalls and the chroot needs Linux` \
+    `# namespaces - so tools/spike2_emu/docker runs it in a container and exports` \
+    `# the display over VNC, which macOS Screen Sharing opens with no install.` \
+    --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \

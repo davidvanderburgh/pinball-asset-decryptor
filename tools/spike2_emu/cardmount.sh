@@ -105,6 +105,18 @@ cache_pick() {
 # that this is offline. Ubuntu splits them into two packages and fuse2fs links
 # libfuse.so.2 (not the libfuse3 the distro ships), hence both.
 ensure_fuse2fs() {
+    # A PROPERLY INSTALLED fuse2fs WINS, and asking first is the whole fix.
+    # The private-prefix download below exists for one situation - a machine
+    # where this rig has no root and fuse2fs is not installed - and it was
+    # being taken unconditionally, so a machine that HAD fuse2fs still went to
+    # the network for its own copy. In the container it then failed outright:
+    # the image drops apt's package lists, so `apt-get download` had nothing to
+    # resolve against and the run died at "could not get fuse2fs" on a box with
+    # fuse2fs already in it.
+    if command -v fuse2fs >/dev/null 2>&1; then
+        FUSE2FS=$(command -v fuse2fs)
+        return 0
+    fi
     [ -x "$FUSE2FS" ] && [ -e "$PREFIX/lib/x86_64-linux-gnu/libfuse.so.2" ] && return 0
     echo "[card] fetching fuse2fs into $PREFIX (once)"
     mkdir -p "$PREFIX" /tmp/cardpkg || return 1
@@ -118,9 +130,21 @@ ensure_fuse2fs() {
 # The games partition. It is p3 on every Spike 2 card seen - 8 GB and 16 GB,
 # 2019 titles and 2024 ones - but the start sector is read rather than assumed,
 # because a wrong offset does not fail, it mounts something else.
+# WHERE THE GAMES PARTITION IS. Asked of parts.py, which every other script
+# that reaches into a card already asks - rootfs.sh, getboot.sh, gethex.sh.
+#
+# THIS USED TO BE A SECOND IMPLEMENTATION, and it was the weaker one: it shelled
+# out to `/sbin/fdisk -l` and matched the human-readable output with awk on
+# three conditions at once - the device name ending in "3", the image path
+# appearing on the line, and the last field being the word "Linux". It assumed
+# the games partition is the THIRD, where parts.py identifies it by what is
+# inside it. In the container it simply printed nothing, and the run died with
+# "no third Linux partition" against a card whose partitions parts.py had
+# listed correctly seconds earlier.
+#
+# Two scripts defining one fact is the thing this rig's own rules forbid.
 games_offset() {
-    /sbin/fdisk -l "$1" 2>/dev/null | awk -v img="$1" '
-        $1 ~ /3$/ && $0 ~ img && $NF == "Linux" { print $2 * 512; exit }'
+    python3 "$SELF/parts.py" --games "$1" 2>/dev/null
 }
 
 # The title directory inside the partition: the one holding a `game` ELF. The

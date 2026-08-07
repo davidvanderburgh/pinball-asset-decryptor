@@ -973,6 +973,52 @@ These have each been violated at least once and each cost a run or a window:
       wrong, and it needs a guest-side instrument and a run before anything can
       be chosen.
 
+- [ ] **30. In the container, a run ends by itself after about 60 seconds.**
+      `S2 D3`
+      **MEASURED 2026-08-07, Docker Desktop on WINDOWS (not the target - see
+      below). Everything about the run is healthy until it stops.** Guest
+      producing **57.1 fps** (`[eglshim] 3460 frames in 60559 ms`), renderer
+      59.9/59.6 fps and 56.5 avg, card mounted, tables built from the card,
+      playfield window open, teardown clean and `alive.sh` 0 after. Then at
+      ~62 s: `[watch] stopping...` and nothing else.
+      **ESTABLISHED, and it rules out the obvious causes.** `watch.sh`'s poll
+      loop has exactly three exits and **NONE of their messages printed** —
+      not `renderer exited (window closed)`, not `the game exited`, not
+      `N min backstop reached` — and the script never reached the
+      `grep -aE 'fps|stopped' "$HOSTLOG"` line that sits between the loop and
+      the end of the script. So the loop did not break: the script took a
+      SIGNAL, and one whose trap could still run (`[watch] stopping...` is
+      printed BY teardown), so SIGINT or SIGTERM and not SIGKILL. `cfg MINS=3`
+      is in the log, so the backstop was 180 s and not 60.
+      **RULED OUT:** the test harness (it happens with the PowerShell pipeline
+      removed and output going to a file); anything the rig starts (grepped
+      `autoattract.sh`, `gamestate.sh`, `status.sh` — no `kill` anywhere); the
+      guest exiting on its own (teardown had to SIGKILL it, so it was alive);
+      the wall-clock backstop; and the OOM killer, which sends SIGKILL and
+      would not have let the trap run.
+      **THE TEST PLATFORM IS NOT THE TARGET, and that has to be settled first.**
+      This was Docker Desktop on **Windows**, which runs containers inside a
+      WSL2 VM. macOS uses a completely different VM layer. The container is
+      identical; the thing around it is not. So the FIRST job is to find out
+      whether this reproduces on a Mac at all — it may be an artefact of the
+      Windows host and no macOS user would ever see it.
+      **Second, cheaper job if it does reproduce:** put a signal trap in
+      `watch.sh` that names what it received (`trap 'echo "[watch] got SIG$s"'`
+      for INT/TERM/HUP), which turns one run into an answer. HUP is the
+      candidate worth suspecting given a container's session semantics.
+      **Related and unexplained: NO VIDEO in the container.** `padvidhost.py`
+      came up (`ready: /pad/rootfs/dump/padvid (95 MB, 8 channels x 4 slots)`)
+      but zero clips streamed in either run, where a WSL run of the same card
+      streams continuously. Not investigated at all.
+      **Acceptance:** a container run reaches its wall-clock backstop and says
+      so, on the platform it is for. State which host you tested on, because
+      this item exists because that distinction was not controlled for.
+      — S2: the emulator runs at full speed in the container, so nothing is
+      broken outright and this is not S1; what it costs is that no macOS
+      session lasts longer than a minute, which is most of the value. D3: it
+      needs a run, it reproduces every time, and the instrument is a one-line
+      trap - the unknown is which host it belongs to, not how to see it.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

@@ -223,9 +223,44 @@ the only way to exercise them from a Windows machine. It is how the Linux path
 was tested; what it cannot show is the playfield window itself, because the
 distro that needs the workaround is by definition the one with no Tk.
 
-macOS is not on this list and is not a matter of effort: `qemu-user` translates
-*Linux* syscalls, and `unshare`, user namespaces and `chroot` into an ELF rootfs
-are Linux kernel features. Running it there means running Linux there.
+### macOS: in a container, watched over VNC
+
+`qemu-user` translates *Linux* syscalls, and `unshare`, user namespaces and
+`chroot` into an ELF rootfs are Linux kernel features. So macOS is not a port
+that could be written — running the rig there means running Linux there, and
+`docker/` is that Linux.
+
+```bash
+docker/padbox.sh --build                 # once
+PAD_CARD=~/cards/godzilla.raw docker/padbox.sh watch.sh 30
+open vnc://localhost:5900                # Screen Sharing; nothing to install
+```
+
+**The container runs its own X server** and exports only the finished
+framebuffer. Forwarding X to XQuartz instead would push every frame across the
+VM boundary as uncompressed protocol, ~4 MB a frame at 1360x768.
+
+**Software rendering is not the bottleneck and never was.** Measured on a
+headless Xvfb with `GALLIUM_DRIVER=llvmpipe`, which is what a container with no
+GPU gets: guest **57.1 fps**, renderer **59.9 fps**. The 1 fps figure this
+project remembers is `glraster.c` running *inside* the emulated ARM guest, which
+the GL bridge replaced and which none of this uses.
+
+Three container details are load-bearing, all in `padbox.sh`:
+
+| | |
+|---|---|
+| `--security-opt seccomp=unconfined` | Docker's default profile blocks `unshare`, so the guest could never get its mount and PID namespaces |
+| `--cap-add SYS_ADMIN --device /dev/fuse` | `cardmount.sh`'s read-only card mount |
+| `-p 127.0.0.1:5900` | the VNC display is an unauthenticated view of the machine; loopback only |
+
+**KNOWN, and see REMAINING item 30: a container run ends by itself after about
+60 seconds.** Everything is healthy until it does — full frame rate, clean
+teardown — and `watch.sh`'s three exit paths all stay silent, so it is taking a
+signal from outside. It was seen on Docker Desktop for **Windows**, which is not
+the target; macOS uses a different VM layer entirely, so the first question is
+whether it happens there at all. Video also does not stream in the container,
+unexplained.
 
 ## Paths
 

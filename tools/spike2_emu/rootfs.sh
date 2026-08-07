@@ -80,7 +80,25 @@ OFF=$(python3 "$RIG/parts.py" --rootfs "$IMG") || {
 
 mkdir -p "$ROOT"
 echo "[rootfs] extracting the OS partition (offset $OFF) - several minutes"
-debugfs -R "rdump / $ROOT" "$IMG?offset=$OFF" 2>&1 | grep -v '^debugfs' | head -5
+# NEVER PIPE THIS INTO `head`. It was `| grep -v ... | head -5`, and `head`
+# closes the pipe after five lines - which SIGPIPEs debugfs and kills the
+# extraction PART WAY THROUGH. The result looked like a wrong partition ("no
+# /lib") when the partition was right and the extraction had simply been shot.
+# Capture it, then summarise.
+#
+# THE OWNERSHIP WARNINGS ARE EXPECTED AND ARE NOT ERRORS. rdump tries to restore
+# each file's original owner, which needs CAP_CHOWN; running as an ordinary user
+# it cannot, says so per file, and extracts the file anyway. That is exactly
+# what is wanted here - the guest runs under qemu-user as this same user, so
+# files owned by root would be less useful, not more. The whole point of this
+# script is that it needs no root, so the noise is summarised rather than shown.
+XLOG=$(mktemp "${TMPDIR:-/var/tmp}/rootfs.XXXXXX")
+debugfs -R "rdump / $ROOT" "$IMG?offset=$OFF" > "$XLOG" 2>&1
+CHOWN_WARN=$(grep -c 'changing ownership' "$XLOG" 2>/dev/null || echo 0)
+grep -v 'changing ownership' "$XLOG" | grep -v '^debugfs' | grep -v '^$' | head -8
+[ "${CHOWN_WARN:-0}" -gt 0 ] && \
+    echo "[rootfs] ($CHOWN_WARN ownership notices - expected without root, files still extracted)"
+rm -f "$XLOG"
 
 # rdump lands the tree under a directory named after the source root on some
 # e2fsprogs versions and directly otherwise; normalise rather than assume.
@@ -115,13 +133,20 @@ if [ -n "$WANT_GAME" ]; then
         echo "[rootfs] could not identify the games partition" >&2; exit 1; }
     echo "[rootfs] extracting title $WANT_GAME (offset $GOFF) - 3-6 GB, minutes"
     mkdir -p "$ROOT/games/$WANT_GAME"
-    debugfs -R "rdump /$WANT_GAME "$ROOT/games"" "$IMG?offset=$GOFF" 2>&1 \
-        | grep -v '^debugfs' | head -5
+    # Same two traps as the rootfs extraction above: no `head` on the pipeline
+    # (it SIGPIPEs debugfs mid-extraction), and the debugfs command is ONE
+    # argument, so the inner quoting has to be single - `"rdump /x "$D""` ends
+    # the outer string at the second quote and only worked by accident.
+    TLOG=$(mktemp "${TMPDIR:-/var/tmp}/title.XXXXXX")
+    debugfs -R "rdump /$WANT_GAME '$ROOT/games'" "$IMG?offset=$GOFF" > "$TLOG" 2>&1
+    grep -v 'changing ownership' "$TLOG" | grep -v '^debugfs' | grep -v '^$' | head -8
     # The node firmware images and conagent are LOOSE files beside the binary,
     # under neither assets/ nor data/, and the original recipe missed all 18.
     # Without them every node board sits on "Runtime Info".
     bash "$RIG/gethex.sh" "$IMG" "$ROOT/games/$WANT_GAME" || true
-    debugfs -R "rdump /spk "$ROOT/games"" "$IMG?offset=$GOFF" 2>/dev/null | head -2
+    debugfs -R "rdump /spk '$ROOT/games'" "$IMG?offset=$GOFF" > "$TLOG" 2>&1
+    grep -v 'changing ownership' "$TLOG" | grep -v '^debugfs' | grep -v '^$' | head -4
+    rm -f "$TLOG"
 fi
 
 echo

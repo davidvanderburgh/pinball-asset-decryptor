@@ -774,11 +774,16 @@ These have each been violated at least once and each cost a run or a window:
       **★★ THE ITEM'S CENTRAL ASSUMPTION IS NOW TESTED RATHER THAN ASSUMED,
       AND IT HELD. Nobody had ever pointed criu at a qemu-user process; the
       whole design rested on it. It works.** `criuladder.sh` (root, no
-      emulator run, ~40 s): rung A dumps and restores an ordinary x86-64
+      emulator run, ~90 s): rung A dumps and restores an ordinary x86-64
       process, rung B does the same to a static ARM binary under
-      `qemu-arm-static` — 13 images, 3.7 MB — and **both resumed their own
-      counter (frozen 60 → 75 → 80) rather than restarting**, by a margin of
-      50 over what a fresh start could have reached.
+      `qemu-arm-static` (13 images, 3.7 MB), and **rung C does it to a THREADED
+      ARM binary** (16 images, 4.5 MB) — which matters because the real guest
+      is multithreaded and qemu-user maps guest threads onto host threads.
+      **All three resumed their own counter (frozen 60 → 75 → 80) rather than
+      restarting**, by a margin of 50 over what a fresh start could have
+      reached. Rung C writes the **minimum** of its three worker counters, not
+      the sum, so the file only advances if EVERY thread came back — a sum
+      would have passed a restore that quietly lost one.
       **The harness passes a LABELLED NEGATIVE CONTROL that runs first and
       aborts the script if it fails:** a deliberate restart is scored FAIL
       (fresh reached 20 against a frozen 60). The first version of the
@@ -817,17 +822,19 @@ These have each been violated at least once and each cost a run or a window:
       the file, and **the content lives in the file, so the rings survive a
       checkpoint without being in it.**
       **STILL UNTESTED, and each is the next rung rather than an assumption:**
-      threads (the real guest runs several; both rungs are single-threaded),
       held fds, the node bus pty bound onto `/dev/ttymxc1`, the `unshare -r -m
-      -p -f` namespaces plus `chroot`, and the **fuse2fs card bind mount** —
-      the last two need `criu --external mnt[]`/`tty[]` and are the expensive
-      part.
-      **Committed:** this commit (`criuprobe.sh`, `criuladder.sh`).
-      **Resume:** add a THREADED rung to `criuladder.sh` (the real guest is
-      multithreaded and qemu-user maps guest threads onto host threads); then
-      a rung that reproduces `run_game.sh`'s `unshare -r -m -p -f` + chroot
-      around the ARM binary, which is where `--external` first becomes
-      necessary. Only then go near a live game.
+      -p -f` namespaces plus `chroot`, the **fuse2fs card bind mount**, the
+      LD_PRELOADed shim, and whether the game survives its node bus, audio sink
+      and GL bridge being restarted underneath it. The namespace and mount work
+      needs `criu --external mnt[]`/`tty[]` and is the expensive part.
+      **Committed:** `26f8f19` (probe, ladder rungs A and B, the ptmx finding),
+      this commit (rung C, threads).
+      **Resume:** build the namespace rung — reproduce `run_game.sh`'s
+      `unshare -r -m -p -f` + `chroot` around the threaded ARM binary and dump
+      THAT. It is where `--external` first becomes necessary and where a PID
+      namespace forces dumping the whole tree from its init rather than one
+      pid. Expect it to be the hardest rung on the ladder. Only then go near a
+      live game.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

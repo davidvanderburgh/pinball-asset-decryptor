@@ -55,6 +55,37 @@ int main(int argc, char **argv)
 }
 EOF
 
+# THE THREADED SUBJECT, for rung C. The real guest runs several threads and
+# qemu-user maps each guest thread onto a host thread, so a single-process rung
+# does not cover it.
+#
+# It writes the MINIMUM of the three worker counters, not the sum, and that is
+# the whole trick: the file only advances if EVERY thread is still running.
+# A sum would keep climbing with two threads out of three alive and the rung
+# would pass a restore that quietly lost one.
+cat > countthr.c <<'EOF'
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+static volatile long c[3];
+static void *worker(void *a) { long i = (long)a; for (;;) { c[i]++; usleep(200000); } return 0; }
+int main(int argc, char **argv)
+{
+    pthread_t t[3];
+    long i;
+    for (i = 0; i < 3; i++) pthread_create(&t[i], 0, worker, (void *)i);
+    for (;;) {
+        long m = c[0];
+        if (c[1] < m) m = c[1];
+        if (c[2] < m) m = c[2];
+        FILE *f = fopen(argv[1], "w");
+        if (f) { fprintf(f, "%ld\n", m); fclose(f); }
+        usleep(100000);
+    }
+    return 0;
+}
+EOF
+
 echo "=== building the subject"
 gcc -O0 -o countx86 count.c || { echo "  x86 build FAILED"; exit 1; }
 echo "  countx86 ok"
@@ -67,8 +98,15 @@ if command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
     else
         echo "  countarm build FAILED (no static libc for the cross target?)"
     fi
+    if [ "$ARMOK" = 1 ] && arm-linux-gnueabihf-gcc -O0 -static -pthread \
+            -o countarmthr countthr.c 2>/dev/null; then
+        THROK=1; echo "  countarmthr ok (static ARM, 3 worker threads)"
+    else
+        THROK=0; echo "  countarmthr build FAILED - rung C will be skipped"
+    fi
 else
-    echo "  no arm-linux-gnueabihf-gcc - rung B will be skipped"
+    THROK=0
+    echo "  no arm-linux-gnueabihf-gcc - rungs B and C will be skipped"
 fi
 
 # ---------------------------------------------------------------- one rung
@@ -254,6 +292,15 @@ else
     echo; echo "=== rung B SKIPPED (no ARM binary)"
 fi
 
+RC=1
+if [ "${THROK:-0}" = 1 ]; then
+    mkdir -p "$WORK/dumpC"
+    rung "C - THREADED ARM binary under qemu-arm-static" "$WORK/dumpC" "$WORK/c2.count" \
+         /usr/bin/qemu-arm-static "$WORK/countarmthr" && RC=0
+else
+    echo; echo "=== rung C SKIPPED (no threaded ARM binary)"
+fi
+
 echo
 echo "=== verdict"
 [ $RA = 0 ] && echo "  A  ok   criu dumps and restores an ordinary process on this kernel" \
@@ -264,9 +311,15 @@ if [ "$ARMOK" = 1 ]; then
 else
     echo "  B  ?    skipped"
 fi
+if [ "${THROK:-0}" = 1 ]; then
+    [ $RC = 0 ] && echo "  C  ok   ... and with THREADS, which the real guest has" \
+                || echo "  C  NO   threads do not survive - the guest is multithreaded, so this matters"
+else
+    echo "  C  ?    skipped"
+fi
 echo
 echo "  NOT tested by these rungs, and each is a later rung, not an assumption:"
 echo "    - held fds, and the pty the node bus binds onto /dev/ttymxc1"
 echo "    - the mount namespace, the chroot, and the fuse2fs card bind mount"
 echo "    - file-backed MAP_SHARED rings with a host helper writing them"
-echo "    - threads (the real guest runs several; these rungs are single)"
+echo "    - the LD_PRELOADed shim, and the game's own threads rather than 3 spinners"

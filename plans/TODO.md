@@ -772,10 +772,10 @@ These have each been violated at least once and each cost a run or a window:
       audio and video and everything."** D stays D2: nothing is left to
       DISCOVER, but the mid-ball acceptance read and the card-run confirm
       each still need a run, which is the D2 line.)*
-      **A LIVE RUN may still be up as this is written (2026-08-08 night): the
-      windowed PAD_PIVOT session David was playing in, 25-min backstop, so it
-      tears itself down and alive.sh reads 0 after. Do not start a second run
-      without alive.sh saying 0 — the standing rule covers this.**
+      **No live run. The windowed session's 25-min backstop fired and
+      teardown was CONFIRMED: alive.sh printed TOTAL 0 after it, including
+      the restored guest (a pidns init — SIGKILL teardown held) and the
+      resume-mode padvidhost (the pattern kill caught it, as designed).**
       **★★★ WINDOWED SAVE/LOAD VERIFIED LIVE 2026-08-08 night, David's eyes
       plus the instrument:** save during live play at **86.4% non-black** →
       20 s more play → `loadgame.sh` → **86.1% non-black**, renderer 59.9 fps

@@ -766,12 +766,16 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D1` ← IN PROGRESS *(**2026-08-08
+- [ ] **13. Save and load save states.** `S2 D2` ← IN PROGRESS *(**2026-08-08
       night: THE WINDOWED FLOW WORKS END TO END, David watching: "it looks
       like from my point of view that the save / load state feature works 🙂
-      audio and video and everything."** D2 → D1: what is left is the formal
-      mid-ball acceptance read and the card-run plumbing; no run is needed to
-      BUILD anything.)*
+      audio and video and everything."** D stays D2: nothing is left to
+      DISCOVER, but the mid-ball acceptance read and the card-run confirm
+      each still need a run, which is the D2 line.)*
+      **A LIVE RUN may still be up as this is written (2026-08-08 night): the
+      windowed PAD_PIVOT session David was playing in, 25-min backstop, so it
+      tears itself down and alive.sh reads 0 after. Do not start a second run
+      without alive.sh saying 0 — the standing rule covers this.**
       **★★★ WINDOWED SAVE/LOAD VERIFIED LIVE 2026-08-08 night, David's eyes
       plus the instrument:** save during live play at **86.4% non-black** →
       20 s more play → `loadgame.sh` → **86.1% non-black**, renderer 59.9 fps

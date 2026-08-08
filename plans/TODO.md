@@ -965,11 +965,26 @@ These have each been violated at least once and each cost a run or a window:
       commit (`savegame.sh`/`loadgame.sh` + the growing-output retry).
       **Resume — the core is PROVEN; what is left is full-rig integration, all
       of it understood and none an unknown mechanism:**
-      **(1) The full rig, not headless.** `savetest_real.sh` runs the guest
-      alone (no padglhost/padvidhost/audio). Those helpers reattach through the
-      file-backed rings on `/dump` (proven restorable by ladder rung G), but
-      restorestate must RESTART them like it restarts nodebus, and that is
-      untested. Wire and measure it.
+      **(1) ★ THE VIDEO HOST DOES NOT REATTACH AFTER A LOAD — the one fault
+      left in the windowed flow, and DAVID'S EYES NAMED IT (2026-08-08):**
+      *"when the load state went off it went back to the tech alert screens,
+      but without the red background. so the text was there, but no background
+      image or video."* That is the sharpest possible diagnosis and it splits
+      the picture cleanly: **the guest's own GL drawing SURVIVES a restore
+      (text is there), and only the HOST-fed video does not** — the background
+      is decoded by `padvidhost.py` and handed over the padvid ring, and after
+      a restore the guest resumes mid-stream against a host that no longer
+      matches its channel/slot state. Matches the instrument: the emulator
+      window sampled 88% non-black before the save and 5% after the load (text
+      on black). Note the return to Tech Alerts is CORRECT — the save was taken
+      there.
+      **What to try, cheapest first:** restart `padvidhost.py` as part of the
+      restore the way nodebus is restarted (it is a helper reading a ring, and
+      restorestate already has the restart-a-helper shape); if the guest will
+      not re-request clips on its own, the ring's channel state has to be reset
+      or replayed. `padglhost` needs no such treatment — the text proves its
+      ring reattached. AUDIO is unverified and probably the same shape: the
+      fifo is recreated so the RESTORE works, but nothing restarts the player.
       **(2) a PLAYABLE windowed session — HALF DONE, and the half that works is
       proven.** `wsl -u root … HOME=/home/david PAD_PIVOT=1 watch.sh` DOES run:
       **the guest booted at 55.4 fps, the emulator window AND the virtual

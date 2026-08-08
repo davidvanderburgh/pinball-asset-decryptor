@@ -831,7 +831,11 @@ HELP_CONTENT = {
          "anything, so a run does not stop on a missing tool a minute after "
          "Start. A machine that is ready shows nothing at all. One that is not "
          "gets an amber notice naming the fault and each missing package with "
-         "what it is for, and this button to fix it: it installs those "
+         "what it is for. Two of those are compilers and they are not "
+         "interchangeable: the ARM one builds the hardware shim, and plain "
+         "gcc (with libc6-dev, which gcc does not always bring along) builds "
+         "the renderer that draws the picture on this PC. "
+         "The button fixes it: it installs those "
          "packages inside WSL, registers the kernel's handler for 32-bit ARM "
          "programs — which is what the game is — and turns on systemd in "
          "/etc/wsl.conf so that registration is still there after WSL "
@@ -860,7 +864,7 @@ HELP_CONTENT = {
          "Linux sees the notice but no button, because there the same work "
          "needs a sudo password this app has nowhere to ask for — the notice "
          "prints the command for that machine instead. macOS sees neither: "
-         "its container already carries all four, so Docker is the "
+         "its container already carries all five, so Docker is the "
          "prerequisite there."),
         ("Restart WSL…",
          "For the two faults that are not the emulator's to fix: a game "

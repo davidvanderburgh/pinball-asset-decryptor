@@ -253,6 +253,8 @@ class App:
             initial_default_presets=self._settings.get(
                 "default_settings_presets", {}),
             on_default_presets_change=self._on_default_presets_change,
+            initial_flash_choices=self._settings.get("flash_choices", {}),
+            on_flash_choices_change=self._on_flash_choices_change,
         )
         # Per-picker-type last-used folders (see MainWindow.last_browse_dir).
         saved_dirs = self._settings.get("browse_dirs")
@@ -3895,6 +3897,14 @@ class App:
         """Persist the Replace-tree column widths the user dragged so the layout
         survives a restart (a tester).  *widths* is ``{tree_key: {col: px}}``."""
         self._settings["column_widths"] = widths
+        self._save_settings()
+
+    def _on_flash_choices_change(self, blob):
+        """Persist which Build / flash sections were last run, per
+        manufacturer (``{mfr_key: {"build": bool, "write": bool}}``).  Saved
+        immediately: the dialog is opened and used between runs, so there is
+        no run-completion _save_settings() for it to ride on."""
+        self._settings["flash_choices"] = blob
         self._save_settings()
 
     def _on_default_presets_change(self, blob):

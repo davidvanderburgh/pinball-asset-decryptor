@@ -19,7 +19,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from ..core.checksums import TRACKING_SIDECARS
 from ..core.config import EXTRACT_PHASES, WRITE_PHASES
-from ..core.extract_source import stale_source_message
+from ..core.extract_source import (dismiss_stale_source, stale_dismissed,
+                                   stale_source_message)
 from ..core.staged_originals import ORIG_DIR
 from ..core import desktop, session_log
 from .theme import (THEMES, dark_titlebar, detect_system_theme,
@@ -1182,6 +1183,8 @@ class MainWindow:
                  on_compare_run=None,
                  initial_default_presets=None,
                  on_default_presets_change=None,
+                 initial_flash_choices=None,
+                 on_flash_choices_change=None,
                  on_build_flash=None,
                  on_save_project=None,
                  on_load_project=None,
@@ -1242,6 +1245,14 @@ class MainWindow:
         # ``on_column_widths_change`` (settings.json).  ``{tree_key: {col: px}}``.
         self._saved_column_widths = dict(initial_column_widths or {})
         self._on_column_widths_change = on_column_widths_change
+        # Which Build / flash sections the user last ran, per manufacturer
+        # (``{mfr_key: {"build": bool, "write": bool}}``), persisted via
+        # ``on_flash_choices_change`` — a tester who builds here and writes the
+        # card elsewhere had to untick the write section every single time.
+        # Per manufacturer because the two sections don't mean the same thing
+        # across plugins (Stern writes a raw SD image, JJP formats a stick).
+        self._saved_flash_choices = dict(initial_flash_choices or {})
+        self._on_flash_choices_change = on_flash_choices_change
         # Recent paths per field (``{field_key: [paths, most recent first]}``)
         # backing the path boxes' dropdown history (a tester: "any text box
         # showing a file path should have a history").  Owned + persisted by
@@ -17530,6 +17541,7 @@ class MainWindow:
         # boxes point at, when it's already been built — flashing what you
         # just built is the overwhelmingly common case (feedback batch 8).
         initial = target if (target and os.path.isfile(target)) else None
+        mfr_key = getattr(self._current_mfr, "key", "")
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
@@ -17541,7 +17553,28 @@ class MainWindow:
             build_target=target,
             can_build=can_build,
             cannot_build_reason=reason,
-            has_pending_changes=self._has_pending_write_changes())
+            has_pending_changes=self._has_pending_write_changes(),
+            initial_choices=self._saved_flash_choices.get(mfr_key),
+            on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c))
+
+    def _remember_flash_choices(self, mfr_key, choices):
+        """Persist the Build / flash dialog's ticked sections for *mfr_key*.
+
+        Merged, not replaced: the dialog omits ``build`` when the box was
+        disabled, and that has to leave the previous answer standing rather
+        than record a False the user never chose."""
+        if not mfr_key or not choices:
+            return
+        current = dict(self._saved_flash_choices.get(mfr_key) or {})
+        current.update(choices)
+        if current == self._saved_flash_choices.get(mfr_key):
+            return
+        self._saved_flash_choices[mfr_key] = current
+        if self._on_flash_choices_change:
+            try:
+                self._on_flash_choices_change(dict(self._saved_flash_choices))
+            except Exception:
+                pass
 
     def _open_diagnose_dialog(self):
         """Open the read-only card-diagnostics modal (mfr.diagnose_card).
@@ -18956,17 +18989,26 @@ class MainWindow:
             anchor=tk.W, justify=tk.LEFT, wraplength=820)
         self._stale_source_banner_text.pack(
             side=tk.LEFT, padx=0, pady=4, fill=tk.X, expand=True)
-        tk.Button(
-            self._stale_source_banner, text="✕",
-            bg="#5a4416", fg="#ffffff",
-            activebackground="#6a5426", activeforeground="#ffffff",
-            relief="flat", padx=6, pady=2, borderwidth=0,
-            cursor="hand2",
-            command=self._dismiss_stale_source_banner,
-        ).pack(side=tk.LEFT, padx=(0, 6), pady=4)
-        # The warning text the user dismissed; suppresses re-show until the
-        # staleness clears (re-Extract) and recurs.
-        self._stale_source_dismissed_msg = None
+        # A WORD, not a bare ✕ (a tester asked for "a dismiss button" for this
+        # banner while running a build that already had one).  The glyph sat
+        # at the far right of a wide window, a couple of rows under the
+        # window's own ✕, and read as title-bar chrome rather than a control
+        # of the strip it was on.  Same right-hand slot, same flat_button as
+        # the update banner's Download / Install (tk.Button is ignored by Aqua
+        # — see widgets.flat_button), now in the accent colour so it reads as
+        # a button on the amber.
+        flat_button(
+            self._stale_source_banner, "Dismiss",
+            bg="#e0a836", fg="#3a2a08", active_bg="#f0c464",
+            command=self._dismiss_stale_source_banner, padx=10,
+        ).pack(side=tk.LEFT, padx=(8, 10), pady=4)
+        # (assets folder, warning text) the user dismissed this session —
+        # suppresses re-show until the staleness clears (re-Extract) and
+        # recurs.  Per folder so dismissing one project's banner can't silence
+        # another's.  The durable half lives in that folder's own sidecar
+        # (core.extract_source.dismiss_stale_source); this is what still works
+        # when the folder can't be written to.
+        self._stale_source_dismissed = None
 
     def _refresh_stale_source_banner(self, *, on_asset_tab=True):
         """Show/hide the source-changed banner against current disk state.
@@ -18988,9 +19030,18 @@ class MainWindow:
         if stale is None:
             # Source matches (or no sidecar) — clear any prior dismissal so a
             # later swap re-surfaces the warning.
-            self._stale_source_dismissed_msg = None
+            self._stale_source_dismissed = None
         show = bool(on_asset_tab and stale
-                    and stale != self._stale_source_dismissed_msg)
+                    and self._stale_source_dismissed != (path, stale))
+        if show:
+            # Dismissed in an earlier session: the sidecar remembers which
+            # source-image state was waved through, so the same one stays
+            # quiet after a restart.  (Reaching here means `path` is set —
+            # an empty one leaves `stale` None and `show` False.)
+            try:
+                show = not stale_dismissed(path)
+            except Exception:
+                pass
         if show:
             self._stale_source_banner_text.configure(text=stale)
             if not banner.winfo_ismapped():
@@ -19002,9 +19053,23 @@ class MainWindow:
             banner.pack_forget()
 
     def _dismiss_stale_source_banner(self):
-        """Hide the banner for this session (until the staleness recurs)."""
-        self._stale_source_dismissed_msg = (
-            self._stale_source_banner_text.cget("text"))
+        """Hide the banner, and remember that this image state was accepted.
+
+        Dismissing used to last only until the next launch, which for a user
+        who has looked and knows the change is harmless means meeting the same
+        warning every session forever.  The acknowledgement is now written
+        into the extract's own sidecar against the source image's current
+        signature, so it survives a restart — and the next change to that
+        image doesn't match it, so a genuinely new one still gets through.
+        """
+        path = (self.write_assets_var.get() or "").strip()
+        self._stale_source_dismissed = (
+            path, self._stale_source_banner_text.cget("text"))
+        if path:
+            try:
+                dismiss_stale_source(path)
+            except Exception:
+                pass          # read-only folder — the session flag still holds
         self._stale_source_banner.pack_forget()
 
     def _handle_check_updates(self):

@@ -96,6 +96,23 @@ for fd in /proc/$PID/fd/*; do
     esac
 done
 
+# --- FIFOs the guest holds (the audio pipe) ------------------------------
+# The guest writes PCM into dump/audio.fifo, made by playaudio.sh. criu restores
+# a named fifo by re-opening its PATH (a "fake fifo"), so it must exist at
+# restore - and playaudio.sh removes it when its reader ends, which is exactly
+# what killing the guest for a load causes:
+#   "Can't open fake fifo 0x74 [dump/audio.fifo]: No such file or directory"
+# Record each so restorestate can mkfifo what is missing. NOTE this makes the
+# RESTORE work; the audio HELPER still has to be restarted to hear anything,
+# which is the outstanding reattach work.
+while read -r p; do
+    echo "fifo $p" >> "$DDIR/restore.env"
+done < <(for fd in /proc/$PID/fd/*; do
+             [ -p "$fd" ] || continue
+             t=$(readlink "$fd" 2>/dev/null)
+             case "$t" in /*) printf '%s\n' "$t" ;; esac
+         done | sort -u)
+
 # --- the rig's shared rings ----------------------------------------------
 # The guest maps dump/padled, dump/padgl, dump/padsw (and padvid) MAP_SHARED.
 # criu re-opens such a mapping FROM THE FILE at restore, so the file must exist

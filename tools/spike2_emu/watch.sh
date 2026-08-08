@@ -703,6 +703,21 @@ while :; do
         echo "[watch] renderer exited (window closed)."
         break
     fi
+    # A SAVE-STATE RELOAD IS NOT THE GAME EXITING (item 13). loadgame.sh kills
+    # the guest and restores another one in its place, so for a second or two
+    # there is no guest - and this loop used to call that "the game exited" and
+    # tear the whole session down, taking the window with it. loadgame.sh raises
+    # this flag before it kills and drops it when the restore is done, so the
+    # session rides through. Bounded: if a reload wedges, the flag goes stale
+    # and the loop stops waiting rather than hanging a dead session forever.
+    if [ -f "$ROOT/dump/reloading" ]; then
+        if [ "$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/reloading" 2>/dev/null || echo 0) ))" -lt 120 ]; then
+            sleep 0.25
+            continue
+        fi
+        echo "[watch] a save-state reload has been in progress for 2 min; giving up on it."
+        rm -f "$ROOT/dump/reloading"
+    fi
     if ! pad_guest_up; then
         echo "[watch] the game exited. Last lines of its log:"
         tail -5 "$LOG"

@@ -32,6 +32,16 @@ SROOT=$(sed -n 's/^root=//p' "$DIR/slot.meta")
 
 echo "[loadgame] slot '$SLOT'  ->  restoring the game"
 
+# TELL A LIVE watch.sh SESSION THAT THE GUEST IS ABOUT TO VANISH ON PURPOSE.
+# Restoring means killing the running guest and putting another in its place;
+# watch.sh's poll loop would otherwise read that gap as "the game exited" and
+# tear down the whole session - window, playfield and audio included, which is
+# what you are playing in. The flag makes it wait instead. Always cleared, even
+# if the restore fails, so a failed load cannot wedge the session.
+RELOAD_FLAG=$ROOT/dump/reloading
+: > "$RELOAD_FLAG" 2>/dev/null
+trap 'rm -f "$RELOAD_FLAG" 2>/dev/null' EXIT
+
 # The guest log grew while you kept playing after the save; restorestate.sh
 # truncates it back to the size criu recorded and retries - see there.
 
@@ -39,4 +49,5 @@ echo "[loadgame] slot '$SLOT'  ->  restoring the game"
 # PAD_ROOT points restorestate at the right rootfs.
 PAD_ROOT="$ROOT" PAD_RESTORE_KILL=1 CRIU="$CRIU" bash "$RIG/restorestate.sh" "$DIR" \
     || { echo "[loadgame] FAILED"; exit 1; }
+rm -f "$RELOAD_FLAG" 2>/dev/null
 echo "[loadgame] restored slot '$SLOT'."

@@ -94,6 +94,18 @@ while read -r kind a b c; do
         INHERIT+=(--inherit-fd "fd[9]:tty[$b]")
         TTYFD=$NEWPTY
         ;;
+    fifo)
+        # a=guest path. criu re-opens a named fifo by path; playaudio.sh
+        # deletes it when its reader ends, which killing the guest causes.
+        # Recreate it empty so the restore can proceed - the guest just goes on
+        # writing PCM into it. (Hearing it again needs the audio helper
+        # restarted; that is the outstanding reattach work.)
+        if [ ! -p "$R$a" ]; then
+            mkdir -p "$(dirname "$R$a")"
+            rm -f "$R$a" 2>/dev/null
+            mkfifo "$R$a" 2>/dev/null && echo "[restore] recreated the missing fifo $a"
+        fi
+        ;;
     ring)
         # a=guest path  b=stashed filename. criu re-opens a file-backed
         # MAP_SHARED mapping from the FILE, so it has to be there - and

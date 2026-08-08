@@ -854,6 +854,15 @@ These have each been violated at least once and each cost a run or a window:
       and left it frozen. The gate is now "is padglhost up" (the definition
       of windowed), with the helper user taken from the renderer when no
       host exists.
+      **A FOURTH, found by alive.sh across both sessions' teardowns:
+      watch.sh had NO kill pattern for `padrelay.py`** — in a PAD_PIVOT
+      session the runuser wrapping breaks the AUDPG group kill that catches
+      it in ordinary runs, so the relay plus the Windows padplay leaked
+      identically twice (2/2 pivot load-sessions; ordinary runs get it via
+      group ancestry). One pattern kill added beside playaudio's; killing
+      the relay closes the socket and takes the Windows player with it.
+      Fix is committed but its teardown has not run yet — the NEXT windowed
+      session's alive.sh 0 is the confirmation.
       **★★★ THE REAL GAME SAVES AND RESTORES, headless, closed loop, twice
       (alive.sh 0 after each, the ~509 MB dumps reclaimed).** `savetest_real.sh`
       (committed): boot godzilla_pro under `PAD_PIVOT=1` → `savestate.sh`

@@ -318,6 +318,14 @@ teardown() {
     pkill -9 -f 'mktables[.]py' 2>/dev/null
     [ -n "$AUDPG" ] && kill -9 -"$AUDPG" 2>/dev/null
     pkill -9 -f 'playaudio.sh' 2>/dev/null
+    # padrelay.py had NO pattern here and leaked twice on 2026-08-08, both
+    # times in PAD_PIVOT sessions - runuser in setsid_as_user changes the
+    # process-group topology, so the AUDPG group kill that catches it in an
+    # ordinary run misses it there. A live relay also keeps the Windows
+    # padplay.py connected forever; killing the relay closes the socket and
+    # takes the player with it (measured - that is the relay's own teardown
+    # design). alive.sh already counted both, which is how the leak was seen.
+    pkill -9 -f 'padrelay\.py' 2>/dev/null
     pkill -9 -f '^ffmpeg .*audio\.fifo' 2>/dev/null
     rm -f "$AUD_HOST" "$AUD_FMT_HOST"
     # The LED block is the virtual playfield's liveness signal: it polls the

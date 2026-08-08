@@ -795,7 +795,12 @@ HELP_CONTENT = {
          "PC does not have and the card carries no software fallback, so the "
          "host decodes each clip with ffmpeg and publishes the frames into a "
          "shared ring the game draws from. Scenes, text, lamps, switches and "
-         "sound all work too."),
+         "sound all work too. That ffmpeg lives on the Linux side, and is a "
+         "different copy from the one this app puts on your PATH — if it is "
+         "missing there, everything else still works and the picture and the "
+         "sound are simply not there. The run checks before it starts and "
+         "names the package rather than letting a black window explain "
+         "itself."),
         ("What it costs",
          "About 15% of one CPU core while waiting and roughly a third of a "
          "core once it is running, plus 1–2 GB of memory. The status line "
@@ -864,7 +869,7 @@ HELP_CONTENT = {
          "Linux sees the notice but no button, because there the same work "
          "needs a sudo password this app has nowhere to ask for — the notice "
          "prints the command for that machine instead. macOS sees neither: "
-         "its container already carries all five, so Docker is the "
+         "its container already carries all six, so Docker is the "
          "prerequisite there."),
         ("Restart WSL…",
          "For the two faults that are not the emulator's to fix: a game "

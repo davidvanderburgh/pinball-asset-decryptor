@@ -17,14 +17,21 @@ so an edit was silently never built AND THE BUILD STILL SAID "built ok".  These
 tests are the coupling - a source on a list but not on a compile line, or the
 reverse, is caught here and not one full run later.
 
-PURE TEXT, NO SHELL.  There is no bash on every machine this suite runs on, and
-a test that needs a compiler is not a test anybody runs.  The behaviour itself -
-missing builds, stale rebuilds, a live run blocking both - is proven by driving
-``ensurebuild.sh`` against a synthetic rig, which needs a real filesystem with
-real exec bits and so lives outside this file.
+PURE TEXT, NO SHELL, WITH ONE EXCEPTION AT THE BOTTOM.  There is no bash on
+every machine this suite runs on, and a test that needs a compiler is not a test
+anybody runs.  The behaviour itself - missing builds, stale rebuilds, a live run
+blocking both - is proven by driving ``ensurebuild.sh`` against a synthetic rig,
+which needs a real filesystem with real exec bits and so lives outside this file.
+
+The exception is how a FAILED build is reported, which is a text-shaping
+question and needs no compiler at all - a script that prints an error and exits
+non-zero is enough, and the assertion is worth far more run against the real
+function than pattern-matched against its source.  It skips where bash is not.
 """
 import os
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -129,3 +136,146 @@ def test_the_renderer_is_launched_by_its_resolved_path(script):
                      if not ln.lstrip().startswith("#"))
     assert "./padglhost" not in body
     assert "$PAD_GLHOST_BIN" in body
+
+
+# --------------------------------------------------------------------------
+# ...and when the build DOES fail, what the user is shown has to be the reason
+#
+# Reported 2026-08-07, Star Wars LE on a fresh WSL install: "build FAILED, and
+# the game has no hardware without it", above it eight lines of
+# -Wformat-truncation notes about gstvid.c:476.  Every one of those lines is a
+# warning about code that compiles perfectly, and all eight are byte for byte
+# the tail of a SUCCESSFUL build on this machine.
+#
+# The cause was three `implicit declaration of function` errors in hwshim.c,
+# which GCC 13 warns about and GCC 14 REJECTS - so the shim did not build on any
+# distro newer than the one the rig is developed on, and could not be made to
+# fail on the machine that could fix it.  Neither half of that was visible: the
+# report showed the tail, and gcc compiles every translation unit before giving
+# up, so the tail belongs to whichever source came last and never to the one
+# that broke.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("script", ["build.sh", "buildbridge.sh"])
+def test_an_old_compiler_is_asked_for_a_new_compiler_s_answer(script):
+    """The flag is the whole fix for the class.  Without it these sources
+    compile here and fail on a user's machine, which is the one shape of build
+    fault that cannot be reproduced where it can be repaired."""
+    text = _read(script)
+    assert "-Werror=implicit-function-declaration" in text, script
+
+
+def test_the_bridge_pins_it_for_both_halves():
+    """Guest and host are different compilers on the user's machine, and both
+    of them are theirs, not ours."""
+    text = _read("buildbridge.sh")
+    # Once in the shared ARM CFLAGS, once on the native padglhost line.
+    assert text.count("-Werror=implicit-function-declaration") >= 2
+
+
+def test_a_failed_build_is_reported_by_its_errors_not_by_its_last_lines():
+    """``tail -8`` is what showed a user eight lines of harmless warning notes
+    and hid the three errors that stopped the build."""
+    eb = _read("ensurebuild.sh")
+    body = eb[eb.index("_pad_build() {"):]
+    body = body[:body.index("\n}")]
+    assert "error:" in body, "the errors have to be selected FOR"
+    assert "undefined reference" in body, "ld's own failures do not say error:"
+    # The tail survives only as the fallback for a failure none of the words
+    # match; it must not be the only thing that is ever printed.
+    assert "tail -8" in body
+    assert body.index("grep -E") < body.index("tail -8")
+
+
+def test_a_failed_build_keeps_its_full_output_somewhere_nameable():
+    """Whatever the next fault is, this pattern will not know its words - and a
+    user who can send the file is a user whose problem can be read."""
+    eb = _read("ensurebuild.sh")
+    body = eb[eb.index("_pad_build() {"):]
+    body = body[:body.index("\n}")]
+    assert "TMPDIR" in body, "somewhere writable on every platform"
+    assert "full build output" in body, "and NAMED, or it may as well not exist"
+
+
+# ---- the one shell-driven test in this file (see the module docstring) -----
+
+BASH = shutil.which("bash")
+
+_FAKE_BUILD = """#!/bin/bash
+echo "hwshim.c:5276:10: error: implicit declaration of function 'open'"
+echo "hwshim.c:5279:5: error: implicit declaration of function 'close'"
+for i in $(seq 1 20); do
+    echo "gstvid.c:476:22: warning: noise $i [-Wformat-truncation=]"
+done
+exit 1
+"""
+
+_FAKE_ODD = """#!/bin/bash
+for i in $(seq 1 20); do echo "something nobody predicted $i"; done
+exit 1
+"""
+
+
+#: EVERYTHING RELATIVE, AND THE SCRIPT ON DISK RATHER THAN ON THE COMMAND LINE.
+#: On Windows ``bash`` is as likely to be WSL's launcher as Git's - and that one
+#: takes the ``-c`` string, drops the positional arguments after it, and sees a
+#: ``C:\...`` path as a name with no directories in it.  A driver file run from
+#: its own directory says the same thing to both, and to a Linux CI runner.
+_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+TMPDIR=$RIG; export TMPDIR
+. "$RIG/ensurebuild.sh"
+_pad_build fake.sh
+"""
+
+
+def _drive(tmp_path, script_body):
+    """Run _pad_build against a synthetic build script and return what a user
+    would have seen.  ensurebuild.sh is SOURCED, exactly as watch.sh sources
+    it, so this is the real function and not a copy of it."""
+    rig = tmp_path / "rig"
+    rig.mkdir()
+    shutil.copy(os.path.join(RIG, "ensurebuild.sh"), str(rig / "ensurebuild.sh"))
+    for name, body in (("fake.sh", script_body), ("driver.sh", _DRIVER)):
+        with open(str(rig / name), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+    out = subprocess.run([BASH, "driver.sh"], cwd=str(rig),
+                         capture_output=True, text=True)
+    assert out.returncode != 0, "a failed build must stay failed: %r" % (
+        out.stdout + out.stderr)
+    return out.stdout + out.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_the_error_survives_twenty_lines_of_warnings_after_it(tmp_path):
+    """The reported shape exactly: errors first, noise after, and the noise
+    longer than anything a tail can see past."""
+    seen = _drive(tmp_path, _FAKE_BUILD)
+    assert "implicit declaration of function 'open'" in seen
+    assert "implicit declaration of function 'close'" in seen
+    assert "noise 20" not in seen, "the tail is not what is worth showing"
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_failure_with_no_recognisable_words_still_says_something(tmp_path):
+    """The fallback matters more than the pattern does: an unmatched failure
+    must not report NOTHING, which is strictly worse than the tail was."""
+    seen = _drive(tmp_path, _FAKE_ODD)
+    assert "something nobody predicted 20" in seen
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_the_whole_output_is_written_where_it_says_it_is(tmp_path):
+    """Named in the log, and actually there - including the twenty lines the
+    report deliberately left out."""
+    seen = _drive(tmp_path, _FAKE_BUILD)
+    m = re.search(r"full build output: (\S+)", seen)
+    assert m, seen
+    # The name is read back from the report, but opened from this side of the
+    # fence: _drive puts TMPDIR in the rig, so whatever shell wrote it, the
+    # basename lands where Python can find it.
+    with open(str(tmp_path / "rig" / os.path.basename(m.group(1))),
+              encoding="utf-8") as fh:
+        full = fh.read()
+    assert "implicit declaration of function 'open'" in full
+    assert "noise 20" in full

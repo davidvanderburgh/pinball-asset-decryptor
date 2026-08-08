@@ -43,7 +43,13 @@ for f in $PAD_GLHOST_SRCS $PAD_GLGUEST_SRCS; do
     cp "$S/$f" "$HOME/emusrc/$f"
 done
 
-CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall -I$HOME/emusrc"
+# -Werror=implicit-function-declaration for the reason build.sh records at
+# length: it is a warning up to GCC 13 and an error from GCC 14 on, so without
+# it a build breaks on newer distros than this rig is developed on and cannot
+# be made to break here. Both halves of the bridge, because both are compiled
+# on the user's machine.
+CFLAGS="-fno-stack-protector -shared -fPIC -O2 -nostdlib -Wall \
+-Werror=implicit-function-declaration -I$HOME/emusrc"
 
 if [ "$WHICH" != host ]; then
     arm-linux-gnueabihf-gcc $CFLAGS -Wl,-soname,libGLESv2.so.2 \
@@ -67,7 +73,8 @@ if [ "$WHICH" != guest ]; then
     # -lEGL / -lX11 fail to link. libxcb comes in via libX11's DT_NEEDED.
     # padglhost.c declares every EGL/GLES/X11 entry point it uses itself, so
     # this needs the runtime libraries and no -dev packages at all.
-    gcc -O2 -Wall -I$HOME/emusrc -o "$PAD_GLHOST_BIN" \
+    gcc -O2 -Wall -Werror=implicit-function-declaration -I$HOME/emusrc \
+      -o "$PAD_GLHOST_BIN" \
       "$HOME/emusrc/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
     pad_glhost_hash "$S" > "$PAD_GLHOST_STAMP"

@@ -19,7 +19,16 @@ for f in $PAD_SHIM_SRCS; do
     cp "$RIG/$f" "$HOME/emusrc/$f"
     case $f in *.c) CC_SRCS+=("$HOME/emusrc/$f") ;; esac
 done
+# THE SAME VERDICT ON EVERY COMPILER, and that flag is the whole of it.
+#
+# An implicit declaration is a WARNING up to GCC 13 and an ERROR from GCC 14 on
+# (Ubuntu 24.10+, Debian trixie, Fedora 40+). hwshim.c had three, and they cost
+# a user a shim that would not build on a distro newer than the one this rig is
+# developed on - while the same sources compiled here without complaint. That is
+# the worst shape a build fault can have: it cannot happen on the machine that
+# could fix it. Asking GCC 13 for GCC 14's answer means the next one fails HERE.
 arm-linux-gnueabihf-gcc -fno-stack-protector -shared -fPIC -O2 -nostdlib \
+  -Werror=implicit-function-declaration \
   -Wl,-soname,hwshim.so -o "$R/lib/hwshim.so" \
   "${CC_SRCS[@]}" \
   -L"$R/lib" -l:libdl.so.2 -l:libc.so.6

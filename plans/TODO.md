@@ -766,10 +766,53 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D2` ← IN PROGRESS *(**2026-08-08
-      evening: CLOSED LOOP on the real game — boot → save → restore → the game
-      RESUMES.** D3 → D2: the mechanism is fully proven end to end; what is
-      left is full-rig integration, not discovery.)*
+- [ ] **13. Save and load save states.** `S2 D1` ← IN PROGRESS *(**2026-08-08
+      night: THE WINDOWED FLOW WORKS END TO END, David watching: "it looks
+      like from my point of view that the save / load state feature works 🙂
+      audio and video and everything."** D2 → D1: what is left is the formal
+      mid-ball acceptance read and the card-run plumbing; no run is needed to
+      BUILD anything.)*
+      **★★★ WINDOWED SAVE/LOAD VERIFIED LIVE 2026-08-08 night, David's eyes
+      plus the instrument:** save during live play at **86.4% non-black** →
+      20 s more play → `loadgame.sh` → **86.1% non-black**, renderer 59.9 fps
+      with video at 29 NEW/s, guest delta 60 fps. The previously-uncaptured
+      windowed `Restoring FAILED` did NOT reproduce — the ring stash from
+      `bd79b8e` had already fixed it — and restorestate now prints the raw
+      tail of restore.log on any failure so the next one cannot go uncaptured.
+      **THE VIDEO REATTACH IS SHIPPED, and it is a RESUME, not just a
+      restart** (this pass's commit): a bare restart cannot work because
+      padvidhost's startup acks every pending gen and the restored guest,
+      seeing gen move under its stream thread, exits WITHOUT posting EOS
+      (`gstvid.c:759` TAKEN OVER path) — background frozen forever, which was
+      David's "text but no background". So `restorestate.sh` stops the video
+      host, **rewinds dump/padvid to the slot's stash** (the one ring where
+      "newer" belongs to the dead guest), restores the guest, and restarts
+      padvidhost with **`PAD_VID_RESUME=1`**: each channel the guest thinks is
+      mid-clip gets its serve CONTINUED at the saved write_idx (measured live:
+      `RESUME mid-clip at frame 18 of 240`, skip 56 ms, superseded at frame
+      199 by the game's own next request — normal attract from there).
+      Requests in flight at the save are deliberately NOT pre-acked so
+      chan_loop serves them fresh. Known tolerated race: the stash is taken
+      moments before the freeze, so indexes can trail by a few frames; the
+      ring math self-heals (comment in resume_serve).
+      **AUDIO REATTACHES BY ITSELF — nothing to build.** playaudio.sh holds
+      its own writer on the fifo (`sleep infinity >`), so the relay and the
+      Windows player ride through the guest swap, and criu re-opens the
+      guest's fifo fd by path onto the same live fifo. David heard it.
+      **The nodebus wrinkle is understood and is a non-problem** (comment in
+      restorestate.sh): run_game's nodebus EOF-exits the moment the guest is
+      killed, so a windowed load always starts a fresh one for the tty
+      external; it dies again when the restored guest reopens its tty, and
+      none of it matters because nodebus only RECORDS — all 1520 ExchangeData
+      timeouts in the post-load log predate the save, zero new after restore.
+      **Also fixed: the video-host user detection** — `pgrep | head -1`
+      matched the root runuser wrapper, so the first restart ran as root and
+      logged to /root/padvid.log; it now matches the python process and
+      restarts as the desktop user (fix committed untested-live; the mechanism
+      is identical bar the uid).
+      **Last pass's "4.1% vs 42.7% non-black" mystery is moot** — this run
+      sampled 86% on both sides of the load; the 4.1% was a dark scene at the
+      sample moment.
       **★★★ THE REAL GAME SAVES AND RESTORES, headless, closed loop, twice
       (alive.sh 0 after each, the ~509 MB dumps reclaimed).** `savetest_real.sh`
       (committed): boot godzilla_pro under `PAD_PIVOT=1` → `savestate.sh`
@@ -963,63 +1006,20 @@ These have each been violated at least once and each cost a run or a window:
       (comm=game, watch.sh/alive.sh wiring, live boot+save), `f5fc6c0`
       (option (a): root guest, no userns; mount-v2 default; CLOSED LOOP), this
       commit (`savegame.sh`/`loadgame.sh` + the growing-output retry).
-      **Resume — the core is PROVEN; what is left is full-rig integration, all
-      of it understood and none an unknown mechanism:**
-      **(1) ★ THE VIDEO HOST DOES NOT REATTACH AFTER A LOAD — the one fault
-      left in the windowed flow, and DAVID'S EYES NAMED IT (2026-08-08):**
-      *"when the load state went off it went back to the tech alert screens,
-      but without the red background. so the text was there, but no background
-      image or video."* That is the sharpest possible diagnosis and it splits
-      the picture cleanly: **the guest's own GL drawing SURVIVES a restore
-      (text is there), and only the HOST-fed video does not** — the background
-      is decoded by `padvidhost.py` and handed over the padvid ring, and after
-      a restore the guest resumes mid-stream against a host that no longer
-      matches its channel/slot state. Matches the instrument: the emulator
-      window sampled 88% non-black before the save and 5% after the load (text
-      on black). Note the return to Tech Alerts is CORRECT — the save was taken
-      there.
-      **What to try, cheapest first:** restart `padvidhost.py` as part of the
-      restore the way nodebus is restarted (it is a helper reading a ring, and
-      restorestate already has the restart-a-helper shape); if the guest will
-      not re-request clips on its own, the ring's channel state has to be reset
-      or replayed. `padglhost` needs no such treatment — the text proves its
-      ring reattached. AUDIO is unverified and probably the same shape: the
-      fifo is recreated so the RESTORE works, but nothing restarts the player.
-      **(2) a PLAYABLE windowed session — HALF DONE, and the half that works is
-      proven.** `wsl -u root … HOME=/home/david PAD_PIVOT=1 watch.sh` DOES run:
-      **the guest booted at 55.4 fps, the emulator window AND the virtual
-      playfield both opened and DREW (shotwin: 42.7% non-black), and
-      `savegame.sh` saved from that live windowed session while play
-      continued.** Two fixes were needed to get there and both are in:
-      • `ensurebuild.sh`'s `_pad_guest_probe` tested `unshare -r` + chroot, which
-      **fails as root on /home** ("Permission denied") even though the real
-      PAD_PIVOT root boot works — it now probes the way the run actually
-      launches (no userns when root). It was blocking the session before it
-      started.
-      • `restorestate.sh` used to call `killgame.sh`, the rig's GLOBAL teardown,
-      which would **close the window on every load**. It now kills only the
-      guest, leaving padglhost/playfield/audio up to reattach.
-      **✗ `loadgame` in a WINDOWED session still fails.** Two causes met, one
-      fixed: `dump/padled` is deleted by teardown but the guest maps it
-      (`Can't open file dump/padled on restore`) — savestate now stashes every
-      mapped ring in the slot and restorestate puts back what is missing. The
-      SECOND attempt then failed with a bare `Restoring FAILED` whose specific
-      error was not captured (the harness deleted the slot on exit). **Capture
-      that error first next pass** — keep the slot, read `restore.log`.
-      **Also unexplained: the second windowed run's game window sampled 4.1%
-      non-black where the first sampled 42.7%** — the guest was rendering
-      (frames climbing) both times. Not diagnosed; may be a dark scene at the
-      sample moment or a real GL-ring reattach fault. Sample twice next time.
-      **(3) leave-running.** Real saves must not pause play, but the log fd
-      grows and fails criu's size check. Either briefly stop only across the
-      dump, redirect the guest log to a pipe, or exclude that fd from
-      validation.
-      **(4) a CARD run** needs `@CARD@` re-mount wired into restorestate (a
-      PAD_GAME_DIR bind is also still unclassified by savestate).
-      **(5) windowed acceptance:** save mid-BALL, restore, and confirm ball,
-      score and mode with `shot.py` — the item's stated oracle, which needs the
-      window and so item 32's size fix does not, but a real game played into a
-      ball does.
+      **Resume — the windowed flow is DONE and David-accepted; two pieces
+      left, neither an unknown mechanism:**
+      **(1) the formal acceptance read: save mid-BALL, restore, confirm ball,
+      score and mode with `shot.py`, play 60 s, alive 0.** David has accepted
+      the feature live (attract + play, audio + video), so this is a
+      formality — but it is the item's written oracle and the box stays open
+      until it is read. One windowed run, or David does it himself playing.
+      **(2) a CARD run** needs `@CARD@` re-mount wired into restorestate (a
+      PAD_GAME_DIR bind is also still unclassified by savestate). Until then
+      save states work on extracted-tree runs only.
+      **(3) DONE — leave-running:** demonstrated this pass on the live load:
+      restorestate's truncate-retry fired on game.out, audio.raw and
+      audio.raw.center and the restore proceeded; play was never paused at
+      the save.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

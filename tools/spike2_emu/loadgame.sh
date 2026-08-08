@@ -46,8 +46,12 @@ trap 'rm -f "$RELOAD_FLAG" 2>/dev/null' EXIT
 # truncates it back to the size criu recorded and retries - see there.
 
 # PAD_RESTORE_KILL clears the currently-running game (pid collision otherwise);
-# PAD_ROOT points restorestate at the right rootfs.
-PAD_ROOT="$ROOT" PAD_RESTORE_KILL=1 CRIU="$CRIU" bash "$RIG/restorestate.sh" "$DIR" \
+# PAD_ROOT points restorestate at the right rootfs; PAD_GAME names the title
+# for the video host's resume restart (restorestate falls back to the restored
+# guest's environ if the slot predates this field).
+SGAME=$(sed -n 's/^game=//p' "$DIR/slot.meta")
+PAD_ROOT="$ROOT" PAD_GAME="$SGAME" PAD_RESTORE_KILL=1 CRIU="$CRIU" \
+    bash "$RIG/restorestate.sh" "$DIR" \
     || { echo "[loadgame] FAILED"; exit 1; }
 rm -f "$RELOAD_FLAG" 2>/dev/null
 echo "[loadgame] restored slot '$SLOT'."

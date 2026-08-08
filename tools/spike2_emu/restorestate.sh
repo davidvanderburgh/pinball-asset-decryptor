@@ -45,11 +45,19 @@ fi
 # --- the node bus and a pty for the restored guest -----------------------
 # The restored guest needs a pty on /dev/ttymxc1 (criu bridges the dumped one
 # to whatever fd we hand it, so ANY pty works). Two cases:
-#   REUSE - a node bus is already running (a live watch.sh session, the
-#           windowed case): open ITS existing slave. Starting a second nodebus
-#           would orphan the first and leak a pty on every loadgame.
-#   START - none running (a headless load): start one, exactly the design's
-#           restart-the-helpers step.
+#   REUSE - a node bus is already running: open ITS existing slave. Starting
+#           a second nodebus would orphan the first and leak a pty.
+#   START - none running: start one, exactly the design's restart-the-helpers
+#           step.
+# MEASURED 2026-08-08, first live windowed load: the windowed case ALWAYS
+# takes START, and that is fine. run_game.sh's nodebus EOF-exits the moment
+# the guest is killed (its os.read on the master breaks when the last slave
+# fd closes), so by the time this runs it is already gone. The fresh pty
+# satisfies criu's tty external; the recorder dying again later - the guest
+# closes and reopens its tty once after restore - loses nothing, because
+# nodebus only RECORDS: the game's real switch/coil traffic is SPI through
+# the shim, and every ExchangeData timeout in the post-load log predates the
+# save (1520 of 1520 in the pre-save bytes, zero new after restore).
 NEWPTY=""
 if grep -q '@PTY@' "$DDIR/restore.env"; then
     export PAD_NODEBUS_DIR="$R/dump"
@@ -75,6 +83,42 @@ if grep -q '@PTY@' "$DDIR/restore.env"; then
         [ -e "$NEWPTY" ] || { echo "[restore] node bus did not come up"; exit 1; }
         echo "[restore] node bus pty: $NEWPTY (pid $NBPID)"
     fi
+fi
+
+# --- the video host: stop it BEFORE the ring is rewound ------------------
+# The restored guest resumes mid-clip: its stream threads hold their consumed
+# counts on their stacks and expect the padvid ring's gen/write_idx to be the
+# SAVE-time values. A live session's video host has moved all of that on (and
+# its serve threads write the ring), so it is stopped here, the ring is put
+# back from the slot's stash below, and after a successful restore a fresh
+# host is started with PAD_VID_RESUME=1 - which continues each mid-clip serve
+# where the save left it instead of acking it away. Without this the guest's
+# takeover check fires on the first frame ("TAKEN OVER: opened at gen N,
+# channel is now at gen M"), the thread exits WITHOUT posting EOS, and the
+# game holds a black/frozen background forever - David's "text but no
+# background video" after the first windowed load.
+# Headless runs have no video host and none is started for them.
+VID_RESTART=0; VID_USER=""; VID_RING="$R/dump/padvid"
+if [ "${PAD_VID_RESTART:-1}" = 1 ] && pgrep -f 'padvidhost\.py' >/dev/null; then
+    # WHOSE host is it? Match the PYTHON process, not whatever else carries
+    # the script name on its command line: watch.sh launches helpers through
+    # `runuser -u david -- setsid python3 padvidhost.py`, and the resident
+    # runuser wrapper is a ROOT process with padvidhost.py in its cmdline -
+    # `pgrep | head -1` picked exactly that on the first live load, so the
+    # restart came up as root and logged to /root/padvid.log. uid via ps then
+    # getent, because ps's user column truncates names longer than 8 chars.
+    VID_PID=""
+    for p in $(pgrep -f 'padvidhost\.py'); do
+        case "$(ps -o comm= -p "$p" 2>/dev/null)" in python*) VID_PID=$p; break ;; esac
+    done
+    if [ -n "$VID_PID" ]; then
+        VID_UID=$(ps -o uid= -p "$VID_PID" 2>/dev/null | tr -d ' ')
+        [ -n "$VID_UID" ] && VID_USER=$(getent passwd "$VID_UID" | cut -d: -f1)
+    fi
+    VID_RESTART=1
+    echo "[restore] stopping the video host (user ${VID_USER:-root}) to rewind its ring"
+    pkill -9 -f 'padvidhost\.py' 2>/dev/null
+    sleep 0.3
 fi
 
 # --- build the restore externals from restore.env ------------------------
@@ -118,7 +162,15 @@ while read -r kind a b c; do
         # watch.sh's teardown deletes dump/padled by design. Put back ONLY what
         # is missing: a live session's ring is newer than this snapshot and
         # clobbering it would throw away the state the helpers are using.
-        if [ ! -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
+        # THE ONE EXCEPTION IS THE VIDEO RING when its host is being
+        # restarted: its "newer" state belongs to the guest that was just
+        # killed, while the restored guest's stream threads expect the
+        # SAVE-time gen/write_idx. Rewind it to the stash so the resumed
+        # host and the restored guest agree (see the video-host block above).
+        if [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
+            cp -f "$DDIR/rings/$b" "$R$a"
+            echo "[restore] rewound the video ring to the save"
+        elif [ ! -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
             mkdir -p "$(dirname "$R$a")"
             cp -f "$DDIR/rings/$b" "$R$a"
             echo "[restore] put back the missing ring $a"
@@ -213,7 +265,13 @@ done
 
 if [ "$RC" != 0 ] || grep -aq 'Restoring FAILED' "$DDIR/restore.log"; then
     echo "[restore] FAILED (exit $RC):"
-    grep -aE 'Error' "$DDIR/restore.log" | tail -12 | sed 's/^/    /'
+    # Two views, because they miss different things: criu's own error lines,
+    # then the raw tail - a BUG/abort/pie message does not say "Error", and a
+    # windowed load once failed with NOTHING captured because only the Error
+    # grep printed. The log itself stays in the slot ($DDIR/restore.log).
+    grep -aE 'Error|BUG|Aborted' "$DDIR/restore.log" | tail -12 | sed 's/^/    /'
+    echo "[restore] last lines of $DDIR/restore.log:"
+    tail -20 "$DDIR/restore.log" | sed 's/^/    /'
     exit 1
 fi
 sleep 1
@@ -222,4 +280,27 @@ if [ -n "$NEWPID" ] && kill -0 "$NEWPID" 2>/dev/null; then
     echo "[restore] ok - guest restored, pid $NEWPID"
 else
     echo "[restore] restore reported ok but the guest is not alive"; exit 1
+fi
+
+# --- restart the video host in RESUME mode (see the stop block above) -----
+if [ "$VID_RESTART" = 1 ]; then
+    # The title, for padvidhost's guest->host path mapping: the caller's
+    # PAD_GAME (loadgame reads it from slot.meta), else the restored guest's
+    # own environment.
+    VGAME=${PAD_GAME:-$(tr '\0' '\n' < "/proc/$NEWPID/environ" 2>/dev/null \
+                        | sed -n 's/^PAD_GAME=//p' | head -1)}
+    VHOME=$(getent passwd "${VID_USER:-root}" | cut -d: -f6)
+    VLOG=${VHOME:-/root}/padvid.log
+    # Same launch shape as watch.sh's (runuser OUTSIDE setsid, helper as the
+    # desktop user), appending to the session's own padvid.log so the resume
+    # lines land where every other [padvid] line of this session lives.
+    if [ -n "$VID_USER" ] && [ "$VID_USER" != root ]; then
+        runuser -u "$VID_USER" -- setsid env PAD_ROOT="$R" PAD_GAME="$VGAME" \
+            PAD_VID_RESUME=1 python3 "$RIG/padvidhost.py" "$VID_RING" \
+            >> "$VLOG" 2>&1 &
+    else
+        setsid env PAD_ROOT="$R" PAD_GAME="$VGAME" PAD_VID_RESUME=1 \
+            python3 "$RIG/padvidhost.py" "$VID_RING" >> "$VLOG" 2>&1 &
+    fi
+    echo "[restore] video host restarted in resume mode (game '$VGAME', log $VLOG)"
 fi

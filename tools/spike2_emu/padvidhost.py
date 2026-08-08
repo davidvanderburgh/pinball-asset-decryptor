@@ -733,6 +733,134 @@ def serve(m, c, path, w, h, native, gen, old_read):
                 pass
 
 
+def resume_serve(m, c):
+    """Continue the serve a save-state restore interrupted. (item 13)
+
+    After loadgame.sh the restored guest believes channel c is mid-clip: its
+    stream thread holds `consumed` on its own stack and waits for write_idx
+    to pass it. A freshly started host would normally treat the channel as
+    settled (startup acks every pending gen and chan_loop sleeps), so nobody
+    ever produces the next frame - and the guest's takeover check then sees
+    nothing wrong, so no EOS is posted and the game never rebuilds the
+    pipeline. On screen that is a background held black/frozen forever while
+    the game's own GL text keeps drawing: exactly what David reported after
+    the first windowed load.
+
+    The ring header restorestate.sh put back carries everything the
+    interrupted serve knew - path, geometry, gen, and write_idx = the next
+    frame due - so: decode the clip, discard the frames already produced,
+    and carry on from there. Indexes are CONTINUED, never reset, which is
+    what keeps the restored guest's slot arithmetic (consumed % SLOTS)
+    landing on the frames it expects. At clip end the normal EOS machinery
+    runs and the game's own loop/rebuild takes over from there.
+
+    Runs INSIDE chan_loop as its first act, never as a second thread: one
+    writer per channel is the file's serialization rule, and the moment the
+    guest asks for anything new, gone() ends this and chan_loop serves it.
+
+    The save/dump gap is a known, tolerated race: savestate stashes the ring
+    moments BEFORE criu freezes the guest, so the stashed indexes can trail
+    the checkpoint by a few frames. The ring math self-heals (the guest
+    waits for write_idx to pass its own consumed; re-produced frames land in
+    the slots it will read), at worst re-decoding a handful of frames. Only
+    a request landing exactly in that gap is lost, and the game's own retry
+    covers it.
+    """
+    gen = get(m, c, "req_gen")
+    if (not get(m, c, "playing") or get(m, c, "status") != OK
+            or get(m, c, "ack_gen") != gen or get(m, c, "eos")):
+        return
+    want = get_path(m, c)
+    full = host_path(want)
+    w, h = get(m, c, "width"), get(m, c, "height")
+    n = get(m, c, "nframes")
+    produced = get(m, c, "write_idx")
+    if not full or not w or not h or produced >= n:
+        if want:
+            log("ch%d resume: nothing to continue (%r frame %d/%d)"
+                % (c, want, produced, n))
+        return
+    frame_bytes = w * h * 3 // 2
+    ring0 = HDR + c * SLOTS * SLOT_BYTES
+    info = probe(full)
+    native = (info[0], info[1]) if info else (w, h)
+    scale = ["-vf", "scale=%d:%d" % (w, h)] if (w, h) != native else []
+    cmd = (["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", full,
+            "-f", "rawvideo"] + scale + ["-pix_fmt", "yuv420p", "-"])
+    log("ch%d RESUME mid-clip at frame %d of %d: %s" % (c, produced, n, want))
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
+    buf = bytearray(frame_bytes)
+    view = memoryview(buf)
+
+    def gone(where):
+        if get(m, c, "req_gen") != gen:
+            log("ch%d resume superseded %s at frame %d" % (c, where, produced))
+            return True
+        if not get(m, c, "playing"):
+            log("ch%d resume: guest stopped %s at frame %d" % (c, where, produced))
+            return True
+        return False
+
+    def read_frame():
+        got = 0
+        while got < frame_bytes:
+            r = select.select([proc.stdout], [], [], 0.002)[0]
+            if not r:
+                if gone("mid-read"):
+                    return -1
+                continue
+            nr = proc.stdout.readinto(view[got:])
+            if not nr:
+                break
+            got += nr
+        return got
+
+    try:
+        # Discard what the interrupted serve already produced. NO head-cache
+        # collection anywhere in this function: these are mid-clip frames and
+        # caching them as the clip's "head" would poison the next real serve.
+        skip = produced
+        t0 = time.monotonic()
+        while skip:
+            got = read_frame()
+            if got < 0:
+                return
+            if got < frame_bytes:
+                # The file ended before the guest's position - tell the game
+                # so it rebuilds, rather than leaving it waiting forever.
+                put(m, c, "eos", 1)
+                log("ch%d resume: file ended during skip (rc=%s)" % (c, proc.poll()))
+                return
+            skip -= 1
+        log("ch%d resume: skipped to frame %d in %.0f ms"
+            % (c, produced, (time.monotonic() - t0) * 1000.0))
+        while True:
+            if gone(""):
+                return
+            while produced - min(get(m, c, "read_idx"), produced) >= SLOTS - 1:
+                if gone("while throttled"):
+                    return
+                time.sleep(0.002)
+            got = read_frame()
+            if got < 0:
+                return
+            if got < frame_bytes:
+                put(m, c, "eos", 1)
+                log("ch%d resume: EOS after %d frames" % (c, produced))
+                return
+            slot = produced % SLOTS
+            off = ring0 + slot * SLOT_BYTES
+            m[off:off + frame_bytes] = buf
+            produced += 1
+            put(m, c, "write_idx", produced)
+    finally:
+        try:
+            proc.kill()
+            threading.Thread(target=proc.wait, daemon=True).start()
+        except Exception:                           # noqa: BLE001
+            pass
+
+
 _STORM = [None] * CHANNELS      # per channel: [path, count, first_t, last_t]
 
 # A channel asked for the SAME file this many times inside STORM_WINDOW is not
@@ -765,8 +893,10 @@ def note_serve(c, want):
             % (c, st[1], want, now - st[2]))
 
 
-def chan_loop(m, c):
+def chan_loop(m, c, resume=False):
     """One channel, forever. Nothing here touches any other channel."""
+    if resume:
+        resume_serve(m, c)
     hot_until = 0.0
     while True:
         req = get(m, c, "req_gen")
@@ -855,9 +985,18 @@ def main():
     os.close(fd)
     struct.pack_into("<I", m, G["magic"], MAGIC)
     struct.pack_into("<I", m, G["version"], VERSION)
+    # PAD_VID_RESUME=1 (restorestate.sh, item 13): the ring was rewound to a
+    # save and a restored guest is coming back mid-clip. Channels the guest
+    # thinks are playing get their serve CONTINUED (resume_serve), and a
+    # request that was in flight at the save is deliberately NOT pre-acked -
+    # chan_loop notices req != ack and serves it fresh, which is the recovery
+    # the restored guest's prepare-spin is waiting for. A normal start (fresh
+    # ring file, watch.sh deleted the old one) is unchanged.
+    resume = os.environ.get("PAD_VID_RESUME") == "1"
     for c in range(CHANNELS):
-        put(m, c, "ack_gen", get(m, c, "req_gen"))
-        t = threading.Thread(target=chan_loop, args=(m, c), daemon=True)
+        if not resume:
+            put(m, c, "ack_gen", get(m, c, "req_gen"))
+        t = threading.Thread(target=chan_loop, args=(m, c, resume), daemon=True)
         t.start()
     log("ready: %s (%d MB, %d channels x %d slots)"
         % (path, TOTAL // (1 << 20), CHANNELS, SLOTS))

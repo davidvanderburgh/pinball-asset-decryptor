@@ -1,9 +1,9 @@
 # Spike 2 PC emulator — task queue
 
 **`/next` takes the OPEN item with the LEAST PROGRESS**, tie-broken on which is
-easiest — the full rule lives in `.claude/commands/next.md` under "Which item
-to take" and is not restated here, because two places defining one fact is how
-this rig has been bitten before. An item nobody has touched is 0% and outranks
+easiest — the full rule lives in `~/.claude/skills/next/SKILL.md` under "Which
+item to take" and is not restated here, because two places defining one fact is
+how this rig has been bitten before. An item nobody has touched is 0% and outranks
 one sitting at 85%, so the queue advances on a broad front instead of grinding
 one item down. **Order on this page is presentation, not priority**; it is only
 the last tie-break, which is what moving lines around is still good for.
@@ -14,7 +14,8 @@ progress: severity first, then difficulty. **Lower is taken sooner in both** —
 S1 is the worst thing, D1 is the cheapest job. Roughly, S1 breaks playing the
 game, S2 costs runs or makes other items more expensive, S3 is friction with a
 workaround. Both ladders live in the same place as the selection rule,
-`.claude/commands/next.md`, and are not restated here for the same reason.
+`~/.claude/skills/next/SKILL.md`, and are not restated here for the same
+reason.
 
 **Severity was added on 2026-08-06 because difficulty alone kept sending the
 next pass at the cheapest item** — three severe faults in a row lost to a
@@ -66,7 +67,10 @@ These have each been violated at least once and each cost a run or a window:
   lists, so there is exactly one place to add to.
 - **Never run two measurement runs at once.** `killgame.sh` is global, so the
   older script's teardown kills the newer run mid-boot.
-- **David pushes straight to main. No PRs.**
+- **Item work commits on `item/<N>` in its own worktree, never straight to
+  main.** Main is the release branch and only moves when a finished item is
+  merged in — `/next` owns the mechanics (branch, sibling worktree dir, merge
+  at close). No PRs, still: the merge is local and pushed.
 
 ## Queue
 

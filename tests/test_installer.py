@@ -507,6 +507,45 @@ def test_windows_installer_offers_every_stern_pip_dep():
         f"{', '.join(missing)} -- Install Missing won't install them on Windows.")
 
 
+def test_both_installers_offer_every_emulator_package_the_tab_names():
+    """Regression guard — the native compiler was on nobody's list.
+
+    The Emulate tab probes what a run needs (emulate_tab._SETUP_TOOLS); the two
+    installers are where a user who never opens that tab gets the same things.
+    Those were three separate lists and they came apart: the rig compiles the
+    ARM shim AND a native renderer, only the cross compiler was ever named, and
+    a user with gcc-arm-linux-gnueabihf and no gcc watched the shim build and
+    the run die on padglhost thirty seconds later.
+
+    Derived from the tab, so a sixth prerequisite cannot go stale here the way
+    the fifth did.  libc6-dev is part of it for the reason the JJP entry
+    already records: gcc only *recommends* the headers."""
+    from pinball_decryptor.gui.emulate_tab import _SETUP_TOOLS
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    linux = (INSTALLER / "install_prerequisites_linux.sh").read_text(
+        encoding="utf-8", errors="replace")
+    # The Stern block only, in both: `gcc` alone appears under JJP already, and
+    # a match there would prove nothing about the Spike 2 user.
+    ps1_stern = ps1.split('"Stern Pinball" = @{', 1)[-1]
+    # [6] is Stern in every one of that script's parallel arrays, so scope to
+    # the packages one — MFR_NAMES[6] would otherwise match and prove nothing.
+    assert "MFR_PACKAGES=(" in linux, (
+        "install_prerequisites_linux.sh lost its package manifest")
+    linux_pkgs = linux.split("MFR_PACKAGES=(", 1)[1].split("\n)", 1)[0]
+    linux_stern = [ln for ln in linux_pkgs.splitlines()
+                   if ln.strip().startswith("[6]=")]
+    assert linux_stern, "install_prerequisites_linux.sh lost its Stern package list"
+    for _key, pkg, _why in _SETUP_TOOLS:
+        for name in pkg.split():
+            assert name in ps1_stern, (
+                f"install_prerequisites.ps1's Stern entry never installs "
+                f"{name} — the Emulate tab needs it and Install Missing "
+                f"will not supply it.")
+            assert name in linux_stern[0], (
+                f"install_prerequisites_linux.sh's Stern list never installs "
+                f"{name} — the Emulate tab needs it.")
+
+
 def test_stern_declares_ext4_grow_prereq_per_platform():
     """Regression guard — the blip-free WSL2 dependency was undeclared.
 

@@ -279,6 +279,14 @@ $ManufacturerPrereqs = [ordered]@{
             # setuid, which is what the fuse3 package provides.
             @{ probe="qemu-arm-static";        pkg="qemu-user-static";         label="qemu-user-static";        reason="Emulate tab: runs the machine's own 32-bit ARM game binary on this PC" }
             @{ probe="arm-linux-gnueabihf-gcc"; pkg="gcc-arm-linux-gnueabihf"; label="ARM cross-compiler";      reason="Emulate tab: builds the LD_PRELOAD hardware shim the game runs against" }
+            # The NATIVE compiler, which is a different one from the line
+            # above and was left off this list until a user turned up with the
+            # cross compiler, a shim that built fine, and no gcc — so the run
+            # died half a minute in on the renderer.  Probed by compiling for
+            # the same reason the JJP entry is: gcc only *recommends*
+            # libc6-dev, so the compiler can be on PATH with no headers.
+            @{ probe="gcc";                    pkg="gcc libc6-dev";            label="gcc + libc6-dev";         reason="Emulate tab: builds padglhost, the native renderer that draws the game's picture";
+               probeCmd="gcc -include stdio.h -x c /dev/null -c -o /var/tmp/ccprobe.o" }
             @{ probe="debugfs";                pkg="e2fsprogs";                label="e2fsprogs/debugfs";       reason="Emulate tab: builds the guest filesystem out of a card image, without root" }
             @{ probe="fusermount3";            pkg="fuse3";                    label="fuse3 (fusermount3)";     reason="Emulate tab: mounts a card read-only so a title runs without extracting 6 GB" }
         )

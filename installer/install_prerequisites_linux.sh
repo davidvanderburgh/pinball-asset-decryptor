@@ -27,7 +27,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     echo "  CGC:    e2fsprogs xxd"
-    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs fuse3 python3-tk"
+    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk"
     exit 1
 fi
 
@@ -64,6 +64,13 @@ declare -A MFR_PACKAGES=(
     # filesystem built from a card image:
     #   qemu-user-static          runs the ARM binary
     #   gcc-arm-linux-gnueabihf   builds the LD_PRELOAD hardware shim
+    #   gcc + libc6-dev           builds padglhost, the NATIVE renderer that
+    #                             draws the picture. A different compiler from
+    #                             the line above, and having that one says
+    #                             nothing about having this one - a user hit
+    #                             exactly that gap, shim built, renderer not.
+    #                             libc6-dev is named for the same reason it is
+    #                             named under JJP: gcc only recommends it.
     #   e2fsprogs                 rootfs.sh, which needs no root to extract
     #   fuse3                     fusermount3, so a card mounts read-only
     #                             without root (fuse2fs itself is fetched by
@@ -71,7 +78,7 @@ declare -A MFR_PACKAGES=(
     #   python3-tk                the virtual playfield window. Separate from
     #                             python3 on Debian and Ubuntu, and its
     #                             absence reads as a puzzling ImportError.
-    [6]="qemu-user-static gcc-arm-linux-gnueabihf e2fsprogs fuse3 python3-tk"
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk"
 )
 
 # Pip packages -- installed into the same Python that runs the app

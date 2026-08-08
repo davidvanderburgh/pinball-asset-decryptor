@@ -602,8 +602,8 @@ def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
 # - and the wording is what a user acts on, which is why it is tested.
 # ----------------------------------------------------------------------
 
-_READY = {"qemu": "1", "armgcc": "1", "debugfs": "1", "fuse": "1",
-          "binfmt": "1", "iswsl": "1", "wslconf": "1"}
+_READY = {"qemu": "1", "armgcc": "1", "nativecc": "1", "debugfs": "1",
+          "fuse": "1", "binfmt": "1", "iswsl": "1", "wslconf": "1"}
 
 
 def _facts(**over):
@@ -653,6 +653,50 @@ def test_every_missing_package_says_what_it_is_for():
         assert pkg in text
     assert "32-bit ARM game binary" in text
     assert "without extracting" in text
+
+
+# ----------------------------------------------------------------------
+# THE RIG COMPILES TWO THINGS AND THE TAB ONLY ASKED ABOUT ONE OF THEM.
+# The hardware shim is ARM and cross compiled; padglhost, the renderer that
+# draws the picture, is native.  A user on 2026-08-08 had the cross compiler,
+# watched the shim build in his log, and thirty seconds into the run met
+#
+#     [build] the GL renderer is not built, and there is no gcc here
+#     [build] to build it. It is a NATIVE binary - install gcc ...
+#
+# The tab had said nothing before Start, because nothing here knew the native
+# compiler was a prerequisite at all.
+# ----------------------------------------------------------------------
+
+def test_the_native_compiler_is_a_prerequisite_in_its_own_right():
+    """Having the ARM cross compiler says nothing about having gcc, which is
+    exactly the machine that reported this."""
+    facts = _facts(nativecc="0")
+    assert not setup_ok(facts)
+    missing, _binfmt = setup_summary(facts)
+    assert [pkg for pkg, _ in missing] == ["gcc libc6-dev"]
+    text = setup_notice(facts, can_fix=True)
+    assert "gcc libc6-dev" in text
+    # ...and said in terms of what it costs the user, not of a compiler.
+    assert "picture" in text
+
+
+def test_the_headers_are_named_beside_the_compiler():
+    """gcc only RECOMMENDS libc6-dev, so `apt install gcc` on a slim WSL is a
+    compiler with no headers - and padglhost.c opens with #include <stdio.h>.
+    The JJP hooks learned this already; naming only gcc here would have sent
+    the same user round again."""
+    text = setup_notice(_facts(nativecc="0", binfmt="1"), can_fix=False)
+    assert "sudo apt install gcc libc6-dev" in text
+
+
+def test_a_rig_that_never_heard_of_the_native_compiler_accuses_nobody():
+    """An older rig emits no `nativecc` line at all, and an absent fact is not
+    a missing package - the same direction everything else here takes."""
+    older = dict(_READY)
+    del older["nativecc"]
+    assert setup_ok(older)
+    assert setup_notice(older, can_fix=True) == ""
 
 
 def test_a_registered_but_disabled_handler_is_not_called_missing():
@@ -727,13 +771,17 @@ def _rig_text(name):
 
 
 def test_the_repair_installs_exactly_the_packages_the_tab_names():
-    """The tab explains four packages and the rig installs them.  Two lists in
+    """The tab explains five packages and the rig installs them.  Two lists in
     two languages is precisely how they drift.
 
     The rig's copy lives in setupcheck.sh, which probes the tool and knows the
     package that carries it; setupfix.sh installs whatever that reports as
-    missing rather than keeping a third list."""
-    check = _rig_text("setupcheck.sh")
+    missing rather than keeping a third list.
+
+    Commas are how the rig's whitespace-split list spells a fact that needs
+    more than one package (gcc,libc6-dev); the tab spells the same thing with
+    a space, and this is the seam where those two have to mean the same."""
+    check = _rig_text("setupcheck.sh").replace(",", " ")
     fix = _rig_text("setupfix.sh")
     for key, pkg, _why in emulate_tab._SETUP_TOOLS:
         assert 'sudo' not in pkg
@@ -741,6 +789,23 @@ def test_the_repair_installs_exactly_the_packages_the_tab_names():
             pkg, key)
         assert "%s:" % key in check
     assert '_get "$facts" need' in fix
+
+
+def test_the_repair_keeps_no_list_of_its_own_to_prove_itself_with():
+    """setupfix.sh's LAST act is to re-probe and declare the machine fixed, and
+    it used to do that by naming the four fact keys one per line - a third copy
+    of the list, on the success path, where nobody would think to look.  Adding
+    a fifth prerequisite would have left it announcing "result=ok" on a machine
+    that still could not build the renderer.
+
+    `need` is emitted by the same loop that emits the keys, so the proof is
+    about whatever setupcheck probes today."""
+    fix = _rig_text("setupfix.sh")
+    proof = fix.split("# ---- 4.")[-1]
+    assert '-z "$(_get "$facts" need)"' in proof
+    for key, _pkg, _why in emulate_tab._SETUP_TOOLS:
+        assert '_get "$facts" %s' % key not in proof, (
+            "setupfix.sh is naming %s itself again" % key)
 
 
 def test_the_repair_does_not_hide_apt_failure_behind_a_pipe():
@@ -1052,6 +1117,24 @@ def test_the_probe_reuses_the_rig_s_own_binfmt_detection():
     ensurebuild.sh owns that, and the run itself uses ensurebuild's."""
     check = _rig_text("setupcheck.sh")
     assert "ensurebuild.sh" in check
+
+
+def test_the_tab_and_the_run_agree_on_what_a_usable_compiler_is():
+    """Same rule, and for the same reason: the prediction the tab makes before
+    Start and the decision the run makes half a minute later have to be one
+    function, or the tab clears a machine the build then refuses.
+
+    `command -v gcc` in either place is the specific way that goes wrong - it
+    passes a WSL that has the compiler and none of its headers."""
+    check = _rig_text("setupcheck.sh")
+    ensure = _rig_text("ensurebuild.sh")
+    assert "_pad_cc_works" in ensure, "the run's own test has to be a function"
+    assert "@_pad_cc_works" in check, "setupcheck must call it, not re-ask"
+    bridge = ensure.split("pad_ensure_bridge() {", 1)[1].split("\n}", 1)[0]
+    assert "command -v gcc" not in bridge, (
+        "the renderer's guard is back to a PATH lookup")
+    assert bridge.count("_pad_cc_works") == 2, (
+        "both the missing and the stale branch decide it the same way")
     assert "_pad_binfmt_arm" in check
     assert "_pad_binfmt_advice" in check
     assert "binfmt_misc/qemu-arm" not in check, "that is a second detector"

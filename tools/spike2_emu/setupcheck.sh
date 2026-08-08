@@ -25,6 +25,9 @@
 # OUTPUT: key=value lines, one per fact, parsed by the Emulate tab.
 #
 #   qemu|armgcc|debugfs|fuse   1 = the tool is on PATH, 0 = it is not
+#   nativecc                   1 = this machine can compile and link a NATIVE
+#                              program, which is a different question from
+#                              whether gcc is on PATH - see _pad_cc_works
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
 #   indexed                    1 = apt has index metadata to answer questions
@@ -58,15 +61,30 @@
 . "$(dirname "$0")/padpath.sh"
 . "$(dirname "$0")/ensurebuild.sh"
 
-_have() { command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0; }
+#: SOME FACTS ARE NOT A PATH LOOKUP. `@name` runs the shell function `name`
+#: instead - which for the native compiler is the only honest test there is,
+#: because gcc can be installed and unusable (see _pad_cc_works). The function
+#: comes from ensurebuild.sh, so the run and the prediction share it.
+_have() {
+    case $1 in
+        @*) "${1#@}" >/dev/null 2>&1 && echo 1 || echo 0 ;;
+        *)  command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0 ;;
+    esac
+}
 
-#: WHAT THE EMULATOR NEEDS BEYOND THE RIG: fact key, the tool that IS the
-#: fact, the package that is only how apt spells it, and whether that package
-#: may be fetched from ANOTHER Ubuntu release when this one has no version of
-#: it. THE RIG'S ONE COPY - setupfix.sh installs what this reports as missing
-#: rather than keeping a second list, because two lists in two scripts is
-#: exactly how the thing that is explained and the thing that is installed
-#: stop being the same four.
+#: WHAT THE EMULATOR NEEDS BEYOND THE RIG: fact key, the tool (or `@function`)
+#: that IS the fact, the package that is only how apt spells it, and whether
+#: that package may be fetched from ANOTHER Ubuntu release when this one has no
+#: version of it. THE RIG'S ONE COPY - setupfix.sh installs what this reports
+#: as missing rather than keeping a second list, because two lists in two
+#: scripts is exactly how the thing that is explained and the thing that is
+#: installed stop being the same four.
+#:
+#: THE PACKAGE FIELD IS COMMA-SEPARATED because one fact can need more than one
+#: package and this list is whitespace-split. Exactly one entry needs that
+#: today: `gcc libc6-dev`, which is one capability apt happens to spell in two
+#: words - gcc only RECOMMENDS the headers, so installing half of it is how a
+#: machine ends up with a compiler it cannot compile with.
 #:
 #: THE LAST FIELD IS A PERMISSION, NOT A PROMISE, and only one package has it.
 #: qemu-user-static is a statically linked binary that Depends on NOTHING (a
@@ -79,6 +97,7 @@ _have() { command -v "$1" >/dev/null 2>&1 && echo 1 || echo 0; }
 #: flag can only ever narrow what is attempted, never widen what is allowed.
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
+nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0"
 
@@ -86,9 +105,14 @@ need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do
     _key=${_t%%:*}; _rest=${_t#*:}; _tool=${_rest%%:*}
     _rest=${_rest#*:}; _pkg=${_rest%%:*}; _xrel=${_rest#*:}
-    echo "$_key=$(_have "$_tool")"
+    _pkg=${_pkg//,/ }
+    # ASKED ONCE. It used to be probed twice - once for the line and once for
+    # the `need` list - which is free for `command -v` and is a compile for the
+    # entry below it.
+    _ok=$(_have "$_tool")
+    echo "$_key=$_ok"
     [ "$_xrel" = 1 ] && _xrel_ok="$_xrel_ok $_pkg"
-    command -v "$_tool" >/dev/null 2>&1 || need="$need $_pkg"
+    [ "$_ok" = 1 ] || need="$need $_pkg"
 done
 echo "need=${need# }"
 

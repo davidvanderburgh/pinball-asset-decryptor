@@ -184,6 +184,39 @@ pad_ensure_shim() {
     return 0
 }
 
+#: CAN THIS MACHINE BUILD A NATIVE BINARY? Asked by compiling one.
+#:
+#: `command -v gcc` IS THE WRONG QUESTION, and it is the wrong question in both
+#: directions at once. A machine can have gcc and be unable to use it - the gcc
+#: package only RECOMMENDS libc6-dev, so a slim WSL image, or one where gcc
+#: arrived as somebody else's dependency, has the compiler on PATH and not one
+#: header to give it. `#include <stdio.h>` is the first line of padglhost.c.
+#: install_prerequisites.ps1 learned this for the JJP dongle hooks and probes
+#: them by compiling; the renderer is the second thing here that is built
+#: natively, and it was still asking the PATH.
+#:
+#: AN UNWRITABLE TEMP DIRECTORY IS NOT A MISSING COMPILER. If the probe cannot
+#: even lay its own source file down it says yes on the strength of the PATH
+#: rather than accusing a machine whose toolchain is fine - the same direction
+#: everything else here takes when it cannot tell.
+#:
+#: setupcheck.sh calls THIS, so what the Emulate tab predicts before the run and
+#: what the run itself decides are one function - the rule _pad_binfmt_arm is
+#: already held to.
+_pad_cc_works() {
+    local t rc
+    command -v gcc >/dev/null 2>&1 || return 1
+    t=$(mktemp -d 2>/dev/null) || return 0
+    if printf '#include <stdio.h>\nint main(void){return 0;}\n' \
+            > "$t/probe.c" 2>/dev/null; then
+        gcc -o "$t/probe" "$t/probe.c" >/dev/null 2>&1; rc=$?
+    else
+        rc=0
+    fi
+    rm -rf "$t" 2>/dev/null
+    return $rc
+}
+
 # ---------------------------------------------------------------------------
 # The GL bridge
 # ---------------------------------------------------------------------------
@@ -197,10 +230,12 @@ pad_ensure_bridge() {
         # No live-run guard here on purpose: a file that does not exist cannot
         # be mapped by anything, so there is nothing to protect and a guard
         # could only refuse to fix the very thing that is broken.
-        if ! command -v gcc >/dev/null 2>&1; then
-            echo "[build] the GL renderer is not built, and there is no gcc here" >&2
-            echo "[build] to build it. It is a NATIVE binary - install gcc (on" >&2
-            echo "[build] Debian/Ubuntu: apt install gcc) and start again." >&2
+        if ! _pad_cc_works; then
+            echo "[build] the GL renderer is not built, and this machine cannot" >&2
+            echo "[build] compile it. It is a NATIVE binary and needs gcc AND the" >&2
+            echo "[build] C headers - gcc only recommends those, so having the" >&2
+            echo "[build] compiler is not enough (on Debian/Ubuntu: apt install" >&2
+            echo "[build] gcc libc6-dev) - and then start again." >&2
             echo "[build] Expected at: $PAD_GLHOST_BIN" >&2
             return 1
         fi
@@ -215,9 +250,10 @@ pad_ensure_bridge() {
             echo "[build] the GL renderer is older than its source, but a run is" >&2
             echo "[build] still up and its binary cannot be rewritten underneath" >&2
             echo "[build] it. Stop it (killgame.sh) to pick up the fix." >&2
-        elif ! command -v gcc >/dev/null 2>&1; then
-            echo "[build] the GL renderer is older than its source, but there is" >&2
-            echo "[build] no gcc here to rebuild it. Running as built." >&2
+        elif ! _pad_cc_works; then
+            echo "[build] the GL renderer is older than its source, but this" >&2
+            echo "[build] machine cannot compile it (gcc + libc6-dev). Running" >&2
+            echo "[build] as built." >&2
         else
             echo "[build] the GL renderer is older than its source; rebuilding"
             _pad_build buildbridge.sh --host \

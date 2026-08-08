@@ -264,6 +264,114 @@ def test_a_failure_with_no_recognisable_words_still_says_something(tmp_path):
     assert "something nobody predicted 20" in seen
 
 
+# --------------------------------------------------------------------------
+# ...and BEFORE any of that, whether this machine can compile at all.
+#
+# Reported 2026-08-08: the ARM cross compiler was there, the shim built and
+# said "built ok: 154684 bytes", and the very next line was
+#
+#     [build] the GL renderer is not built, and there is no gcc here to build
+#     [build] it. It is a NATIVE binary - install gcc ...
+#
+# Two compilers, and having one says nothing about having the other.  The
+# guard was `command -v gcc`, which is also wrong in the other direction: gcc
+# only RECOMMENDS libc6-dev, so a slim WSL has the compiler on PATH with no
+# headers to give it, and padglhost.c opens with #include <stdio.h>.
+#
+# NEEDS NO COMPILER TO TEST, which is the point of doing it here: a `gcc` on
+# PATH that exits non-zero is exactly the machine that a PATH lookup clears
+# and a compile does not.
+# --------------------------------------------------------------------------
+
+#: ``$RIG/bin`` FIRST, so the stand-in gcc is the one that answers.  The empty
+#: case replaces PATH outright rather than prepending: this suite runs on
+#: Linux CI too, where a real gcc is sitting on the inherited PATH and would
+#: quietly turn "no compiler here" into a test of the machine instead of of the
+#: probe.  Nothing external is needed to reach the verdict in that case - the
+#: `command -v` guard returns before mktemp is ever called.
+_CC_DRIVER = """#!/bin/bash
+RIG=$(pwd); export RIG
+PATH=%s; export PATH
+TMPDIR=$RIG/tmp; export TMPDIR
+. "$RIG/ensurebuild.sh"
+_pad_cc_works && echo VERDICT=yes || echo VERDICT=no
+"""
+
+
+def _cc_verdict(tmp_path, gcc_body):
+    """Run the real _pad_cc_works with a stand-in gcc first on PATH.
+
+    ``gcc_body=None`` means a machine with no compiler at all."""
+    rig = tmp_path / "rig"
+    (rig / "bin").mkdir(parents=True)
+    (rig / "tmp").mkdir()
+    shutil.copy(os.path.join(RIG, "ensurebuild.sh"), str(rig / "ensurebuild.sh"))
+    path = "$RIG/bin:$PATH" if gcc_body is not None else "$RIG/bin"
+    files = [(rig / "driver.sh", _CC_DRIVER % path)]
+    if gcc_body is not None:
+        files.append((rig / "bin" / "gcc", gcc_body))
+    for path_, body in files:
+        with open(str(path_), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+        os.chmod(str(path_), 0o755)
+    out = subprocess.run([BASH, "driver.sh"], cwd=str(rig),
+                         capture_output=True, text=True)
+    return out.stdout + out.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_compiler_that_cannot_compile_is_not_a_compiler(tmp_path):
+    """On PATH and unusable - the gcc-without-libc6-dev machine.  A PATH lookup
+    says yes to this one and the build then fails on the first #include."""
+    seen = _cc_verdict(tmp_path, "#!/bin/sh\n"
+                                 "echo 'stdio.h: No such file' >&2\nexit 1\n")
+    assert "VERDICT=no" in seen, seen
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_a_compiler_that_compiles_is_believed(tmp_path):
+    """...and the probe must not be so strict that it condemns a good box: a
+    gcc that does its job is a yes, with no real toolchain needed to show it."""
+    seen = _cc_verdict(tmp_path, "#!/bin/sh\nexit 0\n")
+    assert "VERDICT=yes" in seen, seen
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_the_probe_actually_hands_gcc_a_source_file(tmp_path):
+    """The one thing a stub cannot fake for us: it must be a COMPILE.  A probe
+    that ran `gcc --version` would pass both tests above and still clear a
+    machine with no headers, so the arguments are what is checked.
+
+    Written to a FILE, not printed: the probe sends the compiler's own output
+    to /dev/null, which is right - a build error belongs in the build's report,
+    not in a yes/no answer - and means stdout cannot be read from here."""
+    seen = _cc_verdict(tmp_path, '#!/bin/sh\nprintf "%s" "$*" > "$RIG/args"\n'
+                                 'exit 0\n')
+    assert "VERDICT=yes" in seen, seen
+    args = (tmp_path / "rig" / "args").read_text(encoding="utf-8")
+    assert args.rstrip().endswith(".c"), (
+        "the probe must compile a source file, not interrogate the binary: %r"
+        % args)
+    src = tmp_path / "rig" / "tmp"
+    assert not any(src.iterdir()), "and clean up after itself"
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_no_compiler_at_all_is_a_no(tmp_path):
+    """The fault as it was actually reported: no gcc on the machine."""
+    seen = _cc_verdict(tmp_path, None)
+    assert "VERDICT=no" in seen, seen
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash on this machine")
+def test_the_probe_leaves_nothing_behind(tmp_path):
+    """It runs on every setupcheck, which is every time the tab opens - so a
+    probe that littered would leave a directory per visit in /tmp."""
+    seen = _cc_verdict(tmp_path, "#!/bin/sh\nexit 0\n")
+    assert "VERDICT=yes" in seen, seen
+    assert os.listdir(str(tmp_path / "rig" / "tmp")) == []
+
+
 @pytest.mark.skipif(BASH is None, reason="no bash on this machine")
 def test_the_whole_output_is_written_where_it_says_it_is(tmp_path):
     """Named in the log, and actually there - including the twenty lines the

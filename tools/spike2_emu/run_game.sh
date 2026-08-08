@@ -132,11 +132,54 @@ STUB=""
 [ -n "$CARD_SRC" ] && STUB="$R/games/$GAME"
 trap 'kill $NODEBUS_PID 2>/dev/null; [ -n "$STUB" ] && rmdir "$STUB" 2>/dev/null' EXIT
 
-unshare -r -m -p -f bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" <<'INNER'
+# PAD_PIVOT=1 boots a CHECKPOINTABLE guest (item 13, save states). The default
+# path chroots, and criu CANNOT dump a chroot'd task - the ladder measured it:
+# "The root task has another root than mntns". So under PAD_PIVOT the guest gets
+# its own root via pivot_root instead of chroot, and two binaries have to live
+# INSIDE the rootfs, because after the pivot detaches the host tree they are the
+# only two things that still need to run:
+#   * an x86 STATIC busybox, to umount the old root. The rootfs's own busybox is
+#     ARM and would need qemu - which we are about to exec INTO, so it cannot
+#     also do the umount. busybox-static puts a native one at /bin/busybox.
+#   * qemu itself, because via binfmt the interpreter is on the host tree
+#     (/usr/libexec/qemu-binfmt/arm-binfmt-P) and criu could not resolve its
+#     mapping once that tree is gone. Exec'd explicitly, env still propagates to
+#     the guest exactly as binfmt does (qemu is static, so LD_PRELOAD - an ARM
+#     path - is ignored by the host process and seen only by the guest loader).
+# Fully OPT-IN: with PAD_PIVOT unset, nothing below changes and the boot is
+# byte-for-byte the chroot path it has always been.
+PIVOT=${PAD_PIVOT:-}
+if [ -n "$PIVOT" ]; then
+    QEMU=$(command -v qemu-arm-static)
+    [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs qemu-arm-static" >&2; exit 1; }
+    if ! head -c4 /bin/busybox 2>/dev/null | grep -q ELF || \
+       ldd /bin/busybox 2>&1 | grep -q '=>'; then
+        echo "[run] PAD_PIVOT needs a STATIC busybox at /bin/busybox (apt install busybox-static)" >&2
+        exit 1
+    fi
+    cp -f "$QEMU" "$R/qemu-arm-static"
+    cp -f /bin/busybox "$R/busybox"
+    echo "[run] PAD_PIVOT: checkpointable boot (pivot_root, explicit qemu)"
+fi
+
+# setsid the guest so it leads its own session INSIDE the pid namespace. Without
+# it criu refuses the dump: "A session leader of N(1) is outside of its pid
+# namespace" - the ns init would otherwise belong to watch.sh's session, which
+# is not in the checkpoint. Only under PAD_PIVOT (empty otherwise = byte-for-byte
+# the old command, just a stray space); driven through one variable so the big
+# INNER heredoc is not duplicated.
+SETSID=""
+[ -n "$PIVOT" ] && SETSID="setsid"
+unshare -r -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
 CARD_SRC="$4"
+PIVOT="$5"
+# pivot_root needs the new root to BE a mount, and everything mounted below then
+# rides the pivot, so the self-bind of $R must come FIRST - before proc/sys/tmp.
+# Guarded, so the chroot path is untouched.
+[ -n "$PIVOT" ] && mount --bind "$R" "$R"
 # procfs needs a PID namespace to mount (see the -p -f on unshare below).
 # Without it this silently produced an EMPTY /proc: no /proc/meminfo, and the
 # game sizes its asset budget from that, so it loaded no scenes at all.
@@ -212,6 +255,34 @@ else
 fi
 
 cd "$R"
+if [ -n "$PIVOT" ]; then
+    # THE CHECKPOINTABLE EXEC (item 13). Three steps, each measured on the
+    # criuladder.sh rungs:
+    #  1. close the stray /dev/ptmx fds (3..63) every wsl.exe descendant
+    #     inherits (7 and 10) - criu refuses any process holding them. stdio
+    #     (0,1,2) is pointed inside the container in step 3.
+    #  2. pivot so the guest's root IS the mount-namespace root (chroot's root is
+    #     not, which is why chroot cannot be dumped), then drop the whole host
+    #     tree with one lazy umount so it is not a checkpoint liability.
+    #  3. exec qemu explicitly. LD_PRELOAD and the PAD_* the shim reads are
+    #     inherited from watch.sh and propagated to the guest, same as binfmt.
+    for fd in $(seq 3 63); do eval "exec $fd>&-" 2>/dev/null; done
+    mkdir -p oldroot
+    pivot_root . oldroot || { echo "[run] pivot_root failed" >&2; exit 1; }
+    cd /
+    /busybox umount -l /oldroot
+    cd "/games/$GAME" || exit 1
+    export LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
+    # stdio has to point INSIDE the container. The caller's stdout is a file on
+    # a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves the
+    # namespace with the pivot - criu then refuses fd 1 ("Can't lookup mount for
+    # fd=1"). Reopen all three onto the rootfs's own mounts AFTER the pivot, so
+    # every fd belongs to a mount that stays. The host reads the same bytes at
+    # $ROOT/dump/game.out, so nothing is lost - but a PAD_PIVOT run's log is
+    # THERE, not on the caller's stdout, which watch.sh must follow when it
+    # learns to launch pivot runs.
+    exec /qemu-arm-static ./game </dev/null >/dump/game.out 2>&1
+fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \

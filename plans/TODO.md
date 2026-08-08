@@ -767,9 +767,32 @@ These have each been violated at least once and each cost a run or a window:
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **13. Save and load save states.** `S2 D3` ← IN PROGRESS *(**D5 → D4 →
-      D3, 2026-08-07/08:** the whole desk-side ladder now PASSES — every
-      external shape the guest holds is proven restorable. What is left needs
-      the rig itself: run_game.sh changes and live runs.)*
+      D3, 2026-08-07/08:** the ladder passed, and now the RIG'S OWN scripts do
+      too — offline, on the real run_game.sh. What is left is one LIVE game.)*
+      **★★★ THE RIG NOW SAVES AND RESTORES ITS OWN GUEST, offline, end to end
+      (2026-08-08).** `savetest.sh` (root, no real game, no GL/video/audio — so
+      NOT a measurement run) boots a stub guest through the REAL
+      `run_game.sh PAD_PIVOT=1`, then drives `savestate.sh` and
+      `restorestate.sh`; the stub RESUMED its counter twice (67 → 82 → 87), not
+      restarted. Three new tools + a gated run_game.sh change:
+      **`run_game.sh` grew a `PAD_PIVOT=1` branch, fully gated (default path
+      byte-for-byte unchanged — verified from the diff).** It pivot_roots
+      instead of chroot, self-binds `$R` first, `setsid`s the guest into its
+      own session (else criu: "session leader outside its pid namespace"),
+      execs an explicit rootfs-local qemu instead of binfmt, closes the wsl.exe
+      ptmx fds, and **reopens stdio onto `/dump/game.out` after the pivot**
+      (the caller's log is on a host mount that leaves the namespace — criu
+      then refuses fd 1). It copies a static busybox + qemu into the rootfs for
+      the post-pivot umount and exec.
+      **`savestate.sh`** reads the guest's ACTUAL `/proc/PID/mountinfo` and
+      generates one `--external` per mount criu can't resolve — **classified by
+      FSTYPE, not path** (the first bug the offline loop caught: `/dev/shm` is a
+      tmpfs, not a device bind, and must NOT be external). devtmpfs → the host
+      node, devpts → the pty, fuse → the card. It finds the held tty fd and
+      writes `restore.env` (the one place that owns the mapping).
+      **`restorestate.sh`** restarts nodebus.py for a fresh pty, replays
+      `restore.env`'s externals (resolving `@PTY@`), and runs criu restore
+      inside the stripped nsclean namespace with `--root --mntns-compat-mode`.
       **★★★ ALL SEVEN RUNGS PASS IN ONE RUN (2026-08-08): A ordinary, B
       qemu-user, C +threads, D the full unshare -r -m -p -f + pivot_root
       container, E executed FROM a fuse2fs card bound in from outside, F
@@ -890,18 +913,23 @@ These have each been violated at least once and each cost a run or a window:
       1000→0), a tty opened WITHOUT O_NOCTTY, and whether the game survives
       its node bus, audio sink and GL bridge being restarted underneath it.
       **Committed:** `26f8f19` (probe, rungs A/B, the ptmx finding), `6f3242d`
-      (rung C, threads), `b8f99cc` (rungs D/E, the container recipe), this
-      commit (rungs F/G — every external shape now proven).
-      **Resume:** the ladder is DONE — front (b) is what is left. Make
-      `run_game.sh` checkpointable behind an env flag (`PAD_PIVOT=1`):
-      pivot_root instead of chroot (self-bind $R first), rootfs-local
-      explicit qemu instead of binfmt, stdio pointed inside the container,
-      and the stray wsl.exe ptmx fds closed. Then `savestate.sh` /
-      `restorestate.sh` wrapping the recipe now proven in `criuladder.sh`
-      (compat engine, --root, nsclean, the mnt/tty externals, restart
-      cardmount.sh + nodebus.py first, SIGKILL-only teardown). Then a live
-      game: boot with PAD_PIVOT=1, confirm it still plays, and only then
-      checkpoint one.
+      (rung C, threads), `b8f99cc` (rungs D/E, the container recipe), `4d255c1`
+      (rungs F/G), this commit (run_game.sh PAD_PIVOT + savestate/restorestate
+      + savetest, offline-proven).
+      **Resume — the one thing left is a LIVE game, and it is a run.** Boot a
+      real title with `PAD_PIVOT=1` (through `watch.sh`, which must be taught
+      to read the log from `$ROOT/dump/game.out` instead of the guest's
+      stdout, and to launch the pivot variant) and FIRST confirm it still
+      plays — pivot_root + explicit qemu vs binfmt is unproven on the real
+      multithreaded game with its GL/video/audio fds. Then `savestate.sh
+      <dir>` mid-ball and `restorestate.sh <dir>`, and check ball/score/mode
+      with `shot.py`. **Known gaps the live run will hit, none an unknown
+      mechanism:** the real guest holds GL/video-ring and audio fds the stub
+      does not (the rings are file-backed = fine per rung G, but padglhost/
+      padvidhost are separate helpers that must be restarted and re-attached,
+      like nodebus); a CARD run needs `@CARD@` re-mount wired into
+      restorestate (a PAD_GAME_DIR bind is also currently un-classified); and
+      fd 0/other fds only a real game reveals.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

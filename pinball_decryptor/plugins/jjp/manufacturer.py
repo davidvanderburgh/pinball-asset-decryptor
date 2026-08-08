@@ -18,6 +18,7 @@ physical HASP hardware that's a thin layer of users.
 import os
 import shutil
 
+from ...core.ext4_grow import LOOP_PROBE
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
 from . import config, usbstick
@@ -268,6 +269,23 @@ class JJPManufacturer(Manufacturer):
     # macOS).  Six WSL-side tools cover the standalone Decrypt + Mod
     # flows.
     prerequisites = (
+        # Not "is WSL there" but "can WSL hand out a loop device" — every
+        # JJP flow loop-mounts the ext4 image it pulls out of the .iso, and
+        # a WSL 1 distro answers as root while owning zero loop devices.
+        # Without this chip the strip went all-green on such a machine and
+        # the only feedback was a mount error twenty minutes into an extract
+        # (PAD-45).  Same probe the pipeline's own gate and the Stern write
+        # path use, so the indicator can't disagree with either.
+        Prerequisite(name="WSL2", where="wsl", probe=LOOP_PROBE,
+                     reason="Loop-mounting the game image extracted "
+                            "from the .iso",
+                     install_hint=(
+                         "wsl --install -d Ubuntu  "
+                         "(admin PowerShell, then reboot)\n"
+                         "Installed, but a loop-device error? That distro "
+                         "is WSL 1, which can't mount game images:\n"
+                         "wsl -l -v   (look at VERSION)\n"
+                         "wsl --set-version <name> 2")),
         Prerequisite(name="partclone", where="wsl",
                      probe="which partclone.ext4",
                      reason="ISO partition extraction",

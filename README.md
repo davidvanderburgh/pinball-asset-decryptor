@@ -785,6 +785,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the game runs inside out of that card (a few minutes, once, no root
    needed) and compiles the hardware shim and the GL renderer, and every
    later run rebuilds any of them whose sources an update has moved on.
+   Those compiles happen on *your* machine with *your* compiler, so when
+   one fails the log now shows the compiler's own error lines and writes
+   the full output to a file it names — up to v0.119.0 it showed the
+   last eight lines instead, which on a real failure were eight harmless
+   warnings from a file that had compiled fine.
    All three used to be manual steps that `rootfs.sh` only printed as
    advice and nothing enforced, so a fresh install failed at whichever
    one you stopped at — with an error naming a missing ring or binary

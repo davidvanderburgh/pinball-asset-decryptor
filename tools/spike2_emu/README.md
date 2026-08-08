@@ -133,6 +133,16 @@ sources: missing gets built and stops the run if it cannot be, stale gets
 rebuilt and never blocks, and neither happens while a run is live. The builds
 above are for building deliberately, not because a start needs them.
 
+**A failed build is reported by its errors, not by its last eight lines.**
+`gcc` compiles every source before it gives up, so the errors sit wherever the
+broken file was on the command line and the tail belongs to whichever file came
+last — the one arrangement a tail can never show is an error early with noise
+after it, which is the common one. `_pad_build` republishes the matching error
+lines first, keeps the tail only as the fallback when nothing matches, and
+writes the full output to `$TMPDIR/pad-<script>.log`, which it names in the log.
+Both builders pass `-Werror=implicit-function-declaration` so GCC 13 gives
+GCC 14's answer here rather than on a user's newer distro.
+
 `buildgl.sh` and `buildbridge.sh` **both write `libGLESv2.so.2`**, so whichever
 ran last decides which backend is live. Re-run the one you want before measuring.
 

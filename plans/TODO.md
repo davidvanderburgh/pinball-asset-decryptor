@@ -766,39 +766,44 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D3` ← IN PROGRESS *(**2026-08-08
-      evening: the real game BOOTS and SAVES under PAD_PIVOT; restore hits ONE
-      precise wall — the guest's unprivileged user namespace disables
-      setgroups.** D3: the mechanism is known and the fix is a design choice,
-      not a discovery.)*
-      **★★★ LIVE-GAME FINDINGS, 2026-08-08 (headless, no window, alive.sh 0
-      after each; the 509 MB dumps were reclaimed):**
+- [ ] **13. Save and load save states.** `S2 D2` ← IN PROGRESS *(**2026-08-08
+      evening: CLOSED LOOP on the real game — boot → save → restore → the game
+      RESUMES.** D3 → D2: the mechanism is fully proven end to end; what is
+      left is full-rig integration, not discovery.)*
+      **★★★ THE REAL GAME SAVES AND RESTORES, headless, closed loop, twice
+      (alive.sh 0 after each, the ~509 MB dumps reclaimed).** `savetest_real.sh`
+      (committed): boot godzilla_pro under `PAD_PIVOT=1` → `savestate.sh`
+      (41 images, 509 MB) → `restorestate.sh` → **eglshim frames RESUME past
+      the frozen point (1660 → 2080 → 2260), the restored guest still
+      rendering** — a resume, not a restart.
+      **THE DESIGN CHOICE THAT CLOSED IT — option (a): a checkpointable guest
+      runs as ROOT with NO user namespace.** run_game.sh drops `unshare -r`
+      when euid==0 (real root already has CAP_SYS_ADMIN/CAP_SYS_CHROOT). That
+      deletes the whole userns failure class at once — the setgroups BUG, the
+      tty-owner EPERM, the mount-engine inversion all came from david's
+      unprivileged 1000→0 userns forcing setgroups off, and criu could not
+      restore into it. A root guest has no userns, so restore is the simple
+      case. It is also how the game runs on the real Spike machine.
       **✓ THE REAL GAME BOOTS AND RUNS UNDER PAD_PIVOT — 55.8 fps, node bus
-      live (`[nbcmd]` frames), 19 threads.** pivot_root + explicit qemu vs
-      binfmt was the biggest unknown and it works.
+      live (`[nbcmd]`), 19 threads.** pivot_root + explicit qemu vs binfmt was
+      the biggest unknown and it works.
       **✓ comm STAYS "game" — a fix this exposed.** Explicit qemu made comm
       `qemu-arm-static`, so `pgrep -x game` (the rig's ONE guest identifier)
       found nothing. Fixed: qemu is copied to `/.padqemu/game` and exec'd by
-      that path, so the kernel sets comm=game. Measured: without it the boot
-      ran fine but every count read 0.
-      **✓ THE REAL GAME CHECKPOINTS — savestate.sh, 42 images, 509 MB.** All 12
-      device externals auto-discovered from the live mountinfo, the held tty
-      found, restore.env written. **The guest holds NO sockets** (confirmed on
-      the live fd list); every fd is a device bind, the pty, or a rootfs file.
-      **✗ RESTORE HITS THE UNPRIVILEGED-USERNS WALL, and this is the whole
-      remaining problem.** The real rig runs as david, so run_game.sh's
-      `unshare -r` makes a 1000→0 userns — which the kernel forces
-      setgroups-OFF. criu restore then dies: `Can't setgroups([7 gids]): -22`,
-      `BUG at restorer.c:819`. The offline STUB restored fine only because it
-      ran as ROOT (0→0 userns, setgroups allowed). Getting that far took three
-      other userns-context fixes, all now understood:
-      • compat mount engine BUG'd on `pivot_root(., tmp)` → **mount-v2**
-      (`PAD_RESTORE_V2=1`) clears it;
-      • `--leave-running` let the log grow so criu's fd-size check failed →
-      **dump with the guest stopped** (`PAD_SAVE_STOP=1`);
-      • the pty owner must match the guest's user → **start nodebus as that
-      user** (`PAD_NB_USER=david`). All three land the restore ON the
-      setgroups BUG and no earlier.
+      that path, so the kernel sets comm=game. Without it the boot ran fine but
+      every count read 0.
+      **✓ savestate.sh auto-discovers all 12 device externals + the held tty
+      from the live mountinfo; the guest holds NO sockets** (confirmed on the
+      real fd list — every fd is a device bind, the pty, or a rootfs file).
+      **The recipe, now the DEFAULT in the scripts** (three knobs the earlier
+      userns dead-ends forced, each keeping the restore moving):
+      • **mount-v2** is the restore engine (`PAD_RESTORE_COMPAT=1` forces the
+      old one) — a no-userns guest BUG's the compat engine on `pivot_root`;
+      • **`PAD_SAVE_STOP=1`** stops the guest at dump so the log fd stops
+      growing (criu's fd-size check fails otherwise). A real save that must not
+      pause play needs the log fd handled instead;
+      • nodebus at restore runs as the guest's user (root here), so criu can
+      set the restored pty's owner.
       **★★★ THE RIG NOW SAVES AND RESTORES ITS OWN GUEST, offline, end to end
       (2026-08-08).** `savetest.sh` (root, no real game, no GL/video/audio — so
       NOT a measurement run) boots a stub guest through the REAL
@@ -943,29 +948,31 @@ These have each been violated at least once and each cost a run or a window:
       1000→0), a tty opened WITHOUT O_NOCTTY, and whether the game survives
       its node bus, audio sink and GL bridge being restarted underneath it.
       **Committed:** `26f8f19`/`6f3242d`/`b8f99cc`/`4d255c1` (the ladder),
-      `6b3882e` (run_game.sh PAD_PIVOT + save/restore, offline), this commit
-      (comm=game fix, watch.sh + alive.sh pivot wiring, restore engine/user
-      toggles, live findings above).
-      **Resume — beat the setgroups wall; everything else is proven.** Two
-      candidate designs, pick one:
-      **(a) run checkpointable guests as ROOT** (root is needed for criu
-      anyway), so there is no unprivileged userns and setgroups is allowed —
-      the stub proved a root guest restores. run_game.sh would skip
-      `unshare -r` when euid==0. BLOCKER to solve first: a root boot from the
-      **david** rootfs failed its binds ("bind /home/david/spike2root
-      failed") where a root boot from `/root/spike2root` (the stub) worked —
-      find why /home refuses the bind under a root userns.
-      **(b) run criu as david INSIDE the guest's own userns** (`--unprivileged`;
-      david is root there), so uid/gid/setgroups are all consistent and no
-      root/user split exists — needs criu's unprivileged-mode limits checked.
-      **Then finish the integration** (all understood, none blocking): the
-      real guest also holds the GL/video/audio rings (file-backed = fine per
-      rung G, but padglhost/padvidhost restart-and-reattach like nodebus); a
-      CARD run needs `@CARD@` re-mount in restorestate (PAD_GAME_DIR bind is
-      still unclassified); watch.sh's pivot tail is wired but not yet
-      exercised on a full windowed run; and the log-growth means real saves
-      want the guest briefly stopped, or the log fd excluded from validation.
-      Windowed acceptance with `shot.py` on ball/score/mode is the last step.
+      `6b3882e` (run_game.sh PAD_PIVOT + save/restore, offline), `255f73e`
+      (comm=game, watch.sh/alive.sh wiring, live boot+save), this commit
+      (option (a): drop `unshare -r` for a root guest; mount-v2 default;
+      `savetest_real.sh`; CLOSED LOOP on the real game).
+      **Resume — the core is PROVEN; what is left is full-rig integration, all
+      of it understood and none an unknown mechanism:**
+      **(1) The full rig, not headless.** `savetest_real.sh` runs the guest
+      alone (no padglhost/padvidhost/audio). Those helpers reattach through the
+      file-backed rings on `/dump` (proven restorable by ladder rung G), but
+      restorestate must RESTART them like it restarts nodebus, and that is
+      untested. Wire and measure it.
+      **(2) watch.sh must launch a pivot run as ROOT** while its helpers stay
+      david — option (a) needs the guest root, but padglhost et al. are david's
+      window/audio. The pivot tail is already wired (`255f73e`); the
+      root-launch of run_game.sh is not.
+      **(3) leave-running.** Real saves must not pause play, but the log fd
+      grows and fails criu's size check. Either briefly stop only across the
+      dump, redirect the guest log to a pipe, or exclude that fd from
+      validation.
+      **(4) a CARD run** needs `@CARD@` re-mount wired into restorestate (a
+      PAD_GAME_DIR bind is also still unclassified by savestate).
+      **(5) windowed acceptance:** save mid-BALL, restore, and confirm ball,
+      score and mode with `shot.py` — the item's stated oracle, which needs the
+      window and so item 32's size fix does not, but a real game played into a
+      ball does.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

@@ -104,12 +104,15 @@ if [ -n "$TTYFD" ]; then
     exec 9<>"$TTYFD" || { echo "[restore] could not open $TTYFD on fd 9"; exit 1; }
 fi
 
-# The mount engine. Compat mode is what the criuladder.sh rungs needed (mount-v2
-# BUG_ON'd for a root-userns guest). PAD_RESTORE_V2=1 tries mount-v2 instead -
-# under test for the david-userns real game, whose restore hits a pivot_root
-# EINVAL in the compat engine.
-COMPAT=(--mntns-compat-mode)
-[ "${PAD_RESTORE_V2:-0}" = 1 ] && COMPAT=()
+# The mount engine. mount-v2 is the DEFAULT because a PAD_PIVOT guest launched
+# as root has NO user namespace (run_game.sh drops `unshare -r` for root), and
+# for that guest the COMPAT engine BUG_ON's at `pivot_root(., tmp)` while
+# mount-v2 restores cleanly - measured on the real game. PAD_RESTORE_COMPAT=1
+# forces the old compat engine, which is only right for the legacy case of a
+# guest that kept its user namespace (mount-v2 BUG_ON'd there instead). The two
+# are exact opposites, which is why this is a knob and not a guess.
+COMPAT=()
+[ "${PAD_RESTORE_COMPAT:-0}" = 1 ] && COMPAT=(--mntns-compat-mode)
 echo "[restore] restoring...${COMPAT:+ (compat engine)}"
 unshare -m bash "$NSCLEAN" \
     "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \

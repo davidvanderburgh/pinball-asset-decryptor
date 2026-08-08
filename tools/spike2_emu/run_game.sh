@@ -180,7 +180,21 @@ fi
 # INNER heredoc is not duplicated.
 SETSID=""
 [ -n "$PIVOT" ] && SETSID="setsid"
-unshare -r -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" <<'INNER'
+# THE USER NAMESPACE, and why a checkpointable ROOT run drops it (item 13).
+# `-r` maps the caller to root inside a NEW user namespace, which is how an
+# UNPRIVILEGED user (david, under watch.sh) gets the mount and chroot caps this
+# script needs. But an unprivileged userns is one the kernel FORCES setgroups
+# off in, and criu cannot restore the guest's supplementary groups into it -
+# the save-state RESTORE dies "Can't setgroups: -22". Real root already holds
+# CAP_SYS_ADMIN/CAP_SYS_CHROOT in the initial namespace, so under PAD_PIVOT as
+# root the userns is not needed and is dropped: the guest then has NO userns,
+# restore is the simple case, and the guest runs as root - which is also how
+# the game runs on the real Spike machine. Non-root keeps `-r` (it has no other
+# way to get the caps), and such a run is simply not checkpointable, which is
+# fine because criu needs root anyway. Default (no PIVOT) is untouched.
+USERNS="-r"
+[ -n "$PIVOT" ] && [ "$(id -u)" = 0 ] && USERNS=""
+unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"

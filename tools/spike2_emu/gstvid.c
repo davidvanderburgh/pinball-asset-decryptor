@@ -70,6 +70,11 @@ static int vid_on(void)
 static struct padvid_shm *vshm;
 static unsigned char *vring;
 
+/* Streaming threads started since the guest came up - one per clip play, so it
+ * counts loops and not channels. Only ever read on the failure path in
+ * pad_vid_play(); see the comment there for what a big number means. */
+static unsigned vid_threads_started;
+
 static void vid_map(void)
 {
     const char *path;
@@ -1257,10 +1262,68 @@ int pad_vid_get_int(void *strct, const char *field, int *value)
     return 0;
 }
 
+/* ★ EVERY STREAMING THREAD IS DETACHED, AND THAT IS WHAT KEEPS A LONG RUN
+ * ALIVE.
+ *
+ * Reported 2026-08-08: picture and sound came up fine and the game then killed
+ * itself with a SEGV after seven minutes. The last video line before it went
+ * is this function's failure branch -
+ *
+ *     [vid] ch0 could not start the streaming thread
+ *
+ * - and nothing else in the log is unhealthy: every handoff report reads 30.0/s
+ * with late 0 and early 0 right up to the end.
+ *
+ * ONE THREAD PER PLAY, AND A PLAY PER LOOP. vid_thread runs a clip once and
+ * returns - at EOS, on a takeover, or when a new run supersedes it. The game
+ * loops a clip by seeking, and pad_vid_seek() answers a seek by calling this
+ * function again, so a channel showing a 5.6 s clip starts a NEW thread every
+ * 5.6 s for the whole run. Three channels were looping in the reported log and
+ * the failure landed at 435 s, which is a few hundred threads.
+ *
+ * pthread_create with a NULL attribute makes a JOINABLE thread, and a joinable
+ * thread that exits is not finished: glibc holds its descriptor and its whole
+ * stack - RLIMIT_STACK, normally 8 MB of address space - until somebody joins
+ * it. Nothing here ever does, and nothing here ever could: the run_id handshake
+ * exists precisely so a superseded thread can walk out on its own without the
+ * starter waiting on it. So each loop of each clip permanently consumed another
+ * 8 MB of a 32-bit guest's address space until pthread_create had none left to
+ * give. A few hundred of those is the whole address space, which also explains
+ * the SEGV five seconds later: an allocation the game does not check for NULL
+ * failed for the same reason, in the same exhausted process.
+ *
+ * Detaching is the fix rather than joining because the thread is genuinely
+ * fire-and-forget - it is orphaned by run_id, not waited for - and a detached
+ * thread returns its stack to glibc's cache for the next one to reuse. The
+ * count of live threads then tracks the count of PLAYING channels, which is
+ * bounded by PADVID_CHANNELS, instead of the count of clips ever played.
+ *
+ * RESOLVED THROUGH dlsym, NOT LINKED, for the reason hwshim.c already resolves
+ * pthread_create that way: build.sh links this .so against libc and libdl only,
+ * and on the older glibc in a real Spike 2 rootfs pthread_detach lives in
+ * libpthread.so.0. A direct call would be an undefined symbol that kills the
+ * preload at guest start - the one failure this rig cannot recover from - so it
+ * is looked up at run time and simply skipped if it is not there, which is no
+ * worse than what shipped before. */
+static void vid_detach(unsigned long th)
+{
+    static int (*fn)(unsigned long);
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        fn = dlsym(RTLD_NEXT, "pthread_detach");
+        if (!fn)
+            VLOG("[vid] no pthread_detach here - streaming threads cannot be "
+                 "reaped and a long run will exhaust the guest\n");
+    }
+    if (fn) fn(th);
+}
+
 void pad_vid_play(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
     unsigned long th;
+    int rc;
     if (!s || !s->ready || s->playing || !vshm) return;
     s->pos_ns = 0;
     /* Cleared HERE and not at the top of vid_thread: prepare() reads it to
@@ -1271,11 +1334,21 @@ void pad_vid_play(void *pipeline)
     s->run_id++;                /* orphan any thread from a previous run */
     s->playing = 1;
     vshm->ch[hw_of(s)].playing = 1;
-    if (pthread_create(&th, 0, vid_thread, s) != 0) {
+    vid_threads_started++;
+    rc = pthread_create(&th, 0, vid_thread, s);
+    if (rc != 0) {
         s->playing = 0;
         vshm->ch[hw_of(s)].playing = 0;
-        VLOG("[vid] ch%d could not start the streaming thread\n", chan_of(s));
+        /* THE CODE AND THE COUNT, because without them this line cannot tell
+         * the leak above from anything else that could stop a thread starting.
+         * pthread_create returns the error directly and does not set errno;
+         * EAGAIN (11) with a large count is the leak, and after this fix a
+         * large count should no longer be reachable. */
+        VLOG("[vid] ch%d could not start the streaming thread: rc=%d after %u "
+             "started this run\n", chan_of(s), rc, vid_threads_started);
+        return;
     }
+    vid_detach(th);
 }
 
 void pad_vid_stop(void *pipeline)

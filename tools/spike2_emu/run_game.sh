@@ -157,7 +157,17 @@ if [ -n "$PIVOT" ]; then
         echo "[run] PAD_PIVOT needs a STATIC busybox at /bin/busybox (apt install busybox-static)" >&2
         exit 1
     fi
-    cp -f "$QEMU" "$R/qemu-arm-static"
+    # ★ comm MUST stay "game". The whole rig identifies the guest by comm=game
+    # (alive.sh, watch.sh teardown, savestate.sh, status.sh) - it is the ONE
+    # stable name across platforms. Under binfmt the kernel takes comm from the
+    # original binary's basename, so it is "game" for free; but exec'ing qemu
+    # explicitly would make comm "qemu-arm-static" and the guest would vanish
+    # from every count. So qemu is copied to a path whose OWN basename is
+    # "game" (comm = basename of the exec'd file), and the real ELF is its
+    # argument. Measured: without this the headless boot ran fine but pgrep -x
+    # game found nothing.
+    mkdir -p "$R/.padqemu"
+    cp -f "$QEMU" "$R/.padqemu/game"
     cp -f /bin/busybox "$R/busybox"
     echo "[run] PAD_PIVOT: checkpointable boot (pivot_root, explicit qemu)"
 fi
@@ -281,7 +291,9 @@ if [ -n "$PIVOT" ]; then
     # $ROOT/dump/game.out, so nothing is lost - but a PAD_PIVOT run's log is
     # THERE, not on the caller's stdout, which watch.sh must follow when it
     # learns to launch pivot runs.
-    exec /qemu-arm-static ./game </dev/null >/dump/game.out 2>&1
+    # /.padqemu/game IS qemu (see the copy above) - named so comm stays "game";
+    # /games/$GAME/game is the real ELF it runs.
+    exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
 fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.

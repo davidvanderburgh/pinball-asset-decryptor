@@ -42,7 +42,17 @@ NEWPTY=""
 if grep -q '@PTY@' "$DDIR/restore.env"; then
     export PAD_NODEBUS_DIR="$R/dump"
     rm -f "$R/dump/nodebus.path"
-    python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+    # The pty must be owned by the SAME user the guest ran as, or criu cannot
+    # set the tty owner on restore ("Can't setup uid ... Operation not
+    # permitted"). The guest runs as an unprivileged user (watch.sh is david);
+    # criu needs root. When those differ - root running the restore for a
+    # david guest - start nodebus as that user. PAD_NB_USER names it.
+    if [ "$(id -u)" = 0 ] && [ -n "${PAD_NB_USER:-}" ]; then
+        runuser -u "$PAD_NB_USER" -- env PAD_NODEBUS_DIR="$R/dump" \
+            python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+    else
+        python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+    fi
     NBPID=$!
     for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
     NEWPTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
@@ -94,11 +104,17 @@ if [ -n "$TTYFD" ]; then
     exec 9<>"$TTYFD" || { echo "[restore] could not open $TTYFD on fd 9"; exit 1; }
 fi
 
-echo "[restore] restoring..."
+# The mount engine. Compat mode is what the criuladder.sh rungs needed (mount-v2
+# BUG_ON'd for a root-userns guest). PAD_RESTORE_V2=1 tries mount-v2 instead -
+# under test for the david-userns real game, whose restore hits a pivot_root
+# EINVAL in the compat engine.
+COMPAT=(--mntns-compat-mode)
+[ "${PAD_RESTORE_V2:-0}" = 1 ] && COMPAT=()
+echo "[restore] restoring...${COMPAT:+ (compat engine)}"
 unshare -m bash "$NSCLEAN" \
     "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
         --pidfile "$DDIR/restored.pid" \
-        --root "$R" --mntns-compat-mode \
+        --root "$R" ${COMPAT[@]+"${COMPAT[@]}"} \
         ${REST_EXT[@]+"${REST_EXT[@]}"} ${INHERIT[@]+"${INHERIT[@]}"}
 RC=$?
 [ -n "$TTYFD" ] && exec 9>&-

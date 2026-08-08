@@ -134,7 +134,11 @@ VID=$(n -f 'padvidhost\.py')
 # for the guest to publish. A run that ends first leaves it waiting for
 # something that will never come, which is exactly the shape of every leak this
 # script exists to catch.
+# The PAD_PIVOT game-log tail is counted here too. A pivot run's guest logs to
+# $ROOT/dump/game.out and watch.sh folds it into $LOG with `tail -F`; an
+# orphaned one holds the file forever, the same shape as the event-feed tail.
 HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F "$HOME/padvid"\.log") \
+         + $(n -f '^tail -F .*dump/game\.out') \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
@@ -233,7 +237,7 @@ printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|fuse2fs' \
+    | grep -E 'arm-binfmt|qemu-arm-static|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|fuse2fs|game\.out' \
     | grep -v grep | head -12
   mountpoint -q "$HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'

@@ -205,6 +205,11 @@ done
 unset _v _val
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
+# PAD_PIVOT run only: the guest logs to $ROOT/dump/game.out (its stdout points
+# inside the container - see run_game.sh), so a tail folds that back into $LOG
+# and every existing reader (autoattract, the [sw]/[segv] greps, gamestate)
+# works unchanged. Empty on a normal run.
+GAMEOUTTAIL=""
 # NOTE: CARD_MNT is deliberately NOT reset here - it is set above, and this is
 # below that. See the comment on its declaration.
 
@@ -217,6 +222,9 @@ teardown() {
     # the rig's historic 'godzilla_pro/game' pattern never could.
     pkill -9 -x game 2>/dev/null
     pkill -9 -f arm-binfmt 2>/dev/null
+    # PAD_PIVOT runs exec qemu explicitly (no binfmt) and fold the guest log in
+    # through a tail; kill it too. -F holds the file open forever otherwise.
+    [ -n "$GAMEOUTTAIL" ] && kill -9 "$GAMEOUTTAIL" 2>/dev/null
     # SIGINT, THEN WAIT FOR IT, and only then SIGKILL. The old flat `sleep 1`
     # then SIGKILL fired whether or not the renderer was already on its way out,
     # and padglhost's shutdown now includes destroying its X windows so WSLg's
@@ -452,14 +460,27 @@ fi
 grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
 
 echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
+# PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
+# here it only means the guest's log arrives at $ROOT/dump/game.out instead of
+# on stdout, so clear any stale copy before the run and fold the fresh one into
+# $LOG below. Nothing else about the launch changes.
+[ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
+           PAD_PIVOT="${PAD_PIVOT:-}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
+if [ -n "${PAD_PIVOT:-}" ]; then
+    # -F retries until the guest creates the file a few seconds into the boot.
+    # Direct (not a subshell) so $! is the tail itself and teardown's kill hits
+    # it - a wrapping subshell would leave the tail holding the file forever.
+    tail -F "$ROOT/dump/game.out" >> "$LOG" 2>/dev/null &
+    GAMEOUTTAIL=$!
+fi
 
 # The virtual playfield: clickable switches, inserts lit from the wire.
 #

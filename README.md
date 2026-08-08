@@ -733,7 +733,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    two hours. Video plays as well now: the Spike 2 decoder is an i.MX6
    hardware block a PC doesn't have, so the host decodes each clip with
    ffmpeg and publishes the frames into a shared ring the game draws
-   from. Scenes, text, lamps, switches and sound all work.
+   from. Scenes, text, lamps, switches and sound all work. A long
+   session stays up, too: a clip is looped by playing it again, and
+   every play used to leave another abandoned decoder thread — and its
+   8 MB of stack — behind inside the guest, so a run with video on
+   screen ran the 32-bit game out of address space and died with a
+   `SIGSEGV` after about seven minutes, picture and sound perfect right
+   up to the last second (fixed v0.119.7).
    A **virtual playfield** window opens beside the game: the title's own
    artwork with every switch, coil and insert drawn on it, inserts lit
    live off the node bus, and switches you can click or press and hold

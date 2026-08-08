@@ -766,11 +766,70 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D5` — S2 for the same reason as
-      item 16: play works, but every run pays for its absence. D5 — the only
-      candidate tool is not
-      installed, the kernel is missing `INET_DIAG_DESTROY`, and the restore
-      surface crosses into native Windows. Budget more than one pass.
+- [ ] **13. Save and load save states.** `S2 D4` ← IN PROGRESS *(**D5 → D4,
+      2026-08-07:** the central unknown is answered and the instrument exists
+      and is validated — criu is built and DOES checkpoint/restore qemu-user
+      here. What is left is the rig's namespace/mount surface and live runs,
+      which is several passes but no longer an unknown mechanism.)*
+      **★★ THE ITEM'S CENTRAL ASSUMPTION IS NOW TESTED RATHER THAN ASSUMED,
+      AND IT HELD. Nobody had ever pointed criu at a qemu-user process; the
+      whole design rested on it. It works.** `criuladder.sh` (root, no
+      emulator run, ~40 s): rung A dumps and restores an ordinary x86-64
+      process, rung B does the same to a static ARM binary under
+      `qemu-arm-static` — 13 images, 3.7 MB — and **both resumed their own
+      counter (frozen 60 → 75 → 80) rather than restarting**, by a margin of
+      50 over what a fresh start could have reached.
+      **The harness passes a LABELLED NEGATIVE CONTROL that runs first and
+      aborts the script if it fails:** a deliberate restart is scored FAIL
+      (fresh reached 20 against a frozen 60). The first version of the
+      discriminator was too weak and would have passed a restart — it froze at
+      10 where a fresh process reaches ~15 in the observation window — so the
+      subject now runs ~12 s before the dump. **A metric that cannot fail its
+      own negative case has scored nothing.**
+      **★ CRIU IS NOT PACKAGED FOR UBUNTU 24.04 — "needs installing" is not an
+      apt install.** Zero candidate with universe enabled and lists fresh (the
+      only criu-named package is a Go binding). **Built from source instead:
+      v4.1 at `/var/tmp/criubuild/criu/criu/criu`**, and the deps it wants
+      beyond the obvious are `uuid-dev`, `libaio-dev`, `python3-yaml`.
+      **`criu check` says "Looks good"** on WSL2 6.6.87.2, and **every
+      REQUIRED kernel row is present** — the handoff's five-row table was a
+      sample, not the requirement list. `criu check --all` fails only on
+      nftables locking and one dev:ino check.
+      **★★ A REAL BLOCKER FOUND, WITH ITS FIX, AND IT APPLIES TO THE REAL
+      GUEST: every process started through `wsl.exe` inherits TWO stray
+      `/dev/ptmx` master fds on 7 and 10**, from WSL's own `login`/`bash` on
+      pts/1 (sid 299, pgid 368). criu refuses such a process outright —
+      `Found dangling tty with sid N pgid M (ptmx) on peer fd 7` — and
+      **neither `setsid` nor `</dev/null` helps, because what it objects to is
+      the inherited FD.** The guest is started by `watch.sh` through that same
+      chain, so anything that checkpoints it must close these first. Fix is a
+      close loop before exec; `criuladder.sh` carries it.
+      **RULED OUT, so the design stops carrying it: `INET_DIAG_DESTROY` does
+      NOT bite the guest-only plan.** That row killed a WHOLE-TREE checkpoint,
+      which is already off the table. **`hwshim.c` opens no sockets at all**
+      (grep: no `socket(`, no `connect(`, no `AF_INET`/`AF_UNIX`), so the
+      guest holds no TCP to restore. The `padrelay.py` connection belongs to a
+      HOST helper, which this design restarts rather than restores.
+      **ESTABLISHED, and it makes the rings a non-problem:** they are
+      file-backed `MAP_SHARED` mappings of ordinary files under `dump/`
+      (`hwshim.c:4118` `PAD_SW_SHM`, `:5294` `PAD_LED_SHM`), and the led one
+      even `close()`s the fd after mapping. criu re-opens such a mapping from
+      the file, and **the content lives in the file, so the rings survive a
+      checkpoint without being in it.**
+      **STILL UNTESTED, and each is the next rung rather than an assumption:**
+      threads (the real guest runs several; both rungs are single-threaded),
+      held fds, the node bus pty bound onto `/dev/ttymxc1`, the `unshare -r -m
+      -p -f` namespaces plus `chroot`, and the **fuse2fs card bind mount** —
+      the last two need `criu --external mnt[]`/`tty[]` and are the expensive
+      part.
+      **Committed:** this commit (`criuprobe.sh`, `criuladder.sh`).
+      **Resume:** add a THREADED rung to `criuladder.sh` (the real guest is
+      multithreaded and qemu-user maps guest threads onto host threads); then
+      a rung that reproduces `run_game.sh`'s `unshare -r -m -p -f` + chroot
+      around the ARM binary, which is where `--external` first becomes
+      necessary. Only then go near a live game.
+      — S2 for the same reason as
+      item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later
       at the same ball, score and mode. David picked this reading explicitly
       over the two cheaper ones: it is NOT a boot skip (`autoattract.sh`
@@ -778,17 +837,21 @@ These have each been violated at least once and each cost a run or a window:
       **`savevm`/`loadvm` DO NOT EXIST HERE** — the rig is qemu-**user**
       (`qemu-arm-static` under binfmt_misc, `run_game.sh:2`), and snapshots are
       a qemu-**system** + qcow2 feature. Do not spend a pass hunting a monitor.
-      **CRIU is the only standing candidate and it is not installed.** The
-      kernel does not block it (`CONFIG_CHECKPOINT_RESTORE=y`, WSL2
-      6.6.87.2-microsoft-standard) but **`CONFIG_INET_DIAG_DESTROY is not
-      set`**, and a live run holds a TCP connection from `padrelay.py`
-      (`0.0.0.0:<port>`) to a **native Windows** `padplay.py` that is not in the
-      checkpoint at all — so a whole-tree checkpoint/restore is off the table
-      before it is tried. **GUESS, not established:** checkpoint only the guest
-      side (`arm-binfmt` + `game` + its shm rings) and RE-START every host-side
-      helper on restore. The restore surface is everything `alive.sh` counts —
-      13 process shapes plus the `fuse2fs` card mount and the padled/padsw/
-      padgl/padvid rings. Detail in the handoff under **REMAINING item 13**.
+      **CRIU is the only standing candidate. It is now BUILT — see the top of
+      this item, which supersedes the "not installed" reading this paragraph
+      used to carry.** A WHOLE-TREE checkpoint remains off the table, and for
+      the reason given here rather than the one usually quoted: a live run
+      holds a TCP connection from `padrelay.py` (`0.0.0.0:<port>`) to a
+      **native Windows** `padplay.py` that is not in the checkpoint at all.
+      `INET_DIAG_DESTROY` is a second reason for the same verdict and, per the
+      ruled-out note above, does not touch the guest-only design.
+      **STILL A GUESS, and the rungs above have not reached it:** checkpoint
+      only the guest side (`arm-binfmt` + `game` + its shm rings) and RE-START
+      every host-side helper on restore. Whether the game survives having its
+      node bus, audio sink and GL bridge replaced underneath it is untested.
+      The restore surface is everything `alive.sh` counts — 13 process shapes
+      plus the `fuse2fs` card mount and the padled/padsw/padgl/padvid rings.
+      Detail in the handoff under **REMAINING item 13**.
       **Acceptance:** save mid-ball, restore, and the ball number, score and
       running mode match; play continues 60 s; `alive.sh` prints 0 after.
       Oracle is `shot.py` before and after. **Name collision:** `save_state` in

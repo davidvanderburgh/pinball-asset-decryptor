@@ -911,157 +911,6 @@ These have each been violated at least once and each cost a run or a window:
       so no shot is unreachable; what is missing is the magnitude. D4, armchair
       beyond the desk work above.
 
-- [ ] **28. The rig is welded to one machine, and its per-title tables are
-      checked in instead of derived from the card.** `S2 D3` ← IN PROGRESS
-      **★ DAVID, 2026-08-06: "we shouldn't weld the rig to my machine and
-      additionally, the artwork was extracted from the game image, so we should
-      be able to pull the artwork and necessary leds and switch and coil
-      placements from the image when we load it."**
-      **Three findings, all counted at the desk, all from tracked files:**
-      **(a) THE PATHS.** `/home/david` is in **187** tracked rig files and the
-      checkout's own absolute path in **51**, on both sides of the VM boundary —
-      `watch.sh:56` `S=/mnt/c/Users/david/...`, `watch.sh:448` `PF_WIN='C:\Users\
-      david\...\playfield.py'`, `run_game.sh:10` `R=/home/david/spike2root`. Four
-      files also hard-code `\\wsl.localhost\Ubuntu\...` (`playfield.py:111,168`,
-      `gameinfo.py`), which names a distro that need not exist under a prefix
-      older WSL spells `\\wsl$`. The rig README says the path is in 44 files and
-      one `sed` fixes it; both halves of that are wrong.
-      **(b) THE TABLES ARE COMMITTED, AND ONLY GODZILLA'S EXIST.**
-      `games/godzilla_pro/{device_xy,switch_xy,led_io}.txt` and
-      `games/turtles_pro/switch_list.txt` are the whole of it — and
-      `games/godzilla_pro/playfield.png` is swallowed by
-      `tools/spike2_emu/.gitignore:6` (`*.png`, written to keep frame dumps out).
-      It is **the only ignored-but-present file in the entire rig**, and
-      `gameinfo.py`'s docstring claims the opposite in terms: *"checked in, so
-      the playfield window opens on a machine that has never extracted a card."*
-      **This is the same shape as item 27(a)** — a per-title table with only
-      Godzilla filled in — so deriving them removes 27's generate-and-commit step
-      for every future title rather than repeating it.
-      **(c) NOTHING IN THE REPO CAN BUILD THE ROOTFS.** `run_game.sh:199`
-      chroots into `$R`; no tracked script creates it (grepped for `debugfs`,
-      `rdump`, `mkdir.*spike2root`). `PAD_CARD` does not cover it —
-      `cardmount.sh` mounts the **games** partition only. The recipe lives in
-      `plans/spike2_pc_emulation_handoff.md`, which is gitignored, and the
-      handoff itself records that the obvious version of it is incomplete twice
-      over (`gethex.sh`, `getboot.sh`).
-      **THE TRAP THAT DECIDES THE DESIGN, and it is not obvious: on a card run
-      the title's files are NOT at `games/<title>`.** `run_game.sh:117`
-      bind-mounts the card's title directory inside an `unshare -m` namespace, so
-      from outside the run that path is the empty stub created at `:31`. Anything
-      reading the ELF or the artwork must be told the real directory — hence
-      `run_game.sh` publishing `dump/title`.
-      **Design, being built now:** `padpath.py` / `padpath.sh` as the single
-      source of machine-specific paths (rig from `__file__`/`BASH_SOURCE`, rootfs
-      from `PAD_ROOT` else `~/spike2root`, the UNC asked of `wslpath -w` rather
-      than concatenated, and `PAD_ROOT`/`PAD_TABLES` crossing interop through
-      `WSLENV`'s `/p`); `mktables.py` building artwork + `device_xy` + `led_io` +
-      `switch_xy` + `switch_list` into `$PAD_TABLES/<title>/` — under the rootfs,
-      because watch.sh writes them inside WSL and the playfield window reads them
-      from Windows and the two must name ONE directory; and `rootfs.sh` so a
-      clone can build the guest rootfs from a card image.
-      **ESTABLISHED, from `devicexy.py` and `ledio.py`: the artwork, the LED map
-      and the coil positions are ALL static data in the ELF** — `ledio.py`'s wire
-      enumeration contributes no column, it only agrees or disagrees — so those
-      three need no run at all. **Only `switch_xy` needs one:** the switch table
-      is built in the HEAP and reaches the outside world only as the shim's
-      `[sw]`/`[swmap]` dump (`hwshim.c:3543,4851`), so the id→name join cannot be
-      done from the binary. Cache it per title so only the FIRST run of a title
-      pays.
-      **★★ SHIPPED 2026-08-06, `5d895c8`. The desk half is done and MEASURED
-      against the tables it replaces; what is left is one run.**
-      `padpath.py`/`padpath.sh` are now the only files that know a path;
-      `mktables.py` builds all five tables from the title; `run_game.sh`
-      publishes `dump/title`; `rootfs.sh` + `parts.py` build the rootfs from any
-      card with no root and no hard-coded offsets. Checked-in tables deleted.
-      **The derivation reproduces the hand-made tables exactly, which is the
-      only thing that made it safe to delete them:** `device_xy.txt`
-      **byte-identical** (66642 bytes); `switch_xy.txt` **41/41 positions
-      identical** (fed only the id/name half a run supplies, every coordinate
-      re-derived from the ELF); `led_io.txt` identical but for a header that no
-      longer claims a wire verification that never ran; and the WINDOW draws
-      **132 markers at coordinates identical to HEAD's**, A/B'd through a git
-      worktree at HEAD. `mktables` on Godzilla reproduces the documented numbers
-      cold: 575 records, coil=10 led=506 switch=59, 164 playfield records 0
-      outside 313x710, left/right 31/31.
-      **A REAL BUG FELL OUT OF TESTING A SECOND TITLE, and it is the kind that
-      passes every self-check:** `devicexy.build()` ignored the title it was
-      asked for and loaded whichever was ACTIVE, so `turtles_pro` came back with
-      Godzilla's 575 records, Godzilla's 313x710 artwork size, a clean 31/31
-      left-right score — and **18 of TMNT's switch names collided with
-      Godzilla's** well enough to place markers on a playfield TMNT does not
-      have. Fixed, and it has a regression test. TMNT correctly reports no
-      device table now.
-      **New fast tests:** `tests/test_spike2_emu_paths.py`, 21 tests in 0.19 s,
-      synthetic fixtures only — no WSL, no card, no ELF.
-      **★★ RUN ON FOUR TITLES 2026-08-06, ALL FROM THEIR CARDS, NOTHING
-      COMMITTED. All four boot, render at 60 fps and open a playfield window.**
-      Led Zeppelin LE 1.22.0, Elvira's HoH 1.13.0, Jaws LE 1.02.0, John Wick LE
-      1.01.0. **John Wick is the headline: a title with nothing in the
-      repository drew a full artwork playfield — 503 device records, 63 inserts,
-      56 switches placed, live coils, 30 fps.** Jaws draws its artwork with 73
-      inserts and 14 coils. Led Zeppelin and Elvira ship neither artwork nor a
-      device table and correctly get the clickable schematic.
-      **THREE FAULTS FOUND BY THE RUNS, two fixed here and one filed:**
-      **(a) FIXED — the playfield windows never closed, and it was a
-      REGRESSION FROM THIS ITEM'S OWN SWEEP.** `watch.sh` teardown had
-      `pkill -9 -f "tail … [.]log'` — a double quote closed by a single one,
-      which swallows the rest of the teardown into one string. **`bash -n`
-      cannot see it**, because a later quote in the file rebalances the parse;
-      that is why it shipped. Four playfield stubs and four audio processes
-      leaked across four runs, and it also corrupted the evidence, because
-      `shotwin.py` kept matching the leaked earlier window. Every `.sh` in the
-      rig has been scanned for the same shape; it was the only one.
-      **(b) FIXED — Jaws ships artwork and the rig said it did not.**
-      `find_playfield_art` matched `*_playfield.png`; Jaws spells it
-      `jaws_le_playfield_scaled.png`, qualifier last. Now matched on the word
-      anywhere, and the LE/Pro choice is made on WHOLE WORDS — the old
-      substring test picked that pair correctly only by accident, because
-      "scaLEd" contains "le".
-      **(c) FILED AS ITEM 29 — switch names come back as `?`** on Led Zeppelin,
-      Elvira and Jaws (John Wick and Godzilla are fine), so the schematic is a
-      list of numbers and Jaws gets no switch positions despite having 78 in
-      its binary. NOT fixed here and deliberately not guessed at.
-      **THE 25 s SWITCH-DUMP BUDGET WAS WRONG AND THE WAY IT WAS WRONG WAS THE
-      WORST SHAPE: it caught the dump on one pass of four titles and missed it
-      on the next pass of two, which reads as a property of the title.**
-      Measured: the shim publishes the table about a MINUTE in, consistently,
-      across all five logs. Raising the budget alone would have delayed every
-      first-run window by that minute, so the build is now in two passes —
-      everything that needs no run first, and then the wait BLOCKS only when
-      there is nothing to draw meanwhile (`mktables.py --drawable`). Jaws opens
-      at ~45 s with artwork, inserts and coils and finishes its switch table
-      behind the window; Led Zeppelin waits, because for it an early window is
-      an empty one. Budget now 120 s (`PAD_PF_WAIT`).
-      **Also fixed: the artwork view required switch POSITIONS**, which is a
-      different question from "is there a playfield to show" — so Jaws opened
-      its first run on the "no tables" label despite shipping a drawing and 217
-      positioned devices. It now draws whenever there is artwork and anything to
-      put on it.
-      **The background table builder is a process a run starts, so it went into
-      `alive.sh`, `killgame.sh` and teardown the same day**, per this file's own
-      rule. `alive.sh` printed 0 after every run above.
-      **STILL NOT DONE:** nobody has run this with `PAD_ROOT`/`PAD_TABLES`
-      pointed somewhere other than this machine's defaults, which is the
-      portability half of the acceptance below. The derivation half is done.
-      **Two known prose-only hits** on the grep below: this repo's README
-      describing the fix, and `playaudio.sh`'s `/mnt/c/Users/*/AppData/...`
-      glob, which is already a wildcard across users.
-      **Acceptance:** with `PAD_ROOT` and `PAD_TABLES` pointed somewhere that is
-      not this machine's defaults, and with `games/` empty and no table committed,
-      `PAD_CARD=<godzilla image> watch.sh` opens the virtual playfield with the
-      real artwork, lit inserts and clickable switches — all of it built from the
-      card during that run. Then `grep -rl 'home/david\|Users/david\|wsl\.localhost'`
-      over tracked rig files returns nothing. State which titles you ran, and say
-      whether the first run of a fresh title got its switches or only its
-      artwork, because that is the one thing the cache cannot hide.
-      — S2: nothing is broken on THIS machine, which is why it is not S1; what it
-      costs is that every new title needs a table generated and committed by hand
-      (making item 27 and every title after it dearer), and that the repo cannot
-      be run by anyone else at all. Arguable as S3 if you read "nobody is blocked
-      today" as decisive. D3: needs a run to confirm, the result shows up the
-      moment you look, and the mechanism is fully read off the source — the cost
-      is breadth (~190 files, both sides of the boundary), not uncertainty.
-
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
       `S2 D4`
@@ -1345,6 +1194,74 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **28. The rig is welded to one machine, and its per-title tables are
+      checked in instead of derived from the card.** DONE 2026-08-07, David's
+      call. **The derivation half shipped in `5d895c8` and was measured then;
+      what was still open was the PORTABILITY half, and the CONTAINER work
+      closed it rather than a `PAD_ROOT` run on this machine.**
+      **The derivation, from `5d895c8` and unchanged since:** `padpath.py` /
+      `padpath.sh` are the only files that know a path, `mktables.py` builds all
+      five tables from the title, `rootfs.sh` + `parts.py` build the rootfs from
+      any card with no root and no hard-coded offsets. It reproduced the
+      hand-made tables exactly, which is the only thing that made deleting them
+      safe: `device_xy.txt` **byte-identical** (66642 bytes), `switch_xy.txt`
+      **41/41 positions identical**, and the window drew **132 markers at
+      coordinates identical to HEAD's**, A/B'd through a git worktree.
+      **The tables really are gone: `git ls-files tools/spike2_emu/games`
+      returns NOTHING.** Every title's artwork, device table, LED map and switch
+      layout is built from the card during the run.
+      **THE PORTABILITY HALF WAS CLOSED BY THE CONTAINER, and it is a stronger
+      proof than the acceptance asked for.** `docker/Dockerfile:82` sets
+      **`PAD_ROOT=/pad/rootfs` and `HOME=/pad/home`** — not this machine's
+      defaults, on a machine that is not this one, with `PAD_TABLES` following
+      `PAD_ROOT` by the design's own rule. Item 30's measured run records the
+      whole chain working there: card mounted, **tables built from the card**,
+      playfield window open, guest at 57.1 fps. Shipped as **v0.110.0** (Linux
+      native), **v0.111.0** (macOS in a container over VNC) and **v0.117.0**
+      (macOS end to end).
+      **★ THE ACCEPTANCE GREP AS WRITTEN FAILS, AND THE TEST WAS WRONG RATHER
+      THAN THE CODE — worth keeping, because it is a trap any "remove the
+      hard-coded X" item will hit.** `git grep -E 'home/david|Users/david|
+      wsl\.localhost'` over the rig still returns **15 hits in 9 files** — and
+      **every one is a comment, a docstring or README prose describing the fix
+      itself** (`padpath.py:4` "THIS EXISTS BECAUSE THE RIG WAS WELDED TO ONE
+      MACHINE", `playfield.py:175` naming the literal it replaced, and so on).
+      Zero are executable. A fix whose own documentation must name the thing it
+      removed can never pass a bare `grep -l`, so **the honest check is the same
+      grep restricted to non-comment lines**, and that returns nothing.
+      **NOT CLAIMED: that `PAD_ROOT`/`PAD_TABLES` have been pointed elsewhere
+      under WSL on this machine.** They have not. The container is the evidence,
+      and it exercises more of the surface than that run would have — a
+      different rootfs, a different `HOME`, a different display path and a
+      different renderer. **Item 30 stays open** and is the container's own
+      fault (a run ending after ~60 s), not this item's.
+      **A REAL BUG THIS ITEM'S OWN TESTING FOUND, kept because it is the kind
+      that passes every self-check:** `devicexy.build()` ignored the title it
+      was asked for and loaded whichever was ACTIVE, so `turtles_pro` came back
+      with Godzilla's 575 records and **18 of TMNT's switch names collided with
+      Godzilla's** well enough to place markers on a playfield TMNT does not
+      have. Fixed, with a regression test.
+      **Four titles ran from their cards with nothing committed** — Led Zeppelin
+      LE, Elvira's HoH, Jaws LE and **John Wick LE, a title with nothing in the
+      repository at all, which drew a full artwork playfield**: 503 device
+      records, 63 inserts, 56 switches placed, live coils, 30 fps.
+      **Two faults the runs caught:** a `pkill` line whose double quote was
+      closed by a single one swallowed the rest of `watch.sh`'s teardown — **and
+      `bash -n` cannot see it**, because a later quote rebalances the parse,
+      which is why it shipped and leaked four playfield stubs; and Jaws's
+      artwork was missed because `find_playfield_art` matched `*_playfield.png`
+      while Jaws spells it `jaws_le_playfield_scaled.png`. The LE/Pro choice is
+      made on WHOLE WORDS now — the old substring test picked that pair
+      correctly only by accident, because "scaLEd" contains "le".
+      **The 25 s switch-dump budget was wrong in the worst possible way:** it
+      caught the dump on one pass of four titles and missed it on the next pass
+      of two, which reads as a property of the title. The shim publishes the
+      table about a MINUTE in, consistently. The build is two passes now —
+      everything needing no run first, then a wait that BLOCKS only when there
+      is nothing to draw meanwhile (`mktables.py --drawable`, `PAD_PF_WAIT` 120).
+      **Follow-on: item 29**, the `?` switch names, was filed out of these runs
+      and is still open.
 
 - [x] **31. The playfield claims "30 fps" while the LEDs actually move 2.6
       times a second, in bursts and freezes.** DONE 2026-08-07, `a77eb56` (the

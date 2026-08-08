@@ -27,7 +27,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     echo "  CGC:    e2fsprogs xxd"
-    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk"
+    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg"
     exit 1
 fi
 
@@ -78,7 +78,13 @@ declare -A MFR_PACKAGES=(
     #   python3-tk                the virtual playfield window. Separate from
     #                             python3 on Debian and Ubuntu, and its
     #                             absence reads as a puzzling ImportError.
-    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk"
+    #   ffmpeg                    decodes the game's video AND its audio. The
+    #                             game does neither itself - its gstreamer has
+    #                             no software H.264 element - so without this
+    #                             the emulator starts, opens its window, and
+    #                             plays black and silent, which is the one
+    #                             failure here that does not look like one.
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg"
 )
 
 # Pip packages -- installed into the same Python that runs the app

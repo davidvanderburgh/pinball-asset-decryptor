@@ -459,6 +459,39 @@ if [ -r /proc/uptime ]; then
     fi
 fi
 
+# ffmpeg IS BOTH HELPERS, so it is asked about ONCE, here, before either is
+# started. padvidhost.py spawns it per clip (the guest's gstreamer-0.10 has no
+# software H.264 element - its only h264 decoder is the i.MX6 hardware one, and
+# there is no i.MX6 here) and playaudio.sh uses its `pulse` muxer because this
+# distro ships no pulseaudio client tools at all.
+#
+# WITHOUT THE CHECK, ITS ABSENCE IS INVISIBLE UNTIL IT IS DEAFENING. Nothing
+# below fails to START: the mmap gets created, so "video: host decoder up" is
+# printed by a decoder that cannot decode, and the failure arrives instead as
+# every clip in the game dying on
+#
+#     ch0 decode failed: [Errno 2] No such file or directory: 'ffmpeg'
+#
+# a hundred lines a second, each one blocking the guest's thread until the host
+# acks, behind a window that is simply black. That is what a user sat in front
+# of on 2026-08-08 (PAD-49) while the tab reported every prerequisite OK.
+#
+# It is a WARNING and not a stop, because the rest of the run is real - the
+# guest boots, the playfield works and the keys work, which is worth having on
+# a machine that is one apt away.
+if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "[watch] NO ffmpeg IN THIS LINUX. The game decodes neither its video" \
+         "nor its audio itself, so both are done out here - this run will show" \
+         "a BLACK SCREEN where the picture goes, and be silent." >&2
+    echo "[watch] Fix it once:  sudo apt install ffmpeg" >&2
+    echo "[watch] (or Stop, then 'Set up emulator...' on the Emulate tab)" >&2
+    # The existing degraded path, not a new one. Left running against a video
+    # bridge it can never fill, the guest re-arms the same clip forever and
+    # blocks on each one; telling it up front that there is no bridge costs the
+    # same black screen without the storm.
+    export PAD_VID=0
+fi
+
 # Audio player first, so the FIFO exists before the game's first frame. It is
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then

@@ -25,6 +25,8 @@
 # OUTPUT: key=value lines, one per fact, parsed by the Emulate tab.
 #
 #   qemu|armgcc|debugfs|fuse   1 = the tool is on PATH, 0 = it is not
+#   ffmpeg                     1 = it is on PATH. It decodes BOTH the picture
+#                              and the sound - see PAD_SETUP_TOOLS
 #   nativecc                   1 = this machine can compile and link a NATIVE
 #                              program, which is a different question from
 #                              whether gcc is on PATH - see _pad_cc_works
@@ -95,11 +97,22 @@ _have() {
 #: turn "the emulator will not start" into "apt is broken". setupfix.sh checks
 #: the actual downloaded file's Depends before it installs anything, so this
 #: flag can only ever narrow what is attempted, never widen what is allowed.
+#: THE DECODER WAS MISSING FROM THIS LIST TOO, and it is the one whose absence
+#: looks least like a missing package: every tool above it builds or mounts
+#: something, so lacking one stops the run with a build error, while lacking
+#: this one lets the run SUCCEED all the way to an open, black window. The
+#: game's own gstreamer-0.10 has no software H.264 element (padvidhost.py's
+#: header prices that out), so the picture is decoded out here by ffmpeg and so
+#: is the sound (playaudio.sh uses its `pulse` muxer because this distro ships
+#: no pulseaudio client tools at all). The Mac container has installed it since
+#: the day it was written - docker/Dockerfile, "the host-side H.264 decode the
+#: guest cannot do itself" - and the WSL side was simply never asked.
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
-fuse:fusermount3:fuse3:0"
+fuse:fusermount3:fuse3:0
+ffmpeg:ffmpeg:ffmpeg:0"
 
 need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do

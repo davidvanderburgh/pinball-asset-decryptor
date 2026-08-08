@@ -289,6 +289,13 @@ $ManufacturerPrereqs = [ordered]@{
                probeCmd="gcc -include stdio.h -x c /dev/null -c -o /var/tmp/ccprobe.o" }
             @{ probe="debugfs";                pkg="e2fsprogs";                label="e2fsprogs/debugfs";       reason="Emulate tab: builds the guest filesystem out of a card image, without root" }
             @{ probe="fusermount3";            pkg="fuse3";                    label="fuse3 (fusermount3)";     reason="Emulate tab: mounts a card read-only so a title runs without extracting 6 GB" }
+            # IN WSL, and that is the whole point of the line: there is an
+            # ffmpeg in HostPackages below and the app bundles a third one on
+            # PATH, so this machine can have two of them and still be the
+            # machine that fails.  The game decodes neither its video nor its
+            # audio itself; both are done Linux-side, so without this the
+            # emulator starts perfectly and plays a black, silent window.
+            @{ probe="ffmpeg";                 pkg="ffmpeg";                   label="ffmpeg (in WSL)";         reason="Emulate tab: decodes the game's video and sound, which the game cannot decode itself" }
         )
         HostPackages = @(
             @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }

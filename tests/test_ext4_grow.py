@@ -129,7 +129,7 @@ def test_grow_files_raises_unavailable_not_error_on_loopless_host(
 
 def test_loop_probe_reason_on_native_linux_names_modprobe(monkeypatch):
     monkeypatch.setattr(ext4_grow.sys, "platform", "linux")
-    reason = ext4_grow._loop_unavailable_reason(_FakeExecutor(loop_ok=False))
+    reason = ext4_grow.loop_unavailable_reason(_FakeExecutor(loop_ok=False))
     assert "modprobe loop" in reason
     assert "losetup" in reason
 

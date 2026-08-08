@@ -15,6 +15,7 @@ from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
                        _CREATE_FLAGS as _exec_create_flags)
+from ...core.ext4_grow import loop_unavailable_reason
 
 # Where the decrypt shim writes what it learns about the running game (inside
 # the chroot).  Deliberately not the asset output dir: a successful run's
@@ -2143,6 +2144,27 @@ class DecryptionPipeline:
         safe = re.sub(r'[^a-zA-Z0-9._-]', '_', basename)
         return f"/var/tmp/jjp_raw_{safe}.img"
 
+    def _discard_iso_scratch(self):
+        """Unmount / delete the current ISO scratch dir and forget it.
+
+        Whether it holds a loop mount or an xorriso extraction is the
+        difference between a umount and deleting several GB, so both are
+        attempted; neither is fatal.
+        """
+        if not self._iso_mount:
+            return
+        try:
+            if getattr(self, "_iso_mounted", False):
+                self.executor.run(
+                    f"umount -l '{self._iso_mount}' 2>/dev/null; true",
+                    timeout=15)
+            self.executor.run(
+                f"rm -rf '{self._iso_mount}' 2>/dev/null; true", timeout=60)
+        except CommandError:
+            pass
+        self._iso_mount = None
+        self._iso_mounted = False
+
     def _phase_extract(self):
         if not self._is_iso():
             self.log("Input is a raw image, skipping extraction.", "info")
@@ -2158,6 +2180,15 @@ class DecryptionPipeline:
             )
         except CommandError:
             pass
+
+        # ...and the previous ISO extraction, because this phase can run
+        # twice: a failed mount re-enters it, and the new tag means a second
+        # copy of the .iso's partition parts lands beside the first instead
+        # of replacing it.  Cleanup only ever knew about the newest path, so
+        # the orphan survived to the end of the run — 7.5 GB of it on a
+        # Sonic .iso, which is why the reporter had to delete the old folder
+        # by hand mid-extract to keep the disk from filling (PAD-45).
+        self._discard_iso_scratch()
 
         self.log("Extracting ext4 filesystem from ISO...", "info")
         wsl_iso = self.executor.to_exec_path(self.image_path)
@@ -2456,6 +2487,18 @@ class DecryptionPipeline:
             if _ENOSPC in (e.output or ""):
                 raise PipelineError("Mount", _with_disk_full_hint(
                     f"Failed to mount image: {e.output}")) from e
+            # Neither is "this Linux owns no loop devices".  The image is
+            # fine; nothing can be mounted here at all, so the re-extract
+            # below is a second five-minute restore that ends at the same
+            # error — which is exactly what the field report shows, twice,
+            # under a bare "mount failed: No such file or directory"
+            # (PAD-45).  Say what's wrong while the user still has the
+            # patience to fix it.
+            reason = loop_unavailable_reason(self.executor, "game image")
+            if reason:
+                raise PipelineError("Mount",
+                    f"Failed to mount the extracted filesystem: "
+                    f"{reason}.") from e
             # If this was a cached image, it may be corrupt — delete and re-extract
             if self._raw_img_path and self._is_iso():
                 self.log(
@@ -3545,13 +3588,7 @@ class DecryptionPipeline:
                 pass
 
         # Clean up ISO mount / extraction directory
-        if self._iso_mount:
-            try:
-                if getattr(self, '_iso_mounted', False):
-                    self.executor.run(f"umount -l '{self._iso_mount}' 2>/dev/null; true", timeout=15)
-                self.executor.run(f"rm -rf '{self._iso_mount}' 2>/dev/null; true", timeout=15)
-            except CommandError:
-                pass
+        self._discard_iso_scratch()
 
         # Clean up any leftover raw image in temp dirs (it was moved to output folder)
         if self._raw_img_path and (self._raw_img_path.startswith("/tmp/") or
@@ -4660,7 +4697,11 @@ class ModPipeline(DecryptionPipeline):
                     f"mountpoint -q '{self._iso_mount}'", timeout=5)
             except CommandError:
                 self.log("ISO mount disappeared, re-mounting...", "info")
-                self._iso_mount = None
+                # Discard rather than just forget: "not a mountpoint" also
+                # describes an xorriso extraction, and dropping the name
+                # leaves its several GB behind with nothing left to delete
+                # them by (PAD-45).
+                self._discard_iso_scratch()
 
         if not self._iso_mount:
             wsl_iso = self.executor.to_exec_path(self.image_path)
@@ -4918,16 +4959,7 @@ class ModPipeline(DecryptionPipeline):
 
         # Unmount/remove the original ISO before xorriso reads it — avoids
         # contention between the loop mount and xorriso's file access.
-        if self._iso_mount:
-            try:
-                if getattr(self, '_iso_mounted', False):
-                    self.executor.run(
-                        f"umount -l '{self._iso_mount}' 2>/dev/null; true", timeout=15)
-                self.executor.run(
-                    f"rm -rf '{self._iso_mount}' 2>/dev/null; true", timeout=15)
-            except CommandError:
-                pass
-            self._iso_mount = None
+        self._discard_iso_scratch()
 
         # Remove existing output ISO — xorriso refuses to write to non-empty -outdev
         try:
@@ -5104,12 +5136,7 @@ class ModPipeline(DecryptionPipeline):
             except CommandError:
                 pass
 
-        if self._iso_mount:
-            try:
-                self.executor.run(f"umount -l '{self._iso_mount}' 2>/dev/null; true", timeout=15)
-                self.executor.run(f"rmdir '{self._iso_mount}' 2>/dev/null; true", timeout=5)
-            except CommandError:
-                pass
+        self._discard_iso_scratch()
 
         # Clean up temp chunks directory
         if hasattr(self, '_chunks_dir') and self._chunks_dir:
@@ -5611,15 +5638,13 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             except CommandError:
                 pass
 
-        if self._iso_mount:
-            try:
-                self.executor.run(
-                    f"umount -l '{self._iso_mount}' 2>/dev/null; true",
-                    timeout=15)
-                self.executor.run(
-                    f"rmdir '{self._iso_mount}' 2>/dev/null; true", timeout=5)
-            except CommandError:
-                pass
+        # rmdir only ever emptied a loop MOUNT.  When the .iso is read the
+        # other way — xorriso extraction, which is what a machine whose loop
+        # mount failed falls back to — this directory holds the partition
+        # parts themselves, rmdir refuses, and 7.5 GB of a Sonic .iso stays
+        # in /var/tmp after "Cleanup complete" (PAD-45: the reporter had to
+        # keep clearing C: to get an extract to finish at all).
+        self._discard_iso_scratch()
 
         if self._raw_img_path and (self._raw_img_path.startswith("/tmp/") or
                                    self._raw_img_path.startswith("/var/tmp/")):
@@ -7198,7 +7223,11 @@ class StandaloneModPipeline(ModPipeline):
                     f"mountpoint -q '{self._iso_mount}'", timeout=5)
             except CommandError:
                 self.log("ISO mount disappeared, re-mounting...", "info")
-                self._iso_mount = None
+                # Discard rather than just forget: "not a mountpoint" also
+                # describes an xorriso extraction, and dropping the name
+                # leaves its several GB behind with nothing left to delete
+                # them by (PAD-45).
+                self._discard_iso_scratch()
 
         if not self._iso_mount:
             wsl_iso = self.executor.to_exec_path(self.image_path)
@@ -7387,16 +7416,7 @@ class StandaloneModPipeline(ModPipeline):
             except CommandError:
                 pass
 
-        if self._iso_mount:
-            try:
-                self.executor.run(
-                    f"umount -l '{self._iso_mount}' 2>/dev/null; true",
-                    timeout=15)
-                self.executor.run(
-                    f"rmdir '{self._iso_mount}' 2>/dev/null; true",
-                    timeout=5)
-            except CommandError:
-                pass
+        self._discard_iso_scratch()
 
         if hasattr(self, '_chunks_dir') and self._chunks_dir:
             try:
@@ -10838,13 +10858,32 @@ def check_prerequisites(executor, standalone=False):
     results = []
 
     if isinstance(executor, WslExecutor):
-        # Windows: check WSL2 + tools inside WSL
+        # Windows: check WSL2 + tools inside WSL.
+        #
+        # "echo ok" only proves the distro answers as root, which is NOT the
+        # capability any of these flows needs: every one of them loop-mounts
+        # the ext4 image it just extracted, and a WSL 1 distro answers echo
+        # while owning zero loop devices.  A Sonic extract on WSL 1 therefore
+        # passed this gate, spent five minutes restoring 7.5 GB of partclone
+        # parts, failed to mount with a bare "No such file or directory",
+        # re-extracted the whole thing on the corrupt-image theory and failed
+        # the same way — twenty minutes and 15 GB of scratch to reach an
+        # error that was knowable up front (PAD-45).  Probe what the mount
+        # actually needs, the same string the Stern write path uses (PAD-13).
         try:
             executor.run("echo ok", timeout=15)
-            results.append(("WSL2", True, "Available"))
+            reachable = True
         except Exception:
+            reachable = False
+        if not reachable:
             results.append(("WSL2", False,
                 "WSL2 not available. Install from Microsoft Store."))
+        else:
+            reason = loop_unavailable_reason(executor, "game image")
+            if reason:
+                results.append(("WSL2", False, reason + "."))
+            else:
+                results.append(("WSL2", True, "Available"))
 
         try:
             executor.run("which partclone.ext4", timeout=10)

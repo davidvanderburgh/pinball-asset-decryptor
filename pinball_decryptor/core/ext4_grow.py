@@ -70,12 +70,18 @@ LOOP_PROBE = ("modprobe loop >/dev/null 2>&1 || true; "
               "losetup -f >/dev/null && echo ok")
 
 
-def _loop_unavailable_reason(ex):
+def loop_unavailable_reason(ex, what="card image"):
     """``None`` when *ex*'s Linux can hand out a loop device, else a
     user-facing reason naming the likely fix.  On Windows the classic culprit
     is a WSL 1 distro (no loop devices, ever) — the message walks the user to
     the version check and conversion instead of leaving them a bare losetup
-    error to search for."""
+    error to search for.
+
+    Public because the JJP ISO flows need the same verdict: they loop-mount
+    the ext4 image they extract from the .iso, so a distro without loop
+    devices fails them exactly as it fails a Stern grow (PAD-45).  *what*
+    names the thing that couldn't be mounted, since "card image" is Stern's
+    noun and a JJP user is looking at an .iso."""
     try:
         ex.run(LOOP_PROBE, timeout=60)
         return None
@@ -84,15 +90,15 @@ def _loop_unavailable_reason(ex):
         detail = next((ln for ln in lines if "losetup" in ln),
                       lines[-1] if lines else "losetup -f failed")
         if sys.platform == "win32":
-            return ("WSL can't create a loop device to mount the card image "
+            return ("WSL can't create a loop device to mount the %s "
                     "(%s). This usually means the default WSL distro runs "
                     "under WSL 1: check with 'wsl -l -v' in PowerShell and "
                     "convert it with 'wsl --set-version <name> 2'. If it "
                     "already says VERSION 2, run 'wsl --shutdown' and try "
-                    "again" % detail)
-        return ("this system can't create a loop device to mount the card "
-                "image (%s); load the loop module (modprobe loop) or reboot, "
-                "then try again" % detail)
+                    "again" % (what, detail))
+        return ("this system can't create a loop device to mount the %s "
+                "(%s); load the loop module (modprobe loop) or reboot, "
+                "then try again" % (what, detail))
 
 
 def _find_e2fsprogs():
@@ -138,7 +144,7 @@ def available():
     ok, msg = ex.check_available()
     if not ok:
         return False, msg
-    reason = _loop_unavailable_reason(ex)
+    reason = loop_unavailable_reason(ex)
     if reason:
         return False, reason
     return True, msg
@@ -241,7 +247,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     # planning-time check still degrades to the graceful Unavailable path —
     # a loop-less host used to reach losetup inside the mount script and come
     # back as a raw Ext4GrowError with no hint at the fix (PAD-13).
-    reason = _loop_unavailable_reason(ex)
+    reason = loop_unavailable_reason(ex)
     if reason:
         raise Ext4GrowUnavailable(
             "Can't grow files on this system: %s. The affected "

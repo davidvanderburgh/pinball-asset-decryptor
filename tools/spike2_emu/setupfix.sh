@@ -383,12 +383,18 @@ if [ "$(_get "$facts" iswsl)" = 1 ] && [ "$(_get "$facts" wslconf)" = 0 ]; then
 fi
 
 # ---- 4. and PROVE it, rather than reporting the steps that were taken -----
+#
+# `need`, NOT A LIST OF FACT KEYS. This block used to name the four probes one
+# per line, which made it the THIRD copy of a list this file's own header says
+# it will not keep - and the copy nobody would think to update, because it is
+# the success path. A fifth prerequisite (gcc + the C headers, for the
+# renderer) was added to setupcheck.sh and this would have gone on declaring
+# a machine repaired that still could not build the thing it needs.
+#
+# `need` is emitted by the same loop that emits those keys, so "nothing is
+# missing" is asked of whatever setupcheck probes today.
 facts=$(_facts)
-if [ "$(_get "$facts" binfmt)" = 1 ] && \
-   [ "$(_get "$facts" qemu)" = 1 ] && \
-   [ "$(_get "$facts" armgcc)" = 1 ] && \
-   [ "$(_get "$facts" debugfs)" = 1 ] && \
-   [ "$(_get "$facts" fuse)" = 1 ]; then
+if [ -z "$(_get "$facts" need)" ] && [ "$(_get "$facts" binfmt)" = 1 ]; then
     echo "needs_restart=$needs_restart"
     echo "result=ok"
     exit 0

@@ -270,23 +270,37 @@ def rig_cmd_root(script, *args):
 #: them: probe key (from setupcheck.sh) -> package, and what it is for.
 #:
 #: The tool is what is probed, because that is the fact; the package name is
-#: only how Debian spells it.  Same four as the Stern section of
+#: only how Debian spells it.  Same five as the Stern section of
 #: install_prerequisites.ps1 - that installer is where a user who never opens
 #: this tab still gets them.
+#:
+#: THE NATIVE COMPILER WAS MISSING FROM THIS LIST FOR FIVE RELEASES, and a
+#: machine can pass every other line here without it: the rig builds TWO
+#: things, the hardware shim (ARM, cross compiled) and the renderer (native),
+#: and only the cross compiler was ever asked about.  A user on 2026-08-08 had
+#: the ARM one, watched the shim build, and then met
+#:
+#:     [build] the GL renderer is not built, and there is no gcc here
+#:
+#: half a minute into a run that this tab had said nothing about.  It is two
+#: apt names for one capability because gcc only RECOMMENDS its headers.
 _SETUP_TOOLS = (
     ("qemu", "qemu-user-static",
      "runs the machine's own 32-bit ARM game binary"),
     ("armgcc", "gcc-arm-linux-gnueabihf",
      "builds the hardware shim the game runs against"),
+    ("nativecc", "gcc libc6-dev",
+     "builds the renderer that draws the game's picture on this PC"),
     ("debugfs", "e2fsprogs",
      "builds the guest filesystem out of a card image, without root"),
     ("fuse", "fuse3",
      "mounts a card read only, so a title runs without extracting 6 GB"),
 )
 
-#: How long to give the setup probe.  It is four `command -v`s and a read of
-#: /proc, so it answers instantly on a warm WSL - the timeout is entirely for a
-#: COLD one, where `wsl.exe` has to boot the distro first.
+#: How long to give the setup probe.  It is four `command -v`s, one small
+#: compile and a read of /proc, so it answers in well under a second on a warm
+#: WSL - the timeout is entirely for a COLD one, where `wsl.exe` has to boot
+#: the distro first.
 _SETUP_PROBE_S = 90
 
 

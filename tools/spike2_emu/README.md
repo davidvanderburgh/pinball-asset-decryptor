@@ -193,15 +193,25 @@ the result out of a `PAD_COIL_PROBE=1` capture.
 ## Requirements
 
 **Linux, or Windows with WSL.** `qemu-user-static` (binfmt `qemu-arm`
-registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `e2fsprogs`,
-`fuse3`, and `python3-tk` for the playfield window. Then, once:
+registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `gcc` +
+`libc6-dev`, `e2fsprogs`, `fuse3`, and `python3-tk` for the playfield window.
+Then, once:
 
 ```bash
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
 ```
 
+**Two compilers, and they are not interchangeable.** The hardware shim and the
+guest half of the GL bridge are ARM and want the cross compiler; `padglhost`,
+the renderer that draws the picture, is a native x86-64 binary and wants plain
+`gcc`. `libc6-dev` is named beside it because gcc only *recommends* the
+headers, and `padglhost.c` opens with `#include <stdio.h>`. `setupcheck.sh`
+reports that one as `nativecc` and probes it by compiling rather than by
+looking on the PATH — a compiler with no headers is on the PATH and cannot
+build anything.
+
 On **Ubuntu**, `qemu-user-static` is published in the `universe` component and
-the other three are in `main`. A distro with universe switched off therefore
+the others are in `main`. A distro with universe switched off therefore
 answers `E: Package 'qemu-user-static' has no installation candidate` — apt
 knows the name and has no version — and, because `apt-get install a b` is all
 or nothing, installs none of the others either. `setupcheck.sh` reports that as

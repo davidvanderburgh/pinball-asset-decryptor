@@ -766,11 +766,57 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D4` ← IN PROGRESS *(**D5 → D4,
-      2026-08-07:** the central unknown is answered and the instrument exists
-      and is validated — criu is built and DOES checkpoint/restore qemu-user
-      here. What is left is the rig's namespace/mount surface and live runs,
-      which is several passes but no longer an unknown mechanism.)*
+- [ ] **13. Save and load save states.** `S2 D3` ← IN PROGRESS *(**D5 → D4 →
+      D3, 2026-08-07:** the whole desk-side ladder now PASSES — criu restores
+      the full container shape, fuse card included, with a written recipe.
+      What is left needs the rig itself: run_game.sh changes and live runs.)*
+      **★★★ THE ENTIRE FIVE-RUNG LADDER PASSES IN ONE RUN (A ordinary, B
+      qemu-user, C +threads, D the full unshare -r -m -p -f + pivot_root
+      container, E executed FROM a fuse2fs card bound in from outside).**
+      Every rung resumes its counter (container rungs 70 → 85 → 90, margin 60
+      over a restart). **The restore RECIPE, each part measured as necessary
+      on this WSL, is baked into `criuladder.sh` with the failure that forced
+      it beside each line:**
+      • **pivot_root, not chroot** — criu refuses a chroot'd task twice over
+      (`No parent found for mountpoint` on a plain dir; `root task has another
+      root than mntns` on a self-bound one). The task's root must BE the
+      mntns root. **run_game.sh must switch to pivot_root** — which also lets
+      one lazy umount drop all 39 inherited WSL mounts (four 9p, four
+      overlay, iso9660, /init...) out of the checkpoint.
+      • **binaries the container needs post-pivot must live IN the rootfs** —
+      the subject is exec'd through the rootfs's own qemu copy, because via
+      binfmt it would be the host's `arm-binfmt-P` (flags POF), whose text
+      mapping criu cannot resolve once the host tree is gone. The real rig
+      runs the game via that binfmt today and needs the same treatment. Ditto
+      a STATIC busybox for the post-pivot umount (`busybox-static`; noble's
+      busybox-initramfs is dynamic).
+      • **device binds go external** — `--external mnt[/dev/null]:devnull` at
+      dump, `--external mnt[devnull]:/dev/null` at restore; one pair per
+      device bind, and the card is the same shape (`mnt[/card]:card` →
+      `mnt[card]:<cardmnt>`), with cardmount.sh re-mounting BEFORE restore.
+      • **`--mntns-compat-mode`** — criu 4.1's default mount-v2 engine
+      BUG_ONs (mount.c:48 `service_mountpoint`) and segfaults its restorer on
+      this namespace.
+      • **`--root <rootfs>`** — the single flag that made restore possible at
+      all: prepare_mnt_ns() SKIPS its cleaning phase when --root is given.
+      Without it the restorer umounts a namespace copy from INSIDE the
+      restored userns, where every copied mount is MNT_LOCKED — even a fresh
+      proc of our own — and dies on EINVAL after EINVAL (/init, /dev/pts,
+      /dev, /proc, in discovery order).
+      • **restore runs inside `unshare -m` with everything stripped**
+      (`nsclean.sh`: detach all but / and /proc, then /proc LAST — umount(1)
+      reads /proc/self/mountinfo, and the first version detached /proc
+      mid-loop so every later umount silently failed — then fresh proc, then
+      re-bind the rootfs, keeping the card mount for the external).
+      **★ A TEARDOWN TRAP, MEASURED, AND IT APPLIES TO THE RESTORED GAME: a
+      container-restored process is PID 1 OF ITS PID NAMESPACE and silently
+      IGNORES SIGTERM.** `pkill -f` reported success and killed nothing,
+      three restored subjects piled up across ladder runs, and rung E then
+      read rung D's leftover counter (168 vs its own frozen 70) and failed
+      its "original still alive" check — the harness caught its own leak.
+      SIGKILL from an ancestor namespace works; any teardown of a restored
+      guest must -9 it. criu's `--pidfile` now gives the ladder a
+      deterministic kill target.
       **★★ THE ITEM'S CENTRAL ASSUMPTION IS NOW TESTED RATHER THAN ASSUMED,
       AND IT HELD. Nobody had ever pointed criu at a qemu-user process; the
       whole design rested on it. It works.** `criuladder.sh` (root, no
@@ -822,19 +868,22 @@ These have each been violated at least once and each cost a run or a window:
       the file, and **the content lives in the file, so the rings survive a
       checkpoint without being in it.**
       **STILL UNTESTED, and each is the next rung rather than an assumption:**
-      held fds, the node bus pty bound onto `/dev/ttymxc1`, the `unshare -r -m
-      -p -f` namespaces plus `chroot`, the **fuse2fs card bind mount**, the
-      LD_PRELOADed shim, and whether the game survives its node bus, audio sink
-      and GL bridge being restarted underneath it. The namespace and mount work
-      needs `criu --external mnt[]`/`tty[]` and is the expensive part.
-      **Committed:** `26f8f19` (probe, ladder rungs A and B, the ptmx finding),
-      this commit (rung C, threads).
-      **Resume:** build the namespace rung — reproduce `run_game.sh`'s
-      `unshare -r -m -p -f` + `chroot` around the threaded ARM binary and dump
-      THAT. It is where `--external` first becomes necessary and where a PID
-      namespace forces dumping the whole tree from its init rather than one
-      pid. Expect it to be the hardest rung on the ladder. Only then go near a
-      live game.
+      the node bus pty bound onto `/dev/ttymxc1` (master held outside →
+      `--external tty[]`), file-backed MAP_SHARED rings with a host helper
+      writing them, the LD_PRELOADed shim, the subject running as david (the
+      ladder runs as root, userns 0→0; the rig maps 1000→0), and whether the
+      game survives its node bus, audio sink and GL bridge being restarted
+      underneath it.
+      **Committed:** `26f8f19` (probe, rungs A/B, the ptmx finding), `6f3242d`
+      (rung C, threads), this commit (rungs D/E, the container recipe).
+      **Resume:** two fronts, either order. (a) Extend the ladder with the
+      remaining externals: a pty whose master a host process holds, bound in
+      as `/dev/ttymxc1` (`--external tty[]`), and a file-backed MAP_SHARED
+      ring a host helper keeps writing — both shapes read off `run_game.sh` /
+      `hwshim.c`. (b) Start making `run_game.sh` checkpointable OFFLINE: the
+      pivot_root variant behind an env flag (`PAD_PIVOT=1`), rootfs-local
+      qemu, and a `savestate.sh`/`restorestate.sh` pair wrapping the recipe
+      in `criuladder.sh`'s comments. Only then a live game.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

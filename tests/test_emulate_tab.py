@@ -603,7 +603,8 @@ def test_the_docker_probe_survives_having_no_mainloop_yet(tmp_path,
 # ----------------------------------------------------------------------
 
 _READY = {"qemu": "1", "armgcc": "1", "nativecc": "1", "debugfs": "1",
-          "fuse": "1", "binfmt": "1", "iswsl": "1", "wslconf": "1"}
+          "fuse": "1", "ffmpeg": "1", "binfmt": "1", "iswsl": "1",
+          "wslconf": "1"}
 
 
 def _facts(**over):
@@ -697,6 +698,107 @@ def test_a_rig_that_never_heard_of_the_native_compiler_accuses_nobody():
     del older["nativecc"]
     assert setup_ok(older)
     assert setup_notice(older, can_fix=True) == ""
+
+
+# ----------------------------------------------------------------------
+# AND THE DECODER, WHICH IS THE SAME OMISSION WITH A WORSE SYMPTOM.
+# Every other prerequisite here builds or mounts something, so missing one
+# ENDS the run and names itself in the log.  Missing ffmpeg ends nothing: the
+# guest boots, the shim loads, the renderer opens a 1360x768 window and holds
+# 59 fps - and the window is black and silent, because the game decodes
+# neither its video nor its audio itself.  A user on 2026-08-08 (PAD-49) ran
+# exactly that, with a log repeating
+#
+#     ch0 decode failed: [Errno 2] No such file or directory: 'ffmpeg'
+#
+# a hundred times a second, while the tab said nothing before Start and the
+# prerequisite strip said "All prerequisites OK" - that strip's ffmpeg is the
+# WINDOWS one, which the app bundles, and this one is Linux's.
+# ----------------------------------------------------------------------
+
+def test_the_decoder_is_a_prerequisite_in_its_own_right():
+    """A machine that passes every other line here is precisely the machine
+    that reported this."""
+    facts = _facts(ffmpeg="0")
+    assert not setup_ok(facts)
+    missing, binfmt = setup_summary(facts)
+    assert [pkg for pkg, _ in missing] == ["ffmpeg"]
+    # Nothing else about that machine was wrong, so nothing else may be said.
+    assert binfmt == "1"
+
+
+def test_the_decoder_is_explained_by_what_its_absence_costs():
+    """"ffmpeg" means nothing to the person this is written for; a black
+    screen is the thing he actually has, and the notice has to join the two -
+    the same standard the native compiler's line is held to ("picture")."""
+    text = setup_notice(_facts(ffmpeg="0"), can_fix=True)
+    assert "ffmpeg" in text
+    assert "video" in text and "sound" in text
+    assert "Set up emulator" in text
+
+
+def test_the_decoder_can_be_the_only_thing_wrong():
+    """It has to survive being the WHOLE fault.  Every earlier prerequisite
+    fails alongside a dead run, so a notice listing one package and no
+    stopped-run headline is a shape this had never had to produce."""
+    text = setup_notice(_facts(ffmpeg="0"), can_fix=False)
+    assert "sudo apt install ffmpeg" in text
+    # ...and it must not invent a second fault to explain itself with.
+    assert "32-bit ARM" not in text
+
+
+def test_the_button_promises_only_what_it_is_going_to_do():
+    """The summary sentence used to say "installs those in WSL and registers
+    the handler" whatever was wrong, which was safe only because every
+    prerequisite before this one turned up on machines that also had no
+    handler registered.  The decoder is the first that arrives ALONE, and the
+    machine that reported it had its handler already - so that sentence
+    promised it an act that was not going to happen."""
+    only_pkg = setup_notice(_facts(ffmpeg="0"), can_fix=True)
+    assert "installs those in WSL" in only_pkg
+    assert "registers the handler" not in only_pkg
+    # ...and the converse still says it, since then it IS going to.
+    both = setup_notice(_facts(ffmpeg="0", binfmt="0"), can_fix=True)
+    assert "installs those in WSL and registers the handler" in both
+    # A handler that is merely switched off is a different act, which the
+    # consent list has distinguished since it was written.
+    off = setup_notice(_facts(binfmt="disabled"), can_fix=True)
+    assert "switches the 32-bit ARM handler back on" in off
+    assert "installs those in WSL" not in off
+
+
+def test_a_rig_that_never_heard_of_the_decoder_accuses_nobody():
+    """An older rig emits no `ffmpeg` line, and silence is not a missing
+    package - the direction every fact here takes."""
+    older = dict(_READY)
+    del older["ffmpeg"]
+    assert setup_ok(older)
+    assert setup_notice(older, can_fix=True) == ""
+
+
+def test_the_run_says_it_once_when_the_decoder_is_missing_anyway():
+    """THE BACKSTOP, for a run started outside this tab.
+
+    Nothing in watch.sh FAILS to start without ffmpeg - padvidhost.py creates
+    its mmap either way, so "video: host decoder up" gets printed by a decoder
+    that cannot decode a thing.  The check has to come before the helpers, and
+    it has to hand the guest the existing no-bridge path: left pointed at a
+    bridge that can never fill, the game re-arms the same clip forever and
+    blocks on every one of them, which is the hundred-lines-a-second log."""
+    watch = _rig_text("watch.sh")
+    body = "\n".join(ln for ln in watch.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "command -v ffmpeg" in body, (
+        "watch.sh starts the decode helpers without ever asking for ffmpeg")
+    # Against where they are STARTED, not merely named: both are named far
+    # above this, in the teardown's pkill list.
+    at = body.index("command -v ffmpeg")
+    for launch in ('setsid_as_user bash "$S/playaudio.sh"',
+                   'setsid_as_user python3 "$S/padvidhost.py"'):
+        assert launch in body, "watch.sh no longer starts it this way"
+        assert at < body.index(launch), (
+            "the check must come before the helper it is about")
+    assert "export PAD_VID=0" in body
 
 
 def test_a_registered_but_disabled_handler_is_not_called_missing():

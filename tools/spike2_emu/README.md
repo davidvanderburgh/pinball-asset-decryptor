@@ -194,8 +194,8 @@ the result out of a `PAD_COIL_PROBE=1` capture.
 
 **Linux, or Windows with WSL.** `qemu-user-static` (binfmt `qemu-arm`
 registered with the **F** flag), `gcc-arm-linux-gnueabihf`, `gcc` +
-`libc6-dev`, `e2fsprogs`, `fuse3`, and `python3-tk` for the playfield window.
-Then, once:
+`libc6-dev`, `e2fsprogs`, `fuse3`, `ffmpeg`, and `python3-tk` for the playfield
+window. Then, once:
 
 ```bash
 rootfs.sh <card.raw>    # the guest rootfs, from the card. No root needed.
@@ -209,6 +209,16 @@ headers, and `padglhost.c` opens with `#include <stdio.h>`. `setupcheck.sh`
 reports that one as `nativecc` and probes it by compiling rather than by
 looking on the PATH — a compiler with no headers is on the PATH and cannot
 build anything.
+
+**`ffmpeg` is the decoder for both the picture and the sound**, and it is the
+one requirement here whose absence does not stop anything. The game cannot
+decode its own H.264 (of the 175 plugins in its gstreamer-0.10, the only one
+that does is the i.MX6 hardware element), so `padvidhost.py` decodes out here
+and hands the guest raw frames; `playaudio.sh` uses ffmpeg's `pulse` muxer for
+the same reason, this distro having no pulseaudio client tools. Without it the
+emulator starts, builds, boots the guest and opens a window — and that window
+is black and silent. `watch.sh` says so once at startup rather than letting it
+arrive as a decode error per clip.
 
 On **Ubuntu**, `qemu-user-static` is published in the `universe` component and
 the others are in `main`. A distro with universe switched off therefore

@@ -270,7 +270,7 @@ def rig_cmd_root(script, *args):
 #: them: probe key (from setupcheck.sh) -> package, and what it is for.
 #:
 #: The tool is what is probed, because that is the fact; the package name is
-#: only how Debian spells it.  Same five as the Stern section of
+#: only how Debian spells it.  Same six as the Stern section of
 #: install_prerequisites.ps1 - that installer is where a user who never opens
 #: this tab still gets them.
 #:
@@ -284,6 +284,16 @@ def rig_cmd_root(script, *args):
 #:
 #: half a minute into a run that this tab had said nothing about.  It is two
 #: apt names for one capability because gcc only RECOMMENDS its headers.
+#:
+#: AND THEN THE DECODER, which is the same omission with a worse symptom.  Every
+#: other line here builds or mounts something, so missing one ENDS the run and
+#: says why; missing ffmpeg lets the run succeed completely - guest up, window
+#: open, renderer at 59 fps - and simply shows black, because the picture and
+#: the sound are both decoded by it out here (the game's gstreamer-0.10 has no
+#: software H.264 element).  A user on 2026-08-08 sat in front of that window
+#: with a log repeating `No such file or directory: 'ffmpeg'` a hundred times a
+#: second while this tab said nothing and the prerequisite strip said OK - that
+#: strip's ffmpeg is the WINDOWS one, which the app bundles, and this is Linux's.
 _SETUP_TOOLS = (
     ("qemu", "qemu-user-static",
      "runs the machine's own 32-bit ARM game binary"),
@@ -295,9 +305,11 @@ _SETUP_TOOLS = (
      "builds the guest filesystem out of a card image, without root"),
     ("fuse", "fuse3",
      "mounts a card read only, so a title runs without extracting 6 GB"),
+    ("ffmpeg", "ffmpeg",
+     "decodes the game's video and sound, which it cannot decode itself"),
 )
 
-#: How long to give the setup probe.  It is four `command -v`s, one small
+#: How long to give the setup probe.  It is five `command -v`s, one small
 #: compile and a read of /proc, so it answers in well under a second on a warm
 #: WSL - the timeout is entirely for a COLD one, where `wsl.exe` has to boot
 #: the distro first.
@@ -539,12 +551,30 @@ def setup_notice(facts, can_fix):
             % (", ".join(unavailable) or "the packages",
                KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
     elif can_fix:
+        # ONLY THE PARTS IT IS ACTUALLY GOING TO DO.  Every earlier
+        # prerequisite failed on machines whose handler was unregistered too,
+        # so "installs those and registers the handler" was always true; the
+        # decoder is the first that turns up on its own, on a machine whose
+        # handler is fine, and promising to register it there is a promise
+        # about something that is not going to happen.  setup_fix_steps is the
+        # consent and is already exact - this sentence is its summary and has
+        # to be exact the same way.
+        does = []
+        if facts.get("universe") == "0":
+            does.append("turns universe back on")
+        if missing:
+            does.append("installs those in WSL")
+        if binfmt == "0":
+            does.append("registers the handler for 32-bit ARM programs")
+        elif binfmt == "disabled":
+            # A different act from registering one, and setup_fix_steps has
+            # said so since it was written.
+            does.append("switches the 32-bit ARM handler back on")
         parts.append(
-            "“Set up emulator…” %sinstalls those in WSL and registers the "
-            "handler. It lists exactly what it will change first, and needs "
-            "no password."
-            % ("turns universe back on, "
-               if facts.get("universe") == "0" else ""))
+            "“Set up emulator…” %s. It lists exactly what it will change "
+            "first, and needs no password."
+            % (", ".join(does[:-1]) + " and " + does[-1]
+               if len(does) > 1 else does[0]))
         if fetch:
             # The user is about to be told the button works after being told
             # the package cannot be installed, so it has to say HOW — and say

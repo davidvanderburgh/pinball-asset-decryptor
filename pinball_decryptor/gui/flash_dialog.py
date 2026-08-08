@@ -18,6 +18,14 @@ Both ticked = build, then flash the fresh build, one click.  The dialog
 hands the choice back to the app (``on_build_flash`` / ``on_flash``), which
 runs the pipelines through the main window's normal status area.
 
+Which two boxes were ticked is remembered.  A tester who works build-only
+(build here, write the card elsewhere) found both boxes ticked again every
+time he reopened the dialog: "the Build/Flash screen does not remember your
+selections between sessions."  ``initial_choices`` seeds the ticks from the
+last run and ``on_choices`` reports the pair back when Start is actually
+pressed — a cancelled dialog changes nothing, so what is remembered is what
+the user ran, not what they were mid-way through unticking.
+
 It deliberately does no raw device I/O itself: the target card's capacity
 comes from the same ``core.drives`` enumeration the Direct-SD picker uses
 (advertised size, no privileged open), and a preliminary "does it fit?" check
@@ -87,7 +95,8 @@ class FlashImageDialog:
     def __init__(self, parent, manufacturer, theme_name, on_flash,
                  initial_image=None, on_build_flash=None, build_target="",
                  can_build=False, cannot_build_reason="",
-                 has_pending_changes=True):
+                 has_pending_changes=True, initial_choices=None,
+                 on_choices=None):
         self._parent = parent
         self._mfr = manufacturer
         self._on_flash = on_flash
@@ -95,12 +104,15 @@ class FlashImageDialog:
         self._can_build = bool(can_build and on_build_flash is not None)
         self._cannot_build_reason = cannot_build_reason
         self._has_pending_changes = has_pending_changes
+        self._on_choices = on_choices
         self._theme = THEMES.get(theme_name) or THEMES["light"]
         self._words = _flash_words(manufacturer)
         self._sans, _ = platform_font()
         self._drives = []            # list[PhysicalDrive] from last enumeration
         self._selected = None        # the chosen PhysicalDrive
         self._enum_id = 0            # bump-counter to drop stale enumerations
+        self._initial_build, self._initial_write = self._opening_ticks(
+            initial_choices)
 
         self._build(build_target or "")
         # Pre-fill the flash box with the image the Write tab would build
@@ -114,6 +126,45 @@ class FlashImageDialog:
         self._sync_sections()
         self._refresh_drives()
         self._update_readout()
+
+    # ------------------------------------------------------------------
+    def _opening_ticks(self, saved):
+        """(build?, write?) the dialog opens with.
+
+        With nothing remembered these are the originals: build when a build is
+        possible and something was actually modified, always flash — so a
+        no-changes session (restoring a backup, re-flashing an earlier build)
+        starts flash-only, which is the old Flash dialog exactly.
+
+        Once the user has run the dialog, their own pair wins.  Build is still
+        gated on ``_can_build``, because a ticked box the Write tab can't
+        satisfy is just a disabled box lying; and a remembered pair that is
+        somehow all-off is treated as nothing remembered, since a dialog that
+        opens with Start greyed out looks broken.
+        """
+        if not isinstance(saved, dict) or not saved:
+            return (self._can_build and self._has_pending_changes), True
+        build = self._can_build and bool(
+            saved.get("build", self._has_pending_changes))
+        write = bool(saved.get("write", True))
+        if not (build or write):
+            return (self._can_build and self._has_pending_changes), True
+        return build, write
+
+    def _remember_choices(self):
+        """Report the ticked pair back for next time (Start only)."""
+        if self._on_choices is None:
+            return
+        choices = {"write": bool(self._write_var.get())}
+        # A disabled Build box is not a choice — leaving it out keeps the
+        # previous answer instead of recording the forced False and opening
+        # build-less next time, when the Write tab may well be set up again.
+        if self._can_build:
+            choices["build"] = bool(self._build_var.get())
+        try:
+            self._on_choices(choices)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _build(self, build_target):
@@ -151,12 +202,9 @@ class FlashImageDialog:
             wraplength=560, justify="left").pack(anchor="w", pady=(0, 10))
 
         # ---- Section 1: build ----------------------------------------
-        # Ticked by default when a build is possible and something was
-        # actually modified; a no-changes session (restoring a backup /
-        # re-flashing an earlier build) starts flash-only, which is the old
-        # Flash dialog exactly.
-        self._build_var = tk.BooleanVar(
-            value=self._can_build and self._has_pending_changes)
+        # Opening state: the pair the user last ran, else the defaults —
+        # see _opening_ticks.
+        self._build_var = tk.BooleanVar(value=self._initial_build)
         build_check = ttk.Checkbutton(
             body, text="Build a fresh image from your modifications",
             variable=self._build_var, command=self._sync_sections)
@@ -189,7 +237,7 @@ class FlashImageDialog:
         self._build_browse.pack(side="left", padx=(4, 0))
 
         # ---- Section 2: flash ----------------------------------------
-        self._write_var = tk.BooleanVar(value=True)
+        self._write_var = tk.BooleanVar(value=self._initial_write)
         ttk.Checkbutton(
             body, text=self._words["section"],
             variable=self._write_var, command=self._sync_sections).pack(
@@ -597,6 +645,9 @@ class FlashImageDialog:
                 return
 
         device_path = card.device_path if (writing and card) else None
+        # Past every confirmation — this is the pair the user committed to, so
+        # it's the pair the dialog opens with next time.
+        self._remember_choices()
         self._dlg.grab_release()
         self._dlg.destroy()
         if building:

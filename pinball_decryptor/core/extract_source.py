@@ -20,6 +20,13 @@ him to re-run Extract over a file (``/usr/local/spike/SternLogo.png`` on the OS
 partition) that no extracted asset came from.  :mod:`core.card_edits` remembers
 those replaces, so the check can now tell "PAD changed this image, and not in a
 way that matters here" from "something else changed it".
+
+And when the warning is right but the user has decided it doesn't matter to
+them ("I know I am fine but will have to see that message the entire time"),
+:func:`dismiss_stale_source` parks the *current* source signature in the same
+sidecar and :func:`stale_dismissed` reports it, so the banner's Dismiss
+survives a restart.  It is deliberately pinned to that one signature: the next
+change to the image no longer matches it and the warning comes back.
 """
 
 import json
@@ -39,6 +46,12 @@ SIDE_CAR = ".extract_source.json"
 _VER_RE = re.compile(r"-(\d+)_(\d+)_(\d+)(?:\.([A-Za-z0-9]+))?")
 # Channel-position tokens that are media-size markers, not a build tag.
 _SIZE_TOKENS = frozenset({"8g", "4g", "16g", "2g", "32g"})
+
+# Sidecar key holding the source signature the user dismissed the warning for.
+# Lives beside the extract-time signature rather than in settings.json so it
+# travels with the project folder — and so a re-Extract, which rewrites the
+# whole sidecar, drops it without anyone having to remember to.
+_DISMISSED = "dismissed"
 
 
 def _signature(input_path: str) -> Optional[dict]:
@@ -156,6 +169,55 @@ def stale_source_message(assets_dir: str) -> Optional[str]:
         "assets were extracted. The original-track names and replacements "
         "shown may not match the current image — re-run Extract to refresh."
     )
+
+
+def dismiss_stale_source(assets_dir: str) -> bool:
+    """Remember that the user accepted the source image exactly as it is now.
+
+    Records the source's *current* ``(size, mtime)`` in the sidecar, so
+    :func:`stale_dismissed` can answer "this is the state they already waved
+    through" and the banner stays down across restarts.  Any later change to
+    the image produces a different signature, so the warning returns.
+
+    Best-effort — returns False (and changes nothing) when there is no sidecar,
+    the source is gone, or the folder isn't writable.  Callers pair it with an
+    in-memory flag so a failed write still hides the banner for the session.
+    """
+    recorded = read_extract_source(assets_dir)
+    if not recorded:
+        return False
+    path = recorded.get("input_path")
+    sig = _signature(path) if path else None
+    if sig is None:
+        return False
+    recorded[_DISMISSED] = {"size": sig["size"], "mtime": sig["mtime"]}
+    try:
+        with open(os.path.join(assets_dir, SIDE_CAR), "w",
+                  encoding="utf-8") as f:
+            json.dump(recorded, f, indent=2)
+    except OSError:
+        return False
+    return True
+
+
+def stale_dismissed(assets_dir: str) -> bool:
+    """True when the source image's current state is one the user dismissed.
+
+    Cheap (one ``stat``) and deliberately exact: it answers only for the
+    signature that was dismissed, never "warnings are off for this folder".
+    """
+    recorded = read_extract_source(assets_dir)
+    if not recorded:
+        return False
+    ack = recorded.get(_DISMISSED)
+    path = recorded.get("input_path")
+    if not isinstance(ack, dict) or not path:
+        return False
+    sig = _signature(path)
+    if sig is None:
+        return False
+    return (sig["size"] == ack.get("size")
+            and sig["mtime"] == ack.get("mtime"))
 
 
 #: "PAD's own edits do not explain this image" — distinct from the ``None`` that

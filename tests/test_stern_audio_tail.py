@@ -1304,6 +1304,93 @@ def test_encoders_seed_near_silence_only_when_blip_free_opted_in(monkeypatch):
     assert int(np.abs(captured["tgt"]).max()) == 0
 
 
+def _seed_peak_for_silent_slot(monkeypatch, np, E, stereo=False, **env):
+    """Peak of the seed a silent replacement carries into the encoder under
+    *env*.  Isolates the target-fitting half of _encode_mono/_encode_stereo the
+    same way the tests above do."""
+    for var in ("PAD_STERN_SLOT_SEED_DB", "PAD_STERN_EXPERIMENT_IDXS",
+                "PAD_STERN_SKIP_KEYPATCH", "PAD_STERN_BLIP_FREE"):
+        monkeypatch.delenv(var, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    captured = {}
+
+    class FakeCodec:
+        def encode_sound(self, p, *targets):
+            captured["peak"] = max(int(np.abs(np.asarray(t)).max())
+                                   for t in targets)
+            return 0, b"\0" * 8
+
+    monkeypatch.setattr(E, "_load_wav", lambda *a, **k: (
+        np.zeros((4000, 2), np.int64) if stereo else np.zeros(4000, np.int64)))
+    monkeypatch.setattr(E, "_resolve_shared_boundary", lambda *a, **k: b"\0" * 8)
+    monkeypatch.setattr(E, "_apply_stock_head", lambda *a, **k: (b"\0" * 8, False))
+    monkeypatch.setattr(E, "_verify_encoded", lambda *a, **k: None)
+    p = {"length": 4000, "chan": 2 if stereo else 1, "idx": 1}
+    enc = E._encode_stereo if stereo else E._encode_mono
+    enc(None, FakeCodec(), p, "x.wav", np)
+    return captured["peak"]
+
+
+@pytest.mark.parametrize("stereo", [False, True])
+def test_explicit_seed_never_weakens_the_blip_free_floor(monkeypatch, stereo):
+    """Ticking the anti-pop seed must not cancel Path A's anti-degenerate seed.
+
+    The two seeds answer different problems: the explicit one is a preference
+    at a user-chosen level, the Path A one is what a near-silent body needs to
+    stay decodable at all once the master-directory restore is skipped.  The
+    default anti-pop level (-65 dBFS, ~18 counts) is 20 dB BELOW that floor, so
+    "first one wins" let the weaker setting quietly undo the stronger one on
+    the pair the GUI hands out by default (a tester, LZ 1.22, 2026-08-08).
+    """
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    floor = E._pathA_seed_peak()
+    # blip-free alone: the requirement seed, our reference level
+    rescued = _seed_peak_for_silent_slot(monkeypatch, np, E, stereo=stereo,
+                                         PAD_STERN_BLIP_FREE="1")
+    assert rescued >= floor * 0.9, (rescued, floor)
+
+    # blip-free + the anti-pop seed at its -65 dBFS default -> still rescued
+    both = _seed_peak_for_silent_slot(monkeypatch, np, E, stereo=stereo,
+                                      PAD_STERN_BLIP_FREE="1",
+                                      PAD_STERN_SLOT_SEED_DB="-65")
+    assert both == rescued, (both, rescued)
+
+    # ...and with the slot gated OUT of the experiment too: the per-slot gate
+    # narrows the preference, never the requirement.
+    gated = _seed_peak_for_silent_slot(monkeypatch, np, E, stereo=stereo,
+                                       PAD_STERN_BLIP_FREE="1",
+                                       PAD_STERN_SLOT_SEED_DB="-65",
+                                       PAD_STERN_EXPERIMENT_IDXS="999")
+    assert gated == rescued, (gated, rescued)
+
+
+def test_explicit_seed_wins_when_it_is_the_stronger_one(monkeypatch):
+    """A user seed ABOVE the Path A floor is kept as chosen — the floor is a
+    minimum, not an override."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    strong = _seed_peak_for_silent_slot(monkeypatch, np, E,
+                                        PAD_STERN_BLIP_FREE="1",
+                                        PAD_STERN_SLOT_SEED_DB="-40")
+    assert strong > E._pathA_seed_peak(), (strong, E._pathA_seed_peak())
+
+
+def test_explicit_seed_unchanged_on_a_standard_build(monkeypatch):
+    """Without blip-free there is no floor to hold: the standard build restores
+    the stock master-directory bytes, so a silent slot is never degenerate and
+    the user's -65 dBFS choice reaches the encoder as-is."""
+    import numpy as np
+    from pinball_decryptor.plugins.stern import engine as E
+
+    pk = _seed_peak_for_silent_slot(monkeypatch, np, E,
+                                    PAD_STERN_SLOT_SEED_DB="-65")
+    assert 5 <= pk <= 40, pk
+
+
 class _FakeEmu:
     """Stands in for Spike2Emu over the master-directory restore, recording
     whether the caller handed derive_params a progress callback."""

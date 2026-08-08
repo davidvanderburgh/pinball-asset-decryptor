@@ -99,7 +99,13 @@ fi
 # background video" after the first windowed load.
 # Headless runs have no video host and none is started for them.
 VID_RESTART=0; VID_USER=""; VID_RING="$R/dump/padvid"
-if [ "${PAD_VID_RESTART:-1}" = 1 ] && pgrep -f 'padvidhost\.py' >/dev/null; then
+# The gate is "is this a WINDOWED session", not "is a video host running":
+# padglhost (the renderer) is the definition of windowed, and a load that
+# follows a FAILED video-host restart finds a renderer with no host - gating
+# on the host alone would leave that session frozen forever. Measured
+# 2026-08-08: exactly that state, padglhost at 59.5 fps with vid 0.0 NEW/s.
+if [ "${PAD_VID_RESTART:-1}" = 1 ] \
+        && { pgrep -f 'padvidhost\.py' >/dev/null || pgrep -x padglhost >/dev/null; }; then
     # WHOSE host is it? Match the PYTHON process, not whatever else carries
     # the script name on its command line: watch.sh launches helpers through
     # `runuser -u david -- setsid python3 padvidhost.py`, and the resident
@@ -107,10 +113,13 @@ if [ "${PAD_VID_RESTART:-1}" = 1 ] && pgrep -f 'padvidhost\.py' >/dev/null; then
     # `pgrep | head -1` picked exactly that on the first live load, so the
     # restart came up as root and logged to /root/padvid.log. uid via ps then
     # getent, because ps's user column truncates names longer than 8 chars.
+    # No host at all -> the renderer's user is the helper user by definition
+    # (watch.sh starts every helper as the same PAD_USER).
     VID_PID=""
     for p in $(pgrep -f 'padvidhost\.py'); do
         case "$(ps -o comm= -p "$p" 2>/dev/null)" in python*) VID_PID=$p; break ;; esac
     done
+    [ -z "$VID_PID" ] && VID_PID=$(pgrep -x padglhost | head -1)
     if [ -n "$VID_PID" ]; then
         VID_UID=$(ps -o uid= -p "$VID_PID" 2>/dev/null | tr -d ' ')
         [ -n "$VID_UID" ] && VID_USER=$(getent passwd "$VID_UID" | cut -d: -f1)
@@ -245,6 +254,12 @@ do_restore() {
 # complaining about sizes. The error is the one authority; a stat guess is
 # unreliable because the guest appends between the dump and the stat. Only ever
 # truncates files criu itself names, only on this exact error, bounded.
+# A slot is restored MANY times (save once, load whenever), and criu opens
+# its pidfile O_EXCL - the stale one from the last load fails the whole
+# restore ("Can't write pidfile: File exists"), found on the first repeat
+# load of one slot: every earlier load had a fresh slot because savegame
+# rm -rf's it. The pid it held is dead or being replaced either way.
+rm -f "$DDIR/restored.pid"
 echo "[restore] restoring...${COMPAT:+ (compat engine)}"
 for _attempt in 1 2 3 4 5 6; do
     do_restore
@@ -291,16 +306,23 @@ if [ "$VID_RESTART" = 1 ]; then
                         | sed -n 's/^PAD_GAME=//p' | head -1)}
     VHOME=$(getent passwd "${VID_USER:-root}" | cut -d: -f6)
     VLOG=${VHOME:-/root}/padvid.log
-    # Same launch shape as watch.sh's (runuser OUTSIDE setsid, helper as the
-    # desktop user), appending to the session's own padvid.log so the resume
-    # lines land where every other [padvid] line of this session lives.
+    # NOT watch.sh's `runuser -- setsid cmd &` shape, and the difference is
+    # fatal here: runuser WAITS for its child and FORWARDS signals to it, and
+    # this script - unlike watch.sh - exits immediately, so when the wsl.exe
+    # invocation that ran loadgame ends, the backgrounded runuser takes the
+    # session's SIGHUP and passes it straight to the host it just started.
+    # Measured 2026-08-08: the restart came up, then died with "Hangup" in
+    # padvid.log the moment loadgame returned; the first load's ROOT restart
+    # survived only because it had no runuser in front. So the child is
+    # backgrounded INSIDE a bash -c: that bash exits at once, runuser reaps
+    # it and returns, and the setsid'd host belongs to nobody the teardown
+    # can reach.
+    VCMD="setsid env PAD_ROOT='$R' PAD_GAME='$VGAME' PAD_VID_RESUME=1 \
+python3 '$RIG/padvidhost.py' '$VID_RING' >> '$VLOG' 2>&1 </dev/null &"
     if [ -n "$VID_USER" ] && [ "$VID_USER" != root ]; then
-        runuser -u "$VID_USER" -- setsid env PAD_ROOT="$R" PAD_GAME="$VGAME" \
-            PAD_VID_RESUME=1 python3 "$RIG/padvidhost.py" "$VID_RING" \
-            >> "$VLOG" 2>&1 &
+        runuser -u "$VID_USER" -- bash -c "$VCMD"
     else
-        setsid env PAD_ROOT="$R" PAD_GAME="$VGAME" PAD_VID_RESUME=1 \
-            python3 "$RIG/padvidhost.py" "$VID_RING" >> "$VLOG" 2>&1 &
+        bash -c "$VCMD"
     fi
     echo "[restore] video host restarted in resume mode (game '$VGAME', log $VLOG)"
 fi

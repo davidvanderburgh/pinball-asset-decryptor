@@ -494,6 +494,36 @@ def wsl_run(script, *args):
     return r
 
 
+def state_run(script, slot="quicksave"):
+    """Run savegame.sh / loadgame.sh, the item 13 save-state wrappers.
+
+    NOT wsl_run, for two reasons that are both load-bearing: these are bash
+    scripts, not python helpers, and they need ROOT (criu does), which from
+    Windows is simply `wsl.exe -u root` - no password, no elevation. No
+    HOME/PAD_ROOT juggling either: with a guest up both scripts self-locate
+    from the guest's own /proc environ, which is the proven path.
+
+    The timeout is generous because a load is a criu restore with the
+    growing-file retry loop in it (~10-15 s measured), and a save writes a
+    ~500 MB dump. Returns the CompletedProcess, or None if it did not run.
+
+    NAME COLLISION, again: save_state() in this file is the WINDOW POSITION
+    save. Everything in this feature says `state_run`/`run_state` instead.
+    """
+    if sys.platform == "win32":
+        cmd = ["wsl.exe", "-u", "root", "-e", "bash",
+               "%s/%s" % (WSL_DIR, script), slot]
+    else:
+        # The native-Linux path: run it plainly; without root the script's own
+        # "needs root" line lands in the status bar, which is the honest hint.
+        cmd = ["bash", os.path.join(HERE, script), slot]
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=240,
+                              creationflags=_CREATE_NO_WINDOW)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def pick_scale(root, img_h, chrome=170):
     """Fit the artwork to the screen.
 
@@ -1067,8 +1097,88 @@ class Field:
             self.cv.create_window(x, y, anchor="se", window=b)
             x -= b.winfo_reqwidth() + self.ACT_GAP
 
+        # Save/Load state, bottom-LEFT (item 13's GUI half, David 2026-08-08:
+        # "i'd like to have gui controls to set and load a save state", surface
+        # asked and answered - the playfield, over the game window's legend and
+        # the Emulate tab). The LEFT corner, not more buttons on the right:
+        # game actions stay by the plunger where the hand is, state controls
+        # stay apart from them - a misclicked "Load state" yanks the whole game
+        # back to the save, which is not a neighbour "Plunge" wants. One row
+        # still clears the lowest marker for the same reason the right cluster
+        # does (RIGHT FLIPPER BUTTON at y=656; see the docstring above).
+        self._state_btns = []
+        for label, script in (("Save state", "savegame.sh"),
+                              ("Load state", "loadgame.sh")):
+            self._state_btns.append(
+                tk.Button(self.cv, text=label, width=11,
+                          command=lambda s=script: self.run_state(s)))
+        x = self.ACT_PAD
+        for b in self._state_btns:
+            self.cv.create_window(x, y, anchor="sw", window=b)
+            x += b.winfo_reqwidth() + self.ACT_GAP
+
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
+
+    def run_state(self, script):
+        """Save state / Load state (item 13). One at a time, off the Tk thread.
+
+        The spawn takes seconds (a save dumps ~500 MB; a load is a criu
+        restore), so it runs on its own thread with both buttons disabled -
+        NOT on SwitchDriver's queue, where it would block a held flipper's
+        release behind a 10 s restore. Tk is only ever touched back on the Tk
+        thread via after(), which is the cross-thread rule this repo has paid
+        for before (the Partition Explorer lockup).
+        """
+        if getattr(self, "_state_busy", False):
+            return
+        self._state_busy = True
+        for b in self._state_btns:
+            b.config(state="disabled")
+        verb = "saving" if script.startswith("save") else "loading"
+        self._state_msg = ("%s state..." % verb, None)
+
+        def work():
+            r = state_run(script)
+
+            def done():
+                self._state_busy = False
+                for b in self._state_btns:
+                    b.config(state="normal")
+                # The wrappers' own last [savegame]/[loadgame] line is the
+                # best one-line answer either way ("saved to slot...",
+                # "no game is running...", "FAILED"); fall back to whatever
+                # was printed last.
+                if r is None:
+                    text = "%s did not run" % script
+                else:
+                    lines = [ln.strip() for ln in
+                             (r.stdout or b"").decode("utf8", "replace").splitlines()
+                             + (r.stderr or b"").decode("utf8", "replace").splitlines()
+                             if ln.strip()]
+                    tagged = [ln for ln in lines
+                              if ln.startswith(("[savegame]", "[loadgame]"))]
+                    text = (tagged or lines or ["%s: no output" % script])[-1]
+                self._state_msg = (text, time.monotonic() + 8.0)
+
+            self.cv.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _state_status(self):
+        """The status-bar override while a save/load runs, and its result for
+        a few seconds after - tick() rewrites the bar every frame, so a plain
+        config() here would survive for one frame at most. Reads its OWN
+        monotonic clock: tick's t0 is perf_counter, a different epoch from
+        the monotonic stamp `until` carries."""
+        m = getattr(self, "_state_msg", None)
+        if not m:
+            return None
+        text, until = m
+        if until is not None and time.monotonic() > until:
+            self._state_msg = None
+            return None
+        return text
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
@@ -1396,8 +1506,10 @@ class Field:
             save_state(self.root)
             self.root.destroy()             # the run ended; leave with it
             return
+        state_msg = self._state_status()
         if d is None:
-            self.status.config(text="no emulator (dump/padled not readable)")
+            self.status.config(text=state_msg
+                               or "no emulator (dump/padled not readable)")
         else:
             decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
             skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
@@ -1446,10 +1558,11 @@ class Field:
             draw_hz = self._rate(self._draw_ev, t0)
             data_hz = self._rate(self._data_ev, t0)
             self.status.config(
-                text=" %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
-                     " (%d writes%s)%s   poll %.0f fps"
-                     % (lit, len(self.fixtures), draw_hz, data_hz, decoded,
-                        drops, coils, self.fps))
+                text=state_msg
+                     or " %d of %d inserts lit   LED %.1f Hz   data %.1f Hz"
+                        " (%d writes%s)%s   poll %.0f fps"
+                        % (lit, len(self.fixtures), draw_hz, data_hz, decoded,
+                           drops, coils, self.fps))
 
         # PACED, not slept. after(FRAME_MS) would add the frame's own cost to
         # every interval and land at 20-25 fps while claiming 30; subtracting

@@ -821,6 +821,39 @@ These have each been violated at least once and each cost a run or a window:
       **Last pass's "4.1% vs 42.7% non-black" mystery is moot** — this run
       sampled 86% on both sides of the load; the 4.1% was a dark scene at the
       sample moment.
+      **★★ GUI CONTROLS SHIPPED SAME NIGHT — David: "i'd like to have gui
+      controls to set and load a save state." Surface asked and answered: the
+      virtual playfield,** over the game window's legend and the Emulate tab.
+      `Save state` / `Load state` buttons bottom-LEFT of the artwork view
+      (state controls deliberately apart from the plunger cluster — a
+      misclicked Load yanks the game back), spawning `wsl.exe -u root -e bash
+      …/savegame.sh|loadgame.sh quicksave` off the Tk thread with both
+      buttons disabled while one runs and the result on the status bar
+      (a tick-proof override; tick rewrites the bar every frame). NOT on
+      SwitchDriver's queue — a flipper release must not wait behind a 10 s
+      restore. Schematic view has no buttons yet (it has no action row at
+      all; Godzilla is the only title that runs today, item 27).
+      **Verifying the buttons' exact spawn found and fixed THREE real faults,
+      all live-verified in one session (save → load → repeat load, video at
+      29.9-30.5 NEW/s after each, host as david):**
+      • **the restarted video host died with the wsl session** — runuser
+      WAITS and FORWARDS signals, so when loadgame's wsl.exe ended, SIGHUP
+      reached the fresh host ("Hangup" in padvid.log; window frozen at
+      0.0 NEW/s while sampling 86% non-black — the held frame fooled the
+      content metric, the rate instrument caught it). Fix: background the
+      host inside a `bash -c '… &'` so runuser returns before the teardown.
+      • **a second load of one slot always failed** — criu opens its pidfile
+      O_EXCL and the stale `restored.pid` from the last load was still in
+      the slot ("Can't write pidfile: File exists"); every earlier load had
+      a fresh slot because savegame rm -rf's it. restorestate clears it.
+      And the failure was expensive: the guest was already killed, so
+      watch.sh tore the whole session down (leaked the audio pair;
+      killgame.sh reaped them, alive 0 confirmed).
+      • **the restart gate was too narrow** — it keyed on a running video
+      host, so a load after a failed restart found a renderer with no host
+      and left it frozen. The gate is now "is padglhost up" (the definition
+      of windowed), with the helper user taken from the renderer when no
+      host exists.
       **★★★ THE REAL GAME SAVES AND RESTORES, headless, closed loop, twice
       (alive.sh 0 after each, the ~509 MB dumps reclaimed).** `savetest_real.sh`
       (committed): boot godzilla_pro under `PAD_PIVOT=1` → `savestate.sh`

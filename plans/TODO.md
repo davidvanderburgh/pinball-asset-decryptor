@@ -1178,6 +1178,15 @@ These have each been violated at least once and each cost a run or a window:
   committed because it is 3.5 MB of one machine's run; **re-capture with
   `PAD_NB_TRACE=1 PAD_LED_SKIP_LOG=3000 watch.sh N` if it is ever lost**, and
   note `/var/tmp` and not `/tmp`, which this WSL wipes on restart.
+- **`/var/tmp/criubuild/criu/criu/criu`** (inside WSL) — item 13's CRIU, v4.1,
+  **built from source because criu is NOT PACKAGED for Ubuntu 24.04** (zero apt
+  candidate with universe enabled). `criuladder.sh` defaults to this path and
+  takes `CRIU=` to override. Rebuild with `git clone --depth 1 --branch v4.1
+  https://github.com/checkpoint-restore/criu.git && make -j8`; the build needs
+  the documented deps **plus `uuid-dev`**, which it aborts on without naming,
+  and `libaio-dev` + `python3-yaml` for its own tests. It needs root to run, and
+  `wsl -u root` gives that with no password on this machine. Not committed
+  because it is a 6 MB binary built for one kernel.
 - **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
   this machine. The deep detail behind every numbered item above.
 

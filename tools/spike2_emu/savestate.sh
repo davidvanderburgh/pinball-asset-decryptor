@@ -96,6 +96,25 @@ for fd in /proc/$PID/fd/*; do
     esac
 done
 
+# --- the rig's shared rings ----------------------------------------------
+# The guest maps dump/padled, dump/padgl, dump/padsw (and padvid) MAP_SHARED.
+# criu re-opens such a mapping FROM THE FILE at restore, so the file must exist
+# then - and its CONTENT is the ring state, which is NOT in the checkpoint.
+# watch.sh's teardown DELETES dump/padled on purpose (it is the playfield's
+# liveness signal), so a load after any teardown found it gone:
+#   "Can't open file dump/padled on restore: No such file or directory"
+# So stash every mapped ring in the slot; restorestate puts back any that have
+# gone missing, content and all.
+mkdir -p "$DDIR/rings"
+while read -r p; do
+    case "$p" in /dump/*) ;; *) continue ;; esac
+    src=/proc/$PID/root$p
+    [ -f "$src" ] || continue
+    stash=$(echo "${p#/}" | tr '/' '_')
+    cp -f "$src" "$DDIR/rings/$stash" 2>/dev/null \
+        && echo "ring $p $stash" >> "$DDIR/restore.env"
+done < <(awk '$2 ~ /s/ && $4 !~ /^00:00/ {print $6}' "/proc/$PID/maps" 2>/dev/null | sort -u)
+
 # --- dump ----------------------------------------------------------------
 LEAVE=--leave-running
 [ "${PAD_SAVE_STOP:-0}" = 1 ] && LEAVE=

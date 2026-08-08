@@ -970,15 +970,31 @@ These have each been violated at least once and each cost a run or a window:
       file-backed rings on `/dump` (proven restorable by ladder rung G), but
       restorestate must RESTART them like it restarts nodebus, and that is
       untested. Wire and measure it.
-      **(2) a PLAYABLE windowed session.** The controls work, but they need a
-      running pivot guest, which today means a headless boot. To play WITH the
-      window and click save/load, `watch.sh` must run the guest under PAD_PIVOT
-      as ROOT (criu needs it). Two shapes to try: run the WHOLE watch.sh session
-      as root (`wsl -u root … watch.sh` — root has `DISPLAY=:0`, so padglhost
-      MIGHT get a WSLg window; untested, and the interop playfield/audio are
-      david-user things that may not), or keep helpers as david and escalate
-      only run_game.sh. The pivot log tail is already wired (`255f73e`); the
-      root launch is not. This is the gate to David clicking save/load in-game.
+      **(2) a PLAYABLE windowed session — HALF DONE, and the half that works is
+      proven.** `wsl -u root … HOME=/home/david PAD_PIVOT=1 watch.sh` DOES run:
+      **the guest booted at 55.4 fps, the emulator window AND the virtual
+      playfield both opened and DREW (shotwin: 42.7% non-black), and
+      `savegame.sh` saved from that live windowed session while play
+      continued.** Two fixes were needed to get there and both are in:
+      • `ensurebuild.sh`'s `_pad_guest_probe` tested `unshare -r` + chroot, which
+      **fails as root on /home** ("Permission denied") even though the real
+      PAD_PIVOT root boot works — it now probes the way the run actually
+      launches (no userns when root). It was blocking the session before it
+      started.
+      • `restorestate.sh` used to call `killgame.sh`, the rig's GLOBAL teardown,
+      which would **close the window on every load**. It now kills only the
+      guest, leaving padglhost/playfield/audio up to reattach.
+      **✗ `loadgame` in a WINDOWED session still fails.** Two causes met, one
+      fixed: `dump/padled` is deleted by teardown but the guest maps it
+      (`Can't open file dump/padled on restore`) — savestate now stashes every
+      mapped ring in the slot and restorestate puts back what is missing. The
+      SECOND attempt then failed with a bare `Restoring FAILED` whose specific
+      error was not captured (the harness deleted the slot on exit). **Capture
+      that error first next pass** — keep the slot, read `restore.log`.
+      **Also unexplained: the second windowed run's game window sampled 4.1%
+      non-black where the first sampled 42.7%** — the guest was rendering
+      (frames climbing) both times. Not diagnosed; may be a dark scene at the
+      sample moment or a real GL-ring reattach fault. Sample twice next time.
       **(3) leave-running.** Real saves must not pause play, but the log fd
       grows and fails criu's size check. Either briefly stop only across the
       dump, redirect the guest log to a pipe, or exclude that fd from

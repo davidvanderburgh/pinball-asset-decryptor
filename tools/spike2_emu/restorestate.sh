@@ -26,8 +26,15 @@ R=$ROOT
 # told to clear it (killgame is the rig's own teardown).
 if pgrep -x game >/dev/null; then
     if [ "${PAD_RESTORE_KILL:-0}" = 1 ]; then
-        echo "[restore] a guest is up - killing it first (PAD_RESTORE_KILL=1)"
-        bash "$RIG/killgame.sh" >/dev/null 2>&1
+        # ONLY THE GUEST, never killgame.sh. killgame.sh is the rig's GLOBAL
+        # teardown - it takes padglhost, the playfield, audio and video with it,
+        # which would close the window you are playing in every time you loaded
+        # a save. Those helpers talk to the guest through the file-backed rings
+        # and reattach to the restored one, so they must stay up.
+        echo "[restore] a guest is up - killing just the guest (PAD_RESTORE_KILL=1)"
+        pkill -9 -x game 2>/dev/null
+        pkill -9 -f '\.padqemu/game' 2>/dev/null
+        pkill -9 -f arm-binfmt 2>/dev/null
         sleep 1
     else
         echo "[restore] a guest (comm=game) is already running; set PAD_RESTORE_KILL=1 to replace it"
@@ -35,29 +42,39 @@ if pgrep -x game >/dev/null; then
     fi
 fi
 
-# --- restart the node bus and get a fresh pty ----------------------------
-# nodebus.py holds the master and writes the slave path; the same helper the
-# original run used, restarted, exactly the design's restart-the-helpers step.
+# --- the node bus and a pty for the restored guest -----------------------
+# The restored guest needs a pty on /dev/ttymxc1 (criu bridges the dumped one
+# to whatever fd we hand it, so ANY pty works). Two cases:
+#   REUSE - a node bus is already running (a live watch.sh session, the
+#           windowed case): open ITS existing slave. Starting a second nodebus
+#           would orphan the first and leak a pty on every loadgame.
+#   START - none running (a headless load): start one, exactly the design's
+#           restart-the-helpers step.
 NEWPTY=""
 if grep -q '@PTY@' "$DDIR/restore.env"; then
     export PAD_NODEBUS_DIR="$R/dump"
-    rm -f "$R/dump/nodebus.path"
-    # The pty must be owned by the SAME user the guest ran as, or criu cannot
-    # set the tty owner on restore ("Can't setup uid ... Operation not
-    # permitted"). The guest runs as an unprivileged user (watch.sh is david);
-    # criu needs root. When those differ - root running the restore for a
-    # david guest - start nodebus as that user. PAD_NB_USER names it.
-    if [ "$(id -u)" = 0 ] && [ -n "${PAD_NB_USER:-}" ]; then
-        runuser -u "$PAD_NB_USER" -- env PAD_NODEBUS_DIR="$R/dump" \
-            python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+    RUNNING_PTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
+    if pgrep -f 'nodebus\.py' >/dev/null && [ -n "$RUNNING_PTY" ] && [ -e "$RUNNING_PTY" ]; then
+        NEWPTY=$RUNNING_PTY
+        echo "[restore] reusing the running node bus pty: $NEWPTY"
     else
-        python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+        rm -f "$R/dump/nodebus.path"
+        # The pty must be owned by the SAME user the guest ran as, or criu
+        # cannot set the tty owner on restore ("Can't setup uid ... Operation
+        # not permitted"). PAD_NB_USER names that user when the restore runs as
+        # root for a guest that ran as someone else (the legacy david case).
+        if [ "$(id -u)" = 0 ] && [ -n "${PAD_NB_USER:-}" ]; then
+            runuser -u "$PAD_NB_USER" -- env PAD_NODEBUS_DIR="$R/dump" \
+                python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+        else
+            python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+        fi
+        NBPID=$!
+        for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
+        NEWPTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
+        [ -e "$NEWPTY" ] || { echo "[restore] node bus did not come up"; exit 1; }
+        echo "[restore] node bus pty: $NEWPTY (pid $NBPID)"
     fi
-    NBPID=$!
-    for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
-    NEWPTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
-    [ -e "$NEWPTY" ] || { echo "[restore] node bus did not come up"; exit 1; }
-    echo "[restore] node bus pty: $NEWPTY (pid $NBPID)"
 fi
 
 # --- build the restore externals from restore.env ------------------------
@@ -76,6 +93,18 @@ while read -r kind a b c; do
         # the fd (opened on 9 below); the OLD key names the resource in images.
         INHERIT+=(--inherit-fd "fd[9]:tty[$b]")
         TTYFD=$NEWPTY
+        ;;
+    ring)
+        # a=guest path  b=stashed filename. criu re-opens a file-backed
+        # MAP_SHARED mapping from the FILE, so it has to be there - and
+        # watch.sh's teardown deletes dump/padled by design. Put back ONLY what
+        # is missing: a live session's ring is newer than this snapshot and
+        # clobbering it would throw away the state the helpers are using.
+        if [ ! -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
+            mkdir -p "$(dirname "$R$a")"
+            cp -f "$DDIR/rings/$b" "$R$a"
+            echo "[restore] put back the missing ring $a"
+        fi
         ;;
     esac
 done < "$DDIR/restore.env"

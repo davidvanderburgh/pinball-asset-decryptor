@@ -368,7 +368,15 @@ pad_ensure_rootfs() {
 #: THE ONLY TEST THAT PROVES IT. Same namespace and same chroot as
 #: run_game.sh, so a pass here means the real thing gets as far as the game.
 _pad_guest_probe() {
-    unshare -r -m bash -c 'chroot "$1" /bin/sh -c "exit 0"' _ "$ROOT" 2>&1
+    # `-r` (a new user namespace mapping the caller to root) is how an
+    # UNPRIVILEGED user gets the chroot cap. Real root already has it and does
+    # NOT want the userns: as root, `unshare -r` + `chroot` into /home fails
+    # "Permission denied" (and item 13's PAD_PIVOT root run drops `-r` for the
+    # same reason). So probe the way the run will actually launch - without the
+    # userns when we are root, with it otherwise.
+    local userns="-r"
+    [ "$(id -u)" = 0 ] && userns=""
+    unshare $userns -m bash -c 'chroot "$1" /bin/sh -c "exit 0"' _ "$ROOT" 2>&1
 }
 
 #: The kernel's handler for 32-bit ARM binaries, if it has one. `qemu-arm` on

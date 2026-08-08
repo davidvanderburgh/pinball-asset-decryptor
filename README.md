@@ -601,6 +601,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
 3. **Extract tab** — pick an input file and an output folder; click
    *Extract*. The output folder gets the decrypted assets plus a
    `.checksums.md5` baseline used by the Write tab.
+   If the source image later stops being the file you extracted from —
+   swapped, reverted or rebuilt outside PAD — a banner says so, because
+   the "Original" names on the Replace tabs then describe assets that
+   image no longer holds. Re-extract to resync, or press **Dismiss** to
+   accept it: the dismissal is pinned to that exact image and is stored
+   in the project folder, so it holds after a restart and lifts by
+   itself the next time the image changes.
 4. Modify any files in the output folder you want to change.
    *(BOF specifically:* edit the human-friendly files under
    `pck/_EDITABLE ASSETS/audio|images|video|fonts/` — drop in a new
@@ -673,7 +680,10 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    builds a fresh image and/or writes an image onto a card — tick both
    and the fresh build goes straight onto the card, no separate flash
    step. (Untick building and it's the classic "flash a pre-built or
-   backup image" dialog.) Action buttons are colour-coded — green for
+   backup image" dialog.) The dialog opens on whichever pair you ran
+   last, remembered per manufacturer and kept across restarts, so a
+   build-only or flash-only habit doesn't have to be re-ticked every
+   time. Action buttons are colour-coded — green for
    go actions (Extract, Build), red for the live Cancel and Revert all
    changes — with neutral buttons (Browse, Refresh) left plain.
    Any Replace Audio / Video assignments are applied automatically

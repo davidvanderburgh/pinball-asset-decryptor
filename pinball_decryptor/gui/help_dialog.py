@@ -73,6 +73,14 @@ HELP_CONTENT = {
          "Extract writes a hidden .checksums.md5 file recording the pristine "
          "assets. The Replace tabs and Write use it to tell what you have "
          "changed — leave it in place."),
+        ("\"The source image has changed\"",
+         "A banner appears when the image you extracted from is no longer the "
+         "file it was — swapped, reverted or rebuilt outside PAD — because the "
+         "\"Original\" names on the Replace tabs then describe assets that "
+         "image no longer holds. Re-extract to resync, or press Dismiss if you "
+         "know it doesn't matter to you: that silences it for this image only, "
+         "and it stays silenced after a restart. The next change to the image "
+         "brings it back."),
         ("Re-extracting",
          "Extracting into a non-empty folder overwrites your edits (after a "
          "confirmation). Use a fresh project folder per firmware version — "
@@ -512,7 +520,10 @@ HELP_CONTENT = {
          "unticked it flashes any pre-built or backup image, without a "
          "separate imaging tool. The whole card is erased and replaced; a "
          "size check refuses an image too big for the card. Requires "
-         "Administrator. (Other machines keep a plain Build button.)"),
+         "Administrator. The dialog opens on whichever pair you ran last "
+         "(remembered per manufacturer, across sessions), so a build-only or "
+         "flash-only habit doesn't have to be re-ticked every time. (Other "
+         "machines keep a plain Build button.)"),
         ("USB install stick (JJP)",
          "On Jersey Jack machines the same button reads \"Build / make USB "
          "install stick…\", and the stick section does something different: "

@@ -30,6 +30,12 @@
 #   E. the same, with the binary EXECUTED FROM a fuse2fs mount made OUTSIDE
 #      the namespace and bind mounted in   -> the card, which is how the real
 #                                             game ELF is mapped
+#   F. the subject HOLDS AN OPEN FD to a pty slave whose MASTER a host
+#      process keeps, bound onto /dev/ttymxc1, and the restore attaches it
+#      to a NEW pty from a RESTARTED holder -> the node bus
+#   G. the subject holds a file-backed MAP_SHARED mapping that a host
+#      process KEEPS WRITING across the checkpoint
+#                                          -> the padled/padsw/padgl rings
 #
 # HOW EACH RUNG IS JUDGED, and this is the part that matters. A restored
 # process and a freshly restarted one look IDENTICAL from outside - both are
@@ -51,14 +57,14 @@ FUSELIB=/home/david/local/lib/x86_64-linux-gnu
 [ -x "$CRIU" ] || { echo "criuladder: no criu at $CRIU - build it first, or set CRIU="; exit 2; }
 
 # Which rungs to run. No argument = all of them. The control is not optional.
-RUNGS=${*:-A B C D E}
+RUNGS=${*:-A B C D E F G}
 
 # A previous run may have left the card mounted; rm -rf THROUGH a live fuse
 # mount would try to delete the (read-only) card contents and then fail to
 # remove the directory, so unmount first, always.
 mountpoint -q "$WORK/cardmnt" 2>/dev/null && umount -l "$WORK/cardmnt"
 rm -rf "$WORK"; mkdir -p "$WORK/dumpA" "$WORK/dumpB" "$WORK/dumpC" \
-                        "$WORK/dumpD" "$WORK/dumpE"
+                        "$WORK/dumpD" "$WORK/dumpE" "$WORK/dumpF" "$WORK/dumpG"
 cd "$WORK" || exit 2
 
 # ---------------------------------------------------------------- the subject
@@ -112,9 +118,107 @@ int main(int argc, char **argv)
 }
 EOF
 
+# THE TTY SUBJECT, for rung F. Same counter, but it also opens /dev/ttymxc1
+# and HOLDS the fd, writing a byte down it each loop the way the game talks
+# to its node bus. O_NOCTTY is deliberate and load-bearing: the subject is a
+# session leader with no controlling tty, so a bare open() of a pty slave
+# would ACQUIRE it as ctty, and a controlling tty drags session semantics
+# into the dump (the --shell-job territory this ladder exists to stay out
+# of). NOTE the real game may well open ttymxc1 WITHOUT O_NOCTTY - whether
+# its dump then needs more than --external tty[] is an open question the
+# ladder does not answer.
+cat > counttty.c <<'EOF'
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+int main(int argc, char **argv)
+{
+    long i = 0;
+    int tfd = open("/dev/ttymxc1", O_RDWR | O_NOCTTY);
+    if (tfd < 0) return 48;
+    for (;;) {
+        FILE *f = fopen(argv[1], "w");
+        if (f) { fprintf(f, "%ld\n", ++i); fclose(f); }
+        if (write(tfd, ".", 1) < 0) { /* master gone; keep counting */ }
+        usleep(200000);
+    }
+    return 0;
+}
+EOF
+
+# THE RING SUBJECT AND ITS HOST WRITER, for rung G. The writer (x86, host
+# side, NOT dumped) increments a counter in a file-backed MAP_SHARED page
+# five times a second and NEVER STOPS - through the dump, the kill and the
+# restore, like padglhost writing the switch ring while the guest is frozen.
+# The subject maps the same file and copies whatever it currently reads into
+# ring.out beside its own counter. After the restore, ring.out advancing past
+# what the page held BEFORE the restore proves the remapped page is the LIVE
+# one the host is still writing - not a stale copy restored from images.
+cat > countring.c <<'EOF'
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+int main(int argc, char **argv)
+{
+    long i = 0;
+    int rfd = open("/data/ring", O_RDONLY);
+    if (rfd < 0) return 49;
+    volatile unsigned *ring = mmap(0, 4096, PROT_READ, MAP_SHARED, rfd, 0);
+    if (ring == MAP_FAILED) return 50;
+    for (;;) {
+        FILE *f = fopen(argv[1], "w");
+        if (f) { fprintf(f, "%ld\n", ++i); fclose(f); }
+        f = fopen("/data/ring.out", "w");
+        if (f) { fprintf(f, "%u\n", *ring); fclose(f); }
+        usleep(200000);
+    }
+    return 0;
+}
+EOF
+
+cat > ringwrite.c <<'EOF'
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+int main(int argc, char **argv)
+{
+    int fd = open(argv[1], O_RDWR);
+    if (fd < 0) return 1;
+    volatile unsigned *ring = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ring == MAP_FAILED) return 1;
+    for (;;) { (*ring)++; usleep(200000); }
+    return 0;
+}
+EOF
+
+# THE PTY HOLDER, for rung F - the ladder's stand-in for nodebus.py, which
+# does exactly this: create a pty, publish the slave path, hold the master
+# and service it. Prints "slavepath rdev_hex dev_hex" (criu's tty[] key is
+# %x:%x of st_rdev:st_dev) to the info file, then drains the master forever.
+cat > ptyhold.py <<'EOF'
+import os, sys, select
+m, s = os.openpty()
+path = os.ttyname(s)
+st = os.stat(path)
+with open(sys.argv[1] + ".tmp", "w") as f:
+    f.write("%s %x %x\n" % (path, st.st_rdev, st.st_dev))
+os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+os.close(s)   # nodebus holds only the master; the guest owns the slave
+while True:
+    r, _, _ = select.select([m], [], [], 1.0)
+    if m in r:
+        try:
+            os.read(m, 4096)
+        except OSError:
+            pass  # no slave open right now; keep serving
+EOF
+
 echo "=== building the subject"
 gcc -O0 -o countx86 count.c || { echo "  x86 build FAILED"; exit 1; }
 echo "  countx86 ok"
+gcc -O0 -o ringwrite ringwrite.c || { echo "  ringwrite build FAILED"; exit 1; }
+echo "  ringwrite ok (host-side ring writer)"
 ARMOK=0
 if command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
     # STATIC on purpose: a dynamic ARM binary would drag the rig's rootfs and
@@ -130,9 +234,16 @@ if command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
     else
         THROK=0; echo "  countarmthr build FAILED - rung C will be skipped"
     fi
+    if [ "$ARMOK" = 1 ] && arm-linux-gnueabihf-gcc -O0 -static \
+            -o counttty counttty.c 2>/dev/null \
+       && arm-linux-gnueabihf-gcc -O0 -static -o countring countring.c 2>/dev/null; then
+        EXTOK=1; echo "  counttty + countring ok (static ARM)"
+    else
+        EXTOK=0; echo "  counttty/countring build FAILED - rungs F and G will be skipped"
+    fi
 else
-    THROK=0
-    echo "  no arm-linux-gnueabihf-gcc - rungs B and C will be skipped"
+    THROK=0; EXTOK=0
+    echo "  no arm-linux-gnueabihf-gcc - rungs B through G will be skipped"
 fi
 
 # ------------------------------------------------- the namespace apparatus
@@ -158,6 +269,13 @@ build_ns_world()
     cp /usr/bin/qemu-arm-static "$WORK/rootfs/qemu-arm-static"
     cp /bin/busybox "$WORK/rootfs/busybox"
     cp "$WORK/countarmthr" "$WORK/rootfs/countarmthr"
+    if [ "${EXTOK:-0}" = 1 ]; then
+        cp "$WORK/counttty" "$WORK/rootfs/counttty"
+        cp "$WORK/countring" "$WORK/rootfs/countring"
+    fi
+    : > "$WORK/rootfs/dev/ttymxc1"       # placeholder the pty slave binds onto
+    # the ring: one shared page a host writer and the guest both map
+    truncate -s 4096 "$WORK/rootfs/data/ring"
 
     # The inner script - what run_game.sh's INNER heredoc is to the real rig.
     # It runs as pid 1 of the new pid namespace (via unshare -p -f), as root
@@ -190,7 +308,7 @@ build_ns_world()
     # Post-pivot there are exactly three commands and each is self-contained:
     # bash's own cd builtin, the static busybox, and the rootfs's qemu.
     cat > "$WORK/nsinner.sh" <<'EOF'
-R="$1"; BIN="$2"; CFILE="$3"; WANTCARD="$4"
+R="$1"; BIN="$2"; CFILE="$3"; WANTCARD="$4"; TTYSLAVE="$5"
 mount --bind "$R" "$R"                 || exit 39   # pivot_root wants a mount
 mount -t proc proc "$R/proc"           || exit 40
 mount -t tmpfs tmpfs "$R/tmp"          || exit 41
@@ -201,6 +319,10 @@ mount --bind "$R/data" "$R/data"       || exit 42
 # namespace with the pivot, and criu refuses any fd it cannot resolve:
 #   Error (criu/files-reg.c:1790): Can't lookup mount=101 for fd=0 path=/dev/null
 mount --bind /dev/null "$R/dev/null"   || exit 47
+if [ "$TTYSLAVE" != none ]; then
+    # the pty slave, master held by a host process - run_game.sh's ttymxc1
+    mount --bind "$TTYSLAVE" "$R/dev/ttymxc1" || exit 48
+fi
 if [ "$WANTCARD" = card ]; then
     # made OUTSIDE the namespace (like cardmount.sh's) and bind mounted in
     mount --bind /var/tmp/criuladder/cardmnt "$R/card" || exit 43
@@ -240,14 +362,19 @@ EOF
     # mount is MNT_LOCKED and even a fresh proc of our own refuses with
     # EINVAL. So this script also re-binds the rootfs, and the caller passes
     # --root pointing at it.
-    # The card mount is KEPT: the restore re-binds the container's /card from
-    # it (--external mnt[card]:...cardmnt), so stripping it would leave the
-    # external pointing at an empty directory - the restore would fail, or
-    # worse, succeed with the card's files gone.
+    # KEPT mounts, each because a restore external resolves through it - with
+    # --root skipping the cleaning phase, keeping a mount costs nothing:
+    #  - the card mount: --external mnt[card]:...cardmnt binds from it;
+    #    stripped, the external would point at an empty directory.
+    #  - /dev/pts (and /dev, whose lazy detach would take the child with it):
+    #    rung F's replacement pty slave lives there, and its restore died
+    #    with "Can't bind-mount at ...(yard)/dev/ttymxc1: No such file or
+    #    directory" while it was stripped - the external's SOURCE is resolved
+    #    in criu's own namespace, this one.
     cat > "$WORK/nsclean.sh" <<'EOF'
 mount --make-rprivate /
-awk '$5 != "/" && $5 != "/proc" && $5 != "/var/tmp/criuladder/cardmnt" \
-     { print $5 }' /proc/self/mountinfo \
+awk '$5 != "/" && $5 != "/proc" && $5 != "/dev" && $5 != "/dev/pts" \
+     && $5 != "/var/tmp/criuladder/cardmnt" { print $5 }' /proc/self/mountinfo \
     | sort -r | while read -r mp; do
     umount -l "$mp" 2>/dev/null
 done
@@ -289,7 +416,24 @@ EOF
 # DUMP_XTRA / RESTORE_XTRA are arrays the caller may fill with extra criu
 # flags (the --external incantations rungs D and E exist to discover). Both
 # are reset after use so one rung's flags cannot leak into the next.
+#
+# Three more hooks, all optional, all for the helper-restart window between
+# the kill and the restore - the exact window the real design lives in
+# (checkpoint the guest, RESTART the host helpers, restore):
+#   PRE_RESTORE_CMD   - eval'd after the freeze check, before the restore.
+#                       Rung F kills the pty holder and starts a fresh one
+#                       here; rung G snapshots the ring value the restored
+#                       mapping must then overtake.
+#   RESTORE_TTYFD_FILE- a file whose first field is a tty path; the judge
+#                       opens it on fd 9 for criu's --inherit-fd. Read AFTER
+#                       PRE_RESTORE_CMD, because that is what creates it.
+#   RING_OUT          - a file the restored subject keeps writing the mapped
+#                       ring's current value into; the judge requires it to
+#                       EXCEED $RING_MIN (set by PRE_RESTORE_CMD) - proof the
+#                       remapped page is the live one the host writer is
+#                       still advancing, not a stale copy out of the images.
 DUMP_XTRA=(); RESTORE_XTRA=()
+PRE_RESTORE_CMD=""; RESTORE_TTYFD_FILE=""; RING_OUT=""; RING_MIN=0
 judge()
 {
     local DDIR=$1 CFILE=$2 PID=$3 CLEANPAT=$4
@@ -346,6 +490,19 @@ judge()
     fi
     echo "  original dead, counter frozen at $V3"
 
+    if [ -n "$PRE_RESTORE_CMD" ]; then
+        eval "$PRE_RESTORE_CMD" || { echo "  FAIL  pre-restore hook failed"; return 1; }
+    fi
+    if [ -n "$RESTORE_TTYFD_FILE" ]; then
+        local TTYPATH
+        TTYPATH=$(cut -d' ' -f1 "$RESTORE_TTYFD_FILE" 2>/dev/null)
+        [ -e "$TTYPATH" ] || { echo "  FAIL  no replacement tty at '$TTYPATH'"; return 1; }
+        # fd 9 rides plain fd inheritance through unshare/bash/exec into criu,
+        # which is told with --inherit-fd that this fd IS the dumped tty.
+        exec 9<>"$TTYPATH" || { echo "  FAIL  could not open $TTYPATH on fd 9"; return 1; }
+        echo "  replacement tty $TTYPATH on fd 9"
+    fi
+
     echo "  restoring..."
     # --pidfile: the restored root's host pid, for a deterministic kill. The
     # pattern kill alone was measured NOT to work on the container rungs -
@@ -360,6 +517,7 @@ judge()
     else
         "${RESTORE_CMD[@]}" 2>&1 | tail -3
     fi
+    [ -n "$RESTORE_TTYFD_FILE" ] && exec 9>&-   # criu has its copy; drop ours
     sleep 3
     local V4; V4=$(cat "$CFILE" 2>/dev/null)
     local V5; sleep 1; V5=$(cat "$CFILE" 2>/dev/null)
@@ -398,6 +556,25 @@ judge()
         echo "        The subject did not run long enough before the dump."
         pkill -9 -f "$CFILE" 2>/dev/null
         return 1
+    fi
+
+    # The ring freshness gate, when a rung asked for one. Continuity above
+    # only proves the SUBJECT resumed; this proves its MAPPING is live: the
+    # value it copies out of the shared page must have overtaken what the
+    # page held before the restore, which only the host writer - running on
+    # the other side of the checkpoint the whole time - can have caused.
+    if [ -n "$RING_OUT" ]; then
+        local RINGNOW
+        RINGNOW=$(cat "$RING_OUT" 2>/dev/null)
+        if [ -z "$RINGNOW" ] || [ "$RINGNOW" -le "$RING_MIN" ] 2>/dev/null; then
+            echo "  FAIL  counter resumed but the mapped ring did NOT"
+            echo "        (ring.out ${RINGNOW:-empty} vs $RING_MIN before the restore) -"
+            echo "        the restored mapping is a stale copy, not the live page"
+            [ -s "$DDIR/restored.pid" ] && kill -9 "$(cat "$DDIR/restored.pid")" 2>/dev/null
+            return 1
+        fi
+        echo "  ring   live: $RING_MIN before the restore -> $RINGNOW read through"
+        echo "         the restored mapping (the host writer never stopped)"
     fi
 
     echo "  PASS  counter continued: $V3 (frozen) -> $V4 -> $V5"
@@ -462,7 +639,7 @@ rung()
 # what these rungs exist to discover.
 rungns()
 {
-    local NAME=$1 DDIR=$2 BIN=$3 WANTCARD=$4
+    local NAME=$1 DDIR=$2 BIN=$3 WANTCARD=$4 TTYSLAVE=${5:-none}
     local CFILE=$WORK/rootfs/data/count
     echo
     echo "=== rung $NAME"
@@ -476,7 +653,7 @@ rungns()
     setsid bash -c '
         for fd in $(seq 3 63); do eval "exec $fd>&-" 2>/dev/null; done
         exec unshare -r -m -p -f setsid bash "$@"
-    ' _ "$WORK/nsinner.sh" "$WORK/rootfs" "$BIN" /data/count "$WANTCARD" \
+    ' _ "$WORK/nsinner.sh" "$WORK/rootfs" "$BIN" /data/count "$WANTCARD" "$TTYSLAVE" \
         </dev/null >"$DDIR/subject.out" 2>&1 &
     local UPID=$!
     sleep 2
@@ -571,28 +748,26 @@ if want C; then
     fi
 fi
 
-if want D || want E; then
+if want D || want E || want F || want G; then
     if [ "${THROK:-0}" = 1 ]; then
         echo
         echo "=== building the namespace world (rootfs + card)"
         build_ns_world
     else
-        echo; echo "=== rungs D and E SKIPPED (no threaded ARM binary)"
+        echo; echo "=== rungs D through G SKIPPED (no threaded ARM binary)"
     fi
 fi
 
+# The recipe rungs D-G share, discovered by D and E - see the comments where
+# each part was forced: compat engine (v2 BUG_ONs), --root (skips the cleanup
+# that dies on MNT_LOCKED), nsclean (strips criu's own ns), devnull external.
+BASE_DUMP=(--external 'mnt[/dev/null]:devnull')
+BASE_RESTORE=(--external 'mnt[devnull]:/dev/null' --mntns-compat-mode
+              --root /var/tmp/criuladder/rootfs)
+
 if want D && [ "${THROK:-0}" = 1 ]; then
-    # The /dev/null bind is a mount whose source lives OUTSIDE the namespace,
-    # so criu must be told it is external at dump, and told what to bind in
-    # its place at restore. This is the exact incantation the rig will need
-    # for every one of run_game.sh's device binds.
-    DUMP_XTRA=(--external 'mnt[/dev/null]:devnull')
-    # --mntns-compat-mode: criu 4.1's default mount-restore engine ("mount-v2")
-    # hits its own BUG_ON at mount.c:48 (service_mountpoint, no
-    # plain_mountpoint) restoring this namespace and segfaults the restorer.
-    # The older engine restores it fine.
-    RESTORE_XTRA=(--external 'mnt[devnull]:/dev/null' --mntns-compat-mode
-                  --root /var/tmp/criuladder/rootfs)
+    DUMP_XTRA=("${BASE_DUMP[@]}")
+    RESTORE_XTRA=("${BASE_RESTORE[@]}")
     RESTORE_NSCLEAN=1
     rungns "D - namespaces + pivot_root (run_game.sh's shape)" "$WORK/dumpD" \
            /countarmthr none && RD=ok || RD=NO
@@ -601,15 +776,14 @@ fi
 
 if want E && [ "${THROK:-0}" = 1 ]; then
     if [ "${CARDOK:-0}" = 1 ]; then
-        # Same recipe as D plus the card: a fuse2fs mount made OUTSIDE the
+        # The base recipe plus the card: a fuse2fs mount made OUTSIDE the
         # namespace, bind mounted in, with the subject binary EXECUTED from
         # it - the real game ELF's exact shape. External at dump; at restore
         # the card must already be mounted again (the design restarts host
         # helpers, cardmount.sh among them) and criu binds it back in.
-        DUMP_XTRA=(--external 'mnt[/dev/null]:devnull' --external 'mnt[/card]:card')
-        RESTORE_XTRA=(--external 'mnt[devnull]:/dev/null'
-                      --external 'mnt[card]:/var/tmp/criuladder/cardmnt'
-                      --mntns-compat-mode --root /var/tmp/criuladder/rootfs)
+        DUMP_XTRA=("${BASE_DUMP[@]}" --external 'mnt[/card]:card')
+        RESTORE_XTRA=("${BASE_RESTORE[@]}"
+                      --external 'mnt[card]:/var/tmp/criuladder/cardmnt')
         RESTORE_NSCLEAN=1
         rungns "E - executed FROM the fuse2fs card, bind mounted in" "$WORK/dumpE" \
                /card/countarmthr card && RE=ok || RE=NO
@@ -619,6 +793,76 @@ if want E && [ "${THROK:-0}" = 1 ]; then
     fi
 fi
 
+RF=skip; RG=skip
+
+if want F && [ "${EXTOK:-0}" = 1 ]; then
+    # THE PTY, and the full helper-restart flow: holder 1 (the ladder's
+    # nodebus.py stand-in) owns the master at dump; between kill and restore
+    # it is killed and holder 2 started, exactly as a real restore would
+    # restart the node bus; criu is handed holder 2's NEW slave on fd 9,
+    # standing in for the OLD tty[] key recorded in the images.
+    rm -f "$WORK/pty1.info" "$WORK/pty2.info"
+    setsid python3 "$WORK/ptyhold.py" "$WORK/pty1.info" </dev/null >/dev/null 2>&1 &
+    HOLD1=$!
+    for _ in $(seq 50); do [ -s "$WORK/pty1.info" ] && break; sleep 0.1; done
+    if [ -s "$WORK/pty1.info" ]; then
+        read -r SLAVE1 RDEV1 DEV1 < "$WORK/pty1.info"
+        echo
+        echo "--- rung F pty: $SLAVE1 (tty[$RDEV1:$DEV1]), master held by pid $HOLD1"
+        # TWO externals, one per layer, and both were measured as needed:
+        # the MOUNT of the slave onto /dev/ttymxc1 (without it the dump dies
+        # with "./dev/ttymxc1 doesn't have a proper root mount" - same class
+        # as /dev/null), and the tty FD the subject holds (tty[rdev:dev],
+        # answered at restore by --inherit-fd on fd 9).
+        DUMP_XTRA=("${BASE_DUMP[@]}" --external 'mnt[/dev/ttymxc1]:ttybind'
+                   --external "tty[$RDEV1:$DEV1]")
+        RESTORE_XTRA=("${BASE_RESTORE[@]}" --inherit-fd "fd[9]:tty[$RDEV1:$DEV1]")
+        RESTORE_NSCLEAN=1
+        # The mnt external's restore half is appended INSIDE the hook: it has
+        # to name pty 2's slave, which does not exist until the hook makes
+        # it. The judge builds the restore command after this runs, so a
+        # late append lands in it.
+        PRE_RESTORE_CMD='kill -9 '$HOLD1' 2>/dev/null;
+            setsid python3 "$WORK/ptyhold.py" "$WORK/pty2.info" </dev/null >/dev/null 2>&1 &
+            HOLD2=$!;
+            for _ in $(seq 50); do [ -s "$WORK/pty2.info" ] && break; sleep 0.1; done;
+            RESTORE_XTRA+=(--external "mnt[ttybind]:$(cut -d" " -f1 "$WORK/pty2.info")");
+            echo "  pty holder restarted (pid $HOLD2, was '$HOLD1')"'
+        RESTORE_TTYFD_FILE=$WORK/pty2.info
+        rungns "F - holds a pty slave, master OUTSIDE; restored onto a NEW pty" \
+               "$WORK/dumpF" /counttty none "$SLAVE1" && RF=ok || RF=NO
+        DUMP_XTRA=(); RESTORE_XTRA=(); RESTORE_NSCLEAN=0
+        PRE_RESTORE_CMD=""; RESTORE_TTYFD_FILE=""
+        pkill -9 -f ptyhold.py 2>/dev/null
+    else
+        RF=NO
+        echo; echo "=== rung F FAILED to start its pty holder"
+        kill -9 "$HOLD1" 2>/dev/null
+    fi
+fi
+
+if want G && [ "${EXTOK:-0}" = 1 ]; then
+    # THE RING: a host writer advances a file-backed MAP_SHARED page five
+    # times a second and NEVER stops - the padglhost-writing-the-switch-ring
+    # shape. The subject maps the same file; after the restore its view must
+    # overtake the value the page held before the restore, or the mapping is
+    # a stale copy. RING_MIN is snapshotted in the kill-to-restore window.
+    setsid "$WORK/ringwrite" "$WORK/rootfs/data/ring" </dev/null >/dev/null 2>&1 &
+    RINGPID=$!
+    rm -f "$WORK/rootfs/data/ring.out"
+    DUMP_XTRA=("${BASE_DUMP[@]}")
+    RESTORE_XTRA=("${BASE_RESTORE[@]}")
+    RESTORE_NSCLEAN=1
+    PRE_RESTORE_CMD='RING_MIN=$(od -An -tu4 -N4 "$WORK/rootfs/data/ring" | tr -d " ");
+        echo "  ring at $RING_MIN before the restore (writer still running)"'
+    RING_OUT=$WORK/rootfs/data/ring.out
+    rungns "G - file-backed MAP_SHARED ring, host writer LIVE across the checkpoint" \
+           "$WORK/dumpG" /countring none && RG=ok || RG=NO
+    DUMP_XTRA=(); RESTORE_XTRA=(); RESTORE_NSCLEAN=0
+    PRE_RESTORE_CMD=""; RING_OUT=""; RING_MIN=0
+    kill -9 "$RINGPID" 2>/dev/null
+fi
+
 echo
 echo "=== verdict   (requested: $RUNGS)"
 echo "  A  $RA   ordinary process - is criu working at all here"
@@ -626,13 +870,15 @@ echo "  B  $RB   qemu-user - the assumption item 13's design rests on"
 echo "  C  $RC   qemu-user with threads, which the real guest has"
 echo "  D  $RD   unshare -r -m -p -f + setsid + mounts + chroot - the container"
 echo "  E  $RE   executed from a fuse2fs mount made outside the namespace - the card"
+echo "  F  $RF   holds a pty slave (master outside), restored onto a NEW pty - the node bus"
+echo "  G  $RG   MAP_SHARED ring, host writer live across the checkpoint - the rings"
 echo
 echo "  NOT tested by this ladder, and each is a later rung, not an assumption:"
-echo "    - the pty the node bus binds onto /dev/ttymxc1 (master held outside)"
-echo "    - file-backed MAP_SHARED rings with a host helper writing them"
 echo "    - the LD_PRELOADed shim, and the game's own threads rather than 3 spinners"
 echo "    - the subject running as david (these rungs run it as root; the rig's"
 echo "      userns maps 1000->0, not 0->0)"
+echo "    - a subject that opens its tty WITHOUT O_NOCTTY, the way the real game"
+echo "      may - a controlling tty drags session semantics into the dump"
 
 # Leave nothing mounted: the card fuse mount outlives the script otherwise,
 # and the next run's rm -rf would fight it.

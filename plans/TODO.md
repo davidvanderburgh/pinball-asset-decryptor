@@ -767,14 +767,31 @@ These have each been violated at least once and each cost a run or a window:
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **13. Save and load save states.** `S2 D3` ← IN PROGRESS *(**D5 → D4 →
-      D3, 2026-08-07:** the whole desk-side ladder now PASSES — criu restores
-      the full container shape, fuse card included, with a written recipe.
-      What is left needs the rig itself: run_game.sh changes and live runs.)*
-      **★★★ THE ENTIRE FIVE-RUNG LADDER PASSES IN ONE RUN (A ordinary, B
+      D3, 2026-08-07/08:** the whole desk-side ladder now PASSES — every
+      external shape the guest holds is proven restorable. What is left needs
+      the rig itself: run_game.sh changes and live runs.)*
+      **★★★ ALL SEVEN RUNGS PASS IN ONE RUN (2026-08-08): A ordinary, B
       qemu-user, C +threads, D the full unshare -r -m -p -f + pivot_root
-      container, E executed FROM a fuse2fs card bound in from outside).**
+      container, E executed FROM a fuse2fs card bound in from outside, F
+      holding a pty slave whose MASTER a host process keeps — restored onto a
+      NEW pty from a RESTARTED holder — and G a file-backed MAP_SHARED ring
+      a host writer kept advancing straight through the checkpoint.**
       Every rung resumes its counter (container rungs 70 → 85 → 90, margin 60
-      over a restart). **The restore RECIPE, each part measured as necessary
+      over a restart).
+      **What F establishes (the node bus):** TWO externals, one per layer —
+      the slave's bind mount (`--external mnt[/dev/ttymxc1]:ttybind`, without
+      which the dump dies "doesn't have a proper root mount") AND the held fd
+      (`--external tty[rdev:dev]`, hex st_rdev:st_dev). At restore the mnt
+      external points at the NEW slave and `--inherit-fd fd[9]:tty[old:key]`
+      hands criu an fd to it — the restart-the-helpers flow, working. The
+      subject opens with **O_NOCTTY, deliberately**; whether the real game
+      acquires ttymxc1 as controlling tty is an open question that would drag
+      session semantics into the dump.
+      **What G establishes (the rings):** not just that the mapping restores
+      — that it reattaches to the LIVE page. The judge requires the restored
+      subject's view to OVERTAKE the value the page held before the restore
+      (81 → 100 read through the restored mapping while the writer never
+      stopped); a stale copy restored from images fails that gate. **The restore RECIPE, each part measured as necessary
       on this WSL, is baked into `criuladder.sh` with the failure that forced
       it beside each line:**
       • **pivot_root, not chroot** — criu refuses a chroot'd task twice over
@@ -868,22 +885,23 @@ These have each been violated at least once and each cost a run or a window:
       the file, and **the content lives in the file, so the rings survive a
       checkpoint without being in it.**
       **STILL UNTESTED, and each is the next rung rather than an assumption:**
-      the node bus pty bound onto `/dev/ttymxc1` (master held outside →
-      `--external tty[]`), file-backed MAP_SHARED rings with a host helper
-      writing them, the LD_PRELOADed shim, the subject running as david (the
-      ladder runs as root, userns 0→0; the rig maps 1000→0), and whether the
-      game survives its node bus, audio sink and GL bridge being restarted
-      underneath it.
+      the LD_PRELOADed shim and the game's real thread count, the subject
+      running as david (the ladder runs as root, userns 0→0; the rig maps
+      1000→0), a tty opened WITHOUT O_NOCTTY, and whether the game survives
+      its node bus, audio sink and GL bridge being restarted underneath it.
       **Committed:** `26f8f19` (probe, rungs A/B, the ptmx finding), `6f3242d`
-      (rung C, threads), this commit (rungs D/E, the container recipe).
-      **Resume:** two fronts, either order. (a) Extend the ladder with the
-      remaining externals: a pty whose master a host process holds, bound in
-      as `/dev/ttymxc1` (`--external tty[]`), and a file-backed MAP_SHARED
-      ring a host helper keeps writing — both shapes read off `run_game.sh` /
-      `hwshim.c`. (b) Start making `run_game.sh` checkpointable OFFLINE: the
-      pivot_root variant behind an env flag (`PAD_PIVOT=1`), rootfs-local
-      qemu, and a `savestate.sh`/`restorestate.sh` pair wrapping the recipe
-      in `criuladder.sh`'s comments. Only then a live game.
+      (rung C, threads), `b8f99cc` (rungs D/E, the container recipe), this
+      commit (rungs F/G — every external shape now proven).
+      **Resume:** the ladder is DONE — front (b) is what is left. Make
+      `run_game.sh` checkpointable behind an env flag (`PAD_PIVOT=1`):
+      pivot_root instead of chroot (self-bind $R first), rootfs-local
+      explicit qemu instead of binfmt, stdio pointed inside the container,
+      and the stray wsl.exe ptmx fds closed. Then `savestate.sh` /
+      `restorestate.sh` wrapping the recipe now proven in `criuladder.sh`
+      (compat engine, --root, nsclean, the mnt/tty externals, restart
+      cardmount.sh + nodebus.py first, SIGKILL-only teardown). Then a live
+      game: boot with PAD_PIVOT=1, confirm it still plays, and only then
+      checkpoint one.
       — S2 for the same reason as
       item 16: play works, but every run pays for its absence.
       Freeze a live game and resume it later

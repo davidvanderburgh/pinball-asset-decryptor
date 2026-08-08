@@ -947,11 +947,22 @@ These have each been violated at least once and each cost a run or a window:
       running as david (the ladder runs as root, userns 0→0; the rig maps
       1000→0), a tty opened WITHOUT O_NOCTTY, and whether the game survives
       its node bus, audio sink and GL bridge being restarted underneath it.
+      **★ CONTROLS SHIPPED: `savegame.sh` / `loadgame.sh` (slot-based), tested
+      on the real game.** Save while PLAYING (leave-running, the game does not
+      pause), keep playing, then load and it jumps BACK to the save: measured
+      godzilla_pro saved at frame 1340, played on to 2260, `loadgame` reloaded
+      to 1780 and climbed — a real quicksave/quickload. The rootfs and title
+      come from the guest's own `/proc/PID/environ`, so the wrappers need no
+      paths. **A leave-running save grows every append-only output** (game.out,
+      audio.raw, audio.raw.center) past the size criu recorded; `restorestate.sh`
+      now truncates each file criu names to the exact expected size and retries
+      (bounded, only on that error) — this is what makes keep-playing saves
+      restorable at all.
       **Committed:** `26f8f19`/`6f3242d`/`b8f99cc`/`4d255c1` (the ladder),
       `6b3882e` (run_game.sh PAD_PIVOT + save/restore, offline), `255f73e`
-      (comm=game, watch.sh/alive.sh wiring, live boot+save), this commit
-      (option (a): drop `unshare -r` for a root guest; mount-v2 default;
-      `savetest_real.sh`; CLOSED LOOP on the real game).
+      (comm=game, watch.sh/alive.sh wiring, live boot+save), `f5fc6c0`
+      (option (a): root guest, no userns; mount-v2 default; CLOSED LOOP), this
+      commit (`savegame.sh`/`loadgame.sh` + the growing-output retry).
       **Resume — the core is PROVEN; what is left is full-rig integration, all
       of it understood and none an unknown mechanism:**
       **(1) The full rig, not headless.** `savetest_real.sh` runs the guest
@@ -959,10 +970,15 @@ These have each been violated at least once and each cost a run or a window:
       file-backed rings on `/dump` (proven restorable by ladder rung G), but
       restorestate must RESTART them like it restarts nodebus, and that is
       untested. Wire and measure it.
-      **(2) watch.sh must launch a pivot run as ROOT** while its helpers stay
-      david — option (a) needs the guest root, but padglhost et al. are david's
-      window/audio. The pivot tail is already wired (`255f73e`); the
-      root-launch of run_game.sh is not.
+      **(2) a PLAYABLE windowed session.** The controls work, but they need a
+      running pivot guest, which today means a headless boot. To play WITH the
+      window and click save/load, `watch.sh` must run the guest under PAD_PIVOT
+      as ROOT (criu needs it). Two shapes to try: run the WHOLE watch.sh session
+      as root (`wsl -u root … watch.sh` — root has `DISPLAY=:0`, so padglhost
+      MIGHT get a WSLg window; untested, and the interop playfield/audio are
+      david-user things that may not), or keep helpers as david and escalate
+      only run_game.sh. The pivot log tail is already wired (`255f73e`); the
+      root launch is not. This is the gate to David clicking save/load in-game.
       **(3) leave-running.** Real saves must not pause play, but the log fd
       grows and fails criu's size check. Either briefly stop only across the
       dump, redirect the guest log to a pipe, or exclude that fd from

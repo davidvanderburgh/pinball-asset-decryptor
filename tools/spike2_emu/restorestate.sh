@@ -113,13 +113,42 @@ fi
 # are exact opposites, which is why this is a knob and not a guess.
 COMPAT=()
 [ "${PAD_RESTORE_COMPAT:-0}" = 1 ] && COMPAT=(--mntns-compat-mode)
+
+do_restore() {
+    unshare -m bash "$NSCLEAN" \
+        "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
+            --pidfile "$DDIR/restored.pid" \
+            --root "$R" ${COMPAT[@]+"${COMPAT[@]}"} \
+            ${REST_EXT[@]+"${REST_EXT[@]}"} ${INHERIT[@]+"${INHERIT[@]}"}
+}
+
+# THE GROWING-OUTPUT RETRY. A save that left the game RUNNING (a quicksave)
+# keeps writing its append-only outputs - the log (game.out) and the audio
+# streams (audio.raw, audio.raw.center) - so by restore time each is bigger
+# than the size criu recorded for its fd, and criu refuses it:
+#   "File dump/audio.raw has bad size N (expect M)".
+# criu names the exact size it wants for EACH such file (one per attempt), so
+# truncate every one it names back to M - harmless, they are output streams and
+# the guest just keeps appending after restore - and retry until it stops
+# complaining about sizes. The error is the one authority; a stat guess is
+# unreliable because the guest appends between the dump and the stat. Only ever
+# truncates files criu itself names, only on this exact error, bounded.
 echo "[restore] restoring...${COMPAT:+ (compat engine)}"
-unshare -m bash "$NSCLEAN" \
-    "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
-        --pidfile "$DDIR/restored.pid" \
-        --root "$R" ${COMPAT[@]+"${COMPAT[@]}"} \
-        ${REST_EXT[@]+"${REST_EXT[@]}"} ${INHERIT[@]+"${INHERIT[@]}"}
-RC=$?
+for _attempt in 1 2 3 4 5 6; do
+    do_restore
+    RC=$?
+    { [ "$RC" = 0 ] && ! grep -aq 'Restoring FAILED' "$DDIR/restore.log"; } && break
+    # truncate every growing file this attempt named; stop if it named none
+    # (then it is a real failure, not a size mismatch).
+    fixed=0
+    while read -r path want; do
+        [ -f "$R/$path" ] || continue
+        truncate -s "$want" "$R/$path" && {
+            echo "[restore] $path grew since the save; truncated to $want"; fixed=1; }
+    done < <(grep -aoE 'File [^ ]+ has bad size [0-9]+ \(expect [0-9]+\)' "$DDIR/restore.log" \
+             | sed -E 's/^File (\S+) has bad size [0-9]+ \(expect ([0-9]+)\)/\1 \2/' | sort -u)
+    [ "$fixed" = 1 ] || break
+done
 [ -n "$TTYFD" ] && exec 9>&-
 
 if [ "$RC" != 0 ] || grep -aq 'Restoring FAILED' "$DDIR/restore.log"; then

@@ -94,6 +94,12 @@ while read -r kind a b c; do
         INHERIT+=(--inherit-fd "fd[9]:tty[$b]")
         TTYFD=$NEWPTY
         ;;
+    groups)
+        # a = the guest's supplementary gids (comma list, or "none"). Adopted
+        # below so criu's restorer can SKIP setgroups - the only way to restore
+        # into an unprivileged user namespace. See savestate.sh for the detail.
+        GUEST_GROUPS=$a
+        ;;
     fifo)
         # a=guest path. criu re-opens a named fifo by path; playaudio.sh
         # deletes it when its reader ends, which killing the guest causes.
@@ -155,8 +161,21 @@ fi
 COMPAT=()
 [ "${PAD_RESTORE_COMPAT:-0}" = 1 ] && COMPAT=(--mntns-compat-mode)
 
+# Adopt the guest's supplementary groups before restoring, so criu's restorer
+# finds them already correct and skips the setgroups it is not allowed to make.
+# Costs nothing when the guest was root (the lists match anyway).
+SETPRIV=()
+if [ -n "${GUEST_GROUPS:-}" ]; then
+    if [ "$GUEST_GROUPS" = none ]; then
+        SETPRIV=(setpriv --clear-groups)
+    else
+        SETPRIV=(setpriv --groups "$GUEST_GROUPS")
+    fi
+    echo "[restore] adopting the guest's groups: $GUEST_GROUPS"
+fi
+
 do_restore() {
-    unshare -m bash "$NSCLEAN" \
+    unshare -m bash "$NSCLEAN" ${SETPRIV[@]+"${SETPRIV[@]}"} \
         "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
             --pidfile "$DDIR/restored.pid" \
             --root "$R" ${COMPAT[@]+"${COMPAT[@]}"} \

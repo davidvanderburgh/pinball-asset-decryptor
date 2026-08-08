@@ -204,6 +204,54 @@ for _v in $(set | sed -n 's/^\(PAD_[A-Z0-9_]*\|MESA_[A-Z0-9_]*\|GALLIUM_DRIVER\)
 done
 unset _v _val
 
+# ★ ROOT RUNS THE GUEST; THE DESKTOP USER RUNS EVERYTHING ELSE (item 13).
+#
+# A checkpointable guest has to be root: `unshare -r`'s unprivileged user
+# namespace disables setgroups, and criu cannot restore a process into it
+# ("Can't setgroups([7 gids]): -22"). Matching criu's own groups does NOT help,
+# because the check happens INSIDE that namespace, where the user's gids are
+# not mapped at all. So PAD_PIVOT sessions are launched as root.
+#
+# But root must NOT run the helpers, and this was measured the hard way: as
+# root, padglhost cannot attach to the WSLg X server's shared memory - the log
+# fills with "MESA: error: Failed to attach to x11 shm" and THE WINDOW IS
+# BLACK - and the ring files come out root-owned, so the playfield says
+# "dump/padled not readable". The display, audio and Windows-interop helpers
+# all belong to the ordinary desktop user.
+#
+# So: as root, every helper is dropped back to that user, and the rings are
+# created owned by them. The guest still reads and writes those rings because
+# root ignores file permissions. Not root (an ordinary run) - nothing changes.
+PAD_USER=${PAD_USER:-${SUDO_USER:-}}
+if [ -z "$PAD_USER" ] && [ "$(id -u)" = 0 ]; then
+    # whoever owns the rootfs is the desktop user whose session this is
+    PAD_USER=$(stat -c %U "$ROOT" 2>/dev/null)
+    [ "$PAD_USER" = root ] && PAD_USER=""
+fi
+DROP=0
+[ "$(id -u)" = 0 ] && [ -n "$PAD_USER" ] && DROP=1
+as_user() {
+    if [ "$DROP" = 1 ]; then runuser -u "$PAD_USER" -- "$@"; else "$@"; fi
+}
+# Every helper is started `setsid ... &`, and the pgid is what teardown kills.
+# runuser must therefore go OUTSIDE setsid so the session leader is still the
+# thing $! names: `runuser -u u -- setsid cmd`, not `setsid runuser ...`.
+setsid_as_user() {
+    if [ "$DROP" = 1 ]; then runuser -u "$PAD_USER" -- setsid "$@"; else setsid "$@"; fi
+}
+if [ "$DROP" = 1 ]; then
+    echo "[watch] running the guest as root, helpers as $PAD_USER"
+    # Hand the log files back, or the NEXT ordinary run cannot truncate them:
+    # `>` needs write permission on the FILE, and a root-owned 644 log in the
+    # user's own home refuses it. That would break plain watch.sh runs after a
+    # single PAD_PIVOT one, which is a nasty thing to leave behind.
+    for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
+             "$HOME/padaudio.log" "$HOME/padtables.log"; do
+        [ -e "$f" ] || : > "$f" 2>/dev/null
+        chown "$PAD_USER" "$f" 2>/dev/null
+    done
+fi
+
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
 # PAD_PIVOT run only: the guest logs to $ROOT/dump/game.out (its stdout points
 # inside the container - see run_game.sh), so a tail folds that back into $LOG
@@ -376,6 +424,14 @@ rm -f "$RING_HOST" "$SW_HOST"
 # One page, zeroed: the shim stamps the magic once it maps it.
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
+# The rings must belong to the DESKTOP user: the helpers that read and write
+# them (padglhost, the playfield over \\wsl.localhost, padvidhost) run as that
+# user, and a root-owned padled is exactly what made the playfield report
+# "dump/padled not readable". The guest is root and ignores the permissions.
+if [ "$DROP" = 1 ]; then
+    chown "$PAD_USER" "$LED_HOST" 2>/dev/null
+    chown "$PAD_USER" "$ROOT/dump" 2>/dev/null
+fi
 
 # HOW LONG THIS WSL SESSION HAS BEEN UP, because it predicts a fault nothing
 # here can detect.
@@ -406,7 +462,7 @@ fi
 # Audio player first, so the FIFO exists before the game's first frame. It is
 # started with its own session and killed in teardown like everything else.
 if [ "${PAD_AUDIO:-1}" != 0 ]; then
-    setsid bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
+    setsid_as_user bash "$S/playaudio.sh" "$AUD_HOST" "$AUD_RATE" 2 "$AUD_FMT_HOST" \
         > "$HOME/padaudio.log" 2>&1 &
     AUDPG=$!
     for i in $(seq 1 40); do [ -p "$AUD_HOST" ] && break; sleep 0.05; done
@@ -422,7 +478,7 @@ fi
 
 if [ "${PAD_VID:-1}" != 0 ]; then
     rm -f "$VID_HOST"
-    setsid python3 "$S/padvidhost.py" "$VID_HOST" > "$HOME/padvid.log" 2>&1 &
+    setsid_as_user python3 "$S/padvidhost.py" "$VID_HOST" > "$HOME/padvid.log" 2>&1 &
     VIDPG=$!
     for i in $(seq 1 40); do [ -s "$VID_HOST" ] && break; sleep 0.05; done
     if [ -s "$VID_HOST" ]; then
@@ -439,7 +495,7 @@ if [ "${PAD_VID:-1}" != 0 ]; then
 fi
 
 echo "[watch] starting renderer (window opens when the game's first frame arrives)"
-setsid env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
+setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
            PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-1}" \
            PAD_VID_SHM="${VID_FOR_GL:-}" \
            "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
@@ -543,7 +599,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # which is exactly what Led Zeppelin and Elvira are.
     if grep -q '^drawable=yes' "$TBL_OUT"; then
         echo "[watch]   opening now; the switch table follows in the background"
-        setsid python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
+        setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
             > "$HOME/padtables.log" 2>&1 &
         TBLPG=$!
     else
@@ -566,7 +622,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
         if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then
-            setsid "$PF_PY" "$RIG/playfield.py" "$GAME" </dev/null >/dev/null 2>&1 &
+            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             # Say what to install rather than just what is missing: on Debian
@@ -606,7 +662,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         [ -n "${PAD_PF_FADE_MS:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
         if command -v "$PF_PY" >/dev/null 2>&1; then
-            setsid "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
+            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             echo "[watch] no Windows interop; run playfield.py yourself:" >&2
@@ -649,7 +705,7 @@ fi
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
 if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    setsid bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
+    setsid_as_user bash "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."

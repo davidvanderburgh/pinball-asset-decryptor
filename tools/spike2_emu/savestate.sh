@@ -96,6 +96,20 @@ for fd in /proc/$PID/fd/*; do
     esac
 done
 
+# --- the guest's supplementary groups ------------------------------------
+# ★ THIS IS WHAT LETS A GUEST IN AN UNPRIVILEGED USER NAMESPACE BE RESTORED.
+# In such a namespace the kernel disables setgroups, so criu cannot restore a
+# process's groups - and a david guest under `unshare -r` died exactly there:
+#   "Can't setgroups([7 gids]): -22" then "BUG at restorer.c:819".
+# But criu's restorer SKIPS the setgroups call entirely when the RESTORING
+# process's own group list already equals the dumped one (pie/restorer.c:215,
+# "If the current list of groups is already what we want"). criu runs as root,
+# whose groups are not david's, which is why it never skipped. So record the
+# guest's groups here and let restorestate.sh adopt them before restoring.
+GRP=$(awk '/^Groups:/{ $1=""; print }' "/proc/$PID/status" 2>/dev/null \
+      | tr -s ' ' | sed 's/^ *//; s/ *$//' | tr ' ' ',')
+echo "groups ${GRP:-none}" >> "$DDIR/restore.env"
+
 # --- FIFOs the guest holds (the audio pipe) ------------------------------
 # The guest writes PCM into dump/audio.fifo, made by playaudio.sh. criu restores
 # a named fifo by re-opening its PATH (a "fake fifo"), so it must exist at

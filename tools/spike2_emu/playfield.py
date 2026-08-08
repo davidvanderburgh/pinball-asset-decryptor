@@ -777,7 +777,75 @@ class Tip:
             self.shown = False
 
 
-class Field:
+class StateOps:
+    """Save state / Load state (item 13), shared by BOTH views - a title with
+    no artwork still saves and loads, because savegame.sh/loadgame.sh know
+    nothing about drawings. Each view creates its own `self._state_btns` in
+    its own layout (Field: canvas buttons bottom-left; Schematic: the top
+    bar) and wires `_state_status()` into its own tick's status writes."""
+
+    def run_state(self, script):
+        """One at a time, off the Tk thread.
+
+        The spawn takes seconds (a save dumps ~500 MB; a load is a criu
+        restore), so it runs on its own thread with both buttons disabled -
+        NOT on SwitchDriver's queue, where it would block a held flipper's
+        release behind a 10 s restore. Tk is only ever touched back on the Tk
+        thread via after(), which is the cross-thread rule this repo has paid
+        for before (the Partition Explorer lockup).
+        """
+        if getattr(self, "_state_busy", False):
+            return
+        self._state_busy = True
+        for b in self._state_btns:
+            b.config(state="disabled")
+        verb = "saving" if script.startswith("save") else "loading"
+        self._state_msg = ("%s state..." % verb, None)
+
+        def work():
+            r = state_run(script)
+
+            def done():
+                self._state_busy = False
+                for b in self._state_btns:
+                    b.config(state="normal")
+                # The wrappers' own last [savegame]/[loadgame] line is the
+                # best one-line answer either way ("saved to slot...",
+                # "no game is running...", "FAILED"); fall back to whatever
+                # was printed last.
+                if r is None:
+                    text = "%s did not run" % script
+                else:
+                    lines = [ln.strip() for ln in
+                             (r.stdout or b"").decode("utf8", "replace").splitlines()
+                             + (r.stderr or b"").decode("utf8", "replace").splitlines()
+                             if ln.strip()]
+                    tagged = [ln for ln in lines
+                              if ln.startswith(("[savegame]", "[loadgame]"))]
+                    text = (tagged or lines or ["%s: no output" % script])[-1]
+                self._state_msg = (text, time.monotonic() + 8.0)
+
+            self.cv.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _state_status(self):
+        """The status-bar override while a save/load runs, and its result for
+        a few seconds after - both ticks rewrite the bar every pass, so a
+        plain config() here would survive for one frame at most. Reads its
+        OWN monotonic clock: Field's tick t0 is perf_counter, a different
+        epoch from the monotonic stamp `until` carries."""
+        m = getattr(self, "_state_msg", None)
+        if not m:
+            return None
+        text, until = m
+        if until is not None and time.monotonic() > until:
+            self._state_msg = None
+            return None
+        return text
+
+
+class Field(StateOps):
     def __init__(self, root):
         from PIL import Image, ImageTk
         self.root = root
@@ -1119,66 +1187,6 @@ class Field:
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
-
-    def run_state(self, script):
-        """Save state / Load state (item 13). One at a time, off the Tk thread.
-
-        The spawn takes seconds (a save dumps ~500 MB; a load is a criu
-        restore), so it runs on its own thread with both buttons disabled -
-        NOT on SwitchDriver's queue, where it would block a held flipper's
-        release behind a 10 s restore. Tk is only ever touched back on the Tk
-        thread via after(), which is the cross-thread rule this repo has paid
-        for before (the Partition Explorer lockup).
-        """
-        if getattr(self, "_state_busy", False):
-            return
-        self._state_busy = True
-        for b in self._state_btns:
-            b.config(state="disabled")
-        verb = "saving" if script.startswith("save") else "loading"
-        self._state_msg = ("%s state..." % verb, None)
-
-        def work():
-            r = state_run(script)
-
-            def done():
-                self._state_busy = False
-                for b in self._state_btns:
-                    b.config(state="normal")
-                # The wrappers' own last [savegame]/[loadgame] line is the
-                # best one-line answer either way ("saved to slot...",
-                # "no game is running...", "FAILED"); fall back to whatever
-                # was printed last.
-                if r is None:
-                    text = "%s did not run" % script
-                else:
-                    lines = [ln.strip() for ln in
-                             (r.stdout or b"").decode("utf8", "replace").splitlines()
-                             + (r.stderr or b"").decode("utf8", "replace").splitlines()
-                             if ln.strip()]
-                    tagged = [ln for ln in lines
-                              if ln.startswith(("[savegame]", "[loadgame]"))]
-                    text = (tagged or lines or ["%s: no output" % script])[-1]
-                self._state_msg = (text, time.monotonic() + 8.0)
-
-            self.cv.after(0, done)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _state_status(self):
-        """The status-bar override while a save/load runs, and its result for
-        a few seconds after - tick() rewrites the bar every frame, so a plain
-        config() here would survive for one frame at most. Reads its OWN
-        monotonic clock: tick's t0 is perf_counter, a different epoch from
-        the monotonic stamp `until` carries."""
-        m = getattr(self, "_state_msg", None)
-        if not m:
-            return None
-        text, until = m
-        if until is not None and time.monotonic() > until:
-            self._state_msg = None
-            return None
-        return text
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
@@ -1644,7 +1652,7 @@ def _onscreen(root, x, y):
             and -20 <= y <= root.winfo_screenheight() - 80)
 
 
-class Schematic:
+class Schematic(StateOps):
     """The window for a title with NO positions: every switch, by node, clickable.
 
     This is not a lesser playfield, it is a different question answered. With no
@@ -1673,6 +1681,18 @@ class Schematic:
                       % (GAME, len(switches)),
                  bg="#111", fg="#bbb", font=("Consolas", 9)).pack(side="left",
                                                                   padx=4, pady=4)
+        # Save/Load state on the bar's right (item 13, same pair as the
+        # artwork view's bottom-left cluster): a title with no artwork still
+        # saves and loads - the wrappers know nothing about drawings. Packed
+        # side="right", so LOAD goes first to end up rightmost and the pair
+        # reads Save | Load left-to-right, matching the artwork view.
+        self._state_btns = []
+        for label, script in (("Load state", "loadgame.sh"),
+                              ("Save state", "savegame.sh")):
+            b = tk.Button(bar, text=label, width=11,
+                          command=lambda s=script: self.run_state(s))
+            b.pack(side="right", padx=(0, 4), pady=2)
+            self._state_btns.append(b)
 
         by_node = {}
         for sw in switches:
@@ -1761,15 +1781,18 @@ class Schematic:
             save_state(self.root)           # see Field.tick: this is the COMMON close
             self.root.destroy()             # the run ended; leave with it
             return
+        state_msg = self._state_status()
         if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
-            self.status.config(text="no emulator (dump/padled not readable)")
+            self.status.config(text=state_msg
+                               or "no emulator (dump/padled not readable)")
         else:
             self.status.config(
-                text=" emulator up   %d LED writes decoded   %d coils addressed"
-                     "   (no positions for this title: see swtable.py)"
-                     % (struct.unpack_from("<I", d, 12)[0],
-                        struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
-                        if len(d) >= PADLED_READ else 0))
+                text=state_msg
+                     or " emulator up   %d LED writes decoded   %d coils addressed"
+                        "   (no positions for this title: see swtable.py)"
+                        % (struct.unpack_from("<I", d, 12)[0],
+                           struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
+                           if len(d) >= PADLED_READ else 0))
         self.root.after(POLL_MS, self.tick)
 
 

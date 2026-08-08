@@ -831,8 +831,12 @@ These have each been violated at least once and each cost a run or a window:
       buttons disabled while one runs and the result on the status bar
       (a tick-proof override; tick rewrites the bar every frame). NOT on
       SwitchDriver's queue — a flipper release must not wait behind a 10 s
-      restore. Schematic view has no buttons yet (it has no action row at
-      all; Godzilla is the only title that runs today, item 27).
+      restore. **The SCHEMATIC view has the same pair, top-right of its bar**
+      (David asked; verified rendering on elvira3, a real no-artwork title) —
+      both views share one StateOps mixin, and the wrappers know nothing
+      about drawings, so any title that gets a playfield window gets working
+      save/load controls. A title that gets NO window at all is item 27's
+      silent skip; when 27(a) lands, the buttons ride in with the schematic.
       **Verifying the buttons' exact spawn found and fixed THREE real faults,
       all live-verified in one session (save → load → repeat load, video at
       29.9-30.5 NEW/s after each, host as david):**

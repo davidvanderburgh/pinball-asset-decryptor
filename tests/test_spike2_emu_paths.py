@@ -11,6 +11,7 @@ proof is a run; this is the part that can be checked in half a second after any
 edit.
 """
 import os
+import re
 import sys
 
 import pytest
@@ -282,6 +283,70 @@ def test_the_rig_never_writes_into_its_own_directory():
                      "once installed:\n  " + "\n  ".join(bad))
 
 
+#: `$RIG/`, `$ROOT/` and friends where the shell WOULD word-split them.
+_SPLIT_PAT = re.compile(r"(?<=[ \t])\$\{?(?:RIG|S|ROOT|R|HOME|TABLES)\}?/")
+
+
+def _unquoted(line):
+    """The line with the INSIDE of every quoted string blanked out.
+
+    A quoted string is one word however many spaces the path inside it has,
+    which is the whole rule being linted - so `$ROOT/` inside quotes is the
+    fix, not the fault, and the scan must not see it.
+
+    A PAIRWISE `"[^"]*"` STRIP IS NOT ENOUGH, and getting that wrong is what
+    made this worth writing: `"$(stat -c%s "$R/usr/lib/libEGL.so.1") bytes"`
+    pairs the WRONG quotes with each other and leaves the inner path looking
+    bare.  A command substitution opens a quoting context of its own, so it is
+    tracked rather than pattern-matched.
+
+    TWO THINGS ARE DELIBERATE.  Positions are preserved, one character in one
+    out, so the leading-space lookbehind still means what it says.  And the
+    QUOTE MARKS THEMSELVES SURVIVE: blanking them to spaces would manufacture
+    a leading space in front of `"...at "$R/games/x`, quietly widening this
+    lint to a shape it has never covered.  Narrowing a false positive is the
+    job here; finding new faults in other people's scripts is not.
+    """
+    out, stack, state, i = [], [], None, 0
+    while i < len(line):
+        c = line[i]
+        nxt = line[i + 1] if i + 1 < len(line) else ""
+        keep = state is None
+        if state == "'":                       # no escapes inside single
+            if c == "'":
+                state, keep = None, True
+        elif c == "\\" and state != "'":       # the escaped char is literal
+            out.append(c)
+            if nxt:
+                out.append(nxt)
+                i += 1
+            i += 1
+            continue
+        elif c == "$" and nxt == "(":          # a context of its own
+            stack.append(state)
+            state = None
+            out.append("$(")
+            i += 2
+            continue
+        elif state == '"':
+            if c == '"':
+                state, keep = None, True
+        elif c in ('"', "'"):
+            state, keep = c, True
+        elif c == ")" and stack:
+            state = stack.pop()
+        out.append(c if keep else " ")
+        i += 1
+    return "".join(out)
+
+
+def _splitting_paths(line):
+    """Would a path with a space in it break this line apart?"""
+    if line.lstrip().startswith("#"):
+        return False
+    return bool(_SPLIT_PAT.search(_unquoted(line)))
+
+
 def test_no_unquoted_path_expansion_in_the_shell_scripts():
     """A path with a SPACE in it must not word-split into two arguments.
 
@@ -295,22 +360,35 @@ def test_no_unquoted_path_expansion_in_the_shell_scripts():
     A lint rather than a run: the failure needs WSL, a card and several minutes
     to see, and this sees it in milliseconds after any edit. It only checks the
     argument-leading case, which is the one that splits - an assignment's
-    right-hand side does not word-split and is left alone.
+    right-hand side does not word-split and is left alone, and neither does
+    anything inside quotes.
     """
     import glob
-    import re
     bad = []
-    pat = re.compile(r"(?<=[ \t])\$\{?(?:RIG|S|ROOT|R|HOME|TABLES)\}?/")
     for path in sorted(glob.glob(os.path.join(RIG, "*.sh"))):
         with open(path, encoding="utf-8", newline="") as f:
             for n, line in enumerate(f, 1):
-                if line.lstrip().startswith("#"):
-                    continue
-                if pat.search(line):
+                if _splitting_paths(line):
                     bad.append("%s:%d: %s"
                                % (os.path.basename(path), n, line.strip()[:90]))
     assert not bad, ("unquoted path expansion (breaks under a path with a "
                      "space):\n  " + "\n  ".join(bad))
+
+
+def test_the_lint_knows_a_quoted_path_from_a_bare_one():
+    """It did not, and it turned the whole suite red on three runners for an
+    `echo "... at $ROOT/games/$GAME/game"` that is correct as written - the
+    quotes are exactly what stops the split.
+
+    Both directions, because the cheap way to silence a false positive is to
+    defang the lint, and then the fault it exists for walks back in.
+    """
+    assert _splitting_paths('cp $RIG/hwshim.c $HOME/emusrc/hwshim.c')
+    assert _splitting_paths('bash $RIG/rootfs.sh "$card"')
+    assert not _splitting_paths('echo "no game ELF at $ROOT/games/$GAME/game"')
+    assert not _splitting_paths('cp "$RIG/hwshim.c" "$HOME/emusrc/hwshim.c"')
+    # ...and one quoted argument does not excuse a bare one beside it.
+    assert _splitting_paths('cp "$RIG/a.c" $HOME/emusrc/a.c')
 
 
 def _art_dir(rig, title, names):

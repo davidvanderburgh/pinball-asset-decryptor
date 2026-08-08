@@ -4664,6 +4664,39 @@ def _pathA_seed_peak():
     return int(round((10.0 ** (_PATHA_SEED_DBFS / 20.0)) * 32768.0))
 
 
+def _encode_seed_for(p, peak):
+    """Seed level for sound *p* whose fitted target peaks at *peak* counts
+    (the loudest sample across every channel), or ``None`` for no seed.
+
+    TWO independent levers ask for a seed here and they are not interchangeable:
+
+    * the explicit anti-pop seed (``PAD_STERN_SLOT_SEED_DB`` / the GUI's
+      "Anti-pop codec seed") is a PREFERENCE — an inaudible tone at a level the
+      user picks, gated per-slot so one card can carry treated slots and
+      untouched controls;
+    * the Path A seed (:data:`_PATHA_SEED_DBFS`) is a REQUIREMENT — blip-free
+      skips the master-directory restore, so a near-silent body stays silent
+      everywhere, and below :func:`_pathA_seed_peak` the codec can no longer
+      round-trip it (it decodes to loud garbage).
+
+    So they combine as "whichever is stronger", never "whichever was asked for
+    first".  The old ``seed is None`` gate let the weaker preference cancel the
+    requirement outright: ticking the anti-pop seed at its -65 dBFS default
+    (~18 counts) while blip-free was also on took a silent slot from the ~184
+    counts Path A needs down to 18 — turning one click mitigation ON silently
+    disabled a stronger one, on the exact settings pair the GUI hands out by
+    default (a tester, Led Zeppelin LE 1.22, clicks back on song-name callouts
+    after three builds of settings changes, 2026-08-08).
+
+    The per-slot experiment gate deliberately does NOT narrow the requirement
+    half: a control slot is still a slot that has to decode."""
+    seed = _slot_seed_for(p)
+    if (_pathA_enabled() and peak < _pathA_seed_peak()
+            and (seed is None or seed < _PATHA_SEED_DBFS)):
+        return _PATHA_SEED_DBFS
+    return seed
+
+
 def _apply_slot_seed(samples, np, rng, dbfs):
     """Mix an inaudible edge-faded ~150 Hz tone into *samples* so the correct
     codec slot decodes to spectrally-peaked ("audio") content and the firmware's
@@ -5461,10 +5494,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
                    _stock_render(emu, p, np, stereo=False),
                    _MONO_RANGE, np, headroom)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
-    seed = _slot_seed_for(p)
-    if (seed is None and _pathA_enabled()
-            and int(np.abs(tgt).max()) < _pathA_seed_peak()):
-        seed = _PATHA_SEED_DBFS   # blip-free: rescue a degenerate near-silent slot
+    seed = _encode_seed_for(p, int(np.abs(tgt).max()))
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
     start, body = gr.encode_sound(p, tgt)
     body = _resolve_shared_boundary(emu, p, pred, start, body, tgt, None, np,
@@ -5490,10 +5520,8 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
              fade_ms=fade_ms)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
-    _seed = _slot_seed_for(p)
-    if (_seed is None and _pathA_enabled()
-            and max(int(np.abs(L).max()), int(np.abs(R).max())) < _pathA_seed_peak()):
-        _seed = _PATHA_SEED_DBFS   # blip-free: rescue a degenerate near-silent slot
+    _seed = _encode_seed_for(
+        p, max(int(np.abs(L).max()), int(np.abs(R).max())))
     L = _apply_slot_seed(L, np, _STEREO_RANGE, _seed)
     R = _apply_slot_seed(R, np, _STEREO_RANGE, _seed)
     start, body = sr.encode_sound(p, L, R)

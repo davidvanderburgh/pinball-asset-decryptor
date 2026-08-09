@@ -749,13 +749,6 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
    schematic of its switch list instead.
-   **Save state / Load state** buttons on the playfield window
-   checkpoint the whole running game — game binary, node bus, video,
-   sound — and bring it straight back later, mid-game included
-   (Windows: the app's Start boots the guest in the one shape that can
-   be checkpointed, and drops every helper back to your own desktop
-   session so the window and the sound still work). A run that cannot
-   be saved says why on the button instead of failing quietly.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +
@@ -777,12 +770,7 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is
    nothing to see, and on one that doesn't an amber notice names the
-   fault and each missing package with what it's for. That question is
-   also the first thing to touch WSL after the app opens, and the first
-   WSL touch after a Windows reboot boots the whole WSL VM — tens of
-   seconds, sometimes minutes, that used to look like a frozen app. The
-   tab now says *"Starting WSL — the first start after a Windows reboot
-   can take a minute"* and stays fully usable while it boots. On Windows a **Set
+   fault and each missing package with what it's for. On Windows a **Set
    up emulator…** button repairs it — it installs the missing packages
    into WSL, registers the kernel's handler for 32-bit ARM programs, and
    turns on systemd in `/etc/wsl.conf` so that registration survives a

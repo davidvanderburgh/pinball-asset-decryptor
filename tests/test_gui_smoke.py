@@ -3722,6 +3722,66 @@ def test_font_studio_outline_companion(app, tmp_path, monkeypatch):
     app.root.update()
 
 
+def test_font_studio_outline_scope_covers_every_restyled_size(app, tmp_path,
+                                                              monkeypatch):
+    """Removing the outline has to reach the scenes of every size Apply just
+    restyled, not only the one size the outline is paired to.
+
+    An outline font pairs with exactly ONE size of its typeface, but Apply
+    restyles all of them, so pairing used to decide the scope: on a tester's
+    TMNT the OUTLINE6 companion was narrowed to the 1 scene it shared with the
+    94px row while the typeface he had restyled in full is drawn in all 25 of
+    that outline's scenes, and 24 screens kept the old border.  The scope is
+    still an INTERSECTION, so a scene that draws the outline without any of
+    those body rows keeps it."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+    from pinball_decryptor.plugins.stern import fontrender as fr
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("body")
+    fs._on_select()
+    fo = fs._current_font()
+    comp = fs._companion(fo)
+    assert comp["key"] == "ok"
+
+    # "body2" is the same typeface in /g/scene1 too; make it a second scene so
+    # the union is bigger than the paired row's own overlap
+    tex = tmp_path / "images" / "scene_textures"
+    rows = (tex / "radium_images.txt").read_text(encoding="utf-8")
+    rows += ("scene_textures/radimg_T_8x8_00000005.png\t/g/scene5/scene.radium"
+             "\t100\t256\t32\t32\t5\n")
+    (tex / "radium_images.txt").write_text(rows, encoding="utf-8")
+    fs.reload("body")
+    fs._tree.selection_set("body")
+    fs._on_select()
+    fo = fs._current_font()
+    assert set(fr.scenes_for_font(str(tmp_path), fs._by_key["body2"])) == {
+        "/g/scene1/scene.radium", "/g/scene5/scene.radium"}
+
+    fs._all_sizes_var.set(True)
+    fs._comp_var.set(fs_mod._COMP_CLEAR)
+    fs._pending[fo["key"]] = ({0x41: Image.new("RGBA", (20, 34), (9, 9, 9, 255))},
+                              34, [], "x.ttf")
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._apply()
+
+    scoped = fr.get_font_scope(str(tmp_path), fs._companions["body"])
+    assert scoped == ["/g/scene1/scene.radium", "/g/scene5/scene.radium"], \
+        "the outline must go from every scene the restyled sizes are drawn in"
+
+    fs._close()
+    app.root.update()
+
+
 def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
                                                          monkeypatch):
     """One typeface is baked at many sizes and each is its own font here —

@@ -282,6 +282,61 @@ def test_changed_and_writes_radium_images_size_neutral(tmp_path):
     assert writes[0][0] == data_off                      # patched at the offset
 
 
+def _scoped_atlas_project(tmp_path, n_scenes=4):
+    """One font atlas drawn in *n_scenes* scenes, narrowed by the Fonts window
+    to the FIRST scene only (what an import's outline removal leaves behind)."""
+    from pinball_decryptor.core.checksums import generate_checksums
+    tex = tmp_path / "images" / "scene_textures"
+    tex.mkdir(parents=True)
+    pw = ph = 16
+    Image.new("RGBA", (pw, ph), (10, 20, 30, 255)).save(tex / "atlas.png")
+    cards = ["/g/scene%d/scene.radium" % i for i in range(n_scenes)]
+    rows = "".join(
+        "scene_textures/atlas.png\t%s\t44\t%d\t%d\t%d\t5\n"
+        % (c, pw * ph, pw, ph) for c in cards)
+    tex.joinpath("radium_images.txt").write_text(
+        "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
+        + rows, encoding="utf-8")
+    tex.joinpath("glyph_scope.txt").write_text(
+        "# atlas_rel\tradium card path\nscene_textures/atlas.png\t%s\n"
+        % cards[0], encoding="utf-8")
+    generate_checksums(str(tmp_path))
+    return tex, cards
+
+
+def test_font_scope_does_not_gate_a_replaced_atlas_png(tmp_path):
+    """A font scope narrows GLYPH edits.  Replacing the atlas PNG on the Images
+    tab is the ordinary all-occurrences image replace and must stay that way.
+
+    The scope file is written as a SIDE EFFECT of an import removing an outline
+    companion, so a user can own one without ever opening the scope control.  A
+    tester replaced 13 outline atlases with an empty 512x512 PNG and 900 of
+    their 913 on-card occurrences were dropped by scopes left behind that way,
+    which is why his machine kept the old outlines everywhere but one screen."""
+    from pinball_decryptor.core.checksums import read_checksums
+    tex, cards = _scoped_atlas_project(tmp_path)
+    baseline = read_checksums(str(tmp_path))
+    scope = engine._load_glyph_scopes(str(tmp_path))
+    assert scope == {"scene_textures/atlas.png": {cards[0]}}
+
+    # the user replaces the atlas itself (blank it out, say)
+    Image.new("RGBA", (16, 16), (0, 0, 0, 0)).save(tex / "atlas.png")
+    edits = engine._changed_radium_images(str(tmp_path), baseline, scope=scope)
+    assert sorted(rp for (_o, rp, *_r) in edits) == sorted(cards), \
+        "a replaced atlas PNG has to reach every scene that draws it"
+
+    # ...while a scope still narrows an atlas whose PNG is untouched and whose
+    # only change is composited glyph edits — that is what stops a blanked
+    # outline stripping borders off screens the user never opened
+    from pinball_decryptor.core.checksums import generate_checksums
+    generate_checksums(str(tmp_path))
+    baseline = read_checksums(str(tmp_path))
+    edits = engine._changed_radium_images(
+        str(tmp_path), baseline, extra_changed={"scene_textures/atlas.png"},
+        scope=scope)
+    assert [rp for (_o, rp, *_r) in edits] == [cards[0]]
+
+
 # ---- per-type Extract selection (capabilities.extract_categories) -----------
 
 def test_category_flags_default_and_partial():

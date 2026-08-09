@@ -1234,7 +1234,11 @@ class FontStudioWindow:
                                fo["name"] or fo["key"]),
             [fo, self._companion(fo)] + sibs_planned
             + [self._companion(s) for s in sibs_planned])
-        n, n_comp = self._write_font(fo, pend[0])
+        # Every row this Apply restyles, so an outline companion is removed
+        # wherever the typeface it belongs to has just been replaced — not
+        # only in the scenes shared with the one size it is paired to.
+        restyled = [fo] + sibs_planned
+        n, n_comp = self._write_font(fo, pend[0], bodies=restyled)
         comp = self._companion(fo)
         del self._pending[fo["key"]]
 
@@ -1266,7 +1270,7 @@ class FontStudioWindow:
                         # the rest; the count below says how many missed.
                         n_failed += 1
                         continue
-                    self._write_font(sib, slices, errors)
+                    self._write_font(sib, slices, errors, bodies=restyled)
                     self._pending.pop(sib["key"], None)
                     n_sib += 1
             finally:
@@ -1318,18 +1322,30 @@ class FontStudioWindow:
         self._status.configure(
             text=msg + " — build on the Write tab to put them on the card.")
 
-    def _scope_companion(self, font, comp):
-        """Limit the companion's blanking to the scenes this font is in.
+    def _scope_companion(self, bodies, comp):
+        """Limit the companion's blanking to the scenes *bodies* are in.
 
         Blanking is otherwise CARD-WIDE: one atlas is shared by every scene
         that draws it, and on TMNT a paired outline font turns up 440 times in
         scenes where its body font ISN'T — so a plain blank strips outlines off
         screens the user never touched.  A tester did exactly this by hand and
         reported "i did remove to much shadow, now on the normal font some are
-        missing too".  Scoping it to the overlap keeps the rest stock."""
+        missing too".  Scoping it to the overlap keeps the rest stock.
+
+        *bodies* is every row this Apply restyled, not just the one row the
+        companion is paired to, and that distinction is the whole point.  An
+        outline font pairs with exactly ONE size of its typeface, but Apply
+        restyles all of them, so pairing decided the scope: on a tester's TMNT
+        the OUTLINE6 companion was narrowed to the 1 scene it shared with the
+        94px row, while the typeface he had just restyled in full is drawn in
+        all 25 of that outline's scenes.  Unioning the restyled rows gives
+        25 of 25 there and 200 of 202 on OUTLINE4 — still an intersection, so
+        the 2 scenes that don't draw this typeface at all keep their border."""
         from ..plugins.stern import fontrender as fr
         try:
-            mine = set(fr.scenes_for_font(self.assets_dir, font))
+            mine = set()
+            for b in bodies:
+                mine |= set(fr.scenes_for_font(self.assets_dir, b))
             theirs = set(fr.scenes_for_font(self.assets_dir, comp))
         except Exception:
             return 0
@@ -1342,9 +1358,12 @@ class FontStudioWindow:
             return 0
         return len(both)
 
-    def _write_font(self, font, slices, errors=None):
+    def _write_font(self, font, slices, errors=None, bodies=None):
         """Write one font's slices and handle its outline companion.  Returns
         ``(letters written, companion letters blanked)``.
+
+        *bodies* is every row this Apply is restyling (see
+        :meth:`_scope_companion`); it defaults to this row alone.
 
         Companion failures are COLLECTED, not shown: this runs once per size,
         and a typeface with 94 of them would otherwise stack 94 dialogs."""
@@ -1354,7 +1373,7 @@ class FontStudioWindow:
         n_comp = 0
         if comp is not None and self._comp_var.get() == _COMP_CLEAR:
             try:
-                self._scope_companion(font, comp)
+                self._scope_companion(bodies or [font], comp)
                 n_comp = fr.clear_font(comp)
             except Exception as e:
                 if errors is None:

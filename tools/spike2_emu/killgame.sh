@@ -68,7 +68,21 @@ pkill -9 -f 'padplay\.py'
 # oldest 2.5 h, while alive.sh said the machine was clean.
 #
 # The run scripts go before the wait so nothing restarts under us.
-pkill -9 -f '^bash .*(watch|runbridge|nbrun)\.sh'
+# run_game.sh is in this list as of 2026-08-09, and so is the unshare wrapper
+# it starts, because neither was and the stop path wedged on exactly that:
+# killing the guest is supposed to make unshare reap it and exit, taking
+# run_game.sh's bash with it - and twice in one afternoon it did not. The
+# dead guest sat as a `[game] <defunct>` under a live unshare for half an
+# hour, pgrep -x game still counted it, so the app's button said Stop, Stop
+# killed nothing, and the card mounts could not unmount either - the wedged
+# unshare's OWN mount namespace (-m) still held a reference to every fuse
+# mount, so fusermount's detach never reached fuse2fs. Kill the wrapper and
+# all of that unwinds: the zombie reparents to init, init reaps it, and the
+# mount reference dies with the namespace. The pattern is run_game.sh's exact
+# shape (`unshare $USERNS -m -p -f ...`, -r absent for a root PIVOT run);
+# restorestate.sh's `unshare -m bash` is deliberately NOT matched.
+pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game)\.sh'
+pkill -9 -f '^unshare (-r )?-m -p -f'
 # longplay.sh is started BESIDE a run rather than by one, so it is not in the
 # group above - and watch.sh's own teardown was the only thing that ever killed
 # it. Anything that stops a run through THIS script (abrun.ps1 does) would
@@ -104,6 +118,34 @@ pkill -9 -f '^(/init|python3?) .*playfield\.py'
                     \$_.CommandLine -like '* 45997 *') -or
                    \$_.CommandLine -like '*spike2_emu\playfield.py*') } |
    ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" >/dev/null 2>&1
+
+# ZOMBIE HOLDERS the patterns above did not know. A rig zombie cannot be
+# killed, only reaped, and its holder is whatever process is refusing to do
+# that - so the generic move is to kill the HOLDER and let init reap the
+# orphan. The unshare kill above is this same move for the one shape that has
+# actually wedged; this loop is the backstop for the next shape, so a future
+# holder nobody enumerated does not bring back the frozen-Stop wedge. Two
+# holders are left alone: an interop Relay//init (SIGKILL from inside the VM
+# does not work on it - measured; that case falls through to the wsl
+# --shutdown report below), and anything on a real tty, because a zombie
+# under an INTERACTIVE shell means someone's terminal, and killing a user's
+# shell to tidy a zombie is a worse trade than reporting it.
+ps -eo pid=,ppid=,stat=,comm= 2>/dev/null \
+  | awk '$3 ~ /^Z/ && $4 ~ /^(game|padglhost|fuse2fs|ffmpeg|pythonw\.exe|python3?)$/ {print $2}' \
+  | sort -u | while read -r hp; do
+    [ -z "$hp" ] || [ "$hp" -le 1 ] && continue
+    hcomm=$(ps -o comm= -p "$hp" 2>/dev/null)
+    hargs=$(ps -o args= -p "$hp" 2>/dev/null)
+    htty=$(ps -o tty= -p "$hp" 2>/dev/null | tr -d ' ')
+    case "$hcomm" in ''|init|Relay*) continue ;; esac
+    case "$hargs" in /init*) continue ;; esac
+    [ "$htty" = "?" ] || continue
+    echo "killing $hp ($hcomm): it is holding a dead rig process instead of reaping it"
+    kill -9 "$hp" 2>/dev/null
+done
+# Give init a beat to reap the orphans before the mounts are tried: a freed
+# mount-namespace reference is what lets the unmount below actually work.
+sleep 1
 
 # CARD MOUNTS. cardmount.sh setsid's fuse2fs deliberately - a run's process-group
 # kill used to take the mount out from under the game it had just started, and
@@ -153,4 +195,19 @@ if [ -n "$Z" ]; then
     done
 fi
 
-[ "$after" -eq 0 ] || echo "STILL NOT CLEAN - run alive.sh to see what survived"
+if [ "$after" -ne 0 ]; then
+    echo "STILL NOT CLEAN - run alive.sh to see what survived"
+    # THE LINE THE APP ACTS ON. Anything still standing at this point has
+    # already beaten SIGKILL, a holder sweep and an unmount pass, and from
+    # inside the VM there is no stronger move - but from Windows there is,
+    # and it cures every case at once. Emitted only on WSL: it is the one
+    # platform where the cure exists, and the Emulate tab's Stop watches for
+    # this exact token and offers to run it. Before this line existed the
+    # wedge was a locked room: the leftovers kept `procs` nonzero, nonzero
+    # procs kept the button on Stop AND greyed out "Restart WSL...", and the
+    # user was left with two dead controls and a log that knew the answer.
+    # IS_WSL is padpath.sh's, sourced at the top - the one WSL test.
+    if [ "${IS_WSL:-0}" = 1 ]; then
+        echo "PAD_STOP_NEEDS_WSL_RESTART: $after leftover(s) cannot be cleared from inside WSL"
+    fi
+fi

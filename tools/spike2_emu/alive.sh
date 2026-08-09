@@ -190,9 +190,20 @@ while :; do
     ANC="$ANC
 $_p"
 done
-SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun)\.sh' 2>/dev/null \
+SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun|run_game)\.sh' 2>/dev/null \
          | grep -cvxF "$ANC")
 SCRIPT=${SCRIPT:-0}
+
+# The guest's unshare wrapper - run_game.sh's `unshare $USERNS -m -p -f`, the
+# process that owns the guest's namespaces and is supposed to reap it and
+# exit. 2026-08-09, the third instance of this script's founding rule: TWO of
+# these sat uncounted for half an hour, each holding a dead guest as a
+# zombie, and their -m namespaces were what kept the card mounts alive
+# through killgame.sh's unmount pass. run_game.sh joined the SCRIPT pattern
+# above the same day. The `(-r )?` is because a root PAD_PIVOT run drops the
+# user namespace; restorestate.sh's `unshare -m bash` has no -p and is not
+# this.
+UNSH=$(n -f '^unshare (-r )?-m -p -f')
 
 # ★ CARD MOUNTS - the other class that leaked. cardmount.sh setsid's fuse2fs on
 # purpose (a run's process-group kill used to take the mount out from under the
@@ -213,7 +224,7 @@ CARD=$(n -x fuse2fs)
 ZOMB=$(ps -eo stat,comm --no-headers 2>/dev/null \
        | awk '$1 ~ /^Z/ && $2 ~ /^(game|padglhost|fuse2fs|ffmpeg|pythonw\.exe|python3?)$/' | wc -l)
 
-PROCS=$((GAME + QEMU + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT))
+PROCS=$((GAME + QEMU + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT + UNSH))
 TOTAL=$((PROCS + CARD))
 
 case "$ONLY" in
@@ -230,6 +241,7 @@ printf 'video host (padvidhost): %s\n' "$VID"
 printf 'helpers (attract/feed) : %s\n' "$HELP"
 printf 'playfield (win stub)   : %s\n' "$STUB"
 printf 'run scripts (watch.sh) : %s\n' "$SCRIPT"
+printf 'guest wrapper (unshare): %s\n' "$UNSH"
 printf 'card mounts (fuse2fs)  : %s\n' "$CARD"
 printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
   "$( [ "$TOTAL" -eq 0 ] && echo '  (clean)' || echo '  <-- run killgame.sh' )"
@@ -237,7 +249,7 @@ printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|qemu-arm-static|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|fuse2fs|game\.out' \
+    | grep -E 'arm-binfmt|qemu-arm-static|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
     | grep -v grep | head -12
   mountpoint -q "$HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'

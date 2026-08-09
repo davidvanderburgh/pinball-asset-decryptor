@@ -22,8 +22,8 @@ from pinball_decryptor.gui import emulate_tab
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
                                                rig_cmd_root, setup_notice,
                                                setup_ok, setup_state,
-                                               setup_summary,
-                                               state_text, _wsl_path)
+                                               setup_summary, state_text,
+                                               _NEEDS_WSL_RESTART, _wsl_path)
 
 # ``setup_state`` is imported BY VALUE here on purpose.  The autouse fixture
 # below replaces ``emulate_tab.setup_state`` so that building a panel never
@@ -149,6 +149,24 @@ def test_default_rig_dir_is_the_copy_in_the_repo():
     assert rig.name == "spike2_emu" and rig.parent.name == "tools"
     assert (rig / "watch.sh").is_file()
     assert (rig / "status.sh").is_file()
+
+
+def test_stop_and_killgame_agree_on_the_restart_token():
+    # Stop's "restart WSL?" offer fires on a token killgame.sh prints when
+    # leftovers survive everything it can do from inside the VM.  2026-08-09:
+    # dead guests held as zombies kept the process count nonzero, so the
+    # button stayed on Stop (which killed nothing) and "Restart WSL…" stayed
+    # greyed out (nonzero procs reads as a live run) - a wedge only `wsl
+    # --shutdown` from Windows could clear, and only the log pane knew.  The
+    # token lives in two languages; this is what keeps it ONE string.
+    killgame = (pathlib.Path(DEFAULT_RIG_DIR) / "killgame.sh").read_text(
+        encoding="utf-8")
+    emitted = [ln for ln in killgame.splitlines()
+               if _NEEDS_WSL_RESTART in ln
+               and not ln.lstrip().startswith("#")]
+    assert emitted, ("killgame.sh no longer prints %r, so Stop can never "
+                     "offer the WSL restart again" % _NEEDS_WSL_RESTART)
+    assert any("echo" in ln for ln in emitted)
 
 
 # --------------------------------------------------------------------------

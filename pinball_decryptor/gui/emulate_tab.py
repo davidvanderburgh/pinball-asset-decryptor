@@ -94,6 +94,16 @@ _GAVEUP_HINT = ("Auto-advance pressed Service Back several times and the "
                 "out here. Click the game window and press Esc: from the menu "
                 "it leaves toward attract, from Tech Alerts it clears them.")
 
+#: The token killgame.sh prints (WSL only) when leftovers survived everything
+#: it can do from inside the VM - the measured case is a dead guest held as a
+#: zombie by a WSL interop relay, which ignores SIGKILL from inside.  Stop
+#: watches for it and offers the Windows-side cure, because without that the
+#: wedge is a locked room: the leftovers keep ``procs`` nonzero, which keeps
+#: the button on Stop (which kills nothing) and greys out "Restart WSL…"
+#: (which reads nonzero procs as a live run it must not interrupt).  A user
+#: met exactly that on 2026-08-09, with the answer sitting in the log pane.
+_NEEDS_WSL_RESTART = "PAD_STOP_NEEDS_WSL_RESTART"
+
 
 def rig_dir():
     """Where the emulator rig lives.  Overridable so this is not welded to one
@@ -1369,6 +1379,7 @@ class EmulatePanel:
         self._set("state", "Stopping…")
 
         def run():
+            needs_restart = False
             try:
                 out = subprocess.run(
                     rig_cmd("killgame.sh"),
@@ -1376,6 +1387,8 @@ class EmulatePanel:
                     timeout=60, creationflags=_CREATE_FLAGS)
                 for line in out.stdout.decode("utf-8", "replace").splitlines():
                     self._log("[emulate] " + line)
+                    if _NEEDS_WSL_RESTART in line:
+                        needs_restart = True
             except Exception as exc:                    # noqa: BLE001
                 self._log("[emulate] stop failed: %s" % exc)
             # watch.sh is still sitting in its own poll loop; it notices the
@@ -1391,8 +1404,45 @@ class EmulatePanel:
                     except Exception:                   # noqa: BLE001
                         pass
             self._stopping = False
+            # killgame.sh says the survivors are beyond anything inside WSL.
+            # Offer the Windows-side cure ON THE MAIN THREAD - this is a
+            # dialog, and Tk is not thread safe (see _log).
+            if needs_restart and sys.platform == "win32":
+                try:
+                    self._timer().after(0, self._offer_wsl_restart)
+                except (tk.TclError, RuntimeError):
+                    pass
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _offer_wsl_restart(self):
+        """Stop ran killgame.sh and leftovers survived that nothing inside WSL
+        can clear - killgame.sh said so with its restart token.  Offer the one
+        cure, because a user cannot be expected to read `wsl --shutdown` out
+        of a log pane: measured 2026-08-09, the wedge held Start AND Stop dead
+        (zombie guests kept the process count nonzero, so the button stayed on
+        Stop and Stop killed nothing) with "Restart WSL…" greyed out for the
+        same reason.  This dialog is that button's confirmation, minus the
+        parts the wedge has already answered: there is no run to protect (the
+        rig is already torn down to unkillable remains) and no second killgame
+        to run (it just ran; its verdict is why we are here)."""
+        if self._resetting or self._stopped:
+            return
+        if not messagebox.askyesno(
+                "Stop emulator",
+                "The emulator did not stop cleanly.\n\n"
+                "Some of its processes are stuck in a way that cannot be "
+                "fixed from inside WSL - Windows is holding on to processes "
+                "that are already dead.  They will keep the emulator looking "
+                "half-running and may block the next start.\n\n"
+                "Restarting WSL clears them.  This closes EVERYTHING running "
+                "in WSL, not just the emulator.  Nothing on disk is lost, "
+                "and WSL starts again by itself the next time it is used.\n\n"
+                "Restart WSL now?"):
+            self._log("[emulate] leftovers kept; press Stop again for this "
+                      "offer, or run `wsl --shutdown` yourself when ready")
+            return
+        self._restart_wsl("clearing stuck emulator processes")
 
     def _audio_reset(self):
         """Restart WSL: the cure for a stranded window, and for the old crackle.
@@ -1441,21 +1491,30 @@ class EmulatePanel:
                 "Restart WSL now?"):
             return
 
+        # Tear the rig down first even though the button is only enabled when
+        # nothing is up: a terminal-started run the poll has not seen yet
+        # would otherwise be killed by the shutdown with no teardown at all.
+        self._restart_wsl("rebuilding the audio path and window link",
+                          pre_kill=True)
+
+    def _restart_wsl(self, why, pre_kill=False):
+        """The one `wsl --shutdown` worker, shared by the two doors that reach
+        it: the "Restart WSL…" button (pre_kill=True - a terminal-started run
+        deserves a teardown before the VM dies under it) and Stop's
+        stuck-process offer (pre_kill=False - killgame.sh just ran, and its
+        failure to finish is the reason we are here)."""
         self._resetting = True
         self._fixaud_btn.configure(state=tk.DISABLED)
         self._set("state", "Restarting WSL…")
 
         def run():
             try:
-                # Tear the rig down first even though the button is only
-                # enabled when nothing is up: a terminal-started run the poll
-                # has not seen yet would otherwise be killed by the shutdown
-                # with no teardown at all.
-                subprocess.run(rig_cmd("killgame.sh"),
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT,
-                               timeout=60, creationflags=_CREATE_FLAGS)
-                self._log("[emulate] restarting WSL to rebuild its audio path")
+                if pre_kill:
+                    subprocess.run(rig_cmd("killgame.sh"),
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   timeout=60, creationflags=_CREATE_FLAGS)
+                self._log("[emulate] restarting WSL: %s" % why)
                 out = subprocess.run(["wsl.exe", "--shutdown"],
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT,
@@ -1463,10 +1522,10 @@ class EmulatePanel:
                 for line in out.stdout.decode("utf-8", "replace").splitlines():
                     if line.strip():
                         self._log("[emulate] " + line)
-                self._log("[emulate] WSL is down; it restarts on next use. "
-                          "Start the emulator again and sound should be clean.")
+                self._log("[emulate] WSL is down; it restarts by itself on "
+                          "next use. Start the emulator again when ready.")
             except Exception as exc:                    # noqa: BLE001
-                self._log("[emulate] audio reset failed: %s" % exc)
+                self._log("[emulate] WSL restart failed: %s" % exc)
             finally:
                 self._resetting = False
 

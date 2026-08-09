@@ -90,6 +90,53 @@ def test_a_short_history_is_still_shown_whole(root, tmp_path, monkeypatch):
     assert "full history in the log file" not in body   # nothing was dropped
 
 
+def test_a_poisoned_giant_line_cannot_come_back_out_of_the_file(tmp_path,
+                                                               monkeypatch):
+    """The second freeze, same widget: line COUNT was bounded (above) but
+    line LENGTH was not.  One 341,705-char line — 341,626 NULs from a
+    truncate-extended hole in the guest log, plus a real [sw] line — sat
+    inside the seed window and pegged the main loop inside Tk_MeasureChars
+    for a minute at every startup, of the installed build too, because every
+    version seeds from the same file.  previous_tail() must hand back
+    cleaned, clamped lines even when the FILE holds the poison (written
+    before this fix, or by an older version)."""
+    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE", str(tmp_path))
+    with open(session_log.log_path(), "w", encoding="utf-8") as fh:
+        fh.write("%s0.1.0 — session started earlier =====\n"
+                 % session_log.BANNER_PREFIX)
+        fh.write("[2026-08-09 09:47:28] [emulate] [event] "
+                 + "\x00" * 341626 + "[sw] 345896 ms -67a\n")
+        fh.write("x" * 500_000 + "\n")          # huge but printable → clamped
+        fh.write("\x00\x00\x00\n")              # pure NULs → dropped entirely
+        fh.write("%s0.1.0 — session started now =====\n"
+                 % session_log.BANNER_PREFIX)
+
+    lines = session_log.previous_tail()
+
+    # The earlier session's banner rides along (it always has); the all-NUL
+    # line is GONE, not blanked — so banner + two cleaned lines.
+    assert len(lines) == 3
+    for ln in lines:
+        assert "\x00" not in ln
+        # MAX plus the "… [+N chars]" suffix, nothing near 341K.
+        assert len(ln) <= session_log.MAX_LINE_CHARS + 32
+    # The real content buried behind the NUL flood survives the cleaning.
+    assert "[sw] 345896 ms -67a" in lines[1]
+    # The clamp says it clamped — a silently shortened line reads as whole.
+    assert "chars]" in lines[2]
+
+
+def test_append_cleans_what_it_mirrors(tmp_path, monkeypatch):
+    """The same poison must not reach the DISK either: append() is the one
+    writer, so a flood cleaned here can never freeze a later session."""
+    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE", str(tmp_path))
+    session_log.append("\x00" * 1000 + "[sw] still here")
+    with open(session_log.log_path(), encoding="utf-8") as fh:
+        body = fh.read()
+    assert "\x00" not in body
+    assert "[sw] still here" in body
+
+
 def test_a_long_run_cannot_grow_the_pane_without_bound(root):
     """An emulator run appends thousands of lines; the widget must not keep
     all of them, or every later line (and the next startup) pays for it."""

@@ -18439,6 +18439,13 @@ class MainWindow:
         # Calls before any mfr is selected (e.g. update-check on startup
         # while picker is showing) are buffered against the first mfr's
         # widget once one is selected.  For now, silently drop them.
+        #
+        # Cleaned HERE, at the one sink every path goes through (pane,
+        # buffer and file mirror alike): the emulate drain once delivered a
+        # 341,705-char line that was mostly NULs — a truncate-extended hole
+        # in the guest log — and a Tk Text widget holding it froze the app
+        # for a minute at every later startup.  See session_log.clean_line.
+        text = session_log.clean_line(text)
         ts = time.strftime("%H:%M:%S")
         # Every pane line is also mirrored into the rolling on-disk history
         # (survives restarts and in-place updates — a tester), including

@@ -765,8 +765,16 @@ fi
 # after every print matters - awk into a pipe is block-buffered, and a "live"
 # event feed that arrives four kilobytes at a time is not live.
 if [ "${PAD_EVENTS:-1}" != 0 ]; then
+    # tr -d NULs before awk: loading a save can truncate-EXTEND the guest log
+    # (restorestate.sh grows it back to the size criu recorded), and the hole
+    # reads as one giant all-NUL "line" - 341,626 NULs in one [event] line on
+    # 2026-08-09, which then froze the app's log pane at every startup.
+    # stdbuf -oL because tr into a pipe is block-buffered, and a "live" event
+    # feed that arrives four kilobytes at a time is not live (same reasoning
+    # as the fflush after every print below).
     tail -q -n 0 -F "$HOME/padvid.log" "$HOME/padaudio.log" \
-                    "$HOME/padglhost.log" "$LOG" 2>/dev/null | awk '
+                    "$HOME/padglhost.log" "$LOG" 2>/dev/null \
+        | stdbuf -oL tr -d '\000' | awk '
         /Radium Error/ {
             if (++n[$0] == 1 || n[$0] % 500 == 0)
                 { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }

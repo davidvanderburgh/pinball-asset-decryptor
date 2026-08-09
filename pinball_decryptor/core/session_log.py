@@ -18,6 +18,7 @@ function swallows OSError.
 """
 
 import os
+import re
 import time
 
 from .config import SETTINGS_FILE
@@ -35,6 +36,33 @@ LOG_DIR_OVERRIDE = None
 # Every session opens with this banner; previous_tail() splits the live
 # file on the LAST one to separate earlier sessions from the current run.
 BANNER_PREFIX = "===== Pinball Asset Decryptor v"
+
+# ONE poisoned line is all it takes to freeze every later startup.  A Tk Text
+# widget measures every character it holds, and a single 341,705-char line —
+# 341,626 of them NUL, a truncate-extended hole in the emulator's guest log
+# read back as one "line" (2026-08-09) — pegged the main loop inside
+# Tk_MeasureChars for 60-90 s on EVERY launch of EVERY app version, because
+# they all seed their pane from this one file.  So lines are cleaned at both
+# ends: on the way in (append) and on the way out (previous_tail — the file
+# may hold poison written by an older version, which is exactly how the
+# installed build kept freezing after the dev tree was fixed).
+MAX_LINE_CHARS = 4000
+# Control chars minus tab and newline.  NUL is the one that actually
+# happened; the rest (\r included — Tk renders it as a control glyph) are
+# dropped on the same reasoning rather than waiting for their own incident.
+_HOSTILE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def clean_line(text):
+    """Strip control characters and clamp the length of one log line.
+
+    The clamp says what it cut — a silently shortened line reads as the
+    whole truth and sends whoever reads it down the wrong path."""
+    text = _HOSTILE.sub("", text)
+    if len(text) > MAX_LINE_CHARS:
+        text = "%s … [+%d chars]" % (text[:MAX_LINE_CHARS],
+                                     len(text) - MAX_LINE_CHARS)
+    return text
 
 
 def log_dir():
@@ -77,7 +105,10 @@ def previous_tail(max_lines=None):
             last_banner = i
     if not last_banner:            # no banner, or the file STARTS with ours
         return []
-    prev = [ln for ln in lines[:last_banner] if ln.strip()]
+    # Clean BEFORE the empty filter: a line of pure NULs isn't "whitespace"
+    # to str.strip(), so it would survive the filter and reach the widget.
+    cleaned = (clean_line(ln) for ln in lines[:last_banner])
+    prev = [ln for ln in cleaned if ln.strip()]
     return prev[-max_lines:] if max_lines else prev
 
 
@@ -85,7 +116,7 @@ def append(text, level="info"):
     """Mirror one GUI log line into the rolling file."""
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     prefix = "" if level in ("info", "ts") else "[%s] " % level.upper()
-    _append_raw("[%s] %s%s\n" % (stamp, prefix, text))
+    _append_raw("[%s] %s%s\n" % (stamp, prefix, clean_line(text)))
 
 
 def _append_raw(line):

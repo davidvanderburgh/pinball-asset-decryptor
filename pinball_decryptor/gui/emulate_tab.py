@@ -290,6 +290,13 @@ def wsl_home():
     executor learned that the hard way), so it is ``whoami`` + ``getent``,
     which carry no ``$`` at all.  None when anything fails, and the callers
     fall back to the ordinary user launch.
+
+    NEVER ON THE UI THREAD.  The first wsl.exe after a Windows reboot boots
+    the whole WSL VM, so this probe's real worst case is not its 30 s
+    timeouts, it is that boot - call it (and watch_cmd/kill_cmd, which call
+    it) from a worker.  shutdown_sync is the one deliberate exception: app
+    quit blocks by design, and it only runs while a run is up - so WSL is
+    warm and the probe answers fast even when it is not already cached.
     """
     if _WSL_HOME[1]:
         return _WSL_HOME[0]
@@ -409,6 +416,20 @@ _SETUP_TOOLS = (
 #: WSL - the timeout is entirely for a COLD one, where `wsl.exe` has to boot
 #: the distro first.
 _SETUP_PROBE_S = 90
+
+#: How many drain passes (250 ms each) the setup probe gets before the tab
+#: says WSL itself is booting.  A warm WSL answers inside one pass, so the
+#: message never flashes on an ordinary start; a cold one - the first wsl.exe
+#: after a Windows reboot boots the whole VM - takes tens of seconds, and a
+#: tab that says nothing for that long reads as a broken app.  David read it
+#: exactly that way on 2026-08-09.
+_WSL_BOOT_TICKS = 4
+
+#: What the tab says while that boot runs.  It names the wait AND its bound,
+#: because "Starting WSL…" alone invites force-quitting at the 30 s mark.
+_WSL_BOOT_TEXT = ("Starting WSL — the first start after a Windows reboot can "
+                  "take a minute. The app stays usable, and this finishes on "
+                  "its own.")
 
 
 def setup_state():
@@ -765,6 +786,11 @@ class EmulatePanel:
         self._setup_busy = False
         self._setup_result = None
         self._setup_fixing = False
+        #: Drain passes the current setup probe has been out for, and whether
+        #: the "Starting WSL" line went up because of it (so only the writer
+        #: takes it down - the hint label has other owners).
+        self._setup_ticks = 0
+        self._setup_said_boot = False
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -1121,6 +1147,7 @@ class EmulatePanel:
         if self._setup_busy or sys.platform == "darwin":
             return
         self._setup_busy = True
+        self._setup_ticks = 0
 
         def run():
             try:
@@ -1132,15 +1159,46 @@ class EmulatePanel:
         self._setup_drain()
 
     def _setup_drain(self):
-        """Main-loop side of _setup_check."""
+        """Main-loop side of _setup_check.
+
+        ALSO THE HONEST MOUTH FOR A COLD WSL.  The probe is one wsl.exe call,
+        and the first wsl.exe after a Windows reboot boots the whole WSL VM -
+        tens of seconds, sometimes minutes, during which this tab used to show
+        a dash and say nothing.  David restarted Windows on 2026-08-09, opened
+        PAD, and read that silence as a broken app.  A probe still out after
+        _WSL_BOOT_TICKS passes can only mean that boot (a warm WSL answers
+        inside one), so that is when the tab says so - and the sayer takes its
+        own line down again, because the status poll is gated behind this very
+        probe (see _poll) and will not overwrite it.
+        """
         if self._stopped:
             return
         if self._setup_busy:
+            self._setup_ticks += 1
+            if (self._setup_ticks == _WSL_BOOT_TICKS
+                    and sys.platform == "win32"):
+                self._setup_said_boot = True
+                self._set("state", "Starting WSL…")
+                try:
+                    self._hint.configure(text=_WSL_BOOT_TEXT)
+                except (tk.TclError, AttributeError):
+                    pass
+                self._log("[emulate] starting WSL — the first start after a "
+                          "Windows reboot can take a minute")
             try:
                 self._timer().after(250, self._setup_drain)
             except tk.TclError:
                 self._stopped = True
             return
+        if self._setup_said_boot:
+            # Back to the built state, not to "Not running": nothing has
+            # looked at the rig yet, and the first real poll is 2 s away.
+            self._setup_said_boot = False
+            self._set("state", "—")
+            try:
+                self._hint.configure(text="")
+            except (tk.TclError, AttributeError):
+                pass
         if self._setup_result is not None:
             self._setup_apply(self._setup_result)
             self._setup_result = None
@@ -1384,8 +1442,6 @@ class EmulatePanel:
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
             env.append("PAD_AUTO_ATTRACT=0")
-        cmd = watch_cmd(self.BACKSTOP_MIN, env)
-        self._log("[emulate] %s" % " ".join(cmd))
 
         def run():
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
@@ -1414,6 +1470,14 @@ class EmulatePanel:
                     finally:
                         self._starting = False
                     return
+            # THE COMMAND IS BUILT IN HERE, not before the thread.  On
+            # Windows watch_cmd() asks WSL for the desktop user's home
+            # (wsl_home: two wsl.exe probes, 30 s timeout each), and the
+            # first wsl.exe after a Windows reboot boots the whole WSL VM.
+            # Built on the main thread, that was the window frozen solid for
+            # the boot - David hit it on 2026-08-09 and read it as a crash.
+            cmd = watch_cmd(self.BACKSTOP_MIN, env)
+            self._log("[emulate] %s" % " ".join(cmd))
             try:
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1613,6 +1677,15 @@ class EmulatePanel:
             if self._docker is not None:
                 self._schedule_poll()
                 return
+        # AND NOT THROUGH A BOOTING WSL EITHER.  While the setup probe is
+        # still out, wsl.exe may be booting the whole VM (the first call
+        # after a Windows reboot does exactly that).  Each poll through it
+        # would stack another 20 s worker behind the boot, and the first one
+        # back would time out empty and write "Not running" over the
+        # "Starting WSL" line - a claim about a machine nobody has seen yet.
+        if self._setup_busy:
+            self._schedule_poll()
+            return
         if not rig_available():
             self._schedule_poll()
             return

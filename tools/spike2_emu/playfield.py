@@ -809,10 +809,13 @@ class StateOps:
                 self._state_busy = False
                 for b in self._state_btns:
                     b.config(state="normal")
-                # The wrappers' own last [savegame]/[loadgame] line is the
-                # best one-line answer either way ("saved to slot...",
-                # "no game is running...", "FAILED"); fall back to whatever
-                # was printed last.
+                # The wrappers' own last tagged line is the best one-line
+                # answer ("saved to slot...", "this run is not
+                # checkpointable..."), and a bare "FAILED" is the WORST one -
+                # David's first real button press showed exactly
+                # "[savegame] FAILED" while the criu reason sat one line
+                # above it. So prefer the last tagged line that says
+                # something, and fall back down the ladder from there.
                 if r is None:
                     text = "%s did not run" % script
                 else:
@@ -821,8 +824,13 @@ class StateOps:
                              + (r.stderr or b"").decode("utf8", "replace").splitlines()
                              if ln.strip()]
                     tagged = [ln for ln in lines
-                              if ln.startswith(("[savegame]", "[loadgame]"))]
-                    text = (tagged or lines or ["%s: no output" % script])[-1]
+                              if ln.startswith(("[savegame]", "[loadgame]",
+                                                "[save]", "[restore]",
+                                                "savegame:", "loadgame:"))]
+                    saying = [ln for ln in tagged
+                              if not ln.rstrip().endswith("FAILED")]
+                    text = (saying or tagged or lines
+                            or ["%s: no output" % script])[-1]
                 self._state_msg = (text, time.monotonic() + 8.0)
 
             self.cv.after(0, done)

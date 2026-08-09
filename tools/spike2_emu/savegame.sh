@@ -18,7 +18,25 @@ CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
 
 [ "$(id -u)" = 0 ] || { echo "savegame: needs root. Use: wsl -u root -e bash $0 [slot]"; exit 2; }
 PID=$(pgrep -x game | head -1)
-[ -n "$PID" ] || { echo "savegame: no game is running. Start one with PAD_PIVOT=1 first."; exit 1; }
+[ -n "$PID" ] || { echo "[savegame] no game is running - start one with PAD_PIVOT=1 first"; exit 1; }
+
+# SAY WHY when the running game cannot be saved, before criu burns seconds
+# discovering it the hard way. A pivot guest's root IS its mount-namespace
+# root, so /proc/PID/root reads "/"; an ordinary chroot guest's reads the
+# rootfs path, and criu refuses that shape outright ("The root task has
+# another root than mntns" - the ladder's first finding). This is exactly
+# what the playfield's Save state button hits on a run the app's Emulate tab
+# launched (2026-08-09, "[savegame] FAILED" with the reason buried): the tab
+# does not launch PAD_PIVOT yet. The LAST tagged line is what the button's
+# status bar shows, so the reason goes there, not above it.
+GROOT=$(readlink "/proc/$PID/root" 2>/dev/null)
+if [ "$GROOT" != "/" ]; then
+    echo "savegame: the running game is an ordinary chroot run (root=$GROOT),"
+    echo "which criu cannot checkpoint. Start the emulator with PAD_PIVOT=1"
+    echo "(as root) to use save states - the app's Emulate tab does not yet."
+    echo "[savegame] this run is not checkpointable - start with PAD_PIVOT=1"
+    exit 1
+fi
 
 # The rootfs and title straight from the guest's environment - no guessing, and
 # correct even though this runs as root (whose \$HOME is /root, not the games').

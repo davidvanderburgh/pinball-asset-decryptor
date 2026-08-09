@@ -1060,17 +1060,37 @@ These have each been violated at least once and each cost a run or a window:
       (comm=game, watch.sh/alive.sh wiring, live boot+save), `f5fc6c0`
       (option (a): root guest, no userns; mount-v2 default; CLOSED LOOP), this
       commit (`savegame.sh`/`loadgame.sh` + the growing-output retry).
-      **Resume — the windowed flow is DONE and David-accepted; two pieces
-      left, neither an unknown mechanism:**
-      **(1) the formal acceptance read: save mid-BALL, restore, confirm ball,
-      score and mode with `shot.py`, play 60 s, alive 0.** David has accepted
-      the feature live (attract + play, audio + video), so this is a
-      formality — but it is the item's written oracle and the box stays open
-      until it is read. One windowed run, or David does it himself playing.
-      **(2) a CARD run** needs `@CARD@` re-mount wired into restorestate (a
-      PAD_GAME_DIR bind is also still unclassified by savestate). Until then
-      save states work on extracted-tree runs only.
-      **(3) DONE — leave-running:** demonstrated this pass on the live load:
+      **Resume — the windowed flow is DONE and David-accepted; what is left
+      is making the APP's own flow reach it, none of it an unknown
+      mechanism:**
+      **(1) ★ THE APP'S EMULATE TAB DOES NOT LAUNCH A CHECKPOINTABLE RUN,
+      and David hit exactly this on his first real button press (2026-08-09
+      08:12): "[savegame] FAILED".** His pasted log shows the launch:
+      `wsl.exe -e env … PAD_CARD=… watch.sh 120` — no `-u root`, no
+      `PAD_PIVOT=1`, so the guest is an ordinary chroot run criu refuses.
+      Every session this feature was verified in was launched by hand with
+      `wsl -u root … PAD_PIVOT=1`. The fix is in the APP's emulate command
+      builder (it logs itself as `[emulate] wsl.exe -e env …`): launch
+      `-u root` with `HOME=/home/<user>` and `PAD_PIVOT=1` — watch.sh
+      already handles the rest (root guest, helpers dropped to the desktop
+      user, log chown-back). savegame.sh now DETECTS the chroot case
+      (`readlink /proc/PID/root` != "/") and puts the reason on the status
+      bar instead of a bare FAILED; the playfield's status picker also
+      prefers a line that says something over one that just says FAILED.
+      **(2) a CARD run** needs `@CARD@` wired through restorestate — and the
+      app flow makes this load-bearing, because the Emulate tab ALWAYS runs
+      from a card (`PAD_CARD=…`). The cheap 90% case: in a live windowed
+      session the fuse2fs card mount SURVIVES the guest swap (it is
+      setsid'd), so savestate can record the fuse mount's actual host source
+      path instead of the bare `@CARD@` placeholder, and restorestate can
+      use it whenever that path is still a live fuse mount — no re-mount
+      machinery at all. Cold loads (card unmounted) stay manual. A
+      PAD_GAME_DIR bind is also still unclassified by savestate.
+      **(3) the formal acceptance read: save mid-BALL, restore, confirm
+      ball, score and mode with `shot.py`, play 60 s, alive 0.** David has
+      accepted the feature live (attract + play, audio + video), so this is
+      the written oracle catching up with the verdict.
+      **(4) DONE — leave-running:** demonstrated on a live load:
       restorestate's truncate-retry fired on game.out, audio.raw and
       audio.raw.center and the restore proceeded; play was never paused at
       the save.

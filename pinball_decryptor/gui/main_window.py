@@ -13900,14 +13900,44 @@ class MainWindow:
                 else:
                     self._write_log_line(ts, text, extra)
 
+    #: How many lines of the on-disk history the pane is SEEDED with, and how
+    #: big the live pane may grow before it trims from the top.
+    #:
+    #: BOTH EXIST BECAUSE A Tk Text WIDGET IS NOT FREE TO APPEND TO.  Every
+    #: log line does `insert` + `configure` + `see(END)`, and the cost of
+    #: those scales with what the widget already holds — so an unbounded pane
+    #: makes the app slower the more it has logged, and a pane seeded from a
+    #: big history is slow from the first line.  Measured 2026-08-09 on a
+    #: 5,950-line history (5,490 of them emulator event lines from a day of
+    #: runs): the window sat "Not Responding" for 40-85 s of startup, with
+    #: py-spy showing the main thread inside `Text.see` and `Text.configure`
+    #: under `append_log` on every sample.  It read as a hung app, and it was
+    #: blamed on three other things first.
+    #:
+    #: The FILE still keeps everything — the roll caps it at a couple of MB
+    #: and the ⚙ menu opens it — so this bounds the WIDGET, not the history.
+    LOG_SEED_LINES = 600
+    LOG_PANE_MAX_LINES = 4000
+    #: Trim back to this when the cap is hit, so trimming is occasional
+    #: rather than once per line at the ceiling.
+    LOG_PANE_TRIM_TO = 2500
+    #: Only count the pane every N lines: the count is a Tcl round trip and
+    #: an emulator run appends thousands of lines a minute.
+    LOG_PANE_CHECK_EVERY = 200
+
     def _seed_log_history(self, text):
         """Load the previous sessions' log into the TOP of a log widget,
         dimmed, closed out by a cut line — so what happened before a
         restart/update reads as history, not as this session's output.
-        Everything before the current session goes in (the file itself is
-        size-capped by the roll, so this tops out at a couple of MB); one
-        bulk insert keeps even a full file instant.  The pane ends up
-        scrolled to the cut line; scroll up for the past.
+        The pane ends up scrolled to the cut line; scroll up for the past.
+
+        BOUNDED TO THE LAST ``LOG_SEED_LINES``, and the cut line says so when
+        it truncated.  It used to seed EVERYTHING before the current session
+        — the file is roll-capped, so "a couple of MB" was the reasoning —
+        and a couple of MB of Tk Text is what made this app freeze for tens
+        of seconds at startup (see the constants above).  The full history is
+        still on disk and one ⚙-menu click away, which is what that reasoning
+        was really protecting.
 
         Gated on the ⚙-menu "Show previous sessions in the log" toggle and
         idempotent (the cut line marks a seeded pane), so it serves both
@@ -13916,17 +13946,23 @@ class MainWindow:
             return
         if text.tag_ranges("cut"):
             return                      # already seeded
-        lines = session_log.previous_tail()
+        lines = session_log.previous_tail(max_lines=self.LOG_SEED_LINES)
         if not lines:
             return
+        # A full read means there is probably more above it; say so rather
+        # than letting the history look like it starts there.
+        truncated = len(lines) >= self.LOG_SEED_LINES
+        cut = ("──────────── earlier sessions above · this session below "
+               "────────────\n")
+        if truncated:
+            cut = ("──────────── earlier sessions above (last %d lines — full "
+                   "history in the log file) · this session below "
+                   "────────────\n" % self.LOG_SEED_LINES)
         text.configure(state=tk.NORMAL)
         # Cut line first, then the history above it — two inserts at "1.0"
         # land in visual order history → cut, above any live lines already
         # in the widget (the mid-session re-enable case).
-        text.insert(
-            "1.0",
-            "──────────── earlier sessions above · this session below "
-            "────────────\n", "cut")
+        text.insert("1.0", cut, "cut")
         text.insert("1.0", "\n".join(lines) + "\n", "hist")
         text.configure(state=tk.DISABLED)
         text.see(tk.END)
@@ -18419,8 +18455,39 @@ class MainWindow:
         self._log_text.configure(state=tk.NORMAL)
         self._log_text.insert(tk.END, f"[{ts}] ", "ts")
         self._log_text.insert(tk.END, text + "\n", level)
+        self._trim_log_pane(self._log_text)
         self._log_text.configure(state=tk.DISABLED)
         self._log_text.see(tk.END)
+
+    def _trim_log_pane(self, text):
+        """Drop the oldest lines once a pane passes ``LOG_PANE_MAX_LINES``.
+
+        THE PANE IS A VIEWPORT, NOT THE RECORD.  Every line costs `insert` +
+        `configure` + `see(END)`, and those get dearer as the widget grows —
+        so without this an emulator run (thousands of event lines a minute,
+        5,490 of them in one day here) makes the whole app progressively
+        slower, and the next startup slower still because it seeds from what
+        that run wrote.  The rolling file keeps every line; the ⚙ menu opens
+        it.  Called with the widget already NORMAL, from the two places that
+        append.
+
+        Counted every ``LOG_PANE_CHECK_EVERY`` lines because the count is a
+        Tcl round trip, and trimmed back to ``LOG_PANE_TRIM_TO`` rather than
+        to the cap so the deletes stay occasional instead of firing on every
+        line once the ceiling is reached."""
+        self._log_pane_lines = getattr(self, "_log_pane_lines", 0) + 1
+        if self._log_pane_lines < self.LOG_PANE_CHECK_EVERY:
+            return
+        self._log_pane_lines = 0
+        try:
+            n = int(str(text.index("end-1c")).split(".")[0])
+            if n <= self.LOG_PANE_MAX_LINES:
+                return
+            # Delete from the top, which is the oldest — the seeded history
+            # first (it is the oldest thing here and is on disk anyway).
+            text.delete("1.0", "%d.0" % (n - self.LOG_PANE_TRIM_TO + 1))
+        except (tk.TclError, ValueError):
+            pass
 
     def update_log_line(self, key, text, level="info"):
         """Create-or-update a single *keyed* log line in place (live per-sound
@@ -18442,6 +18509,7 @@ class MainWindow:
         else:
             t.insert(tk.END, text, (tag, level))
             t.insert(tk.END, "\n")
+            self._trim_log_pane(t)
             t.see(tk.END)
         t.configure(state=tk.DISABLED)
 

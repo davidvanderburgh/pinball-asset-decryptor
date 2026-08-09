@@ -616,6 +616,16 @@ class EmulatePanel:
     #: slow enough to cost nothing and fast enough to feel live.
     POLL_MS = 2000
 
+    #: Poll period when the rig is IDLE.  A run in progress is worth a
+    #: two-second heartbeat; a machine with no emulator on it is not worth a
+    #: `wsl.exe` spawn every two seconds for as long as the app is open — that
+    #: is 1,800 WSL round trips an hour to be told "off" each time, and after
+    #: a Windows reboot the first of them boots the whole WSL VM.  A run this
+    #: app starts flips to POLL_MS immediately (the status says so), so the
+    #: only thing this delays is noticing a run somebody started in a
+    #: terminal, by a few seconds.
+    POLL_IDLE_MS = 10000
+
     def __init__(self, parent, log=None, card_var=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
@@ -670,6 +680,9 @@ class EmulatePanel:
         self._setup_busy = False
         self._setup_result = None
         self._setup_fixing = False
+        #: A status poll's wsl.exe is in flight — see _poll.  Written only on
+        #: the main thread, so it cannot be raced by the worker it gates.
+        self._poll_busy = False
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -1489,11 +1502,16 @@ class EmulatePanel:
     # status polling
     # ------------------------------------------------------------------
 
-    def _schedule_poll(self):
+    def _schedule_poll(self, ms=None):
         if self._stopped:
             return
+        if ms is None:
+            # A run in progress is worth watching closely; an idle rig is
+            # not worth a wsl.exe every two seconds for the whole time the
+            # app is open.  See POLL_IDLE_MS.
+            ms = self.POLL_MS if self._last_up else self.POLL_IDLE_MS
         try:
-            self._poll_job = self._timer().after(self.POLL_MS, self._poll)
+            self._poll_job = self._timer().after(ms, self._poll)
         except tk.TclError:
             self._stopped = True
 
@@ -1521,6 +1539,27 @@ class EmulatePanel:
         if not rig_available():
             self._schedule_poll()
             return
+        # ★ ONE STATUS POLL AT A TIME, AND NONE WHILE THE SETUP PROBE IS OUT.
+        #
+        # This loop used to start a worker and reschedule itself in the same
+        # breath, so the NEXT poll fired 2 s later whether or not the last one
+        # had answered.  Each worker is a `wsl.exe` spawn with a 20 s timeout,
+        # and the first wsl.exe after a Windows reboot boots the whole WSL VM
+        # — so a cold start stacked up to ten concurrent WSL spawns, each one
+        # contending with the boot the others were waiting on.  Measured
+        # 2026-08-09 on a warm machine: 21 wsl.exe spawns in the first 45 s of
+        # app life, from a tab nobody had opened.  Cold, that is what left the
+        # window "Not Responding" for tens of seconds after a reboot, and it
+        # was blamed on three other things (a GUI release, an OneDrive stat,
+        # the log pane) before anyone counted the spawns.
+        #
+        # Skipping rather than queueing is right: a status poll is a snapshot,
+        # and the answer a stacked poll would have given is the one the
+        # in-flight poll is already fetching.
+        if self._poll_busy or self._setup_busy:
+            self._schedule_poll()
+            return
+        self._poll_busy = True
 
         def run():
             try:
@@ -1534,13 +1573,21 @@ class EmulatePanel:
             info = parse_status(text)
             # Tk is not thread safe — every widget touch goes back to the main
             # loop.  Doing it from the worker is the exact bug that froze the
-            # Partition Explorer's extract.
+            # Partition Explorer's extract.  The busy flag is cleared THERE
+            # too, so it is only ever written on the main thread and a slow
+            # poll cannot be lapped by the timer that scheduled it.
             if self._stopped:
+                self._poll_busy = False
                 return
+
+            def apply_and_release():
+                self._poll_busy = False
+                self._apply(info)
+
             try:
-                self._timer().after(0, lambda: self._apply(info))
+                self._timer().after(0, apply_and_release)
             except (tk.TclError, RuntimeError):
-                pass
+                self._poll_busy = False
 
         threading.Thread(target=run, daemon=True).start()
         self._schedule_poll()

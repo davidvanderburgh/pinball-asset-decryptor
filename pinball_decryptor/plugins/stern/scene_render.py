@@ -20,9 +20,14 @@ output:
 * Glyph ink is TINTED by the keyframe's RGBA — stock atlases are mostly white
   ink precisely so the scene can color them.
 * BC1 atlases hold ink on opaque black and the machine adds it to the frame,
-  so ink is composited additively rather than alpha-blended over the
-  background (:func:`fontrender.load_slice` already keys alpha off luminance
-  for those, which is what makes this work).
+  so that ink is composited additively (:func:`fontrender.load_slice` already
+  keys alpha off luminance for those, which is what makes this work).  Alpha
+  (BC3) glyphs are laid OVER the frame instead — the outline fonts prove the
+  machine does, since their black ink could never show additively.
+* A title is drawn TWICE: an outline under-pass in a companion font, then the
+  fill on top.  The layout keeps the pair (``outline``-tagged) and this module
+  draws them in that order, so the border is finally inspectable here — over a
+  light backdrop, exactly like any other black ink.
 
 The machine draws on black, so black is the truthful backdrop and the default.
 A preview is also something you *inspect*, though, and black ink on a black
@@ -99,7 +104,10 @@ def describe(layout, state=0, group=None):
         return "No preview for this scene."
     n_states = state_count(layout)
     names = group_names(layout)
-    texts = _pick(layout.get("texts") or (), state, group)
+    # An outline pass is the same line twice; counting it said "2 text lines"
+    # where the user sees one.
+    texts = [t for t in _pick(layout.get("texts") or (), state, group)
+             if not t.get("outline")]
     sprites = _pick(layout.get("sprites") or (), state, group)
     n_t = len(texts)
     n_s = len(sprites)
@@ -182,14 +190,21 @@ def _tint(img, rgba):
     return Image.fromarray(arr.clip(0, 255).astype("uint8"), "RGBA")
 
 
-def _add(canvas, img, x, y):
-    """Composite *img* onto *canvas* additively (the machine's blend for
-    ink-on-black art), clipped to the canvas.
+def _add(canvas, img, x, y, over=False):
+    """Composite *img* onto *canvas*, clipped to the canvas.
 
-    The alpha channel is not part of that blend — it accumulates COVERAGE, so
-    :func:`_over_background` can tell "nothing was drawn here" from "black was
-    drawn here".  Those are the same pixel on the machine and had to become
-    different ones here, or a black outline could never be looked at."""
+    Two blends, matching the machine's own: additive (the default — its blend
+    for BC1 ink-on-black art) and, with *over*, ordinary src-over for alpha
+    art.  Over is what the outline fonts prove the machine does with BC3
+    glyphs: their ink is BLACK, and an additive black is invisible, yet the
+    borders show on screen — so those must be laid over the frame, not added
+    to it.  The canvas RGB is premultiplied by coverage, which makes the over
+    blend the plain ``src*a + dst*(1-a)``.
+
+    The alpha channel is not part of either blend — it accumulates COVERAGE,
+    so :func:`_over_background` can tell "nothing was drawn here" from "black
+    was drawn here".  Those are the same pixel on the machine and had to
+    become different ones here, or a black outline could never be looked at."""
     import numpy as np
     ch, cw = canvas.shape[:2]
     a = np.asarray(img.convert("RGBA"))
@@ -204,7 +219,10 @@ def _add(canvas, img, x, y):
     src = a[sy0:sy0 + h, sx0:sx0 + w].astype(np.float32)
     dst = canvas[dy0:dy0 + h, dx0:dx0 + w].astype(np.float32)
     alpha = (src[..., 3:4] / 255.0)
-    out = dst[..., :3] + src[..., :3] * alpha
+    if over:
+        out = src[..., :3] * alpha + dst[..., :3] * (1.0 - alpha)
+    else:
+        out = dst[..., :3] + src[..., :3] * alpha
     canvas[dy0:dy0 + h, dx0:dx0 + w, :3] = out.clip(0, 255).astype("uint8")
     cov = alpha + (dst[..., 3:4] / 255.0) * (1.0 - alpha)
     canvas[dy0:dy0 + h, dx0:dx0 + w, 3:] = (
@@ -439,9 +457,12 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                 continue
             rgba = list(tx.get("rgba") or (1, 1, 1, 1))
             # A colour the user picked but hasn't built yet: the scene's own
-            # alpha is kept, because that is what fades the line in.
+            # alpha is kept, because that is what fades the line in.  An
+            # OUTLINE line shares the fill's display string and must not take
+            # its colour — repainting it is how a border silently disappears
+            # (the Write path guards the same way, by the current rgba).
             pick = (colors or {}).get(tx.get("text"))
-            if pick:
+            if pick and not tx.get("outline"):
                 rgba = [c / 255.0 for c in pick[:3]] + [
                     rgba[3] if len(rgba) > 3 else 1.0]
             ink = _tint(ink, rgba)
@@ -466,7 +487,10 @@ def render_layout(assets_dir, layout, fonts=None, frame=0, background=None,
                 x = left + (right - left - ink.size[0]) / 2.0
             # the track y is the baseline, so lift by the font's ascent
             y = tx.get("y", 0) - font.get("ascent", 0)
-            _add(canvas, ink, x, y)
+            # BC1 ink adds (black draws nothing, as on the machine); alpha
+            # glyphs lay OVER the frame — the outline pass under a title is
+            # black and would otherwise vanish into whatever it covers.
+            _add(canvas, ink, x, y, over=(fr.font_fmt(font) != 4))
             drew = True
     if not drew:
         return None

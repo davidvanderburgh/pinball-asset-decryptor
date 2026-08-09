@@ -461,14 +461,58 @@ def test_collect_scenes_groups_manifests(tmp_path):
     assert [r for _o, r in s1["images"]] == [
         "images/scene_textures/radimg_TestA_8x8_00000001.png",
         "images/scene_textures/radimg_TestA_8x8_00000002.png"]
-    assert s1["fonts"] == {"tbl": ("TestFont", 6)}
+    # 7 = ascent 6 + descent 1, the number the FONT LIST prints for tbl —
+    # not the raw glyph-height 6 this label used to quote
+    assert s1["fonts"] == {"tbl": ("TestFont", 7)}
     assert s1["texts"] == ["HELLO"]
     assert s1["label"] == "TestA · scene1"
     s2 = scenes["/g/scene2"]
     assert s2["fonts"] == {"tbl2": ("Bc1Font", 6)}
     assert s2["texts"] == ["WORLD"]
     # scene9 shares atlas page 1 -> same font, same first image
-    assert scenes["/g/scene9"]["fonts"] == {"tbl": ("TestFont", 6)}
+    assert scenes["/g/scene9"]["fonts"] == {"tbl": ("TestFont", 7)}
+
+
+def test_scene_font_size_speaks_the_font_lists_unit(tmp_path):
+    """The Scenes window used to print the radium's NOMINAL size id while the
+    Fonts window prints fontrender's measured ascent+descent — so one font
+    read "83px" in one window and "94px" in the other, and a tester hunted
+    the font list for an 83px font that was never missing.  The nominal id
+    now only picks WHICH size variant to name; the number printed is always
+    the font list's own."""
+    import json
+    tex = tmp_path / "images" / "scene_textures"
+    tex.mkdir(parents=True)
+    stem = "radimg_TF_8x8_00000001"
+    arel = "scene_textures/%s.png" % stem
+    (tex / "radium_images.txt").write_text(
+        "# output\tradium card path\tdata offset\tlength\tpad_w\tpad_h\tfmt\n"
+        "%s\t/g/big/scene.radium\t100\t256\t16\t16\t5\n"
+        "%s\t/g/small/scene.radium\t100\t256\t16\t16\t5\n" % (arel, arel),
+        encoding="utf-8")
+    # one table baked at two sizes: nominal 83 measures 94, nominal 40
+    # measures 45 (ascent + descent, exactly as load_fonts reads them)
+    (tex / "glyph_images.txt").write_text(
+        "# glyph output\tatlas output\tchar\tx\ty\tw\th\tfont\trot\tglyph_w"
+        "\tglyph_h\tbearing_x\tbearing_y\tadvance\ttable\tkerning\tsize\n"
+        "scene_textures/glyphs/%s/U+0041_A.png\t%s\t0x0041\t0\t0\t8\t8\tBig"
+        "\t0\t50\t94\t0\t80\t51\ttf\t\t83\n"
+        "scene_textures/glyphs/%s/U+0041_A.png\t%s\t0x0041\t0\t0\t8\t8\tBig"
+        "\t0\t25\t45\t0\t40\t26\ttf\t\t40\n" % (stem, arel, stem, arel),
+        encoding="utf-8")
+    (tex / "scene_layout.json").write_text(json.dumps({
+        "/g/big/scene.radium": {"stage": [10, 10, 60.0], "sprites": [],
+                                "texts": [{"font": "tf", "font_px": 83}]},
+        "/g/small/scene.radium": {"stage": [10, 10, 60.0], "sprites": [],
+                                  "texts": [{"font": "tf", "font_px": 40}]},
+    }), encoding="utf-8")
+    from pinball_decryptor.gui.scene_browser import collect_scenes
+    scenes = collect_scenes(str(tmp_path))
+    assert scenes["/g/big"]["fonts"] == {"tf": ("Big", 94)}
+    assert scenes["/g/small"]["fonts"] == {"tf": ("Big", 45)}
+    # ...and "the font list's own number" is literal, not a coincidence
+    fonts = {f["key"]: f for f in fr.load_fonts(str(tmp_path))}
+    assert fonts["tf"]["px"] == 94
 
 
 # ---- outline companions ------------------------------------------------------

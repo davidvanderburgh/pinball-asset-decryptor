@@ -166,6 +166,19 @@ def load_fonts(assets_dir):
     return out
 
 
+def font_fmt(font):
+    """The atlas format this font's glyph bitmaps are stored in: 4 = BC1 ink
+    on opaque black, which the machine composites ADDITIVELY (black draws
+    nothing), anything else = alpha art the machine draws OVER the frame —
+    which is the only way its black outline fonts can be visible at all.  The
+    scene renderer picks its blend with this."""
+    counts = {}
+    for g in font["glyphs"].values():
+        f = g.get("fmt", 5)
+        counts[f] = counts.get(f, 0) + 1
+    return max(counts, key=counts.get) if counts else 5
+
+
 def font_at_size(font, size_id):
     """The variant of *font* whose metrics match *size_id*, or *font* itself.
 

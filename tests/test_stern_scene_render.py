@@ -287,13 +287,15 @@ def test_line_with_no_named_font_falls_back_to_the_scene_pick():
         == [(32, 90)]
 
 
-def test_outline_and_fill_collapse_even_in_different_fonts():
+def test_outline_and_fill_survive_as_an_ordered_pair():
     """A title is an outline instance under a fill instance at the SAME spot,
     and they name DIFFERENT faces.
 
-    The duplicate rules keyed on the font, which was invisible while every line
-    in a scene shared one — decoding the per-line font split the pair apart and
-    every John Wick title drew twice, in two faces, on top of itself."""
+    The pair used to collapse to the fill because the renderer could only ADD
+    ink, and adding black drew nothing — which left the preview "not a good
+    place to check outlines" (David).  Now the renderer lays alpha glyphs OVER
+    the frame, so the under-pass is kept: tagged ``outline``, ordered BEFORE
+    its fill, and holding its own face."""
     body, outline = _fake_image(32), _fake_image(48)
     tables = [_font_table("Body", body, 60), _font_table("Body_Outline",
                                                          outline, 60)]
@@ -302,9 +304,10 @@ def test_outline_and_fill_collapse_even_in_different_fonts():
     data = _radium(_text_scene(lines, fonts=["Body_Outline", "Body"]))
     lay = scene_layout.parse_scene_layout(data, [body, outline], tables)
     assert lay is not None
-    # one line survives, and it is the LAST — the fill, drawn on top
-    assert [(t["text"], t["font_atlas_off"]) for t in lay["texts"]] \
-        == [("KIRILL BATTLE READY", 32)]
+    assert [(t["text"], t["font_atlas_off"], bool(t.get("outline")))
+            for t in lay["texts"]] \
+        == [("KIRILL BATTLE READY", 48, True),
+            ("KIRILL BATTLE READY", 32, False)]
 
 
 def test_scene_names_its_screens_and_they_can_be_isolated():
@@ -739,6 +742,84 @@ def test_black_ink_is_invisible_on_black_and_shows_on_a_light_backdrop():
         assert (band.max(axis=1) < 40).any(), "the black letter never showed"
 
 
+def _seed_outline_pair(root):
+    """Add an outline companion under the seeded fill: a fatter, BLACK,
+    opaque 'A' in its own font, drawn first at the same baseline — the shape
+    of every Stern title (outline instance, then fill instance on top)."""
+    assets = _seed_preview_extract(root)
+    st = root / "images" / "scene_textures"
+    gdir = st / "glyphs" / "radimg_ofont_64x64_cccc0003"
+    gdir.mkdir(parents=True)
+    Image.new("RGBA", (12, 12), (0, 0, 0, 255)).save(
+        str(gdir / "U+0041_A.png"))
+    with open(str(st / "radium_images.txt"), "a", encoding="utf-8") as f:
+        f.write("scene_textures/radimg_ofont_64x64_cccc0003.png"
+                "\t/g/s1/scene.radium\t300\t16\t64\t64\t5\n")
+    with open(str(st / "glyph_images.txt"), "a", encoding="utf-8") as f:
+        f.write("scene_textures/glyphs/radimg_ofont_64x64_cccc0003/"
+                "U+0041_A.png\t"
+                "scene_textures/radimg_ofont_64x64_cccc0003.png\t0x0041\t0\t0"
+                "\t12\t12\tTestFont_Outline\t0\t12\t12\t0\t10\t13\t"
+                "radimg_ofont_64x64_cccc0003\n")
+    _relayout(assets, lambda sc: (
+        sc.__setitem__("sprites", []),
+        sc.__setitem__("texts", [
+            {"name": "L1_Outline", "x": 0, "y": 60, "text": "A",
+             "rect": [0, 0, 200, 100], "rgba": [0, 0, 0, 1], "align": 1,
+             "font": "radimg_ofont_64x64_cccc0003", "outline": True},
+            sc["texts"][0]])))
+    return assets
+
+
+def test_render_draws_the_outline_pass_under_the_fill():
+    """The preview "still does not draw the outline pass, so it is not a good
+    place to check outlines" (David) — because the layout dropped the outline
+    instance and the renderer could only ADD ink, which makes black invisible.
+    Now the pair is kept and alpha glyphs lay OVER the frame: the border shows
+    around the fill on a light backdrop, the fill stays intact on top, and on
+    the machine's own black the pair still renders exactly as the fill alone
+    (black over black IS invisible there — that part was always true)."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        assets = _seed_outline_pair(root)
+        on_white = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", background="White"))
+        # outline ink rows 50..61 x cols 94..105; fill rows 52..59 x 96..103
+        assert tuple(on_white[49, 100]) == (255, 255, 255)   # backdrop
+        assert on_white[51, 100].max() < 40                  # the border
+        assert on_white[55, 100].min() > 200                 # fill on top
+        # the pair is ONE line to the caption, not two
+        lay = scene_render.load_layouts(assets)["/g/s1/scene.radium"]
+        assert "1 text line" in scene_render.describe(lay)
+        pair = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium"))
+        _relayout(assets, lambda sc: sc.__setitem__(
+            "texts", [t for t in sc["texts"] if not t.get("outline")]))
+        alone = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium"))
+        assert np.array_equal(pair, alone)
+
+
+def test_pending_colour_repaints_the_fill_not_its_outline():
+    """A pending text colour is keyed by the display string, and the outline
+    pass carries the SAME string — repainting it would silently delete the
+    border.  The Write path guards by the current rgba; the preview guards by
+    the outline tag."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        assets = _seed_outline_pair(root)
+        a = np.asarray(scene_render.render_scene(
+            assets, "/g/s1/scene.radium", background="White",
+            colors={"A": (255, 0, 0)}))
+        r, g, _b = a[55, 100]
+        assert r > 200 and g < 100          # the fill took the pick
+        assert a[51, 100].max() < 40        # the border is still black
+
+
 def test_render_shows_a_colour_the_user_has_picked_but_not_built():
     """The Scenes window passes pending colours straight into the render, so a
     recolour is visible before the card is written."""
@@ -1054,10 +1135,11 @@ def test_parse_group_node_does_not_borrow_the_scenes_only_image():
 
 
 def test_parse_keeps_the_visible_half_of_an_outline_fill_pair():
-    """A Stern title is an outline instance followed by a fill instance at the
-    same spot.  The outline is tinted pure BLACK, and ink is composited
-    additively, so keeping it drew nothing at all — TMNT's AWARD popup rendered
-    as an empty frame until the LAST of a duplicate pair won."""
+    """When the per-line font did NOT decode, an outline/fill pair is two
+    identical lines in the same (fallback) face, and only the fill survives —
+    the same-face collapse that stops TMNT's AWARD popup drawing its title
+    twice.  (With faces decoded the under-pass is kept instead; see
+    test_outline_and_fill_survive_as_an_ordered_pair.)"""
     data = _radium(_framed_scene(
         [("AwardTitle", 700.0, 400.0, 2, None, b""),
          ("Instance_AwardTitle_Outline", 0.0, 0.0, 0, "AWARD", b""),

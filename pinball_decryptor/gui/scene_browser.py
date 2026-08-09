@@ -186,10 +186,32 @@ def collect_scenes(assets_dir):
     except Exception:
         pass
 
+    # The number printed must be the FONT LIST's number for the same font.
+    # The layout's size is the radium's NOMINAL size id, while the Fonts
+    # window prints fontrender's measured px (ascent + descent) — quoting the
+    # nominal here made one font read "83px" in this window and "94px" in
+    # that one, and a tester went hunting for a font that was never missing.
+    # So the nominal id is translated through the same variants the Fonts
+    # window reads, and only picks WHICH size to name, never the label itself.
+    size_px, rep_px = {}, {}
+    try:
+        from ..plugins.stern import fontrender as _fr
+        for fo in _fr.load_fonts(assets_dir):
+            rep_px[fo["key"]] = fo["px"]
+            for sid, v in (fo.get("sizes") or {}).items():
+                size_px[(fo["key"], sid)] = v["px"]
+    except Exception:
+        pass
+
+    def _label_px(d, t):
+        sid = scene_font_px.get((d, t))
+        if sid is not None and (t, sid) in size_px:
+            return size_px[(t, sid)]
+        return rep_px.get(t) or font_px.get(t, 0)
+
     for d, sc in scenes.items():
         sc["images"].sort()
-        sc["fonts"] = {t: (n, int(scene_font_px.get((d, t),
-                                                    font_px.get(t, 0))))
+        sc["fonts"] = {t: (n, int(_label_px(d, t)))
                        for t, n in sc["fonts"].items()}
         base = d.rstrip("/").rsplit("/", 1)[-1][:8] or d
         sc["label"] = ("%s · %s" % (sc["hint"], base)) if sc["hint"] else base

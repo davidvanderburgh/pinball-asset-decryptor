@@ -282,26 +282,76 @@ def _drop_exact_duplicates(texts, sprites):
     four times, twice at each of two positions), and drawing a string twice over
     itself only thickens and blurs it.
 
-    The one KEPT is the LAST, because later means drawn on top.  That is not a
-    detail: a Stern title is an outline instance followed by a fill instance at
-    the same spot, and the outline is tinted pure black — keeping it rendered
-    TMNT's AWARD popup as an empty frame (ink multiplied by black, composited
-    additively, adds nothing).  Keeping the fill draws the popup."""
+    The one KEPT is the LAST, because later means drawn on top.  But a string
+    repeated at one spot in a DIFFERENT face is not a redundant copy — it is
+    the machine's own layering: a Stern title is an outline instance followed
+    by a fill instance at the same spot, drawn from two fonts (the
+    ``..._Outline`` companion under the body face).  Those under-passes are
+    kept, tagged ``outline``, so the renderer can draw them beneath the fill
+    with the blend that makes black visible — dropping them is why the preview
+    was "not a good place to check outlines" (David).  Only same-face repeats
+    still collapse, which keeps the pair rule from resurrecting the
+    GRAND CHAMPION pile."""
     def dedupe(els, key):
         last = {}
         for i, el in enumerate(els):
             last[key(el)] = i
         return [el for i, el in enumerate(els) if last[key(el)] == i]
-    # The FONT is deliberately not part of the key: the outline instance and
-    # the fill instance name DIFFERENT fonts (an ``..._Outline`` companion and
-    # the body face), so including it stopped the pair collapsing the moment
-    # the per-line font was decoded, and every John Wick title drew twice in
-    # two faces on top of itself.  Same string at the same spot IS the pair.
-    return (dedupe(texts, lambda t: (t["text"], round(t["x"], 1),
-                                     round(t["y"], 1))),
+    groups = {}
+    for t in texts:
+        groups.setdefault((t["text"], round(t["x"], 1), round(t["y"], 1)),
+                          []).append(t)
+    keep = set()
+    for members in groups.values():
+        fill = members[-1]
+        keep.add(id(fill))
+        # One under-pass per distinct face, the LAST of each (drawn closest to
+        # the fill); a line whose font did not decode shares the scene-wide
+        # fallback face and collapses exactly as it always did.
+        faces = {(fill.get("font_atlas_off"), fill.get("font_px"))}
+        for el in reversed(members[:-1]):
+            face = (el.get("font_atlas_off"), el.get("font_px"))
+            if face in faces:
+                continue
+            faces.add(face)
+            el["outline"] = True
+            keep.add(id(el))
+    return ([t for t in texts if id(t) in keep],
             dedupe(sprites, lambda s: (tuple(s.get("frames") or
                                              (s.get("image_off"),)),
                                        round(s["x"], 1), round(s["y"], 1))))
+
+
+def _attach_outlines(texts, alt_t, outlines):
+    """Insert each outline under-pass back in front of the fill it belongs to.
+
+    Outlines sit OUTSIDE the state/page pruning — an outline is the same
+    string at the same spot as its fill, so the overlap rules would file it as
+    an alternative state of the very line it underlines.  Instead it is bound
+    to its fill here: it inherits the fill's slot/state/group (shown and
+    hidden as one thing) and precedes it in draw order.  An outline whose
+    fill was pruned away entirely goes with it."""
+    if not outlines:
+        return texts, alt_t
+    texts, alt_t = list(texts), list(alt_t)
+
+    def key(t):
+        return (t["text"], round(t["x"], 1), round(t["y"], 1))
+
+    fills = {}
+    for holder in (texts, alt_t):
+        for t in holder:
+            fills.setdefault(key(t), (holder, t))
+    for ol in outlines:
+        got = fills.get(key(ol))
+        if got is None:
+            continue
+        holder, fill = got
+        for fld in ("slot", "state", "group"):
+            if fill.get(fld) is not None:
+                ol[fld] = fill[fld]
+        holder.insert(holder.index(fill), ol)
+    return texts, alt_t
 
 
 def _intersection(a, b):
@@ -1255,6 +1305,10 @@ def _parse_scene_layout(data, images, tables):
     if _refine_sprite_pivots(sprites, stage, dims) and origin == "topleft":
         origin = "mixed"
     texts, sprites = _drop_exact_duplicates(texts, sprites)
+    # Outline under-passes ride outside the pruning below (see
+    # _attach_outlines); the fills alone decide states, pages and orphans.
+    outlines = [t for t in texts if t.get("outline")]
+    texts = [t for t in texts if not t.get("outline")]
     # Pages first, then what is left inside them: pruning elements first can
     # strip a page down to a couple of lines, and those no longer cover enough
     # of the page they duplicate to be recognised as its repeat.
@@ -1314,6 +1368,7 @@ def _parse_scene_layout(data, images, tables):
                 index[r] = len(groups)
                 groups.append(name_of.get(r) or "unnamed")
             el["group"] = index[r]
+    texts, alt_t = _attach_outlines(texts, alt_t, outlines)
     return {"stage": stage, "origin": origin,
             "texts": texts + alt_t, "sprites": sprites + alt_s,
             # How many alternative states the deepest slot holds: the Scenes

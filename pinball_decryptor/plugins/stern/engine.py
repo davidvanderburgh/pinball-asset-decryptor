@@ -845,6 +845,10 @@ def _scene_layout_entry(lay, off2rel):
             # ...and the SIZE that font is drawn at here, because one atlas
             # serves several sizes and the key alone can't say which.
             "font_px": t.get("font_px", 0),
+            # an outline under-pass: drawn beneath its fill with the blend
+            # that makes black ink visible, and never repainted by a pending
+            # text-colour pick (that would delete the border)
+            "outline": bool(t.get("outline")),
         })
     for s in lay["sprites"]:
         irel = off2rel.get(s["image_off"])

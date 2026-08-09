@@ -822,11 +822,7 @@ HELP_CONTENT = {
          "running, so any Spike 2 game gets one. The switches are the one "
          "part that needs the game to be up: it publishes its switch list a "
          "minute or so into a run, and they appear on the playfield as soon "
-         "as it does, without restarting anything. Save state and Load "
-         "state buttons live on this window too (Windows): a save "
-         "checkpoints the entire running game and a load brings it straight "
-         "back, mid-game included. A run that is not in a shape that can be "
-         "saved says why on the button instead of failing quietly."),
+         "as it does, without restarting anything."),
         ("Install Docker… (macOS only)",
          "The emulator is a Linux program, and a container is how a Mac runs "
          "one — so Docker is to macOS what WSL is to Windows here. This "

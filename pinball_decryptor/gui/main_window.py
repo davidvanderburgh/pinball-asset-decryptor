@@ -16089,19 +16089,30 @@ class MainWindow:
             text="Scanning for modified files…")
         self._set_tab_scanning("write_preview", True)
 
-        # The bail-out for a folder that cannot be scanned.  Runs on the UI
-        # thread (posted from the worker): drop back out of the scanning
-        # state, list the pending rows (there'll be no on-disk ones) and show
-        # the right placeholder instead.
-        def _bail(msg):
-            if scan_id != self._write_preview_scan_id:
-                return          # a newer scan owns the tree and spinner now
+        # Every early return below leaves no worker running — drop back out of
+        # the scanning state, list the pending rows (there'll be no on-disk
+        # ones) and show the right placeholder instead.
+        if not assets_path or not os.path.isdir(assets_path):
             pending_n = self._add_pending_preview_rows(assets_path, scan_id)
             self._set_tab_scanning("write_preview", False)
             if not pending_n:
-                self._write_preview_empty.configure(text=msg)
+                self._write_preview_empty.configure(
+                    text="Select your modified assets folder above to preview "
+                         "changed files.")
                 self._write_preview_empty.place(
                     relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
+        checksums_file = os.path.join(assets_path, ".checksums.md5")
+        if not os.path.isfile(checksums_file):
+            pending_n = self._add_pending_preview_rows(assets_path, scan_id)
+            self._set_tab_scanning("write_preview", False)
+            if not pending_n:
+                self._write_preview_empty.configure(
+                    text=("Pick a folder produced by Extract first "
+                          "(no .checksums.md5 found)."))
+                self._write_preview_empty.place(
+                    relx=0.5, rely=0.5, anchor=tk.CENTER)
+            return
 
         def _scan():
             def _post(fn, *args):
@@ -16112,21 +16123,6 @@ class MainWindow:
                     self._tk_root().after(0, fn, *args)
                 except (tk.TclError, RuntimeError):
                     pass
-
-            # THE FOLDER CHECKS LIVE IN HERE, with the walk they gate.  They
-            # are two stats of the user's assets folder, which can live on
-            # OneDrive or a NAS — and this scan fires at STARTUP ("write
-            # destination changed") when a reboot has left those paths cold,
-            # so on the main thread they were seconds of frozen window.
-            if not assets_path or not os.path.isdir(assets_path):
-                _post(_bail, "Select your modified assets folder above to "
-                             "preview changed files.")
-                return
-            checksums_file = os.path.join(assets_path, ".checksums.md5")
-            if not os.path.isfile(checksums_file):
-                _post(_bail, "Pick a folder produced by Extract first "
-                             "(no .checksums.md5 found).")
-                return
 
             # ``.checksums.md5`` ships in two flavours depending on
             # which plugin wrote it:
@@ -19017,87 +19013,44 @@ class MainWindow:
     def _refresh_stale_source_banner(self, *, on_asset_tab=True):
         """Show/hide the source-changed banner against current disk state.
 
-        Called on entry to every tab.  ``on_asset_tab=False`` (Extract,
-        Emulate, other non-editing tabs) hides it — the warning is about
-        editing stale assets, which only applies on the asset-editing tabs.
-
-        THE DISK IS NEVER TOUCHED ON THIS THREAD.  Deciding whether the
-        source is stale reads the extract sidecar and stats the SOURCE IMAGE
-        it names, and both can live on OneDrive or a NAS — after a Windows
-        reboot the first touch of a cloud-synced path can block for seconds
-        while the sync engine wakes up.  This ran inline on every tab change
-        (even for tabs the banner never shows on), which is what made
-        David's first post-reboot switch to the Emulate tab hang the whole
-        window on 2026-08-09.  Non-asset tabs now skip the disk entirely,
-        and asset tabs probe on a worker and hand the answer back through
-        ``after``; the token keeps a slow probe from stamping its stale
-        answer over a later tab's.
+        Called on entry to the Write / Replace tabs.  ``on_asset_tab=False``
+        (Extract/other tabs) always hides it — the warning is about editing
+        stale assets, which only applies on the asset-editing tabs.
         """
         banner = getattr(self, "_stale_source_banner", None)
         if banner is None:
             return
-        self._stale_banner_token = getattr(
-            self, "_stale_banner_token", 0) + 1
-        if not on_asset_tab:
-            if banner.winfo_ismapped():
-                banner.pack_forget()
-            return
         path = (self.write_assets_var.get() or "").strip()
-        token = self._stale_banner_token
-
-        def _probe():
-            stale = None
-            if path:
-                try:
-                    stale = stale_source_message(path)
-                except Exception:
-                    stale = None
-            dismissed_on_disk = False
-            if stale is not None:
-                try:
-                    dismissed_on_disk = stale_dismissed(path)
-                except Exception:
-                    dismissed_on_disk = False
+        stale = None
+        if path:
             try:
-                self.root.after(0, lambda: self._apply_stale_source_banner(
-                    token, path, stale, dismissed_on_disk))
-            except (RuntimeError, tk.TclError):
-                pass
-
-        import threading
-        threading.Thread(target=_probe, daemon=True).start()
-
-    def _apply_stale_source_banner(self, token, path, stale,
-                                   dismissed_on_disk):
-        """Main-thread half of _refresh_stale_source_banner."""
-        if token != getattr(self, "_stale_banner_token", 0):
-            return          # a newer tab change owns the banner now
-        banner = getattr(self, "_stale_source_banner", None)
-        if banner is None:
-            return
+                stale = stale_source_message(path)
+            except Exception:
+                stale = None
         if stale is None:
             # Source matches (or no sidecar) — clear any prior dismissal so a
             # later swap re-surfaces the warning.
             self._stale_source_dismissed = None
-        show = bool(stale and self._stale_source_dismissed != (path, stale))
-        if show and dismissed_on_disk:
+        show = bool(on_asset_tab and stale
+                    and self._stale_source_dismissed != (path, stale))
+        if show:
             # Dismissed in an earlier session: the sidecar remembers which
             # source-image state was waved through, so the same one stays
-            # quiet after a restart.
-            show = False
-        try:
-            if show:
-                self._stale_source_banner_text.configure(text=stale)
-                if not banner.winfo_ismapped():
-                    try:
-                        banner.pack(fill=tk.X, side=tk.TOP,
-                                    before=self._top_bar)
-                    except tk.TclError:
-                        banner.pack(fill=tk.X, side=tk.TOP)
-            elif banner.winfo_ismapped():
-                banner.pack_forget()
-        except tk.TclError:
-            pass            # torn down between the probe and its answer
+            # quiet after a restart.  (Reaching here means `path` is set —
+            # an empty one leaves `stale` None and `show` False.)
+            try:
+                show = not stale_dismissed(path)
+            except Exception:
+                pass
+        if show:
+            self._stale_source_banner_text.configure(text=stale)
+            if not banner.winfo_ismapped():
+                try:
+                    banner.pack(fill=tk.X, side=tk.TOP, before=self._top_bar)
+                except tk.TclError:
+                    banner.pack(fill=tk.X, side=tk.TOP)
+        elif banner.winfo_ismapped():
+            banner.pack_forget()
 
     def _dismiss_stale_source_banner(self):
         """Hide the banner, and remember that this image state was accepted.

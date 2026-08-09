@@ -100,15 +100,21 @@ def item_title(todo_text, branch):
     """The queue item's title for an item/<N> branch, from plans/TODO.md.
 
     Queue lines look like `- [ ] **33. Save-state slots need visibility.**
-    `S2 D3`` — the number is the anchor, the bold run is the title."""
+    `S2 D3`` — the number is the anchor, the bold run is the title.  Long
+    titles WRAP across hard-wrapped lines (most real items do), so the
+    match must cross newlines and the result is whitespace-collapsed."""
     m = re.fullmatch(r"item/(\w+)", branch or "")
     if not m:
         return None
     hit = re.search(
-        r"\*\*" + re.escape(m.group(1)) + r"\.\s*(.+?)\*\*", todo_text)
+        r"\*\*" + re.escape(m.group(1)) + r"\.\s*(.+?)\*\*", todo_text, re.S)
     if not hit:
         return None
-    return hit.group(1).strip().rstrip(".")
+    return " ".join(hit.group(1).split()).rstrip(".")
+
+
+def _shorten(text, limit=64):
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 def _describe(path, branch):
@@ -121,8 +127,13 @@ def _describe(path, branch):
             title = item_title(fh.read(), branch)
     except OSError:
         pass
+    if not title:
+        # Never leave a bare branch number — the last commit subject is
+        # the next best reminder of what the worktree is about.
+        subject = _git(["log", "-1", "--format=%s"], cwd=path)
+        title = subject.strip() if subject else None
     if title:
-        label += "  —  " + title
+        label += "  —  " + _shorten(title)
     status = _git(["status", "--porcelain"], cwd=path)
     if status and status.strip():
         label += "   ● uncommitted"

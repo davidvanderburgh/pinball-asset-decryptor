@@ -90,6 +90,46 @@ def test_item_title():
     assert wp.item_title(todo, None) is None
 
 
+def test_item_title_wrapped_across_lines():
+    # Most real queue titles hard-wrap mid-bold — the match must cross
+    # newlines and collapse the wrap indentation.
+    todo = (
+        "- [ ] **27. Any Spike 2 title should load, show a switch layout, "
+        "and start a\n"
+        "      game. Today only Godzilla does.** `S1 D3`\n")
+    assert wp.item_title(todo, "item/27") == (
+        "Any Spike 2 title should load, show a switch layout, and start a "
+        "game. Today only Godzilla does")
+
+
+def test_item_title_number_is_anchored():
+    todo = "- [ ] **13. Save and load save states.** `S2 D2`\n"
+    # item/1 must not match inside **13. — the dot anchors the number.
+    assert wp.item_title(todo, "item/1") is None
+
+
+def test_item_title_against_real_todo():
+    """The regex must keep matching the REAL queue file's format."""
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(wp.__file__)))
+    with open(os.path.join(root, "plans", "TODO.md"),
+              encoding="utf-8") as fh:
+        todo = fh.read()
+    nums = re.findall(r"^- \[ \] \*\*(\w+)\.", todo, re.M)
+    assert nums, "no open queue items found — format changed?"
+    for num in nums:
+        title = wp.item_title(todo, "item/" + num)
+        assert title, "item %s title did not parse" % num
+        assert "\n" not in title and "  " not in title
+
+
+def test_shorten():
+    assert wp._shorten("short") == "short"
+    long = "x" * 100
+    assert len(wp._shorten(long)) == 64
+    assert wp._shorten(long).endswith("…")
+
+
 def test_pick_noop_when_child(monkeypatch):
     monkeypatch.setenv(wp.ENV_PICKED, "1")
     # Discovery must not even run — a child re-asking is the recursion bug.
